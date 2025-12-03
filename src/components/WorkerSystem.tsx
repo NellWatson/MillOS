@@ -163,7 +163,7 @@ const Hair: React.FC<{ style: HairStyle; color: string }> = ({ style, color }) =
 
 // Realistic Human Model Component
 const HumanModel: React.FC<{
-  walkCycle: number;
+  walkCycleRef: React.MutableRefObject<number>; // Use ref to avoid re-renders
   uniformColor: string;
   skinTone: string;
   hatColor: string;
@@ -175,7 +175,7 @@ const HumanModel: React.FC<{
   tool: ToolType;
   isWaving?: boolean;
   isIdle?: boolean;
-}> = ({ walkCycle, uniformColor, skinTone, hatColor, hasVest, pantsColor, headRotation = 0, hairColor, hairStyle, tool, isWaving = false, isIdle = false }) => {
+}> = ({ walkCycleRef, uniformColor, skinTone, hatColor, hasVest, pantsColor, headRotation = 0, hairColor, hairStyle, tool, isWaving = false, isIdle = false }) => {
   const leftArmRef = useRef<THREE.Group>(null);
   const rightArmRef = useRef<THREE.Group>(null);
   const leftLegRef = useRef<THREE.Group>(null);
@@ -185,6 +185,7 @@ const HumanModel: React.FC<{
 
   // Animate limbs and head
   useFrame((state, delta) => {
+    const walkCycle = walkCycleRef.current; // Read current value from ref
     const isDoingSomething = isIdle && tool !== 'none';
     const armSwing = isIdle ? Math.sin(walkCycle) * 0.05 : Math.sin(walkCycle) * 0.5;
     const legSwing = isIdle ? 0 : Math.sin(walkCycle) * 0.6;
@@ -568,7 +569,7 @@ const HumanModel: React.FC<{
 const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = ({ data, onSelect }) => {
   const ref = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
-  const [walkCycle, setWalkCycle] = useState(0);
+  const walkCycleRef = useRef(0); // Changed to ref - no re-render on animation
   const [headRotation, setHeadRotation] = useState(0);
   const [isWaving, setIsWaving] = useState(false);
   const [isIdle, setIsIdle] = useState(false);
@@ -579,6 +580,8 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = ({ data, on
   const isEvadingRef = useRef(false);
   const wasEvadingRef = useRef(false);
   const evadeDirectionRef = useRef(0); // -1 for left, 1 for right
+  const evadeCooldownRef = useRef(0); // Cooldown after evasion before returning
+  const EVADE_COOLDOWN_TIME = 1.5; // Wait 1.5s after forklift passes before returning
   const waveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastStepRef = useRef(0); // Track walk cycle phase for footsteps
   const recordWorkerEvasion = useMillStore(state => state.recordWorkerEvasion);
@@ -604,6 +607,15 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = ({ data, on
       if (waveTimeoutRef.current) clearTimeout(waveTimeoutRef.current);
     };
   }, []);
+
+  // Set initial position only once (not via prop to avoid reset on re-render)
+  const initializedRef = useRef(false);
+  useEffect(() => {
+    if (ref.current && !initializedRef.current) {
+      ref.current.position.set(...data.position);
+      initializedRef.current = true;
+    }
+  }, [data.position]);
 
   // Memoize appearance for consistency
   const appearance = useMemo(
@@ -635,9 +647,15 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = ({ data, on
       let relativeAngle = angleToForklift - bodyAngle;
       // Clamp head rotation to realistic range (-90 to +90 degrees)
       relativeAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, relativeAngle));
-      setHeadRotation(relativeAngle);
+      // Only update if angle changed significantly (avoid jitter from tiny fluctuations)
+      if (Math.abs(relativeAngle - headRotation) > 0.05) {
+        setHeadRotation(relativeAngle);
+      }
     } else {
-      setHeadRotation(0); // Look forward when no forklift nearby
+      // Only reset to 0 if not already near 0
+      if (Math.abs(headRotation) > 0.05) {
+        setHeadRotation(0);
+      }
     }
 
     // Determine if we need to evade
@@ -664,14 +682,25 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = ({ data, on
       }
 
       // Slow down forward movement while evading
-      setWalkCycle(prev => prev + delta * 2);
+      walkCycleRef.current += delta * 2;
     } else {
-      isEvadingRef.current = false;
+      // Cooldown before clearing evade state and returning to path
+      if (isEvadingRef.current) {
+        evadeCooldownRef.current = EVADE_COOLDOWN_TIME; // Start cooldown when we stop evading
+        isEvadingRef.current = false;
+      }
 
-      // Return to original path when safe
-      const diffX = baseXRef.current - ref.current.position.x;
-      if (Math.abs(diffX) > 0.1) {
-        ref.current.position.x += Math.sign(diffX) * EVADE_SPEED * 0.5 * delta;
+      // Count down the cooldown timer
+      if (evadeCooldownRef.current > 0) {
+        evadeCooldownRef.current -= delta;
+      }
+
+      // Only return to original path after cooldown expires
+      if (evadeCooldownRef.current <= 0) {
+        const diffX = baseXRef.current - ref.current.position.x;
+        if (Math.abs(diffX) > 0.1) {
+          ref.current.position.x += Math.sign(diffX) * EVADE_SPEED * 0.5 * delta;
+        }
       }
 
       // Idle behavior management
@@ -682,7 +711,7 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = ({ data, on
           idleTimerRef.current = Math.random() * 12 + 8; // 8-20s until next idle
         }
         // Slow breathing animation while idle
-        setWalkCycle(prev => prev + delta * 0.5);
+        walkCycleRef.current += delta * 0.5;
       } else {
         idleTimerRef.current -= delta;
         if (idleTimerRef.current <= 0) {
@@ -690,17 +719,17 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = ({ data, on
           idleDurationRef.current = Math.random() * 4 + 2; // Idle for 2-6s
         }
         // Normal walking animation
-        setWalkCycle(prev => prev + delta * 5.5);
+        walkCycleRef.current += delta * 5.5;
       }
     }
 
     // Move worker (skip movement when idle)
-    const bobHeight = isIdle ? 0 : Math.abs(Math.sin(walkCycle)) * 0.025;
+    const bobHeight = isIdle ? 0 : Math.abs(Math.sin(walkCycleRef.current)) * 0.025;
     if (!isIdle) {
       ref.current.position.z += data.speed * delta * directionRef.current;
 
       // Trigger footstep sounds at each step (when sin crosses 0)
-      const currentStep = Math.floor(walkCycle / Math.PI);
+      const currentStep = Math.floor(walkCycleRef.current / Math.PI);
       if (currentStep !== lastStepRef.current) {
         lastStepRef.current = currentStep;
         audioManager.playFootstep(data.id);
@@ -743,14 +772,13 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = ({ data, on
   return (
     <group
       ref={ref}
-      position={new THREE.Vector3(...data.position)}
       onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer'; }}
       onPointerOut={() => { setHovered(false); document.body.style.cursor = 'auto'; }}
       onClick={(e) => { e.stopPropagation(); audioManager.playClick(); onSelect(); }}
     >
       {/* Human Model */}
       <HumanModel
-        walkCycle={walkCycle}
+        walkCycleRef={walkCycleRef}
         uniformColor={appearance.uniformColor}
         skinTone={appearance.skinTone}
         hatColor={appearance.hatColor}

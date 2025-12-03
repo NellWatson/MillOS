@@ -6,6 +6,9 @@ export enum MachineType {
   CONTROL_ROOM = 'CONTROL_ROOM'
 }
 
+// Grain quality grades
+export type GrainQuality = 'premium' | 'standard' | 'economy' | 'mixed';
+
 export interface MachineData {
   id: string;
   name: string;
@@ -22,9 +25,46 @@ export interface MachineData {
   };
   lastMaintenance: string;
   nextMaintenance: string;
+  // Silo-specific fields
+  fillLevel?: number; // 0-100 percentage
+  grainQuality?: GrainQuality;
+  grainType?: string; // e.g., 'Wheat', 'Corn', 'Barley'
+  // Maintenance tracking
+  maintenanceCountdown?: number; // hours until next maintenance
+  maintenanceHistory?: MaintenanceRecord[];
+}
+
+export interface MaintenanceRecord {
+  id: string;
+  date: string;
+  type: 'preventive' | 'corrective' | 'emergency';
+  technician: string;
+  notes: string;
+  duration: number; // minutes
 }
 
 export type WorkerIconType = 'supervisor' | 'engineer' | 'operator' | 'safety' | 'quality' | 'maintenance';
+
+// Worker skill levels
+export type SkillLevel = 1 | 2 | 3 | 4 | 5; // 1=Novice, 5=Master
+
+export interface WorkerSkills {
+  machineOperation: SkillLevel;
+  safetyProtocols: SkillLevel;
+  qualityControl: SkillLevel;
+  troubleshooting: SkillLevel;
+  teamwork: SkillLevel;
+}
+
+export interface PerformanceReview {
+  id: string;
+  date: string;
+  reviewer: string;
+  overallScore: number; // 1-100
+  strengths: string[];
+  improvements: string[];
+  notes: string;
+}
 
 export interface WorkerData {
   id: string;
@@ -41,6 +81,14 @@ export interface WorkerData {
   experience: number; // years
   certifications: string[];
   color: string;
+  // Worker advancement
+  skills?: WorkerSkills;
+  skillPoints?: number; // XP towards next skill level
+  promotionLevel?: number; // 0=Junior, 1=Regular, 2=Senior, 3=Lead
+  performanceReviews?: PerformanceReview[];
+  productivityScore?: number; // 0-100 current shift
+  tasksCompleted?: number;
+  trainingSessions?: number;
 }
 
 export interface ProductData {
@@ -51,6 +99,52 @@ export interface ProductData {
   axis: 'x' | 'z';
   direction: 1 | -1;
   type: 'GRAIN' | 'FLOUR_BAG';
+  // Batch tracking
+  batchNumber?: string;
+  batchDate?: string;
+  quality?: GrainQuality;
+  weight?: number; // kg
+}
+
+// Production targets and achievements
+export interface ProductionTarget {
+  id: string;
+  date: string;
+  targetBags: number;
+  producedBags: number;
+  targetThroughput: number; // tons/hour
+  actualThroughput: number;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+}
+
+export interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  icon: string; // Lucide icon name
+  category: 'safety' | 'production' | 'quality' | 'teamwork';
+  unlockedAt?: string;
+  progress?: number; // 0-100 for progressive achievements
+  requirement: number;
+  currentValue: number;
+}
+
+// PA Announcement system
+export interface PAnnouncement {
+  id: string;
+  type: 'shift_change' | 'safety' | 'production' | 'emergency' | 'general';
+  message: string;
+  timestamp: number;
+  duration: number; // seconds to display
+  priority: 'low' | 'medium' | 'high' | 'critical';
+}
+
+// Incident replay data
+export interface IncidentReplayFrame {
+  timestamp: number;
+  workerPositions: Record<string, [number, number, number]>;
+  forkliftPositions: Record<string, [number, number, number]>;
+  machineStates: Record<string, string>;
 }
 
 export interface AlertData {
@@ -73,6 +167,19 @@ export interface AIDecision {
   impact: string;
   workerId?: string;
   machineId?: string;
+  // Decision chain support
+  parentDecisionId?: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'superseded';
+  outcome?: string;
+  // Context awareness
+  triggeredBy?: 'alert' | 'metric' | 'schedule' | 'prediction' | 'user';
+  relatedAlertId?: string;
+  // Alternatives and uncertainty
+  alternatives?: { action: string; tradeoff: string }[];
+  uncertainty?: string;
+  // Priority and urgency
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  expiresAt?: Date;
 }
 
 export interface ForkliftData {
@@ -93,6 +200,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
     icon: 'supervisor',
     speed: 1.2,
     currentTask: 'Overseeing production line',
+    targetMachine: 'rm-103',
     status: 'working',
     shiftStart: '06:00',
     experience: 15,
@@ -134,6 +242,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
     icon: 'quality',
     speed: 1.1,
     currentTask: 'Testing flour samples',
+    targetMachine: 'packer-2',
     status: 'working',
     shiftStart: '06:00',
     experience: 6,
@@ -161,6 +270,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
     icon: 'safety',
     speed: 1.0,
     currentTask: 'Safety inspection - Zone 2',
+    targetMachine: 'sifter-b',
     status: 'working',
     shiftStart: '06:00',
     experience: 10,
@@ -216,6 +326,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
     icon: 'quality',
     speed: 1.2,
     currentTask: 'Moisture analysis',
+    targetMachine: 'sifter-a',
     status: 'working',
     shiftStart: '14:00',
     experience: 5,

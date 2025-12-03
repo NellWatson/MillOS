@@ -1,8 +1,62 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { MachineData, MachineType } from '../types';
+import { audioManager } from '../utils/audioManager';
 
 export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines }) => {
+  // Calculate spouting sound positions (midpoints of key pipe connections)
+  const spoutPositions = useMemo(() => {
+    const positions: { id: string; x: number; y: number; z: number }[] = [];
+    const silos = machines.filter(m => m.type === MachineType.SILO);
+    const mills = machines.filter(m => m.type === MachineType.ROLLER_MILL);
+    const sifters = machines.filter(m => m.type === MachineType.PLANSIFTER);
+
+    // Add sound positions at key pipe junctions
+    mills.forEach((mill, i) => {
+      const silo = silos[i % silos.length];
+      if (silo) {
+        positions.push({
+          id: `spout-silo-mill-${i}`,
+          x: (silo.position[0] + mill.position[0]) / 2,
+          y: 8,
+          z: (silo.position[2] + mill.position[2]) / 2
+        });
+      }
+    });
+
+    sifters.forEach((sifter, i) => {
+      positions.push({
+        id: `spout-sifter-${i}`,
+        x: sifter.position[0],
+        y: sifter.position[1],
+        z: sifter.position[2]
+      });
+    });
+
+    return positions;
+  }, [machines]);
+
+  // Start spouting sounds on mount
+  useEffect(() => {
+    spoutPositions.forEach(pos => {
+      audioManager.startSpoutingSound(pos.id, pos.x, pos.y, pos.z);
+    });
+
+    return () => {
+      spoutPositions.forEach(pos => {
+        audioManager.stopSpoutingSound(pos.id);
+      });
+    };
+  }, [spoutPositions]);
+
+  // Update spatial audio volumes each frame
+  useFrame(() => {
+    spoutPositions.forEach(pos => {
+      audioManager.updateSpoutingSpatialVolume(pos.id);
+    });
+  });
+
   const pipes = useMemo(() => {
     const _pipes: React.ReactNode[] = [];
     const tubeRadius = 0.18;

@@ -51,9 +51,12 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
       // Handle state transitions for sounds
       if (newState !== truck1StateRef.current) {
         if (newState === 'docked' && truck1StateRef.current === 'arriving') {
-          audioManager.playAirBrake();
+          audioManager.playDoorOpen();      // Loading bay door opens
+          audioManager.playTruckArrival();  // Horn + air brake fanfare
           audioManager.updateTruckEngine('truck-1', false);
         } else if (newState === 'leaving' && truck1StateRef.current === 'docked') {
+          audioManager.playDoorClose();     // Loading bay door closes
+          audioManager.playTruckDeparture(); // Engine rev up
           audioManager.updateTruckEngine('truck-1', true);
         } else if (newState === 'arriving') {
           audioManager.updateTruckEngine('truck-1', true);
@@ -83,9 +86,12 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
       // Handle state transitions for sounds
       if (newState !== truck2StateRef.current) {
         if (newState === 'docked' && truck2StateRef.current === 'arriving') {
-          audioManager.playAirBrake();
+          audioManager.playDoorOpen();      // Loading bay door opens
+          audioManager.playTruckArrival();  // Horn + air brake fanfare
           audioManager.updateTruckEngine('truck-2', false);
         } else if (newState === 'leaving' && truck2StateRef.current === 'docked') {
+          audioManager.playDoorClose();     // Loading bay door closes
+          audioManager.playTruckDeparture(); // Engine rev up
           audioManager.updateTruckEngine('truck-2', true);
         } else if (newState === 'arriving') {
           audioManager.updateTruckEngine('truck-2', true);

@@ -1,5 +1,5 @@
 <div align="center">
-<img width="900" alt="MILLOS Digital Twin" src="assets/Screenshot.png" />
+<img width="900" alt="MillOS Digital Twin" src="assets/Screenshot.png" />
 
 <br/>
 
@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/Vite-6.0-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
 </p>
 
-# MILLOS
+# MillOS
 
 ### AI-Powered Grain Mill Digital Twin Simulator
 
@@ -28,7 +28,7 @@ A browser-based 3D industrial simulation featuring autonomous workers, intellige
 
 ## Overview
 
-MILLOS is a fully interactive digital twin of a grain mill factory, built with React Three Fiber. Watch 10 autonomous workers patrol the factory floor, observe 2 intelligent forklifts navigate around obstacles, and monitor real-time production data as 14 machines process grain across 4 production zones.
+MillOS is a fully interactive digital twin of a grain mill factory, built with React Three Fiber. Watch 10 autonomous workers patrol the factory floor, observe 2 intelligent forklifts navigate around obstacles, and monitor real-time production data as 14 machines process grain across 4 production zones.
 
 <table>
 <tr>
@@ -191,7 +191,7 @@ src/
 
 ### State Management
 
-MILLOS uses **Zustand** for lightweight, performant global state:
+MillOS uses **Zustand** for lightweight, performant global state:
 
 ```typescript
 interface MillStore {
@@ -279,7 +279,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**MILLOS v2.0**
+**MillOS v2.0**
 
 *Transforming grain milling through digital twin technology*
 

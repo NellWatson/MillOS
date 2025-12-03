@@ -8,13 +8,14 @@ interface EntityPosition {
   type: 'worker' | 'forklift';
   dirX?: number; // Direction vector for forklifts
   dirZ?: number;
+  isStopped?: boolean; // Whether forklift is currently stopped
 }
 
 class PositionRegistry {
   private positions: Map<string, EntityPosition> = new Map();
 
-  register(id: string, x: number, z: number, type: 'worker' | 'forklift', dirX?: number, dirZ?: number) {
-    this.positions.set(id, { id, x, z, type, dirX, dirZ });
+  register(id: string, x: number, z: number, type: 'worker' | 'forklift', dirX?: number, dirZ?: number, isStopped?: boolean) {
+    this.positions.set(id, { id, x, z, type, dirX, dirZ, isStopped });
   }
 
   unregister(id: string) {
@@ -87,8 +88,35 @@ class PositionRegistry {
     return nearest;
   }
 
+  // Get the nearest worker to a position (for worker conversations)
+  getNearestWorker(x: number, z: number, maxDistance: number, excludeId: string): EntityPosition | null {
+    let nearest: EntityPosition | null = null;
+    let nearestDist = maxDistance;
+
+    this.positions.forEach(pos => {
+      if (pos.type === 'worker' && pos.id !== excludeId) {
+        const dx = pos.x - x;
+        const dz = pos.z - z;
+        const distance = Math.sqrt(dx * dx + dz * dz);
+        if (distance < nearestDist) {
+          nearestDist = distance;
+          nearest = { ...pos, distance } as EntityPosition & { distance: number };
+        }
+      }
+    });
+    return nearest;
+  }
+
+  // Get worker position by ID
+  getWorkerPosition(id: string): EntityPosition | null {
+    const pos = this.positions.get(id);
+    return pos?.type === 'worker' ? pos : null;
+  }
+
   // Check if a forklift is approaching a position (heading towards it)
   isForkliftApproaching(workerX: number, workerZ: number, forklift: EntityPosition): boolean {
+    // If forklift is stopped, it's not approaching
+    if (forklift.isStopped) return false;
     if (forklift.dirX === undefined || forklift.dirZ === undefined) return false;
 
     // Vector from forklift to worker
@@ -97,7 +125,30 @@ class PositionRegistry {
 
     // Dot product to check if forklift is heading towards worker
     const dot = toWorkerX * forklift.dirX + toWorkerZ * forklift.dirZ;
-    return dot > 0; // Positive means forklift is heading towards worker
+    // Require stronger alignment (dot > 0.3) to prevent edge-case oscillation
+    return dot > 0.3;
+  }
+
+  // Get all workers for mini-map display
+  getAllWorkers(): EntityPosition[] {
+    const workers: EntityPosition[] = [];
+    this.positions.forEach(pos => {
+      if (pos.type === 'worker') {
+        workers.push(pos);
+      }
+    });
+    return workers;
+  }
+
+  // Get all forklifts for mini-map display
+  getAllForklifts(): EntityPosition[] {
+    const forklifts: EntityPosition[] = [];
+    this.positions.forEach(pos => {
+      if (pos.type === 'forklift') {
+        forklifts.push(pos);
+      }
+    });
+    return forklifts;
   }
 }
 

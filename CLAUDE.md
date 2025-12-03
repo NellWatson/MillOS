@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MILLOS is an AI-powered grain mill digital twin simulator - a 3D React application that visualizes a virtual grain mill factory with interactive machines, workers, conveyors, and real-time production metrics.
+MillOS is an AI-powered grain mill digital twin simulator - a 3D React application that visualizes a virtual grain mill factory with interactive machines, workers, conveyors, and real-time production metrics.
 
 ## Development Commands
 
@@ -99,3 +99,36 @@ Available icon imports from `lucide-react`:
 - Alerts: `Siren`, `AlertTriangle`, `CheckCircle`, `Info`, `Shield`
 - AI/Tech: `Bot`, `Brain`, `Zap`, `Eye`
 - Workers: `User`, `Briefcase`, `HardHat`, `Wrench`, `FlaskConical`, `Shield`
+
+## Known Graphics Issues
+
+### Flickering on Medium+ Quality Settings
+
+Certain effects cause visual flickering (brightness pulsing, "dancing shadows") on medium and higher quality settings. These have been disabled or fixed:
+
+| Component | Issue | Resolution |
+|-----------|-------|------------|
+| **AtmosphericHaze** | Large transparent boxes with `THREE.BackSide` cause depth sorting conflicts | Disabled in MillScene.tsx |
+| **Post-processing (Bloom/Vignette)** | EffectComposer causes flickering with scene lighting | Disabled on medium preset in store.ts |
+| **MeshReflectorMaterial** | Floor reflector causes temporal instability | Only enabled on high/ultra |
+| **ContactShadows position** | Originally at y=0.01, too close to floor | Raised to y=0.05 |
+| **Shadow bias** | Was -0.0001 (too aggressive) | Changed to -0.001 |
+| **Camera near/far** | Was 0.1/500 (poor depth precision) | Changed to 0.5/300 |
+
+### Graphics Quality Presets (store.ts)
+
+When adding new visual effects, be aware of what's enabled per quality level:
+
+- **Low:** No shadows, no post-processing, meshBasicMaterial, minimal effects
+- **Medium:** Shadows, HDRI environment, standard materials, NO post-processing
+- **High/Ultra:** Full effects including post-processing, reflector floor, AmbientDetails
+
+### Preventing Future Flickering
+
+When adding new 3D effects:
+
+1. **Transparent materials with BackSide:** Add `depthTest: false` to prevent depth conflicts
+2. **Large overlay volumes:** Avoid or use very low opacity with `depthWrite: false`
+3. **Post-processing effects:** Test on medium settings before enabling by default
+4. **Shadow-casting lights:** Only use ONE shadow-casting directional light
+5. **Floor overlays:** Position at y >= 0.03 to prevent z-fighting with floor

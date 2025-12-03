@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Text, Billboard, RoundedBox } from '@react-three/drei';
 import * as THREE from 'three';
+import { useMillStore } from '../store';
 
 export const HolographicDisplays: React.FC = () => {
   return (
@@ -70,8 +71,16 @@ interface HoloPanelProps {
 const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue, color, size }) => {
   const groupRef = useRef<THREE.Group>(null);
   const glowRef = useRef<THREE.Mesh>(null);
+  const graphicsQuality = useMillStore(state => state.graphics.quality);
+  const frameSkipRef = useRef(0);
 
   useFrame((state) => {
+    // Throttle on low graphics - skip every other frame
+    if (graphicsQuality === 'low') {
+      frameSkipRef.current++;
+      if (frameSkipRef.current % 2 !== 0) return;
+    }
+
     if (groupRef.current) {
       groupRef.current.position.y = position[1] + Math.sin(state.clock.elapsedTime * 0.5) * 0.1;
     }
@@ -165,7 +174,9 @@ const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue,
 
 const DataParticles: React.FC = () => {
   const particlesRef = useRef<THREE.Points>(null);
-  const count = 100;
+  const graphicsQuality = useMillStore(state => state.graphics.quality);
+  const frameSkipRef = useRef(0);
+  const count = graphicsQuality === 'low' ? 50 : 100; // Reduce particle count on low
 
   const positions = React.useMemo(() => {
     const pos = new Float32Array(count * 3);
@@ -175,14 +186,21 @@ const DataParticles: React.FC = () => {
       pos[i * 3 + 2] = (Math.random() - 0.5) * 60;
     }
     return pos;
-  }, []);
+  }, [count]);
 
-  useFrame((state) => {
+  useFrame(() => {
+    // Throttle on low graphics
+    if (graphicsQuality === 'low') {
+      frameSkipRef.current++;
+      if (frameSkipRef.current % 2 !== 0) return;
+    }
+
     if (!particlesRef.current) return;
     const positions = particlesRef.current.geometry.attributes.position.array as Float32Array;
+    const speed = graphicsQuality === 'low' ? 0.04 : 0.02; // Compensate for skipped frames
 
     for (let i = 0; i < count; i++) {
-      positions[i * 3 + 1] += 0.02;
+      positions[i * 3 + 1] += speed;
       if (positions[i * 3 + 1] > 25) {
         positions[i * 3 + 1] = 5;
       }
@@ -190,8 +208,9 @@ const DataParticles: React.FC = () => {
     particlesRef.current.geometry.attributes.position.needsUpdate = true;
   });
 
+  // Use key to force remount when count changes, preventing buffer resize error
   return (
-    <points ref={particlesRef}>
+    <points ref={particlesRef} key={`data-particles-${count}`}>
       <bufferGeometry>
         <bufferAttribute
           attach="attributes-position"
