@@ -97,8 +97,10 @@ export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines
       const sifter = sifters[i % sifters.length];
       if (!sifter) return;
       const start = new THREE.Vector3(mill.position[0], mill.position[1] + mill.size[1], mill.position[2]);
+      // Use deterministic offset based on index instead of random (prevents pipes jumping on re-render)
+      const offsetX = ((i % 3) - 1) * 1.5; // -1.5, 0, or 1.5 based on index
       const end = new THREE.Vector3(
-        sifter.position[0] + (Math.random() - 0.5) * 3,
+        sifter.position[0] + offsetX,
         sifter.position[1] + sifter.size[1] / 2,
         sifter.position[2]
       );

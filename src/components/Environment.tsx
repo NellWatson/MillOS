@@ -331,14 +331,17 @@ const GradientSky: React.FC = () => {
 
 // Game time ticker component - throttled to every 500ms to reduce re-renders
 const GameTimeTicker: React.FC = () => {
-  const tickGameTime = useMillStore((state) => state.tickGameTime);
+  const setGameTime = useMillStore((state) => state.setGameTime);
   const lastTickRef = useRef(0);
+  // Cache gameTime locally to avoid subscribing to it (which would cause re-renders)
+  const gameTimeRef = useRef(useMillStore.getState().gameTime);
 
   useFrame((state) => {
     const now = state.clock.elapsedTime;
-    if (now - lastTickRef.current >= 0.5) { // Tick every 500ms (was 100ms)
-      // Tick 5 times to maintain same game speed
-      for (let i = 0; i < 5; i++) tickGameTime();
+    if (now - lastTickRef.current >= 0.5) { // Tick every 500ms
+      // Single batched update instead of 5 separate updates
+      gameTimeRef.current = (gameTimeRef.current + 0.02) % 24; // 0.004 * 5 = 0.02
+      setGameTime(gameTimeRef.current);
       lastTickRef.current = now;
     }
   });
