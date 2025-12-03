@@ -120,7 +120,6 @@ const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue,
           color="#94a3b8"
           anchorX="center"
           anchorY="middle"
-          font="/fonts/inter-bold.woff"
         >
           {title}
         </Text>

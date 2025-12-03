@@ -24,11 +24,13 @@ export interface MachineData {
   nextMaintenance: string;
 }
 
+export type WorkerIconType = 'supervisor' | 'engineer' | 'operator' | 'safety' | 'quality' | 'maintenance';
+
 export interface WorkerData {
   id: string;
   name: string;
   role: 'Operator' | 'Engineer' | 'Supervisor' | 'Safety Officer' | 'Quality Control' | 'Maintenance';
-  avatar: string;
+  icon: WorkerIconType;
   position: [number, number, number];
   speed: number;
   direction: 1 | -1;
@@ -88,7 +90,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
     id: 'w1',
     name: 'Marcus Chen',
     role: 'Supervisor',
-    avatar: '👨‍💼',
+    icon: 'supervisor',
     speed: 1.2,
     currentTask: 'Overseeing production line',
     status: 'working',
@@ -101,7 +103,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
     id: 'w2',
     name: 'Sarah Mitchell',
     role: 'Engineer',
-    avatar: '👩‍🔧',
+    icon: 'engineer',
     speed: 1.5,
     currentTask: 'Calibrating Roller Mill #2',
     targetMachine: 'mill-1.5',
@@ -115,7 +117,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
     id: 'w3',
     name: 'James Rodriguez',
     role: 'Operator',
-    avatar: '👷',
+    icon: 'operator',
     speed: 1.3,
     currentTask: 'Monitoring Silo levels',
     targetMachine: 'silo-0',
@@ -129,7 +131,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
     id: 'w4',
     name: 'Emily Watson',
     role: 'Quality Control',
-    avatar: '👩‍🔬',
+    icon: 'quality',
     speed: 1.1,
     currentTask: 'Testing flour samples',
     status: 'working',
@@ -142,7 +144,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
     id: 'w5',
     name: 'David Kim',
     role: 'Maintenance',
-    avatar: '🔧',
+    icon: 'maintenance',
     speed: 1.4,
     currentTask: 'Preventive maintenance on Packer #1',
     targetMachine: 'packer-0',
@@ -156,7 +158,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
     id: 'w6',
     name: 'Lisa Thompson',
     role: 'Safety Officer',
-    avatar: '🦺',
+    icon: 'safety',
     speed: 1.0,
     currentTask: 'Safety inspection - Zone 2',
     status: 'working',
@@ -169,7 +171,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
     id: 'w7',
     name: 'Robert Garcia',
     role: 'Operator',
-    avatar: '👷',
+    icon: 'operator',
     speed: 1.2,
     currentTask: 'Loading grain into Silo 3',
     targetMachine: 'silo-2',
@@ -183,7 +185,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
     id: 'w8',
     name: 'Anna Kowalski',
     role: 'Engineer',
-    avatar: '👩‍🔧',
+    icon: 'engineer',
     speed: 1.6,
     currentTask: 'Optimizing Plansifter efficiency',
     targetMachine: 'sifter-0',
@@ -197,7 +199,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
     id: 'w9',
     name: 'Michael Brown',
     role: 'Operator',
-    avatar: '👷',
+    icon: 'operator',
     speed: 1.3,
     currentTask: 'Operating Packer #2',
     targetMachine: 'packer-2',
@@ -211,7 +213,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
     id: 'w10',
     name: 'Jennifer Lee',
     role: 'Quality Control',
-    avatar: '👩‍🔬',
+    icon: 'quality',
     speed: 1.2,
     currentTask: 'Moisture analysis',
     status: 'working',

@@ -1,7 +1,8 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Text } from '@react-three/drei';
 import * as THREE from 'three';
+import { audioManager } from '../utils/audioManager';
 
 interface TruckBayProps {
   productionSpeed: number;
@@ -10,6 +11,21 @@ interface TruckBayProps {
 export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
   const truck1Ref = useRef<THREE.Group>(null);
   const truck2Ref = useRef<THREE.Group>(null);
+  const truck1StateRef = useRef<'arriving' | 'docked' | 'leaving'>('arriving');
+  const truck2StateRef = useRef<'arriving' | 'docked' | 'leaving'>('arriving');
+  const lastTruck1State = useRef<string>('');
+  const lastTruck2State = useRef<string>('');
+
+  // Start truck engines on mount
+  useEffect(() => {
+    audioManager.startTruckEngine('truck-1', true);
+    audioManager.startTruckEngine('truck-2', true);
+
+    return () => {
+      audioManager.stopTruckEngine('truck-1');
+      audioManager.stopTruckEngine('truck-2');
+    };
+  }, []);
 
   useFrame((state) => {
     const time = state.clock.elapsedTime * (productionSpeed * 0.5 + 0.2);
@@ -18,28 +34,64 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
     if (truck1Ref.current) {
       const cycle = time % 25;
       let z: number;
+      let newState: 'arriving' | 'docked' | 'leaving';
+
       if (cycle < 10) {
         z = THREE.MathUtils.lerp(-80, -30, cycle / 10);
+        newState = 'arriving';
       } else if (cycle < 18) {
         z = -30;
+        newState = 'docked';
       } else {
         z = THREE.MathUtils.lerp(-30, 80, (cycle - 18) / 7);
+        newState = 'leaving';
       }
       truck1Ref.current.position.z = z;
+
+      // Handle state transitions for sounds
+      if (newState !== truck1StateRef.current) {
+        if (newState === 'docked' && truck1StateRef.current === 'arriving') {
+          audioManager.playAirBrake();
+          audioManager.updateTruckEngine('truck-1', false);
+        } else if (newState === 'leaving' && truck1StateRef.current === 'docked') {
+          audioManager.updateTruckEngine('truck-1', true);
+        } else if (newState === 'arriving') {
+          audioManager.updateTruckEngine('truck-1', true);
+        }
+        truck1StateRef.current = newState;
+      }
     }
 
     // Truck 2 - Offset cycle
     if (truck2Ref.current) {
       const cycle = (time + 12) % 25;
       let z: number;
+      let newState: 'arriving' | 'docked' | 'leaving';
+
       if (cycle < 10) {
         z = THREE.MathUtils.lerp(-80, -30, cycle / 10);
+        newState = 'arriving';
       } else if (cycle < 18) {
         z = -30;
+        newState = 'docked';
       } else {
         z = THREE.MathUtils.lerp(-30, 80, (cycle - 18) / 7);
+        newState = 'leaving';
       }
       truck2Ref.current.position.z = z;
+
+      // Handle state transitions for sounds
+      if (newState !== truck2StateRef.current) {
+        if (newState === 'docked' && truck2StateRef.current === 'arriving') {
+          audioManager.playAirBrake();
+          audioManager.updateTruckEngine('truck-2', false);
+        } else if (newState === 'leaving' && truck2StateRef.current === 'docked') {
+          audioManager.updateTruckEngine('truck-2', true);
+        } else if (newState === 'arriving') {
+          audioManager.updateTruckEngine('truck-2', true);
+        }
+        truck2StateRef.current = newState;
+      }
     }
   });
 

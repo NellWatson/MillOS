@@ -1,8 +1,58 @@
-import React, { useRef, useMemo, useState } from 'react';
+import React, { useRef, useMemo, useState, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Text } from '@react-three/drei';
+import { Text, Line } from '@react-three/drei';
 import { positionRegistry } from '../utils/positionRegistry';
+import { audioManager } from '../utils/audioManager';
+import { useMillStore } from '../store';
 import * as THREE from 'three';
+
+// Path visualization component - shows forklift routes on the floor
+const ForkliftPath: React.FC<{ path: [number, number, number][]; color: string }> = ({ path, color }) => {
+  // Create a closed loop by adding the first point at the end
+  const points = useMemo(() => {
+    const pts = path.map(p => new THREE.Vector3(p[0], 0.05, p[2])); // Slightly above floor
+    pts.push(pts[0].clone()); // Close the loop
+    return pts;
+  }, [path]);
+
+  return (
+    <group>
+      {/* Main path line */}
+      <Line
+        points={points}
+        color={color}
+        lineWidth={2}
+        dashed
+        dashSize={0.5}
+        dashScale={2}
+        gapSize={0.3}
+      />
+      {/* Waypoint markers */}
+      {path.map((point, i) => (
+        <group key={i} position={[point[0], 0.02, point[2]]}>
+          {/* Circle marker */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[0.3, 0.5, 16]} />
+            <meshBasicMaterial color={color} transparent opacity={0.6} />
+          </mesh>
+          {/* Direction arrow to next point */}
+          {i < path.length && (
+            <mesh
+              rotation={[-Math.PI / 2, 0, Math.atan2(
+                path[(i + 1) % path.length][0] - point[0],
+                path[(i + 1) % path.length][2] - point[2]
+              )]}
+              position={[0, 0.01, 0]}
+            >
+              <coneGeometry args={[0.2, 0.4, 3]} />
+              <meshBasicMaterial color={color} transparent opacity={0.4} />
+            </mesh>
+          )}
+        </group>
+      ))}
+    </group>
+  );
+};
 
 // Warning light component that changes color when stopped
 const WarningLight: React.FC<{ isStopped: boolean }> = ({ isStopped }) => {
@@ -47,6 +97,9 @@ interface Forklift {
   operatorName: string;
 }
 
+// Path colors for each forklift
+const PATH_COLORS = ['#f59e0b', '#3b82f6']; // Amber for first, blue for second
+
 export const ForkliftSystem: React.FC = () => {
   const forklifts = useMemo<Forklift[]>(() => [
     {
@@ -73,6 +126,11 @@ export const ForkliftSystem: React.FC = () => {
 
   return (
     <group>
+      {/* Render path lines on floor */}
+      {forklifts.map((f, i) => (
+        <ForkliftPath key={`path-${f.id}`} path={f.path} color={PATH_COLORS[i % PATH_COLORS.length]} />
+      ))}
+      {/* Render forklifts */}
       {forklifts.map(f => (
         <Forklift key={f.id} data={f} />
       ))}
@@ -85,7 +143,20 @@ const Forklift: React.FC<{ data: Forklift }> = ({ data }) => {
   const pathIndexRef = useRef(0);
   const currentTarget = useRef(new THREE.Vector3(...data.path[0]));
   const [isStopped, setIsStopped] = useState(false);
+  const [isReversing, setIsReversing] = useState(false);
   const directionRef = useRef(new THREE.Vector3());
+  const prevDirectionRef = useRef(new THREE.Vector3(0, 0, 1));
+  const wasStoppedRef = useRef(false);
+  const recordSafetyStop = useMillStore(state => state.recordSafetyStop);
+
+  // Play horn when stopping for safety
+  useEffect(() => {
+    if (isStopped && !wasStoppedRef.current) {
+      audioManager.playHorn(data.id);
+      recordSafetyStop();
+    }
+    wasStoppedRef.current = isStopped;
+  }, [isStopped, data.id, recordSafetyStop]);
 
   useFrame((state, delta) => {
     if (!ref.current) return;
@@ -100,6 +171,18 @@ const Forklift: React.FC<{ data: Forklift }> = ({ data }) => {
     const FORKLIFT_SAFETY_RADIUS = 4; // Larger radius for forklift-to-forklift
     const CHECK_DISTANCE = 5; // How far ahead to check
     const dirNormalized = direction.clone().normalize();
+
+    // Detect if reversing (direction changed significantly)
+    const dotProduct = dirNormalized.dot(prevDirectionRef.current);
+    const reversing = dotProduct < -0.5; // Roughly opposite direction
+    setIsReversing(reversing);
+
+    // Play backup beeper when reversing
+    if (reversing && !isStopped) {
+      audioManager.playBackupBeep(data.id);
+    }
+
+    prevDirectionRef.current.copy(dirNormalized);
     directionRef.current.copy(dirNormalized);
 
     // Register this forklift's position and direction

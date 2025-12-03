@@ -9,15 +9,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@react-three/fiber": "^9.4.0",
     "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.4.0",
     "@react-three/postprocessing": "^3.0.4",
-    "three": "^0.181.2",
+    "framer-motion": "^11.15.0",
+    "lucide-react": "^0.555.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "zustand": "^5.0.0",
     "recharts": "^2.15.0",
-    "framer-motion": "^11.15.0"
+    "three": "^0.181.2",
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

@@ -71,3 +71,31 @@ The app uses both React local state (App.tsx) and Zustand global state (store.ts
 ### Path Aliases
 
 `@/*` maps to project root (configured in tsconfig.json and vite.config.ts)
+
+## Code Style Rules
+
+### No Emojis - Use Icons Instead
+
+Never use emoji characters in the codebase. Always use Lucide React icons instead.
+
+**Exception:** The 🏭 mill emoji is permitted in these specific branding locations:
+- Favicon (`index.html`)
+- Loading screen icon (`index.html`)
+- Top-left header logo (`UIOverlay.tsx`)
+
+Example:
+
+```tsx
+// Bad - using emoji
+const icon = '🚨';
+<span>{icon}</span>
+
+// Good - using Lucide icons
+import { Siren } from 'lucide-react';
+<Siren className="w-5 h-5" />
+```
+
+Available icon imports from `lucide-react`:
+- Alerts: `Siren`, `AlertTriangle`, `CheckCircle`, `Info`, `Shield`
+- AI/Tech: `Bot`, `Brain`, `Zap`, `Eye`
+- Workers: `User`, `Briefcase`, `HardHat`, `Wrench`, `FlaskConical`, `Shield`

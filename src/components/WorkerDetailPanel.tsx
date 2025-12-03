@@ -1,11 +1,25 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { WorkerData } from '../types';
+import { Briefcase, FlaskConical, HardHat, Shield, User, Wrench } from 'lucide-react';
+import { WorkerData, WorkerIconType } from '../types';
 
 interface WorkerDetailPanelProps {
   worker: WorkerData;
   onClose: () => void;
 }
+
+const getWorkerIcon = (role: WorkerData['role']) => {
+  const iconClass = "w-8 h-8 text-white";
+  switch (role) {
+    case 'Supervisor': return <Briefcase className={iconClass} />;
+    case 'Engineer': return <Wrench className={iconClass} />;
+    case 'Operator': return <HardHat className={iconClass} />;
+    case 'Safety Officer': return <Shield className={iconClass} />;
+    case 'Quality Control': return <FlaskConical className={iconClass} />;
+    case 'Maintenance': return <Wrench className={iconClass} />;
+    default: return <User className={iconClass} />;
+  }
+};
 
 export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({ worker, onClose }) => {
   const getStatusColor = () => {
@@ -46,8 +60,8 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({ worker, on
             ×
           </button>
           <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center text-3xl">
-              {worker.avatar}
+            <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center">
+              {getWorkerIcon(worker.role)}
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">{worker.name}</h2>

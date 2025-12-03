@@ -1,8 +1,9 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { MachineData, MachineType } from '../types';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
+import { audioManager } from '../utils/audioManager';
 
 interface MachinesProps {
   machines: MachineData[];
@@ -23,6 +24,31 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
   const { type, position, size, rotation, status } = data;
   const groupRef = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
+
+  // Machine-specific sounds based on type and status
+  useEffect(() => {
+    if (status !== 'running') {
+      audioManager.stopMachineSound(data.id);
+      return;
+    }
+
+    // Start appropriate sound for machine type
+    switch (type) {
+      case MachineType.ROLLER_MILL:
+        audioManager.playMillSound(data.id, data.metrics.rpm);
+        break;
+      case MachineType.PLANSIFTER:
+        audioManager.playSifterSound(data.id, data.metrics.rpm);
+        break;
+      case MachineType.PACKER:
+        audioManager.playPackerSound(data.id);
+        break;
+    }
+
+    return () => {
+      audioManager.stopMachineSound(data.id);
+    };
+  }, [data.id, type, status, data.metrics.rpm]);
 
   useFrame((state) => {
     if (status === 'running' && groupRef.current && (type === MachineType.PLANSIFTER || type === MachineType.ROLLER_MILL)) {
@@ -167,7 +193,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
       rotation={[0, rotation, 0]}
       onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer'; }}
       onPointerOut={() => { setHovered(false); document.body.style.cursor = 'auto'; }}
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      onClick={(e) => { e.stopPropagation(); audioManager.playClick(); onClick(); }}
     >
       {renderGeometry()}
 

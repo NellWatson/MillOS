@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { useMillStore } from '../store';
 
 interface MetricsData {
   time: string;
@@ -19,6 +20,19 @@ export const ProductionMetrics: React.FC = () => {
     bagsPerMinute: 42,
     energyUsage: 847
   });
+  const safetyMetrics = useMillStore(state => state.safetyMetrics);
+
+  // Calculate time since last safety incident
+  const getTimeSinceIncident = () => {
+    if (!safetyMetrics.lastIncidentTime) return 'No incidents';
+    const elapsed = Date.now() - safetyMetrics.lastIncidentTime;
+    const seconds = Math.floor(elapsed / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    if (hours > 0) return `${hours}h ${minutes % 60}m`;
+    if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+    return `${seconds}s`;
+  };
 
   // Generate initial data
   useEffect(() => {
@@ -63,45 +77,36 @@ export const ProductionMetrics: React.FC = () => {
   }, []);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-1.5">
       {/* Live KPIs */}
-      <div className="grid grid-cols-3 gap-2">
-        <motion.div
-          className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50"
-          whileHover={{ scale: 1.02 }}
-        >
-          <div className="text-[10px] text-slate-500 uppercase tracking-wider">Throughput</div>
-          <div className="text-xl font-bold text-white font-mono">{liveMetrics.throughput}</div>
-          <div className="text-[10px] text-slate-500">tonnes/hour</div>
-        </motion.div>
-        <motion.div
-          className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50"
-          whileHover={{ scale: 1.02 }}
-        >
-          <div className="text-[10px] text-slate-500 uppercase tracking-wider">Efficiency</div>
-          <div className="text-xl font-bold text-green-400 font-mono">{liveMetrics.efficiency}%</div>
-          <div className="text-[10px] text-green-500/50">+2.1% vs target</div>
-        </motion.div>
-        <motion.div
-          className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50"
-          whileHover={{ scale: 1.02 }}
-        >
-          <div className="text-[10px] text-slate-500 uppercase tracking-wider">Quality</div>
-          <div className="text-xl font-bold text-purple-400 font-mono">{liveMetrics.quality}%</div>
-          <div className="text-[10px] text-purple-500/50">Grade A</div>
-        </motion.div>
+      <div className="grid grid-cols-3 gap-1">
+        <div className="bg-slate-800/50 rounded p-1.5 border border-slate-700/50">
+          <div className="text-[8px] text-slate-500 uppercase">Throughput</div>
+          <div className="text-base font-bold text-white font-mono leading-tight">{liveMetrics.throughput}</div>
+          <div className="text-[8px] text-slate-500">t/hr</div>
+        </div>
+        <div className="bg-slate-800/50 rounded p-1.5 border border-slate-700/50">
+          <div className="text-[8px] text-slate-500 uppercase">Efficiency</div>
+          <div className="text-base font-bold text-green-400 font-mono leading-tight">{liveMetrics.efficiency}%</div>
+          <div className="text-[8px] text-green-500/50">+2.1%</div>
+        </div>
+        <div className="bg-slate-800/50 rounded p-1.5 border border-slate-700/50">
+          <div className="text-[8px] text-slate-500 uppercase">Quality</div>
+          <div className="text-base font-bold text-purple-400 font-mono leading-tight">{liveMetrics.quality}%</div>
+          <div className="text-[8px] text-purple-500/50">Grade A</div>
+        </div>
       </div>
 
       {/* Mini Charts */}
-      <div className="bg-slate-800/30 rounded-lg p-3 border border-slate-700/30">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-slate-400">Production Trend (30 min)</span>
-          <span className="text-[10px] text-cyan-400 flex items-center gap-1">
-            <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse" />
+      <div className="bg-slate-800/30 rounded p-1.5 border border-slate-700/30">
+        <div className="flex items-center justify-between mb-0.5">
+          <span className="text-[9px] text-slate-400">Production (30m)</span>
+          <span className="text-[8px] text-cyan-400 flex items-center gap-0.5">
+            <span className="w-1 h-1 bg-cyan-400 rounded-full animate-pulse" />
             Live
           </span>
         </div>
-        <div className="h-20">
+        <div className="h-10">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data}>
               <defs>
@@ -123,19 +128,51 @@ export const ProductionMetrics: React.FC = () => {
       </div>
 
       {/* Secondary Stats */}
-      <div className="grid grid-cols-3 gap-2 text-center">
-        <div className="bg-slate-800/30 rounded p-2">
-          <div className="text-lg font-bold text-orange-400 font-mono">{liveMetrics.bagsPerMinute}</div>
-          <div className="text-[9px] text-slate-500">bags/min</div>
+      <div className="grid grid-cols-3 gap-1 text-center">
+        <div className="bg-slate-800/30 rounded p-1">
+          <div className="text-sm font-bold text-orange-400 font-mono leading-tight">{liveMetrics.bagsPerMinute}</div>
+          <div className="text-[7px] text-slate-500">bags/min</div>
         </div>
-        <div className="bg-slate-800/30 rounded p-2">
-          <div className="text-lg font-bold text-blue-400 font-mono">{liveMetrics.uptime}%</div>
-          <div className="text-[9px] text-slate-500">uptime</div>
+        <div className="bg-slate-800/30 rounded p-1">
+          <div className="text-sm font-bold text-blue-400 font-mono leading-tight">{liveMetrics.uptime}%</div>
+          <div className="text-[7px] text-slate-500">uptime</div>
         </div>
-        <div className="bg-slate-800/30 rounded p-2">
-          <div className="text-lg font-bold text-yellow-400 font-mono">{liveMetrics.energyUsage}</div>
-          <div className="text-[9px] text-slate-500">kWh</div>
+        <div className="bg-slate-800/30 rounded p-1">
+          <div className="text-sm font-bold text-yellow-400 font-mono leading-tight">{liveMetrics.energyUsage}</div>
+          <div className="text-[7px] text-slate-500">kWh</div>
         </div>
+      </div>
+
+      {/* Safety Metrics */}
+      <div className="bg-gradient-to-r from-green-900/30 to-emerald-900/30 rounded p-1.5 border border-green-700/30">
+        <div className="flex items-center gap-1 mb-1">
+          <svg className="w-2.5 h-2.5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+          <span className="text-[9px] font-medium text-green-400">Safety</span>
+        </div>
+        <div className="grid grid-cols-3 gap-1 text-center">
+          <div className="bg-slate-900/50 rounded p-1">
+            <div className="text-sm font-bold text-green-400 font-mono leading-tight">{safetyMetrics.safetyStops}</div>
+            <div className="text-[7px] text-slate-500">stops</div>
+          </div>
+          <div className="bg-slate-900/50 rounded p-1">
+            <div className="text-sm font-bold text-emerald-400 font-mono leading-tight">{safetyMetrics.workerEvasions}</div>
+            <div className="text-[7px] text-slate-500">evasions</div>
+          </div>
+          <div className="bg-slate-900/50 rounded p-1 min-w-[60px]">
+            <div className="text-[10px] font-bold text-teal-400 font-mono leading-tight whitespace-nowrap h-4 flex items-center justify-center">{getTimeSinceIncident()}</div>
+            <div className="text-[7px] text-slate-500">elapsed</div>
+          </div>
+        </div>
+        {safetyMetrics.safetyStops === 0 && (
+          <div className="mt-1 text-center">
+            <span className="text-[8px] text-green-500/70 flex items-center justify-center gap-0.5">
+              <span className="w-1 h-1 bg-green-500 rounded-full animate-pulse" />
+              All safe
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,13 +1,81 @@
-import React, { useRef } from 'react';
+import React, { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Sky, Environment as DreiEnvironment, Lightformer, ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
+import { useMillStore } from '../store';
+
+// Calculate daylight color based on game time
+const getDaylightProperties = (hour: number) => {
+  // Night (8pm - 5am): dark blue, minimal glow
+  if (hour >= 20 || hour < 5) {
+    return { color: '#1e3a5f', intensity: 0.1, opacity: 0.2 };
+  }
+  // Dawn (5am - 7am): warm orange/pink
+  if (hour >= 5 && hour < 7) {
+    const t = (hour - 5) / 2;
+    return { color: '#f97316', intensity: 0.2 + t * 0.3, opacity: 0.3 + t * 0.2 };
+  }
+  // Morning (7am - 10am): transitioning to bright
+  if (hour >= 7 && hour < 10) {
+    const t = (hour - 7) / 3;
+    return { color: '#fbbf24', intensity: 0.5 + t * 0.3, opacity: 0.5 + t * 0.2 };
+  }
+  // Midday (10am - 4pm): bright daylight
+  if (hour >= 10 && hour < 16) {
+    return { color: '#7dd3fc', intensity: 0.8, opacity: 0.7 };
+  }
+  // Afternoon (4pm - 6pm): warm golden
+  if (hour >= 16 && hour < 18) {
+    const t = (hour - 16) / 2;
+    return { color: '#fbbf24', intensity: 0.7 - t * 0.2, opacity: 0.6 - t * 0.1 };
+  }
+  // Dusk (6pm - 8pm): orange/red sunset
+  if (hour >= 18 && hour < 20) {
+    const t = (hour - 18) / 2;
+    return { color: '#f97316', intensity: 0.5 - t * 0.3, opacity: 0.5 - t * 0.2 };
+  }
+
+  return { color: '#7dd3fc', intensity: 0.5, opacity: 0.5 };
+};
+
+// Window component that responds to game time daylight
+const DaylightWindow: React.FC<{ position: [number, number, number]; size: [number, number] }> = ({ position, size }) => {
+  const gameTime = useMillStore((state) => state.gameTime);
+  const { color, intensity, opacity } = getDaylightProperties(gameTime);
+
+  return (
+    <mesh position={position}>
+      <planeGeometry args={size} />
+      <meshStandardMaterial
+        color={color}
+        emissive={color}
+        emissiveIntensity={intensity}
+        transparent
+        opacity={opacity}
+      />
+    </mesh>
+  );
+};
+
+// Game time ticker component
+const GameTimeTicker: React.FC = () => {
+  const tickGameTime = useMillStore((state) => state.tickGameTime);
+
+  useFrame(() => {
+    tickGameTime();
+  });
+
+  return null;
+};
 
 export const FactoryEnvironment: React.FC = () => {
   const spotlightRefs = useRef<THREE.SpotLight[]>([]);
 
   return (
     <group>
+      {/* Game time ticker - advances time each frame */}
+      <GameTimeTicker />
+
       {/* Main ambient */}
       <ambientLight intensity={0.15} color="#b4c6e7" />
 
@@ -92,45 +160,91 @@ export const FactoryEnvironment: React.FC = () => {
         <meshBasicMaterial color="#0f172a" side={THREE.BackSide} />
       </mesh>
 
-      {/* Factory walls (distant) */}
-      <mesh position={[0, 15, -40]} receiveShadow>
-        <boxGeometry args={[120, 35, 2]} />
-        <meshStandardMaterial color="#1e293b" roughness={0.9} />
-      </mesh>
-      <mesh position={[0, 15, 40]} receiveShadow>
-        <boxGeometry args={[120, 35, 2]} />
-        <meshStandardMaterial color="#1e293b" roughness={0.9} />
-      </mesh>
-      <mesh position={[-55, 15, 0]} receiveShadow>
-        <boxGeometry args={[2, 35, 82]} />
-        <meshStandardMaterial color="#1e293b" roughness={0.9} />
-      </mesh>
-      <mesh position={[55, 15, 0]} receiveShadow>
-        <boxGeometry args={[2, 35, 82]} />
-        <meshStandardMaterial color="#1e293b" roughness={0.9} />
+      {/* Factory walls - planes facing inward (only visible from inside) */}
+      {/* Back wall */}
+      <group position={[0, 15, -40]}>
+        <mesh receiveShadow>
+          <planeGeometry args={[120, 35]} />
+          <meshStandardMaterial color="#475569" roughness={0.7} metalness={0.2} />
+        </mesh>
+        {/* Industrial windows - daylight responsive */}
+        {[-40, -20, 0, 20, 40].map((x, i) => (
+          <DaylightWindow key={i} position={[x, 5, 0.1]} size={[8, 12]} />
+        ))}
+        {/* Wall panels */}
+        {[-50, -30, -10, 10, 30, 50].map((x, i) => (
+          <mesh key={i} position={[x, -5, 0.05]}>
+            <planeGeometry args={[6, 8]} />
+            <meshStandardMaterial color="#64748b" metalness={0.5} roughness={0.5} />
+          </mesh>
+        ))}
+      </group>
+
+      {/* Front wall */}
+      <group position={[0, 15, 40]} rotation={[0, Math.PI, 0]}>
+        <mesh receiveShadow>
+          <planeGeometry args={[120, 35]} />
+          <meshStandardMaterial color="#475569" roughness={0.7} metalness={0.2} />
+        </mesh>
+        {/* Large loading bay doors */}
+        {[-30, 0, 30].map((x, i) => (
+          <mesh key={i} position={[x, -5, 0.1]}>
+            <planeGeometry args={[15, 20]} />
+            <meshStandardMaterial color="#1e293b" metalness={0.6} roughness={0.4} />
+          </mesh>
+        ))}
+        {/* Door warning stripes */}
+        {[-30, 0, 30].map((x, i) => (
+          <mesh key={i} position={[x, -14, 0.15]}>
+            <planeGeometry args={[15, 2]} />
+            <meshStandardMaterial color="#eab308" emissive="#eab308" emissiveIntensity={0.2} />
+          </mesh>
+        ))}
+      </group>
+
+      {/* Left wall */}
+      <group position={[-55, 15, 0]} rotation={[0, Math.PI / 2, 0]}>
+        <mesh receiveShadow>
+          <planeGeometry args={[82, 35]} />
+          <meshStandardMaterial color="#475569" roughness={0.7} metalness={0.2} />
+        </mesh>
+        {/* Windows - daylight responsive */}
+        {[-25, 0, 25].map((z, i) => (
+          <DaylightWindow key={i} position={[z, 5, 0.1]} size={[10, 12]} />
+        ))}
+      </group>
+
+      {/* Right wall */}
+      <group position={[55, 15, 0]} rotation={[0, -Math.PI / 2, 0]}>
+        <mesh receiveShadow>
+          <planeGeometry args={[82, 35]} />
+          <meshStandardMaterial color="#475569" roughness={0.7} metalness={0.2} />
+        </mesh>
+        {/* Windows - daylight responsive */}
+        {[-25, 0, 25].map((z, i) => (
+          <DaylightWindow key={i} position={[z, 5, 0.1]} size={[10, 12]} />
+        ))}
+      </group>
+
+      {/* Ceiling - plane facing down (only visible from below) */}
+      <mesh position={[0, 32, 0]} rotation={[Math.PI / 2, 0, 0]} receiveShadow>
+        <planeGeometry args={[110, 80]} />
+        <meshStandardMaterial color="#1e293b" />
       </mesh>
 
       {/* Skylights */}
       {[-20, 0, 20].map((x, i) => (
-        <group key={i} position={[x, 32, 0]}>
-          <mesh>
-            <boxGeometry args={[10, 0.5, 15]} />
-            <meshStandardMaterial
-              color="#87ceeb"
-              transparent
-              opacity={0.3}
-              emissive="#87ceeb"
-              emissiveIntensity={0.2}
-            />
-          </mesh>
-        </group>
+        <mesh key={i} position={[x, 31.9, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[10, 15]} />
+          <meshStandardMaterial
+            color="#87ceeb"
+            transparent
+            opacity={0.3}
+            emissive="#87ceeb"
+            emissiveIntensity={0.2}
+          />
+        </mesh>
       ))}
-
-      {/* Ceiling structure */}
-      <mesh position={[0, 32, 0]} receiveShadow>
-        <boxGeometry args={[110, 0.5, 80]} />
-        <meshStandardMaterial color="#1e293b" />
-      </mesh>
 
       {/* Support beams */}
       {[-40, -20, 0, 20, 40].map((x, i) => (

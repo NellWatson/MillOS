@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Bot, Brain, Shield, User, Wrench, Zap, Eye } from 'lucide-react';
 import { AIDecision, AlertData, WORKER_ROSTER } from '../types';
 
 interface AICommandCenterProps {
@@ -72,13 +73,14 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
   }, []);
 
   const getTypeIcon = (type: string) => {
+    const iconClass = "w-5 h-5";
     switch (type) {
-      case 'assignment': return '👤';
-      case 'optimization': return '⚡';
-      case 'prediction': return '🔮';
-      case 'maintenance': return '🔧';
-      case 'safety': return '🛡️';
-      default: return '🤖';
+      case 'assignment': return <User className={iconClass} />;
+      case 'optimization': return <Zap className={iconClass} />;
+      case 'prediction': return <Eye className={iconClass} />;
+      case 'maintenance': return <Wrench className={iconClass} />;
+      case 'safety': return <Shield className={iconClass} />;
+      default: return <Bot className={iconClass} />;
     }
   };
 
@@ -108,7 +110,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
           <div className="flex items-center gap-3">
             <div className="relative">
               <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center">
-                <span className="text-xl">🧠</span>
+                <Brain className="w-6 h-6 text-white" />
               </div>
               {isThinking && (
                 <div className="absolute -top-1 -right-1 w-3 h-3 bg-cyan-400 rounded-full animate-ping" />
@@ -173,7 +175,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
                 <div className={`h-1 bg-gradient-to-r ${getTypeColor(decision.type)}`} />
                 <div className="p-3">
                   <div className="flex items-start gap-2">
-                    <span className="text-lg">{getTypeIcon(decision.type)}</span>
+                    {getTypeIcon(decision.type)}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase">
@@ -201,7 +203,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
 
           {decisions.length === 0 && (
             <div className="text-center py-8 text-slate-500">
-              <div className="text-3xl mb-2">🤖</div>
+              <Bot className="w-8 h-8 mx-auto mb-2" />
               <p className="text-sm">AI is analyzing operations...</p>
               <p className="text-xs text-slate-600">Decisions will appear here</p>
             </div>
@@ -212,7 +214,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
       {/* Footer */}
       <div className="p-3 border-t border-slate-800 bg-slate-950/80">
         <div className="flex items-center justify-between text-xs text-slate-500">
-          <span>Model: MillOS-AI v2.4</span>
+          <span>Model: MillOS-AI v0.10</span>
           <span className="flex items-center gap-1">
             <span className="w-2 h-2 bg-green-500 rounded-full" />
             All systems nominal

@@ -2,6 +2,11 @@ import { create } from 'zustand';
 import { MachineData, WorkerData, AlertData, AIDecision } from './types';
 
 interface MillStore {
+  // Game Time (24-hour cycle in ~10 real minutes)
+  gameTime: number; // 0-24 representing hour of day
+  setGameTime: (time: number) => void;
+  tickGameTime: () => void;
+
   // Production
   productionSpeed: number;
   setProductionSpeed: (speed: number) => void;
@@ -36,6 +41,16 @@ interface MillStore {
   };
   updateMetrics: (metrics: Partial<MillStore['metrics']>) => void;
 
+  // Safety metrics
+  safetyMetrics: {
+    nearMisses: number;
+    safetyStops: number;
+    workerEvasions: number;
+    lastIncidentTime: number | null;
+  };
+  recordSafetyStop: () => void;
+  recordWorkerEvasion: () => void;
+
   // UI
   showZones: boolean;
   setShowZones: (show: boolean) => void;
@@ -44,6 +59,12 @@ interface MillStore {
 }
 
 export const useMillStore = create<MillStore>((set) => ({
+  // Game time starts at 8am, full day cycles in ~10 minutes (600 seconds)
+  // Each tick (called every 100ms) advances by 24/6000 = 0.004 hours
+  gameTime: 8,
+  setGameTime: (time) => set({ gameTime: time % 24 }),
+  tickGameTime: () => set((state) => ({ gameTime: (state.gameTime + 0.004) % 24 })),
+
   productionSpeed: 0.8,
   setProductionSpeed: (speed) => set({ productionSpeed: speed }),
 
@@ -86,6 +107,27 @@ export const useMillStore = create<MillStore>((set) => ({
   },
   updateMetrics: (metrics) => set((state) => ({
     metrics: { ...state.metrics, ...metrics }
+  })),
+
+  safetyMetrics: {
+    nearMisses: 0,
+    safetyStops: 0,
+    workerEvasions: 0,
+    lastIncidentTime: null
+  },
+  recordSafetyStop: () => set((state) => ({
+    safetyMetrics: {
+      ...state.safetyMetrics,
+      safetyStops: state.safetyMetrics.safetyStops + 1,
+      nearMisses: state.safetyMetrics.nearMisses + 1,
+      lastIncidentTime: Date.now()
+    }
+  })),
+  recordWorkerEvasion: () => set((state) => ({
+    safetyMetrics: {
+      ...state.safetyMetrics,
+      workerEvasions: state.safetyMetrics.workerEvasions + 1
+    }
   })),
 
   showZones: true,
