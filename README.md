@@ -20,7 +20,9 @@
 
 A browser-based 3D industrial simulation featuring autonomous workers, intelligent forklifts,<br/>real-time production metrics, SCADA integration, and an AI command center — all visualizing a complete grain milling operation.
 
-[View in AI Studio](https://ai.studio/apps/drive/1dzg8VQBWvFW1SYHiqYyClsvakjN8uidt)
+<br/>
+
+![MillOS Screenshot](src/0.10%20Archive/assets/Screenshot.png)
 
 </div>
 
