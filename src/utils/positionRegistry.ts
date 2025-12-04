@@ -1,7 +1,7 @@
 // Shared position registry for collision avoidance
 // Workers and forklifts register their positions for mutual awareness
 
-interface EntityPosition {
+export interface EntityPosition {
   id: string;
   x: number;
   z: number;
@@ -11,11 +11,113 @@ interface EntityPosition {
   isStopped?: boolean; // Whether forklift is currently stopped
 }
 
+// Static obstacle definition (axis-aligned bounding box)
+export interface Obstacle {
+  id: string;
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  // Optional: height for future 3D collision (workers can walk under elevated equipment)
+  minY?: number;
+  maxY?: number;
+  // If true, only forklifts are blocked (workers can pass under/around)
+  forkliftOnly?: boolean;
+}
+
 class PositionRegistry {
   private positions: Map<string, EntityPosition> = new Map();
+  private obstacles: Obstacle[] = [];
 
-  register(id: string, x: number, z: number, type: 'worker' | 'forklift', dirX?: number, dirZ?: number, isStopped?: boolean) {
+  register(
+    id: string,
+    x: number,
+    z: number,
+    type: 'worker' | 'forklift',
+    dirX?: number,
+    dirZ?: number,
+    isStopped?: boolean
+  ) {
     this.positions.set(id, { id, x, z, type, dirX, dirZ, isStopped });
+  }
+
+  // Register static obstacles (called once during scene setup)
+  registerObstacles(obstacles: Obstacle[]) {
+    this.obstacles = obstacles;
+  }
+
+  // Check if a point is inside any obstacle (with padding for entity radius)
+  // Set isForklift=true to include forkliftOnly obstacles
+  isInsideObstacle(
+    x: number,
+    z: number,
+    padding: number = 0.5,
+    isForklift: boolean = false
+  ): boolean {
+    for (const obs of this.obstacles) {
+      // Skip forklift-only obstacles when checking for workers
+      if (obs.forkliftOnly && !isForklift) continue;
+
+      if (
+        x >= obs.minX - padding &&
+        x <= obs.maxX + padding &&
+        z >= obs.minZ - padding &&
+        z <= obs.maxZ + padding
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Get the nearest obstacle in the direction of movement
+  // Set isForklift=true to include forkliftOnly obstacles
+  getObstacleAhead(
+    x: number,
+    _z: number,
+    dirZ: number,
+    checkDistance: number,
+    padding: number = 0.5,
+    isForklift: boolean = false
+  ): Obstacle | null {
+    const z = _z;
+    for (const obs of this.obstacles) {
+      // Skip forklift-only obstacles when checking for workers
+      if (obs.forkliftOnly && !isForklift) continue;
+
+      // Check if obstacle is in front of us (considering direction)
+      const obstacleInPath =
+        dirZ > 0
+          ? z < obs.maxZ + padding && z + checkDistance > obs.minZ - padding
+          : z > obs.minZ - padding && z - checkDistance < obs.maxZ + padding;
+
+      if (obstacleInPath && x >= obs.minX - padding && x <= obs.maxX + padding) {
+        return obs;
+      }
+    }
+    return null;
+  }
+
+  // Find a clear path around an obstacle (returns x offset to avoid it)
+  findClearPath(x: number, _z: number, obstacleId: string, padding: number = 1.0): number {
+    const obstacle = this.obstacles.find((o) => o.id === obstacleId);
+    if (!obstacle) return 0;
+
+    // Calculate distances to go around left vs right
+    const distToLeft = x - (obstacle.minX - padding);
+    const distToRight = obstacle.maxX + padding - x;
+
+    // Choose the shorter path, but prefer staying closer to original position
+    if (Math.abs(distToLeft) < Math.abs(distToRight)) {
+      return obstacle.minX - padding - 0.5; // Go left
+    } else {
+      return obstacle.maxX + padding + 0.5; // Go right
+    }
+  }
+
+  // Get all obstacles (for debugging/visualization)
+  getAllObstacles(): Obstacle[] {
+    return [...this.obstacles];
   }
 
   unregister(id: string) {
@@ -23,9 +125,15 @@ class PositionRegistry {
   }
 
   // Get all entities of a specific type within a radius
-  getEntitiesNearby(x: number, z: number, radius: number, type: 'worker' | 'forklift', excludeId?: string): EntityPosition[] {
+  getEntitiesNearby(
+    x: number,
+    z: number,
+    radius: number,
+    type: 'worker' | 'forklift',
+    excludeId?: string
+  ): EntityPosition[] {
     const nearby: EntityPosition[] = [];
-    this.positions.forEach(pos => {
+    this.positions.forEach((pos) => {
       if (pos.type === type && pos.id !== excludeId) {
         const dx = pos.x - x;
         const dz = pos.z - z;
@@ -48,8 +156,17 @@ class PositionRegistry {
     return this.getEntitiesNearby(x, z, radius, 'forklift', excludeId);
   }
 
-  // Check if there's any worker or forklift in the path ahead
-  isPathClear(x: number, z: number, dirX: number, dirZ: number, checkDistance: number, safetyRadius: number, forkliftId?: string): boolean {
+  // Check if there's any worker, forklift, or obstacle in the path ahead
+  isPathClear(
+    x: number,
+    z: number,
+    dirX: number,
+    dirZ: number,
+    checkDistance: number,
+    safetyRadius: number,
+    forkliftId?: string,
+    checkObstacles: boolean = false
+  ): boolean {
     // Check points along the path ahead
     for (let d = 1; d <= checkDistance; d += 0.5) {
       const checkX = x + dirX * d;
@@ -65,6 +182,13 @@ class PositionRegistry {
           return false;
         }
       }
+      // Check for static obstacles if enabled (forkliftId presence indicates forklift)
+      if (
+        checkObstacles &&
+        this.isInsideObstacle(checkX, checkZ, safetyRadius * 0.5, !!forkliftId)
+      ) {
+        return false;
+      }
     }
     return true;
   }
@@ -74,7 +198,7 @@ class PositionRegistry {
     let nearest: EntityPosition | null = null;
     let nearestDist = maxDistance;
 
-    this.positions.forEach(pos => {
+    this.positions.forEach((pos) => {
       if (pos.type === 'forklift') {
         const dx = pos.x - x;
         const dz = pos.z - z;
@@ -89,11 +213,16 @@ class PositionRegistry {
   }
 
   // Get the nearest worker to a position (for worker conversations)
-  getNearestWorker(x: number, z: number, maxDistance: number, excludeId: string): EntityPosition | null {
+  getNearestWorker(
+    x: number,
+    z: number,
+    maxDistance: number,
+    excludeId: string
+  ): EntityPosition | null {
     let nearest: EntityPosition | null = null;
     let nearestDist = maxDistance;
 
-    this.positions.forEach(pos => {
+    this.positions.forEach((pos) => {
       if (pos.type === 'worker' && pos.id !== excludeId) {
         const dx = pos.x - x;
         const dz = pos.z - z;
@@ -132,7 +261,7 @@ class PositionRegistry {
   // Get all workers for mini-map display
   getAllWorkers(): EntityPosition[] {
     const workers: EntityPosition[] = [];
-    this.positions.forEach(pos => {
+    this.positions.forEach((pos) => {
       if (pos.type === 'worker') {
         workers.push(pos);
       }
@@ -143,7 +272,7 @@ class PositionRegistry {
   // Get all forklifts for mini-map display
   getAllForklifts(): EntityPosition[] {
     const forklifts: EntityPosition[] = [];
-    this.positions.forEach(pos => {
+    this.positions.forEach((pos) => {
       if (pos.type === 'forklift') {
         forklifts.push(pos);
       }

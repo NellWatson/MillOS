@@ -3,13 +3,14 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useMillStore } from '../store';
 import { audioManager } from '../utils/audioManager';
+import { shouldRunThisFrame } from '../utils/frameThrottle';
 
 // Cobweb component for corners and rafters
-const Cobweb: React.FC<{ position: [number, number, number]; rotation?: [number, number, number]; scale?: number }> = ({
-  position,
-  rotation = [0, 0, 0],
-  scale = 1
-}) => {
+const Cobweb: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+  scale?: number;
+}> = ({ position, rotation = [0, 0, 0], scale = 1 }) => {
   const meshRef = useRef<THREE.Mesh>(null);
 
   // Create cobweb geometry with radial lines
@@ -56,8 +57,9 @@ const Cobweb: React.FC<{ position: [number, number, number]; rotation?: [number,
     return geo;
   }, [scale]);
 
-  // Subtle swaying animation
+  // Subtle swaying animation - throttled to 20fps
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (meshRef.current) {
       meshRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.3) * 0.02;
     }
@@ -71,11 +73,11 @@ const Cobweb: React.FC<{ position: [number, number, number]; rotation?: [number,
 };
 
 // Rust stain component for equipment surfaces
-const RustStain: React.FC<{ position: [number, number, number]; rotation?: [number, number, number]; size?: number }> = ({
-  position,
-  rotation = [0, 0, 0],
-  size = 0.5
-}) => {
+const RustStain: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+  size?: number;
+}> = ({ position, rotation = [0, 0, 0], size = 0.5 }) => {
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 128;
@@ -140,12 +142,13 @@ const RustStain: React.FC<{ position: [number, number, number]; rotation?: [numb
 // Oil puddle with reflections
 const OilPuddle: React.FC<{ position: [number, number, number]; size?: number }> = ({
   position,
-  size = 1
+  size = 1,
 }) => {
   const meshRef = useRef<THREE.Mesh>(null);
 
-  // Animate subtle iridescence
+  // Animate subtle iridescence - throttled to 20fps
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (meshRef.current) {
       const mat = meshRef.current.material as THREE.MeshStandardMaterial;
       mat.emissiveIntensity = 0.1 + Math.sin(state.clock.elapsedTime * 0.5) * 0.05;
@@ -187,7 +190,12 @@ const OilPuddle: React.FC<{ position: [number, number, number]; size?: number }>
   }, [size]);
 
   return (
-    <mesh ref={meshRef} position={position} rotation={[-Math.PI / 2, 0, Math.random() * Math.PI * 2]} geometry={shape}>
+    <mesh
+      ref={meshRef}
+      position={position}
+      rotation={[-Math.PI / 2, 0, Math.random() * Math.PI * 2]}
+      geometry={shape}
+    >
       <meshStandardMaterial
         color="#1a1a2e"
         metalness={0.9}
@@ -201,6 +209,76 @@ const OilPuddle: React.FC<{ position: [number, number, number]; size?: number }>
   );
 };
 
+// Rain puddle for outdoor areas (clear water after rain)
+const RainPuddle: React.FC<{ position: [number, number, number]; size?: number }> = ({
+  position,
+  size = 1.5,
+}) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  // Animate subtle surface ripple - throttled to 20fps
+  useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
+    if (meshRef.current) {
+      const mat = meshRef.current.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = 0.05 + Math.sin(state.clock.elapsedTime * 0.8) * 0.02;
+    }
+  });
+
+  const shape = useMemo(() => {
+    const geo = new THREE.BufferGeometry();
+    const vertices: number[] = [];
+    const uvs: number[] = [];
+    const indices: number[] = [];
+
+    // Create irregular puddle shape
+    const points = 20;
+    const baseRadius = size * 0.5;
+
+    // Center vertex
+    vertices.push(0, 0, 0);
+    uvs.push(0.5, 0.5);
+
+    for (let i = 0; i < points; i++) {
+      const angle = (i / points) * Math.PI * 2;
+      const r = baseRadius * (0.6 + Math.random() * 0.4);
+      vertices.push(Math.cos(angle) * r, 0, Math.sin(angle) * r);
+      uvs.push(0.5 + Math.cos(angle) * 0.5, 0.5 + Math.sin(angle) * 0.5);
+    }
+
+    // Create triangles
+    for (let i = 0; i < points; i++) {
+      indices.push(0, i + 1, ((i + 1) % points) + 1);
+    }
+
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+
+    return geo;
+  }, [size]);
+
+  return (
+    <mesh
+      ref={meshRef}
+      position={position}
+      rotation={[-Math.PI / 2, 0, Math.random() * Math.PI * 2]}
+      geometry={shape}
+    >
+      <meshStandardMaterial
+        color="#1e3a5f"
+        metalness={0.95}
+        roughness={0.05}
+        transparent
+        opacity={0.4}
+        emissive="#60a5fa"
+        emissiveIntensity={0.05}
+      />
+    </mesh>
+  );
+};
+
 // Animated safety signage with blinking lights
 const SafetySign: React.FC<{
   position: [number, number, number];
@@ -208,19 +286,20 @@ const SafetySign: React.FC<{
   type: 'exit' | 'caution' | 'danger' | 'ppe';
 }> = ({ position, rotation = [0, 0, 0], type }) => {
   const lightRef = useRef<THREE.PointLight>(null);
-  const [isOn, setIsOn] = useState(true);
+  const [isOn, _setIsOn] = useState(true);
 
   const colors = {
     exit: '#22c55e',
     caution: '#eab308',
     danger: '#ef4444',
-    ppe: '#3b82f6'
+    ppe: '#3b82f6',
   };
 
   const color = colors[type];
 
-  // Blinking effect for danger signs
+  // Blinking effect for danger signs - throttled to 15fps
   useFrame((state) => {
+    if (!shouldRunThisFrame(4)) return;
     if (type === 'danger' && lightRef.current) {
       const blink = Math.sin(state.clock.elapsedTime * 4) > 0;
       lightRef.current.intensity = blink ? 0.5 : 0.1;
@@ -238,15 +317,16 @@ const SafetySign: React.FC<{
       {/* Sign face */}
       <mesh position={[0, 0, 0.02]}>
         <planeGeometry args={[0.55, 0.35]} />
-        <meshStandardMaterial
-          color={color}
-          emissive={color}
-          emissiveIntensity={0.3}
-        />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.3} />
       </mesh>
 
       {/* Corner lights */}
-      {[[-0.22, 0.12], [0.22, 0.12], [-0.22, -0.12], [0.22, -0.12]].map(([x, y], i) => (
+      {[
+        [-0.22, 0.12],
+        [0.22, 0.12],
+        [-0.22, -0.12],
+        [0.22, -0.12],
+      ].map(([x, y], i) => (
         <mesh key={i} position={[x, y, 0.025]}>
           <sphereGeometry args={[0.02, 8, 8]} />
           <meshStandardMaterial
@@ -258,24 +338,31 @@ const SafetySign: React.FC<{
       ))}
 
       {/* Glow light */}
-      <pointLight ref={lightRef} position={[0, 0, 0.1]} color={color} intensity={0.3} distance={2} />
+      <pointLight
+        ref={lightRef}
+        position={[0, 0, 0.1]}
+        color={color}
+        intensity={0.3}
+        distance={2}
+      />
     </group>
   );
 };
 
 // Large wall-mounted clock (for placement on factory walls)
-export const FactoryWallClock: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
-  const gameTime = useMillStore((state) => state.gameTime);
+export const FactoryWallClock: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
+  const gameTime = useMillStore((state: any) => state.gameTime);
   const secondHandRef = useRef<THREE.Mesh>(null);
 
   const hourAngle = ((gameTime % 12) / 12) * Math.PI * 2 - Math.PI / 2;
-  const minuteAngle = ((gameTime % 1) * 60 / 60) * Math.PI * 2 - Math.PI / 2;
+  const minuteAngle = (((gameTime % 1) * 60) / 60) * Math.PI * 2 - Math.PI / 2;
 
-  // Animate second hand
+  // Animate second hand - throttled to 20fps
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (secondHandRef.current) {
       const seconds = (state.clock.elapsedTime * 10) % 60;
       const secondAngle = (seconds / 60) * Math.PI * 2 - Math.PI / 2;
@@ -310,11 +397,7 @@ export const FactoryWallClock: React.FC<{ position: [number, number, number]; ro
         return (
           <mesh
             key={i}
-            position={[
-              Math.sin(angle) * 0.45,
-              0.065,
-              Math.cos(angle) * 0.45
-            ]}
+            position={[Math.sin(angle) * 0.45, 0.065, Math.cos(angle) * 0.45]}
             rotation={[Math.PI / 2, 0, -angle]}
           >
             <boxGeometry args={[0.03, isHour ? 0.1 : 0.05, 0.02]} />
@@ -360,11 +443,14 @@ export const FactoryWallClock: React.FC<{ position: [number, number, number]; ro
 };
 
 // Fire extinguisher station with animated inspection tag
-const FireExtinguisherStation: React.FC<{ position: [number, number, number] }> = ({ position }) => {
+const FireExtinguisherStation: React.FC<{ position: [number, number, number] }> = ({
+  position,
+}) => {
   const tagRef = useRef<THREE.Mesh>(null);
 
-  // Gentle swaying for the inspection tag
+  // Gentle swaying for the inspection tag - throttled to 20fps
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (tagRef.current) {
       tagRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 1.5) * 0.1;
     }
@@ -409,8 +495,8 @@ const FireExtinguisherStation: React.FC<{ position: [number, number, number] }> 
       </mesh>
 
       {/* Pressure gauge */}
-      <mesh position={[0, 0.85, 0.12]}>
-        <cylinderGeometry args={[0.03, 0.03, 0.02, 16]} rotation={[Math.PI / 2, 0, 0]} />
+      <mesh position={[0, 0.85, 0.12]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.03, 0.03, 0.02, 16]} />
         <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.3} />
       </mesh>
 
@@ -421,8 +507,8 @@ const FireExtinguisherStation: React.FC<{ position: [number, number, number] }> 
           <meshStandardMaterial color="#f5f5f5" side={THREE.DoubleSide} />
         </mesh>
         {/* Tag string */}
-        <mesh>
-          <cylinderGeometry args={[0.002, 0.002, 0.08, 4]} rotation={[0, 0, Math.PI / 4]} />
+        <mesh rotation={[0, 0, Math.PI / 4]}>
+          <cylinderGeometry args={[0.002, 0.002, 0.08, 4]} />
           <meshBasicMaterial color="#94a3b8" />
         </mesh>
       </group>
@@ -441,7 +527,7 @@ export const LoadingDockDoor: React.FC<{
   position: [number, number, number];
   isOpen: boolean;
   onToggle?: () => void;
-}> = ({ position, isOpen, onToggle }) => {
+}> = ({ position, isOpen, onToggle: _onToggle }) => {
   const doorRef = useRef<THREE.Group>(null);
   const currentOpenRef = useRef(0);
   const warningLightsActiveRef = useRef(false);
@@ -452,6 +538,7 @@ export const LoadingDockDoor: React.FC<{
   const segments = 8;
 
   useFrame((_, delta) => {
+    if (!shouldRunThisFrame(2)) return;
     const speed = 0.5;
     const diff = targetOpen - currentOpenRef.current;
     if (Math.abs(diff) > 0.01) {
@@ -534,10 +621,14 @@ export const LoadingDockDoor: React.FC<{
 };
 
 // Warning light component
-const WarningLight: React.FC<{ position: [number, number, number]; isActive: boolean }> = ({ position, isActive }) => {
+const WarningLight: React.FC<{ position: [number, number, number]; isActive: boolean }> = ({
+  position,
+  isActive,
+}) => {
   const lightRef = useRef<THREE.PointLight>(null);
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (lightRef.current && isActive) {
       lightRef.current.intensity = Math.abs(Math.sin(state.clock.elapsedTime * 4)) * 2;
     } else if (lightRef.current) {
@@ -569,6 +660,7 @@ export const ControlPanelLED: React.FC<{
   const meshRef = useRef<THREE.Mesh>(null);
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (!meshRef.current) return;
     const mat = meshRef.current.material as THREE.MeshStandardMaterial;
     const t = state.clock.elapsedTime;
@@ -600,10 +692,10 @@ export const ControlPanelLED: React.FC<{
 };
 
 // Control panel with multiple LEDs
-export const ControlPanel: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+export const ControlPanel: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   return (
     <group position={position} rotation={rotation}>
       {/* Panel body */}
@@ -627,9 +719,13 @@ export const ControlPanel: React.FC<{ position: [number, number, number]; rotati
       <ControlPanelLED position={[0.25, 0.15, 0.09]} color="#22c55e" blinkPattern="steady" />
 
       {/* Buttons */}
-      {[[-0.2, -0.05], [0, -0.05], [0.2, -0.05]].map(([x, y], i) => (
-        <mesh key={i} position={[x, y, 0.09]}>
-          <cylinderGeometry args={[0.04, 0.04, 0.03, 16]} rotation={[Math.PI / 2, 0, 0]} />
+      {[
+        [-0.2, -0.05],
+        [0, -0.05],
+        [0.2, -0.05],
+      ].map(([x, y], i) => (
+        <mesh key={i} position={[x, y, 0.09]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.04, 0.04, 0.03, 16]} />
           <meshStandardMaterial color={['#22c55e', '#eab308', '#ef4444'][i]} roughness={0.3} />
         </mesh>
       ))}
@@ -644,13 +740,16 @@ export const ControlPanel: React.FC<{ position: [number, number, number]; rotati
 };
 
 // Pipe condensation drip effect - ref-based animation (no setState in useFrame)
-export const CondensationDrip: React.FC<{ position: [number, number, number] }> = ({ position }) => {
+export const CondensationDrip: React.FC<{ position: [number, number, number] }> = ({
+  position,
+}) => {
   const dropRef = useRef<THREE.Mesh>(null);
   const dropYRef = useRef(0);
   const startY = 0;
   const endY = -3;
 
   useFrame((_, delta) => {
+    if (!shouldRunThisFrame(2)) return;
     let newY = dropYRef.current - delta * 1.5;
     if (newY < endY) {
       // Reset with random delay
@@ -672,13 +771,25 @@ export const CondensationDrip: React.FC<{ position: [number, number, number] }> 
       {/* Water buildup on pipe */}
       <mesh position={[0, 0.05, 0]}>
         <sphereGeometry args={[0.03, 8, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
-        <meshStandardMaterial color="#60a5fa" transparent opacity={0.6} metalness={0.8} roughness={0.1} />
+        <meshStandardMaterial
+          color="#60a5fa"
+          transparent
+          opacity={0.6}
+          metalness={0.8}
+          roughness={0.1}
+        />
       </mesh>
 
       {/* Falling drop */}
       <mesh ref={dropRef} position={[0, 0, 0]}>
         <sphereGeometry args={[0.015, 6, 6]} />
-        <meshStandardMaterial color="#60a5fa" transparent opacity={0.7} metalness={0.8} roughness={0.1} />
+        <meshStandardMaterial
+          color="#60a5fa"
+          transparent
+          opacity={0.7}
+          metalness={0.8}
+          roughness={0.1}
+        />
       </mesh>
     </group>
   );
@@ -688,11 +799,12 @@ export const CondensationDrip: React.FC<{ position: [number, number, number] }> 
 export const VibrationIndicator: React.FC<{
   position: [number, number, number];
   machineId: string;
-}> = ({ position, machineId }) => {
+}> = ({ position, machineId: _machineId }) => {
   const groupRef = useRef<THREE.Group>(null);
-  const [vibrationLevel, setVibrationLevel] = useState(0.5);
+  const [vibrationLevel, _setVibrationLevel] = useState(0.5);
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (!groupRef.current) return;
 
     // Simulate vibration based on audio manager state
@@ -718,7 +830,7 @@ export const VibrationIndicator: React.FC<{
 // Stacked pallets in corners
 const StackedPallets: React.FC<{ position: [number, number, number]; count?: number }> = ({
   position,
-  count = 3
+  count = 3,
 }) => {
   return (
     <group position={position}>
@@ -763,10 +875,10 @@ const StackedPallets: React.FC<{ position: [number, number, number]; count?: num
 };
 
 // Tool rack / pegboard on walls
-const ToolRack: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const ToolRack: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   return (
     <group position={position} rotation={rotation}>
       {/* Pegboard backing */}
@@ -850,12 +962,13 @@ const ToolRack: React.FC<{ position: [number, number, number]; rotation?: [numbe
 // Hard hat on hook
 const HardHatHook: React.FC<{ position: [number, number, number]; color?: string }> = ({
   position,
-  color = '#eab308'
+  color = '#eab308',
 }) => {
   const hatRef = useRef<THREE.Group>(null);
 
   // Gentle swaying
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (hatRef.current) {
       hatRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.8) * 0.03;
     }
@@ -915,8 +1028,8 @@ const CleaningEquipment: React.FC<{ position: [number, number, number] }> = ({ p
         </mesh>
         {/* Wheels */}
         {[-0.15, 0.15].map((x, i) => (
-          <mesh key={i} position={[x, 0.03, 0.2]}>
-            <cylinderGeometry args={[0.03, 0.03, 0.02, 12]} rotation={[Math.PI / 2, 0, 0]} />
+          <mesh key={i} position={[x, 0.03, 0.2]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.03, 0.03, 0.02, 12]} />
             <meshStandardMaterial color="#1e293b" />
           </mesh>
         ))}
@@ -961,6 +1074,7 @@ const CableTray: React.FC<{
 
   // Subtle wire sway
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (wiresRef.current) {
       wiresRef.current.children.forEach((wire, i) => {
         wire.rotation.z = Math.sin(state.clock.elapsedTime * 0.5 + i) * 0.02;
@@ -998,8 +1112,8 @@ const CableTray: React.FC<{
         { color: '#3b82f6', offset: 0 },
         { color: '#22c55e', offset: 0.08 },
       ].map((cable, i) => (
-        <mesh key={i} position={[0, 0.02, cable.offset]}>
-          <cylinderGeometry args={[0.02, 0.02, length, 8]} rotation={[0, 0, Math.PI / 2]} />
+        <mesh key={i} position={[0, 0.02, cable.offset]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.02, 0.02, length, 8]} />
           <meshStandardMaterial color={cable.color} roughness={0.6} />
         </mesh>
       ))}
@@ -1039,6 +1153,7 @@ const SteamVent: React.FC<{ position: [number, number, number] }> = ({ position 
   }, []);
 
   useFrame(() => {
+    if (!shouldRunThisFrame(3)) return;
     if (!steamRef.current) return;
     const positions = steamRef.current.geometry.attributes.position.array as Float32Array;
 
@@ -1073,12 +1188,7 @@ const SteamVent: React.FC<{ position: [number, number, number] }> = ({ position 
       {/* Steam particles */}
       <points ref={steamRef} position={[0, 0.25, 0]}>
         <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            count={particleCount}
-            array={particles.positions}
-            itemSize={3}
-          />
+          <bufferAttribute attach="attributes-position" args={[particles.positions, 3]} />
         </bufferGeometry>
         <pointsMaterial
           size={0.08}
@@ -1096,7 +1206,7 @@ const SteamVent: React.FC<{ position: [number, number, number] }> = ({ position 
 // Drainage grate in floor
 const DrainageGrate: React.FC<{ position: [number, number, number]; size?: number }> = ({
   position,
-  size = 0.6
+  size = 0.6,
 }) => {
   return (
     <group position={position}>
@@ -1134,13 +1244,15 @@ const FlickeringLight: React.FC<{ position: [number, number, number] }> = ({ pos
   const flickerState = useRef({ nextFlicker: 0, isFlickering: false, flickerEnd: 0 });
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (!lightRef.current || !tubeRef.current) return;
     const time = state.clock.elapsedTime;
     const mat = tubeRef.current.material as THREE.MeshStandardMaterial;
 
     // Random flickering behavior
     if (time > flickerState.current.nextFlicker && !flickerState.current.isFlickering) {
-      if (Math.random() < 0.002) { // Rare flicker
+      if (Math.random() < 0.002) {
+        // Rare flicker
         flickerState.current.isFlickering = true;
         flickerState.current.flickerEnd = time + 0.5 + Math.random() * 1;
       }
@@ -1169,13 +1281,9 @@ const FlickeringLight: React.FC<{ position: [number, number, number] }> = ({ pos
       </mesh>
 
       {/* Fluorescent tube */}
-      <mesh ref={tubeRef}>
-        <cylinderGeometry args={[0.02, 0.02, 1, 8]} rotation={[0, 0, Math.PI / 2]} />
-        <meshStandardMaterial
-          color="#f5f5f5"
-          emissive="#f5f5f5"
-          emissiveIntensity={0.8}
-        />
+      <mesh ref={tubeRef} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.02, 0.02, 1, 8]} />
+        <meshStandardMaterial color="#f5f5f5" emissive="#f5f5f5" emissiveIntensity={0.8} />
       </mesh>
 
       <pointLight
@@ -1192,16 +1300,19 @@ const FlickeringLight: React.FC<{ position: [number, number, number] }> = ({ pos
 // Swinging chain with hook
 const SwingingChain: React.FC<{ position: [number, number, number]; length?: number }> = ({
   position,
-  length = 3
+  length = 3,
 }) => {
   const chainRef = useRef<THREE.Group>(null);
   const swingSpeed = useRef(0.5 + Math.random() * 0.5);
   const swingAmount = useRef(0.05 + Math.random() * 0.1);
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (chainRef.current) {
-      chainRef.current.rotation.z = Math.sin(state.clock.elapsedTime * swingSpeed.current) * swingAmount.current;
-      chainRef.current.rotation.x = Math.cos(state.clock.elapsedTime * swingSpeed.current * 0.7) * swingAmount.current * 0.5;
+      chainRef.current.rotation.z =
+        Math.sin(state.clock.elapsedTime * swingSpeed.current) * swingAmount.current;
+      chainRef.current.rotation.x =
+        Math.cos(state.clock.elapsedTime * swingSpeed.current * 0.7) * swingAmount.current * 0.5;
     }
   });
 
@@ -1218,7 +1329,11 @@ const SwingingChain: React.FC<{ position: [number, number, number]; length?: num
       <group ref={chainRef}>
         {/* Chain links */}
         {Array.from({ length: links }).map((_, i) => (
-          <mesh key={i} position={[0, -0.1 - i * 0.12, 0]} rotation={[0, i % 2 === 0 ? 0 : Math.PI / 2, 0]}>
+          <mesh
+            key={i}
+            position={[0, -0.1 - i * 0.12, 0]}
+            rotation={[0, i % 2 === 0 ? 0 : Math.PI / 2, 0]}
+          >
             <torusGeometry args={[0.03, 0.008, 6, 12]} />
             <meshStandardMaterial color="#52525b" metalness={0.8} roughness={0.3} />
           </mesh>
@@ -1240,59 +1355,16 @@ const SwingingChain: React.FC<{ position: [number, number, number]; length?: num
   );
 };
 
-// Rotating exhaust fan
-const ExhaustFan: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
-  const fanRef = useRef<THREE.Mesh>(null);
-  const speed = useRef(2 + Math.random() * 2);
-
-  useFrame((state) => {
-    if (fanRef.current) {
-      fanRef.current.rotation.z = state.clock.elapsedTime * speed.current;
-    }
-  });
-
-  return (
-    <group position={position} rotation={rotation}>
-      {/* Vent housing */}
-      <mesh>
-        <boxGeometry args={[0.8, 0.8, 0.15]} />
-        <meshStandardMaterial color="#374151" metalness={0.5} roughness={0.5} />
-      </mesh>
-
-      {/* Grate */}
-      <mesh position={[0, 0, 0.08]}>
-        <planeGeometry args={[0.7, 0.7]} />
-        <meshStandardMaterial color="#1e293b" metalness={0.6} transparent opacity={0.8} />
-      </mesh>
-
-      {/* Fan blades */}
-      <mesh ref={fanRef} position={[0, 0, 0.02]}>
-        {/* Using a simple geometry for fan blades */}
-        <cylinderGeometry args={[0.3, 0.3, 0.02, 4]} />
-        <meshStandardMaterial color="#52525b" metalness={0.6} roughness={0.4} side={THREE.DoubleSide} />
-      </mesh>
-
-      {/* Center hub */}
-      <mesh position={[0, 0, 0.05]}>
-        <cylinderGeometry args={[0.05, 0.05, 0.05, 12]} rotation={[Math.PI / 2, 0, 0]} />
-        <meshStandardMaterial color="#1e293b" metalness={0.7} />
-      </mesh>
-    </group>
-  );
-};
-
 // Electrical panel with occasional sparks
-const ElectricalPanel: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const ElectricalPanel: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   const sparkRef = useRef<THREE.PointLight>(null);
   const sparkState = useRef({ nextSpark: 5 + Math.random() * 30, sparking: false, sparkEnd: 0 });
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (!sparkRef.current) return;
     const time = state.clock.elapsedTime;
 
@@ -1372,6 +1444,7 @@ const Pigeon: React.FC<{ position: [number, number, number] }> = ({ position }) 
   });
 
   useFrame((stateFrame) => {
+    if (!shouldRunThisFrame(3)) return;
     if (!pigeonRef.current) return;
     const time = stateFrame.clock.elapsedTime;
 
@@ -1412,8 +1485,8 @@ const Pigeon: React.FC<{ position: [number, number, number] }> = ({ position }) 
         </mesh>
 
         {/* Beak */}
-        <mesh position={[0.13, 0.03, 0]} rotation={[0, 0, -0.3]}>
-          <coneGeometry args={[0.01, 0.03, 4]} rotation={[0, 0, Math.PI / 2]} />
+        <mesh position={[0.13, 0.03, 0]} rotation={[0, 0, -0.3 + Math.PI / 2]}>
+          <coneGeometry args={[0.01, 0.03, 4]} />
           <meshStandardMaterial color="#f97316" roughness={0.5} />
         </mesh>
 
@@ -1438,7 +1511,7 @@ const Pigeon: React.FC<{ position: [number, number, number] }> = ({ position }) 
 // Mouse scurrying near walls
 const Mouse: React.FC<{ position: [number, number, number]; pathLength?: number }> = ({
   position,
-  pathLength = 3
+  pathLength = 3,
 }) => {
   const mouseRef = useRef<THREE.Group>(null);
   const state = useRef({
@@ -1450,6 +1523,7 @@ const Mouse: React.FC<{ position: [number, number, number]; pathLength?: number 
   });
 
   useFrame((stateFrame, delta) => {
+    if (!shouldRunThisFrame(3)) return;
     if (!mouseRef.current) return;
     const time = stateFrame.clock.elapsedTime;
 
@@ -1465,7 +1539,10 @@ const Mouse: React.FC<{ position: [number, number, number]; pathLength?: number 
       if (time < state.current.moveEnd) {
         // Quick scurrying movement
         state.current.currentX += state.current.direction * delta * 3;
-        state.current.currentX = Math.max(-pathLength / 2, Math.min(pathLength / 2, state.current.currentX));
+        state.current.currentX = Math.max(
+          -pathLength / 2,
+          Math.min(pathLength / 2, state.current.currentX)
+        );
         mouseRef.current.position.x = state.current.currentX;
         mouseRef.current.rotation.y = state.current.direction > 0 ? 0 : Math.PI;
 
@@ -1501,8 +1578,8 @@ const Mouse: React.FC<{ position: [number, number, number]; pathLength?: number 
         ))}
 
         {/* Tail */}
-        <mesh position={[-0.1, 0.01, 0]} rotation={[0, 0, 0.5]}>
-          <cylinderGeometry args={[0.005, 0.003, 0.12, 6]} rotation={[0, 0, Math.PI / 2]} />
+        <mesh position={[-0.1, 0.01, 0]} rotation={[0, 0, 0.5 + Math.PI / 2]}>
+          <cylinderGeometry args={[0.005, 0.003, 0.12, 6]} />
           <meshStandardMaterial color="#d6d3d1" roughness={0.7} />
         </mesh>
       </group>
@@ -1515,10 +1592,10 @@ const Mouse: React.FC<{ position: [number, number, number]; pathLength?: number 
 // ==========================================
 
 // God rays / dust motes in light beams
-const GodRays: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const GodRays: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   const particlesRef = useRef<THREE.Points>(null);
   const particleCount = 100;
 
@@ -1540,6 +1617,7 @@ const GodRays: React.FC<{ position: [number, number, number]; rotation?: [number
   }, []);
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (!particlesRef.current) return;
     const positions = particlesRef.current.geometry.attributes.position.array as Float32Array;
 
@@ -1579,12 +1657,7 @@ const GodRays: React.FC<{ position: [number, number, number]; rotation?: [number
       {/* Dust particles */}
       <points ref={particlesRef}>
         <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            count={particleCount}
-            array={particles.positions}
-            itemSize={3}
-          />
+          <bufferAttribute attach="attributes-position" args={[particles.positions, 3]} />
         </bufferGeometry>
         <pointsMaterial
           size={0.05}
@@ -1614,12 +1687,13 @@ const Graffiti: React.FC<{
     ctx.clearRect(0, 0, 128, 64);
 
     switch (type) {
-      case 'tag':
+      case 'tag': {
         ctx.font = 'bold 24px Arial';
         ctx.fillStyle = 'rgba(50, 50, 50, 0.6)';
         const tags = ['JAKE WUZ HERE', 'B.M. 2019', 'MILL CREW', 'SHIFT 3'];
         ctx.fillText(tags[Math.floor(Math.random() * tags.length)], 10, 40);
         break;
+      }
       case 'drawing':
         ctx.strokeStyle = 'rgba(60, 60, 60, 0.5)';
         ctx.lineWidth = 2;
@@ -1657,14 +1731,15 @@ const Graffiti: React.FC<{
 };
 
 // Bulletin board with pinned notices
-const BulletinBoard: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const BulletinBoard: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   const paperRef = useRef<THREE.Group>(null);
 
   // Gentle paper flutter
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (paperRef.current) {
       paperRef.current.children.forEach((paper, i) => {
         paper.rotation.z = Math.sin(state.clock.elapsedTime * 2 + i * 0.5) * 0.02;
@@ -1681,7 +1756,12 @@ const BulletinBoard: React.FC<{ position: [number, number, number]; rotation?: [
       </mesh>
 
       {/* Frame */}
-      {[[-0.6, 0], [0.6, 0], [0, -0.45], [0, 0.45]].map(([x, y], i) => (
+      {[
+        [-0.6, 0],
+        [0.6, 0],
+        [0, -0.45],
+        [0, 0.45],
+      ].map(([x, y], i) => (
         <mesh key={i} position={[x, y, 0.03]} rotation={[0, 0, i < 2 ? 0 : Math.PI / 2]}>
           <boxGeometry args={[0.05, i < 2 ? 0.95 : 1.25, 0.03]} />
           <meshStandardMaterial color="#78350f" roughness={0.7} />
@@ -1755,11 +1835,11 @@ const BulletinBoard: React.FC<{ position: [number, number, number]; rotation?: [
 };
 
 // Scorch marks near welding/hot areas
-const ScorchMark: React.FC<{ position: [number, number, number]; rotation?: [number, number, number]; size?: number }> = ({
-  position,
-  rotation = [0, 0, 0],
-  size = 0.5
-}) => {
+const ScorchMark: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+  size?: number;
+}> = ({ position, rotation = [0, 0, 0], size = 0.5 }) => {
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 128;
@@ -1794,7 +1874,13 @@ const ScorchMark: React.FC<{ position: [number, number, number]; rotation?: [num
       const dist = 30 + Math.random() * 30;
       ctx.fillStyle = `rgba(30, 30, 30, ${0.3 + Math.random() * 0.3})`;
       ctx.beginPath();
-      ctx.arc(64 + Math.cos(angle) * dist, 64 + Math.sin(angle) * dist, 2 + Math.random() * 4, 0, Math.PI * 2);
+      ctx.arc(
+        64 + Math.cos(angle) * dist,
+        64 + Math.sin(angle) * dist,
+        2 + Math.random() * 4,
+        0,
+        Math.PI * 2
+      );
       ctx.fill();
     }
 
@@ -1816,13 +1902,20 @@ const ScorchMark: React.FC<{ position: [number, number, number]; rotation?: [num
 // ==========================================
 
 // Oil drum / barrel
-const OilDrum: React.FC<{ position: [number, number, number]; color?: string; tipped?: boolean }> = ({
-  position,
-  color = '#3b82f6',
-  tipped = false
-}) => {
+const OilDrum: React.FC<{
+  position: [number, number, number];
+  color?: string;
+  tipped?: boolean;
+}> = ({ position, color = '#3b82f6', tipped = false }) => {
   return (
-    <group position={position} rotation={tipped ? [Math.PI / 2 - 0.3, 0, Math.random() * Math.PI * 2] : [0, Math.random() * Math.PI * 2, 0]}>
+    <group
+      position={position}
+      rotation={
+        tipped
+          ? [Math.PI / 2 - 0.3, 0, Math.random() * Math.PI * 2]
+          : [0, Math.random() * Math.PI * 2, 0]
+      }
+    >
       {/* Drum body */}
       <mesh position={[0, tipped ? 0 : 0.45, 0]} castShadow>
         <cylinderGeometry args={[0.28, 0.28, 0.9, 16]} />
@@ -1867,7 +1960,7 @@ const OilDrum: React.FC<{ position: [number, number, number]; color?: string; ti
 // Gas cylinder (chained to wall)
 const GasCylinder: React.FC<{ position: [number, number, number]; color?: string }> = ({
   position,
-  color = '#22c55e'
+  color = '#22c55e',
 }) => {
   return (
     <group position={position}>
@@ -1906,8 +1999,8 @@ const GasCylinder: React.FC<{ position: [number, number, number]; color?: string
         <torusGeometry args={[0.02, 0.005, 6, 12]} />
         <meshStandardMaterial color="#71717a" metalness={0.8} />
       </mesh>
-      <mesh position={[0, 0.8, 0.19]}>
-        <torusGeometry args={[0.02, 0.005, 6, 12]} rotation={[0, Math.PI / 2, 0]} />
+      <mesh position={[0, 0.8, 0.19]} rotation={[0, Math.PI / 2, 0]}>
+        <torusGeometry args={[0.02, 0.005, 6, 12]} />
         <meshStandardMaterial color="#71717a" metalness={0.8} />
       </mesh>
 
@@ -1923,7 +2016,7 @@ const GasCylinder: React.FC<{ position: [number, number, number]; color?: string
 // Toolbox on floor
 const Toolbox: React.FC<{ position: [number, number, number]; isOpen?: boolean }> = ({
   position,
-  isOpen = false
+  isOpen = false,
 }) => {
   return (
     <group position={position}>
@@ -2021,10 +2114,10 @@ const TrashBin: React.FC<{ position: [number, number, number] }> = ({ position }
 };
 
 // Coffee cup / thermos on surfaces
-const CoffeeCup: React.FC<{ position: [number, number, number]; type?: 'cup' | 'thermos' | 'mug' }> = ({
-  position,
-  type = 'cup'
-}) => {
+const CoffeeCup: React.FC<{
+  position: [number, number, number];
+  type?: 'cup' | 'thermos' | 'mug';
+}> = ({ position, type = 'cup' }) => {
   return (
     <group position={position}>
       {type === 'cup' && (
@@ -2078,10 +2171,10 @@ const CoffeeCup: React.FC<{ position: [number, number, number]; type?: 'cup' | '
 };
 
 // First aid kit wall box
-const FirstAidKit: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const FirstAidKit: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   return (
     <group position={position} rotation={rotation}>
       {/* Box */}
@@ -2129,11 +2222,7 @@ const ExtensionCord: React.FC<{
       const perpZ = end[0] - start[0];
       const len = Math.sqrt(perpX * perpX + perpZ * perpZ);
 
-      pts.push(new THREE.Vector3(
-        x + (perpX / len) * wave,
-        0.01,
-        z + (perpZ / len) * wave
-      ));
+      pts.push(new THREE.Vector3(x + (perpX / len) * wave, 0.01, z + (perpZ / len) * wave));
     }
 
     return pts;
@@ -2223,11 +2312,11 @@ const ChalkOutline: React.FC<{ position: [number, number, number] }> = ({ positi
 };
 
 // "Days since last accident" board
-const AccidentBoard: React.FC<{ position: [number, number, number]; rotation?: [number, number, number]; days?: number }> = ({
-  position,
-  rotation = [0, 0, 0],
-  days = 47
-}) => {
+const AccidentBoard: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+  days?: number;
+}> = ({ position, rotation = [0, 0, 0], days: _days = 47 }) => {
   return (
     <group position={position} rotation={rotation}>
       {/* Board backing */}
@@ -2270,10 +2359,10 @@ const AccidentBoard: React.FC<{ position: [number, number, number]; rotation?: [
 };
 
 // Employee of the month photo frame
-const EmployeeOfMonth: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const EmployeeOfMonth: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   return (
     <group position={position} rotation={rotation}>
       {/* Frame */}
@@ -2319,6 +2408,7 @@ const OldRadio: React.FC<{ position: [number, number, number] }> = ({ position }
   const lightRef = useRef<THREE.PointLight>(null);
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (speakerRef.current) {
       // Subtle vibration from "playing"
       speakerRef.current.scale.z = 1 + Math.sin(state.clock.elapsedTime * 30) * 0.02;
@@ -2360,8 +2450,8 @@ const OldRadio: React.FC<{ position: [number, number, number] }> = ({ position }
 
       {/* Knobs */}
       {[-0.1, -0.05].map((x, i) => (
-        <mesh key={i} position={[x, -0.06, 0.08]}>
-          <cylinderGeometry args={[0.015, 0.015, 0.02, 12]} rotation={[Math.PI / 2, 0, 0]} />
+        <mesh key={i} position={[x, -0.06, 0.08]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.015, 0.015, 0.02, 12]} />
           <meshStandardMaterial color="#1e293b" metalness={0.5} />
         </mesh>
       ))}
@@ -2409,13 +2499,13 @@ const EmergencyShower: React.FC<{ position: [number, number, number] }> = ({ pos
 
       {/* Pull handle */}
       <group position={[0.15, 1.5, 0]}>
-        <mesh>
-          <cylinderGeometry args={[0.02, 0.02, 0.4, 8]} rotation={[0, 0, Math.PI / 2]} />
+        <mesh rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.02, 0.02, 0.4, 8]} />
           <meshStandardMaterial color="#374151" metalness={0.6} />
         </mesh>
         {/* Triangle pull */}
-        <mesh position={[0.25, 0, 0]}>
-          <coneGeometry args={[0.06, 0.15, 3]} rotation={[0, 0, -Math.PI / 2]} />
+        <mesh position={[0.25, 0, 0]} rotation={[0, 0, -Math.PI / 2]}>
+          <coneGeometry args={[0.06, 0.15, 3]} />
           <meshStandardMaterial color="#22c55e" />
         </mesh>
       </group>
@@ -2436,10 +2526,10 @@ const EmergencyShower: React.FC<{ position: [number, number, number] }> = ({ pos
 };
 
 // Eye wash station
-const EyeWashStation: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const EyeWashStation: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   return (
     <group position={position} rotation={rotation}>
       {/* Wall mount base */}
@@ -2451,7 +2541,12 @@ const EyeWashStation: React.FC<{ position: [number, number, number]; rotation?: 
       {/* Bowl */}
       <mesh position={[0, -0.1, 0.1]}>
         <sphereGeometry args={[0.15, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
-        <meshStandardMaterial color="#e2e8f0" metalness={0.4} roughness={0.3} side={THREE.DoubleSide} />
+        <meshStandardMaterial
+          color="#e2e8f0"
+          metalness={0.4}
+          roughness={0.3}
+          side={THREE.DoubleSide}
+        />
       </mesh>
 
       {/* Nozzles */}
@@ -2486,10 +2581,10 @@ const EyeWashStation: React.FC<{ position: [number, number, number]; rotation?: 
 };
 
 // Ear plug dispenser
-const EarPlugDispenser: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const EarPlugDispenser: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   return (
     <group position={position} rotation={rotation}>
       {/* Dispenser body */}
@@ -2506,7 +2601,7 @@ const EarPlugDispenser: React.FC<{ position: [number, number, number]; rotation?
 
       {/* Ear plugs visible inside (orange/yellow) */}
       {Array.from({ length: 6 }).map((_, i) => (
-        <mesh key={i} position={[(i % 2 - 0.5) * 0.04, (Math.floor(i / 2) - 1) * 0.05, 0.03]}>
+        <mesh key={i} position={[((i % 2) - 0.5) * 0.04, (Math.floor(i / 2) - 1) * 0.05, 0.03]}>
           <sphereGeometry args={[0.015, 6, 6]} />
           <meshStandardMaterial color={i % 2 === 0 ? '#f97316' : '#eab308'} />
         </mesh>
@@ -2528,10 +2623,10 @@ const EarPlugDispenser: React.FC<{ position: [number, number, number]; rotation?
 };
 
 // Safety goggles rack
-const SafetyGogglesRack: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const SafetyGogglesRack: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   return (
     <group position={position} rotation={rotation}>
       {/* Backing board */}
@@ -2543,8 +2638,8 @@ const SafetyGogglesRack: React.FC<{ position: [number, number, number]; rotation
       {/* Hooks */}
       {[-0.15, 0, 0.15].map((x, i) => (
         <group key={i} position={[x, -0.05, 0.03]}>
-          <mesh rotation={[0.3, 0, 0]}>
-            <cylinderGeometry args={[0.008, 0.008, 0.08, 6]} rotation={[Math.PI / 2, 0, 0]} />
+          <mesh rotation={[0.3 + Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.008, 0.008, 0.08, 6]} />
             <meshStandardMaterial color="#71717a" metalness={0.7} />
           </mesh>
 
@@ -2552,8 +2647,8 @@ const SafetyGogglesRack: React.FC<{ position: [number, number, number]; rotation
           {i !== 1 && ( // Leave one hook empty
             <group position={[0, -0.06, 0.04]}>
               {/* Strap */}
-              <mesh>
-                <torusGeometry args={[0.04, 0.005, 6, 12]} rotation={[Math.PI / 2, 0, 0]} />
+              <mesh rotation={[Math.PI / 2, 0, 0]}>
+                <torusGeometry args={[0.04, 0.005, 6, 12]} />
                 <meshStandardMaterial color={i === 0 ? '#1e293b' : '#3b82f6'} />
               </mesh>
               {/* Lenses */}
@@ -2582,18 +2677,22 @@ const SafetyGogglesRack: React.FC<{ position: [number, number, number]; rotation
 // Flies buzzing around
 const Flies: React.FC<{ position: [number, number, number]; count?: number }> = ({
   position,
-  count = 5
+  count = 5,
 }) => {
   const groupRef = useRef<THREE.Group>(null);
-  const fliesData = useMemo(() =>
-    Array.from({ length: count }).map(() => ({
-      offset: [Math.random() * 2 - 1, Math.random() * 0.5, Math.random() * 2 - 1],
-      speed: 2 + Math.random() * 3,
-      radius: 0.3 + Math.random() * 0.4,
-      phase: Math.random() * Math.PI * 2
-    })), [count]);
+  const fliesData = useMemo(
+    () =>
+      Array.from({ length: count }).map(() => ({
+        offset: [Math.random() * 2 - 1, Math.random() * 0.5, Math.random() * 2 - 1],
+        speed: 2 + Math.random() * 3,
+        radius: 0.3 + Math.random() * 0.4,
+        phase: Math.random() * Math.PI * 2,
+      })),
+    [count]
+  );
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (!groupRef.current) return;
     const t = state.clock.elapsedTime;
 
@@ -2621,7 +2720,8 @@ const Flies: React.FC<{ position: [number, number, number]; count?: number }> = 
 const Spider: React.FC<{ position: [number, number, number] }> = ({ position }) => {
   const spiderRef = useRef<THREE.Group>(null);
 
-  useFrame((state) => {
+  useFrame(() => {
+    if (!shouldRunThisFrame(3)) return;
     if (!spiderRef.current) return;
     // Occasional tiny movements
     if (Math.random() < 0.002) {
@@ -2667,6 +2767,7 @@ const DustBunny: React.FC<{ position: [number, number, number] }> = ({ position 
 
   // Very occasional drift
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (!bunnyRef.current) return;
     if (Math.random() < 0.001) {
       bunnyRef.current.position.x += (Math.random() - 0.5) * 0.01;
@@ -2688,13 +2789,14 @@ const DustBunny: React.FC<{ position: [number, number, number] }> = ({ position 
 // ==========================================
 
 // Vending machine
-const VendingMachine: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const VendingMachine: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   const glowRef = useRef<THREE.Mesh>(null);
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (glowRef.current) {
       const mat = glowRef.current.material as THREE.MeshStandardMaterial;
       mat.emissiveIntensity = 0.3 + Math.sin(state.clock.elapsedTime * 2) * 0.1;
@@ -2749,13 +2851,14 @@ const VendingMachine: React.FC<{ position: [number, number, number]; rotation?: 
 };
 
 // Time clock punch station
-const TimeClockStation: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const TimeClockStation: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   const displayRef = useRef<THREE.Mesh>(null);
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (displayRef.current) {
       const mat = displayRef.current.material as THREE.MeshStandardMaterial;
       // Blinking colon effect
@@ -2785,14 +2888,7 @@ const TimeClockStation: React.FC<{ position: [number, number, number]; rotation?
 
       {/* Keypad */}
       {Array.from({ length: 9 }).map((_, i) => (
-        <mesh
-          key={i}
-          position={[
-            ((i % 3) - 1) * 0.04,
-            -0.02 - Math.floor(i / 3) * 0.035,
-            0.062
-          ]}
-        >
+        <mesh key={i} position={[((i % 3) - 1) * 0.04, -0.02 - Math.floor(i / 3) * 0.035, 0.062]}>
           <boxGeometry args={[0.03, 0.025, 0.01]} />
           <meshStandardMaterial color="#52525b" roughness={0.5} />
         </mesh>
@@ -2816,14 +2912,15 @@ const TimeClockStation: React.FC<{ position: [number, number, number]; rotation?
 };
 
 // Old calendar on wall
-const WallCalendar: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const WallCalendar: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   const pageRef = useRef<THREE.Mesh>(null);
 
   // Subtle page flutter
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (pageRef.current) {
       pageRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.5) * 0.02;
     }
@@ -2856,8 +2953,8 @@ const WallCalendar: React.FC<{ position: [number, number, number]; rotation?: [n
       </mesh>
 
       {/* Hanging hole */}
-      <mesh position={[0, 0.17, 0]}>
-        <cylinderGeometry args={[0.01, 0.01, 0.015, 8]} rotation={[Math.PI / 2, 0, 0]} />
+      <mesh position={[0, 0.17, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.01, 0.01, 0.015, 8]} />
         <meshStandardMaterial color="#1e293b" />
       </mesh>
     </group>
@@ -2870,6 +2967,7 @@ const BirthdayDecorations: React.FC<{ position: [number, number, number] }> = ({
   const streamersRef = useRef<THREE.Group>(null);
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (balloonRef.current) {
       balloonRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.5) * 0.1;
       balloonRef.current.position.y = Math.sin(state.clock.elapsedTime * 0.3) * 0.02;
@@ -2911,11 +3009,16 @@ const BirthdayDecorations: React.FC<{ position: [number, number, number] }> = ({
         {[
           { color: '#ef4444', x: -0.15 },
           { color: '#eab308', x: 0 },
-          { color: '#22c55e', x: 0.15 }
+          { color: '#22c55e', x: 0.15 },
         ].map((s, i) => (
           <mesh key={i} position={[s.x, 0, 0]} rotation={[0, 0, 0.2 * (i - 1)]}>
             <planeGeometry args={[0.02, 0.4]} />
-            <meshStandardMaterial color={s.color} side={THREE.DoubleSide} transparent opacity={0.8} />
+            <meshStandardMaterial
+              color={s.color}
+              side={THREE.DoubleSide}
+              transparent
+              opacity={0.8}
+            />
           </mesh>
         ))}
       </group>
@@ -2934,10 +3037,10 @@ const BirthdayDecorations: React.FC<{ position: [number, number, number] }> = ({
 // ==========================================
 
 // PA system speaker horn
-const PASpeaker: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const PASpeaker: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   return (
     <group position={position} rotation={rotation}>
       {/* Mounting bracket */}
@@ -2949,12 +3052,17 @@ const PASpeaker: React.FC<{ position: [number, number, number]; rotation?: [numb
       {/* Horn body */}
       <mesh rotation={[0, 0, Math.PI / 2]}>
         <coneGeometry args={[0.15, 0.3, 12, 1, true]} />
-        <meshStandardMaterial color="#d4d4d8" metalness={0.4} roughness={0.4} side={THREE.DoubleSide} />
+        <meshStandardMaterial
+          color="#d4d4d8"
+          metalness={0.4}
+          roughness={0.4}
+          side={THREE.DoubleSide}
+        />
       </mesh>
 
       {/* Driver housing */}
-      <mesh position={[-0.15, 0, 0]}>
-        <cylinderGeometry args={[0.05, 0.05, 0.1, 12]} rotation={[0, 0, Math.PI / 2]} />
+      <mesh position={[-0.15, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.05, 0.05, 0.1, 12]} />
         <meshStandardMaterial color="#1e293b" metalness={0.5} />
       </mesh>
     </group>
@@ -2968,6 +3076,7 @@ const AlarmBell: React.FC<{ position: [number, number, number] }> = ({ position 
 
   // Occasional test ring animation
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     const t = state.clock.elapsedTime;
     // Ring every ~30 seconds for a brief moment
     if (Math.floor(t) % 30 === 0 && t % 1 < 0.5) {
@@ -3010,13 +3119,14 @@ const AlarmBell: React.FC<{ position: [number, number, number] }> = ({ position 
 };
 
 // Pressure gauge on pipe
-const PressureGauge: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const PressureGauge: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   const needleRef = useRef<THREE.Mesh>(null);
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (needleRef.current) {
       // Subtle needle wobble
       needleRef.current.rotation.z = -0.5 + Math.sin(state.clock.elapsedTime * 0.5) * 0.1;
@@ -3026,8 +3136,8 @@ const PressureGauge: React.FC<{ position: [number, number, number]; rotation?: [
   return (
     <group position={position} rotation={rotation}>
       {/* Gauge body */}
-      <mesh>
-        <cylinderGeometry args={[0.08, 0.08, 0.04, 24]} rotation={[Math.PI / 2, 0, 0]} />
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.08, 0.08, 0.04, 24]} />
         <meshStandardMaterial color="#1e293b" metalness={0.5} roughness={0.4} />
       </mesh>
 
@@ -3056,8 +3166,8 @@ const PressureGauge: React.FC<{ position: [number, number, number]; rotation?: [
       </mesh>
 
       {/* Center cap */}
-      <mesh position={[0, 0, 0.025]}>
-        <cylinderGeometry args={[0.008, 0.008, 0.01, 8]} rotation={[Math.PI / 2, 0, 0]} />
+      <mesh position={[0, 0, 0.025]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.008, 0.008, 0.01, 8]} />
         <meshStandardMaterial color="#1e293b" metalness={0.7} />
       </mesh>
 
@@ -3071,11 +3181,11 @@ const PressureGauge: React.FC<{ position: [number, number, number]; rotation?: [
 };
 
 // Valve wheel
-const ValveWheel: React.FC<{ position: [number, number, number]; rotation?: [number, number, number]; size?: number }> = ({
-  position,
-  rotation = [0, 0, 0],
-  size = 0.15
-}) => {
+const ValveWheel: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+  size?: number;
+}> = ({ position, rotation = [0, 0, 0], size = 0.15 }) => {
   return (
     <group position={position} rotation={rotation}>
       {/* Wheel rim */}
@@ -3085,22 +3195,24 @@ const ValveWheel: React.FC<{ position: [number, number, number]; rotation?: [num
       </mesh>
 
       {/* Spokes */}
-      {[0, Math.PI / 3, Math.PI * 2 / 3, Math.PI, Math.PI * 4 / 3, Math.PI * 5 / 3].map((angle, i) => (
-        <mesh key={i} rotation={[0, 0, angle]}>
-          <boxGeometry args={[size * 2 * 0.8, size * 0.15, size * 0.08]} />
-          <meshStandardMaterial color="#ef4444" roughness={0.5} />
-        </mesh>
-      ))}
+      {[0, Math.PI / 3, (Math.PI * 2) / 3, Math.PI, (Math.PI * 4) / 3, (Math.PI * 5) / 3].map(
+        (angle, i) => (
+          <mesh key={i} rotation={[0, 0, angle]}>
+            <boxGeometry args={[size * 2 * 0.8, size * 0.15, size * 0.08]} />
+            <meshStandardMaterial color="#ef4444" roughness={0.5} />
+          </mesh>
+        )
+      )}
 
       {/* Center hub */}
-      <mesh>
-        <cylinderGeometry args={[size * 0.25, size * 0.25, size * 0.2, 12]} rotation={[Math.PI / 2, 0, 0]} />
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[size * 0.25, size * 0.25, size * 0.2, 12]} />
         <meshStandardMaterial color="#1e293b" metalness={0.6} />
       </mesh>
 
       {/* Stem */}
-      <mesh position={[0, 0, -size * 0.3]}>
-        <cylinderGeometry args={[size * 0.1, size * 0.1, size * 0.4, 8]} rotation={[Math.PI / 2, 0, 0]} />
+      <mesh position={[0, 0, -size * 0.3]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[size * 0.1, size * 0.1, size * 0.4, 8]} />
         <meshStandardMaterial color="#71717a" metalness={0.6} />
       </mesh>
     </group>
@@ -3117,10 +3229,13 @@ export const PulsingIndicator: React.FC<{
   const lightRef = useRef<THREE.PointLight>(null);
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (!meshRef.current || !lightRef.current) return;
 
     // Pulse based on simulated audio level
-    const audioLevel = 0.5 + Math.sin(state.clock.elapsedTime * 3) * 0.3 +
+    const audioLevel =
+      0.5 +
+      Math.sin(state.clock.elapsedTime * 3) * 0.3 +
       Math.sin(state.clock.elapsedTime * 7) * 0.2;
 
     const mat = meshRef.current.material as THREE.MeshStandardMaterial;
@@ -3154,19 +3269,26 @@ export const PulsingIndicator: React.FC<{
 // Cigarette butts near back door
 const CigaretteButts: React.FC<{ position: [number, number, number]; count?: number }> = ({
   position,
-  count = 5
+  count = 5,
 }) => {
-  const butts = useMemo(() =>
-    Array.from({ length: count }).map(() => ({
-      offset: [(Math.random() - 0.5) * 0.4, 0, (Math.random() - 0.5) * 0.4],
-      rotation: Math.random() * Math.PI * 2,
-      isLit: Math.random() < 0.1 // 10% chance of recently discarded
-    })), [count]);
+  const butts = useMemo(
+    () =>
+      Array.from({ length: count }).map(() => ({
+        offset: [(Math.random() - 0.5) * 0.4, 0, (Math.random() - 0.5) * 0.4],
+        rotation: Math.random() * Math.PI * 2,
+        isLit: Math.random() < 0.1, // 10% chance of recently discarded
+      })),
+    [count]
+  );
 
   return (
     <group position={position}>
       {butts.map((butt, i) => (
-        <group key={i} position={butt.offset as [number, number, number]} rotation={[Math.PI / 2, butt.rotation, Math.random() * 0.3]}>
+        <group
+          key={i}
+          position={butt.offset as [number, number, number]}
+          rotation={[Math.PI / 2, butt.rotation, Math.random() * 0.3]}
+        >
           {/* Filter */}
           <mesh position={[0, 0, 0]}>
             <cylinderGeometry args={[0.004, 0.004, 0.012, 6]} />
@@ -3175,7 +3297,7 @@ const CigaretteButts: React.FC<{ position: [number, number, number]; count?: num
           {/* Paper/tobacco */}
           <mesh position={[0, 0.012, 0]}>
             <cylinderGeometry args={[0.003, 0.004, 0.015, 6]} />
-            <meshStandardMaterial color={butt.isLit ? "#4a4a4a" : "#e8e0d5"} roughness={0.95} />
+            <meshStandardMaterial color={butt.isLit ? '#4a4a4a' : '#e8e0d5'} roughness={0.95} />
           </mesh>
           {/* Ash tip */}
           <mesh position={[0, 0.022, 0]}>
@@ -3190,7 +3312,11 @@ const CigaretteButts: React.FC<{ position: [number, number, number]; count?: num
       ))}
       {/* Ash scatter around */}
       {Array.from({ length: 8 }).map((_, i) => (
-        <mesh key={`ash-${i}`} position={[(Math.random() - 0.5) * 0.5, 0.001, (Math.random() - 0.5) * 0.5]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh
+          key={`ash-${i}`}
+          position={[(Math.random() - 0.5) * 0.5, 0.001, (Math.random() - 0.5) * 0.5]}
+          rotation={[-Math.PI / 2, 0, 0]}
+        >
           <circleGeometry args={[0.01 + Math.random() * 0.015, 6]} />
           <meshBasicMaterial color="#4a4a4a" transparent opacity={0.4} />
         </mesh>
@@ -3202,7 +3328,7 @@ const CigaretteButts: React.FC<{ position: [number, number, number]; count?: num
 // Gum stuck under surfaces
 const StuckGum: React.FC<{ position: [number, number, number]; color?: string }> = ({
   position,
-  color = '#f472b6'
+  color = '#f472b6',
 }) => {
   return (
     <mesh position={position}>
@@ -3223,6 +3349,7 @@ const StickyNote: React.FC<{
 
   // Subtle flutter
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (noteRef.current && curled) {
       noteRef.current.rotation.x = rotation[0] + Math.sin(state.clock.elapsedTime * 2) * 0.02;
     }
@@ -3248,20 +3375,27 @@ const StickyNote: React.FC<{
 // Scattered pens and pencils
 const ScatteredPens: React.FC<{ position: [number, number, number]; count?: number }> = ({
   position,
-  count = 3
+  count = 3,
 }) => {
-  const items = useMemo(() =>
-    Array.from({ length: count }).map(() => ({
-      offset: [(Math.random() - 0.5) * 0.3, 0.008, (Math.random() - 0.5) * 0.3],
-      rotation: Math.random() * Math.PI,
-      isPen: Math.random() > 0.4,
-      color: ['#1e3a8a', '#dc2626', '#000000', '#16a34a'][Math.floor(Math.random() * 4)]
-    })), [count]);
+  const items = useMemo(
+    () =>
+      Array.from({ length: count }).map(() => ({
+        offset: [(Math.random() - 0.5) * 0.3, 0.008, (Math.random() - 0.5) * 0.3],
+        rotation: Math.random() * Math.PI,
+        isPen: Math.random() > 0.4,
+        color: ['#1e3a8a', '#dc2626', '#000000', '#16a34a'][Math.floor(Math.random() * 4)],
+      })),
+    [count]
+  );
 
   return (
     <group position={position}>
       {items.map((item, i) => (
-        <group key={i} position={item.offset as [number, number, number]} rotation={[Math.PI / 2, 0, item.rotation]}>
+        <group
+          key={i}
+          position={item.offset as [number, number, number]}
+          rotation={[Math.PI / 2, 0, item.rotation]}
+        >
           {item.isPen ? (
             // Pen
             <>
@@ -3312,12 +3446,13 @@ const ScatteredPens: React.FC<{ position: [number, number, number]; count?: numb
 // Jacket on hook
 const JacketOnHook: React.FC<{ position: [number, number, number]; color?: string }> = ({
   position,
-  color = '#1e3a8a'
+  color = '#1e3a8a',
 }) => {
   const jacketRef = useRef<THREE.Group>(null);
 
   // Gentle sway
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (jacketRef.current) {
       jacketRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.5) * 0.02;
     }
@@ -3364,7 +3499,7 @@ const JacketOnHook: React.FC<{ position: [number, number, number]; color?: strin
 // Umbrella in corner
 const UmbrellaCorner: React.FC<{ position: [number, number, number]; color?: string }> = ({
   position,
-  color = '#1e293b'
+  color = '#1e293b',
 }) => {
   return (
     <group position={position} rotation={[0.15, 0, 0.1]}>
@@ -3398,10 +3533,10 @@ const UmbrellaCorner: React.FC<{ position: [number, number, number]; color?: str
 };
 
 // Lunch bag
-const LunchBag: React.FC<{ position: [number, number, number]; type?: 'paper' | 'cooler' | 'box' }> = ({
-  position,
-  type = 'paper'
-}) => {
+const LunchBag: React.FC<{
+  position: [number, number, number];
+  type?: 'paper' | 'cooler' | 'box';
+}> = ({ position, type = 'paper' }) => {
   return (
     <group position={position}>
       {type === 'paper' && (
@@ -3453,10 +3588,10 @@ const LunchBag: React.FC<{ position: [number, number, number]; type?: 'paper' | 
 };
 
 // Water bottle
-const WaterBottle: React.FC<{ position: [number, number, number]; type?: 'plastic' | 'metal' | 'sports' }> = ({
-  position,
-  type = 'plastic'
-}) => {
+const WaterBottle: React.FC<{
+  position: [number, number, number];
+  type?: 'plastic' | 'metal' | 'sports';
+}> = ({ position, type = 'plastic' }) => {
   return (
     <group position={position}>
       {type === 'plastic' && (
@@ -3512,10 +3647,10 @@ const WaterBottle: React.FC<{ position: [number, number, number]; type?: 'plasti
 };
 
 // Folded newspaper
-const FoldedNewspaper: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const FoldedNewspaper: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   return (
     <group position={position} rotation={rotation}>
       {/* Folded newspaper stack */}
@@ -3544,15 +3679,16 @@ const FoldedNewspaper: React.FC<{ position: [number, number, number]; rotation?:
 // ==========================================
 
 // Sawhorse with caution tape
-const Sawhorse: React.FC<{ position: [number, number, number]; rotation?: [number, number, number]; hasTape?: boolean }> = ({
-  position,
-  rotation = [0, 0, 0],
-  hasTape = true
-}) => {
+const Sawhorse: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+  hasTape?: boolean;
+}> = ({ position, rotation = [0, 0, 0], hasTape = true }) => {
   const tapeRef = useRef<THREE.Mesh>(null);
 
   // Tape flutter
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (tapeRef.current) {
       tapeRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 3) * 0.05;
     }
@@ -3573,8 +3709,17 @@ const Sawhorse: React.FC<{ position: [number, number, number]; rotation?: [numbe
         </mesh>
       ))}
       {/* Legs */}
-      {[[-0.35, 0.35, -0.25], [-0.35, 0.35, 0.25], [0.35, 0.35, -0.25], [0.35, 0.35, 0.25]].map((pos, i) => (
-        <mesh key={i} position={pos as [number, number, number]} rotation={[i < 2 ? 0.2 : -0.2, 0, i % 2 === 0 ? 0.15 : -0.15]}>
+      {[
+        [-0.35, 0.35, -0.25],
+        [-0.35, 0.35, 0.25],
+        [0.35, 0.35, -0.25],
+        [0.35, 0.35, 0.25],
+      ].map((pos, i) => (
+        <mesh
+          key={i}
+          position={pos as [number, number, number]}
+          rotation={[i < 2 ? 0.2 : -0.2, 0, i % 2 === 0 ? 0.15 : -0.15]}
+        >
           <boxGeometry args={[0.04, 0.75, 0.04]} />
           <meshStandardMaterial color="#a16207" roughness={0.8} />
         </mesh>
@@ -3597,10 +3742,10 @@ const Sawhorse: React.FC<{ position: [number, number, number]; rotation?: [numbe
 };
 
 // Maintenance cart with parts
-const MaintenanceCart: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const MaintenanceCart: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   return (
     <group position={position} rotation={rotation}>
       {/* Cart base */}
@@ -3627,15 +3772,20 @@ const MaintenanceCart: React.FC<{ position: [number, number, number]; rotation?:
         <meshStandardMaterial color="#1e293b" metalness={0.6} />
       </mesh>
       {/* Wheels */}
-      {[[-0.22, 0.05, 0.12], [0.22, 0.05, 0.12], [-0.22, 0.05, -0.12], [0.22, 0.05, -0.12]].map((pos, i) => (
+      {[
+        [-0.22, 0.05, 0.12],
+        [0.22, 0.05, 0.12],
+        [-0.22, 0.05, -0.12],
+        [0.22, 0.05, -0.12],
+      ].map((pos, i) => (
         <mesh key={i} position={pos as [number, number, number]} rotation={[Math.PI / 2, 0, 0]}>
           <cylinderGeometry args={[0.05, 0.05, 0.03, 12]} />
           <meshStandardMaterial color="#1e293b" roughness={0.8} />
         </mesh>
       ))}
       {/* Parts on cart - scattered tools and components */}
-      <mesh position={[-0.15, 0.4, 0.05]}>
-        <cylinderGeometry args={[0.015, 0.015, 0.12, 8]} rotation={[Math.PI / 2, 0, 0.3]} />
+      <mesh position={[-0.15, 0.4, 0.05]} rotation={[Math.PI / 2, 0, 0.3]}>
+        <cylinderGeometry args={[0.015, 0.015, 0.12, 8]} />
         <meshStandardMaterial color="#71717a" metalness={0.8} />
       </mesh>
       <mesh position={[0.1, 0.38, -0.08]}>
@@ -3656,14 +3806,15 @@ const MaintenanceCart: React.FC<{ position: [number, number, number]; rotation?:
 };
 
 // Out of Order sign
-const OutOfOrderSign: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const OutOfOrderSign: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   const signRef = useRef<THREE.Group>(null);
 
   // Slight swing
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (signRef.current) {
       signRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.8) * 0.03;
     }
@@ -3693,10 +3844,10 @@ const OutOfOrderSign: React.FC<{ position: [number, number, number]; rotation?: 
 };
 
 // Partially opened machine panel
-const OpenedPanel: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const OpenedPanel: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   return (
     <group position={position} rotation={rotation}>
       {/* Panel frame */}
@@ -3726,9 +3877,13 @@ const OpenedPanel: React.FC<{ position: [number, number, number]; rotation?: [nu
         <meshStandardMaterial color="#1e293b" />
       </mesh>
       {/* Wires */}
-      {[['#ef4444', -0.05], ['#3b82f6', 0.05], ['#eab308', 0.15]].map(([color, y], i) => (
-        <mesh key={i} position={[0.1, y as number, 0.05]}>
-          <cylinderGeometry args={[0.004, 0.004, 0.2, 6]} rotation={[0, 0, Math.PI / 2]} />
+      {[
+        ['#ef4444', -0.05],
+        ['#3b82f6', 0.05],
+        ['#eab308', 0.15],
+      ].map(([color, y], i) => (
+        <mesh key={i} position={[0.1, y as number, 0.05]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.004, 0.004, 0.2, 6]} />
           <meshStandardMaterial color={color as string} />
         </mesh>
       ))}
@@ -3743,15 +3898,16 @@ const OpenedPanel: React.FC<{ position: [number, number, number]; rotation?: [nu
 // Puddle from roof leak
 const RoofLeakPuddle: React.FC<{ position: [number, number, number]; size?: number }> = ({
   position,
-  size = 0.8
+  size = 0.8,
 }) => {
   const dropRef = useRef<THREE.Mesh>(null);
   const rippleRef = useRef<THREE.Mesh>(null);
   const [dropY, setDropY] = useState(3);
 
-  useFrame((state, delta) => {
+  useFrame((_state, delta) => {
+    if (!shouldRunThisFrame(3)) return;
     // Falling drop
-    setDropY(prev => {
+    setDropY((prev) => {
       let newY = prev - delta * 4;
       if (newY < 0) {
         return 3 + Math.random() * 2; // Reset with variation
@@ -3801,10 +3957,10 @@ const RoofLeakPuddle: React.FC<{ position: [number, number, number]; size?: numb
 };
 
 // Condensation on windows
-const WindowCondensation: React.FC<{ position: [number, number, number]; rotation?: [number, number, number] }> = ({
-  position,
-  rotation = [0, 0, 0]
-}) => {
+const WindowCondensation: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}> = ({ position, rotation = [0, 0, 0] }) => {
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 128;
@@ -3859,7 +4015,7 @@ const WindowCondensation: React.FC<{ position: [number, number, number]; rotatio
 // Water stain on ceiling
 const CeilingWaterStain: React.FC<{ position: [number, number, number]; size?: number }> = ({
   position,
-  size = 1.5
+  size = 1.5,
 }) => {
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas');
@@ -3919,19 +4075,23 @@ const CeilingWaterStain: React.FC<{ position: [number, number, number]; size?: n
 // Moths circling lights
 const MothSwarm: React.FC<{ position: [number, number, number]; count?: number }> = ({
   position,
-  count = 6
+  count = 6,
 }) => {
   const groupRef = useRef<THREE.Group>(null);
-  const mothData = useMemo(() =>
-    Array.from({ length: count }).map(() => ({
-      radius: 0.3 + Math.random() * 0.5,
-      speed: 2 + Math.random() * 2,
-      phase: Math.random() * Math.PI * 2,
-      yOffset: (Math.random() - 0.5) * 0.4,
-      erratic: Math.random() * 0.5
-    })), [count]);
+  const mothData = useMemo(
+    () =>
+      Array.from({ length: count }).map(() => ({
+        radius: 0.3 + Math.random() * 0.5,
+        speed: 2 + Math.random() * 2,
+        phase: Math.random() * Math.PI * 2,
+        yOffset: (Math.random() - 0.5) * 0.4,
+        erratic: Math.random() * 0.5,
+      })),
+    [count]
+  );
 
   useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
     if (!groupRef.current) return;
     const t = state.clock.elapsedTime;
 
@@ -3963,12 +4123,22 @@ const MothSwarm: React.FC<{ position: [number, number, number]; count?: number }
           {/* Left wing */}
           <mesh position={[-0.01, 0, 0]} rotation={[0, 0, 0.3]}>
             <planeGeometry args={[0.02, 0.015]} />
-            <meshStandardMaterial color="#d4d4d4" side={THREE.DoubleSide} transparent opacity={0.8} />
+            <meshStandardMaterial
+              color="#d4d4d4"
+              side={THREE.DoubleSide}
+              transparent
+              opacity={0.8}
+            />
           </mesh>
           {/* Right wing */}
           <mesh position={[0.01, 0, 0]} rotation={[0, 0, -0.3]}>
             <planeGeometry args={[0.02, 0.015]} />
-            <meshStandardMaterial color="#d4d4d4" side={THREE.DoubleSide} transparent opacity={0.8} />
+            <meshStandardMaterial
+              color="#d4d4d4"
+              side={THREE.DoubleSide}
+              transparent
+              opacity={0.8}
+            />
           </mesh>
         </group>
       ))}
@@ -3979,7 +4149,7 @@ const MothSwarm: React.FC<{ position: [number, number, number]; count?: number }
 // Cockroach (for the daring)
 const Cockroach: React.FC<{ position: [number, number, number]; pathLength?: number }> = ({
   position,
-  pathLength = 2
+  pathLength = 2,
 }) => {
   const roachRef = useRef<THREE.Group>(null);
   const state = useRef({
@@ -3988,10 +4158,11 @@ const Cockroach: React.FC<{ position: [number, number, number]; pathLength?: num
     moveEnd: 0,
     direction: 1,
     currentX: 0,
-    rotation: 0
+    rotation: 0,
   });
 
   useFrame((stateFrame, delta) => {
+    if (!shouldRunThisFrame(3)) return;
     if (!roachRef.current) return;
     const time = stateFrame.clock.elapsedTime;
 
@@ -4008,7 +4179,10 @@ const Cockroach: React.FC<{ position: [number, number, number]; pathLength?: num
       if (time < state.current.moveEnd) {
         // Very fast scurrying
         state.current.currentX += state.current.direction * delta * 5;
-        state.current.currentX = Math.max(-pathLength / 2, Math.min(pathLength / 2, state.current.currentX));
+        state.current.currentX = Math.max(
+          -pathLength / 2,
+          Math.min(pathLength / 2, state.current.currentX)
+        );
         roachRef.current.position.x = state.current.currentX;
         roachRef.current.rotation.y = state.current.rotation;
         // Leg animation through body wobble
@@ -4023,8 +4197,8 @@ const Cockroach: React.FC<{ position: [number, number, number]; pathLength?: num
     <group position={position}>
       <group ref={roachRef} scale={0.4}>
         {/* Body */}
-        <mesh>
-          <capsuleGeometry args={[0.02, 0.04, 4, 8]} rotation={[Math.PI / 2, 0, 0]} />
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <capsuleGeometry args={[0.02, 0.04, 4, 8]} />
           <meshStandardMaterial color="#3d2817" roughness={0.7} />
         </mesh>
         {/* Head */}
@@ -4034,8 +4208,8 @@ const Cockroach: React.FC<{ position: [number, number, number]; pathLength?: num
         </mesh>
         {/* Antennae */}
         {[-0.008, 0.008].map((z, i) => (
-          <mesh key={i} position={[0.04, 0.01, z]} rotation={[0, 0, -0.5 + i * 0.3]}>
-            <cylinderGeometry args={[0.001, 0.0005, 0.03, 4]} rotation={[0, 0, Math.PI / 2]} />
+          <mesh key={i} position={[0.04, 0.01, z]} rotation={[0, 0, -0.5 + i * 0.3 + Math.PI / 2]}>
+            <cylinderGeometry args={[0.001, 0.0005, 0.03, 4]} />
             <meshStandardMaterial color="#1a1a1a" />
           </mesh>
         ))}
@@ -4062,193 +4236,234 @@ export const AmbientDetailsGroup: React.FC = () => {
   const [doorStates, setDoorStates] = useState<Record<string, boolean>>({
     'door-1': false,
     'door-2': false,
-    'door-3': false
+    'door-3': false,
   });
 
   // Toggle door states periodically
   useEffect(() => {
-    const interval = setInterval(() => {
-      const doorId = `door-${Math.floor(Math.random() * 3) + 1}`;
-      setDoorStates(prev => ({
-        ...prev,
-        [doorId]: !prev[doorId]
-      }));
+    const interval = setInterval(
+      () => {
+        const doorId = `door-${Math.floor(Math.random() * 3) + 1}`;
+        setDoorStates((prev) => ({
+          ...prev,
+          [doorId]: !prev[doorId],
+        }));
 
-      // Play door sound
-      if (audioManager.initialized) {
-        if (doorStates[doorId]) {
-          audioManager.playDoorClose();
-        } else {
-          audioManager.playDoorOpen();
+        // Play door sound
+        if (audioManager.initialized) {
+          if (doorStates[doorId]) {
+            audioManager.playDoorClose();
+          } else {
+            audioManager.playDoorOpen();
+          }
         }
-      }
-    }, 15000 + Math.random() * 30000);
+      },
+      15000 + Math.random() * 30000
+    );
 
     return () => clearInterval(interval);
   }, [doorStates]);
 
   return (
     <group>
-      {/* Cobwebs in corners and rafters */}
-      <Cobweb position={[-50, 28, -35]} rotation={[0.2, 0.5, 0]} scale={1.2} />
-      <Cobweb position={[50, 28, -35]} rotation={[0.2, -0.5, 0]} scale={1} />
-      <Cobweb position={[-50, 28, 35]} rotation={[0.2, -0.3, 0]} scale={0.8} />
-      <Cobweb position={[50, 28, 35]} rotation={[0.2, 0.3, 0]} scale={1.1} />
-      <Cobweb position={[-30, 26, -38]} rotation={[0.1, 0.2, 0.1]} scale={0.7} />
-      <Cobweb position={[20, 27, -38]} rotation={[0.15, -0.1, 0]} scale={0.9} />
+      {/* Cobwebs in corners and rafters (updated for 120x160 floor) */}
+      <Cobweb position={[-55, 28, -40]} rotation={[0.2, 0.5, 0]} scale={1.2} />
+      <Cobweb position={[55, 28, -40]} rotation={[0.2, -0.5, 0]} scale={1} />
+      <Cobweb position={[-55, 28, 40]} rotation={[0.2, -0.3, 0]} scale={0.8} />
+      <Cobweb position={[55, 28, 40]} rotation={[0.2, 0.3, 0]} scale={1.1} />
+      <Cobweb position={[-35, 26, -42]} rotation={[0.1, 0.2, 0.1]} scale={0.7} />
+      <Cobweb position={[25, 27, -42]} rotation={[0.15, -0.1, 0]} scale={0.9} />
 
       {/* Rust stains on walls and equipment */}
-      <RustStain position={[-52, 8, -20]} rotation={[0, Math.PI / 2, 0]} size={1.5} />
-      <RustStain position={[52, 6, 10]} rotation={[0, -Math.PI / 2, 0]} size={1.2} />
-      <RustStain position={[-40, 4, -38]} rotation={[0, 0, 0]} size={0.8} />
-      <RustStain position={[30, 5, -38]} rotation={[0, 0, 0]} size={1} />
-      <RustStain position={[-20, 3, 38]} rotation={[0, Math.PI, 0]} size={0.7} />
+      <RustStain position={[-58, 8, -25]} rotation={[0, Math.PI / 2, 0]} size={1.5} />
+      <RustStain position={[58, 6, 15]} rotation={[0, -Math.PI / 2, 0]} size={1.2} />
+      <RustStain position={[-45, 4, -42]} rotation={[0, 0, 0]} size={0.8} />
+      <RustStain position={[35, 5, -42]} rotation={[0, 0, 0]} size={1} />
+      <RustStain position={[-25, 3, 42]} rotation={[0, Math.PI, 0]} size={0.7} />
 
-      {/* Oil puddles on floor */}
-      <OilPuddle position={[-15, 0.02, -5]} size={1.2} />
-      <OilPuddle position={[8, 0.02, 15]} size={0.8} />
-      <OilPuddle position={[-30, 0.02, 10]} size={1} />
-      <OilPuddle position={[25, 0.02, -15]} size={0.6} />
-      <OilPuddle position={[0, 0.02, 25]} size={1.1} />
+      {/* Oil puddles on floor - spread across larger area */}
+      <OilPuddle position={[-20, 0.02, -8]} size={1.2} />
+      <OilPuddle position={[12, 0.02, 18]} size={0.8} />
+      <OilPuddle position={[-35, 0.02, 12]} size={1} />
+      <OilPuddle position={[30, 0.02, -18]} size={0.6} />
+      <OilPuddle position={[0, 0.02, 28]} size={1.1} />
+      <OilPuddle position={[-40, 0.02, -20]} size={0.7} />
+      <OilPuddle position={[40, 0.02, 25]} size={0.9} />
 
-      {/* Safety signage */}
-      <SafetySign position={[-50, 8, 0]} rotation={[0, Math.PI / 2, 0]} type="exit" />
-      <SafetySign position={[50, 8, 0]} rotation={[0, -Math.PI / 2, 0]} type="exit" />
-      <SafetySign position={[0, 10, -38]} rotation={[0, 0, 0]} type="caution" />
-      <SafetySign position={[-20, 8, -38]} rotation={[0, 0, 0]} type="danger" />
-      <SafetySign position={[20, 8, -38]} rotation={[0, 0, 0]} type="ppe" />
-      <SafetySign position={[0, 8, 38]} rotation={[0, Math.PI, 0]} type="exit" />
+      {/* Oil stains in truck yard areas - near where trucks park */}
+      <OilPuddle position={[5, 0.02, 45]} size={1.5} />
+      <OilPuddle position={[-10, 0.02, 40]} size={1.0} />
+      <OilPuddle position={[15, 0.02, 50]} size={0.8} />
+      <OilPuddle position={[-5, 0.02, 55]} size={1.2} />
+      {/* Back yard oil stains */}
+      <OilPuddle position={[8, 0.02, -65]} size={1.3} />
+      <OilPuddle position={[-12, 0.02, -70]} size={0.9} />
+      <OilPuddle position={[0, 0.02, -60]} size={1.1} />
+
+      {/* Rain puddles in outdoor yard areas (water pooling on pavement) */}
+      <RainPuddle position={[-15, 0.015, 48]} size={2.5} />
+      <RainPuddle position={[20, 0.015, 52]} size={2.0} />
+      <RainPuddle position={[-8, 0.015, 60]} size={1.8} />
+      <RainPuddle position={[10, 0.015, 65]} size={2.2} />
+      {/* Back yard rain puddles */}
+      <RainPuddle position={[-18, 0.015, -68]} size={2.3} />
+      <RainPuddle position={[15, 0.015, -72]} size={1.9} />
+      <RainPuddle position={[5, 0.015, -80]} size={2.6} />
+
+      {/* Safety signage - walls at x=±60 */}
+      <SafetySign position={[-58, 8, 0]} rotation={[0, Math.PI / 2, 0]} type="exit" />
+      <SafetySign position={[58, 8, 0]} rotation={[0, -Math.PI / 2, 0]} type="exit" />
+      <SafetySign position={[0, 10, -42]} rotation={[0, 0, 0]} type="caution" />
+      <SafetySign position={[-25, 8, -42]} rotation={[0, 0, 0]} type="danger" />
+      <SafetySign position={[25, 8, -42]} rotation={[0, 0, 0]} type="ppe" />
+      <SafetySign position={[0, 8, 42]} rotation={[0, Math.PI, 0]} type="exit" />
 
       {/* Wall clocks */}
-      <FactoryWallClock position={[-52, 12, 0]} rotation={[0, Math.PI / 2, 0]} />
-      <FactoryWallClock position={[52, 12, 0]} rotation={[0, -Math.PI / 2, 0]} />
+      <FactoryWallClock position={[-58, 12, 0]} rotation={[0, Math.PI / 2, 0]} />
+      <FactoryWallClock position={[58, 12, 0]} rotation={[0, -Math.PI / 2, 0]} />
 
-      {/* Fire extinguisher stations */}
-      <FireExtinguisherStation position={[-40, 0, -38]} />
-      <FireExtinguisherStation position={[40, 0, -38]} />
-      <FireExtinguisherStation position={[-40, 0, 38]} />
-      <FireExtinguisherStation position={[40, 0, 38]} />
+      {/* Fire extinguisher stations - expanded coverage */}
+      <FireExtinguisherStation position={[-50, 0, -40]} />
+      <FireExtinguisherStation position={[50, 0, -40]} />
+      <FireExtinguisherStation position={[-50, 0, 40]} />
+      <FireExtinguisherStation position={[50, 0, 40]} />
+      <FireExtinguisherStation position={[0, 0, -35]} />
+      <FireExtinguisherStation position={[0, 0, 35]} />
 
-      {/* Loading dock doors */}
-      <LoadingDockDoor position={[-30, 0, 39.5]} isOpen={doorStates['door-1']} />
-      <LoadingDockDoor position={[0, 0, 39.5]} isOpen={doorStates['door-2']} />
-      <LoadingDockDoor position={[30, 0, 39.5]} isOpen={doorStates['door-3']} />
+      {/* Loading dock doors - at z=48 (shipping dock) */}
+      <LoadingDockDoor position={[-15, 0, 48]} isOpen={doorStates['door-1']} />
+      <LoadingDockDoor position={[0, 0, 48]} isOpen={doorStates['door-2']} />
+      <LoadingDockDoor position={[15, 0, 48]} isOpen={doorStates['door-3']} />
 
-      {/* Control panels */}
-      <ControlPanel position={[-35, 5, -38]} rotation={[0, 0, 0]} />
-      <ControlPanel position={[35, 5, -38]} rotation={[0, 0, 0]} />
-      <ControlPanel position={[-52, 5, 15]} rotation={[0, Math.PI / 2, 0]} />
-      <ControlPanel position={[52, 5, -15]} rotation={[0, -Math.PI / 2, 0]} />
+      {/* Control panels - walls at x=±60 */}
+      <ControlPanel position={[-40, 5, -42]} rotation={[0, 0, 0]} />
+      <ControlPanel position={[40, 5, -42]} rotation={[0, 0, 0]} />
+      <ControlPanel position={[-58, 5, 20]} rotation={[0, Math.PI / 2, 0]} />
+      <ControlPanel position={[58, 5, -20]} rotation={[0, -Math.PI / 2, 0]} />
 
       {/* Condensation drips on pipes */}
-      <CondensationDrip position={[-15, 18, -10]} />
-      <CondensationDrip position={[10, 16, 5]} />
-      <CondensationDrip position={[-5, 17, 15]} />
-      <CondensationDrip position={[20, 15, -5]} />
+      <CondensationDrip position={[-20, 18, -12]} />
+      <CondensationDrip position={[15, 16, 8]} />
+      <CondensationDrip position={[-8, 17, 18]} />
+      <CondensationDrip position={[25, 15, -8]} />
 
       {/* Pulsing indicators on key machinery */}
-      <PulsingIndicator position={[-20, 4, -22]} baseColor="#22c55e" />
+      <PulsingIndicator position={[-25, 4, -22]} baseColor="#22c55e" />
       <PulsingIndicator position={[0, 4, -22]} baseColor="#3b82f6" />
-      <PulsingIndicator position={[20, 4, -22]} baseColor="#22c55e" />
-      <PulsingIndicator position={[-15, 12, 6]} baseColor="#eab308" size={0.08} />
-      <PulsingIndicator position={[15, 12, 6]} baseColor="#eab308" size={0.08} />
+      <PulsingIndicator position={[25, 4, -22]} baseColor="#22c55e" />
+      <PulsingIndicator position={[-18, 12, 6]} baseColor="#eab308" size={0.08} />
+      <PulsingIndicator position={[18, 12, 6]} baseColor="#eab308" size={0.08} />
 
       {/* ==========================================
-          ENVIRONMENTAL PROPS
+          ENVIRONMENTAL PROPS (updated for 120x160 floor)
           ========================================== */}
 
-      {/* Stacked pallets in corners */}
-      <StackedPallets position={[-45, 0, -30]} count={4} />
-      <StackedPallets position={[45, 0, -30]} count={3} />
-      <StackedPallets position={[-45, 0, 30]} count={5} />
-      <StackedPallets position={[45, 0, 30]} count={2} />
-      <StackedPallets position={[-35, 0, 25]} count={3} />
-      <StackedPallets position={[35, 0, -25]} count={4} />
+      {/* Stacked pallets in corners and along walls */}
+      <StackedPallets position={[-52, 0, -35]} count={4} />
+      <StackedPallets position={[52, 0, -35]} count={3} />
+      <StackedPallets position={[-52, 0, 35]} count={5} />
+      <StackedPallets position={[52, 0, 35]} count={2} />
+      <StackedPallets position={[-40, 0, 30]} count={3} />
+      <StackedPallets position={[40, 0, -30]} count={4} />
+      <StackedPallets position={[-52, 0, 0]} count={2} />
+      <StackedPallets position={[52, 0, 0]} count={3} />
 
-      {/* Tool racks on walls */}
-      <ToolRack position={[-52, 4, -25]} rotation={[0, Math.PI / 2, 0]} />
-      <ToolRack position={[52, 4, 25]} rotation={[0, -Math.PI / 2, 0]} />
-      <ToolRack position={[15, 4, -38]} rotation={[0, 0, 0]} />
+      {/* Tool racks on walls - x=±60 */}
+      <ToolRack position={[-58, 4, -30]} rotation={[0, Math.PI / 2, 0]} />
+      <ToolRack position={[58, 4, 30]} rotation={[0, -Math.PI / 2, 0]} />
+      <ToolRack position={[20, 4, -42]} rotation={[0, 0, 0]} />
 
-      {/* Hard hats on hooks */}
-      <HardHatHook position={[-52, 5, 20]} color="#eab308" />
-      <HardHatHook position={[-52, 5, 22]} color="#f97316" />
-      <HardHatHook position={[-52, 5, 24]} color="#22c55e" />
-      <HardHatHook position={[52, 5, -20]} color="#eab308" />
-      <HardHatHook position={[52, 5, -22]} color="#3b82f6" />
+      {/* Hard hats on hooks - x=±60 */}
+      <HardHatHook position={[-58, 5, 25]} color="#eab308" />
+      <HardHatHook position={[-58, 5, 27]} color="#f97316" />
+      <HardHatHook position={[-58, 5, 29]} color="#22c55e" />
+      <HardHatHook position={[58, 5, -25]} color="#eab308" />
+      <HardHatHook position={[58, 5, -27]} color="#3b82f6" />
 
-      {/* Cleaning equipment */}
-      <CleaningEquipment position={[-38, 0, 0]} />
-      <CleaningEquipment position={[38, 0, 15]} />
+      {/* Cleaning equipment - spread out */}
+      <CleaningEquipment position={[-45, 0, 5]} />
+      <CleaningEquipment position={[45, 0, 20]} />
 
-      {/* Cable trays overhead */}
-      <CableTray position={[-30, 22, 0]} length={20} />
-      <CableTray position={[30, 22, 0]} length={20} />
-      <CableTray position={[0, 20, -15]} length={30} rotation={[0, Math.PI / 2, 0]} />
-      <CableTray position={[0, 20, 15]} length={30} rotation={[0, Math.PI / 2, 0]} />
+      {/* Cable trays overhead - extended for larger ceiling */}
+      <CableTray position={[-35, 22, 0]} length={25} />
+      <CableTray position={[35, 22, 0]} length={25} />
+      <CableTray position={[0, 20, -20]} length={40} rotation={[0, Math.PI / 2, 0]} />
+      <CableTray position={[0, 20, 20]} length={40} rotation={[0, Math.PI / 2, 0]} />
 
       {/* Steam vents */}
-      <SteamVent position={[-25, 15, -15]} />
-      <SteamVent position={[25, 15, -15]} />
-      <SteamVent position={[0, 18, 10]} />
+      <SteamVent position={[-30, 15, -18]} />
+      <SteamVent position={[30, 15, -18]} />
+      <SteamVent position={[0, 18, 12]} />
 
-      {/* Drainage grates in floor */}
-      <DrainageGrate position={[-20, 0, 0]} size={0.8} />
-      <DrainageGrate position={[20, 0, 0]} size={0.8} />
-      <DrainageGrate position={[0, 0, -15]} size={0.6} />
-      <DrainageGrate position={[0, 0, 15]} size={0.6} />
-      <DrainageGrate position={[-10, 0, 25]} size={0.5} />
-      <DrainageGrate position={[10, 0, 25]} size={0.5} />
+      {/* Drainage grates in floor - expanded coverage */}
+      <DrainageGrate position={[-25, 0, 0]} size={0.8} />
+      <DrainageGrate position={[25, 0, 0]} size={0.8} />
+      <DrainageGrate position={[0, 0, -20]} size={0.6} />
+      <DrainageGrate position={[0, 0, 20]} size={0.6} />
+      <DrainageGrate position={[-15, 0, 28]} size={0.5} />
+      <DrainageGrate position={[15, 0, 28]} size={0.5} />
+      <DrainageGrate position={[-40, 0, -15]} size={0.6} />
+      <DrainageGrate position={[40, 0, 15]} size={0.6} />
 
       {/* ==========================================
-          ANIMATED ELEMENTS
+          ANIMATED ELEMENTS (updated for 120x160 floor)
           ========================================== */}
 
-      {/* Flickering fluorescent lights */}
-      <FlickeringLight position={[-30, 18, -20]} />
-      <FlickeringLight position={[30, 18, 20]} />
+      {/* Flickering fluorescent lights - spread across larger area */}
+      <FlickeringLight position={[-35, 18, -25]} />
+      <FlickeringLight position={[35, 18, 25]} />
       <FlickeringLight position={[0, 16, 0]} />
+      <FlickeringLight position={[-45, 17, 10]} />
+      <FlickeringLight position={[45, 17, -10]} />
 
       {/* Swinging chains from ceiling */}
-      <SwingingChain position={[-35, 25, -10]} length={4} />
-      <SwingingChain position={[35, 25, 10]} length={3} />
-      <SwingingChain position={[-15, 24, 20]} length={2.5} />
-      <SwingingChain position={[15, 24, -20]} length={3.5} />
-
-      {/* Rotating exhaust fans */}
-      <ExhaustFan position={[-52, 8, -30]} rotation={[0, Math.PI / 2, 0]} />
-      <ExhaustFan position={[52, 8, 30]} rotation={[0, -Math.PI / 2, 0]} />
-      <ExhaustFan position={[-30, 30, -38]} rotation={[Math.PI / 2, 0, 0]} />
-      <ExhaustFan position={[30, 30, -38]} rotation={[Math.PI / 2, 0, 0]} />
+      <SwingingChain position={[-40, 25, -15]} length={4} />
+      <SwingingChain position={[40, 25, 15]} length={3} />
+      <SwingingChain position={[-20, 24, 25]} length={2.5} />
+      <SwingingChain position={[20, 24, -25]} length={3.5} />
 
       {/* Electrical panels with occasional sparks */}
-      <ElectricalPanel position={[-52, 4, 5]} rotation={[0, Math.PI / 2, 0]} />
-      <ElectricalPanel position={[52, 4, -5]} rotation={[0, -Math.PI / 2, 0]} />
-      <ElectricalPanel position={[-25, 4, -38]} rotation={[0, 0, 0]} />
+      <ElectricalPanel position={[-58, 4, 8]} rotation={[0, Math.PI / 2, 0]} />
+      <ElectricalPanel position={[58, 4, -8]} rotation={[0, -Math.PI / 2, 0]} />
+      <ElectricalPanel position={[-30, 4, -42]} rotation={[0, 0, 0]} />
 
       {/* ==========================================
-          AMBIENT LIFE
+          AMBIENT LIFE (updated for 120x160 floor)
           ========================================== */}
 
-      {/* Pigeons in rafters */}
-      <Pigeon position={[-40, 27, -32]} />
-      <Pigeon position={[-38, 27, -31]} />
-      <Pigeon position={[42, 26, 30]} />
-      <Pigeon position={[20, 28, -35]} />
-      <Pigeon position={[-15, 27, 33]} />
+      {/* Pigeons in rafters - spread across larger ceiling */}
+      <Pigeon position={[-45, 27, -38]} />
+      <Pigeon position={[-43, 27, -37]} />
+      <Pigeon position={[48, 26, 35]} />
+      <Pigeon position={[25, 28, -40]} />
+      <Pigeon position={[-20, 27, 38]} />
+      <Pigeon position={[0, 28, 0]} />
 
-      {/* Mice near walls (rare, scurrying) */}
-      <Mouse position={[-50, 0.02, -20]} pathLength={4} />
-      <Mouse position={[50, 0.02, 15]} pathLength={3} />
-      <Mouse position={[-30, 0.02, 36]} pathLength={5} />
+      {/* Pigeons roosting on yard light poles */}
+      <Pigeon position={[-25, 14.5, 35]} />
+      <Pigeon position={[-24, 14.5, 35]} />
+      <Pigeon position={[25, 14.5, 35]} />
+      <Pigeon position={[-25, 14.5, 55]} />
+      <Pigeon position={[25, 14.5, 55]} />
+      <Pigeon position={[26, 14.5, 55]} />
+      {/* Pigeons on back yard light poles */}
+      <Pigeon position={[-25, 14.5, -85]} />
+      <Pigeon position={[25, 14.5, -85]} />
+      <Pigeon position={[24, 14.5, -85]} />
+
+      {/* Mice near walls (rare, scurrying) - walls at x=±60 */}
+      <Mouse position={[-55, 0.02, -25]} pathLength={4} />
+      <Mouse position={[55, 0.02, 20]} pathLength={3} />
+      <Mouse position={[-35, 0.02, 40]} pathLength={5} />
 
       {/* ==========================================
           ATMOSPHERE EFFECTS
           ========================================== */}
 
-      {/* God rays through skylights */}
-      <GodRays position={[-20, 30, -15]} rotation={[0.1, 0, 0.05]} />
-      <GodRays position={[15, 30, 10]} rotation={[-0.05, 0, -0.1]} />
+      {/* God rays through skylights - spread across larger area */}
+      <GodRays position={[-25, 30, -18]} rotation={[0.1, 0, 0.05]} />
+      <GodRays position={[20, 30, 15]} rotation={[-0.05, 0, -0.1]} />
+      <GodRays position={[0, 30, 0]} rotation={[0, 0, 0]} />
       <GodRays position={[0, 30, -25]} rotation={[0.08, 0, 0]} />
 
       {/* Graffiti in hidden corners */}
@@ -4443,8 +4658,17 @@ export const AmbientDetailsGroup: React.FC = () => {
       {/* Sticky notes on equipment */}
       <StickyNote position={[-35.2, 5.4, -37.7]} rotation={[0, 0, 0.05]} color="#fef08a" curled />
       <StickyNote position={[35.3, 5.35, -37.75]} rotation={[0, 0, -0.08]} color="#fbcfe8" />
-      <StickyNote position={[-52, 5.2, 15.1]} rotation={[0, Math.PI / 2, 0.03]} color="#bfdbfe" curled />
-      <StickyNote position={[52, 5.25, -15.05]} rotation={[0, -Math.PI / 2, -0.05]} color="#fef08a" />
+      <StickyNote
+        position={[-52, 5.2, 15.1]}
+        rotation={[0, Math.PI / 2, 0.03]}
+        color="#bfdbfe"
+        curled
+      />
+      <StickyNote
+        position={[52, 5.25, -15.05]}
+        rotation={[0, -Math.PI / 2, -0.05]}
+        color="#fef08a"
+      />
       <StickyNote position={[-25.1, 4.15, -37.9]} rotation={[0, 0, 0.1]} color="#d9f99d" curled />
 
       {/* Scattered pens and pencils on work surfaces */}

@@ -1,56 +1,154 @@
-import React, { useRef } from 'react';
+import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Text, Billboard, RoundedBox } from '@react-three/drei';
 import * as THREE from 'three';
 import { useMillStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
+import { shouldRunThisFrame, getThrottleLevel } from '../utils/frameThrottle';
+import { MachineType } from '../types';
 
 export const HolographicDisplays: React.FC = () => {
+  // Use useShallow to prevent re-renders when unrelated store values change
+  const { dockStatus, machines, metrics, totalBagsProduced, productionSpeed } = useMillStore(
+    useShallow((state) => ({
+      dockStatus: state.dockStatus,
+      machines: state.machines,
+      metrics: state.metrics,
+      totalBagsProduced: state.totalBagsProduced,
+      productionSpeed: state.productionSpeed,
+    }))
+  );
+
+  // Calculate real zone metrics from store data
+  const zoneMetrics = useMemo(() => {
+    // Zone 1: Silos - calculate capacity from silo machine data
+    const silos = machines.filter((m) => m.type === MachineType.SILO);
+    const siloCapacity =
+      silos.length > 0
+        ? Math.round(silos.reduce((acc, s) => acc + (s.metrics?.load || 80), 0) / silos.length)
+        : 85;
+
+    // Zone 2: Mills - calculate throughput
+    const mills = machines.filter((m) => m.type === MachineType.ROLLER_MILL);
+    const runningMills = mills.filter((m) => m.status === 'running').length;
+    const throughput = Math.round(200 * runningMills * productionSpeed + 200);
+
+    // Zone 3: Sifters - use quality metric from store
+    const qualityGrade = metrics.quality;
+
+    // Zone 4: Packers - calculate bags/min and daily total
+    const packers = machines.filter((m) => m.type === MachineType.PACKER);
+    const runningPackers = packers.filter((m) => m.status === 'running').length;
+    const bagsPerMin = Math.round(12 * runningPackers * productionSpeed + 5);
+
+    return {
+      siloCapacity,
+      throughput,
+      qualityGrade,
+      bagsPerMin,
+      totalBags: totalBagsProduced,
+    };
+  }, [machines, metrics, totalBagsProduced, productionSpeed]);
+
+  // Format dock display values
+  const getStatusDisplay = (status: 'arriving' | 'loading' | 'departing' | 'clear') => {
+    switch (status) {
+      case 'arriving':
+        return 'Incoming';
+      case 'loading':
+        return 'Loading';
+      case 'departing':
+        return 'Departing';
+      case 'clear':
+        return 'Clear';
+    }
+  };
+
+  const getStatusColor = (status: 'arriving' | 'loading' | 'departing' | 'clear') => {
+    switch (status) {
+      case 'arriving':
+        return '#3b82f6'; // blue
+      case 'loading':
+        return '#f97316'; // orange
+      case 'departing':
+        return '#22c55e'; // green
+      case 'clear':
+        return '#64748b'; // gray
+    }
+  };
+
+  const getSubValue = (status: 'arriving' | 'loading' | 'departing' | 'clear', eta: number) => {
+    if (status === 'arriving') return `ETA: ${eta} min`;
+    if (status === 'loading') return `${eta} min left`;
+    if (status === 'departing') return 'Bay clearing';
+    return 'Awaiting truck';
+  };
+
   return (
     <group>
-      {/* Main production display */}
+      {/* Main production display - centered, high visibility */}
       <HoloPanel
-        position={[0, 12, -25]}
+        position={[0, 14, -30]}
         title="PRODUCTION STATUS"
         value="OPTIMAL"
         color="#22c55e"
-        size={[12, 4]}
+        size={[14, 4.5]}
       />
 
-      {/* Zone displays */}
+      {/* Zone displays - repositioned for 120x160 floor */}
       <HoloPanel
-        position={[-20, 8, -18]}
+        position={[-30, 10, -22]}
         title="ZONE 1: STORAGE"
-        value="5 Silos Active"
-        subValue="Capacity: 87%"
+        value={`${machines.filter((m) => m.type === MachineType.SILO).length} Silos Active`}
+        subValue={`Capacity: ${zoneMetrics.siloCapacity}%`}
         color="#3b82f6"
-        size={[6, 2.5]}
+        size={[7, 2.8]}
       />
 
       <HoloPanel
-        position={[0, 8, -8]}
+        position={[30, 10, -6]}
         title="ZONE 2: MILLING"
-        value="6 Mills Running"
-        subValue="Output: 1,240 T/hr"
+        value={`${machines.filter((m) => m.type === MachineType.ROLLER_MILL && m.status === 'running').length} Mills Running`}
+        subValue={`Output: ${zoneMetrics.throughput.toLocaleString()} T/hr`}
         color="#8b5cf6"
-        size={[6, 2.5]}
+        size={[7, 2.8]}
       />
 
       <HoloPanel
-        position={[20, 10, 5]}
+        position={[-30, 12, 6]}
         title="ZONE 3: SIFTING"
-        value="3 Plansifters"
-        subValue="Grade A: 99.2%"
+        value={`${machines.filter((m) => m.type === MachineType.PLANSIFTER).length} Plansifters`}
+        subValue={`Grade A: ${zoneMetrics.qualityGrade.toFixed(1)}%`}
         color="#ec4899"
-        size={[6, 2.5]}
+        size={[7, 2.8]}
       />
 
       <HoloPanel
-        position={[0, 8, 22]}
+        position={[30, 10, 28]}
         title="ZONE 4: PACKING"
-        value="42 bags/min"
-        subValue="Today: 24,120 bags"
+        value={`${zoneMetrics.bagsPerMin} bags/min`}
+        subValue={`Today: ${zoneMetrics.totalBags.toLocaleString()} bags`}
         color="#f59e0b"
-        size={[6, 2.5]}
+        size={[7, 2.8]}
+      />
+
+      {/* Dock status displays */}
+      <HoloPanel
+        position={[0, 8, 42]}
+        title="SHIPPING DOCK"
+        value={getStatusDisplay(dockStatus.shipping.status)}
+        subValue={getSubValue(dockStatus.shipping.status, dockStatus.shipping.etaMinutes)}
+        color={getStatusColor(dockStatus.shipping.status)}
+        size={[5, 2]}
+      />
+
+      <HoloPanel
+        position={[0, 8, -42]}
+        title="RECEIVING DOCK"
+        value={getStatusDisplay(dockStatus.receiving.status)}
+        subValue={getSubValue(dockStatus.receiving.status, dockStatus.receiving.etaMinutes)}
+        color={getStatusColor(dockStatus.receiving.status)}
+        size={[5, 2]}
       />
 
       {/* Floating data particles */}
@@ -71,15 +169,12 @@ interface HoloPanelProps {
 const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue, color, size }) => {
   const groupRef = useRef<THREE.Group>(null);
   const glowRef = useRef<THREE.Mesh>(null);
-  const graphicsQuality = useMillStore(state => state.graphics.quality);
-  const frameSkipRef = useRef(0);
+  const graphicsQuality = useMillStore((state) => state.graphics.quality);
 
   useFrame((state) => {
-    // Throttle on low graphics - skip every other frame
-    if (graphicsQuality === 'low') {
-      frameSkipRef.current++;
-      if (frameSkipRef.current % 2 !== 0) return;
-    }
+    // Use shared throttle utility for consistent performance
+    const throttle = getThrottleLevel(graphicsQuality);
+    if (!shouldRunThisFrame(throttle)) return;
 
     if (groupRef.current) {
       groupRef.current.position.y = position[1] + Math.sin(state.clock.elapsedTime * 0.5) * 0.1;
@@ -158,11 +253,13 @@ const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue,
         )}
 
         {/* Corner accents */}
-        {[[-1, 1], [1, 1], [-1, -1], [1, -1]].map(([x, y], i) => (
-          <mesh
-            key={i}
-            position={[x * (size[0] / 2 - 0.15), y * (size[1] / 2 - 0.15), 0.03]}
-          >
+        {[
+          [-1, 1],
+          [1, 1],
+          [-1, -1],
+          [1, -1],
+        ].map(([x, y], i) => (
+          <mesh key={i} position={[x * (size[0] / 2 - 0.15), y * (size[1] / 2 - 0.15), 0.03]}>
             <circleGeometry args={[0.05, 16]} />
             <meshBasicMaterial color={color} />
           </mesh>
@@ -172,10 +269,9 @@ const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue,
   );
 };
 
-const DataParticles: React.FC = () => {
+const DataParticles: React.FC = React.memo(() => {
   const particlesRef = useRef<THREE.Points>(null);
-  const graphicsQuality = useMillStore(state => state.graphics.quality);
-  const frameSkipRef = useRef(0);
+  const graphicsQuality = useMillStore((state) => state.graphics.quality);
   const count = graphicsQuality === 'low' ? 50 : 100; // Reduce particle count on low
 
   const positions = React.useMemo(() => {
@@ -189,15 +285,14 @@ const DataParticles: React.FC = () => {
   }, [count]);
 
   useFrame(() => {
-    // Throttle on low graphics
-    if (graphicsQuality === 'low') {
-      frameSkipRef.current++;
-      if (frameSkipRef.current % 2 !== 0) return;
-    }
+    // Use shared throttle utility for consistent performance
+    const throttle = getThrottleLevel(graphicsQuality);
+    if (!shouldRunThisFrame(throttle)) return;
 
     if (!particlesRef.current) return;
     const positions = particlesRef.current.geometry.attributes.position.array as Float32Array;
-    const speed = graphicsQuality === 'low' ? 0.04 : 0.02; // Compensate for skipped frames
+    // Compensate speed for throttle level (higher throttle = faster movement per frame)
+    const speed = 0.02 * throttle;
 
     for (let i = 0; i < count; i++) {
       positions[i * 3 + 1] += speed;
@@ -214,18 +309,10 @@ const DataParticles: React.FC = () => {
       <bufferGeometry>
         <bufferAttribute
           attach="attributes-position"
-          count={count}
-          array={positions}
-          itemSize={3}
+          args={[positions, 3]}
         />
       </bufferGeometry>
-      <pointsMaterial
-        size={0.1}
-        color="#06b6d4"
-        transparent
-        opacity={0.6}
-        sizeAttenuation
-      />
+      <pointsMaterial size={0.1} color="#06b6d4" transparent opacity={0.6} sizeAttenuation />
     </points>
   );
-};
+});

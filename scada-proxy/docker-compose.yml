@@ -1,0 +1,83 @@
+# MillOS SCADA Proxy - Docker Compose
+#
+# Usage:
+#   Development:  docker-compose up
+#   Production:   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   With MQTT:    docker-compose --profile mqtt up
+
+version: '3.8'
+
+services:
+  # Main SCADA Proxy Service
+  scada-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - POLL_INTERVAL=${POLL_INTERVAL:-1000}
+      - OPCUA_ENDPOINT=${OPCUA_ENDPOINT:-}
+      - MODBUS_HOST=${MODBUS_HOST:-}
+      - MODBUS_PORT=${MODBUS_PORT:-502}
+    volumes:
+      - ./tags.json:/app/tags.json:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - scada-network
+
+  # Optional: MQTT Broker (Mosquitto)
+  mqtt-broker:
+    image: eclipse-mosquitto:2
+    profiles:
+      - mqtt
+    ports:
+      - "1883:1883"   # MQTT
+      - "8883:8883"   # MQTT over WebSocket
+    volumes:
+      - ./mosquitto/config:/mosquitto/config:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    restart: unless-stopped
+    networks:
+      - scada-network
+
+  # Optional: OPC-UA Simulator (for testing)
+  opcua-simulator:
+    image: mcr.microsoft.com/iotedge/opc-plc:latest
+    profiles:
+      - opcua-sim
+    ports:
+      - "50000:50000"
+    environment:
+      - PLC_SIMULATION_CONFIG=/app/pn.json
+    restart: unless-stopped
+    networks:
+      - scada-network
+
+  # Optional: Modbus Simulator (for testing)
+  modbus-simulator:
+    image: oitc/modbus-server:latest
+    profiles:
+      - modbus-sim
+    ports:
+      - "5020:5020"
+    restart: unless-stopped
+    networks:
+      - scada-network
+
+networks:
+  scada-network:
+    driver: bridge
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:

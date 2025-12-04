@@ -236,19 +236,58 @@ docker build -t millos .
 docker run -p 80:80 millos
 ```
 
+### SCADA Backend Proxy
+
+For connecting to real PLCs via OPC-UA or Modbus:
+
+```bash
+cd scada-proxy
+
+# Development mode
+npm install
+npm run dev
+
+# Docker deployment
+docker-compose up
+
+# With MQTT broker
+docker-compose --profile mqtt up
+
+# With protocol simulators
+docker-compose --profile opcua-sim --profile modbus-sim up
+
+# Production
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+**Docker Compose Services:**
+
+| Service | Port | Description |
+|---------|------|-------------|
+| `scada-proxy` | 3001 | REST API and WebSocket server |
+| `mosquitto` | 8883 | MQTT broker (WebSocket) |
+| `mosquitto` | 1883 | MQTT broker (TCP) |
+
+**Kubernetes Deployment:**
+
+See `.github/workflows/deploy-k8s.yml` for Kubernetes deployment configuration.
+
 ---
 
 ## Environment Variables
 
 ### Build-Time Variables
 
-Environment variables are embedded at build time via Vite:
+> **SECURITY WARNING**: Never embed API keys in client-side bundles using Vite's `define`.
+> API keys in client bundles can be extracted by anyone viewing your site.
+
+For sensitive API keys, use a backend proxy or serverless function:
 
 ```typescript
-// vite.config.ts
-define: {
-  'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-  'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+// api/proxy.ts (serverless function)
+export default async function handler(req, res) {
+  const apiKey = process.env.GEMINI_API_KEY; // Server-side only
+  // Forward request to external API
 }
 ```
 
@@ -256,16 +295,18 @@ define: {
 
 #### Local Development
 
-Create `.env.local`:
+Create `.env.local` for backend/serverless functions:
 
 ```bash
 GEMINI_API_KEY=your_key_here
 ```
 
-#### GitHub Actions
+**Note**: The `.env.local` file is gitignored and should never be committed.
 
-1. Go to **Settings** > **Secrets and variables** > **Actions**
-2. Add `GEMINI_API_KEY` as a repository secret
+#### Vercel/Netlify Deployment
+
+Add environment variables in your hosting platform's dashboard (Settings > Environment Variables).
+These are only accessible server-side in serverless functions.
 
 #### Vercel
 
@@ -276,6 +317,29 @@ vercel env add GEMINI_API_KEY
 #### Netlify
 
 Add in **Site settings** > **Environment variables**
+
+### SCADA Proxy Environment Variables
+
+For the backend SCADA proxy service:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | 3001 | Server port |
+| `POLL_INTERVAL` | 1000 | Polling interval (ms) |
+| `OPCUA_ENDPOINT` | - | OPC-UA server URL (e.g., `opc.tcp://192.168.1.100:4840`) |
+| `MODBUS_HOST` | - | Modbus TCP host |
+| `MODBUS_PORT` | 502 | Modbus TCP port |
+| `MQTT_BROKER_URL` | - | MQTT broker for pub/sub |
+
+Example `.env` file for scada-proxy:
+
+```bash
+PORT=3001
+POLL_INTERVAL=1000
+OPCUA_ENDPOINT=opc.tcp://192.168.1.100:4840
+MODBUS_HOST=192.168.1.101
+MODBUS_PORT=502
+```
 
 ---
 

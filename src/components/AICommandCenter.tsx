@@ -1,11 +1,34 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Bot, Brain, Shield, User, Wrench, Zap, Eye,
-  CheckCircle, Clock, AlertTriangle, ChevronRight,
-  Activity, Cpu, HardDrive, TrendingUp, TrendingDown, Cloud, CloudRain,
-  CloudLightning, Sun, Users, Gauge, Calendar, DollarSign,
-  ShieldCheck, Target, BarChart3, ArrowUp, ArrowDown
+  Bot,
+  Brain,
+  Shield,
+  User,
+  Wrench,
+  Zap,
+  Eye,
+  CheckCircle,
+  Clock,
+  AlertTriangle,
+  ChevronRight,
+  Activity,
+  Cpu,
+  HardDrive,
+  TrendingUp,
+  Cloud,
+  CloudRain,
+  CloudLightning,
+  Sun,
+  Users,
+  Gauge,
+  Calendar,
+  DollarSign,
+  ShieldCheck,
+  Target,
+  BarChart3,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { AIDecision } from '../types';
 import { useMillStore } from '../store';
@@ -14,11 +37,10 @@ import {
   applyDecisionEffects,
   reactToAlert,
   getPredictedEvents,
-  getCongestionHotspots,
   getImpactStats,
   getSparklineData,
   shouldTriggerAudioCue,
-  getConfidenceAdjustmentForType
+  getConfidenceAdjustmentForType,
 } from '../utils/aiEngine';
 import { audioManager } from '../utils/audioManager';
 
@@ -31,14 +53,14 @@ interface AICommandCenterProps {
 const Sparkline: React.FC<{ data: number[]; color?: string; height?: number }> = ({
   data,
   color = '#22d3ee',
-  height = 20
+  height = 20,
 }) => {
   if (data.length < 2) return null;
 
   const width = 60;
   const points = data.map((v, i) => ({
     x: (i / (data.length - 1)) * width,
-    y: height - v * height
+    y: height - v * height,
   }));
 
   const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
@@ -53,13 +75,21 @@ const Sparkline: React.FC<{ data: number[]; color?: string; height?: number }> =
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r="2" fill={color} />
+      <circle
+        cx={points[points.length - 1].x}
+        cy={points[points.length - 1].y}
+        r="2"
+        fill={color}
+      />
     </svg>
   );
 };
 
 // Confidence adjustment indicator component
-const ConfidenceIndicator: React.FC<{ type: AIDecision['type']; confidence: number }> = ({ type, confidence }) => {
+const ConfidenceIndicator: React.FC<{ type: AIDecision['type']; confidence: number }> = ({
+  type,
+  confidence,
+}) => {
   const adjustment = getConfidenceAdjustmentForType(type);
   const hasAdjustment = Math.abs(adjustment) >= 1; // Only show if adjustment is >= 1%
 
@@ -71,11 +101,7 @@ const ConfidenceIndicator: React.FC<{ type: AIDecision['type']; confidence: numb
           className={`inline-flex items-center ${adjustment > 0 ? 'text-green-400' : 'text-orange-400'}`}
           title={`AI learning: ${adjustment > 0 ? '+' : ''}${adjustment.toFixed(1)}% adjustment based on historical accuracy`}
         >
-          {adjustment > 0 ? (
-            <ArrowUp className="w-3 h-3" />
-          ) : (
-            <ArrowDown className="w-3 h-3" />
-          )}
+          {adjustment > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
         </span>
       )}
     </span>
@@ -87,61 +113,83 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
   const [activeTab, setActiveTab] = useState<'decisions' | 'predictions'>('decisions');
   const [predictedEvents, setPredictedEvents] = useState<ReturnType<typeof getPredictedEvents>>([]);
   const [impactStats, setImpactStats] = useState<ReturnType<typeof getImpactStats> | null>(null);
+  // Track actual decision outcomes for real success rate calculation
+  const decisionOutcomesRef = useRef<{ successful: number; total: number }>({
+    successful: 0,
+    total: 0,
+  });
+
   const [systemStatus, setSystemStatus] = useState({
-    cpu: 23,
-    memory: 45,
+    cpu: 15,
+    memory: 35,
     decisions: 0,
-    successRate: 94.2
+    successRate: 0, // Start at 0, will be calculated from actual decisions
   });
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastAlertCountRef = useRef(0);
   const lastDecisionIdRef = useRef<string | null>(null);
+  const decisionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const alertReactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const initialTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const predictionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const metricsIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isGeneratingDecisionRef = useRef(false);
 
   // Get state from store
-  const aiDecisions = useMillStore(state => state.aiDecisions);
-  const alerts = useMillStore(state => state.alerts);
-  const machines = useMillStore(state => state.machines);
-  const metrics = useMillStore(state => state.metrics);
-  const weather = useMillStore(state => state.weather);
-  const currentShift = useMillStore(state => state.currentShift);
-  const gameTime = useMillStore(state => state.gameTime);
-  const workerSatisfaction = useMillStore(state => state.workerSatisfaction);
-  const emergencyDrillMode = useMillStore(state => state.emergencyDrillMode);
+  const aiDecisions = useMillStore((state: any) => state.aiDecisions);
+  const alerts = useMillStore((state: any) => state.alerts);
+  const machines = useMillStore((state: any) => state.machines);
+  const metrics = useMillStore((state: any) => state.metrics);
+  const weather = useMillStore((state: any) => state.weather);
+  const currentShift = useMillStore((state: any) => state.currentShift);
+  const gameTime = useMillStore((state: any) => state.gameTime);
+  const workerSatisfaction = useMillStore((state: any) => state.workerSatisfaction);
+  const emergencyDrillMode = useMillStore((state: any) => state.emergencyDrillMode);
 
   // Generate context-aware decisions
   const generateDecision = useCallback(() => {
+    // Prevent overlapping decision generation
+    if (isGeneratingDecisionRef.current) return;
+
+    isGeneratingDecisionRef.current = true;
     setIsThinking(true);
 
-    setTimeout(() => {
-      const decision = generateContextAwareDecision();
+    if (decisionTimeoutRef.current) clearTimeout(decisionTimeoutRef.current);
+    decisionTimeoutRef.current = setTimeout(
+      () => {
+        const decision = generateContextAwareDecision();
 
-      if (decision) {
-        applyDecisionEffects(decision);
-        setSystemStatus(prev => ({
-          ...prev,
-          decisions: prev.decisions + 1
-        }));
+        if (decision) {
+          applyDecisionEffects(decision);
+          setSystemStatus((prev) => ({
+            ...prev,
+            decisions: prev.decisions + 1,
+          }));
 
-        // Play appropriate audio cue based on decision type/priority
-        if (shouldTriggerAudioCue(decision)) {
-          if (decision.priority === 'critical') {
-            audioManager.playAICriticalAlert();
-          } else if (decision.action.includes('anomaly')) {
-            audioManager.playAIAnomaly();
-          } else {
-            audioManager.playAIDecision();
+          // Play appropriate audio cue based on decision type/priority
+          if (shouldTriggerAudioCue(decision)) {
+            if (decision.priority === 'critical') {
+              audioManager.playAICriticalAlert();
+            } else if (decision.action.includes('anomaly')) {
+              audioManager.playAIAnomaly();
+            } else {
+              audioManager.playAIDecision();
+            }
           }
+
+          lastDecisionIdRef.current = decision.id;
         }
 
-        lastDecisionIdRef.current = decision.id;
-      }
+        // Update predicted events and impact stats
+        setPredictedEvents(getPredictedEvents());
+        setImpactStats(getImpactStats());
 
-      // Update predicted events and impact stats
-      setPredictedEvents(getPredictedEvents());
-      setImpactStats(getImpactStats());
-
-      setIsThinking(false);
-    }, 600 + Math.random() * 800);
+        setIsThinking(false);
+        isGeneratingDecisionRef.current = false;
+      },
+      600 + Math.random() * 800
+    );
   }, []);
 
   // React to new alerts
@@ -151,13 +199,14 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
     if (alerts.length > lastAlertCountRef.current) {
       const newAlert = alerts[0];
       if (newAlert && newAlert.machineId) {
-        setTimeout(() => {
+        if (alertReactionTimeoutRef.current) clearTimeout(alertReactionTimeoutRef.current);
+        alertReactionTimeoutRef.current = setTimeout(() => {
           const decision = reactToAlert(newAlert);
           if (decision) {
             applyDecisionEffects(decision);
-            setSystemStatus(prev => ({
+            setSystemStatus((prev) => ({
               ...prev,
-              decisions: prev.decisions + 1
+              decisions: prev.decisions + 1,
             }));
           }
         }, 1500);
@@ -170,70 +219,150 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
   useEffect(() => {
     if (!isOpen) return;
 
-    const initialTimeout = setTimeout(generateDecision, 2000);
-    const interval = setInterval(generateDecision, 6000);
+    if (initialTimeoutRef.current) clearTimeout(initialTimeoutRef.current);
+    if (intervalRef.current) clearInterval(intervalRef.current);
+
+    initialTimeoutRef.current = setTimeout(generateDecision, 2000);
+    intervalRef.current = setInterval(generateDecision, 6000);
 
     return () => {
-      clearTimeout(initialTimeout);
-      clearInterval(interval);
+      if (initialTimeoutRef.current) clearTimeout(initialTimeoutRef.current);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (decisionTimeoutRef.current) clearTimeout(decisionTimeoutRef.current);
+      if (alertReactionTimeoutRef.current) clearTimeout(alertReactionTimeoutRef.current);
+      // Reset decision generation flag to prevent stuck state
+      isGeneratingDecisionRef.current = false;
+      // Reset decision outcomes tracking on cleanup
+      decisionOutcomesRef.current = { successful: 0, total: 0 };
     };
   }, [isOpen, generateDecision]);
 
   // Update predictions periodically
   useEffect(() => {
     if (!isOpen) return;
-    const interval = setInterval(() => {
+
+    if (predictionIntervalRef.current) clearInterval(predictionIntervalRef.current);
+    predictionIntervalRef.current = setInterval(() => {
       setPredictedEvents(getPredictedEvents());
     }, 5000);
-    return () => clearInterval(interval);
+
+    return () => {
+      if (predictionIntervalRef.current) clearInterval(predictionIntervalRef.current);
+    };
   }, [isOpen]);
 
-  // Fluctuate system metrics
+  // Calculate real success rate from actual decision outcomes
   useEffect(() => {
-    const interval = setInterval(() => {
-      const decisionLoad = Math.min(aiDecisions.length * 2, 15);
-      const alertLoad = alerts.length * 3;
+    // Count completed and successful decisions from the store
+    const completedDecisions = aiDecisions.filter((d: AIDecision) => d.status === 'completed');
 
-      setSystemStatus(prev => ({
+    // Track outcomes - successful if completed with positive outcome
+    const successful = completedDecisions.filter(
+      (d: AIDecision) =>
+        d.outcome?.toLowerCase().includes('success') ||
+        d.outcome?.toLowerCase().includes('resolved') ||
+        d.outcome?.toLowerCase().includes('completed') ||
+        d.outcome?.toLowerCase().includes('improved') ||
+        !d.outcome // No outcome recorded = assumed success
+    ).length;
+
+    decisionOutcomesRef.current = {
+      successful,
+      total: completedDecisions.length,
+    };
+  }, [aiDecisions]);
+
+  // Update system metrics based on actual workload
+  useEffect(() => {
+    if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
+
+    metricsIntervalRef.current = setInterval(() => {
+      // Calculate CPU based on actual work being done
+      const activeDecisions = aiDecisions.filter(
+        (d: AIDecision) => d.status === 'in_progress'
+      ).length;
+      const pendingDecisions = aiDecisions.filter((d: AIDecision) => d.status === 'pending').length;
+      const alertLoad = alerts.filter(
+        (a: any) => a.type === 'critical' || a.type === 'warning'
+      ).length;
+
+      // Base CPU load + active work + pending queue + alert processing
+      const baseCpu = 12;
+      const activeLoad = activeDecisions * 8;
+      const queueLoad = Math.min(pendingDecisions * 2, 10);
+      const alertProcessing = alertLoad * 4;
+      const cpuUsage = Math.min(baseCpu + activeLoad + queueLoad + alertProcessing, 85);
+
+      // Memory based on stored decisions and history
+      const baseMemory = 30;
+      const decisionMemory = Math.min(aiDecisions.length * 0.5, 20);
+      const alertMemory = alerts.length * 1.5;
+      const memoryUsage = Math.min(baseMemory + decisionMemory + alertMemory, 80);
+
+      // Calculate real success rate
+      const { successful, total } = decisionOutcomesRef.current;
+      const successRate = total > 0 ? (successful / total) * 100 : 0;
+
+      setSystemStatus((prev) => ({
         ...prev,
-        cpu: Math.max(15, Math.min(55, 20 + decisionLoad + alertLoad + (Math.random() - 0.5) * 8)),
-        memory: Math.max(35, Math.min(65, 42 + decisionLoad + (Math.random() - 0.5) * 5)),
-        successRate: Math.max(88, Math.min(99, prev.successRate + (Math.random() - 0.45) * 2))
+        cpu: cpuUsage,
+        memory: memoryUsage,
+        successRate: successRate > 0 ? successRate : prev.successRate,
       }));
     }, 1500);
-    return () => clearInterval(interval);
-  }, [aiDecisions.length, alerts.length]);
+
+    return () => {
+      if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
+    };
+  }, [aiDecisions, alerts]);
 
   const getTypeIcon = (type: string) => {
-    const iconClass = "w-5 h-5";
+    const iconClass = 'w-5 h-5';
     switch (type) {
-      case 'assignment': return <User className={iconClass} />;
-      case 'optimization': return <Zap className={iconClass} />;
-      case 'prediction': return <Eye className={iconClass} />;
-      case 'maintenance': return <Wrench className={iconClass} />;
-      case 'safety': return <Shield className={iconClass} />;
-      default: return <Bot className={iconClass} />;
+      case 'assignment':
+        return <User className={iconClass} />;
+      case 'optimization':
+        return <Zap className={iconClass} />;
+      case 'prediction':
+        return <Eye className={iconClass} />;
+      case 'maintenance':
+        return <Wrench className={iconClass} />;
+      case 'safety':
+        return <Shield className={iconClass} />;
+      default:
+        return <Bot className={iconClass} />;
     }
   };
 
   const getTypeColor = (type: string) => {
     switch (type) {
-      case 'assignment': return 'from-blue-500 to-blue-600';
-      case 'optimization': return 'from-green-500 to-green-600';
-      case 'prediction': return 'from-purple-500 to-purple-600';
-      case 'maintenance': return 'from-yellow-500 to-yellow-600';
-      case 'safety': return 'from-red-500 to-red-600';
-      default: return 'from-gray-500 to-gray-600';
+      case 'assignment':
+        return 'from-blue-500 to-blue-600';
+      case 'optimization':
+        return 'from-green-500 to-green-600';
+      case 'prediction':
+        return 'from-purple-500 to-purple-600';
+      case 'maintenance':
+        return 'from-yellow-500 to-yellow-600';
+      case 'safety':
+        return 'from-red-500 to-red-600';
+      default:
+        return 'from-gray-500 to-gray-600';
     }
   };
 
   const getStatusIcon = (status: AIDecision['status']) => {
     switch (status) {
-      case 'completed': return <CheckCircle className="w-3 h-3 text-green-400" />;
-      case 'in_progress': return <Activity className="w-3 h-3 text-blue-400 animate-pulse" />;
-      case 'pending': return <Clock className="w-3 h-3 text-yellow-400" />;
-      case 'superseded': return <AlertTriangle className="w-3 h-3 text-slate-400" />;
-      default: return null;
+      case 'completed':
+        return <CheckCircle className="w-3 h-3 text-green-400" />;
+      case 'in_progress':
+        return <Activity className="w-3 h-3 text-blue-400 animate-pulse" />;
+      case 'pending':
+        return <Clock className="w-3 h-3 text-yellow-400" />;
+      case 'superseded':
+        return <AlertTriangle className="w-3 h-3 text-slate-400" />;
+      default:
+        return null;
     }
   };
 
@@ -242,17 +371,21 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
       critical: 'bg-red-500/20 text-red-400 border-red-500/30',
       high: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
       medium: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-      low: 'bg-slate-500/20 text-slate-400 border-slate-500/30'
+      low: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
     };
     return colors[priority] || colors.medium;
   };
 
   const getWeatherIcon = () => {
     switch (weather) {
-      case 'storm': return <CloudLightning className="w-4 h-4 text-purple-400" />;
-      case 'rain': return <CloudRain className="w-4 h-4 text-blue-400" />;
-      case 'cloudy': return <Cloud className="w-4 h-4 text-slate-400" />;
-      default: return <Sun className="w-4 h-4 text-yellow-400" />;
+      case 'storm':
+        return <CloudLightning className="w-4 h-4 text-purple-400" />;
+      case 'rain':
+        return <CloudRain className="w-4 h-4 text-blue-400" />;
+      case 'cloudy':
+        return <Cloud className="w-4 h-4 text-slate-400" />;
+      default:
+        return <Sun className="w-4 h-4 text-yellow-400" />;
     }
   };
 
@@ -292,11 +425,15 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
             <div>
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 AI Command Center
-                {isThinking && <span className="text-xs text-white/70 animate-pulse">analyzing...</span>}
+                {isThinking && (
+                  <span className="text-xs text-white/70 animate-pulse">analyzing...</span>
+                )}
               </h2>
             </div>
           </div>
-          <button onClick={onClose} className="text-white/70 hover:text-white text-sm font-medium">ESC to close</button>
+          <button onClick={onClose} className="text-white/70 hover:text-white text-sm font-medium">
+            ESC to close
+          </button>
         </div>
 
         {/* System Status */}
@@ -308,7 +445,10 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
             </div>
             <div className="text-sm font-mono text-cyan-400">{systemStatus.cpu.toFixed(1)}%</div>
             <div className="h-1 bg-slate-800 rounded-full mt-1 overflow-hidden">
-              <div className="h-full bg-cyan-500 transition-all duration-500" style={{ width: `${systemStatus.cpu}%` }} />
+              <div
+                className="h-full bg-cyan-500 transition-all duration-500"
+                style={{ width: `${systemStatus.cpu}%` }}
+              />
             </div>
           </div>
           <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50">
@@ -316,9 +456,14 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
               <HardDrive className="w-3 h-3 text-slate-500" />
               <span className="text-[10px] text-slate-500 uppercase">Memory</span>
             </div>
-            <div className="text-sm font-mono text-green-400">{systemStatus.memory.toFixed(1)}%</div>
+            <div className="text-sm font-mono text-green-400">
+              {systemStatus.memory.toFixed(1)}%
+            </div>
             <div className="h-1 bg-slate-800 rounded-full mt-1 overflow-hidden">
-              <div className="h-full bg-green-500 transition-all duration-500" style={{ width: `${systemStatus.memory}%` }} />
+              <div
+                className="h-full bg-green-500 transition-all duration-500"
+                style={{ width: `${systemStatus.memory}%` }}
+              />
             </div>
           </div>
           <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50">
@@ -334,7 +479,9 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
               <TrendingUp className="w-3 h-3 text-slate-500" />
               <span className="text-[10px] text-slate-500 uppercase">Success</span>
             </div>
-            <div className="text-sm font-mono text-emerald-400">{systemStatus.successRate.toFixed(1)}%</div>
+            <div className="text-sm font-mono text-emerald-400">
+              {systemStatus.successRate.toFixed(1)}%
+            </div>
             <div className="text-[10px] text-slate-600">accuracy</div>
           </div>
         </div>
@@ -361,7 +508,9 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
               </div>
               <div className="flex items-center gap-2">
                 <Gauge className="w-3 h-3 text-slate-500" />
-                <span className={`${workerSatisfaction.averageEnergy > 50 ? 'text-green-400' : 'text-orange-400'}`}>
+                <span
+                  className={`${workerSatisfaction.averageEnergy > 50 ? 'text-green-400' : 'text-orange-400'}`}
+                >
                   Energy: {workerSatisfaction.averageEnergy.toFixed(0)}%
                 </span>
               </div>
@@ -384,7 +533,8 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
           <div className="flex items-center justify-between text-[10px]">
             <span className="text-slate-500">Monitoring:</span>
             <span className="text-cyan-400">
-              {machines.length} machines | {alerts.length} alerts | Eff: {metrics.efficiency.toFixed(1)}%
+              {machines.length} machines | {alerts.length} alerts | Eff:{' '}
+              {metrics.efficiency.toFixed(1)}%
             </span>
           </div>
         </div>
@@ -421,7 +571,9 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
         <div className="px-4 py-2 border-b border-slate-800 bg-gradient-to-r from-emerald-950/30 to-slate-950">
           <div className="flex items-center gap-2 mb-2">
             <BarChart3 className="w-4 h-4 text-emerald-400" />
-            <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">Shift Impact</span>
+            <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">
+              Shift Impact
+            </span>
           </div>
           <div className="grid grid-cols-3 gap-2">
             <div className="bg-slate-900/50 rounded-lg p-2 border border-emerald-500/20">
@@ -452,9 +604,12 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
               <div className="text-lg font-bold text-emerald-400">
                 {impactStats.totalDecisions > 0
                   ? Math.round((impactStats.successfulDecisions / impactStats.totalDecisions) * 100)
-                  : 0}%
+                  : 0}
+                %
               </div>
-              <div className="text-[10px] text-slate-500">{impactStats.successfulDecisions}/{impactStats.totalDecisions}</div>
+              <div className="text-[10px] text-slate-500">
+                {impactStats.successfulDecisions}/{impactStats.totalDecisions}
+              </div>
             </div>
           </div>
         </div>
@@ -465,7 +620,9 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
         {activeTab === 'decisions' ? (
           <>
             <div className="px-4 py-2 border-b border-slate-800 flex items-center justify-between">
-              <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Live Decision Feed</span>
+              <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">
+                Live Decision Feed
+              </span>
               <span className="text-xs text-cyan-400 flex items-center gap-1">
                 <span className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse" />
                 Context-Aware
@@ -474,7 +631,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
 
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-2">
               <AnimatePresence>
-                {aiDecisions.slice(0, 20).map((decision) => (
+                {aiDecisions.slice(0, 20).map((decision: AIDecision) => (
                   <motion.div
                     key={decision.id}
                     initial={{ opacity: 0, y: -20, scale: 0.95 }}
@@ -482,15 +639,19 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
                     exit={{ opacity: 0, scale: 0.95 }}
                     transition={{ duration: 0.3 }}
                     className={`bg-slate-900/80 rounded-lg border overflow-hidden hover:border-cyan-500/30 transition-colors ${
-                      decision.status === 'completed' ? 'border-green-500/20' :
-                      decision.status === 'in_progress' ? 'border-blue-500/30' :
-                      'border-slate-700/50'
+                      decision.status === 'completed'
+                        ? 'border-green-500/20'
+                        : decision.status === 'in_progress'
+                          ? 'border-blue-500/30'
+                          : 'border-slate-700/50'
                     }`}
                   >
                     <div className={`h-1 bg-gradient-to-r ${getTypeColor(decision.type)}`} />
                     <div className="p-3">
                       <div className="flex items-start gap-2">
-                        <div className={`p-1.5 rounded-md bg-gradient-to-br ${getTypeColor(decision.type)} bg-opacity-20`}>
+                        <div
+                          className={`p-1.5 rounded-md bg-gradient-to-br ${getTypeColor(decision.type)} bg-opacity-20`}
+                        >
                           {getTypeIcon(decision.type)}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -498,12 +659,16 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase">
                               {decision.type}
                             </span>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded border ${getPriorityBadge(decision.priority)}`}>
+                            <span
+                              className={`text-[10px] px-1.5 py-0.5 rounded border ${getPriorityBadge(decision.priority)}`}
+                            >
                               {decision.priority}
                             </span>
                             <div className="flex items-center gap-1 ml-auto">
                               {getStatusIcon(decision.status)}
-                              <span className="text-[10px] text-slate-500 capitalize">{decision.status}</span>
+                              <span className="text-[10px] text-slate-500 capitalize">
+                                {decision.status}
+                              </span>
                             </div>
                           </div>
 
@@ -511,7 +676,10 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
                           <p className="text-xs text-slate-400 mb-2">{decision.reasoning}</p>
 
                           <div className="flex items-center gap-3 text-[10px] flex-wrap">
-                            <ConfidenceIndicator type={decision.type} confidence={decision.confidence} />
+                            <ConfidenceIndicator
+                              type={decision.type}
+                              confidence={decision.confidence}
+                            />
                             {decision.machineId && (
                               <span className="text-slate-500 flex items-center gap-1">
                                 <ChevronRight className="w-3 h-3" />
@@ -530,34 +698,35 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
                           </div>
 
                           {/* Trend Sparklines for machine-related decisions */}
-                          {decision.machineId && (decision.type === 'maintenance' || decision.type === 'prediction') && (
-                            <div className="mt-2 flex items-center gap-3 px-2 py-1.5 bg-slate-800/50 rounded border border-slate-700/30">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[9px] text-slate-500">Temp</span>
-                                <Sparkline
-                                  data={getSparklineData(decision.machineId, 'temperature')}
-                                  color="#f97316"
-                                  height={16}
-                                />
+                          {decision.machineId &&
+                            (decision.type === 'maintenance' || decision.type === 'prediction') && (
+                              <div className="mt-2 flex items-center gap-3 px-2 py-1.5 bg-slate-800/50 rounded border border-slate-700/30">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[9px] text-slate-500">Temp</span>
+                                  <Sparkline
+                                    data={getSparklineData(decision.machineId, 'temperature')}
+                                    color="#f97316"
+                                    height={16}
+                                  />
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[9px] text-slate-500">Vib</span>
+                                  <Sparkline
+                                    data={getSparklineData(decision.machineId, 'vibration')}
+                                    color="#a855f7"
+                                    height={16}
+                                  />
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[9px] text-slate-500">Load</span>
+                                  <Sparkline
+                                    data={getSparklineData(decision.machineId, 'load')}
+                                    color="#22d3ee"
+                                    height={16}
+                                  />
+                                </div>
                               </div>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[9px] text-slate-500">Vib</span>
-                                <Sparkline
-                                  data={getSparklineData(decision.machineId, 'vibration')}
-                                  color="#a855f7"
-                                  height={16}
-                                />
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[9px] text-slate-500">Load</span>
-                                <Sparkline
-                                  data={getSparklineData(decision.machineId, 'load')}
-                                  color="#22d3ee"
-                                  height={16}
-                                />
-                              </div>
-                            </div>
-                          )}
+                            )}
 
                           <div className="flex items-center gap-1 text-[10px] text-green-400 mt-2">
                             <TrendingUp className="w-3 h-3" />
@@ -575,9 +744,14 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
 
                           {decision.alternatives && decision.alternatives.length > 0 && (
                             <div className="mt-2 space-y-1">
-                              <div className="text-[9px] text-slate-500 uppercase">Alternatives:</div>
+                              <div className="text-[9px] text-slate-500 uppercase">
+                                Alternatives:
+                              </div>
                               {decision.alternatives.map((alt, idx) => (
-                                <div key={idx} className="text-[10px] text-slate-500 flex items-start gap-1">
+                                <div
+                                  key={idx}
+                                  className="text-[10px] text-slate-500 flex items-start gap-1"
+                                >
                                   <span className="text-slate-600">-</span>
                                   <span>{alt.action}</span>
                                   <span className="text-slate-600">({alt.tradeoff})</span>
@@ -604,7 +778,9 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
                   <Bot className="w-8 h-8 mx-auto mb-2" />
                   <p className="text-sm">AI is analyzing factory state...</p>
                   <p className="text-xs text-slate-600">
-                    {machines.length > 0 ? 'Context-aware decisions will appear here' : 'Waiting for machine data...'}
+                    {machines.length > 0
+                      ? 'Context-aware decisions will appear here'
+                      : 'Waiting for machine data...'}
                   </p>
                 </div>
               )}
@@ -613,7 +789,9 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
         ) : (
           <>
             <div className="px-4 py-2 border-b border-slate-800 flex items-center justify-between">
-              <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Predictive Schedule</span>
+              <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">
+                Predictive Schedule
+              </span>
               <span className="text-xs text-purple-400 flex items-center gap-1">
                 <Eye className="w-3 h-3" />
                 Looking Ahead
@@ -631,31 +809,53 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-2">
-                        <div className={`p-1.5 rounded-md ${
-                          event.type === 'maintenance' ? 'bg-yellow-500/20' :
-                          event.type === 'shift_change' ? 'bg-blue-500/20' :
-                          event.type === 'weather' ? 'bg-purple-500/20' :
-                          event.type === 'fatigue' ? 'bg-orange-500/20' :
-                          'bg-green-500/20'
-                        }`}>
-                          {event.type === 'maintenance' && <Wrench className="w-4 h-4 text-yellow-400" />}
-                          {event.type === 'shift_change' && <Users className="w-4 h-4 text-blue-400" />}
-                          {event.type === 'weather' && <Cloud className="w-4 h-4 text-purple-400" />}
-                          {event.type === 'fatigue' && <Gauge className="w-4 h-4 text-orange-400" />}
-                          {event.type === 'optimization' && <Zap className="w-4 h-4 text-green-400" />}
+                        <div
+                          className={`p-1.5 rounded-md ${
+                            event.type === 'maintenance'
+                              ? 'bg-yellow-500/20'
+                              : event.type === 'shift_change'
+                                ? 'bg-blue-500/20'
+                                : event.type === 'weather'
+                                  ? 'bg-purple-500/20'
+                                  : event.type === 'fatigue'
+                                    ? 'bg-orange-500/20'
+                                    : 'bg-green-500/20'
+                          }`}
+                        >
+                          {event.type === 'maintenance' && (
+                            <Wrench className="w-4 h-4 text-yellow-400" />
+                          )}
+                          {event.type === 'shift_change' && (
+                            <Users className="w-4 h-4 text-blue-400" />
+                          )}
+                          {event.type === 'weather' && (
+                            <Cloud className="w-4 h-4 text-purple-400" />
+                          )}
+                          {event.type === 'fatigue' && (
+                            <Gauge className="w-4 h-4 text-orange-400" />
+                          )}
+                          {event.type === 'optimization' && (
+                            <Zap className="w-4 h-4 text-green-400" />
+                          )}
                         </div>
                         <div>
                           <div className="text-sm text-white font-medium">{event.description}</div>
-                          <div className="text-[10px] text-slate-500 capitalize">{event.type.replace('_', ' ')}</div>
+                          <div className="text-[10px] text-slate-500 capitalize">
+                            {event.type.replace('_', ' ')}
+                          </div>
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-sm font-mono text-cyan-400">{formatTimeUntil(event.predictedTime)}</div>
+                        <div className="text-sm font-mono text-cyan-400">
+                          {formatTimeUntil(event.predictedTime)}
+                        </div>
                         <div className="text-[10px] text-slate-500">{event.confidence}% conf</div>
                       </div>
                     </div>
                     <div className="mt-2 flex items-center justify-between">
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${getPriorityBadge(event.priority)}`}>
+                      <span
+                        className={`text-[10px] px-1.5 py-0.5 rounded border ${getPriorityBadge(event.priority)}`}
+                      >
                         {event.priority}
                       </span>
                       {event.machineId && (
@@ -668,7 +868,9 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
                 <div className="text-center py-8 text-slate-500">
                   <Calendar className="w-8 h-8 mx-auto mb-2" />
                   <p className="text-sm">No upcoming predictions</p>
-                  <p className="text-xs text-slate-600">Events will appear as patterns are detected</p>
+                  <p className="text-xs text-slate-600">
+                    Events will appear as patterns are detected
+                  </p>
                 </div>
               )}
             </div>
@@ -681,7 +883,9 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
         <div className="flex items-center justify-between text-xs text-slate-500">
           <span>MillOS-AI v2.0 (Enhanced)</span>
           <span className="flex items-center gap-1">
-            <span className={`w-2 h-2 rounded-full ${machines.length > 0 ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'}`} />
+            <span
+              className={`w-2 h-2 rounded-full ${machines.length > 0 ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'}`}
+            />
             {machines.length > 0 ? 'All systems nominal' : 'Initializing...'}
           </span>
         </div>

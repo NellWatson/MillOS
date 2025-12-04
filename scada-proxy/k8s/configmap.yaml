@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scada-proxy-config
+  namespace: millos-scada
+  labels:
+    app.kubernetes.io/name: scada-proxy
+    app.kubernetes.io/component: config
+data:
+  PORT: "3001"
+  POLL_INTERVAL: "1000"
+  LOG_LEVEL: "info"
+  CORS_ORIGIN: "*"
+
+  # Tag configuration (can be mounted as file instead)
+  tags.json: |
+    [
+      {
+        "id": "RM101.ST001.PV",
+        "name": "Roller Mill 101 Speed",
+        "protocol": "opcua",
+        "address": "ns=2;s=RM101.Speed",
+        "dataType": "FLOAT32",
+        "accessMode": "READ",
+        "engineeringUnits": "RPM",
+        "engLow": 0,
+        "engHigh": 2000
+      },
+      {
+        "id": "RM101.TT001.PV",
+        "name": "Roller Mill 101 Temperature",
+        "protocol": "opcua",
+        "address": "ns=2;s=RM101.Temperature",
+        "dataType": "FLOAT32",
+        "accessMode": "READ",
+        "engineeringUnits": "C",
+        "engLow": 0,
+        "engHigh": 100
+      },
+      {
+        "id": "RM101.VT001.PV",
+        "name": "Roller Mill 101 Vibration",
+        "protocol": "opcua",
+        "address": "ns=2;s=RM101.Vibration",
+        "dataType": "FLOAT32",
+        "accessMode": "READ",
+        "engineeringUnits": "mm/s",
+        "engLow": 0,
+        "engHigh": 10
+      },
+      {
+        "id": "SILO_ALPHA.LT001.PV",
+        "name": "Silo Alpha Level",
+        "protocol": "modbus",
+        "address": "40001",
+        "dataType": "FLOAT32",
+        "accessMode": "READ",
+        "engineeringUnits": "%",
+        "engLow": 0,
+        "engHigh": 100,
+        "modbusRegister": "holding",
+        "modbusOffset": 0,
+        "modbusSlave": 1
+      }
+    ]

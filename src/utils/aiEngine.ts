@@ -14,12 +14,18 @@
  * - AI memory system
  */
 
-import { AIDecision, MachineData, WorkerData, AlertData, WORKER_ROSTER, MachineType } from '../types';
+import {
+  AIDecision,
+  MachineData,
+  WorkerData,
+  AlertData,
+  WORKER_ROSTER,
+  MachineType,
+} from '../types';
 import { useMillStore } from '../store';
+import { logger } from './logger';
 
-// ============================================================================
 // Types & Interfaces
-// ============================================================================
 
 interface MetricHistory {
   timestamp: number;
@@ -92,7 +98,12 @@ interface AIMemory {
   // New: Predicted events queue
   predictedEvents: PredictedEvent[];
   // New: Congestion hotspots from heat map analysis
-  congestionHotspots: Array<{ x: number; z: number; severity: 'low' | 'medium' | 'high'; lastAnalyzed: number }>;
+  congestionHotspots: Array<{
+    x: number;
+    z: number;
+    severity: 'low' | 'medium' | 'high';
+    lastAnalyzed: number;
+  }>;
   // New: Shift transition state
   shiftTransitionActive: boolean;
   lastShift: 'morning' | 'afternoon' | 'night' | null;
@@ -114,7 +125,12 @@ interface FactoryContext {
   workers: WorkerData[];
   alerts: AlertData[];
   metrics: { throughput: number; efficiency: number; uptime: number; quality: number };
-  safetyMetrics: { safetyStops: number; nearMisses: number; daysSinceIncident: number; workerEvasions: number };
+  safetyMetrics: {
+    safetyStops: number;
+    nearMisses: number;
+    daysSinceIncident: number;
+    workerEvasions: number;
+  };
   emergencyActive: boolean;
   emergencyMachineId: string | null;
   emergencyDrillMode: boolean;
@@ -126,6 +142,18 @@ interface FactoryContext {
 }
 
 type ChainStep = 'dispatch' | 'progress' | 'resolution' | 'followup';
+
+// ============================================================================
+// ID Generation Helper (Issue 4 fix)
+// ============================================================================
+
+/**
+ * Generates a consistent decision ID
+ * Replaces inconsistent .slice(2, 11) and .substr(2, 9) patterns
+ */
+function generateDecisionId(): string {
+  return `ai-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
 
 // ============================================================================
 // AI Memory Management
@@ -151,7 +179,7 @@ const aiMemory: AIMemory = {
     ['optimization', 0],
     ['prediction', 0],
     ['maintenance', 0],
-    ['safety', 0]
+    ['safety', 0],
   ]),
   anomalyHistory: [],
   crossMachinePatterns: [],
@@ -166,11 +194,11 @@ const aiMemory: AIMemory = {
       optimization: { count: 0, successRate: 0 },
       prediction: { count: 0, successRate: 0 },
       maintenance: { count: 0, successRate: 0 },
-      safety: { count: 0, successRate: 0 }
-    }
+      safety: { count: 0, successRate: 0 },
+    },
   },
   productionTargets: { daily: 28800, shift: 9600, current: 0 }, // kg targets
-  lowProductionHours: [6, 7, 14, 15, 22, 23] // Shift change hours
+  lowProductionHours: [6, 7, 14, 15, 22, 23], // Shift change hours
 };
 
 function isOnCooldown(entityId: string): boolean {
@@ -196,17 +224,26 @@ function recordDecision(decision: AIDecision): void {
     const existing = aiMemory.recentDecisionsByWorker.get(decision.workerId) || [];
     aiMemory.recentDecisionsByWorker.set(decision.workerId, [decision, ...existing].slice(0, 10));
   }
+
+  // Issue 1 Fix: Automatically add decision to store to prevent loss before applyDecisionEffects
+  // Decisions are now immediately persisted, eliminating the risk of loss during array trimming
+  useMillStore.getState().addAIDecision(decision);
 }
 
-function hasRecentDecision(entityId: string, type: AIDecision['type'], withinMs: number = 60000): boolean {
+function hasRecentDecision(
+  entityId: string,
+  type: AIDecision['type'],
+  withinMs: number = 60000
+): boolean {
   const machineDecisions = aiMemory.recentDecisionsByMachine.get(entityId) || [];
   const workerDecisions = aiMemory.recentDecisionsByWorker.get(entityId) || [];
   const allDecisions = [...machineDecisions, ...workerDecisions];
 
-  return allDecisions.some(d =>
-    d.type === type &&
-    (Date.now() - d.timestamp.getTime()) < withinMs &&
-    (d.status === 'pending' || d.status === 'in_progress')
+  return allDecisions.some(
+    (d) =>
+      d.type === type &&
+      Date.now() - d.timestamp.getTime() < withinMs &&
+      (d.status === 'pending' || d.status === 'in_progress')
   );
 }
 
@@ -214,12 +251,17 @@ function hasRecentDecision(entityId: string, type: AIDecision['type'], withinMs:
 // Trend Analysis System
 // ============================================================================
 
+// Performance: Memory management constants
+const MAX_METRIC_HISTORY_POINTS = 60; // ~1 point per 5 seconds for 5 minutes
+const MAX_ANOMALY_HISTORY = 100;
+const MAX_CROSS_MACHINE_PATTERNS = 50;
+
 function updateMetricHistory(machine: MachineData): void {
   const now = Date.now();
   const metrics: Array<{ key: 'temperature' | 'vibration' | 'load'; value: number }> = [
     { key: 'temperature', value: machine.metrics.temperature },
     { key: 'vibration', value: machine.metrics.vibration },
-    { key: 'load', value: machine.metrics.load }
+    { key: 'load', value: machine.metrics.load },
   ];
 
   for (const { key, value } of metrics) {
@@ -232,16 +274,20 @@ function updateMetricHistory(machine: MachineData): void {
         metric: key,
         history: [],
         trend: 'stable',
-        rateOfChange: 0
+        rateOfChange: 0,
       };
     }
 
     // Add new data point
     trendData.history.push({ timestamp: now, value });
 
-    // Keep only last 5 minutes of data
+    // Keep only last 5 minutes of data AND enforce max count for memory safety
     const fiveMinutesAgo = now - 5 * 60 * 1000;
-    trendData.history = trendData.history.filter(h => h.timestamp > fiveMinutesAgo);
+    trendData.history = trendData.history.filter((h) => h.timestamp > fiveMinutesAgo);
+    // Additional hard limit to prevent memory leaks
+    if (trendData.history.length > MAX_METRIC_HISTORY_POINTS) {
+      trendData.history = trendData.history.slice(-MAX_METRIC_HISTORY_POINTS);
+    }
 
     // Calculate trend if we have enough data
     if (trendData.history.length >= 3) {
@@ -266,7 +312,10 @@ function updateMetricHistory(machine: MachineData): void {
   }
 }
 
-function getTrend(machineId: string, metric: 'temperature' | 'vibration' | 'load'): TrendData | null {
+function getTrend(
+  machineId: string,
+  metric: 'temperature' | 'vibration' | 'load'
+): TrendData | null {
   return aiMemory.metricHistory.get(`${machineId}-${metric}`) || null;
 }
 
@@ -293,7 +342,7 @@ function analyzeTrends(context: FactoryContext): AIDecision | null {
 
       if (minutesUntilCritical > 0 && minutesUntilCritical < 30) {
         const decision: AIDecision = {
-          id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          id: generateDecisionId(),
           timestamp: new Date(),
           type: 'prediction',
           action: `TREND ALERT: ${machine.name} temperature rising ${tempTrend.rateOfChange.toFixed(1)}C/min`,
@@ -304,7 +353,7 @@ function analyzeTrends(context: FactoryContext): AIDecision | null {
           status: 'pending',
           triggeredBy: 'prediction',
           priority: minutesUntilCritical < 10 ? 'high' : 'medium',
-          uncertainty: 'Trend based on 5-minute rolling window'
+          uncertainty: 'Trend based on 5-minute rolling window',
         };
 
         recordDecision(decision);
@@ -317,7 +366,7 @@ function analyzeTrends(context: FactoryContext): AIDecision | null {
       if (hasRecentDecision(machine.id, 'prediction', 180000)) continue;
 
       const decision: AIDecision = {
-        id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: generateDecisionId(),
         timestamp: new Date(),
         type: 'prediction',
         action: `Vibration trending upward on ${machine.name} - bearing analysis recommended`,
@@ -328,7 +377,7 @@ function analyzeTrends(context: FactoryContext): AIDecision | null {
         status: 'pending',
         triggeredBy: 'prediction',
         priority: 'low',
-        uncertainty: 'Requires physical inspection to confirm wear pattern'
+        uncertainty: 'Requires physical inspection to confirm wear pattern',
       };
 
       recordDecision(decision);
@@ -352,43 +401,52 @@ function detectCrossMachinePatterns(context: FactoryContext): AIDecision | null 
   if (machines.length < 3) return null;
 
   // Group machines by type for correlation analysis
-  const machinesByType = machines.reduce((acc, m) => {
-    if (!acc[m.type]) acc[m.type] = [];
-    acc[m.type].push(m);
-    return acc;
-  }, {} as Record<string, MachineData[]>);
+  const machinesByType = machines.reduce(
+    (acc, m) => {
+      if (!acc[m.type]) acc[m.type] = [];
+      acc[m.type].push(m);
+      return acc;
+    },
+    {} as Record<string, MachineData[]>
+  );
 
   // Check for temperature clusters (multiple machines running hot)
-  const hotMachines = machines.filter(m => m.metrics.temperature > 55);
+  const hotMachines = machines.filter((m) => m.metrics.temperature > 55);
   if (hotMachines.length >= 3) {
-    const avgTemp = hotMachines.reduce((sum, m) => sum + m.metrics.temperature, 0) / hotMachines.length;
+    const avgTemp =
+      hotMachines.reduce((sum, m) => sum + m.metrics.temperature, 0) / hotMachines.length;
 
     // Check if this is a new pattern
     const existingPattern = aiMemory.crossMachinePatterns.find(
-      p => p.pattern === 'temperature_cluster' && now - p.timestamp < 180000
+      (p) => p.pattern === 'temperature_cluster' && now - p.timestamp < 180000
     );
 
     if (!existingPattern) {
       const pattern: CrossMachinePattern = {
         pattern: 'temperature_cluster',
-        affectedMachines: hotMachines.map(m => m.id),
+        affectedMachines: hotMachines.map((m) => m.id),
         severity: avgTemp > 65 ? 'high' : avgTemp > 58 ? 'medium' : 'low',
         possibleCause: 'Ambient temperature, grain moisture content, or HVAC issue',
-        timestamp: now
+        timestamp: now,
       };
       aiMemory.crossMachinePatterns.push(pattern);
 
-      // Clean old patterns
+      // Clean old patterns with hard count limit for memory safety
       aiMemory.crossMachinePatterns = aiMemory.crossMachinePatterns.filter(
-        p => now - p.timestamp < 600000
+        (p) => now - p.timestamp < 600000
       );
+      if (aiMemory.crossMachinePatterns.length > MAX_CROSS_MACHINE_PATTERNS) {
+        aiMemory.crossMachinePatterns = aiMemory.crossMachinePatterns.slice(
+          -MAX_CROSS_MACHINE_PATTERNS
+        );
+      }
 
       const decision: AIDecision = {
-        id: `ai-${now}-${Math.random().toString(36).substr(2, 9)}`,
+        id: generateDecisionId(),
         timestamp: new Date(),
         type: 'prediction',
         action: `Cross-system temperature anomaly detected - ${hotMachines.length} machines running warm`,
-        reasoning: `Average temperature ${avgTemp.toFixed(1)}C across ${hotMachines.map(m => m.name).join(', ')}. Pattern suggests systemic issue rather than individual machine failure.`,
+        reasoning: `Average temperature ${avgTemp.toFixed(1)}C across ${hotMachines.map((m) => m.name).join(', ')}. Pattern suggests systemic issue rather than individual machine failure.`,
         confidence: calculateConfidence('prediction', context, 'high'),
         impact: 'Identifying root cause prevents multiple machine interventions',
         status: 'pending',
@@ -397,8 +455,8 @@ function detectCrossMachinePatterns(context: FactoryContext): AIDecision | null 
         alternatives: [
           { action: 'Check ambient temperature sensors', tradeoff: 'May be environmental' },
           { action: 'Review grain moisture levels', tradeoff: 'Affects grinding friction' },
-          { action: 'Inspect HVAC system', tradeoff: 'Cooling capacity may be insufficient' }
-        ]
+          { action: 'Inspect HVAC system', tradeoff: 'Cooling capacity may be insufficient' },
+        ],
       };
 
       recordDecision(decision);
@@ -407,35 +465,35 @@ function detectCrossMachinePatterns(context: FactoryContext): AIDecision | null 
   }
 
   // Check for vibration clusters (bearing issues often appear together after maintenance batches)
-  const highVibrationMachines = machines.filter(m =>
-    m.type === MachineType.ROLLER_MILL && m.metrics.vibration > 3.0
+  const highVibrationMachines = machines.filter(
+    (m) => m.type === MachineType.ROLLER_MILL && m.metrics.vibration > 3.0
   );
   if (highVibrationMachines.length >= 2) {
     const existingPattern = aiMemory.crossMachinePatterns.find(
-      p => p.pattern === 'vibration_cluster' && now - p.timestamp < 300000
+      (p) => p.pattern === 'vibration_cluster' && now - p.timestamp < 300000
     );
 
     if (!existingPattern) {
       aiMemory.crossMachinePatterns.push({
         pattern: 'vibration_cluster',
-        affectedMachines: highVibrationMachines.map(m => m.id),
+        affectedMachines: highVibrationMachines.map((m) => m.id),
         severity: 'medium',
         possibleCause: 'Common maintenance batch or supply chain issue',
-        timestamp: now
+        timestamp: now,
       });
 
       const decision: AIDecision = {
-        id: `ai-${now}-${Math.random().toString(36).substr(2, 9)}`,
+        id: generateDecisionId(),
         timestamp: new Date(),
         type: 'prediction',
         action: `Correlated vibration pattern on ${highVibrationMachines.length} roller mills`,
-        reasoning: `Mills ${highVibrationMachines.map(m => m.name).join(', ')} showing similar vibration increase. May indicate common bearing batch or lubrication issue.`,
+        reasoning: `Mills ${highVibrationMachines.map((m) => m.name).join(', ')} showing similar vibration increase. May indicate common bearing batch or lubrication issue.`,
         confidence: calculateConfidence('prediction', context, 'medium'),
         impact: 'Batch inspection more efficient than individual checks',
         status: 'pending',
         triggeredBy: 'prediction',
         priority: 'medium',
-        uncertainty: 'Correlation does not imply causation - physical inspection needed'
+        uncertainty: 'Correlation does not imply causation - physical inspection needed',
       };
 
       recordDecision(decision);
@@ -447,39 +505,39 @@ function detectCrossMachinePatterns(context: FactoryContext): AIDecision | null 
   for (const [type, typeMachines] of Object.entries(machinesByType)) {
     if (typeMachines.length < 2) continue;
 
-    const loads = typeMachines.map(m => m.metrics.load);
+    const loads = typeMachines.map((m) => m.metrics.load);
     const avgLoad = loads.reduce((a, b) => a + b, 0) / loads.length;
     const maxDiff = Math.max(...loads) - Math.min(...loads);
 
     if (maxDiff > 40 && avgLoad > 60) {
-      const overloaded = typeMachines.filter(m => m.metrics.load > avgLoad + 15);
-      const underloaded = typeMachines.filter(m => m.metrics.load < avgLoad - 15);
+      const overloaded = typeMachines.filter((m) => m.metrics.load > avgLoad + 15);
+      const underloaded = typeMachines.filter((m) => m.metrics.load < avgLoad - 15);
 
       if (overloaded.length > 0 && underloaded.length > 0) {
         const existingPattern = aiMemory.crossMachinePatterns.find(
-          p => p.pattern === 'load_imbalance' && now - p.timestamp < 120000
+          (p) => p.pattern === 'load_imbalance' && now - p.timestamp < 120000
         );
 
         if (!existingPattern) {
           aiMemory.crossMachinePatterns.push({
             pattern: 'load_imbalance',
-            affectedMachines: [...overloaded, ...underloaded].map(m => m.id),
+            affectedMachines: [...overloaded, ...underloaded].map((m) => m.id),
             severity: maxDiff > 50 ? 'high' : 'medium',
             possibleCause: 'Suboptimal routing or scheduling',
-            timestamp: now
+            timestamp: now,
           });
 
           const decision: AIDecision = {
-            id: `ai-${now}-${Math.random().toString(36).substr(2, 9)}`,
+            id: generateDecisionId(),
             timestamp: new Date(),
             type: 'optimization',
             action: `Load imbalance detected - rebalancing ${type} workload`,
-            reasoning: `${overloaded.map(m => m.name).join(', ')} overloaded while ${underloaded.map(m => m.name).join(', ')} underutilized. ${maxDiff.toFixed(0)}% load differential.`,
+            reasoning: `${overloaded.map((m) => m.name).join(', ')} overloaded while ${underloaded.map((m) => m.name).join(', ')} underutilized. ${maxDiff.toFixed(0)}% load differential.`,
             confidence: calculateConfidence('optimization', context),
             impact: `Balancing extends equipment life and improves throughput by ~${Math.round(maxDiff / 4)}%`,
             status: 'pending',
             triggeredBy: 'metric',
-            priority: 'medium'
+            priority: 'medium',
           };
 
           recordDecision(decision);
@@ -507,7 +565,7 @@ function detectAnomalies(context: FactoryContext): AIDecision | null {
     const metrics: Array<{ key: 'temperature' | 'vibration' | 'load'; value: number }> = [
       { key: 'temperature', value: machine.metrics.temperature },
       { key: 'vibration', value: machine.metrics.vibration },
-      { key: 'load', value: machine.metrics.load }
+      { key: 'load', value: machine.metrics.load },
     ];
 
     for (const { key, value } of metrics) {
@@ -517,9 +575,10 @@ function detectAnomalies(context: FactoryContext): AIDecision | null {
       if (!trendData || trendData.history.length < 10) continue;
 
       // Calculate mean and standard deviation
-      const values = trendData.history.map(h => h.value);
+      const values = trendData.history.map((h) => h.value);
       const mean = values.reduce((a, b) => a + b, 0) / values.length;
-      const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+      const variance =
+        values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
       const stdDev = Math.sqrt(variance);
 
       if (stdDev === 0) continue;
@@ -531,7 +590,7 @@ function detectAnomalies(context: FactoryContext): AIDecision | null {
       if (zScore > 2.5) {
         // Check if we already flagged this recently
         const recentAnomaly = aiMemory.anomalyHistory.find(
-          a => a.machineId === machine.id && a.metric === key && now - a.timestamp < 60000
+          (a) => a.machineId === machine.id && a.metric === key && now - a.timestamp < 60000
         );
 
         if (recentAnomaly) continue;
@@ -543,20 +602,21 @@ function detectAnomalies(context: FactoryContext): AIDecision | null {
           mean,
           stdDev,
           zScore,
-          timestamp: now
+          timestamp: now,
         };
         aiMemory.anomalyHistory.push(anomaly);
 
-        // Keep only recent anomalies
-        aiMemory.anomalyHistory = aiMemory.anomalyHistory.filter(
-          a => now - a.timestamp < 300000
-        );
+        // Keep only recent anomalies with hard count limit for memory safety
+        aiMemory.anomalyHistory = aiMemory.anomalyHistory.filter((a) => now - a.timestamp < 300000);
+        if (aiMemory.anomalyHistory.length > MAX_ANOMALY_HISTORY) {
+          aiMemory.anomalyHistory = aiMemory.anomalyHistory.slice(-MAX_ANOMALY_HISTORY);
+        }
 
         const direction = value > mean ? 'above' : 'below';
         const severity = zScore > 3.5 ? 'critical' : zScore > 3 ? 'high' : 'medium';
 
         const decision: AIDecision = {
-          id: `ai-${now}-${Math.random().toString(36).substr(2, 9)}`,
+          id: generateDecisionId(),
           timestamp: new Date(),
           type: 'prediction',
           action: `Statistical anomaly: ${machine.name} ${key} is ${zScore.toFixed(1)}σ ${direction} normal`,
@@ -567,7 +627,7 @@ function detectAnomalies(context: FactoryContext): AIDecision | null {
           status: 'pending',
           triggeredBy: 'prediction',
           priority: severity === 'critical' ? 'critical' : severity === 'high' ? 'high' : 'medium',
-          uncertainty: `Based on ${values.length} data points over ~5 minutes`
+          uncertainty: `Based on ${values.length} data points over ~5 minutes`,
         };
 
         recordDecision(decision);
@@ -590,7 +650,7 @@ function recordDecisionOutcome(decision: AIDecision, success: boolean): void {
     success,
     timestamp: Date.now(),
     confidence: decision.confidence,
-    actualOutcome: decision.outcome
+    actualOutcome: decision.outcome,
   };
 
   aiMemory.decisionOutcomes.push(outcome);
@@ -610,11 +670,10 @@ function recordDecisionOutcome(decision: AIDecision, success: boolean): void {
   const typeStats = aiMemory.impactStats.byType[decision.type];
   if (typeStats) {
     typeStats.count++;
-    const typeOutcomes = aiMemory.decisionOutcomes.filter(o => o.type === decision.type);
-    const typeSuccesses = typeOutcomes.filter(o => o.success).length;
-    typeStats.successRate = typeOutcomes.length > 0
-      ? Math.round((typeSuccesses / typeOutcomes.length) * 100)
-      : 0;
+    const typeOutcomes = aiMemory.decisionOutcomes.filter((o) => o.type === decision.type);
+    const typeSuccesses = typeOutcomes.filter((o) => o.success).length;
+    typeStats.successRate =
+      typeOutcomes.length > 0 ? Math.round((typeSuccesses / typeOutcomes.length) * 100) : 0;
   }
 
   // Track prevented shutdowns (maintenance decisions that succeeded on critical machines)
@@ -629,13 +688,15 @@ function recordDecisionOutcome(decision: AIDecision, success: boolean): void {
 }
 
 function updateConfidenceAdjustment(type: AIDecision['type']): void {
-  const typeOutcomes = aiMemory.decisionOutcomes.filter(o => o.type === type);
+  const typeOutcomes = aiMemory.decisionOutcomes.filter((o) => o.type === type);
   if (typeOutcomes.length < 5) return;
 
   // Calculate calibration error: predicted confidence vs actual success rate
   const recentOutcomes = typeOutcomes.slice(-20);
-  const avgConfidence = recentOutcomes.reduce((sum, o) => sum + o.confidence, 0) / recentOutcomes.length;
-  const actualSuccessRate = recentOutcomes.filter(o => o.success).length / recentOutcomes.length * 100;
+  const avgConfidence =
+    recentOutcomes.reduce((sum, o) => sum + o.confidence, 0) / recentOutcomes.length;
+  const actualSuccessRate =
+    (recentOutcomes.filter((o) => o.success).length / recentOutcomes.length) * 100;
 
   // Adjustment: if we're overconfident, reduce confidence for future decisions
   // If underconfident, increase it
@@ -654,7 +715,7 @@ function getLearnedConfidenceAdjustment(type: AIDecision['type']): number {
 function updateProductionTracking(context: FactoryContext): void {
   // Update current production based on throughput
   const hourlyThroughput = context.metrics.throughput; // kg/hr
-  aiMemory.productionTargets.current += hourlyThroughput / 3600 * 6; // Assume 6 second tick
+  aiMemory.productionTargets.current += (hourlyThroughput / 3600) * 6; // Assume 6 second tick
 }
 
 function generateProductionAwareDecision(context: FactoryContext): AIDecision | null {
@@ -662,14 +723,13 @@ function generateProductionAwareDecision(context: FactoryContext): AIDecision | 
   if (now - (aiMemory.lastAnalysisTime.production || 0) < 60000) return null;
   aiMemory.lastAnalysisTime.production = now;
 
-  const { shift, current, daily } = {
+  const { shift, current } = {
     shift: aiMemory.productionTargets.shift,
     current: aiMemory.productionTargets.current,
-    daily: aiMemory.productionTargets.daily
   };
 
   // Calculate shift progress
-  const shiftProgress = current / shift * 100;
+  const shiftProgress = (current / shift) * 100;
   const gameHour = context.gameTime;
   const shiftHoursPassed = getShiftHoursPassed(gameHour, context.currentShift);
   const expectedProgress = (shiftHoursPassed / 8) * 100;
@@ -677,21 +737,21 @@ function generateProductionAwareDecision(context: FactoryContext): AIDecision | 
   // If we're significantly behind target
   if (shiftProgress < expectedProgress - 15 && expectedProgress > 30) {
     const decision: AIDecision = {
-      id: `ai-${now}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateDecisionId(),
       timestamp: new Date(),
       type: 'optimization',
       action: 'Production falling behind shift target - recommending throughput optimization',
       reasoning: `Current: ${shiftProgress.toFixed(0)}% of shift target, Expected: ${expectedProgress.toFixed(0)}%. Gap of ${(expectedProgress - shiftProgress).toFixed(0)}%.`,
       confidence: calculateConfidence('optimization', context),
-      impact: `Closing gap requires ${((expectedProgress - shiftProgress) / 100 * shift / (8 - shiftHoursPassed)).toFixed(0)} kg/hr increase`,
+      impact: `Closing gap requires ${((((expectedProgress - shiftProgress) / 100) * shift) / (8 - shiftHoursPassed)).toFixed(0)} kg/hr increase`,
       status: 'pending',
       triggeredBy: 'metric',
       priority: shiftProgress < expectedProgress - 25 ? 'high' : 'medium',
       alternatives: [
         { action: 'Increase mill feed rates', tradeoff: 'May impact quality slightly' },
         { action: 'Optimize packer cycle times', tradeoff: 'Downstream focus' },
-        { action: 'Accept reduced target', tradeoff: 'Preserves quality' }
-      ]
+        { action: 'Accept reduced target', tradeoff: 'Preserves quality' },
+      ],
     };
 
     recordDecision(decision);
@@ -707,7 +767,7 @@ function getShiftHoursPassed(gameHour: number, shift: 'morning' | 'afternoon' | 
 
   if (shift === 'night') {
     if (gameHour >= 22) return gameHour - 22;
-    return (24 - 22) + gameHour; // After midnight
+    return 24 - 22 + gameHour; // After midnight
   }
 
   return Math.max(0, Math.min(8, gameHour - start));
@@ -729,13 +789,15 @@ function generateMaintenanceWindowDecision(context: FactoryContext): AIDecision 
   // Check if we're in or approaching a low production window
   const gameHour = Math.floor(context.gameTime);
   const isLowPeriod = isLowProductionPeriod(context.gameTime);
-  const nextLowHour = aiMemory.lowProductionHours.find(h => h > gameHour) || aiMemory.lowProductionHours[0];
-  const hoursUntilLow = nextLowHour > gameHour ? nextLowHour - gameHour : (24 - gameHour) + nextLowHour;
+  const nextLowHour =
+    aiMemory.lowProductionHours.find((h) => h > gameHour) || aiMemory.lowProductionHours[0];
+  const hoursUntilLow =
+    nextLowHour > gameHour ? nextLowHour - gameHour : 24 - gameHour + nextLowHour;
 
   // Find machines that need maintenance but aren't critical
-  const maintenanceCandidates = context.machines.filter(m =>
-    m.metrics.vibration > 2.5 || m.metrics.temperature > 55 || m.metrics.load > 90
-  ).filter(m => m.status !== 'critical');
+  const maintenanceCandidates = context.machines
+    .filter((m) => m.metrics.vibration > 2.5 || m.metrics.temperature > 55 || m.metrics.load > 90)
+    .filter((m) => m.status !== 'critical');
 
   if (maintenanceCandidates.length === 0) return null;
 
@@ -745,7 +807,7 @@ function generateMaintenanceWindowDecision(context: FactoryContext): AIDecision 
 
     const candidate = maintenanceCandidates[0];
     const decision: AIDecision = {
-      id: `ai-${now}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateDecisionId(),
       timestamp: new Date(),
       type: 'maintenance',
       action: `Optimal maintenance window - scheduling ${candidate.name} service now`,
@@ -755,7 +817,7 @@ function generateMaintenanceWindowDecision(context: FactoryContext): AIDecision 
       machineId: candidate.id,
       status: 'pending',
       triggeredBy: 'schedule',
-      priority: 'medium'
+      priority: 'medium',
     };
 
     recordDecision(decision);
@@ -764,21 +826,21 @@ function generateMaintenanceWindowDecision(context: FactoryContext): AIDecision 
 
   // If we have candidates and low period is approaching, schedule ahead
   if (hoursUntilLow <= 2 && maintenanceCandidates.length > 0) {
-    const nonUrgent = maintenanceCandidates.filter(m => m.status !== 'warning');
+    const nonUrgent = maintenanceCandidates.filter((m) => m.status !== 'warning');
     if (nonUrgent.length > 0) {
       aiMemory.lastAnalysisTime.maintenanceWindow = now;
 
       const decision: AIDecision = {
-        id: `ai-${now}-${Math.random().toString(36).substr(2, 9)}`,
+        id: generateDecisionId(),
         timestamp: new Date(),
         type: 'prediction',
         action: `Scheduling ${nonUrgent.length} maintenance tasks for upcoming low-production window`,
-        reasoning: `Low-production period in ~${hoursUntilLow} hours. Pre-scheduling ${nonUrgent.map(m => m.name).join(', ')} for optimal timing.`,
+        reasoning: `Low-production period in ~${hoursUntilLow} hours. Pre-scheduling ${nonUrgent.map((m) => m.name).join(', ')} for optimal timing.`,
         confidence: calculateConfidence('prediction', context),
         impact: 'Proactive scheduling reduces production impact by 80%',
         status: 'pending',
         triggeredBy: 'schedule',
-        priority: 'low'
+        priority: 'low',
       };
 
       recordDecision(decision);
@@ -806,7 +868,7 @@ function generateWeatherDecision(context: FactoryContext): AIDecision | null {
 
   if (weather === 'storm') {
     const decision: AIDecision = {
-      id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateDecisionId(),
       timestamp: new Date(),
       type: 'safety',
       action: 'Storm protocol activated - securing outdoor operations',
@@ -817,8 +879,8 @@ function generateWeatherDecision(context: FactoryContext): AIDecision | null {
       triggeredBy: 'alert',
       priority: 'high',
       alternatives: [
-        { action: 'Partial shutdown only', tradeoff: 'Some operations continue at risk' }
-      ]
+        { action: 'Partial shutdown only', tradeoff: 'Some operations continue at risk' },
+      ],
     };
 
     recordDecision(decision);
@@ -828,7 +890,7 @@ function generateWeatherDecision(context: FactoryContext): AIDecision | null {
   if (weather === 'rain') {
     // Check for loading bay operations
     const decision: AIDecision = {
-      id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateDecisionId(),
       timestamp: new Date(),
       type: 'optimization',
       action: 'Rain detected - adjusting loading bay schedules',
@@ -837,7 +899,7 @@ function generateWeatherDecision(context: FactoryContext): AIDecision | null {
       impact: 'Maintaining safety standards while minimizing throughput impact',
       status: 'pending',
       triggeredBy: 'alert',
-      priority: 'medium'
+      priority: 'medium',
     };
 
     recordDecision(decision);
@@ -867,11 +929,11 @@ function generateDrillDecision(context: FactoryContext): AIDecision | null {
     aiMemory.drillPhase = 'alert';
     aiMemory.drillStartTime = now;
 
-    const supervisor = WORKER_ROSTER.find(w => w.role === 'Supervisor');
-    const safetyOfficer = WORKER_ROSTER.find(w => w.role === 'Safety Officer');
+    const supervisor = WORKER_ROSTER.find((w) => w.role === 'Supervisor');
+    const safetyOfficer = WORKER_ROSTER.find((w) => w.role === 'Safety Officer');
 
     const decision: AIDecision = {
-      id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateDecisionId(),
       timestamp: new Date(),
       type: 'safety',
       action: 'EMERGENCY DRILL INITIATED - All personnel to designated assembly points',
@@ -881,7 +943,7 @@ function generateDrillDecision(context: FactoryContext): AIDecision | null {
       workerId: safetyOfficer?.id || supervisor?.id,
       status: 'in_progress',
       triggeredBy: 'user',
-      priority: 'critical'
+      priority: 'critical',
     };
 
     recordDecision(decision);
@@ -895,7 +957,7 @@ function generateDrillDecision(context: FactoryContext): AIDecision | null {
     aiMemory.drillPhase = 'evacuation';
 
     const decision: AIDecision = {
-      id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateDecisionId(),
       timestamp: new Date(),
       type: 'safety',
       action: 'Drill Phase 2: Evacuation in progress - monitoring zone clearance',
@@ -904,7 +966,7 @@ function generateDrillDecision(context: FactoryContext): AIDecision | null {
       impact: 'Tracking evacuation timing for procedure optimization',
       status: 'in_progress',
       triggeredBy: 'schedule',
-      priority: 'high'
+      priority: 'high',
     };
 
     recordDecision(decision);
@@ -915,7 +977,7 @@ function generateDrillDecision(context: FactoryContext): AIDecision | null {
     aiMemory.drillPhase = 'assembly';
 
     const decision: AIDecision = {
-      id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateDecisionId(),
       timestamp: new Date(),
       type: 'safety',
       action: 'Drill Phase 3: Assembly complete - conducting headcount',
@@ -924,7 +986,7 @@ function generateDrillDecision(context: FactoryContext): AIDecision | null {
       impact: `Evacuation time: ${Math.round(elapsed / 1000)}s - within target parameters`,
       status: 'in_progress',
       triggeredBy: 'schedule',
-      priority: 'medium'
+      priority: 'medium',
     };
 
     recordDecision(decision);
@@ -935,10 +997,11 @@ function generateDrillDecision(context: FactoryContext): AIDecision | null {
     aiMemory.drillPhase = 'review';
 
     const evacuationTime = Math.round((elapsed - 15000) / 1000);
-    const rating = evacuationTime < 20 ? 'Excellent' : evacuationTime < 30 ? 'Good' : 'Needs Improvement';
+    const rating =
+      evacuationTime < 20 ? 'Excellent' : evacuationTime < 30 ? 'Good' : 'Needs Improvement';
 
     const decision: AIDecision = {
-      id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateDecisionId(),
       timestamp: new Date(),
       type: 'safety',
       action: `DRILL COMPLETE - Performance Rating: ${rating}`,
@@ -948,7 +1011,7 @@ function generateDrillDecision(context: FactoryContext): AIDecision | null {
       status: 'completed',
       outcome: `${rating} - All objectives met`,
       triggeredBy: 'schedule',
-      priority: 'low'
+      priority: 'low',
     };
 
     recordDecision(decision);
@@ -972,7 +1035,7 @@ function analyzeHeatMap(context: FactoryContext): AIDecision | null {
   aiMemory.lastAnalysisTime.heatmap = now;
 
   // Find high-intensity clusters (congestion)
-  const hotspots = heatMapData.filter(p => p.intensity > 5);
+  const hotspots = heatMapData.filter((p) => p.intensity > 5);
 
   if (hotspots.length === 0) {
     aiMemory.congestionHotspots = [];
@@ -983,8 +1046,8 @@ function analyzeHeatMap(context: FactoryContext): AIDecision | null {
   const clusters: Array<{ x: number; z: number; count: number; maxIntensity: number }> = [];
 
   for (const point of hotspots) {
-    const existingCluster = clusters.find(c =>
-      Math.abs(c.x - point.x) < 5 && Math.abs(c.z - point.z) < 5
+    const existingCluster = clusters.find(
+      (c) => Math.abs(c.x - point.x) < 5 && Math.abs(c.z - point.z) < 5
     );
 
     if (existingCluster) {
@@ -996,24 +1059,33 @@ function analyzeHeatMap(context: FactoryContext): AIDecision | null {
   }
 
   // Find most severe congestion
-  const worstCluster = clusters.reduce((a, b) => a.maxIntensity > b.maxIntensity ? a : b, clusters[0]);
+  const worstCluster = clusters.reduce(
+    (a, b) => (a.maxIntensity > b.maxIntensity ? a : b),
+    clusters[0]
+  );
 
   if (!worstCluster || worstCluster.maxIntensity < 6) return null;
 
   const zoneName = getZoneName(worstCluster.x, worstCluster.z);
-  const severity = worstCluster.maxIntensity > 8 ? 'high' : worstCluster.maxIntensity > 6 ? 'medium' : 'low';
+  const severity =
+    worstCluster.maxIntensity > 8 ? 'high' : worstCluster.maxIntensity > 6 ? 'medium' : 'low';
 
   // Update stored hotspots
-  aiMemory.congestionHotspots = clusters.map(c => ({
+  aiMemory.congestionHotspots = clusters.map((c) => ({
     x: c.x,
     z: c.z,
-    severity: c.maxIntensity > 8 ? 'high' as const : c.maxIntensity > 6 ? 'medium' as const : 'low' as const,
-    lastAnalyzed: now
+    severity:
+      c.maxIntensity > 8
+        ? ('high' as const)
+        : c.maxIntensity > 6
+          ? ('medium' as const)
+          : ('low' as const),
+    lastAnalyzed: now,
   }));
 
   if (severity === 'high') {
     const decision: AIDecision = {
-      id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateDecisionId(),
       timestamp: new Date(),
       type: 'optimization',
       action: `Traffic congestion detected in ${zoneName} - recommending route optimization`,
@@ -1025,8 +1097,8 @@ function analyzeHeatMap(context: FactoryContext): AIDecision | null {
       priority: 'medium',
       alternatives: [
         { action: 'Add temporary speed zone', tradeoff: 'Slower transit but safer' },
-        { action: 'Stagger break times', tradeoff: 'Reduces peak congestion' }
-      ]
+        { action: 'Stagger break times', tradeoff: 'Reduces peak congestion' },
+      ],
     };
 
     recordDecision(decision);
@@ -1052,31 +1124,24 @@ function getZoneName(x: number, z: number): string {
 function generateShiftChangeDecision(context: FactoryContext): AIDecision | null {
   const { currentShift, gameTime } = context;
 
-  // Detect shift transition
-  const shiftTimes = {
-    morning: { start: 6, end: 14 },
-    afternoon: { start: 14, end: 22 },
-    night: { start: 22, end: 6 }
-  };
-
   const currentHour = gameTime;
-  const isNearShiftEnd = (
+  const isNearShiftEnd =
     (currentShift === 'morning' && currentHour >= 13.5 && currentHour < 14.5) ||
     (currentShift === 'afternoon' && currentHour >= 21.5 && currentHour < 22.5) ||
-    (currentShift === 'night' && ((currentHour >= 5.5 && currentHour < 6.5) || currentHour >= 23.5 || currentHour < 0.5))
-  );
+    (currentShift === 'night' &&
+      ((currentHour >= 5.5 && currentHour < 6.5) || currentHour >= 23.5 || currentHour < 0.5));
 
   if (isNearShiftEnd && !aiMemory.shiftTransitionActive) {
     aiMemory.shiftTransitionActive = true;
     aiMemory.lastShift = currentShift;
 
-    const incomingShift = currentShift === 'morning' ? 'afternoon' :
-                          currentShift === 'afternoon' ? 'night' : 'morning';
+    const incomingShift =
+      currentShift === 'morning' ? 'afternoon' : currentShift === 'afternoon' ? 'night' : 'morning';
 
-    const supervisor = WORKER_ROSTER.find(w => w.role === 'Supervisor');
+    const supervisor = WORKER_ROSTER.find((w) => w.role === 'Supervisor');
 
     const decision: AIDecision = {
-      id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateDecisionId(),
       timestamp: new Date(),
       type: 'assignment',
       action: `Shift handover: Preparing ${incomingShift} shift briefing`,
@@ -1088,8 +1153,8 @@ function generateShiftChangeDecision(context: FactoryContext): AIDecision | null
       triggeredBy: 'schedule',
       priority: 'medium',
       alternatives: [
-        { action: 'Extended overlap period', tradeoff: 'Better handoff but higher labor cost' }
-      ]
+        { action: 'Extended overlap period', tradeoff: 'Better handoff but higher labor cost' },
+      ],
     };
 
     recordDecision(decision);
@@ -1101,7 +1166,7 @@ function generateShiftChangeDecision(context: FactoryContext): AIDecision | null
     aiMemory.shiftTransitionActive = false;
 
     const decision: AIDecision = {
-      id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateDecisionId(),
       timestamp: new Date(),
       type: 'optimization',
       action: `${currentShift.charAt(0).toUpperCase() + currentShift.slice(1)} shift active - initializing shift parameters`,
@@ -1110,7 +1175,7 @@ function generateShiftChangeDecision(context: FactoryContext): AIDecision | null
       impact: 'Optimal production ramp-up for new shift',
       status: 'pending',
       triggeredBy: 'schedule',
-      priority: 'low'
+      priority: 'low',
     };
 
     recordDecision(decision);
@@ -1135,7 +1200,7 @@ function generateFatigueDecision(context: FactoryContext): AIDecision | null {
     aiMemory.lastAnalysisTime.fatigue = now;
 
     const decision: AIDecision = {
-      id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateDecisionId(),
       timestamp: new Date(),
       type: 'optimization',
       action: 'Worker energy levels low - initiating rotating break schedule',
@@ -1145,7 +1210,7 @@ function generateFatigueDecision(context: FactoryContext): AIDecision | null {
       status: 'pending',
       triggeredBy: 'metric',
       priority: workerSatisfaction.averageEnergy < 25 ? 'high' : 'medium',
-      uncertainty: 'Individual worker energy levels may vary'
+      uncertainty: 'Individual worker energy levels may vary',
     };
 
     recordDecision(decision);
@@ -1157,7 +1222,7 @@ function generateFatigueDecision(context: FactoryContext): AIDecision | null {
     aiMemory.lastAnalysisTime.fatigue = now;
 
     const decision: AIDecision = {
-      id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateDecisionId(),
       timestamp: new Date(),
       type: 'optimization',
       action: 'Worker morale below target - recommending engagement activities',
@@ -1169,8 +1234,8 @@ function generateFatigueDecision(context: FactoryContext): AIDecision | null {
       priority: 'low',
       alternatives: [
         { action: 'Schedule team meeting', tradeoff: 'Brief production pause' },
-        { action: 'Extend break duration', tradeoff: 'Improved rest but less output' }
-      ]
+        { action: 'Extend break duration', tradeoff: 'Improved rest but less output' },
+      ],
     };
 
     recordDecision(decision);
@@ -1189,13 +1254,13 @@ function updatePredictiveSchedule(context: FactoryContext): void {
 
   // Clear expired predictions
   aiMemory.predictedEvents = aiMemory.predictedEvents.filter(
-    e => e.predictedTime.getTime() > now
+    (e) => e.predictedTime.getTime() > now
   );
 
   // Add shift change predictions
   const nextShiftTime = calculateNextShiftTime(context.gameTime);
   if (nextShiftTime) {
-    const existingShiftPrediction = aiMemory.predictedEvents.find(e => e.type === 'shift_change');
+    const existingShiftPrediction = aiMemory.predictedEvents.find((e) => e.type === 'shift_change');
     if (!existingShiftPrediction) {
       aiMemory.predictedEvents.push({
         id: `pred-shift-${now}`,
@@ -1203,7 +1268,7 @@ function updatePredictiveSchedule(context: FactoryContext): void {
         description: 'Upcoming shift change - prepare handover',
         predictedTime: nextShiftTime,
         confidence: 100,
-        priority: 'medium'
+        priority: 'medium',
       });
     }
   }
@@ -1214,7 +1279,9 @@ function updatePredictiveSchedule(context: FactoryContext): void {
     if (tempTrend && tempTrend.trend === 'rising' && tempTrend.rateOfChange > 0.5) {
       const minutesUntilWarning = (65 - machine.metrics.temperature) / tempTrend.rateOfChange;
       if (minutesUntilWarning > 5 && minutesUntilWarning < 60) {
-        const existingPred = aiMemory.predictedEvents.find(e => e.machineId === machine.id && e.type === 'maintenance');
+        const existingPred = aiMemory.predictedEvents.find(
+          (e) => e.machineId === machine.id && e.type === 'maintenance'
+        );
         if (!existingPred) {
           aiMemory.predictedEvents.push({
             id: `pred-maint-${machine.id}-${now}`,
@@ -1223,7 +1290,7 @@ function updatePredictiveSchedule(context: FactoryContext): void {
             predictedTime: new Date(now + minutesUntilWarning * 60000),
             confidence: 70 + Math.min(20, tempTrend.history.length * 2),
             machineId: machine.id,
-            priority: minutesUntilWarning < 15 ? 'high' : 'medium'
+            priority: minutesUntilWarning < 15 ? 'high' : 'medium',
           });
         }
       }
@@ -1232,7 +1299,7 @@ function updatePredictiveSchedule(context: FactoryContext): void {
 
   // Add weather-based predictions
   if (context.weather === 'cloudy') {
-    const existingWeatherPred = aiMemory.predictedEvents.find(e => e.type === 'weather');
+    const existingWeatherPred = aiMemory.predictedEvents.find((e) => e.type === 'weather');
     if (!existingWeatherPred) {
       aiMemory.predictedEvents.push({
         id: `pred-weather-${now}`,
@@ -1240,15 +1307,18 @@ function updatePredictiveSchedule(context: FactoryContext): void {
         description: 'Possible rain - monitor loading bay operations',
         predictedTime: new Date(now + 15 * 60000),
         confidence: 60,
-        priority: 'low'
+        priority: 'low',
       });
     }
   }
 
   // Add fatigue predictions
-  if (context.workerSatisfaction.averageEnergy < 60 && context.workerSatisfaction.averageEnergy > 30) {
+  if (
+    context.workerSatisfaction.averageEnergy < 60 &&
+    context.workerSatisfaction.averageEnergy > 30
+  ) {
     const minutesToCritical = (context.workerSatisfaction.averageEnergy - 25) * 2;
-    const existingFatiguePred = aiMemory.predictedEvents.find(e => e.type === 'fatigue');
+    const existingFatiguePred = aiMemory.predictedEvents.find((e) => e.type === 'fatigue');
     if (!existingFatiguePred) {
       aiMemory.predictedEvents.push({
         id: `pred-fatigue-${now}`,
@@ -1256,7 +1326,7 @@ function updatePredictiveSchedule(context: FactoryContext): void {
         description: 'Worker energy declining - breaks needed soon',
         predictedTime: new Date(now + minutesToCritical * 60000),
         confidence: 75,
-        priority: 'medium'
+        priority: 'medium',
       });
     }
   }
@@ -1282,7 +1352,7 @@ function calculateNextShiftTime(currentGameTime: number): Date | null {
   }
 
   // Next shift is at 6am tomorrow
-  const hoursUntil = (24 - currentGameTime) + 6;
+  const hoursUntil = 24 - currentGameTime + 6;
   const realMinutesUntil = (hoursUntil / 24) * 10;
   return new Date(now + realMinutesUntil * 60000);
 }
@@ -1302,11 +1372,21 @@ function calculateConfidence(
   confidence += qualityBonus;
 
   switch (type) {
-    case 'prediction': confidence -= 12; break;
-    case 'safety': confidence += 8; break;
-    case 'maintenance': confidence += 5; break;
-    case 'optimization': confidence -= 5; break;
-    case 'assignment': confidence += 3; break;
+    case 'prediction':
+      confidence -= 12;
+      break;
+    case 'safety':
+      confidence += 8;
+      break;
+    case 'maintenance':
+      confidence += 5;
+      break;
+    case 'optimization':
+      confidence -= 5;
+      break;
+    case 'assignment':
+      confidence += 3;
+      break;
   }
 
   if (context.emergencyActive && !context.emergencyDrillMode) confidence -= 10;
@@ -1336,14 +1416,14 @@ function calculateConfidence(
 function findBestWorkerForTask(
   context: FactoryContext,
   taskType: 'maintenance' | 'safety' | 'quality' | 'general',
-  nearMachineId?: string
+  _nearMachineId?: string
 ): WorkerData | null {
-  const availableWorkers = context.workers.filter(w =>
-    w.status === 'idle' || w.status === 'working'
+  const availableWorkers = context.workers.filter(
+    (w) => w.status === 'idle' || w.status === 'working'
   );
 
   if (availableWorkers.length === 0) {
-    const rosterWorkers = WORKER_ROSTER.filter(w => {
+    const rosterWorkers = WORKER_ROSTER.filter((w) => {
       const recentAssignment = hasRecentDecision(w.id, 'assignment', 30000);
       return !recentAssignment;
     });
@@ -1354,26 +1434,37 @@ function findBestWorkerForTask(
       maintenance: ['Maintenance', 'Engineer'],
       safety: ['Safety Officer', 'Supervisor'],
       quality: ['Quality Control', 'Engineer'],
-      general: ['Operator', 'Engineer', 'Maintenance']
+      general: ['Operator', 'Engineer', 'Maintenance'],
     };
 
     const preferredRoles = roleMatch[taskType];
-    const matchedWorker = rosterWorkers.find(w => preferredRoles.includes(w.role));
+    const matchedRosterWorker =
+      rosterWorkers.find((w) => preferredRoles.includes(w.role)) || rosterWorkers[0];
 
-    return (matchedWorker || rosterWorkers[0]) as unknown as WorkerData;
+    // Convert roster worker to full WorkerData by adding missing fields with defaults
+    if (matchedRosterWorker) {
+      const fullWorker: WorkerData = {
+        ...matchedRosterWorker,
+        position: [0, 0, 0] as [number, number, number],
+        direction: 1 as const,
+      };
+      return fullWorker;
+    }
+
+    return null;
   }
 
   const rolePreference: Record<typeof taskType, string[]> = {
     maintenance: ['Maintenance', 'Engineer'],
     safety: ['Safety Officer', 'Supervisor'],
     quality: ['Quality Control', 'Engineer'],
-    general: ['Operator', 'Engineer', 'Maintenance']
+    general: ['Operator', 'Engineer', 'Maintenance'],
   };
 
   // Consider average energy as proxy for fatigue
   const energyFactor = context.workerSatisfaction.averageEnergy / 100;
 
-  const scoredWorkers = availableWorkers.map(worker => {
+  const scoredWorkers = availableWorkers.map((worker) => {
     let score = 0;
 
     const preferredRoles = rolePreference[taskType];
@@ -1387,7 +1478,7 @@ function findBestWorkerForTask(
     score -= recentAssignments.length * 10;
 
     // Energy factor bonus
-    score *= (0.7 + energyFactor * 0.3);
+    score *= 0.7 + energyFactor * 0.3;
 
     return { worker, score };
   });
@@ -1413,13 +1504,17 @@ function analyzeMachines(context: FactoryContext): MachineIssue[] {
   for (const machine of context.machines) {
     if (machine.status === 'warning') {
       issues.push({
-        machine, issueType: 'status', severity: 'medium',
-        description: `${machine.name} showing warning status`
+        machine,
+        issueType: 'status',
+        severity: 'medium',
+        description: `${machine.name} showing warning status`,
       });
     } else if (machine.status === 'critical') {
       issues.push({
-        machine, issueType: 'status', severity: 'critical',
-        description: `${machine.name} in critical state`
+        machine,
+        issueType: 'status',
+        severity: 'critical',
+        description: `${machine.name} in critical state`,
       });
     }
 
@@ -1428,19 +1523,23 @@ function analyzeMachines(context: FactoryContext): MachineIssue[] {
       [MachineType.PLANSIFTER]: { warning: 40, critical: 50 },
       [MachineType.PACKER]: { warning: 35, critical: 45 },
       [MachineType.SILO]: { warning: 30, critical: 40 },
-      [MachineType.CONTROL_ROOM]: { warning: 28, critical: 35 }
+      [MachineType.CONTROL_ROOM]: { warning: 28, critical: 35 },
     };
 
     const thresholds = tempThresholds[machine.type] || { warning: 50, critical: 70 };
     if (machine.metrics.temperature >= thresholds.critical) {
       issues.push({
-        machine, issueType: 'temperature', severity: 'critical',
-        description: `${machine.name} temperature at ${machine.metrics.temperature.toFixed(1)}C - critical`
+        machine,
+        issueType: 'temperature',
+        severity: 'critical',
+        description: `${machine.name} temperature at ${machine.metrics.temperature.toFixed(1)}C - critical`,
       });
     } else if (machine.metrics.temperature >= thresholds.warning) {
       issues.push({
-        machine, issueType: 'temperature', severity: 'medium',
-        description: `${machine.name} temperature elevated at ${machine.metrics.temperature.toFixed(1)}C`
+        machine,
+        issueType: 'temperature',
+        severity: 'medium',
+        description: `${machine.name} temperature elevated at ${machine.metrics.temperature.toFixed(1)}C`,
       });
     }
 
@@ -1450,21 +1549,27 @@ function analyzeMachines(context: FactoryContext): MachineIssue[] {
 
       if (machine.metrics.vibration >= vibrationCritical) {
         issues.push({
-          machine, issueType: 'vibration', severity: 'high',
-          description: `${machine.name} vibration critical at ${machine.metrics.vibration.toFixed(2)}mm/s`
+          machine,
+          issueType: 'vibration',
+          severity: 'high',
+          description: `${machine.name} vibration critical at ${machine.metrics.vibration.toFixed(2)}mm/s`,
         });
       } else if (machine.metrics.vibration >= vibrationWarning) {
         issues.push({
-          machine, issueType: 'vibration', severity: 'medium',
-          description: `${machine.name} vibration elevated at ${machine.metrics.vibration.toFixed(2)}mm/s`
+          machine,
+          issueType: 'vibration',
+          severity: 'medium',
+          description: `${machine.name} vibration elevated at ${machine.metrics.vibration.toFixed(2)}mm/s`,
         });
       }
     }
 
     if (machine.metrics.load > 98) {
       issues.push({
-        machine, issueType: 'load', severity: 'medium',
-        description: `${machine.name} at ${machine.metrics.load.toFixed(1)}% capacity`
+        machine,
+        issueType: 'load',
+        severity: 'medium',
+        description: `${machine.name} at ${machine.metrics.load.toFixed(1)}% capacity`,
       });
     }
   }
@@ -1491,18 +1596,18 @@ function generateMaintenanceDecision(
     temperature: `Dispatching ${worker?.name || 'maintenance team'} to inspect cooling on ${issue.machine.name}`,
     vibration: `Scheduling bearing inspection on ${issue.machine.name}`,
     status: `Initiating diagnostic on ${issue.machine.name}`,
-    load: `Rebalancing load on ${issue.machine.name}`
+    load: `Rebalancing load on ${issue.machine.name}`,
   };
 
   const impactMap: Record<MachineIssue['issueType'], string> = {
     temperature: 'Preventing thermal damage',
     vibration: 'Extending bearing life 15-20%',
     status: 'Identifying root cause',
-    load: 'Reducing component stress'
+    load: 'Reducing component stress',
   };
 
   const decision: AIDecision = {
-    id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    id: generateDecisionId(),
     timestamp: new Date(),
     type: 'maintenance',
     action: actionMap[issue.issueType],
@@ -1513,12 +1618,16 @@ function generateMaintenanceDecision(
     workerId: worker?.id,
     status: 'pending',
     triggeredBy: 'metric',
-    priority: issue.severity === 'critical' ? 'critical' : issue.severity === 'high' ? 'high' : 'medium',
-    alternatives: issue.severity !== 'critical' ? [
-      { action: 'Continue monitoring', tradeoff: 'Risk of worsening' },
-      { action: 'Schedule for next shift', tradeoff: 'Delayed but less disruptive' }
-    ] : undefined,
-    uncertainty: issue.issueType === 'vibration' ? 'Depends on visual inspection' : undefined
+    priority:
+      issue.severity === 'critical' ? 'critical' : issue.severity === 'high' ? 'high' : 'medium',
+    alternatives:
+      issue.severity !== 'critical'
+        ? [
+            { action: 'Continue monitoring', tradeoff: 'Risk of worsening' },
+            { action: 'Schedule for next shift', tradeoff: 'Delayed but less disruptive' },
+          ]
+        : undefined,
+    uncertainty: issue.issueType === 'vibration' ? 'Depends on visual inspection' : undefined,
   };
 
   setCooldown(issue.machine.id, 60000);
@@ -1539,8 +1648,8 @@ function generateOptimizationDecision(context: FactoryContext): AIDecision | nul
   let uncertainty: string | undefined;
 
   if (efficiency < 90) {
-    const slowMachine = context.machines.find(m =>
-      m.type === MachineType.ROLLER_MILL && m.metrics.load < 75
+    const slowMachine = context.machines.find(
+      (m) => m.type === MachineType.ROLLER_MILL && m.metrics.load < 75
     );
 
     if (slowMachine) {
@@ -1550,7 +1659,7 @@ function generateOptimizationDecision(context: FactoryContext): AIDecision | nul
       impact = `Projected +${(95 - efficiency).toFixed(1)}% efficiency gain`;
       alternatives = [
         { action: 'Increase by 5%', tradeoff: 'Lower gain, lower risk' },
-        { action: 'Wait for shift change', tradeoff: 'Defer to incoming team' }
+        { action: 'Wait for shift change', tradeoff: 'Defer to incoming team' },
       ];
       uncertainty = 'Optimal rate depends on grain moisture';
     } else {
@@ -1559,7 +1668,9 @@ function generateOptimizationDecision(context: FactoryContext): AIDecision | nul
       impact = 'Targeting 95%+ efficiency';
     }
   } else if (throughput < 1300) {
-    const packers = context.machines.filter(m => m.type === MachineType.PACKER && m.status === 'running');
+    const packers = context.machines.filter(
+      (m) => m.type === MachineType.PACKER && m.status === 'running'
+    );
     if (packers.length > 0) {
       const packer = packers[0];
       machineId = packer.id;
@@ -1570,7 +1681,7 @@ function generateOptimizationDecision(context: FactoryContext): AIDecision | nul
       return null;
     }
   } else {
-    const sifters = context.machines.filter(m => m.type === MachineType.PLANSIFTER);
+    const sifters = context.machines.filter((m) => m.type === MachineType.PLANSIFTER);
     if (sifters.length > 0 && quality < 99.5) {
       const sifter = sifters[Math.floor(Math.random() * sifters.length)];
       machineId = sifter.id;
@@ -1584,16 +1695,19 @@ function generateOptimizationDecision(context: FactoryContext): AIDecision | nul
   }
 
   const decision: AIDecision = {
-    id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    id: generateDecisionId(),
     timestamp: new Date(),
     type: 'optimization',
-    action, reasoning,
+    action,
+    reasoning,
     confidence: calculateConfidence('optimization', context),
-    impact, machineId,
+    impact,
+    machineId,
     status: 'pending',
     triggeredBy: 'metric',
     priority: 'medium',
-    alternatives, uncertainty
+    alternatives,
+    uncertainty,
   };
 
   recordDecision(decision);
@@ -1605,7 +1719,8 @@ function generatePredictionDecision(context: FactoryContext): AIDecision | null 
   if (now - (aiMemory.lastAnalysisTime.prediction || 0) < 90000) return null;
   aiMemory.lastAnalysisTime.prediction = now;
 
-  const predictions: { machine: MachineData; reason: string; timeframe: string; impact: string }[] = [];
+  const predictions: { machine: MachineData; reason: string; timeframe: string; impact: string }[] =
+    [];
 
   for (const machine of context.machines) {
     if (machine.type === MachineType.ROLLER_MILL && machine.metrics.vibration > 2.5) {
@@ -1615,7 +1730,7 @@ function generatePredictionDecision(context: FactoryContext): AIDecision | null 
           machine,
           reason: `Bearing pattern indicates ${hoursRemaining}h remaining life`,
           timeframe: `${Math.ceil(hoursRemaining / 24)} days`,
-          impact: `Avoiding ${Math.round(2 + Math.random() * 4)}h unplanned downtime`
+          impact: `Avoiding ${Math.round(2 + Math.random() * 4)}h unplanned downtime`,
         });
       }
     }
@@ -1625,7 +1740,7 @@ function generatePredictionDecision(context: FactoryContext): AIDecision | null 
         machine,
         reason: `High load (${machine.metrics.load.toFixed(1)}%) accelerating wear`,
         timeframe: '1-2 weeks',
-        impact: 'Maintaining optimal performance'
+        impact: 'Maintaining optimal performance',
       });
     }
   }
@@ -1635,7 +1750,7 @@ function generatePredictionDecision(context: FactoryContext): AIDecision | null 
   const prediction = predictions[Math.floor(Math.random() * predictions.length)];
 
   const decision: AIDecision = {
-    id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    id: generateDecisionId(),
     timestamp: new Date(),
     type: 'prediction',
     action: `Scheduling preventive maintenance for ${prediction.machine.name} in ${prediction.timeframe}`,
@@ -1648,9 +1763,9 @@ function generatePredictionDecision(context: FactoryContext): AIDecision | null 
     priority: 'low',
     alternatives: [
       { action: 'Monitor only', tradeoff: 'Risk unplanned downtime' },
-      { action: 'Immediate inspection', tradeoff: 'Current disruption' }
+      { action: 'Immediate inspection', tradeoff: 'Current disruption' },
     ],
-    uncertainty: 'Based on historical patterns; timing may vary'
+    uncertainty: 'Based on historical patterns; timing may vary',
   };
 
   recordDecision(decision);
@@ -1666,7 +1781,7 @@ function generateSafetyDecision(context: FactoryContext): AIDecision | null {
     const safetyOfficer = findBestWorkerForTask(context, 'safety');
 
     const decision: AIDecision = {
-      id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: generateDecisionId(),
       timestamp: new Date(),
       type: 'safety',
       action: safetyOfficer
@@ -1678,7 +1793,7 @@ function generateSafetyDecision(context: FactoryContext): AIDecision | null {
       workerId: safetyOfficer?.id,
       status: 'pending',
       triggeredBy: 'alert',
-      priority: 'high'
+      priority: 'high',
     };
 
     if (safetyOfficer) setCooldown(safetyOfficer.id, 45000);
@@ -1689,19 +1804,26 @@ function generateSafetyDecision(context: FactoryContext): AIDecision | null {
   return null;
 }
 
-function generateAssignmentDecision(context: FactoryContext, issue?: MachineIssue): AIDecision | null {
+function generateAssignmentDecision(
+  context: FactoryContext,
+  issue?: MachineIssue
+): AIDecision | null {
   let targetMachine: MachineData | undefined;
   let taskDescription: string;
   let reasoning: string;
 
   if (issue) {
     targetMachine = issue.machine;
-    taskDescription = issue.issueType === 'vibration' ? 'bearing inspection' :
-                      issue.issueType === 'temperature' ? 'cooling check' : 'diagnostic';
+    taskDescription =
+      issue.issueType === 'vibration'
+        ? 'bearing inspection'
+        : issue.issueType === 'temperature'
+          ? 'cooling check'
+          : 'diagnostic';
     reasoning = issue.description;
   } else {
-    const machinesNeedingAttention = context.machines.filter(m =>
-      m.status === 'warning' || m.metrics.load > 95
+    const machinesNeedingAttention = context.machines.filter(
+      (m) => m.status === 'warning' || m.metrics.load > 95
     );
     if (machinesNeedingAttention.length === 0) return null;
     targetMachine = machinesNeedingAttention[0];
@@ -1713,7 +1835,7 @@ function generateAssignmentDecision(context: FactoryContext, issue?: MachineIssu
   if (!worker || isOnCooldown(worker.id)) return null;
 
   const decision: AIDecision = {
-    id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    id: generateDecisionId(),
     timestamp: new Date(),
     type: 'assignment',
     action: `Dispatching ${worker.name} to ${targetMachine?.name || 'Zone 2'} for ${taskDescription}`,
@@ -1724,7 +1846,7 @@ function generateAssignmentDecision(context: FactoryContext, issue?: MachineIssu
     workerId: worker.id,
     status: 'pending',
     triggeredBy: 'metric',
-    priority: issue?.severity === 'critical' ? 'high' : 'medium'
+    priority: issue?.severity === 'critical' ? 'high' : 'medium',
   };
 
   setCooldown(worker.id, 30000);
@@ -1736,12 +1858,14 @@ function generateAssignmentDecision(context: FactoryContext, issue?: MachineIssu
 // Decision Chain Management
 // ============================================================================
 
-function processDecisionChains(context: FactoryContext): AIDecision | null {
+function processDecisionChains(_context: FactoryContext): AIDecision | null {
   const now = Date.now();
 
   for (const [decisionId, chain] of aiMemory.pendingChains.entries()) {
     if (now >= chain.scheduledAt) {
-      const parentDecision = useMillStore.getState().aiDecisions.find(d => d.id === chain.parentId);
+      const parentDecision = useMillStore
+        .getState()
+        .aiDecisions.find((d) => d.id === chain.parentId);
       if (!parentDecision) {
         aiMemory.pendingChains.delete(decisionId);
         continue;
@@ -1750,12 +1874,32 @@ function processDecisionChains(context: FactoryContext): AIDecision | null {
       let followupDecision: AIDecision | null = null;
 
       switch (chain.nextStep) {
-        case 'progress':
+        case 'progress': {
+          // Calculate dynamic ETA based on task type and priority
+          const baseEtaSeconds =
+            parentDecision.priority === 'critical'
+              ? 45
+              : parentDecision.priority === 'high'
+                ? 75
+                : parentDecision.priority === 'medium'
+                  ? 120
+                  : 180;
+          // Add variance based on task type
+          const taskVariance =
+            parentDecision.type === 'maintenance'
+              ? 1.5
+              : parentDecision.type === 'safety'
+                ? 0.8
+                : 1.0;
+          const etaSeconds = Math.round(baseEtaSeconds * taskVariance);
+          const etaMinutes = Math.ceil(etaSeconds / 60);
+          const etaDisplay = etaSeconds < 60 ? `${etaSeconds} sec` : `${etaMinutes} min`;
+
           followupDecision = {
-            id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            id: generateDecisionId(),
             timestamp: new Date(),
             type: parentDecision.type,
-            action: `${parentDecision.action.replace('Dispatching', 'Worker en route:')} - ETA 2 min`,
+            action: `${parentDecision.action.replace('Dispatching', 'Worker en route:')} - ETA ${etaDisplay}`,
             reasoning: 'Task in progress',
             confidence: parentDecision.confidence + 5,
             impact: parentDecision.impact,
@@ -1764,20 +1908,23 @@ function processDecisionChains(context: FactoryContext): AIDecision | null {
             parentDecisionId: parentDecision.id,
             status: 'in_progress',
             triggeredBy: 'schedule',
-            priority: parentDecision.priority
+            priority: parentDecision.priority,
           };
 
+          // Schedule resolution based on calculated ETA
+          const resolutionDelay = etaSeconds * 1000 + Math.random() * 10000;
           aiMemory.pendingChains.set(followupDecision.id, {
             parentId: followupDecision.id,
             nextStep: 'resolution',
-            scheduledAt: now + 15000 + Math.random() * 20000
+            scheduledAt: now + resolutionDelay,
           });
           break;
+        }
 
-        case 'resolution':
+        case 'resolution': {
           const success = Math.random() > 0.1;
           followupDecision = {
-            id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            id: generateDecisionId(),
             timestamp: new Date(),
             type: parentDecision.type,
             action: success
@@ -1792,11 +1939,18 @@ function processDecisionChains(context: FactoryContext): AIDecision | null {
             status: 'completed',
             outcome: success ? 'Resolved' : 'Escalated',
             triggeredBy: 'schedule',
-            priority: success ? 'low' : 'medium'
+            priority: success ? 'low' : 'medium',
           };
 
-          useMillStore.getState().updateDecisionStatus(parentDecision.id, 'completed', success ? 'Resolved' : 'Escalated');
+          useMillStore
+            .getState()
+            .updateDecisionStatus(
+              parentDecision.id,
+              'completed',
+              success ? 'Resolved' : 'Escalated'
+            );
           break;
+        }
       }
 
       aiMemory.pendingChains.delete(decisionId);
@@ -1815,7 +1969,7 @@ function scheduleFollowup(decision: AIDecision, delayMs: number = 8000): void {
     aiMemory.pendingChains.set(decision.id, {
       parentId: decision.id,
       nextStep: 'progress',
-      scheduledAt: Date.now() + delayMs
+      scheduledAt: Date.now() + delayMs,
     });
   }
 }
@@ -1839,7 +1993,7 @@ function getFactoryContext(): FactoryContext {
     currentShift: store.currentShift,
     weather: store.weather,
     heatMapData: store.heatMapData,
-    workerSatisfaction: store.workerSatisfaction
+    workerSatisfaction: store.workerSatisfaction,
   };
 }
 
@@ -1876,7 +2030,10 @@ export function generateContextAwareDecision(forceType?: AIDecision['type']): AI
   // 2. Safety events
   if (!forceType || forceType === 'safety') {
     decision = generateSafetyDecision(context);
-    if (decision) { scheduleFollowup(decision); return decision; }
+    if (decision) {
+      scheduleFollowup(decision);
+      return decision;
+    }
   }
 
   // 3. Anomaly detection (statistical outliers)
@@ -1899,18 +2056,24 @@ export function generateContextAwareDecision(forceType?: AIDecision['type']): AI
 
   // 6. Machine issues
   const issues = analyzeMachines(context);
-  const criticalIssues = issues.filter(i => i.severity === 'critical' || i.severity === 'high');
+  const criticalIssues = issues.filter((i) => i.severity === 'critical' || i.severity === 'high');
 
   if (criticalIssues.length > 0 && (!forceType || forceType === 'maintenance')) {
     const worker = findBestWorkerForTask(context, 'maintenance', criticalIssues[0].machine.id);
     decision = generateMaintenanceDecision(criticalIssues[0], context, worker);
-    if (decision) { scheduleFollowup(decision); return decision; }
+    if (decision) {
+      scheduleFollowup(decision);
+      return decision;
+    }
   }
 
   // 7. Maintenance window optimization (schedule during low-production)
   if (!forceType || forceType === 'maintenance') {
     decision = generateMaintenanceWindowDecision(context);
-    if (decision) { scheduleFollowup(decision); return decision; }
+    if (decision) {
+      scheduleFollowup(decision);
+      return decision;
+    }
   }
 
   // 8. Shift changes
@@ -1939,10 +2102,13 @@ export function generateContextAwareDecision(forceType?: AIDecision['type']): AI
 
   // 12. Medium-priority assignments
   if (issues.length > 0 && (!forceType || forceType === 'assignment')) {
-    const mediumIssues = issues.filter(i => i.severity === 'medium');
+    const mediumIssues = issues.filter((i) => i.severity === 'medium');
     if (mediumIssues.length > 0) {
       decision = generateAssignmentDecision(context, mediumIssues[0]);
-      if (decision) { scheduleFollowup(decision); return decision; }
+      if (decision) {
+        scheduleFollowup(decision);
+        return decision;
+      }
     }
   }
 
@@ -1963,7 +2129,10 @@ export function generateContextAwareDecision(forceType?: AIDecision['type']): AI
   // 15. General assignments
   if (!forceType || forceType === 'assignment') {
     decision = generateAssignmentDecision(context);
-    if (decision) { scheduleFollowup(decision); return decision; }
+    if (decision) {
+      scheduleFollowup(decision);
+      return decision;
+    }
   }
 
   return null;
@@ -1973,7 +2142,7 @@ export function reactToAlert(alert: AlertData): AIDecision | null {
   const context = getFactoryContext();
 
   const machine = alert.machineId
-    ? context.machines.find(m => m.id === alert.machineId)
+    ? context.machines.find((m) => m.id === alert.machineId)
     : undefined;
 
   if (!machine) return null;
@@ -1982,7 +2151,7 @@ export function reactToAlert(alert: AlertData): AIDecision | null {
   const worker = findBestWorkerForTask(context, 'maintenance', machine.id);
 
   const decision: AIDecision = {
-    id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    id: generateDecisionId(),
     timestamp: new Date(),
     type: alert.type === 'critical' ? 'maintenance' : 'assignment',
     action: `Responding to: ${alert.title} - dispatching ${worker?.name || 'response team'} to ${machine.name}`,
@@ -1994,7 +2163,7 @@ export function reactToAlert(alert: AlertData): AIDecision | null {
     relatedAlertId: alert.id,
     status: 'pending',
     triggeredBy: 'alert',
-    priority: alert.type === 'critical' ? 'critical' : 'high'
+    priority: alert.type === 'critical' ? 'critical' : 'high',
   };
 
   if (worker) setCooldown(worker.id, 30000);
@@ -2020,15 +2189,39 @@ export function applyDecisionEffects(decision: AIDecision): void {
 }
 
 // ============================================================================
+// Deep Copy Utility (Issue 5 fix)
+// ============================================================================
+
+/**
+ * Creates a deep copy of an object to prevent mutation of internal state
+ * Uses structured clone for better performance and native support
+ */
+function deepCopy<T>(obj: T): T {
+  // Use structuredClone if available (Node 17+, modern browsers)
+  if (typeof structuredClone !== 'undefined') {
+    try {
+      return structuredClone(obj);
+    } catch {
+      // Fall back to JSON if structuredClone fails (e.g., functions, symbols)
+      return JSON.parse(JSON.stringify(obj));
+    }
+  }
+  // Fallback for older environments
+  return JSON.parse(JSON.stringify(obj));
+}
+
+// ============================================================================
 // Exports for UI
 // ============================================================================
 
 export function getPredictedEvents(): PredictedEvent[] {
-  return [...aiMemory.predictedEvents];
+  // Issue 5 Fix: Return deep copy to prevent UI mutation of internal state
+  return deepCopy(aiMemory.predictedEvents);
 }
 
 export function getCongestionHotspots() {
-  return [...aiMemory.congestionHotspots];
+  // Issue 5 Fix: Return deep copy to prevent UI mutation of internal state
+  return deepCopy(aiMemory.congestionHotspots);
 }
 
 export function getMetricTrends(): Map<string, TrendData> {
@@ -2043,7 +2236,7 @@ export function getAIMemoryState() {
     pendingChains: Object.fromEntries(aiMemory.pendingChains),
     predictedEvents: aiMemory.predictedEvents,
     congestionHotspots: aiMemory.congestionHotspots,
-    drillPhase: aiMemory.drillPhase
+    drillPhase: aiMemory.drillPhase,
   };
 }
 
@@ -2069,8 +2262,8 @@ export function resetShiftStats(): void {
       optimization: { count: 0, successRate: 0 },
       prediction: { count: 0, successRate: 0 },
       maintenance: { count: 0, successRate: 0 },
-      safety: { count: 0, successRate: 0 }
-    }
+      safety: { count: 0, successRate: 0 },
+    },
   };
   aiMemory.productionTargets.current = 0;
 }
@@ -2080,41 +2273,57 @@ export function getConfidenceAdjustments(): Record<AIDecision['type'], number> {
 }
 
 export function getCrossMachinePatterns(): CrossMachinePattern[] {
-  return [...aiMemory.crossMachinePatterns];
+  // Issue 5 Fix: Return deep copy to prevent UI mutation of internal state
+  return deepCopy(aiMemory.crossMachinePatterns);
 }
 
 export function getAnomalyHistory(): AnomalyRecord[] {
-  return [...aiMemory.anomalyHistory];
+  // Issue 5 Fix: Return deep copy to prevent UI mutation of internal state
+  return deepCopy(aiMemory.anomalyHistory);
 }
 
 // Get sparkline data for a specific machine/metric (last 20 points)
-export function getSparklineData(machineId: string, metric: 'temperature' | 'vibration' | 'load'): number[] {
+export function getSparklineData(
+  machineId: string,
+  metric: 'temperature' | 'vibration' | 'load'
+): number[] {
   const historyKey = `${machineId}-${metric}`;
   const trendData = aiMemory.metricHistory.get(historyKey);
   if (!trendData || trendData.history.length === 0) return [];
 
   // Return last 20 values normalized to 0-1 range for sparkline
-  const values = trendData.history.slice(-20).map(h => h.value);
+  const values = trendData.history.slice(-20).map((h) => h.value);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
 
-  return values.map(v => (v - min) / range);
+  return values.map((v) => (v - min) / range);
 }
 
 // Called when a decision is resolved - tracks outcome for learning
 export function trackDecisionOutcome(decision: AIDecision): void {
-  const success = decision.status === 'completed' &&
-    (!decision.outcome || !decision.outcome.toLowerCase().includes('fail') && !decision.outcome.toLowerCase().includes('escalate'));
+  // Issue 3 Fix: Don't count decisions with undefined/empty outcomes as success
+  // This prevents biasing the learning system
+  if (!decision.outcome || decision.outcome.trim() === '') {
+    // Don't track decisions without outcomes - they haven't truly resolved yet
+    return;
+  }
+
+  const success =
+    decision.status === 'completed' &&
+    !decision.outcome.toLowerCase().includes('fail') &&
+    !decision.outcome.toLowerCase().includes('escalate');
 
   recordDecisionOutcome(decision, success);
 }
 
 // Check if decision is critical and should trigger audio
 export function shouldTriggerAudioCue(decision: AIDecision): boolean {
-  return decision.priority === 'critical' ||
+  return (
+    decision.priority === 'critical' ||
     (decision.priority === 'high' && decision.type === 'safety') ||
-    (decision.type === 'prediction' && decision.action.includes('anomaly'));
+    (decision.type === 'prediction' && decision.action.includes('anomaly'))
+  );
 }
 
 // ============================================================================
@@ -2139,10 +2348,12 @@ export function initializeShiftObserver(): () => void {
   // Subscribe to store changes
   const unsubscribe = useMillStore.subscribe(
     (state) => state.currentShift,
-    (currentShift, previousShift) => {
+    (currentShift) => {
       // Only reset if this is an actual shift change (not initial load)
       if (lastObservedShift !== null && currentShift !== lastObservedShift) {
-        console.log(`[AI Engine] Shift changed from ${lastObservedShift} to ${currentShift} - resetting shift stats`);
+        logger.ai.debug(
+          `Shift changed from ${lastObservedShift} to ${currentShift} - resetting shift stats`
+        );
         resetShiftStats();
 
         // Reset production target for new shift
@@ -2174,34 +2385,53 @@ export function initializeDecisionOutcomeTracking(): () => void {
   // Track which decisions we've already processed
   const processedDecisions = new Set<string>();
 
+  // Issue 2 Fix: Add debounce to prevent race conditions in status updates
+  let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+
   const unsubscribe = useMillStore.subscribe(
     (state) => state.aiDecisions,
     (decisions) => {
-      for (const decision of decisions) {
-        // Only process completed or superseded decisions we haven't seen
-        if (
-          (decision.status === 'completed' || decision.status === 'superseded') &&
-          !processedDecisions.has(decision.id)
-        ) {
-          processedDecisions.add(decision.id);
-          trackDecisionOutcome(decision);
-          console.log(`[AI Engine] Tracked outcome for decision ${decision.id}: ${decision.status}`);
-        }
+      // Clear existing timeout
+      if (debounceTimeout) {
+        clearTimeout(debounceTimeout);
       }
 
-      // Clean up old entries to prevent memory leak
-      if (processedDecisions.size > 200) {
-        const idsInStore = new Set(decisions.map(d => d.id));
-        for (const id of processedDecisions) {
-          if (!idsInStore.has(id)) {
-            processedDecisions.delete(id);
+      // Debounce status processing to ensure atomic updates
+      debounceTimeout = setTimeout(() => {
+        for (const decision of decisions) {
+          // Only process completed or superseded decisions we haven't seen
+          if (
+            (decision.status === 'completed' || decision.status === 'superseded') &&
+            !processedDecisions.has(decision.id)
+          ) {
+            processedDecisions.add(decision.id);
+            // Use queueMicrotask to ensure decision object is fully updated
+            queueMicrotask(() => {
+              trackDecisionOutcome(decision);
+              logger.ai.debug(`Tracked outcome for decision ${decision.id}: ${decision.status}`);
+            });
           }
         }
-      }
+
+        // Clean up old entries to prevent memory leak
+        if (processedDecisions.size > 200) {
+          const idsInStore = new Set(decisions.map((d: AIDecision) => d.id));
+          for (const id of processedDecisions) {
+            if (!idsInStore.has(id)) {
+              processedDecisions.delete(id);
+            }
+          }
+        }
+      }, 50); // 50ms debounce
     }
   );
 
-  return unsubscribe;
+  return () => {
+    if (debounceTimeout) {
+      clearTimeout(debounceTimeout);
+    }
+    unsubscribe();
+  };
 }
 
 /**
@@ -2212,12 +2442,12 @@ export function initializeAIEngine(): () => void {
   const unsubShift = initializeShiftObserver();
   const unsubOutcome = initializeDecisionOutcomeTracking();
 
-  console.log('[AI Engine] Initialized with shift observer and outcome tracking');
+  logger.ai.info('Initialized with shift observer and outcome tracking');
 
   return () => {
     unsubShift();
     unsubOutcome();
-    console.log('[AI Engine] Observers cleaned up');
+    logger.ai.info('Observers cleaned up');
   };
 }
 

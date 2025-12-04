@@ -3,15 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, CheckCircle, Info, Shield, Siren, Bell } from 'lucide-react';
 import { audioManager } from '../utils/audioManager';
 import { useMillStore } from '../store';
-
-interface Alert {
-  id: string;
-  type: 'warning' | 'critical' | 'info' | 'success' | 'safety';
-  title: string;
-  message: string;
-  timestamp: Date;
-  machine?: string;
-}
+import type { AlertData } from '../types';
 
 interface TimerState {
   timeout: NodeJS.Timeout | null;
@@ -19,13 +11,24 @@ interface TimerState {
   startTime: number;
 }
 
-const SAMPLE_ALERTS: Omit<Alert, 'id' | 'timestamp'>[] = [
-  { type: 'info', title: 'Shift Change', message: 'Night shift crew arriving in 30 minutes' },
-  { type: 'success', title: 'Maintenance Complete', message: 'Roller Mill #3 back online', machine: 'mill-1.5' },
-  { type: 'warning', title: 'Temperature Rising', message: 'Plansifter #2 bearing temperature elevated', machine: 'sifter-0' },
+// Sample alerts for random rotation (shift changes handled by PA system in GameFeatures)
+const getSampleAlerts = (): Omit<AlertData, 'id' | 'timestamp' | 'acknowledged'>[] => [
+  {
+    type: 'success',
+    title: 'Maintenance Complete',
+    message: 'Roller Mill #3 back online',
+    machineId: 'mill-1.5',
+  },
+  {
+    type: 'warning',
+    title: 'Temperature Rising',
+    message: 'Plansifter #2 bearing temperature elevated',
+    machineId: 'sifter-0',
+  },
   { type: 'info', title: 'Quality Check', message: 'Hourly sample collection in progress' },
   { type: 'success', title: 'Target Met', message: 'Daily production target achieved at 94%' },
   { type: 'warning', title: 'Low Stock', message: 'Packaging supplies below reorder threshold' },
+  { type: 'info', title: 'Conveyor Check', message: 'Belt tension within normal parameters' },
 ];
 
 const NEAR_MISS_MESSAGES = [
@@ -37,7 +40,7 @@ const NEAR_MISS_MESSAGES = [
 ];
 
 // Auto-dismiss duration by alert type (in ms)
-const AUTO_DISMISS_DURATION: Record<Alert['type'], number> = {
+const AUTO_DISMISS_DURATION: Record<AlertData['type'], number> = {
   info: 5000,
   success: 5000,
   warning: 8000,
@@ -46,24 +49,25 @@ const AUTO_DISMISS_DURATION: Record<Alert['type'], number> = {
 };
 
 export const AlertSystem: React.FC = () => {
-  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [alerts, setAlerts] = useState<AlertData[]>([]);
   const [totalAlertCount, setTotalAlertCount] = useState(0);
+  const [liveRegionMessage, setLiveRegionMessage] = useState('');
   const isInitialMount = useRef(true);
-  const safetyMetrics = useMillStore(state => state.safetyMetrics);
+  const safetyMetrics = useMillStore((state: any) => state.safetyMetrics);
   const prevSafetyStopsRef = useRef(safetyMetrics.safetyStops);
   const timerStates = useRef<Map<string, TimerState>>(new Map());
 
   // Schedule auto-dismiss for an alert
-  const scheduleAutoDismiss = useCallback((alert: Alert, remainingTime?: number) => {
+  const scheduleAutoDismiss = useCallback((alert: AlertData, remainingTime?: number) => {
     const duration = remainingTime ?? AUTO_DISMISS_DURATION[alert.type];
     const timeout = setTimeout(() => {
-      setAlerts(prev => prev.filter(a => a.id !== alert.id));
+      setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
       timerStates.current.delete(alert.id);
     }, duration);
     timerStates.current.set(alert.id, {
       timeout,
       remaining: duration,
-      startTime: Date.now()
+      startTime: Date.now(),
     });
   }, []);
 
@@ -77,23 +81,27 @@ export const AlertSystem: React.FC = () => {
       timerStates.current.set(alertId, {
         timeout: null,
         remaining,
-        startTime: 0
+        startTime: 0,
       });
     }
   }, []);
 
   // Resume timer on mouse leave
-  const resumeTimer = useCallback((alert: Alert) => {
-    const state = timerStates.current.get(alert.id);
-    if (state && !state.timeout && state.remaining > 0) {
-      scheduleAutoDismiss(alert, state.remaining);
-    }
-  }, [scheduleAutoDismiss]);
+  const resumeTimer = useCallback(
+    (alert: AlertData) => {
+      const state = timerStates.current.get(alert.id);
+      if (state && !state.timeout && state.remaining > 0) {
+        scheduleAutoDismiss(alert, state.remaining);
+      }
+    },
+    [scheduleAutoDismiss]
+  );
 
   // Cleanup timeouts on unmount
   useEffect(() => {
+    const currentTimerStates = timerStates.current;
     return () => {
-      timerStates.current.forEach(state => {
+      currentTimerStates.forEach((state) => {
         if (state.timeout) clearTimeout(state.timeout);
       });
     };
@@ -105,19 +113,23 @@ export const AlertSystem: React.FC = () => {
 
     if (safetyMetrics.safetyStops > prevSafetyStopsRef.current) {
       const message = NEAR_MISS_MESSAGES[Math.floor(Math.random() * NEAR_MISS_MESSAGES.length)];
-      const newAlert: Alert = {
+      const newAlert: AlertData = {
         id: `safety-${Date.now()}`,
         type: 'safety',
         title: 'Near-Miss Avoided',
         message,
-        timestamp: new Date()
+        timestamp: new Date(),
+        acknowledged: false,
       };
 
       // Play distinct safety alert sound
       audioManager.playAlert();
 
-      setAlerts(prev => [newAlert, ...prev].slice(0, 5));
-      setTotalAlertCount(prev => prev + 1);
+      // Announce to screen readers
+      setLiveRegionMessage(`Safety alert: ${newAlert.title}. ${newAlert.message}`);
+
+      setAlerts((prev) => [newAlert, ...prev].slice(0, 5));
+      setTotalAlertCount((prev) => prev + 1);
       scheduleAutoDismiss(newAlert);
     }
     prevSafetyStopsRef.current = safetyMetrics.safetyStops;
@@ -125,22 +137,26 @@ export const AlertSystem: React.FC = () => {
 
   useEffect(() => {
     // Add initial alerts (no sound on mount)
-    const initial = SAMPLE_ALERTS.slice(0, 2).map((a, i) => ({
+    const sampleAlerts = getSampleAlerts();
+    const initial = sampleAlerts.slice(0, 2).map((a, i) => ({
       ...a,
       id: `alert-${i}`,
-      timestamp: new Date()
+      timestamp: new Date(),
+      acknowledged: false,
     }));
     setAlerts(initial);
     setTotalAlertCount(2);
-    initial.forEach(a => scheduleAutoDismiss(a));
+    initial.forEach((a) => scheduleAutoDismiss(a));
 
     // Periodically add new alerts
     const interval = setInterval(() => {
-      const template = SAMPLE_ALERTS[Math.floor(Math.random() * SAMPLE_ALERTS.length)];
-      const newAlert: Alert = {
+      const alerts = getSampleAlerts();
+      const template = alerts[Math.floor(Math.random() * alerts.length)];
+      const newAlert: AlertData = {
         ...template,
         id: `alert-${Date.now()}`,
-        timestamp: new Date()
+        timestamp: new Date(),
+        acknowledged: false,
       };
 
       // Play alert sound for new alerts
@@ -148,8 +164,13 @@ export const AlertSystem: React.FC = () => {
         audioManager.playAlert();
       }
 
-      setAlerts(prev => [newAlert, ...prev].slice(0, 5));
-      setTotalAlertCount(prev => prev + 1);
+      // Announce critical and warning alerts to screen readers
+      if (newAlert.type === 'critical' || newAlert.type === 'warning') {
+        setLiveRegionMessage(`${newAlert.type} alert: ${newAlert.title}. ${newAlert.message}`);
+      }
+
+      setAlerts((prev) => [newAlert, ...prev].slice(0, 5));
+      setTotalAlertCount((prev) => prev + 1);
       scheduleAutoDismiss(newAlert);
     }, 8000);
 
@@ -164,53 +185,64 @@ export const AlertSystem: React.FC = () => {
       clearTimeout(state.timeout);
       timerStates.current.delete(id);
     }
-    setAlerts(prev => prev.filter(a => a.id !== id));
+    setAlerts((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
-  const getAlertStyles = (type: Alert['type']) => {
+  const getAlertStyles = (type: AlertData['type']) => {
     switch (type) {
       case 'critical':
         return {
           bg: 'bg-red-950/90',
           border: 'border-red-500',
           icon: <Siren className="w-5 h-5 text-red-400" />,
-          accent: 'text-red-400'
+          accent: 'text-red-400',
         };
       case 'warning':
         return {
           bg: 'bg-yellow-950/90',
           border: 'border-yellow-500',
           icon: <AlertTriangle className="w-5 h-5 text-yellow-400" />,
-          accent: 'text-yellow-400'
+          accent: 'text-yellow-400',
         };
       case 'success':
         return {
           bg: 'bg-green-950/90',
           border: 'border-green-500',
           icon: <CheckCircle className="w-5 h-5 text-green-400" />,
-          accent: 'text-green-400'
+          accent: 'text-green-400',
         };
       case 'safety':
         return {
           bg: 'bg-emerald-950/90',
           border: 'border-emerald-500',
           icon: <Shield className="w-5 h-5 text-emerald-400" />,
-          accent: 'text-emerald-400'
+          accent: 'text-emerald-400',
         };
       default:
         return {
           bg: 'bg-blue-950/90',
           border: 'border-blue-500',
           icon: <Info className="w-5 h-5 text-blue-400" />,
-          accent: 'text-blue-400'
+          accent: 'text-blue-400',
         };
     }
   };
 
   return (
-    <div className="fixed top-4 right-4 w-64 sm:w-72 z-30 space-y-1.5 max-h-[35vh] sm:max-h-[40vh] overflow-hidden">
-      {/* Alert count badge */}
-      {alerts.length === 0 && totalAlertCount > 0 && (
+    <>
+      {/* Screen reader announcements */}
+      <div
+        role="status"
+        aria-live="assertive"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {liveRegionMessage}
+      </div>
+
+      <div className="fixed top-4 right-4 w-64 sm:w-72 z-30 space-y-1.5 max-h-[35vh] sm:max-h-[40vh] overflow-hidden">
+        {/* Alert count badge */}
+        {alerts.length === 0 && totalAlertCount > 0 && (
         <motion.div
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -235,22 +267,38 @@ export const AlertSystem: React.FC = () => {
               onMouseEnter={() => pauseTimer(alert.id)}
               onMouseLeave={() => resumeTimer(alert)}
               className={`${styles.bg} ${styles.border} border-l-2 sm:border-l-3 rounded-lg p-1.5 sm:p-2 backdrop-blur-xl shadow-lg cursor-default`}
+              role="alert"
+              aria-live={alert.type === 'critical' ? 'assertive' : 'polite'}
             >
               <div className="flex items-start gap-1.5 sm:gap-2">
                 <div className="flex-shrink-0 mt-0.5 hidden sm:block">
-                  {React.cloneElement(styles.icon, { className: 'w-4 h-4' })}
+                  {React.cloneElement(styles.icon, { className: 'w-4 h-4', 'aria-hidden': true })}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <h4 className={`font-semibold text-[11px] sm:text-xs ${styles.accent} truncate`}>{alert.title}</h4>
+                    <h4
+                      className={`font-semibold text-[11px] sm:text-xs ${styles.accent} truncate`}
+                    >
+                      {alert.title}
+                    </h4>
                     <button
                       onClick={() => dismissAlert(alert.id)}
-                      className="text-slate-500 hover:text-white text-sm leading-none flex-shrink-0"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          dismissAlert(alert.id);
+                        }
+                      }}
+                      aria-label={`Dismiss ${alert.title} alert`}
+                      tabIndex={0}
+                      className="text-slate-500 hover:text-white text-sm leading-none flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-cyan-500 rounded"
                     >
                       ×
                     </button>
                   </div>
-                  <p className="text-[10px] sm:text-[11px] text-slate-300 mt-0.5 line-clamp-1">{alert.message}</p>
+                  <p className="text-[10px] sm:text-[11px] text-slate-300 mt-0.5 line-clamp-1">
+                    {alert.message}
+                  </p>
                   <span className="text-[8px] sm:text-[9px] text-slate-600">
                     {alert.timestamp.toLocaleTimeString()}
                   </span>
@@ -265,6 +313,7 @@ export const AlertSystem: React.FC = () => {
           +{alerts.length - 3} more
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 };

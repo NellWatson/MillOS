@@ -2,34 +2,115 @@ import React, { useRef, useMemo, useState, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html, Billboard, Text } from '@react-three/drei';
 import { Briefcase, FlaskConical, HardHat, Shield, User, Wrench as WrenchIcon } from 'lucide-react';
-import { WorkerData, WorkerIconType, WORKER_ROSTER } from '../types';
-import { positionRegistry } from '../utils/positionRegistry';
+import { WorkerData, WORKER_ROSTER } from '../types';
+import { positionRegistry, type EntityPosition } from '../utils/positionRegistry';
 import { useMillStore } from '../store';
+import { WorkerMoodOverlay } from './WorkerMoodOverlay';
+import { WorkerReactionOverlay } from './MaintenanceSystem';
 import { audioManager } from '../utils/audioManager';
+import { shouldRunThisFrame, getThrottleLevel } from '../utils/frameThrottle';
 import * as THREE from 'three';
 
 interface WorkerSystemProps {
   onSelectWorker: (worker: WorkerData) => void;
 }
 
+// Truck lane exclusion zones - workers should not enter these areas
+// Defined as { xMin, xMax, zMin, zMax }
+interface ExclusionZone {
+  xMin: number;
+  xMax: number;
+  zMin: number;
+  zMax: number;
+  name: string;
+}
+
+const TRUCK_EXCLUSION_ZONES: ExclusionZone[] = [
+  // Front truck yard - shipping (z > 45)
+  { xMin: -30, xMax: 30, zMin: 45, zMax: 100, name: 'shipping-yard' },
+  // Back truck yard - receiving (z < -45)
+  { xMin: -30, xMax: 30, zMin: -100, zMax: -45, name: 'receiving-yard' },
+  // Shipping dock approach area
+  { xMin: -15, xMax: 15, zMin: 40, zMax: 55, name: 'shipping-dock' },
+  // Receiving dock approach area
+  { xMin: -15, xMax: 15, zMin: -55, zMax: -40, name: 'receiving-dock' },
+];
+
+// Check if position is in an exclusion zone
+const isInExclusionZone = (x: number, z: number): boolean => {
+  for (const zone of TRUCK_EXCLUSION_ZONES) {
+    if (x >= zone.xMin && x <= zone.xMax && z >= zone.zMin && z <= zone.zMax) {
+      return true;
+    }
+  }
+  return false;
+};
+
+// Get safe z position (pushed away from exclusion zones)
+const getSafeZPosition = (z: number): number => {
+  if (z > 40) return 35; // Push away from shipping yard
+  if (z < -40) return -35; // Push away from receiving yard
+  return z;
+};
+
+// Safe aisle positions that avoid equipment (accounting for obstacle padding):
+// - Silos at x: -18, -9, 0, 9, 18 (z=-22) - obstacle extends ±3.25 + 0.8 padding
+// - Mills at x: -15, -7.5, 7.5, 15 (z=-6) - obstacle extends ±2.75 + 0.8 padding
+// - Packers at x: -8, 0, 8 (z=25)
+// - Central conveyor at x: -1.5 to 1.5
+// Safe zones: x=±28 (well outside silos), x=±2.5 (between conveyor and mills)
+const SAFE_AISLES = [28, -28, 2.5, -2.5, 30, -30];
+
+// Safe z spawn ranges (avoiding obstacle zones at spawn time)
+// Account for obstacle WORKER_PADDING (1.0) + movement OBSTACLE_PADDING (0.8) = 1.8 total
+// Silos z=-22: obstacle zone z from -25.05 to -18.95
+// Mills z=-6: obstacle zone z from -9.55 to -2.45
+// Packers z=25: obstacle zone z from 20.2 to 29.8
+const getSafeSpawnZ = (preferredZ: number): number => {
+  // Avoid silo zone (with full padding)
+  if (preferredZ >= -26 && preferredZ <= -18) {
+    return preferredZ < -22 ? -28 : -16;
+  }
+  // Avoid mill zone (with full padding)
+  if (preferredZ >= -11 && preferredZ <= -1) {
+    return preferredZ < -6 ? -13 : 1;
+  }
+  // Avoid conveyor + packer zone (with full padding)
+  if (preferredZ >= 18 && preferredZ <= 32) {
+    return preferredZ < 25 ? 16 : 34;
+  }
+  return preferredZ;
+};
+
 export const WorkerSystem: React.FC<WorkerSystemProps> = ({ onSelectWorker }) => {
   const workers = useMemo(() => {
-    const aisles = [10, -10, 0];
-    return WORKER_ROSTER.map((roster, i) => ({
-      ...roster,
-      position: [
-        aisles[i % aisles.length] + (Math.random() - 0.5) * 4,
-        0,
-        (Math.random() * 40) - 20
-      ] as [number, number, number],
-      direction: (Math.random() > 0.5 ? 1 : -1) as 1 | -1
-    }));
+    return WORKER_ROSTER.map((roster, i) => {
+      // Pick a safe aisle
+      const baseX = SAFE_AISLES[i % SAFE_AISLES.length];
+      // Add small random offset but keep in safe zone
+      const x = baseX + (Math.random() - 0.5) * 2;
+      // Generate z position and adjust if in obstacle zone
+      const rawZ = Math.random() * 50 - 25;
+      const z = getSafeSpawnZ(rawZ);
+
+      return {
+        ...roster,
+        position: [x, 0, z] as [number, number, number],
+        direction: (Math.random() > 0.5 ? 1 : -1) as 1 | -1,
+      };
+    });
   }, []);
+
+  // Memoize callbacks for each worker to prevent re-renders
+  const workerCallbacks = useMemo(
+    () => workers.map((w) => () => onSelectWorker(w)),
+    [workers, onSelectWorker]
+  );
 
   return (
     <group>
-      {workers.map(w => (
-        <Worker key={w.id} data={w} onSelect={() => onSelectWorker(w)} />
+      {workers.map((w, i) => (
+        <Worker key={w.id} data={w} onSelect={workerCallbacks[i]} />
       ))}
     </group>
   );
@@ -41,8 +122,26 @@ type ToolType = 'clipboard' | 'tablet' | 'radio' | 'wrench' | 'magnifier' | 'non
 
 // Worker appearance configuration based on role
 const getWorkerAppearance = (role: string, color: string, id: string) => {
-  const skinTones = ['#f5d0c5', '#d4a574', '#8d5524', '#c68642', '#e0ac69', '#ffdbac', '#f1c27d', '#cd8c52'];
-  const hairColors = ['#1a1a1a', '#3d2314', '#8b4513', '#d4a574', '#4a3728', '#2d1810', '#654321', '#8b0000'];
+  const skinTones = [
+    '#f5d0c5',
+    '#d4a574',
+    '#8d5524',
+    '#c68642',
+    '#e0ac69',
+    '#ffdbac',
+    '#f1c27d',
+    '#cd8c52',
+  ];
+  const hairColors = [
+    '#1a1a1a',
+    '#3d2314',
+    '#8b4513',
+    '#d4a574',
+    '#4a3728',
+    '#2d1810',
+    '#654321',
+    '#8b0000',
+  ];
   const hairStyles: HairStyle[] = ['bald', 'short', 'medium', 'curly', 'ponytail'];
   const skinIndex = id.charCodeAt(id.length - 1) % skinTones.length;
   const hairColorIndex = id.charCodeAt(0) % hairColors.length;
@@ -53,117 +152,351 @@ const getWorkerAppearance = (role: string, color: string, id: string) => {
 
   switch (role) {
     case 'Supervisor':
-      return { uniformColor: '#1e40af', skinTone, hatColor: '#1e40af', hasVest: false, pantsColor: '#1e293b', hairColor, hairStyle, tool: 'clipboard' as ToolType };
+      return {
+        uniformColor: '#1e40af',
+        skinTone,
+        hatColor: '#1e40af',
+        hasVest: false,
+        pantsColor: '#1e293b',
+        hairColor,
+        hairStyle,
+        tool: 'clipboard' as ToolType,
+      };
     case 'Engineer':
-      return { uniformColor: '#374151', skinTone, hatColor: '#ffffff', hasVest: false, pantsColor: '#1f2937', hairColor, hairStyle, tool: 'tablet' as ToolType };
+      return {
+        uniformColor: '#374151',
+        skinTone,
+        hatColor: '#ffffff',
+        hasVest: false,
+        pantsColor: '#1f2937',
+        hairColor,
+        hairStyle,
+        tool: 'tablet' as ToolType,
+      };
     case 'Safety Officer':
-      return { uniformColor: '#166534', skinTone, hatColor: '#22c55e', hasVest: true, pantsColor: '#14532d', hairColor, hairStyle, tool: 'radio' as ToolType };
+      return {
+        uniformColor: '#166534',
+        skinTone,
+        hatColor: '#22c55e',
+        hasVest: true,
+        pantsColor: '#14532d',
+        hairColor,
+        hairStyle,
+        tool: 'radio' as ToolType,
+      };
     case 'Quality Control':
-      return { uniformColor: '#7c3aed', skinTone, hatColor: '#ffffff', hasVest: false, pantsColor: '#1e1b4b', hairColor, hairStyle, tool: 'magnifier' as ToolType };
+      return {
+        uniformColor: '#7c3aed',
+        skinTone,
+        hatColor: '#ffffff',
+        hasVest: false,
+        pantsColor: '#1e1b4b',
+        hairColor,
+        hairStyle,
+        tool: 'magnifier' as ToolType,
+      };
     case 'Maintenance':
-      return { uniformColor: '#9a3412', skinTone, hatColor: '#f97316', hasVest: true, pantsColor: '#431407', hairColor, hairStyle, tool: 'wrench' as ToolType };
+      return {
+        uniformColor: '#9a3412',
+        skinTone,
+        hatColor: '#f97316',
+        hasVest: true,
+        pantsColor: '#431407',
+        hairColor,
+        hairStyle,
+        tool: 'wrench' as ToolType,
+      };
     case 'Operator':
     default:
-      return { uniformColor: color || '#475569', skinTone, hatColor: '#eab308', hasVest: id.charCodeAt(2) % 2 === 0, pantsColor: '#1e3a5f', hairColor, hairStyle, tool: 'none' as ToolType };
+      return {
+        uniformColor: color || '#475569',
+        skinTone,
+        hatColor: '#eab308',
+        hasVest: id.charCodeAt(2) % 2 === 0,
+        pantsColor: '#1e3a5f',
+        hairColor,
+        hairStyle,
+        tool: 'none' as ToolType,
+      };
   }
 };
 
-// === TOOL ACCESSORY COMPONENTS ===
-const Clipboard: React.FC = () => (
+// === SHARED TOOL GEOMETRIES (module-level cache) ===
+// These geometries are created once and shared across all workers to reduce memory and creation overhead
+const sharedToolGeometries = {
+  clipboard: {
+    board: new THREE.BoxGeometry(0.12, 0.16, 0.015),
+    clip: new THREE.BoxGeometry(0.04, 0.02, 0.02),
+    paper: new THREE.BoxGeometry(0.1, 0.12, 0.002),
+    line: new THREE.BoxGeometry(0.07, 0.008, 0.001),
+  },
+  tablet: {
+    body: new THREE.BoxGeometry(0.1, 0.14, 0.01),
+    screen: new THREE.BoxGeometry(0.085, 0.12, 0.002),
+    indicator: new THREE.BoxGeometry(0.06, 0.002, 0.001),
+  },
+  radio: {
+    body: new THREE.BoxGeometry(0.04, 0.1, 0.025),
+    antenna: new THREE.CylinderGeometry(0.004, 0.003, 0.06, 8),
+    led: new THREE.SphereGeometry(0.004, 8, 8),
+  },
+  wrench: {
+    handle: new THREE.BoxGeometry(0.025, 0.14, 0.012),
+    head: new THREE.BoxGeometry(0.05, 0.03, 0.012),
+    grip: new THREE.BoxGeometry(0.027, 0.05, 0.004),
+  },
+  magnifier: {
+    handle: new THREE.CylinderGeometry(0.012, 0.015, 0.08, 12),
+    ring: new THREE.TorusGeometry(0.035, 0.006, 8, 24),
+    lens: new THREE.CircleGeometry(0.032, 24),
+  },
+};
+
+// === TOOL ACCESSORY COMPONENTS (memoized) ===
+const Clipboard: React.FC = React.memo(() => (
   <group position={[0.08, -0.02, 0.04]} rotation={[0.3, 0, 0.1]}>
-    <mesh castShadow><boxGeometry args={[0.12, 0.16, 0.015]} /><meshStandardMaterial color="#8b4513" roughness={0.7} /></mesh>
-    <mesh position={[0, 0.07, 0.01]}><boxGeometry args={[0.04, 0.02, 0.02]} /><meshStandardMaterial color="#c0c0c0" metalness={0.8} roughness={0.2} /></mesh>
-    <mesh position={[0, -0.01, 0.01]}><boxGeometry args={[0.1, 0.12, 0.002]} /><meshStandardMaterial color="#ffffff" /></mesh>
-    {[-0.03, 0, 0.03].map((y, i) => (<mesh key={i} position={[0, y, 0.012]}><boxGeometry args={[0.07, 0.008, 0.001]} /><meshStandardMaterial color="#333" /></mesh>))}
+    <mesh castShadow geometry={sharedToolGeometries.clipboard.board}>
+      <meshStandardMaterial color="#8b4513" roughness={0.7} />
+    </mesh>
+    <mesh position={[0, 0.07, 0.01]} geometry={sharedToolGeometries.clipboard.clip}>
+      <meshStandardMaterial color="#c0c0c0" metalness={0.8} roughness={0.2} />
+    </mesh>
+    <mesh position={[0, -0.01, 0.01]} geometry={sharedToolGeometries.clipboard.paper}>
+      <meshStandardMaterial color="#ffffff" />
+    </mesh>
+    {[-0.03, 0, 0.03].map((y, i) => (
+      <mesh key={i} position={[0, y, 0.012]} geometry={sharedToolGeometries.clipboard.line}>
+        <meshStandardMaterial color="#333" />
+      </mesh>
+    ))}
   </group>
-);
+));
+Clipboard.displayName = 'Clipboard';
 
-const Tablet: React.FC = () => (
+const Tablet: React.FC = React.memo(() => (
   <group position={[0.06, -0.02, 0.04]} rotation={[0.4, 0, 0.15]}>
-    <mesh castShadow><boxGeometry args={[0.1, 0.14, 0.01]} /><meshStandardMaterial color="#1a1a1a" roughness={0.3} /></mesh>
-    <mesh position={[0, 0, 0.006]}><boxGeometry args={[0.085, 0.12, 0.002]} /><meshStandardMaterial color="#1e40af" emissive="#1e40af" emissiveIntensity={0.3} /></mesh>
-    <mesh position={[0, 0.02, 0.008]}><boxGeometry args={[0.06, 0.002, 0.001]} /><meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.5} /></mesh>
+    <mesh castShadow geometry={sharedToolGeometries.tablet.body}>
+      <meshStandardMaterial color="#1a1a1a" roughness={0.3} />
+    </mesh>
+    <mesh position={[0, 0, 0.006]} geometry={sharedToolGeometries.tablet.screen}>
+      <meshStandardMaterial color="#1e40af" emissive="#1e40af" emissiveIntensity={0.3} />
+    </mesh>
+    <mesh position={[0, 0.02, 0.008]} geometry={sharedToolGeometries.tablet.indicator}>
+      <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.5} />
+    </mesh>
   </group>
-);
+));
+Tablet.displayName = 'Tablet';
 
-const RadioWalkieTalkie: React.FC = () => (
+const RadioWalkieTalkie: React.FC = React.memo(() => (
   <group position={[0.04, 0, 0.03]} rotation={[0.2, 0.3, 0]}>
-    <mesh castShadow><boxGeometry args={[0.04, 0.1, 0.025]} /><meshStandardMaterial color="#1a1a1a" roughness={0.4} /></mesh>
-    <mesh position={[0.01, 0.07, 0]}><cylinderGeometry args={[0.004, 0.003, 0.06, 8]} /><meshStandardMaterial color="#333" /></mesh>
-    <mesh position={[0, 0.04, 0.014]}><sphereGeometry args={[0.004, 8, 8]} /><meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={2} /></mesh>
+    <mesh castShadow geometry={sharedToolGeometries.radio.body}>
+      <meshStandardMaterial color="#1a1a1a" roughness={0.4} />
+    </mesh>
+    <mesh position={[0.01, 0.07, 0]} geometry={sharedToolGeometries.radio.antenna}>
+      <meshStandardMaterial color="#333" />
+    </mesh>
+    <mesh position={[0, 0.04, 0.014]} geometry={sharedToolGeometries.radio.led}>
+      <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={2} />
+    </mesh>
   </group>
-);
+));
+RadioWalkieTalkie.displayName = 'RadioWalkieTalkie';
 
-const Wrench: React.FC = () => (
+const Wrench: React.FC = React.memo(() => (
   <group position={[0.02, -0.04, 0.02]} rotation={[0, 0.5, -0.3]}>
-    <mesh castShadow><boxGeometry args={[0.025, 0.14, 0.012]} /><meshStandardMaterial color="#c0c0c0" metalness={0.9} roughness={0.3} /></mesh>
-    <mesh castShadow position={[0, 0.08, 0]}><boxGeometry args={[0.05, 0.03, 0.012]} /><meshStandardMaterial color="#c0c0c0" metalness={0.9} roughness={0.3} /></mesh>
-    <mesh position={[0, -0.03, 0.007]}><boxGeometry args={[0.027, 0.05, 0.004]} /><meshStandardMaterial color="#ef4444" roughness={0.8} /></mesh>
+    <mesh castShadow geometry={sharedToolGeometries.wrench.handle}>
+      <meshStandardMaterial color="#c0c0c0" metalness={0.9} roughness={0.3} />
+    </mesh>
+    <mesh castShadow position={[0, 0.08, 0]} geometry={sharedToolGeometries.wrench.head}>
+      <meshStandardMaterial color="#c0c0c0" metalness={0.9} roughness={0.3} />
+    </mesh>
+    <mesh position={[0, -0.03, 0.007]} geometry={sharedToolGeometries.wrench.grip}>
+      <meshStandardMaterial color="#ef4444" roughness={0.8} />
+    </mesh>
   </group>
-);
+));
+Wrench.displayName = 'Wrench';
 
-const Magnifier: React.FC = () => (
+const Magnifier: React.FC = React.memo(() => (
   <group position={[0.05, 0, 0.04]} rotation={[0.3, 0.2, 0]}>
-    <mesh castShadow><cylinderGeometry args={[0.012, 0.015, 0.08, 12]} /><meshStandardMaterial color="#1a1a1a" roughness={0.5} /></mesh>
-    <mesh castShadow position={[0, 0.06, 0]} rotation={[Math.PI / 2, 0, 0]}><torusGeometry args={[0.035, 0.006, 8, 24]} /><meshStandardMaterial color="#c0c0c0" metalness={0.8} roughness={0.2} /></mesh>
-    <mesh position={[0, 0.06, 0]} rotation={[Math.PI / 2, 0, 0]}><circleGeometry args={[0.032, 24]} /><meshStandardMaterial color="#a0d8ef" transparent opacity={0.4} /></mesh>
+    <mesh castShadow geometry={sharedToolGeometries.magnifier.handle}>
+      <meshStandardMaterial color="#1a1a1a" roughness={0.5} />
+    </mesh>
+    <mesh
+      castShadow
+      position={[0, 0.06, 0]}
+      rotation={[Math.PI / 2, 0, 0]}
+      geometry={sharedToolGeometries.magnifier.ring}
+    >
+      <meshStandardMaterial color="#c0c0c0" metalness={0.8} roughness={0.2} />
+    </mesh>
+    <mesh
+      position={[0, 0.06, 0]}
+      rotation={[Math.PI / 2, 0, 0]}
+      geometry={sharedToolGeometries.magnifier.lens}
+    >
+      <meshStandardMaterial color="#a0d8ef" transparent opacity={0.4} />
+    </mesh>
   </group>
-);
+));
+Magnifier.displayName = 'Magnifier';
 
-const ToolAccessory: React.FC<{ tool: ToolType }> = ({ tool }) => {
+const ToolAccessory: React.FC<{ tool: ToolType }> = React.memo(({ tool }) => {
   switch (tool) {
-    case 'clipboard': return <Clipboard />;
-    case 'tablet': return <Tablet />;
-    case 'radio': return <RadioWalkieTalkie />;
-    case 'wrench': return <Wrench />;
-    case 'magnifier': return <Magnifier />;
-    default: return null;
+    case 'clipboard':
+      return <Clipboard />;
+    case 'tablet':
+      return <Tablet />;
+    case 'radio':
+      return <RadioWalkieTalkie />;
+    case 'wrench':
+      return <Wrench />;
+    case 'magnifier':
+      return <Magnifier />;
+    default:
+      return null;
   }
-};
+});
+ToolAccessory.displayName = 'ToolAccessory';
 
-// === HAIR COMPONENT ===
-const Hair: React.FC<{ style: HairStyle; color: string }> = ({ style, color }) => {
+// === HAIR COMPONENT (memoized) ===
+const Hair: React.FC<{ style: HairStyle; color: string }> = React.memo(({ style, color }) => {
   switch (style) {
     case 'short':
       return (
         <group position={[0, 0.05, -0.02]}>
-          <mesh castShadow position={[-0.14, -0.02, 0]}><boxGeometry args={[0.04, 0.08, 0.1]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>
-          <mesh castShadow position={[0.14, -0.02, 0]}><boxGeometry args={[0.04, 0.08, 0.1]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>
-          <mesh castShadow position={[0, -0.02, -0.12]}><boxGeometry args={[0.2, 0.1, 0.04]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>
+          <mesh castShadow position={[-0.14, -0.02, 0]}>
+            <boxGeometry args={[0.04, 0.08, 0.1]} />
+            <meshStandardMaterial color={color} roughness={0.9} />
+          </mesh>
+          <mesh castShadow position={[0.14, -0.02, 0]}>
+            <boxGeometry args={[0.04, 0.08, 0.1]} />
+            <meshStandardMaterial color={color} roughness={0.9} />
+          </mesh>
+          <mesh castShadow position={[0, -0.02, -0.12]}>
+            <boxGeometry args={[0.2, 0.1, 0.04]} />
+            <meshStandardMaterial color={color} roughness={0.9} />
+          </mesh>
         </group>
       );
     case 'medium':
       return (
         <group position={[0, 0.02, 0]}>
-          <mesh castShadow position={[-0.15, -0.06, 0]}><boxGeometry args={[0.04, 0.14, 0.12]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>
-          <mesh castShadow position={[0.15, -0.06, 0]}><boxGeometry args={[0.04, 0.14, 0.12]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>
-          <mesh castShadow position={[0, -0.04, -0.13]}><boxGeometry args={[0.22, 0.14, 0.04]} /><meshStandardMaterial color={color} roughness={0.9} /></mesh>
+          <mesh castShadow position={[-0.15, -0.06, 0]}>
+            <boxGeometry args={[0.04, 0.14, 0.12]} />
+            <meshStandardMaterial color={color} roughness={0.9} />
+          </mesh>
+          <mesh castShadow position={[0.15, -0.06, 0]}>
+            <boxGeometry args={[0.04, 0.14, 0.12]} />
+            <meshStandardMaterial color={color} roughness={0.9} />
+          </mesh>
+          <mesh castShadow position={[0, -0.04, -0.13]}>
+            <boxGeometry args={[0.22, 0.14, 0.04]} />
+            <meshStandardMaterial color={color} roughness={0.9} />
+          </mesh>
         </group>
       );
     case 'curly':
       return (
         <group position={[0, 0.02, 0]}>
-          {[[-0.13, -0.04, 0.02], [0.13, -0.04, 0.02], [-0.12, -0.08, -0.04], [0.12, -0.08, -0.04], [0, -0.06, -0.14]].map((pos, i) => (
-            <mesh key={i} castShadow position={pos as [number, number, number]}><sphereGeometry args={[0.04, 8, 8]} /><meshStandardMaterial color={color} roughness={1} /></mesh>
+          {[
+            [-0.13, -0.04, 0.02],
+            [0.13, -0.04, 0.02],
+            [-0.12, -0.08, -0.04],
+            [0.12, -0.08, -0.04],
+            [0, -0.06, -0.14],
+          ].map((pos, i) => (
+            <mesh key={i} castShadow position={pos as [number, number, number]}>
+              <sphereGeometry args={[0.04, 8, 8]} />
+              <meshStandardMaterial color={color} roughness={1} />
+            </mesh>
           ))}
         </group>
       );
     case 'ponytail':
       return (
         <group position={[0, 0, -0.1]}>
-          <mesh castShadow position={[0, -0.1, -0.05]}><capsuleGeometry args={[0.03, 0.12, 6, 12]} /><meshStandardMaterial color={color} roughness={0.8} /></mesh>
-          <mesh position={[0, -0.02, -0.05]}><torusGeometry args={[0.035, 0.008, 8, 16]} /><meshStandardMaterial color="#1a1a1a" /></mesh>
+          <mesh castShadow position={[0, -0.1, -0.05]}>
+            <capsuleGeometry args={[0.03, 0.12, 6, 12]} />
+            <meshStandardMaterial color={color} roughness={0.8} />
+          </mesh>
+          <mesh position={[0, -0.02, -0.05]}>
+            <torusGeometry args={[0.035, 0.008, 8, 16]} />
+            <meshStandardMaterial color="#1a1a1a" />
+          </mesh>
         </group>
       );
     case 'bald':
     default:
       return null;
   }
+});
+Hair.displayName = 'Hair';
+
+// Idle animation types for variety
+type IdleAnimationType = 'breathing' | 'looking' | 'shifting' | 'stretching';
+
+// Role-specific working pose configurations
+type WorkingPose = {
+  leftArm: { x: number; z: number };
+  rightArm: { x: number; z: number };
+  torsoLean: number;
+  headTilt: { x: number; y: number };
+  crouch: number;
 };
+
+const ROLE_WORKING_POSES: Record<string, WorkingPose> = {
+  Operator: {
+    leftArm: { x: -0.6, z: 0.2 },
+    rightArm: { x: -0.4, z: -0.1 },
+    torsoLean: 0.08,
+    headTilt: { x: 0.15, y: 0 },
+    crouch: 0,
+  },
+  Maintenance: {
+    leftArm: { x: -1.0, z: 0.3 },
+    rightArm: { x: -0.8, z: -0.2 },
+    torsoLean: 0.2,
+    headTilt: { x: 0.3, y: -0.2 },
+    crouch: 0.3,
+  },
+  'Quality Control': {
+    leftArm: { x: -0.5, z: 0.4 },
+    rightArm: { x: -0.7, z: -0.3 },
+    torsoLean: 0.12,
+    headTilt: { x: 0.25, y: 0 },
+    crouch: 0,
+  },
+  Supervisor: {
+    leftArm: { x: -0.3, z: 0.1 },
+    rightArm: { x: 0.2, z: -0.4 },
+    torsoLean: 0,
+    headTilt: { x: 0, y: 0.3 },
+    crouch: 0,
+  },
+  'Safety Officer': {
+    leftArm: { x: -0.4, z: 0.2 },
+    rightArm: { x: 0.1, z: -0.2 },
+    torsoLean: 0,
+    headTilt: { x: 0, y: 0.2 },
+    crouch: 0,
+  },
+  Engineer: {
+    leftArm: { x: -0.6, z: 0.3 },
+    rightArm: { x: -0.4, z: 0 },
+    torsoLean: 0.05,
+    headTilt: { x: 0.2, y: -0.1 },
+    crouch: 0,
+  },
+};
+
+// Special action animation types
+type SpecialAction = 'none' | 'running' | 'carrying' | 'sitting' | 'celebrating' | 'pointing';
 
 // Realistic Human Model Component
 const HumanModel: React.FC<{
-  walkCycleRef: React.MutableRefObject<number>; // Use ref to avoid re-renders
+  walkCycleRef: React.MutableRefObject<number>;
   uniformColor: string;
   skinTone: string;
   hatColor: string;
@@ -173,66 +506,832 @@ const HumanModel: React.FC<{
   hairColor: string;
   hairStyle: HairStyle;
   tool: ToolType;
+  role?: string;
   isWaving?: boolean;
   isIdle?: boolean;
-}> = ({ walkCycleRef, uniformColor, skinTone, hatColor, hasVest, pantsColor, headRotation = 0, hairColor, hairStyle, tool, isWaving = false, isIdle = false }) => {
+  isStartled?: boolean;
+  alertDirection?: number;
+  fatigueLevel?: number;
+  nearbyWorkerDirection?: number;
+  specialAction?: SpecialAction;
+  pointDirection?: number;
+  distanceToCamera?: number;
+}> = ({
+  walkCycleRef,
+  uniformColor,
+  skinTone,
+  hatColor,
+  hasVest,
+  pantsColor,
+  headRotation = 0,
+  hairColor,
+  hairStyle,
+  tool,
+  role = 'Operator',
+  isWaving = false,
+  isIdle = false,
+  isStartled = false,
+  alertDirection,
+  fatigueLevel = 0,
+  nearbyWorkerDirection,
+  specialAction = 'none',
+  pointDirection = 0,
+  distanceToCamera = 0,
+}) => {
+  // Body part refs for animation
   const leftArmRef = useRef<THREE.Group>(null);
   const rightArmRef = useRef<THREE.Group>(null);
   const leftLegRef = useRef<THREE.Group>(null);
   const rightLegRef = useRef<THREE.Group>(null);
   const headRef = useRef<THREE.Group>(null);
-  const wavePhaseRef = useRef(0);
+  const torsoRef = useRef<THREE.Group>(null);
+  const chestRef = useRef<THREE.Mesh>(null);
+  const hipsRef = useRef<THREE.Mesh>(null);
+  const leftEyelidRef = useRef<THREE.Mesh>(null);
+  const rightEyelidRef = useRef<THREE.Mesh>(null);
+  const leftFingersRef = useRef<THREE.Mesh>(null);
+  const rightFingersRef = useRef<THREE.Mesh>(null);
 
-  // Animate limbs and head
+  // Animation state refs (avoid re-renders)
+  const wavePhaseRef = useRef(0);
+  const idleAnimationRef = useRef<IdleAnimationType>('breathing');
+  const idlePhaseRef = useRef(0);
+  const idleLookTargetRef = useRef(0);
+  const weightShiftRef = useRef(0);
+  const blinkTimerRef = useRef(Math.random() * 3 + 2);
+  const blinkPhaseRef = useRef(0);
+  const startledPhaseRef = useRef(0);
+  const workingPhaseRef = useRef(0);
+  const gripAmountRef = useRef(0);
+  const celebratePhaseRef = useRef(0);
+  const sittingTransitionRef = useRef(0);
+  const carryBobRef = useRef(0);
+
+  // Cache graphics settings (updated every ~1 second instead of every frame)
+  const cachedThrottleLevelRef = useRef(2);
+  const cachedLodDistanceRef = useRef(50);
+  const settingsCacheFrameRef = useRef(0);
+
+  // Animate limbs, torso, and head with enhanced secondary motion
   useFrame((state, delta) => {
-    const walkCycle = walkCycleRef.current; // Read current value from ref
+    // Update cached settings every 60 frames (~1 second at 60fps)
+    if (settingsCacheFrameRef.current % 60 === 0) {
+      const graphics = useMillStore.getState().graphics;
+      cachedThrottleLevelRef.current = getThrottleLevel(graphics.quality);
+      cachedLodDistanceRef.current = graphics.workerLodDistance;
+    }
+    settingsCacheFrameRef.current++;
+
+    // Frame throttling for performance - worker animations don't need 60fps
+    if (!shouldRunThisFrame(cachedThrottleLevelRef.current)) {
+      return; // Skip this frame
+    }
+
+    // Cap delta to prevent huge jumps (max 100ms)
+    const cappedDelta = Math.min(delta, 0.1);
+    const walkCycle = walkCycleRef.current;
+    const time = state.clock.elapsedTime;
     const isDoingSomething = isIdle && tool !== 'none';
-    const armSwing = isIdle ? Math.sin(walkCycle) * 0.05 : Math.sin(walkCycle) * 0.5;
+
+    // Get LOD distance from cached settings
+    const lodDistance = cachedLodDistanceRef.current;
+
+    // Animation LOD - tiered complexity reduction for distant workers
+    // LOD thresholds scale with the user's workerLodDistance setting
+    // Tier 1 (0-25% of lodDistance): Full detail - all animations including blinking, idle variations
+    // Tier 2 (25-50% of lodDistance): Medium detail - basic walk/idle, no blinking or facial animations
+    // Tier 3 (50-80% of lodDistance): Low detail - just breathing and basic limb movement
+    // Tier 4 (80%+ of lodDistance): Minimal - static pose with breathing only
+    const fullDetailThreshold = lodDistance * 0.25;
+    const mediumDetailThreshold = lodDistance * 0.5;
+    const lowDetailThreshold = lodDistance * 0.8;
+
+    const isFullDetail = distanceToCamera < fullDetailThreshold;
+    const isLowDetail =
+      distanceToCamera >= mediumDetailThreshold && distanceToCamera < lowDetailThreshold;
+    const isMinimalDetail = distanceToCamera >= lowDetailThreshold;
+
+    // Skip most animation for very distant workers (Tier 4)
+    if (isMinimalDetail) {
+      // Only breathing for distant workers
+      if (chestRef.current) {
+        const breathScale = 1 + Math.sin(time * 1.2) * 0.015;
+        chestRef.current.scale.y = breathScale;
+      }
+      return;
+    }
+
+    // Low detail tier (Tier 3) - skip idle variations and facial animations
+    if (isLowDetail) {
+      // Basic breathing
+      const breathScale = 1 + Math.sin(time * 1.2) * 0.015;
+      if (chestRef.current) {
+        chestRef.current.scale.y = breathScale;
+      }
+      // Simplified arm swing only when walking
+      const armSwing = isIdle ? 0 : Math.sin(walkCycle) * 0.3;
+      if (leftArmRef.current) {
+        leftArmRef.current.rotation.x = armSwing;
+      }
+      if (rightArmRef.current) {
+        rightArmRef.current.rotation.x = -armSwing;
+      }
+      // Basic leg movement
+      const legSwing = isIdle ? 0 : Math.sin(walkCycle) * 0.4;
+      if (leftLegRef.current) {
+        leftLegRef.current.rotation.x = -legSwing;
+      }
+      if (rightLegRef.current) {
+        rightLegRef.current.rotation.x = legSwing;
+      }
+      return;
+    }
+
+    // === BREATHING (always active) ===
+    const breathCycle = time * 1.2;
+    const breathScale = 1 + Math.sin(breathCycle) * 0.015;
+    const breathScaleX = 1 + Math.sin(breathCycle) * 0.008;
+
+    if (chestRef.current) {
+      chestRef.current.scale.y = THREE.MathUtils.lerp(chestRef.current.scale.y, breathScale, 0.1);
+      chestRef.current.scale.x = THREE.MathUtils.lerp(chestRef.current.scale.x, breathScaleX, 0.1);
+    }
+
+    // === EYE BLINKING (only for close-up detail) ===
+    if (isFullDetail) {
+      blinkTimerRef.current -= cappedDelta;
+      if (blinkTimerRef.current <= 0) {
+        blinkPhaseRef.current = 0.15; // Start blink (duration in seconds)
+        blinkTimerRef.current = Math.random() * 4 + 2; // Next blink in 2-6s
+      }
+      if (blinkPhaseRef.current > 0) {
+        blinkPhaseRef.current -= cappedDelta;
+        const blinkAmount =
+          blinkPhaseRef.current > 0.075
+            ? (0.15 - blinkPhaseRef.current) / 0.075 // Closing
+            : blinkPhaseRef.current / 0.075; // Opening
+        if (leftEyelidRef.current) {
+          leftEyelidRef.current.scale.y = 0.3 + blinkAmount * 0.7;
+        }
+        if (rightEyelidRef.current) {
+          rightEyelidRef.current.scale.y = 0.3 + blinkAmount * 0.7;
+        }
+      }
+    }
+
+    // === STARTLED REACTION ===
+    if (isStartled) {
+      startledPhaseRef.current = Math.min(startledPhaseRef.current + cappedDelta * 8, 1);
+    } else {
+      startledPhaseRef.current = Math.max(startledPhaseRef.current - cappedDelta * 3, 0);
+    }
+    const startledAmount = startledPhaseRef.current;
+
+    // === SPECIAL ACTIONS (override normal animations) ===
+    if (specialAction !== 'none' && isFullDetail) {
+      switch (specialAction) {
+        case 'running': {
+          // Fast, exaggerated run cycle
+          const runCycle = walkCycle * 1.8; // Faster cycle
+          const runArmSwing = Math.sin(runCycle) * 0.9; // Bigger arm swing
+          const runLegSwing = Math.sin(runCycle) * 0.85; // Bigger leg swing
+          const runLean = 0.15; // Strong forward lean
+
+          if (leftArmRef.current) {
+            leftArmRef.current.rotation.x = THREE.MathUtils.lerp(
+              leftArmRef.current.rotation.x,
+              runArmSwing - 0.5,
+              0.2
+            );
+            leftArmRef.current.rotation.z = THREE.MathUtils.lerp(
+              leftArmRef.current.rotation.z,
+              0.3,
+              0.1
+            );
+          }
+          if (rightArmRef.current) {
+            rightArmRef.current.rotation.x = THREE.MathUtils.lerp(
+              rightArmRef.current.rotation.x,
+              -runArmSwing - 0.5,
+              0.2
+            );
+            rightArmRef.current.rotation.z = THREE.MathUtils.lerp(
+              rightArmRef.current.rotation.z,
+              -0.3,
+              0.1
+            );
+          }
+          if (leftLegRef.current) {
+            leftLegRef.current.rotation.x = THREE.MathUtils.lerp(
+              leftLegRef.current.rotation.x,
+              -runLegSwing,
+              0.2
+            );
+          }
+          if (rightLegRef.current) {
+            rightLegRef.current.rotation.x = THREE.MathUtils.lerp(
+              rightLegRef.current.rotation.x,
+              runLegSwing,
+              0.2
+            );
+          }
+          if (torsoRef.current) {
+            torsoRef.current.rotation.x = THREE.MathUtils.lerp(
+              torsoRef.current.rotation.x,
+              runLean,
+              0.1
+            );
+            torsoRef.current.position.y = Math.abs(Math.sin(runCycle * 2)) * 0.04; // Bounce
+          }
+          if (headRef.current) {
+            headRef.current.rotation.x = THREE.MathUtils.lerp(
+              headRef.current.rotation.x,
+              -0.1,
+              0.1
+            );
+          }
+          return; // Skip normal animations
+        }
+
+        case 'carrying': {
+          // Arms in front holding position, slower walk
+          carryBobRef.current = Math.sin(walkCycle * 0.5) * 0.02;
+          if (leftArmRef.current) {
+            leftArmRef.current.rotation.x = THREE.MathUtils.lerp(
+              leftArmRef.current.rotation.x,
+              -1.0,
+              0.1
+            );
+            leftArmRef.current.rotation.z = THREE.MathUtils.lerp(
+              leftArmRef.current.rotation.z,
+              0.3,
+              0.1
+            );
+          }
+          if (rightArmRef.current) {
+            rightArmRef.current.rotation.x = THREE.MathUtils.lerp(
+              rightArmRef.current.rotation.x,
+              -1.0,
+              0.1
+            );
+            rightArmRef.current.rotation.z = THREE.MathUtils.lerp(
+              rightArmRef.current.rotation.z,
+              -0.3,
+              0.1
+            );
+          }
+          if (torsoRef.current) {
+            torsoRef.current.rotation.x = THREE.MathUtils.lerp(
+              torsoRef.current.rotation.x,
+              0.1,
+              0.05
+            ); // Lean back
+            torsoRef.current.position.y = carryBobRef.current;
+          }
+          // Slower leg movement for carrying
+          const carryLegSwing = Math.sin(walkCycle * 0.7) * 0.3;
+          if (leftLegRef.current) {
+            leftLegRef.current.rotation.x = THREE.MathUtils.lerp(
+              leftLegRef.current.rotation.x,
+              -carryLegSwing,
+              0.1
+            );
+          }
+          if (rightLegRef.current) {
+            rightLegRef.current.rotation.x = THREE.MathUtils.lerp(
+              rightLegRef.current.rotation.x,
+              carryLegSwing,
+              0.1
+            );
+          }
+          return;
+        }
+
+        case 'sitting': {
+          // Transition to seated pose
+          sittingTransitionRef.current = THREE.MathUtils.lerp(
+            sittingTransitionRef.current,
+            1,
+            0.05
+          );
+          const sitAmount = sittingTransitionRef.current;
+
+          if (leftLegRef.current) {
+            leftLegRef.current.rotation.x = THREE.MathUtils.lerp(
+              leftLegRef.current.rotation.x,
+              -1.5 * sitAmount,
+              0.08
+            );
+          }
+          if (rightLegRef.current) {
+            rightLegRef.current.rotation.x = THREE.MathUtils.lerp(
+              rightLegRef.current.rotation.x,
+              -1.5 * sitAmount,
+              0.08
+            );
+          }
+          if (torsoRef.current) {
+            torsoRef.current.position.y = THREE.MathUtils.lerp(
+              torsoRef.current.position.y,
+              -0.4 * sitAmount,
+              0.05
+            );
+            torsoRef.current.rotation.x = THREE.MathUtils.lerp(
+              torsoRef.current.rotation.x,
+              -0.1 * sitAmount,
+              0.05
+            );
+          }
+          if (leftArmRef.current) {
+            leftArmRef.current.rotation.x = THREE.MathUtils.lerp(
+              leftArmRef.current.rotation.x,
+              -0.3 * sitAmount,
+              0.08
+            );
+          }
+          if (rightArmRef.current && !isWaving) {
+            rightArmRef.current.rotation.x = THREE.MathUtils.lerp(
+              rightArmRef.current.rotation.x,
+              -0.3 * sitAmount,
+              0.08
+            );
+          }
+          if (hipsRef.current) {
+            hipsRef.current.position.y = THREE.MathUtils.lerp(
+              hipsRef.current.position.y || 0,
+              -0.3 * sitAmount,
+              0.05
+            );
+          }
+          return;
+        }
+
+        case 'celebrating': {
+          // Fist pump celebration
+          celebratePhaseRef.current += cappedDelta * 4;
+          const celebrateCycle = Math.sin(celebratePhaseRef.current);
+          const pumpHeight = Math.max(0, celebrateCycle) * 0.8;
+
+          if (rightArmRef.current) {
+            rightArmRef.current.rotation.x = THREE.MathUtils.lerp(
+              rightArmRef.current.rotation.x,
+              -2.5 - pumpHeight * 0.5,
+              0.2
+            );
+            rightArmRef.current.rotation.z = THREE.MathUtils.lerp(
+              rightArmRef.current.rotation.z,
+              -0.3,
+              0.1
+            );
+          }
+          if (leftArmRef.current) {
+            // Subtle secondary arm movement
+            leftArmRef.current.rotation.x = THREE.MathUtils.lerp(
+              leftArmRef.current.rotation.x,
+              -0.5 + celebrateCycle * 0.2,
+              0.1
+            );
+          }
+          if (torsoRef.current) {
+            torsoRef.current.rotation.x = THREE.MathUtils.lerp(
+              torsoRef.current.rotation.x,
+              -0.05,
+              0.1
+            );
+            torsoRef.current.position.y = Math.max(0, celebrateCycle) * 0.03; // Slight bounce
+          }
+          if (headRef.current) {
+            headRef.current.rotation.x = THREE.MathUtils.lerp(
+              headRef.current.rotation.x,
+              -0.2,
+              0.1
+            ); // Look up
+          }
+          // Grip fist for pump
+          gripAmountRef.current = THREE.MathUtils.lerp(gripAmountRef.current, 1, 0.2);
+          return;
+        }
+
+        case 'pointing': {
+          // Extend right arm to point
+          const clampedPointDir = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pointDirection));
+          if (rightArmRef.current) {
+            rightArmRef.current.rotation.x = THREE.MathUtils.lerp(
+              rightArmRef.current.rotation.x,
+              -1.3,
+              0.12
+            );
+            rightArmRef.current.rotation.z = THREE.MathUtils.lerp(
+              rightArmRef.current.rotation.z,
+              clampedPointDir * 0.5 - 0.5,
+              0.1
+            );
+          }
+          if (headRef.current) {
+            headRef.current.rotation.y = THREE.MathUtils.lerp(
+              headRef.current.rotation.y,
+              clampedPointDir,
+              0.1
+            );
+            headRef.current.rotation.x = THREE.MathUtils.lerp(headRef.current.rotation.x, 0.1, 0.1);
+          }
+          if (torsoRef.current) {
+            torsoRef.current.rotation.y = THREE.MathUtils.lerp(
+              torsoRef.current.rotation.y,
+              clampedPointDir * 0.3,
+              0.08
+            );
+          }
+          // Keep index finger extended (minimal grip)
+          gripAmountRef.current = THREE.MathUtils.lerp(gripAmountRef.current, 0.3, 0.1);
+          return;
+        }
+      }
+    } else {
+      // Reset sitting transition when not sitting
+      sittingTransitionRef.current = THREE.MathUtils.lerp(sittingTransitionRef.current, 0, 0.1);
+      celebratePhaseRef.current = 0;
+    }
+
+    // === WALK CYCLE CALCULATIONS ===
+    const isWalking = !isIdle && !isDoingSomething;
+
+    // Primary limb motion
     const legSwing = isIdle ? 0 : Math.sin(walkCycle) * 0.6;
 
+    // Secondary motion (only for full detail)
+    const hipSway = isWalking && isFullDetail ? Math.sin(walkCycle) * 0.025 : 0;
+    const shoulderCounter = isWalking && isFullDetail ? Math.sin(walkCycle) * 0.06 : 0;
+    const headBob = isWalking && isFullDetail ? Math.abs(Math.sin(walkCycle * 2)) * 0.015 : 0;
+    const torsoLean = isWalking ? 0.04 : 0; // Slight forward lean when walking
+
+    // === IDLE ANIMATION VARIETY ===
+    if (isIdle && !isDoingSomething && isFullDetail) {
+      idlePhaseRef.current += cappedDelta;
+
+      // Cycle through idle animations every 3-6 seconds
+      if (idlePhaseRef.current > 4) {
+        const animations: IdleAnimationType[] = ['breathing', 'looking', 'shifting', 'stretching'];
+        idleAnimationRef.current = animations[Math.floor(Math.random() * animations.length)];
+        idlePhaseRef.current = 0;
+        // Set new look target for 'looking' animation
+        idleLookTargetRef.current = (Math.random() - 0.5) * 1.2; // ±60 degrees
+      }
+
+      // Apply idle animation effects
+      switch (idleAnimationRef.current) {
+        case 'looking':
+          // Smooth head turn to look around
+          if (headRef.current) {
+            const lookProgress = Math.min(idlePhaseRef.current / 1.5, 1);
+            const easedProgress = 1 - Math.pow(1 - lookProgress, 3); // Ease out cubic
+            headRef.current.rotation.y = THREE.MathUtils.lerp(
+              headRef.current.rotation.y,
+              idleLookTargetRef.current * easedProgress,
+              0.05
+            );
+          }
+          break;
+
+        case 'shifting':
+          // Weight shift side to side
+          weightShiftRef.current = Math.sin(time * 0.8) * 0.03;
+          if (hipsRef.current) {
+            hipsRef.current.position.x = THREE.MathUtils.lerp(
+              hipsRef.current.position.x,
+              weightShiftRef.current,
+              0.05
+            );
+          }
+          if (torsoRef.current) {
+            torsoRef.current.rotation.z = THREE.MathUtils.lerp(
+              torsoRef.current.rotation.z,
+              -weightShiftRef.current * 0.5,
+              0.05
+            );
+          }
+          break;
+
+        case 'stretching':
+          // Subtle arm stretch (only first 2 seconds of idle)
+          if (idlePhaseRef.current < 2 && rightArmRef.current && !isWaving) {
+            const stretchProgress = Math.sin((idlePhaseRef.current * Math.PI) / 2);
+            rightArmRef.current.rotation.x = THREE.MathUtils.lerp(
+              rightArmRef.current.rotation.x,
+              -0.3 * stretchProgress,
+              0.08
+            );
+            rightArmRef.current.rotation.z = THREE.MathUtils.lerp(
+              rightArmRef.current.rotation.z,
+              -0.2 * stretchProgress,
+              0.08
+            );
+          }
+          break;
+
+        case 'breathing':
+        default:
+          // Just enhanced breathing (already handled above)
+          break;
+      }
+    } else {
+      // Reset idle animation state when not idle
+      idlePhaseRef.current = 0;
+    }
+
+    // === TORSO ANIMATION ===
+    if (torsoRef.current) {
+      // Hip sway during walking
+      torsoRef.current.position.x = THREE.MathUtils.lerp(
+        torsoRef.current.position.x,
+        hipSway,
+        0.12
+      );
+      // Forward lean when walking
+      torsoRef.current.rotation.x = THREE.MathUtils.lerp(
+        torsoRef.current.rotation.x,
+        torsoLean,
+        0.08
+      );
+      // Shoulder counter-rotation
+      if (!isIdle || idleAnimationRef.current !== 'shifting') {
+        torsoRef.current.rotation.y = THREE.MathUtils.lerp(
+          torsoRef.current.rotation.y,
+          shoulderCounter,
+          0.1
+        );
+        torsoRef.current.rotation.z = THREE.MathUtils.lerp(torsoRef.current.rotation.z, 0, 0.05);
+      }
+      // Head bob via torso Y position
+      torsoRef.current.position.y = THREE.MathUtils.lerp(
+        torsoRef.current.position.y,
+        headBob,
+        0.15
+      );
+    }
+
+    // === ARM ANIMATION ===
+    // Get role-specific working pose
+    const workingPose = ROLE_WORKING_POSES[role] || ROLE_WORKING_POSES['Operator'];
+    workingPhaseRef.current += cappedDelta * 2; // Subtle oscillation for working animation
+
     if (leftArmRef.current) {
-      if (isDoingSomething) {
-        leftArmRef.current.rotation.x = THREE.MathUtils.lerp(leftArmRef.current.rotation.x, -0.8, 0.05);
-        leftArmRef.current.rotation.z = THREE.MathUtils.lerp(leftArmRef.current.rotation.z, 0.3, 0.05);
+      if (startledAmount > 0) {
+        // Startled: arms raise defensively
+        leftArmRef.current.rotation.x = THREE.MathUtils.lerp(
+          leftArmRef.current.rotation.x,
+          -1.2 * startledAmount,
+          0.2
+        );
+        leftArmRef.current.rotation.z = THREE.MathUtils.lerp(
+          leftArmRef.current.rotation.z,
+          0.5 * startledAmount,
+          0.2
+        );
+      } else if (isDoingSomething) {
+        // Role-specific working pose with subtle motion
+        const workOscillation = Math.sin(workingPhaseRef.current) * 0.05;
+        leftArmRef.current.rotation.x = THREE.MathUtils.lerp(
+          leftArmRef.current.rotation.x,
+          workingPose.leftArm.x + workOscillation,
+          0.05
+        );
+        leftArmRef.current.rotation.z = THREE.MathUtils.lerp(
+          leftArmRef.current.rotation.z,
+          workingPose.leftArm.z,
+          0.05
+        );
       } else {
-        leftArmRef.current.rotation.x = THREE.MathUtils.lerp(leftArmRef.current.rotation.x, armSwing, 0.1);
+        // Natural arm swing with slight phase offset
+        const leftArmTarget = Math.sin(walkCycle + 0.1) * (isIdle ? 0.05 : 0.5);
+        leftArmRef.current.rotation.x = THREE.MathUtils.lerp(
+          leftArmRef.current.rotation.x,
+          leftArmTarget,
+          0.1
+        );
         leftArmRef.current.rotation.z = THREE.MathUtils.lerp(leftArmRef.current.rotation.z, 0, 0.1);
       }
     }
+
     if (rightArmRef.current) {
-      if (isWaving) {
-        wavePhaseRef.current += delta * 12;
+      if (startledAmount > 0 && !isWaving) {
+        // Startled: arms raise defensively
+        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(
+          rightArmRef.current.rotation.x,
+          -1.2 * startledAmount,
+          0.2
+        );
+        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(
+          rightArmRef.current.rotation.z,
+          -0.5 * startledAmount,
+          0.2
+        );
+      } else if (isWaving) {
+        // Waving animation
+        wavePhaseRef.current += cappedDelta * 12;
         const waveAngle = Math.sin(wavePhaseRef.current) * 0.4;
-        rightArmRef.current.rotation.x = -2.2;
-        rightArmRef.current.rotation.z = -0.8 + waveAngle;
+        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(
+          rightArmRef.current.rotation.x,
+          -2.2,
+          0.15
+        );
+        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(
+          rightArmRef.current.rotation.z,
+          -0.8 + waveAngle,
+          0.2
+        );
       } else if (isDoingSomething) {
-        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, -0.3, 0.05);
-      } else {
-        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, -armSwing, 0.1);
-        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z, 0, 0.1);
+        // Role-specific working pose with subtle motion
+        const workOscillation = Math.sin(workingPhaseRef.current + 1) * 0.08;
+        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(
+          rightArmRef.current.rotation.x,
+          workingPose.rightArm.x + workOscillation,
+          0.05
+        );
+        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(
+          rightArmRef.current.rotation.z,
+          workingPose.rightArm.z,
+          0.05
+        );
+      } else if (idleAnimationRef.current !== 'stretching' || !isIdle) {
+        // Natural arm swing (opposite phase from left arm)
+        const rightArmTarget = -Math.sin(walkCycle + 0.1) * (isIdle ? 0.05 : 0.5);
+        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(
+          rightArmRef.current.rotation.x,
+          rightArmTarget,
+          0.1
+        );
+        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(
+          rightArmRef.current.rotation.z,
+          0,
+          0.1
+        );
         wavePhaseRef.current = 0;
       }
     }
+
+    // === FINGER GRIP ANIMATION ===
+    // Curl fingers when holding tools
+    const shouldGrip = tool !== 'none' && (isDoingSomething || isWaving);
+    const targetGrip = shouldGrip ? 1 : 0;
+    gripAmountRef.current = THREE.MathUtils.lerp(gripAmountRef.current, targetGrip, 0.1);
+
+    if (leftFingersRef.current && isFullDetail) {
+      // Curl fingers by rotating them inward (around X axis)
+      leftFingersRef.current.rotation.x = gripAmountRef.current * 0.8;
+      leftFingersRef.current.scale.y = 1 - gripAmountRef.current * 0.3; // Compress slightly
+    }
+    if (rightFingersRef.current && isFullDetail) {
+      rightFingersRef.current.rotation.x = gripAmountRef.current * 0.5; // Less curl on right (often empty)
+      rightFingersRef.current.scale.y = 1 - gripAmountRef.current * 0.2;
+    }
+
+    // === LEG ANIMATION ===
     if (leftLegRef.current) {
-      leftLegRef.current.rotation.x = THREE.MathUtils.lerp(leftLegRef.current.rotation.x, -legSwing, 0.1);
+      leftLegRef.current.rotation.x = THREE.MathUtils.lerp(
+        leftLegRef.current.rotation.x,
+        -legSwing,
+        0.1
+      );
     }
     if (rightLegRef.current) {
-      rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, legSwing, 0.1);
+      rightLegRef.current.rotation.x = THREE.MathUtils.lerp(
+        rightLegRef.current.rotation.x,
+        legSwing,
+        0.1
+      );
     }
+
+    // === HEAD ANIMATION ===
+    // Fatigue adds a slight droop to head
+    const fatigueHeadDroop = fatigueLevel * 0.15;
+
     if (headRef.current) {
-      const targetY = isDoingSomething ? -0.3 : headRotation;
-      const targetX = isDoingSomething ? 0.2 : 0;
-      headRef.current.rotation.y = THREE.MathUtils.lerp(headRef.current.rotation.y, targetY, 0.1);
-      headRef.current.rotation.x = THREE.MathUtils.lerp(headRef.current.rotation.x, targetX, 0.1);
+      if (startledAmount > 0) {
+        // Startled: head jerks back
+        headRef.current.rotation.x = THREE.MathUtils.lerp(
+          headRef.current.rotation.x,
+          -0.3 * startledAmount,
+          0.25
+        );
+        headRef.current.rotation.y = THREE.MathUtils.lerp(
+          headRef.current.rotation.y,
+          headRotation,
+          0.15
+        );
+      } else if (alertDirection !== undefined && isFullDetail) {
+        // Alert reaction: quickly look toward alert source
+        const clampedAlertDir = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, alertDirection));
+        headRef.current.rotation.y = THREE.MathUtils.lerp(
+          headRef.current.rotation.y,
+          clampedAlertDir,
+          0.15
+        );
+        headRef.current.rotation.x = THREE.MathUtils.lerp(
+          headRef.current.rotation.x,
+          -0.1 + fatigueHeadDroop,
+          0.1
+        ); // Slight upward look
+      } else if (nearbyWorkerDirection !== undefined && isIdle && isFullDetail) {
+        // Social: nod toward nearby worker
+        const clampedSocialDir = Math.max(
+          -Math.PI / 3,
+          Math.min(Math.PI / 3, nearbyWorkerDirection)
+        );
+        headRef.current.rotation.y = THREE.MathUtils.lerp(
+          headRef.current.rotation.y,
+          clampedSocialDir,
+          0.08
+        );
+        // Subtle nod
+        const nodAmount = Math.sin(time * 2) * 0.05;
+        headRef.current.rotation.x = THREE.MathUtils.lerp(
+          headRef.current.rotation.x,
+          nodAmount + fatigueHeadDroop,
+          0.1
+        );
+      } else if (isIdle && idleAnimationRef.current === 'looking') {
+        // Already handled in idle animation section
+        headRef.current.rotation.x = THREE.MathUtils.lerp(
+          headRef.current.rotation.x,
+          fatigueHeadDroop,
+          0.05
+        );
+      } else if (isDoingSomething) {
+        // Role-specific head tilt while working
+        headRef.current.rotation.y = THREE.MathUtils.lerp(
+          headRef.current.rotation.y,
+          workingPose.headTilt.y,
+          0.1
+        );
+        headRef.current.rotation.x = THREE.MathUtils.lerp(
+          headRef.current.rotation.x,
+          workingPose.headTilt.x + fatigueHeadDroop,
+          0.1
+        );
+      } else {
+        // Normal head tracking (forklift awareness) or forward
+        headRef.current.rotation.y = THREE.MathUtils.lerp(
+          headRef.current.rotation.y,
+          headRotation,
+          0.1
+        );
+        headRef.current.rotation.x = THREE.MathUtils.lerp(
+          headRef.current.rotation.x,
+          fatigueHeadDroop,
+          0.1
+        );
+      }
+    }
+
+    // === FATIGUE EFFECTS ON POSTURE ===
+    if (fatigueLevel > 0 && torsoRef.current) {
+      // Shoulders droop, slight slouch
+      const slouch = fatigueLevel * 0.08;
+      torsoRef.current.rotation.x = THREE.MathUtils.lerp(
+        torsoRef.current.rotation.x,
+        torsoRef.current.rotation.x + slouch,
+        0.02
+      );
+    }
+
+    // === CROUCH FOR WORKING ROLES ===
+    if (isDoingSomething && workingPose.crouch > 0) {
+      if (leftLegRef.current) {
+        leftLegRef.current.rotation.x = THREE.MathUtils.lerp(
+          leftLegRef.current.rotation.x,
+          -workingPose.crouch * 0.8,
+          0.05
+        );
+      }
+      if (rightLegRef.current) {
+        rightLegRef.current.rotation.x = THREE.MathUtils.lerp(
+          rightLegRef.current.rotation.x,
+          -workingPose.crouch * 0.8,
+          0.05
+        );
+      }
+      if (torsoRef.current) {
+        torsoRef.current.rotation.x = THREE.MathUtils.lerp(
+          torsoRef.current.rotation.x,
+          workingPose.torsoLean,
+          0.05
+        );
+      }
+    }
+
+    // === HIPS RESET (when not shifting) ===
+    if (hipsRef.current && (!isIdle || idleAnimationRef.current !== 'shifting')) {
+      hipsRef.current.position.x = THREE.MathUtils.lerp(hipsRef.current.position.x, 0, 0.05);
     }
   });
 
   return (
     <group scale={[0.85, 0.85, 0.85]}>
       {/* === TORSO === */}
-      <group position={[0, 1.15, 0]}>
+      <group ref={torsoRef} position={[0, 1.15, 0]}>
         {/* Upper torso / chest */}
-        <mesh castShadow position={[0, 0.2, 0]}>
+        <mesh ref={chestRef} castShadow position={[0, 0.2, 0]}>
           <boxGeometry args={[0.48, 0.45, 0.24]} />
           <meshStandardMaterial color={uniformColor} roughness={0.8} />
         </mesh>
@@ -360,6 +1459,16 @@ const HumanModel: React.FC<{
             <meshStandardMaterial color="#0a0a0a" />
           </mesh>
 
+          {/* Eyelids (for blinking) */}
+          <mesh ref={leftEyelidRef} position={[-0.055, 0.045, 0.155]}>
+            <boxGeometry args={[0.04, 0.025, 0.02]} />
+            <meshStandardMaterial color={skinTone} roughness={0.6} />
+          </mesh>
+          <mesh ref={rightEyelidRef} position={[0.055, 0.045, 0.155]}>
+            <boxGeometry args={[0.04, 0.025, 0.02]} />
+            <meshStandardMaterial color={skinTone} roughness={0.6} />
+          </mesh>
+
           {/* Eyebrows */}
           <mesh position={[-0.055, 0.07, 0.14]} rotation={[0.15, 0, 0.12]}>
             <boxGeometry args={[0.045, 0.012, 0.015]} />
@@ -433,7 +1542,7 @@ const HumanModel: React.FC<{
               <meshStandardMaterial color={skinTone} roughness={0.6} />
             </mesh>
             {/* Fingers */}
-            <mesh castShadow position={[0, -0.055, 0]}>
+            <mesh ref={leftFingersRef} castShadow position={[0, -0.055, 0]}>
               <boxGeometry args={[0.055, 0.04, 0.025]} />
               <meshStandardMaterial color={skinTone} roughness={0.6} />
             </mesh>
@@ -466,7 +1575,7 @@ const HumanModel: React.FC<{
               <meshStandardMaterial color={skinTone} roughness={0.6} />
             </mesh>
             {/* Fingers */}
-            <mesh castShadow position={[0, -0.055, 0]}>
+            <mesh ref={rightFingersRef} castShadow position={[0, -0.055, 0]}>
               <boxGeometry args={[0.055, 0.04, 0.025]} />
               <meshStandardMaterial color={skinTone} roughness={0.6} />
             </mesh>
@@ -475,7 +1584,7 @@ const HumanModel: React.FC<{
       </group>
 
       {/* === HIPS / PELVIS === */}
-      <mesh castShadow position={[0, 0.72, 0]}>
+      <mesh ref={hipsRef} castShadow position={[0, 0.72, 0]}>
         <boxGeometry args={[0.38, 0.14, 0.2]} />
         <meshStandardMaterial color={pantsColor} roughness={0.8} />
       </mesh>
@@ -566,316 +1675,811 @@ const HumanModel: React.FC<{
   );
 };
 
-const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = ({ data, onSelect }) => {
-  const ref = useRef<THREE.Group>(null);
-  const [hovered, setHovered] = useState(false);
-  const walkCycleRef = useRef(0); // Changed to ref - no re-render on animation
-  const [headRotation, setHeadRotation] = useState(0);
-  const [isWaving, setIsWaving] = useState(false);
-  const [isIdle, setIsIdle] = useState(false);
-  const directionRef = useRef(data.direction);
-  const baseXRef = useRef(data.position[0]);
-  const idleTimerRef = useRef(Math.random() * 10 + 5); // 5-15s before first idle
-  const idleDurationRef = useRef(0);
-  const isEvadingRef = useRef(false);
-  const wasEvadingRef = useRef(false);
-  const evadeDirectionRef = useRef(0); // -1 for left, 1 for right
-  const evadeCooldownRef = useRef(0); // Cooldown after evasion before returning
-  const EVADE_COOLDOWN_TIME = 1.5; // Wait 1.5s after forklift passes before returning
-  const waveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastStepRef = useRef(0); // Track walk cycle phase for footsteps
-  const recordWorkerEvasion = useMillStore(state => state.recordWorkerEvasion);
+// Simplified worker billboard for distant rendering (50+ units away)
+// Uses only 3 meshes instead of ~50 for massive performance improvement
+// Simplified worker for medium distance (8-10 meshes instead of 20+)
+const SimplifiedWorker: React.FC<{
+  walkCycleRef: React.MutableRefObject<number>;
+  uniformColor: string;
+  skinTone: string;
+  hatColor: string;
+  hasVest: boolean;
+  pantsColor: string;
+}> = React.memo(({ walkCycleRef, uniformColor, skinTone, hatColor, hasVest, pantsColor }) => {
+  const leftLegRef = useRef<THREE.Group>(null);
+  const rightLegRef = useRef<THREE.Group>(null);
+  const leftArmRef = useRef<THREE.Group>(null);
+  const rightArmRef = useRef<THREE.Group>(null);
 
-  // Track when evasion starts and ends
-  useEffect(() => {
-    if (isEvadingRef.current && !wasEvadingRef.current) {
-      recordWorkerEvasion();
+  // Basic walk animation
+  useFrame(() => {
+    const walkCycle = walkCycleRef.current;
+    if (leftLegRef.current && rightLegRef.current) {
+      leftLegRef.current.rotation.x = Math.sin(walkCycle) * 0.3;
+      rightLegRef.current.rotation.x = -Math.sin(walkCycle) * 0.3;
     }
-    // When evasion ends, wave to acknowledge the forklift
-    if (!isEvadingRef.current && wasEvadingRef.current) {
-      setIsWaving(true);
-      // Stop waving after 1.5 seconds
-      if (waveTimeoutRef.current) clearTimeout(waveTimeoutRef.current);
-      waveTimeoutRef.current = setTimeout(() => setIsWaving(false), 1500);
-    }
-    wasEvadingRef.current = isEvadingRef.current;
-  });
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (waveTimeoutRef.current) clearTimeout(waveTimeoutRef.current);
-    };
-  }, []);
-
-  // Set initial position only once (not via prop to avoid reset on re-render)
-  const initializedRef = useRef(false);
-  useEffect(() => {
-    if (ref.current && !initializedRef.current) {
-      ref.current.position.set(...data.position);
-      initializedRef.current = true;
-    }
-  }, [data.position]);
-
-  // Memoize appearance for consistency
-  const appearance = useMemo(
-    () => getWorkerAppearance(data.role, data.color, data.id),
-    [data.role, data.color, data.id]
-  );
-
-  useFrame((state, delta) => {
-    if (!ref.current) return;
-
-    const FORKLIFT_DETECTION_RANGE = 8; // How far away to detect forklifts
-    const EVADE_DISTANCE = 3; // How far to step aside
-    const EVADE_SPEED = 4; // How fast to move sideways
-
-    // Check for nearby forklifts
-    const nearestForklift = positionRegistry.getNearestForklift(
-      ref.current.position.x,
-      ref.current.position.z,
-      FORKLIFT_DETECTION_RANGE
-    );
-
-    // Calculate head rotation to look at forklift
-    if (nearestForklift) {
-      const dx = nearestForklift.x - ref.current.position.x;
-      const dz = nearestForklift.z - ref.current.position.z;
-      // Calculate angle to forklift, relative to worker's body direction
-      const angleToForklift = Math.atan2(dx, dz);
-      const bodyAngle = directionRef.current > 0 ? 0 : Math.PI;
-      let relativeAngle = angleToForklift - bodyAngle;
-      // Clamp head rotation to realistic range (-90 to +90 degrees)
-      relativeAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, relativeAngle));
-      // Only update if angle changed significantly (avoid jitter from tiny fluctuations)
-      if (Math.abs(relativeAngle - headRotation) > 0.05) {
-        setHeadRotation(relativeAngle);
-      }
-    } else {
-      // Only reset to 0 if not already near 0
-      if (Math.abs(headRotation) > 0.05) {
-        setHeadRotation(0);
-      }
-    }
-
-    // Determine if we need to evade
-    if (nearestForklift && positionRegistry.isForkliftApproaching(
-      ref.current.position.x,
-      ref.current.position.z,
-      nearestForklift
-    )) {
-      if (!isEvadingRef.current) {
-        // Decide which direction to evade (away from forklift's path)
-        // Use cross product to determine which side of the forklift's path we're on
-        const toWorkerX = ref.current.position.x - nearestForklift.x;
-        const toWorkerZ = ref.current.position.z - nearestForklift.z;
-        const crossProduct = (nearestForklift.dirX || 0) * toWorkerZ - (nearestForklift.dirZ || 0) * toWorkerX;
-        evadeDirectionRef.current = crossProduct > 0 ? 1 : -1;
-        isEvadingRef.current = true;
-      }
-
-      // Move sideways to evade
-      const targetX = baseXRef.current + (evadeDirectionRef.current * EVADE_DISTANCE);
-      const diffX = targetX - ref.current.position.x;
-      if (Math.abs(diffX) > 0.1) {
-        ref.current.position.x += Math.sign(diffX) * EVADE_SPEED * delta;
-      }
-
-      // Slow down forward movement while evading
-      walkCycleRef.current += delta * 2;
-    } else {
-      // Cooldown before clearing evade state and returning to path
-      if (isEvadingRef.current) {
-        evadeCooldownRef.current = EVADE_COOLDOWN_TIME; // Start cooldown when we stop evading
-        isEvadingRef.current = false;
-      }
-
-      // Count down the cooldown timer
-      if (evadeCooldownRef.current > 0) {
-        evadeCooldownRef.current -= delta;
-      }
-
-      // Only return to original path after cooldown expires
-      if (evadeCooldownRef.current <= 0) {
-        const diffX = baseXRef.current - ref.current.position.x;
-        if (Math.abs(diffX) > 0.1) {
-          ref.current.position.x += Math.sign(diffX) * EVADE_SPEED * 0.5 * delta;
-        }
-      }
-
-      // Idle behavior management
-      if (isIdle) {
-        idleDurationRef.current -= delta;
-        if (idleDurationRef.current <= 0) {
-          setIsIdle(false);
-          idleTimerRef.current = Math.random() * 12 + 8; // 8-20s until next idle
-        }
-        // Slow breathing animation while idle
-        walkCycleRef.current += delta * 0.5;
-      } else {
-        idleTimerRef.current -= delta;
-        if (idleTimerRef.current <= 0) {
-          setIsIdle(true);
-          idleDurationRef.current = Math.random() * 4 + 2; // Idle for 2-6s
-        }
-        // Normal walking animation
-        walkCycleRef.current += delta * 5.5;
-      }
-    }
-
-    // Move worker (skip movement when idle)
-    const bobHeight = isIdle ? 0 : Math.abs(Math.sin(walkCycleRef.current)) * 0.025;
-    if (!isIdle) {
-      ref.current.position.z += data.speed * delta * directionRef.current;
-
-      // Trigger footstep sounds at each step (when sin crosses 0)
-      const currentStep = Math.floor(walkCycleRef.current / Math.PI);
-      if (currentStep !== lastStepRef.current) {
-        lastStepRef.current = currentStep;
-        audioManager.playFootstep(data.id);
-      }
-    }
-    ref.current.position.y = bobHeight;
-    ref.current.rotation.y = directionRef.current > 0 ? 0 : Math.PI;
-
-    // Register position for collision avoidance
-    positionRegistry.register(data.id, ref.current.position.x, ref.current.position.z, 'worker');
-
-    // Turn around at boundaries
-    if (ref.current.position.z > 25 || ref.current.position.z < -25) {
-      directionRef.current *= -1;
+    if (leftArmRef.current && rightArmRef.current) {
+      leftArmRef.current.rotation.x = -Math.sin(walkCycle) * 0.2;
+      rightArmRef.current.rotation.x = Math.sin(walkCycle) * 0.2;
     }
   });
-
-  const getRoleIcon = () => {
-    const iconClass = "w-6 h-6";
-    switch (data.role) {
-      case 'Supervisor': return <Briefcase className={iconClass} />;
-      case 'Engineer': return <WrenchIcon className={iconClass} />;
-      case 'Operator': return <HardHat className={iconClass} />;
-      case 'Safety Officer': return <Shield className={iconClass} />;
-      case 'Quality Control': return <FlaskConical className={iconClass} />;
-      case 'Maintenance': return <WrenchIcon className={iconClass} />;
-      default: return <User className={iconClass} />;
-    }
-  };
-
-  const getStatusColor = () => {
-    switch (data.status) {
-      case 'working': return '#22c55e';
-      case 'responding': return '#f59e0b';
-      case 'break': return '#6b7280';
-      default: return '#3b82f6';
-    }
-  };
 
   return (
-    <group
-      ref={ref}
-      onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer'; }}
-      onPointerOut={() => { setHovered(false); document.body.style.cursor = 'auto'; }}
-      onClick={(e) => { e.stopPropagation(); audioManager.playClick(); onSelect(); }}
-    >
-      {/* Human Model */}
-      <HumanModel
-        walkCycleRef={walkCycleRef}
-        uniformColor={appearance.uniformColor}
-        skinTone={appearance.skinTone}
-        hatColor={appearance.hatColor}
-        hasVest={appearance.hasVest}
-        pantsColor={appearance.pantsColor}
-        headRotation={headRotation}
-        hairColor={appearance.hairColor}
-        hairStyle={appearance.hairStyle}
-        tool={appearance.tool}
-        isWaving={isWaving}
-        isIdle={isIdle}
-      />
+    <group>
+      {/* Torso - combined chest and hips */}
+      <mesh position={[0, 1.1, 0]} castShadow>
+        <boxGeometry args={[0.5, 0.9, 0.25]} />
+        <meshStandardMaterial color={hasVest ? '#f97316' : uniformColor} roughness={0.7} />
+      </mesh>
 
-      {/* Status indicator above head */}
-      <group position={[0, 2.15, 0]}>
-        <mesh>
-          <sphereGeometry args={[0.055]} />
-          <meshStandardMaterial
-            color={getStatusColor()}
-            emissive={getStatusColor()}
-            emissiveIntensity={2.5}
-            toneMapped={false}
-          />
-        </mesh>
-        {/* Pulsing ring */}
-        <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[0.07, 0.085, 20]} />
-          <meshStandardMaterial
-            color={getStatusColor()}
-            emissive={getStatusColor()}
-            emissiveIntensity={1.5}
-            transparent
-            opacity={0.6}
-            toneMapped={false}
-          />
+      {/* Head */}
+      <mesh position={[0, 1.75, 0]} castShadow>
+        <sphereGeometry args={[0.15, 12, 12]} />
+        <meshStandardMaterial color={skinTone} roughness={0.6} />
+      </mesh>
+
+      {/* Hard hat */}
+      <mesh position={[0, 1.9, 0]} castShadow>
+        <sphereGeometry args={[0.17, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshStandardMaterial color={hatColor} roughness={0.5} />
+      </mesh>
+
+      {/* Left arm */}
+      <group ref={leftArmRef} position={[-0.3, 1.3, 0]}>
+        <mesh position={[0, -0.25, 0]} castShadow>
+          <boxGeometry args={[0.12, 0.5, 0.12]} />
+          <meshStandardMaterial color={uniformColor} roughness={0.7} />
         </mesh>
       </group>
 
-      {/* Floating name tag when hovered */}
-      {hovered && (
-        <Html position={[0, 2.6, 0]} center distanceFactor={12}>
-          <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-500/50 px-4 py-3 rounded-xl shadow-2xl pointer-events-none min-w-[220px]">
-            <div className="flex items-center gap-3 mb-2">
-              {getRoleIcon()}
-              <div>
-                <div className="font-bold text-white text-sm">{data.name}</div>
-                <div className="text-xs text-blue-400">{data.role}</div>
-              </div>
-            </div>
-            <div className="text-xs text-slate-400 border-t border-slate-700/50 pt-2 mt-2">
-              <div className="flex items-center gap-2">
-                <span
-                  className="w-2 h-2 rounded-full animate-pulse"
-                  style={{ backgroundColor: getStatusColor() }}
-                />
-                <span className="text-slate-300">{data.currentTask}</span>
-              </div>
-            </div>
-            <div className="text-[10px] text-slate-500 mt-2 flex items-center gap-1.5">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
-              </svg>
-              Click for details
-            </div>
-          </div>
-        </Html>
-      )}
-
-      {/* Always visible name badge */}
-      <Billboard position={[0, 2.4, 0]}>
-        <Text
-          fontSize={0.14}
-          color="white"
-          anchorX="center"
-          anchorY="middle"
-          outlineWidth={0.012}
-          outlineColor="#000000"
-        >
-          {data.name.split(' ')[0]}
-        </Text>
-      </Billboard>
-
-      {/* ID badge on chest */}
-      <group position={[0.12, 1.28, 0.125]} rotation={[0, 0, 0]}>
-        <mesh>
-          <planeGeometry args={[0.09, 0.06]} />
-          <meshStandardMaterial color="#ffffff" />
+      {/* Right arm */}
+      <group ref={rightArmRef} position={[0.3, 1.3, 0]}>
+        <mesh position={[0, -0.25, 0]} castShadow>
+          <boxGeometry args={[0.12, 0.5, 0.12]} />
+          <meshStandardMaterial color={uniformColor} roughness={0.7} />
         </mesh>
-        <mesh position={[0, 0.012, 0.001]}>
-          <planeGeometry args={[0.07, 0.015]} />
-          <meshStandardMaterial color="#1e40af" />
+      </group>
+
+      {/* Hips */}
+      <mesh position={[0, 0.7, 0]}>
+        <boxGeometry args={[0.45, 0.3, 0.25]} />
+        <meshStandardMaterial color={pantsColor} roughness={0.8} />
+      </mesh>
+
+      {/* Left leg */}
+      <group ref={leftLegRef} position={[-0.13, 0.55, 0]}>
+        <mesh position={[0, -0.3, 0]} castShadow>
+          <boxGeometry args={[0.15, 0.6, 0.15]} />
+          <meshStandardMaterial color={pantsColor} roughness={0.8} />
         </mesh>
-        <mesh position={[0, -0.012, 0.001]}>
-          <planeGeometry args={[0.06, 0.008]} />
-          <meshStandardMaterial color="#94a3b8" />
+      </group>
+
+      {/* Right leg */}
+      <group ref={rightLegRef} position={[0.13, 0.55, 0]}>
+        <mesh position={[0, -0.3, 0]} castShadow>
+          <boxGeometry args={[0.15, 0.6, 0.15]} />
+          <meshStandardMaterial color={pantsColor} roughness={0.8} />
         </mesh>
       </group>
     </group>
   );
-};
+});
+SimplifiedWorker.displayName = 'SimplifiedWorker';
+
+const WorkerBillboard: React.FC<{
+  uniformColor: string;
+  hasVest: boolean;
+  hatColor: string;
+}> = React.memo(({ uniformColor, hasVest, hatColor }) => {
+  return (
+    <group scale={[0.85, 0.85, 0.85]}>
+      {/* Simple body - single box */}
+      <mesh position={[0, 1.0, 0]} castShadow>
+        <boxGeometry args={[0.4, 1.2, 0.25]} />
+        <meshStandardMaterial color={hasVest ? '#f97316' : uniformColor} roughness={0.8} />
+      </mesh>
+      {/* Head - sphere */}
+      <mesh position={[0, 1.8, 0]} castShadow>
+        <sphereGeometry args={[0.15, 8, 8]} />
+        <meshStandardMaterial color="#f5d0c5" roughness={0.6} />
+      </mesh>
+      {/* Hard hat */}
+      <mesh position={[0, 1.95, 0]}>
+        <sphereGeometry args={[0.17, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshStandardMaterial color={hatColor} roughness={0.5} />
+      </mesh>
+    </group>
+  );
+});
+
+// Memoize Worker component to prevent unnecessary re-renders
+// Custom comparison function - only re-render if worker data actually changes
+const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
+  ({ data, onSelect }) => {
+    const ref = useRef<THREE.Group>(null);
+    const [hovered, setHovered] = useState(false);
+    const [lod, setLod] = useState<'high' | 'medium' | 'low'>('high'); // LOD tier for rendering
+    const walkCycleRef = useRef(0); // Changed to ref - no re-render on animation
+    const headRotationRef = useRef(0); // Changed to ref for smoother animation without re-renders
+    const [isWaving, setIsWaving] = useState(false);
+    const isIdleRef = useRef(false); // Changed from useState to ref to avoid re-renders in useFrame
+    const directionRef = useRef(data.direction);
+    const baseXRef = useRef(data.position[0]);
+    const idleTimerRef = useRef(Math.random() * 10 + 5); // 5-15s before first idle
+    const idleDurationRef = useRef(0);
+    const isEvadingRef = useRef(false);
+    const wasEvadingRef = useRef(false);
+    const evadeDirectionRef = useRef(0); // -1 for left, 1 for right
+    const evadeCooldownRef = useRef(0); // Cooldown after evasion before returning
+    const EVADE_COOLDOWN_TIME = 1.5; // Wait 1.5s after forklift passes before returning
+    const waveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const lastStepRef = useRef(0); // Track walk cycle phase for footsteps
+    const cameraDistanceRef = useRef(0); // For animation LOD
+    const isStartledRef = useRef(false); // Startled when forklift is very close
+    const frameCountRef = useRef(0); // Frame counter for throttling expensive checks
+    const lastForkliftCheckRef = useRef<EntityPosition | null>(null);
+    const alertDirectionRef = useRef<number | undefined>(undefined); // Direction to look at active alert
+    const fatigueRef = useRef(0); // Accumulates over time, resets on break
+    const nearbyWorkerDirRef = useRef<number | undefined>(undefined); // Direction to nearby worker
+    const shiftStartRef = useRef(Date.now()); // Track shift start for fatigue
+    const specialActionRef = useRef<
+      'none' | 'running' | 'carrying' | 'sitting' | 'celebrating' | 'pointing'
+    >('none');
+    const pointDirectionRef = useRef(0);
+    const celebrationTimerRef = useRef(0); // Timer for celebration duration
+    const recordWorkerEvasion = useMillStore((state: any) => state.recordWorkerEvasion);
+    const alerts = useMillStore((state: any) => state.alerts);
+    const productionEfficiency = useMillStore((state: any) => state.productionEfficiency);
+
+    // Cache graphics settings (updated every ~1 second instead of every frame)
+    const cachedThrottleLevelRef = useRef(2);
+    const workerSettingsCacheFrameRef = useRef(0);
+
+    // Obstacle avoidance state
+    const isAvoidingObstacleRef = useRef(false);
+    const avoidanceTargetXRef = useRef(0);
+    const currentObstacleRef = useRef<string | null>(null);
+    const OBSTACLE_DETECTION_RANGE = 5; // How far ahead to look for obstacles
+    const AVOIDANCE_SPEED = 2.5; // Speed when moving sideways to avoid
+    const OBSTACLE_PADDING = 0.8; // Extra clearance around obstacles
+
+    // Track when evasion starts and ends
+    // Note: This effect intentionally runs on every render to track ref changes
+    // The setIsWaving calls are guarded by conditions that prevent infinite loops
+    useEffect(() => {
+      if (isEvadingRef.current && !wasEvadingRef.current) {
+        recordWorkerEvasion();
+      }
+      // When evasion ends, wave to acknowledge the forklift
+      if (!isEvadingRef.current && wasEvadingRef.current) {
+        setIsWaving(true);
+        // Stop waving after 1.5 seconds
+        if (waveTimeoutRef.current) clearTimeout(waveTimeoutRef.current);
+        waveTimeoutRef.current = setTimeout(() => setIsWaving(() => false), 1500);
+      }
+      wasEvadingRef.current = isEvadingRef.current;
+    }, [recordWorkerEvasion]);
+
+    // Cleanup timeout on unmount
+    useEffect(() => {
+      return () => {
+        if (waveTimeoutRef.current) {
+          clearTimeout(waveTimeoutRef.current);
+          waveTimeoutRef.current = null;
+        }
+      };
+    }, []);
+
+    // Set initial position only once (not via prop to avoid reset on re-render)
+    const initializedRef = useRef(false);
+    useEffect(() => {
+      if (ref.current && !initializedRef.current) {
+        ref.current.position.set(...data.position);
+        initializedRef.current = true;
+      }
+    }, [data.position]);
+
+    // Memoize appearance for consistency
+    const appearance = useMemo(
+      () => getWorkerAppearance(data.role, data.color, data.id),
+      [data.role, data.color, data.id]
+    );
+
+    useFrame((state, delta) => {
+      if (!ref.current) return;
+
+      // Update cached settings every 60 frames (~1 second at 60fps)
+      if (workerSettingsCacheFrameRef.current % 60 === 0) {
+        const graphics = useMillStore.getState().graphics;
+        cachedThrottleLevelRef.current = getThrottleLevel(graphics.quality);
+      }
+      workerSettingsCacheFrameRef.current++;
+
+      // Frame throttling for performance - position updates don't need 60fps
+      if (!shouldRunThisFrame(cachedThrottleLevelRef.current)) {
+        return; // Skip this frame
+      }
+
+      // Cap delta to prevent huge jumps (max 100ms)
+      const cappedDelta = Math.min(delta, 0.1);
+
+      // Calculate camera distance for animation LOD (update every few frames for performance)
+      cameraDistanceRef.current = state.camera.position.distanceTo(ref.current.position);
+
+      // Update LOD tier for rendering (with hysteresis to prevent flickering)
+      // High: < 25 units, Medium: 25-55 units, Low: > 55 units
+      const dist = cameraDistanceRef.current;
+      if (lod === 'high' && dist > 30) {
+        setLod('medium');
+      } else if (lod === 'medium' && dist < 25) {
+        setLod('high');
+      } else if (lod === 'medium' && dist > 55) {
+        setLod('low');
+      } else if (lod === 'low' && dist < 45) {
+        setLod('medium');
+      }
+
+      // === FATIGUE CALCULATION ===
+      // Fatigue increases slowly over time (full fatigue after ~10 min of real time, scaled to game time)
+      const shiftDuration = (Date.now() - shiftStartRef.current) / 1000; // seconds
+      const baseFatigue = Math.min(shiftDuration / 600, 0.8); // Max 80% fatigue from time
+      // Reduce fatigue if on break
+      if (data.status === 'break') {
+        fatigueRef.current = Math.max(0, fatigueRef.current - cappedDelta * 0.1);
+        shiftStartRef.current = Date.now(); // Reset shift timer on break
+      } else {
+        fatigueRef.current = baseFatigue;
+      }
+
+      // === ALERT REACTION ===
+      // Check for active (non-dismissed) critical/warning alerts and look toward them
+      const activeAlerts = alerts.filter(
+        (a: any) => !a.dismissed && (a.type === 'critical' || a.type === 'warning')
+      );
+      if (activeAlerts.length > 0 && !isEvadingRef.current) {
+        // Find nearest alert by machine position (approximate positions based on machine zones)
+        const machinePositions: Record<string, { x: number; z: number }> = {
+          silo: { x: 0, z: -22 },
+          mill: { x: 0, z: -6 },
+          packer: { x: 0, z: 25 },
+          default: { x: 0, z: 0 },
+        };
+        const alertPos =
+          machinePositions[
+            activeAlerts[0].machine?.toLowerCase().includes('silo')
+              ? 'silo'
+              : activeAlerts[0].machine?.toLowerCase().includes('mill')
+                ? 'mill'
+                : activeAlerts[0].machine?.toLowerCase().includes('packer')
+                  ? 'packer'
+                  : 'default'
+          ];
+        const dx = alertPos.x - ref.current.position.x;
+        const dz = alertPos.z - ref.current.position.z;
+        const bodyAngle = directionRef.current > 0 ? 0 : Math.PI;
+        alertDirectionRef.current = Math.atan2(dx, dz) - bodyAngle;
+      } else {
+        alertDirectionRef.current = undefined;
+      }
+
+      // === NEARBY WORKER DETECTION (throttled) ===
+      if (frameCountRef.current % 30 === 0 && isIdleRef.current) {
+        // Check every ~0.5s when idle
+        const nearbyWorker = positionRegistry.getNearestWorker(
+          ref.current.position.x,
+          ref.current.position.z,
+          5, // 5 unit range
+          data.id
+        );
+        if (nearbyWorker) {
+          const dx = nearbyWorker.x - ref.current.position.x;
+          const dz = nearbyWorker.z - ref.current.position.z;
+          const bodyAngle = directionRef.current > 0 ? 0 : Math.PI;
+          nearbyWorkerDirRef.current = Math.atan2(dx, dz) - bodyAngle;
+        } else {
+          nearbyWorkerDirRef.current = undefined;
+        }
+      } else if (!isIdleRef.current) {
+        nearbyWorkerDirRef.current = undefined;
+      }
+
+      // === SPECIAL ACTION DETERMINATION ===
+      // Priority: emergency > break sitting > celebrating > pointing > carrying > normal
+      const hasCriticalAlert = alerts.some((a: { dismissed: boolean; type: string }) => !a.dismissed && a.type === 'critical');
+      const isOnBreak = data.status === 'break';
+      const isSupervisor = data.role === 'Supervisor';
+
+      // Celebration: triggered when efficiency hits 100% (check every 2 seconds)
+      if (frameCountRef.current % 120 === 0) {
+        if (productionEfficiency >= 100 && celebrationTimerRef.current <= 0) {
+          celebrationTimerRef.current = 3; // Celebrate for 3 seconds
+        }
+      }
+      if (celebrationTimerRef.current > 0) {
+        celebrationTimerRef.current -= cappedDelta;
+        specialActionRef.current = 'celebrating';
+      } else if (hasCriticalAlert && data.role === 'Safety Officer') {
+        // Safety officers run during critical alerts
+        specialActionRef.current = 'running';
+      } else if (isOnBreak && isIdleRef.current) {
+        // Sitting during break when idle
+        specialActionRef.current = 'sitting';
+      } else if (isSupervisor && isIdleRef.current && nearbyWorkerDirRef.current !== undefined) {
+        // Supervisors point when giving directions to nearby workers
+        specialActionRef.current = 'pointing';
+        pointDirectionRef.current = nearbyWorkerDirRef.current;
+      } else if (data.role === 'Maintenance' && !isIdleRef.current && Math.random() < 0.001) {
+        // Maintenance occasionally carries things (very rare trigger per frame)
+        specialActionRef.current = 'carrying';
+      } else {
+        specialActionRef.current = 'none';
+      }
+
+      const FORKLIFT_DETECTION_RANGE = 8; // How far away to detect forklifts
+      const EVADE_DISTANCE = 3; // How far to step aside
+      const EVADE_SPEED = 4; // How fast to move sideways
+
+      // Throttle expensive forklift detection to every 3 frames (~20Hz instead of 60Hz)
+      frameCountRef.current++;
+      const shouldCheckForForklifts = frameCountRef.current % 3 === 0;
+
+      let nearestForklift: EntityPosition | null;
+
+      if (shouldCheckForForklifts) {
+        nearestForklift = positionRegistry.getNearestForklift(
+          ref.current.position.x,
+          ref.current.position.z,
+          FORKLIFT_DETECTION_RANGE
+        );
+        lastForkliftCheckRef.current = nearestForklift;
+      } else {
+        nearestForklift = lastForkliftCheckRef.current;
+      }
+
+      // Calculate head rotation to look at forklift (uses ref instead of state for performance)
+      if (nearestForklift) {
+        const dx = nearestForklift.x - ref.current.position.x;
+        const dz = nearestForklift.z - ref.current.position.z;
+        const distanceToForklift = Math.sqrt(dx * dx + dz * dz);
+
+        // Startled when forklift is very close (under 3 units) and approaching
+        const isApproaching = positionRegistry.isForkliftApproaching(
+          ref.current.position.x,
+          ref.current.position.z,
+          nearestForklift
+        );
+        isStartledRef.current = distanceToForklift < 3 && isApproaching;
+
+        // Calculate angle to forklift, relative to worker's body direction
+        const angleToForklift = Math.atan2(dx, dz);
+        const bodyAngle = directionRef.current > 0 ? 0 : Math.PI;
+        let relativeAngle = angleToForklift - bodyAngle;
+        // Clamp head rotation to realistic range (-90 to +90 degrees)
+        relativeAngle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, relativeAngle));
+        // Smoothly interpolate head rotation via ref (no re-render)
+        headRotationRef.current = THREE.MathUtils.lerp(headRotationRef.current, relativeAngle, 0.1);
+      } else {
+        // Smoothly return to 0
+        headRotationRef.current = THREE.MathUtils.lerp(headRotationRef.current, 0, 0.1);
+        isStartledRef.current = false;
+      }
+
+      // Determine if we need to evade
+      if (
+        nearestForklift &&
+        positionRegistry.isForkliftApproaching(
+          ref.current.position.x,
+          ref.current.position.z,
+          nearestForklift
+        )
+      ) {
+        if (!isEvadingRef.current) {
+          // Decide which direction to evade (away from forklift's path)
+          // Use cross product to determine which side of the forklift's path we're on
+          const toWorkerX = ref.current.position.x - nearestForklift.x;
+          const toWorkerZ = ref.current.position.z - nearestForklift.z;
+          const crossProduct =
+            (nearestForklift.dirX || 0) * toWorkerZ - (nearestForklift.dirZ || 0) * toWorkerX;
+          const preferredDirection = crossProduct > 0 ? 1 : -1;
+
+          // Check if preferred evasion direction is clear of obstacles
+          const preferredTargetX = ref.current.position.x + preferredDirection * EVADE_DISTANCE;
+          const alternateTargetX = ref.current.position.x + -preferredDirection * EVADE_DISTANCE;
+
+          const preferredClear = !positionRegistry.isInsideObstacle(
+            preferredTargetX,
+            ref.current.position.z,
+            OBSTACLE_PADDING
+          );
+          const alternateClear = !positionRegistry.isInsideObstacle(
+            alternateTargetX,
+            ref.current.position.z,
+            OBSTACLE_PADDING
+          );
+
+          if (preferredClear) {
+            evadeDirectionRef.current = preferredDirection;
+            isEvadingRef.current = true;
+          } else if (alternateClear) {
+            // Preferred direction blocked, try the other way
+            evadeDirectionRef.current = -preferredDirection;
+            isEvadingRef.current = true;
+          } else {
+            // Both directions blocked - stay put, forklift will stop for us
+            evadeDirectionRef.current = 0;
+            isEvadingRef.current = false;
+          }
+        }
+
+        // Move sideways to evade (only if we have a valid direction)
+        if (evadeDirectionRef.current !== 0) {
+          const targetX = baseXRef.current + evadeDirectionRef.current * EVADE_DISTANCE;
+          // Double-check the next position won't be inside an obstacle
+          const nextX =
+            ref.current.position.x +
+            Math.sign(targetX - ref.current.position.x) * EVADE_SPEED * cappedDelta;
+          if (
+            !positionRegistry.isInsideObstacle(
+              nextX,
+              ref.current.position.z,
+              OBSTACLE_PADDING * 0.5
+            )
+          ) {
+            const diffX = targetX - ref.current.position.x;
+            if (Math.abs(diffX) > 0.1) {
+              ref.current.position.x = nextX;
+            }
+          }
+        }
+
+        // Slow down forward movement while evading
+        walkCycleRef.current += cappedDelta * 2;
+      } else {
+        // Cooldown before clearing evade state and returning to path
+        if (isEvadingRef.current) {
+          evadeCooldownRef.current = EVADE_COOLDOWN_TIME; // Start cooldown when we stop evading
+          isEvadingRef.current = false;
+        }
+
+        // Count down the cooldown timer
+        if (evadeCooldownRef.current > 0) {
+          evadeCooldownRef.current -= cappedDelta;
+        }
+
+        // Note: Return to original path is handled in obstacle avoidance section below
+
+        // Idle behavior management
+        if (isIdleRef.current) {
+          idleDurationRef.current -= cappedDelta;
+          if (idleDurationRef.current <= 0) {
+            isIdleRef.current = false;
+            idleTimerRef.current = Math.random() * 12 + 8; // 8-20s until next idle
+          }
+          // Slow breathing animation while idle
+          walkCycleRef.current += cappedDelta * 0.5;
+        } else {
+          idleTimerRef.current -= cappedDelta;
+          if (idleTimerRef.current <= 0) {
+            isIdleRef.current = true;
+            idleDurationRef.current = Math.random() * 4 + 2; // Idle for 2-6s
+          }
+          // Normal walking animation
+          walkCycleRef.current += cappedDelta * 5.5;
+        }
+      }
+
+      // === OBSTACLE AVOIDANCE ===
+      // Check for obstacles ahead (only when not evading forklift and not idle)
+      if (!isEvadingRef.current && !isIdleRef.current) {
+        const obstacleAhead = positionRegistry.getObstacleAhead(
+          ref.current.position.x,
+          ref.current.position.z,
+          directionRef.current,
+          OBSTACLE_DETECTION_RANGE,
+          OBSTACLE_PADDING
+        );
+
+        if (obstacleAhead) {
+          // Start avoiding if not already avoiding this obstacle
+          if (!isAvoidingObstacleRef.current || currentObstacleRef.current !== obstacleAhead.id) {
+            isAvoidingObstacleRef.current = true;
+            currentObstacleRef.current = obstacleAhead.id;
+            // Calculate which side to go around
+            avoidanceTargetXRef.current = positionRegistry.findClearPath(
+              ref.current.position.x,
+              ref.current.position.z,
+              obstacleAhead.id,
+              OBSTACLE_PADDING + 0.5
+            );
+          }
+        } else if (isAvoidingObstacleRef.current) {
+          // No obstacle ahead, clear avoidance state
+          // Check if we've passed the obstacle before returning to original path
+          const stillNearObstacle = positionRegistry.isInsideObstacle(
+            ref.current.position.x,
+            ref.current.position.z,
+            OBSTACLE_PADDING + 1.0
+          );
+          if (!stillNearObstacle) {
+            isAvoidingObstacleRef.current = false;
+            currentObstacleRef.current = null;
+          }
+        }
+      }
+
+      // Apply obstacle avoidance movement (move toward avoidance target X)
+      if (isAvoidingObstacleRef.current && !isEvadingRef.current) {
+        const diffX = avoidanceTargetXRef.current - ref.current.position.x;
+        if (Math.abs(diffX) > 0.15) {
+          ref.current.position.x += Math.sign(diffX) * AVOIDANCE_SPEED * cappedDelta;
+        }
+      } else if (
+        !isEvadingRef.current &&
+        evadeCooldownRef.current <= 0 &&
+        !isAvoidingObstacleRef.current
+      ) {
+        // Return to base path when not avoiding anything
+        const diffX = baseXRef.current - ref.current.position.x;
+        if (Math.abs(diffX) > 0.15) {
+          ref.current.position.x += Math.sign(diffX) * AVOIDANCE_SPEED * 0.5 * cappedDelta;
+        }
+      }
+
+      // Move worker (skip movement when idle)
+      const bobHeight = isIdleRef.current ? 0 : Math.abs(Math.sin(walkCycleRef.current)) * 0.025;
+      if (!isIdleRef.current) {
+        // Check if next position would be inside an obstacle
+        const nextZ = ref.current.position.z + data.speed * cappedDelta * directionRef.current;
+        const wouldHitObstacle = positionRegistry.isInsideObstacle(
+          ref.current.position.x,
+          nextZ,
+          OBSTACLE_PADDING
+        );
+
+        if (!wouldHitObstacle) {
+          ref.current.position.z = nextZ;
+        } else {
+          // Stop and wait for avoidance to take effect, or turn around
+          if (!isAvoidingObstacleRef.current) {
+            directionRef.current *= -1;
+          }
+        }
+
+        // Trigger footstep sounds at each step (when sin crosses 0)
+        const currentStep = Math.floor(walkCycleRef.current / Math.PI);
+        if (currentStep !== lastStepRef.current) {
+          lastStepRef.current = currentStep;
+          audioManager.playFootstep(data.id);
+        }
+      }
+      ref.current.position.y = bobHeight;
+      ref.current.rotation.y = directionRef.current > 0 ? 0 : Math.PI;
+
+      // Register position for collision avoidance
+      positionRegistry.register(data.id, ref.current.position.x, ref.current.position.z, 'worker');
+
+      // Enforce exclusion zones - push workers away from truck yards
+      if (isInExclusionZone(ref.current.position.x, ref.current.position.z)) {
+        // Push worker back to safe z position
+        ref.current.position.z = getSafeZPosition(ref.current.position.z);
+        // Turn around when pushed
+        if (ref.current.position.z >= 35) {
+          directionRef.current = -1; // Walk backward (away from shipping)
+        } else if (ref.current.position.z <= -35) {
+          directionRef.current = 1; // Walk forward (away from receiving)
+        }
+      }
+
+      // Turn around at safe boundaries (inside factory, away from truck yards)
+      if (ref.current.position.z > 35 || ref.current.position.z < -35) {
+        directionRef.current *= -1;
+      }
+
+      // Keep x position within safe central zone (wider factory floor)
+      if (ref.current.position.x > 45) {
+        ref.current.position.x = 45;
+      } else if (ref.current.position.x < -45) {
+        ref.current.position.x = -45;
+      }
+    });
+
+    const getRoleIcon = () => {
+      const iconClass = 'w-6 h-6';
+      switch (data.role) {
+        case 'Supervisor':
+          return <Briefcase className={iconClass} />;
+        case 'Engineer':
+          return <WrenchIcon className={iconClass} />;
+        case 'Operator':
+          return <HardHat className={iconClass} />;
+        case 'Safety Officer':
+          return <Shield className={iconClass} />;
+        case 'Quality Control':
+          return <FlaskConical className={iconClass} />;
+        case 'Maintenance':
+          return <WrenchIcon className={iconClass} />;
+        default:
+          return <User className={iconClass} />;
+      }
+    };
+
+    const getStatusColor = () => {
+      switch (data.status) {
+        case 'working':
+          return '#22c55e';
+        case 'responding':
+          return '#f59e0b';
+        case 'break':
+          return '#6b7280';
+        default:
+          return '#3b82f6';
+      }
+    };
+
+    return (
+      <group
+        ref={ref}
+        onPointerOver={(e) => {
+          e.stopPropagation();
+          setHovered(true);
+          document.body.style.cursor = 'pointer';
+        }}
+        onPointerOut={() => {
+          setHovered(false);
+          document.body.style.cursor = 'auto';
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          audioManager.playClick();
+          onSelect();
+        }}
+      >
+        {/* Human Model - 3-tier LOD system */}
+        {lod === 'high' ? (
+          <HumanModel
+            walkCycleRef={walkCycleRef}
+            uniformColor={appearance.uniformColor}
+            skinTone={appearance.skinTone}
+            hatColor={appearance.hatColor}
+            hasVest={appearance.hasVest}
+            pantsColor={appearance.pantsColor}
+            headRotation={headRotationRef.current}
+            hairColor={appearance.hairColor}
+            hairStyle={appearance.hairStyle}
+            tool={appearance.tool}
+            role={data.role}
+            isWaving={isWaving}
+            isIdle={isIdleRef.current}
+            isStartled={isStartledRef.current}
+            alertDirection={alertDirectionRef.current}
+            fatigueLevel={fatigueRef.current}
+            nearbyWorkerDirection={nearbyWorkerDirRef.current}
+            specialAction={specialActionRef.current}
+            pointDirection={pointDirectionRef.current}
+            distanceToCamera={cameraDistanceRef.current}
+          />
+        ) : lod === 'medium' ? (
+          <SimplifiedWorker
+            walkCycleRef={walkCycleRef}
+            uniformColor={appearance.uniformColor}
+            skinTone={appearance.skinTone}
+            hatColor={appearance.hatColor}
+            hasVest={appearance.hasVest}
+            pantsColor={appearance.pantsColor}
+          />
+        ) : (
+          <WorkerBillboard
+            uniformColor={appearance.uniformColor}
+            hasVest={appearance.hasVest}
+            hatColor={appearance.hatColor}
+          />
+        )}
+
+        {/* Status indicator above head */}
+        <group position={[0, 2.15, 0]}>
+          <mesh>
+            <sphereGeometry args={[0.055]} />
+            <meshStandardMaterial
+              color={getStatusColor()}
+              emissive={getStatusColor()}
+              emissiveIntensity={2.5}
+              toneMapped={false}
+            />
+          </mesh>
+          {/* Pulsing ring */}
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[0.07, 0.085, 20]} />
+            <meshStandardMaterial
+              color={getStatusColor()}
+              emissive={getStatusColor()}
+              emissiveIntensity={1.5}
+              transparent
+              opacity={0.6}
+              toneMapped={false}
+            />
+          </mesh>
+        </group>
+
+        {/* Floating name tag when hovered */}
+        {hovered && (
+          <Html position={[0, 2.6, 0]} center distanceFactor={12}>
+            <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-500/50 px-4 py-3 rounded-xl shadow-2xl pointer-events-none min-w-[220px]">
+              <div className="flex items-center gap-3 mb-2">
+                {getRoleIcon()}
+                <div>
+                  <div className="font-bold text-white text-sm">{data.name}</div>
+                  <div className="text-xs text-blue-400">{data.role}</div>
+                </div>
+              </div>
+              <div className="text-xs text-slate-400 border-t border-slate-700/50 pt-2 mt-2">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="w-2 h-2 rounded-full animate-pulse"
+                    style={{ backgroundColor: getStatusColor() }}
+                  />
+                  <span className="text-slate-300">{data.currentTask}</span>
+                </div>
+              </div>
+              <div className="text-[10px] text-slate-500 mt-2 flex items-center gap-1.5">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
+                  />
+                </svg>
+                Click for details
+              </div>
+            </div>
+          </Html>
+        )}
+
+        {/* Always visible name badge */}
+        <Billboard position={[0, 2.4, 0]}>
+          <Text
+            fontSize={0.14}
+            color="white"
+            anchorX="center"
+            anchorY="middle"
+            outlineWidth={0.012}
+            outlineColor="#000000"
+          >
+            {data.name.split(' ')[0]}
+          </Text>
+        </Billboard>
+
+        {/* ID badge on chest */}
+        <group position={[0.12, 1.28, 0.125]} rotation={[0, 0, 0]}>
+          <mesh>
+            <planeGeometry args={[0.09, 0.06]} />
+            <meshStandardMaterial color="#ffffff" />
+          </mesh>
+          <mesh position={[0, 0.012, 0.001]}>
+            <planeGeometry args={[0.07, 0.015]} />
+            <meshStandardMaterial color="#1e40af" />
+          </mesh>
+          <mesh position={[0, -0.012, 0.001]}>
+            <planeGeometry args={[0.06, 0.008]} />
+            <meshStandardMaterial color="#94a3b8" />
+          </mesh>
+        </group>
+
+        {/* Theme Hospital-inspired mood overlay with speech bubbles */}
+        <WorkerMoodOverlay workerId={data.id} position={[0, 0, 0]} />
+
+        {/* Reaction animations (slipping, coughing) */}
+        <WorkerReactionOverlay workerId={data.id} position={[0, 0, 0]} />
+      </group>
+    );
+  },
+  (prevProps, nextProps) => {
+    // Custom comparison: only re-render if worker ID or status changed
+    // Position updates are handled via refs in useFrame, not props
+    return (
+      prevProps.data.id === nextProps.data.id &&
+      prevProps.data.status === nextProps.data.status &&
+      prevProps.onSelect === nextProps.onSelect
+    );
+  }
+);

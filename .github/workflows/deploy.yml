@@ -29,8 +29,35 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
-        run: npm run build
+      # Build v0.20 alpha to /v0.20/ subdirectory
+      - name: Build v0.20 alpha
+        run: VERSION=v0.20 npm run build
+
+      - name: Setup staging with v0.20 alpha
+        run: |
+          mkdir -p staging/v0.20
+          cp -r dist/* staging/v0.20/
+
+      # v0.10 is pre-built in public/v0.10/ - copy to staging
+      - name: Copy v0.10 to staging
+        run: cp -r public/v0.10 staging/v0.10
+
+      # Root redirects to v0.10 (stable)
+      - name: Create root redirect
+        run: |
+          cat > staging/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <meta http-equiv="refresh" content="0;url=/v0.10/">
+            <title>Redirecting to MillOS</title>
+          </head>
+          <body>
+            <p>Redirecting to <a href="/v0.10/">MillOS v0.10</a>...</p>
+          </body>
+          </html>
+          EOF
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -38,7 +65,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: staging
 
   deploy:
     environment:

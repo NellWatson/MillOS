@@ -1,61 +1,148 @@
-import React, { useState, Suspense, useEffect, useCallback, useRef } from 'react';
-import { Canvas } from '@react-three/fiber';
+import React, { useState, Suspense, useEffect, useCallback, useRef, lazy } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Preload } from '@react-three/drei';
 import { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
 import { MillScene } from './components/MillScene';
 import { UIOverlay } from './components/UIOverlay';
-import { AICommandCenter } from './components/AICommandCenter';
 import { AlertSystem } from './components/AlertSystem';
-import { WorkerDetailPanel } from './components/WorkerDetailPanel';
-import { PostProcessing } from './components/PostProcessing';
 import { SpatialAudioTracker } from './components/SpatialAudioTracker';
 import { FPSTracker } from './components/FPSMonitor';
 import { EmergencyOverlay } from './components/EmergencyOverlay';
-import { CameraController, useCameraStore, CAMERA_PRESETS, CameraPresetIndicator } from './components/CameraController';
-import { SecurityCameraViews } from './components/SecurityCameraViews';
+import { CameraController, CameraPresetIndicator } from './components/CameraController';
+import {
+  FirstPersonController,
+  FPSCrosshair,
+  FPSInstructions,
+} from './components/FirstPersonController';
+import ErrorBoundary from './components/ErrorBoundary';
 import { MachineData, WorkerData } from './types';
+import { ForkliftData } from './components/ForkliftSystem';
 import { AnimatePresence, motion } from 'framer-motion';
 import { audioManager } from './utils/audioManager';
 import { initializeAIEngine } from './utils/aiEngine';
-import { useMillStore, GraphicsQuality } from './store';
+import { useMillStore, initializeSCADASync } from './store';
+import { AlertTriangle, RotateCcw } from 'lucide-react';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+
+// Lazy-load heavy panels to reduce initial bundle size (saves ~300KB gzipped)
+const AICommandCenter = lazy(() =>
+  import('./components/AICommandCenter').then((m) => ({ default: m.AICommandCenter }))
+);
+const SCADAPanel = lazy(() =>
+  import('./components/SCADAPanel').then((m) => ({ default: m.SCADAPanel }))
+);
+const WorkerDetailPanel = lazy(() =>
+  import('./components/WorkerDetailPanel').then((m) => ({ default: m.WorkerDetailPanel }))
+);
+const PostProcessing = lazy(() =>
+  import('./components/PostProcessing').then((m) => ({ default: m.PostProcessing }))
+);
+
+// Frame limiter component - triggers renders at 30fps when using frameloop="demand"
+const FrameLimiter: React.FC<{ fps?: number }> = ({ fps = 30 }) => {
+  const { invalidate } = useThree();
+  const lastTime = useRef(0);
+  const frameInterval = 1000 / fps;
+
+  useEffect(() => {
+    let animationId: number;
+
+    const tick = (time: number) => {
+      if (time - lastTime.current >= frameInterval) {
+        lastTime.current = time;
+        invalidate();
+      }
+      animationId = requestAnimationFrame(tick);
+    };
+
+    animationId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animationId);
+  }, [invalidate, frameInterval]);
+
+  return null;
+};
 
 const App: React.FC = () => {
   const [productionSpeed, setProductionSpeed] = useState(0.8);
   const [showZones, setShowZones] = useState(true);
   const [showAIPanel, setShowAIPanel] = useState(false);
+  const [showSCADAPanel, setShowSCADAPanel] = useState(false);
   const [selectedMachine, setSelectedMachine] = useState<MachineData | null>(null);
   const [selectedWorker, setSelectedWorker] = useState<WorkerData | null>(null);
+  const [selectedForklift, setSelectedForklift] = useState<ForkliftData | null>(null);
   const [audioInitialized, setAudioInitialized] = useState(false);
   const [qualityNotification, setQualityNotification] = useState<string | null>(null);
   const [autoRotate, setAutoRotate] = useState(true);
 
-  // Graphics quality shortcuts
-  const setGraphicsQuality = useMillStore((state) => state.setGraphicsQuality);
-  const currentQuality = useMillStore((state) => state.graphics.quality);
-
-  // Emergency stop state
-  const forkliftEmergencyStop = useMillStore((state) => state.forkliftEmergencyStop);
-  const setForkliftEmergencyStop = useMillStore((state) => state.setForkliftEmergencyStop);
-  const addSafetyIncident = useMillStore((state) => state.addSafetyIncident);
-
-  // Camera presets
-  const setCameraPreset = useCameraStore((state) => state.setPreset);
+  const currentQuality = useMillStore(
+    (state: { graphics: { quality: string } }) => state.graphics.quality
+  );
+  const postProcessingEnabled = useMillStore((state: any) => {
+    const g = state.graphics;
+    return (
+      g.enableSSAO ||
+      g.enableBloom ||
+      g.enableVignette ||
+      g.enableChromaticAberration ||
+      g.enableFilmGrain ||
+      g.enableDepthOfField
+    );
+  });
+  const fpsMode = useMillStore((state: { fpsMode: boolean }) => state.fpsMode);
+  const [showFpsInstructions, setShowFpsInstructions] = useState(false);
   const orbitControlsRef = useRef<OrbitControlsImpl>(null);
+  const glRef = useRef<THREE.WebGLRenderer | null>(null);
+  const webglHandlersRef = useRef<{ lost: (event: Event) => void; restored: () => void } | null>(
+    null
+  );
+
+  // Show FPS instructions when entering FPS mode
+  useEffect(() => {
+    if (fpsMode) {
+      setShowFpsInstructions(true);
+    }
+  }, [fpsMode]);
+
+  // Use custom hook for keyboard shortcuts (extracted to reduce component complexity and dependencies)
+  useKeyboardShortcuts({
+    showAIPanel,
+    setShowAIPanel,
+    showSCADAPanel,
+    setShowSCADAPanel,
+    selectedMachine,
+    setSelectedMachine,
+    selectedWorker,
+    setSelectedWorker,
+    productionSpeed,
+    setProductionSpeed,
+    showZones,
+    setShowZones,
+    autoRotate,
+    setAutoRotate,
+    setQualityNotification,
+  });
 
   // Initialize audio on first user interaction (required by Web Audio API)
   const initializeAudio = useCallback(() => {
     if (!audioInitialized) {
-      audioManager.resume().then(() => {
-        audioManager.startAmbientSounds();
-        audioManager.startOutdoorAmbient();  // Birds, wind, distant traffic
-        audioManager.startRadioChatter();     // Radio static/beeps from workers
-        audioManager.startWorkerVoices();     // Distant shouts/whistles from workers
-        audioManager.startPASystem();         // PA announcements and shift bells
-        audioManager.startCompressorCycling(); // Industrial air compressor cycling
-        audioManager.startMetalClanks();       // Random metal clanks from factory floor
-        setAudioInitialized(true);
-      });
+      audioManager
+        .resume()
+        .then(() => {
+          audioManager.startAmbientSounds();
+          audioManager.startOutdoorAmbient(); // Birds, wind, distant traffic
+          audioManager.startRadioChatter(); // Radio static/beeps from workers
+          audioManager.startWorkerVoices(); // Distant shouts/whistles from workers
+          audioManager.startPASystem(); // PA announcements and shift bells
+          audioManager.startCompressorCycling(); // Industrial air compressor cycling
+          audioManager.startMetalClanks(); // Random metal clanks from factory floor
+          audioManager.startMusic(); // Background music (respects musicEnabled setting)
+          setAudioInitialized(true);
+        })
+        .catch((error) => {
+          console.warn('[Audio] Failed to initialize:', error);
+          setAudioInitialized(true); // Continue without audio
+        });
     }
   }, [audioInitialized]);
 
@@ -76,241 +163,41 @@ const App: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const handleVisibility = () => {
+      audioManager.setBackgroundVisibility(document.hidden);
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      const gl = glRef.current;
+      const handlers = webglHandlersRef.current;
+      if (gl && handlers) {
+        gl.domElement.removeEventListener('webglcontextlost', handlers.lost);
+        gl.domElement.removeEventListener('webglcontextrestored', handlers.restored);
+      }
+    };
+  }, []);
+
   // Initialize AI Engine observers (shift change detection, outcome tracking)
   useEffect(() => {
     const cleanup = initializeAIEngine();
     return cleanup;
   }, []);
 
-  // Keyboard shortcuts handler
-  React.useEffect(() => {
-    const qualityKeys: Record<string, GraphicsQuality> = {
-      'F1': 'low',
-      'F2': 'medium',
-      'F3': 'high',
-      'F4': 'ultra',
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore shortcuts when typing in input fields
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
-
-      // Emergency stop on Spacebar
-      if (e.key === ' ' || e.code === 'Space') {
-        e.preventDefault();
-        const newState = !forkliftEmergencyStop;
-        setForkliftEmergencyStop(newState);
-        if (newState) {
-          audioManager.playEmergencyStop();
-          addSafetyIncident({
-            type: 'emergency',
-            description: 'Emergency stop activated via keyboard (Spacebar)'
-          });
-          setQualityNotification('EMERGENCY STOP');
-        } else {
-          setQualityNotification('E-STOP RELEASED');
-        }
-        setTimeout(() => setQualityNotification(null), 2000);
-        return;
-      }
-
-      // Close panels on escape
-      if (e.key === 'Escape') {
-        if (showAIPanel || selectedMachine || selectedWorker) {
-          audioManager.playPanelClose();
-        }
-        setShowAIPanel(false);
-        setSelectedMachine(null);
-        setSelectedWorker(null);
-        return;
-      }
-
-      // Graphics quality shortcuts (F1-F4)
-      if (qualityKeys[e.key]) {
-        e.preventDefault();
-        const quality = qualityKeys[e.key];
-        setGraphicsQuality(quality);
-        audioManager.playClick();
-        setQualityNotification(quality);
-        setTimeout(() => setQualityNotification(null), 2000);
-        return;
-      }
-
-      // Additional shortcuts (case-insensitive)
-      const key = e.key.toLowerCase();
-
-      // P - Toggle pause (set production speed to 0 or restore)
-      if (key === 'p') {
-        e.preventDefault();
-        audioManager.playClick();
-        if (productionSpeed > 0) {
-          setProductionSpeed(0);
-          setQualityNotification('PAUSED');
-        } else {
-          setProductionSpeed(0.8);
-          setQualityNotification('RESUMED');
-        }
-        setTimeout(() => setQualityNotification(null), 1500);
-        return;
-      }
-
-      // Z - Toggle safety zones
-      if (key === 'z') {
-        e.preventDefault();
-        audioManager.playClick();
-        setShowZones(!showZones);
-        setQualityNotification(showZones ? 'ZONES OFF' : 'ZONES ON');
-        setTimeout(() => setQualityNotification(null), 1500);
-        return;
-      }
-
-      // I - Toggle AI panel (changed from A to avoid conflict with WASD movement)
-      if (key === 'i') {
-        e.preventDefault();
-        if (!showAIPanel) {
-          audioManager.playPanelOpen();
-        } else {
-          audioManager.playPanelClose();
-        }
-        setShowAIPanel(!showAIPanel);
-        return;
-      }
-
-      // H - Toggle heat map
-      if (key === 'h') {
-        e.preventDefault();
-        audioManager.playClick();
-        const currentHeatMap = useMillStore.getState().showHeatMap;
-        useMillStore.getState().setShowHeatMap(!currentHeatMap);
-        setQualityNotification(currentHeatMap ? 'HEATMAP OFF' : 'HEATMAP ON');
-        setTimeout(() => setQualityNotification(null), 1500);
-        return;
-      }
-
-      // +/= - Increase production speed
-      if (key === '+' || key === '=') {
-        e.preventDefault();
-        audioManager.playClick();
-        const newSpeed = Math.min(2, productionSpeed + 0.1);
-        setProductionSpeed(newSpeed);
-        return;
-      }
-
-      // - - Decrease production speed
-      if (key === '-') {
-        e.preventDefault();
-        audioManager.playClick();
-        const newSpeed = Math.max(0, productionSpeed - 0.1);
-        setProductionSpeed(newSpeed);
-        return;
-      }
-
-      // M - Toggle panel minimize
-      if (key === 'm') {
-        e.preventDefault();
-        audioManager.playClick();
-        const currentMinimized = useMillStore.getState().panelMinimized;
-        useMillStore.getState().setPanelMinimized(!currentMinimized);
-        return;
-      }
-
-      // T - Toggle theme
-      if (key === 't') {
-        e.preventDefault();
-        audioManager.playClick();
-        useMillStore.getState().toggleTheme();
-        const newTheme = useMillStore.getState().theme;
-        setQualityNotification(newTheme === 'dark' ? 'DARK MODE' : 'LIGHT MODE');
-        setTimeout(() => setQualityNotification(null), 1500);
-        return;
-      }
-
-      // ? - Toggle keyboard shortcuts modal
-      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
-        e.preventDefault();
-        audioManager.playClick();
-        const currentShow = useMillStore.getState().showShortcuts;
-        useMillStore.getState().setShowShortcuts(!currentShow);
-        return;
-      }
-
-      // R - Toggle auto-rotation
-      if (key === 'r') {
-        e.preventDefault();
-        audioManager.playClick();
-        setAutoRotate((prev) => !prev);
-        setQualityNotification(autoRotate ? 'ROTATION OFF' : 'ROTATION ON');
-        setTimeout(() => setQualityNotification(null), 1500);
-        return;
-      }
-
-      // F - Toggle fullscreen
-      if (key === 'f') {
-        e.preventDefault();
-        audioManager.playClick();
-        if (!document.fullscreenElement) {
-          document.documentElement.requestFullscreen().catch(() => {});
-          setQualityNotification('FULLSCREEN');
-        } else {
-          document.exitFullscreen().catch(() => {});
-          setQualityNotification('WINDOWED');
-        }
-        setTimeout(() => setQualityNotification(null), 1500);
-        return;
-      }
-
-      // G - Toggle GPS mini-map
-      if (key === 'g') {
-        e.preventDefault();
-        audioManager.playClick();
-        const current = useMillStore.getState().showMiniMap;
-        useMillStore.getState().setShowMiniMap(!current);
-        setQualityNotification(current ? 'GPS OFF' : 'GPS ON');
-        setTimeout(() => setQualityNotification(null), 1500);
-        return;
-      }
-
-      // C - Toggle security cameras
-      if (key === 'c') {
-        e.preventDefault();
-        audioManager.playClick();
-        const current = useMillStore.getState().showSecurityCameras;
-        useMillStore.getState().setShowSecurityCameras(!current);
-        setQualityNotification(current ? 'CAMERAS OFF' : 'CAMERAS ON');
-        setTimeout(() => setQualityNotification(null), 1500);
-        return;
-      }
-
-      // 0 - Reset camera to default overview
-      if (e.key === '0') {
-        e.preventDefault();
-        audioManager.playClick();
-        setCameraPreset(0); // Overview preset
-        setQualityNotification('RESET VIEW');
-        setTimeout(() => setQualityNotification(null), 1500);
-        return;
-      }
-
-      // 1-5 - Camera presets
-      const presetIndex = parseInt(e.key) - 1;
-      if (presetIndex >= 0 && presetIndex < CAMERA_PRESETS.length) {
-        e.preventDefault();
-        audioManager.playClick();
-        setCameraPreset(presetIndex);
-        const preset = CAMERA_PRESETS[presetIndex];
-        setQualityNotification(preset.name.toUpperCase());
-        setTimeout(() => setQualityNotification(null), 2000);
-        return;
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showAIPanel, selectedMachine, selectedWorker, setGraphicsQuality, productionSpeed, showZones, forkliftEmergencyStop, setForkliftEmergencyStop, addSafetyIncident, setCameraPreset, autoRotate]);
+  // Initialize SCADA system with bidirectional store sync
+  // This starts the simulation adapter and syncs machine states
+  useEffect(() => {
+    const cleanup = initializeSCADASync();
+    return cleanup;
+  }, []);
 
   // Panel open/close sounds
   const prevShowAIPanelRef = React.useRef(showAIPanel);
+  const prevShowSCADAPanelRef = React.useRef(showSCADAPanel);
   const prevSelectedMachineRef = React.useRef(selectedMachine);
   const prevSelectedWorkerRef = React.useRef(selectedWorker);
 
@@ -322,6 +209,15 @@ const App: React.FC = () => {
     }
     prevShowAIPanelRef.current = showAIPanel;
   }, [showAIPanel]);
+
+  useEffect(() => {
+    if (showSCADAPanel && !prevShowSCADAPanelRef.current) {
+      audioManager.playPanelOpen();
+    } else if (!showSCADAPanel && prevShowSCADAPanelRef.current) {
+      audioManager.playPanelClose();
+    }
+    prevShowSCADAPanelRef.current = showSCADAPanel;
+  }, [showSCADAPanel]);
 
   useEffect(() => {
     if (selectedMachine && !prevSelectedMachineRef.current) {
@@ -341,6 +237,27 @@ const App: React.FC = () => {
     prevSelectedWorkerRef.current = selectedWorker;
   }, [selectedWorker]);
 
+  // WebGL context loss fallback component
+  const WebGLErrorFallback = (
+    <div className="fixed inset-0 flex items-center justify-center bg-slate-950">
+      <div className="bg-slate-900 border border-amber-500/50 rounded-xl p-8 max-w-md text-center">
+        <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
+        <h2 className="text-xl font-bold text-white mb-2">WebGL Context Lost</h2>
+        <p className="text-slate-400 mb-4">
+          The 3D graphics context encountered an error. This can happen due to GPU limitations or
+          driver issues.
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg mx-auto"
+        >
+          <RotateCcw className="w-4 h-4" />
+          Reload Application
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="relative w-full h-full bg-slate-950">
       {/* UI Layer */}
@@ -351,6 +268,8 @@ const App: React.FC = () => {
         setShowZones={setShowZones}
         showAIPanel={showAIPanel}
         setShowAIPanel={setShowAIPanel}
+        showSCADAPanel={showSCADAPanel}
+        setShowSCADAPanel={setShowSCADAPanel}
         selectedMachine={selectedMachine}
         onCloseSelection={() => setSelectedMachine(null)}
       />
@@ -368,6 +287,13 @@ const App: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* SCADA Monitor Panel */}
+      <AnimatePresence>
+        {showSCADAPanel && (
+          <SCADAPanel isOpen={showSCADAPanel} onClose={() => setShowSCADAPanel(false)} />
+        )}
+      </AnimatePresence>
+
       {/* Worker Detail Panel */}
       <AnimatePresence>
         {selectedWorker && (
@@ -375,65 +301,175 @@ const App: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* 3D Canvas */}
-      <Canvas
-        shadows={currentQuality !== 'low' ? { type: THREE.PCFShadowMap } : false}
-        camera={{ position: [40, 25, 40], fov: 45, near: 0.5, far: 300 }}
-        gl={{ antialias: currentQuality !== 'low', alpha: false, toneMappingExposure: 1.1 }}
-        dpr={1}
-      >
-        <color attach="background" args={['#0a0f1a']} />
-        <fog attach="fog" args={['#0a0f1a', 120, 280]} />
+      {/* Forklift Info Panel */}
+      <AnimatePresence>
+        {selectedForklift && (
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            className="fixed right-4 top-20 bg-gray-900/95 backdrop-blur-sm rounded-lg p-4 shadow-xl border border-amber-500/30 z-50 min-w-64"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-amber-400 font-bold text-lg">Forklift</h3>
+              <button
+                onClick={() => setSelectedForklift(null)}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                ×
+              </button>
+            </div>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-400">ID:</span>
+                <span className="text-white font-mono">{selectedForklift.id}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Operator:</span>
+                <span className="text-white">{selectedForklift.operatorName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Cargo:</span>
+                <span className={selectedForklift.cargo === 'pallet' ? 'text-green-400' : 'text-gray-500'}>
+                  {selectedForklift.cargo === 'pallet' ? 'Loaded' : 'Empty'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Position:</span>
+                <span className="text-white font-mono text-xs">
+                  [{selectedForklift.position.map(p => p.toFixed(1)).join(', ')}]
+                </span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-        <Suspense fallback={null}>
-          <OrbitControls
-            ref={orbitControlsRef}
-            maxPolarAngle={Math.PI / 2 - 0.05}
-            minPolarAngle={0.2}
-            minDistance={15}
-            maxDistance={100}
-            autoRotate
-            autoRotateSpeed={0}
-            target={[0, 5, 0]}
-            enableDamping
-            dampingFactor={0.05}
-          />
+      {/* 3D Canvas with Error Boundary */}
+      <ErrorBoundary fallback={WebGLErrorFallback}>
+        <Canvas
+          frameloop="demand"
+          shadows={currentQuality !== 'low' ? { type: THREE.PCFShadowMap } : false}
+          camera={{ position: [70, 40, 70], fov: 65, near: 0.5, far: 300 }}
+          gl={{
+            antialias: currentQuality !== 'low',
+            alpha: false,
+            toneMappingExposure: 1.1,
+            powerPreference: 'high-performance',
+            // Limit texture and geometry to prevent GPU memory exhaustion
+            preserveDrawingBuffer: false,
+            failIfMajorPerformanceCaveat: false,
+          }}
+          dpr={currentQuality === 'low' ? 1 : Math.min(window.devicePixelRatio, 1.5)}
+          onCreated={({ gl }) => {
+            glRef.current = gl;
 
-          <MillScene
-            productionSpeed={productionSpeed}
-            showZones={showZones}
-            onSelectMachine={setSelectedMachine}
-            onSelectWorker={setSelectedWorker}
-          />
+            const handleContextLost = (event: Event) => {
+              event.preventDefault();
+              console.error(
+                '[WebGL] Context lost - too many GPU resources. Try lowering graphics quality.'
+              );
+            };
 
-          {/* Spatial audio tracking - updates audio volume based on camera distance */}
-          <SpatialAudioTracker />
+            const handleContextRestored = () => {
+              console.log('[WebGL] Context restored');
+              window.location.reload();
+            };
 
-          {/* FPS tracking for performance monitoring */}
-          <FPSTracker />
+            webglHandlersRef.current = {
+              lost: handleContextLost,
+              restored: handleContextRestored,
+            };
 
-          {/* Camera preset controller for smooth transitions */}
-          <CameraController
-            orbitControlsRef={orbitControlsRef}
-            autoRotateEnabled={autoRotate && !selectedMachine && !selectedWorker && !showAIPanel}
-            targetSpeed={0.15}
-          />
+            // Handle WebGL context loss gracefully
+            gl.domElement.addEventListener('webglcontextlost', handleContextLost);
+            gl.domElement.addEventListener('webglcontextrestored', handleContextRestored);
 
-          {/* Security camera feeds - renders to DOM containers */}
-          <SecurityCameraViews />
+            // Log renderer info for debugging
+            const info = gl.info;
+            console.log('[WebGL] Renderer initialized:', {
+              geometries: info.memory.geometries,
+              textures: info.memory.textures,
+            });
+          }}
+        >
+          <color attach="background" args={['#0a0f1a']} />
+          <fog attach="fog" args={['#0a0f1a', 150, 350]} />
+          <FrameLimiter fps={30} />
 
-          <PostProcessing />
-          <Preload all />
-        </Suspense>
-      </Canvas>
+          <Suspense fallback={null}>
+            {/* Camera controls - conditionally render Orbit or FPS mode */}
+            {fpsMode ? (
+              <FirstPersonController
+                onLockChange={(locked) => {
+                  if (locked) {
+                    setShowFpsInstructions(false);
+                  }
+                }}
+              />
+            ) : (
+              <>
+                {/* Note: OrbitControls uses non-passive wheel event listeners for camera zoom.
+                    This triggers a Chrome DevTools warning but is expected behavior for 3D controls.
+                    The listener must call preventDefault() to control zoom, which is incompatible
+                    with passive listeners. This is a known Three.js/drei limitation. */}
+                <OrbitControls
+                  ref={orbitControlsRef}
+                  maxPolarAngle={Math.PI / 2 - 0.05}
+                  minPolarAngle={0.2}
+                  minDistance={15}
+                  maxDistance={100}
+                  autoRotate
+                  autoRotateSpeed={0}
+                  target={[0, 5, 0]}
+                  enableDamping
+                  dampingFactor={0.05}
+                />
+              </>
+            )}
+
+            <MillScene
+              productionSpeed={productionSpeed}
+              showZones={showZones}
+              onSelectMachine={setSelectedMachine}
+              onSelectWorker={setSelectedWorker}
+              onSelectForklift={setSelectedForklift}
+            />
+
+            {/* Spatial audio tracking - updates audio volume based on camera distance */}
+            <SpatialAudioTracker />
+
+            {/* FPS tracking for performance monitoring */}
+            <FPSTracker />
+
+            {/* Camera preset controller for smooth transitions (orbit mode only) */}
+            {!fpsMode && (
+              <CameraController
+                orbitControlsRef={orbitControlsRef}
+                autoRotateEnabled={
+                  autoRotate && !selectedMachine && !selectedWorker && !showAIPanel
+                }
+                targetSpeed={0.15}
+              />
+            )}
+
+            {postProcessingEnabled && <PostProcessing />}
+            <Preload all />
+          </Suspense>
+        </Canvas>
+      </ErrorBoundary>
 
       {/* Loading overlay */}
       <div className="fixed bottom-4 left-4 text-slate-600 text-xs pointer-events-none">
         MillOS Digital Twin v0.10 | Powered by AI
       </div>
 
-      {/* Camera preset indicator */}
-      <CameraPresetIndicator />
+      {/* Camera preset indicator (orbit mode only) */}
+      {!fpsMode && <CameraPresetIndicator />}
+
+      {/* FPS mode overlays */}
+      <FPSCrosshair />
+      <FPSInstructions visible={showFpsInstructions && fpsMode} />
 
       {/* Quality/Status change notification */}
       <AnimatePresence>
@@ -444,20 +480,34 @@ const App: React.FC = () => {
             exit={{ opacity: 0, scale: 0.8 }}
             className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none"
           >
-            <div className={`px-6 py-4 rounded-xl backdrop-blur-xl border shadow-2xl ${
-              qualityNotification === 'EMERGENCY STOP' ? 'bg-red-900/95 border-red-500 text-red-100 animate-pulse' :
-              qualityNotification === 'E-STOP RELEASED' ? 'bg-green-900/90 border-green-600 text-green-300' :
-              qualityNotification === 'low' ? 'bg-slate-800/90 border-slate-600 text-slate-300' :
-              qualityNotification === 'medium' ? 'bg-yellow-900/90 border-yellow-600 text-yellow-300' :
-              qualityNotification === 'high' ? 'bg-cyan-900/90 border-cyan-600 text-cyan-300' :
-              qualityNotification === 'ultra' ? 'bg-purple-900/90 border-purple-600 text-purple-300' :
-              'bg-slate-800/90 border-slate-600 text-slate-300'
-            }`}>
+            <div
+              className={`px-6 py-4 rounded-xl backdrop-blur-xl border shadow-2xl ${
+                qualityNotification === 'EMERGENCY STOP'
+                  ? 'bg-red-900/95 border-red-500 text-red-100 animate-pulse'
+                  : qualityNotification === 'E-STOP RELEASED'
+                    ? 'bg-green-900/90 border-green-600 text-green-300'
+                    : qualityNotification === 'low'
+                      ? 'bg-slate-800/90 border-slate-600 text-slate-300'
+                      : qualityNotification === 'medium'
+                        ? 'bg-yellow-900/90 border-yellow-600 text-yellow-300'
+                        : qualityNotification === 'high'
+                          ? 'bg-cyan-900/90 border-cyan-600 text-cyan-300'
+                          : qualityNotification === 'ultra'
+                            ? 'bg-purple-900/90 border-purple-600 text-purple-300'
+                            : 'bg-slate-800/90 border-slate-600 text-slate-300'
+              }`}
+            >
               <div className="text-center">
-                <div className="text-3xl font-bold uppercase tracking-wider">{qualityNotification}</div>
+                <div className="text-3xl font-bold uppercase tracking-wider">
+                  {qualityNotification}
+                </div>
                 <div className="text-xs opacity-70 mt-1">
-                  {qualityNotification.includes('EMERGENCY') || qualityNotification.includes('E-STOP') ? 'Safety System' :
-                   ['low', 'medium', 'high', 'ultra'].includes(qualityNotification) ? 'Graphics Quality' : 'Status'}
+                  {qualityNotification.includes('EMERGENCY') ||
+                  qualityNotification.includes('E-STOP')
+                    ? 'Safety System'
+                    : ['low', 'medium', 'high', 'ultra'].includes(qualityNotification)
+                      ? 'Graphics Quality'
+                      : 'Status'}
                 </div>
               </div>
             </div>

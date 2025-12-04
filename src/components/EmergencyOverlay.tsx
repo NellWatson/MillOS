@@ -1,16 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { OctagonX, AlertTriangle, Shield } from 'lucide-react';
+import { OctagonX, Shield } from 'lucide-react';
 import { useMillStore } from '../store';
 
 // Calculate safety score based on incident history
 const useSafetyScore = () => {
-  const safetyIncidents = useMillStore(state => state.safetyIncidents);
-  const safetyMetrics = useMillStore(state => state.safetyMetrics);
+  const safetyIncidents = useMillStore((state) => state.safetyIncidents);
+  const safetyMetrics = useMillStore((state) => state.safetyMetrics);
 
   // Calculate score (100 = perfect, decreases with incidents)
   const recentIncidents = safetyIncidents.filter(
-    i => Date.now() - i.timestamp < 24 * 60 * 60 * 1000 // Last 24 hours
+    (i) => Date.now() - i.timestamp < 24 * 60 * 60 * 1000 // Last 24 hours
   );
 
   // Weight different incident types
@@ -18,7 +18,7 @@ const useSafetyScore = () => {
     emergency: 15,
     near_miss: 8,
     stop: 3,
-    evasion: 2
+    evasion: 2,
   };
 
   const totalPenalty = recentIncidents.reduce((acc, incident) => {
@@ -78,7 +78,9 @@ export const SafetyScoreBadge: React.FC<{ compact?: boolean }> = ({ compact = fa
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-1.5">
           <Shield className={`w-4 h-4 ${color}`} />
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Safety Score</span>
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+            Safety Score
+          </span>
         </div>
         <div className={`text-2xl font-bold ${color}`}>{rating}</div>
       </div>
@@ -90,11 +92,15 @@ export const SafetyScoreBadge: React.FC<{ compact?: boolean }> = ({ compact = fa
               animate={{ width: `${score}%` }}
               transition={{ duration: 0.5, ease: 'easeOut' }}
               className={`h-full rounded-full ${
-                score >= 90 ? 'bg-green-500' :
-                score >= 80 ? 'bg-cyan-500' :
-                score >= 70 ? 'bg-yellow-500' :
-                score >= 60 ? 'bg-orange-500' :
-                'bg-red-500'
+                score >= 90
+                  ? 'bg-green-500'
+                  : score >= 80
+                    ? 'bg-cyan-500'
+                    : score >= 70
+                      ? 'bg-yellow-500'
+                      : score >= 60
+                        ? 'bg-orange-500'
+                        : 'bg-red-500'
               }`}
             />
           </div>
@@ -115,8 +121,8 @@ export const SafetyScoreBadge: React.FC<{ compact?: boolean }> = ({ compact = fa
 
 // Emergency Overlay Component - shows flashing red border
 export const EmergencyOverlay: React.FC = () => {
-  const forkliftEmergencyStop = useMillStore(state => state.forkliftEmergencyStop);
-  const emergencyActive = useMillStore(state => state.emergencyActive);
+  const forkliftEmergencyStop = useMillStore((state) => state.forkliftEmergencyStop);
+  const emergencyActive = useMillStore((state) => state.emergencyActive);
   const [flash, setFlash] = useState(true);
 
   // Either emergency type triggers the overlay
@@ -127,7 +133,7 @@ export const EmergencyOverlay: React.FC = () => {
     if (!isEmergency) return;
 
     const interval = setInterval(() => {
-      setFlash(f => !f);
+      setFlash((f) => !f);
     }, 300);
 
     return () => clearInterval(interval);
@@ -144,7 +150,8 @@ export const EmergencyOverlay: React.FC = () => {
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-40 pointer-events-none"
             style={{
-              boxShadow: 'inset 0 0 0 4px rgba(239, 68, 68, 0.8), inset 0 0 60px rgba(239, 68, 68, 0.3)'
+              boxShadow:
+                'inset 0 0 0 4px rgba(239, 68, 68, 0.8), inset 0 0 60px rgba(239, 68, 68, 0.3)',
             }}
           />
 
@@ -172,7 +179,8 @@ export const EmergencyOverlay: React.FC = () => {
             className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none"
           >
             <div className="bg-slate-900/80 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs">
-              Press <kbd className="bg-slate-700 px-1.5 py-0.5 rounded font-mono mx-1">SPACE</kbd> to release
+              Press <kbd className="bg-slate-700 px-1.5 py-0.5 rounded font-mono mx-1">SPACE</kbd>{' '}
+              to release
             </div>
           </motion.div>
         </>

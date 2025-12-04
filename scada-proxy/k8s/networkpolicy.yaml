@@ -1,0 +1,85 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: scada-proxy
+  namespace: millos-scada
+  labels:
+    app.kubernetes.io/name: scada-proxy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: scada-proxy
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow ingress from nginx ingress controller
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 3001
+
+    # Allow ingress from same namespace (for health checks, metrics)
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 3001
+
+    # Allow prometheus scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/name: monitoring
+      ports:
+        - protocol: TCP
+          port: 3001
+
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Allow OPC-UA connections (typically port 4840)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 4840
+
+    # Allow Modbus connections (typically port 502)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 502
+
+    # Allow MQTT (internal broker)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mosquitto
+      ports:
+        - protocol: TCP
+          port: 1883

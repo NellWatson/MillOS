@@ -1,5 +1,5 @@
 {
-  "name": "Vibrant 3D City",
-  "description": "A bustling interactive 3D urban environment with dynamic day/night cycles, moving traffic, and pedestrians.",
+  "name": "MillOS Digital Twin",
+  "description": "AI-built grain mill factory simulator with SCADA integration, autonomous workers, forklifts, and live 3D process visualization.",
   "requestFramePermissions": []
 }

@@ -1,0 +1,402 @@
+/**
+ * REST Protocol Adapter for MillOS SCADA
+ *
+ * Connects to REST APIs for live SCADA data with configurable polling.
+ * Supports:
+ * - Polling-based data fetching with configurable intervals
+ * - Batch tag reads for efficiency
+ * - Automatic reconnection with exponential backoff
+ * - Authentication via API key or Bearer token
+ */
+
+import {
+  IProtocolAdapter,
+  TagDefinition,
+  TagValue,
+  Quality,
+  ConnectionConfig,
+  ConnectionStatus,
+  AdapterStatistics,
+} from '../types';
+
+/** REST API response format for tag values */
+interface RESTTagResponse {
+  tagId: string;
+  value: number | boolean | string;
+  quality: string;
+  timestamp: number;
+  sourceTimestamp?: number;
+}
+
+/** REST API response for batch reads */
+interface RESTBatchResponse {
+  tags: RESTTagResponse[];
+  serverTime: number;
+}
+
+/** REST API write request */
+interface RESTWriteRequest {
+  tagId: string;
+  value: number | boolean | string;
+}
+
+export class RESTAdapter implements IProtocolAdapter {
+  private config: ConnectionConfig;
+  private tags: Map<string, TagDefinition> = new Map();
+  private values: Map<string, TagValue> = new Map();
+  private subscribers: Map<string, Set<(values: TagValue[]) => void>> = new Map();
+  private globalSubscribers: Set<(values: TagValue[]) => void> = new Set();
+  private pollInterval: ReturnType<typeof setInterval> | null = null;
+  private connected = false;
+  private connectTime = 0;
+  private lastDisconnectTime = 0;
+  private reconnectAttempts = 0;
+  private lastError: string | undefined;
+  private reconnectTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  // Statistics
+  private stats = {
+    readCount: 0,
+    writeCount: 0,
+    errorCount: 0,
+    totalLatency: 0,
+    latencyCount: 0,
+  };
+
+  constructor(tagDefinitions: TagDefinition[], config: ConnectionConfig) {
+    this.config = config;
+    tagDefinitions.forEach((tag) => this.tags.set(tag.id, tag));
+  }
+
+  // =========================================================================
+  // Lifecycle Methods
+  // =========================================================================
+
+  async connect(): Promise<void> {
+    if (this.connected) return;
+
+    const baseUrl = this.config.baseUrl;
+    if (!baseUrl) {
+      throw new Error('REST adapter requires baseUrl in config');
+    }
+
+    try {
+      // Test connection with health check
+      const response = await this.fetchWithAuth(`${baseUrl}/health`);
+      if (!response.ok) {
+        throw new Error(`Health check failed: ${response.status}`);
+      }
+
+      this.connected = true;
+      this.connectTime = Date.now();
+      this.reconnectAttempts = 0;
+      this.lastError = undefined;
+
+      // Start polling
+      const interval = this.config.pollInterval ?? 1000;
+      this.pollInterval = setInterval(() => this.poll(), interval);
+
+      // Do initial poll
+      await this.poll();
+
+      console.log(`[RESTAdapter] Connected to ${baseUrl}. Polling every ${interval}ms`);
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err);
+      this.stats.errorCount++;
+      throw err;
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+      this.pollInterval = null;
+    }
+    if (this.reconnectTimeoutId) {
+      clearTimeout(this.reconnectTimeoutId);
+      this.reconnectTimeoutId = null;
+    }
+    this.connected = false;
+    this.lastDisconnectTime = Date.now();
+    this.values.clear();
+    console.log('[RESTAdapter] Disconnected');
+  }
+
+  isConnected(): boolean {
+    return this.connected;
+  }
+
+  // =========================================================================
+  // Read Operations
+  // =========================================================================
+
+  async readTag(tagId: string): Promise<TagValue> {
+    const start = performance.now();
+
+    try {
+      const response = await this.fetchWithAuth(
+        `${this.config.baseUrl}/tags/${encodeURIComponent(tagId)}`
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to read tag: ${response.status}`);
+      }
+
+      const data: RESTTagResponse = await response.json();
+      const tagValue = this.parseTagResponse(data);
+
+      this.values.set(tagId, tagValue);
+      this.stats.readCount++;
+      this.updateLatency(performance.now() - start);
+
+      return tagValue;
+    } catch (err) {
+      this.stats.errorCount++;
+      throw err;
+    }
+  }
+
+  async readTags(tagIds: string[]): Promise<TagValue[]> {
+    const start = performance.now();
+
+    try {
+      const response = await this.fetchWithAuth(`${this.config.baseUrl}/tags/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tagIds }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to read tags: ${response.status}`);
+      }
+
+      const data: RESTBatchResponse = await response.json();
+      const tagValues = data.tags.map((t) => this.parseTagResponse(t));
+
+      tagValues.forEach((tv) => this.values.set(tv.tagId, tv));
+      this.stats.readCount += tagIds.length;
+      this.updateLatency(performance.now() - start);
+
+      return tagValues;
+    } catch (err) {
+      this.stats.errorCount++;
+      throw err;
+    }
+  }
+
+  async readAllTags(): Promise<TagValue[]> {
+    const tagIds = Array.from(this.tags.keys());
+    return this.readTags(tagIds);
+  }
+
+  // =========================================================================
+  // Write Operations
+  // =========================================================================
+
+  async writeTag(tagId: string, value: number | boolean | string): Promise<boolean> {
+    const tag = this.tags.get(tagId);
+    if (!tag) {
+      console.warn(`[RESTAdapter] Unknown tag: ${tagId}`);
+      return false;
+    }
+
+    if (tag.accessMode === 'READ') {
+      console.warn(`[RESTAdapter] Cannot write to read-only tag: ${tagId}`);
+      return false;
+    }
+
+    try {
+      const request: RESTWriteRequest = { tagId, value };
+      const response = await this.fetchWithAuth(
+        `${this.config.baseUrl}/tags/${encodeURIComponent(tagId)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to write tag: ${response.status}`);
+      }
+
+      this.stats.writeCount++;
+      return true;
+    } catch (err) {
+      this.stats.errorCount++;
+      console.error(`[RESTAdapter] Write failed for ${tagId}:`, err);
+      return false;
+    }
+  }
+
+  // =========================================================================
+  // Subscriptions
+  // =========================================================================
+
+  subscribe(tagIds: string[], callback: (values: TagValue[]) => void): () => void {
+    if (tagIds.length === 0) {
+      // Subscribe to all tags
+      this.globalSubscribers.add(callback);
+      return () => {
+        this.globalSubscribers.delete(callback);
+      };
+    }
+
+    tagIds.forEach((id) => {
+      if (!this.subscribers.has(id)) {
+        this.subscribers.set(id, new Set());
+      }
+      this.subscribers.get(id)!.add(callback);
+    });
+
+    return () => {
+      tagIds.forEach((id) => {
+        this.subscribers.get(id)?.delete(callback);
+      });
+    };
+  }
+
+  // =========================================================================
+  // Diagnostics
+  // =========================================================================
+
+  getConnectionStatus(): ConnectionStatus {
+    return {
+      connected: this.connected,
+      lastConnectTime: this.connectTime || undefined,
+      lastDisconnectTime: this.lastDisconnectTime || undefined,
+      reconnectAttempts: this.reconnectAttempts,
+      error: this.lastError,
+    };
+  }
+
+  getStatistics(): AdapterStatistics {
+    const uptime = this.connected ? (Date.now() - this.connectTime) / 1000 : 0;
+    return {
+      readsPerSecond: uptime > 0 ? this.stats.readCount / uptime : 0,
+      writesPerSecond: uptime > 0 ? this.stats.writeCount / uptime : 0,
+      avgReadLatency:
+        this.stats.latencyCount > 0 ? this.stats.totalLatency / this.stats.latencyCount : 0,
+      errorCount: this.stats.errorCount,
+      uptime,
+    };
+  }
+
+  // =========================================================================
+  // Polling
+  // =========================================================================
+
+  private async poll(): Promise<void> {
+    if (!this.connected) return;
+
+    try {
+      const tagValues = await this.readAllTags();
+      this.notifySubscribers(tagValues);
+    } catch (err) {
+      console.error('[RESTAdapter] Poll failed:', err);
+      this.handleConnectionError();
+    }
+  }
+
+  private handleConnectionError(): void {
+    // Already scheduled a reconnect, prevent race condition
+    if (this.reconnectTimeoutId) return;
+
+    this.reconnectAttempts++;
+    this.lastError = 'Connection lost';
+
+    if (this.reconnectAttempts >= 5) {
+      console.error('[RESTAdapter] Max reconnect attempts reached. Disconnecting.');
+      this.disconnect();
+    } else {
+      // Exponential backoff
+      const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+      console.log(`[RESTAdapter] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+
+      this.reconnectTimeoutId = setTimeout(() => {
+        this.reconnectTimeoutId = null;
+        this.connect().catch((err) => {
+          console.error('[RESTAdapter] Reconnection failed:', err);
+        });
+      }, delay);
+    }
+  }
+
+  // =========================================================================
+  // Helpers
+  // =========================================================================
+
+  private async fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
+    // Validate URL format
+    try {
+      new URL(url);
+    } catch {
+      throw new Error(`Invalid URL: ${url}`);
+    }
+
+    const headers = new Headers(options.headers);
+
+    if (this.config.apiKey) {
+      headers.set('Authorization', `Bearer ${this.config.apiKey}`);
+    }
+
+    return fetch(url, { ...options, headers });
+  }
+
+  private parseTagResponse(data: RESTTagResponse): TagValue {
+    return {
+      tagId: data.tagId,
+      value: data.value,
+      quality: this.parseQuality(data.quality),
+      timestamp: data.timestamp,
+      sourceTimestamp: data.sourceTimestamp,
+    };
+  }
+
+  private parseQuality(quality: string): Quality {
+    const q = quality.toUpperCase();
+    if (q === 'GOOD' || q === 'UNCERTAIN' || q === 'BAD' || q === 'STALE') {
+      return q as Quality;
+    }
+    return 'UNCERTAIN';
+  }
+
+  private updateLatency(latency: number): void {
+    this.stats.totalLatency += latency;
+    this.stats.latencyCount++;
+  }
+
+  private notifySubscribers(tagValues: TagValue[]): void {
+    // Notify global subscribers
+    this.globalSubscribers.forEach((callback) => {
+      try {
+        callback(tagValues);
+      } catch (err) {
+        console.error('[RESTAdapter] Subscriber callback error:', err);
+      }
+    });
+
+    // Notify tag-specific subscribers
+    const subscriberUpdates = new Map<(values: TagValue[]) => void, TagValue[]>();
+
+    tagValues.forEach((tv) => {
+      const callbacks = this.subscribers.get(tv.tagId);
+      if (callbacks) {
+        callbacks.forEach((cb) => {
+          if (!subscriberUpdates.has(cb)) {
+            subscriberUpdates.set(cb, []);
+          }
+          subscriberUpdates.get(cb)!.push(tv);
+        });
+      }
+    });
+
+    subscriberUpdates.forEach((values, callback) => {
+      try {
+        callback(values);
+      } catch (err) {
+        console.error('[RESTAdapter] Subscriber callback error:', err);
+      }
+    });
+  }
+}

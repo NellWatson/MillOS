@@ -1,7 +1,8 @@
-import React, { useRef, useMemo, useCallback } from 'react';
+import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useMillStore } from '../store';
+import { shouldRunThisFrame, getThrottleLevel } from '../utils/frameThrottle';
 
 interface DustParticlesProps {
   count: number;
@@ -22,7 +23,6 @@ interface PooledParticle {
 
 // Skylight positions for light shaft calculation
 const SKYLIGHT_POSITIONS = [-20, 0, 20];
-const LIGHT_SHAFT_RADIUS = 6;
 const LIGHT_SHAFT_Z = 0;
 
 // Cached vectors for performance
@@ -32,14 +32,18 @@ const tempScale = new THREE.Vector3();
 const tempQuaternion = new THREE.Quaternion();
 
 // Check if a position is inside a light shaft cone (optimized)
+// Pre-calculates cone radius once per Y level to avoid redundant calculations
 const isInLightShaft = (x: number, y: number, z: number): number => {
   // Early exit for out-of-bounds
   if (y <= 5 || y >= 32) return 0;
 
+  // Pre-calculate cone properties once per call (not per light shaft)
   const normalizedY = (y - 5) / 27;
   const coneRadius = 3 + normalizedY * 3;
   const coneRadiusSq = coneRadius * coneRadius;
+  const invConeRadius = 1 / coneRadius; // Pre-compute inverse for faster division
 
+  // Check each light shaft
   for (let i = 0; i < SKYLIGHT_POSITIONS.length; i++) {
     const skylightX = SKYLIGHT_POSITIONS[i];
     const dx = x - skylightX;
@@ -48,7 +52,8 @@ const isInLightShaft = (x: number, y: number, z: number): number => {
 
     if (distanceSq < coneRadiusSq) {
       // Return intensity based on how centered the particle is
-      return 1 - (Math.sqrt(distanceSq) / coneRadius) * 0.5;
+      // Use inverse multiplication instead of division for better performance
+      return 1 - Math.sqrt(distanceSq) * invConeRadius * 0.5;
     }
   }
   return 0;
@@ -136,11 +141,15 @@ class ParticlePool {
 
 export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
   const mesh = useRef<THREE.InstancedMesh>(null);
-  const gameTime = useMillStore((state) => state.gameTime);
-  const graphics = useMillStore((state) => state.graphics);
+  const gameTime = useMillStore((state: any) => state.gameTime);
+  const { dustParticleCount, enableDustParticles, quality } = useMillStore((state: any) => ({
+    dustParticleCount: state.graphics.dustParticleCount,
+    enableDustParticles: state.graphics.enableDustParticles,
+    quality: state.graphics.quality,
+  }));
 
   // Use graphics setting for particle count
-  const effectiveCount = Math.min(count, graphics.dustParticleCount);
+  const effectiveCount = Math.min(count, dustParticleCount);
 
   // Determine if it's daytime (light shafts visible)
   const isDaytime = gameTime >= 7 && gameTime < 18;
@@ -165,10 +174,15 @@ export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
   }, []);
 
   // Check if dust particles are enabled (after all hooks)
-  const isEnabled = graphics.enableDustParticles;
+  const isEnabled = enableDustParticles;
+
+  // Throttle particle updates based on graphics quality (200+ particles is expensive)
+  const throttleLevel = getThrottleLevel(quality);
 
   useFrame(() => {
     if (!mesh.current || !isEnabled) return;
+    // Throttle updates - particles look fine at reduced update rate
+    if (!shouldRunThisFrame(throttleLevel)) return;
 
     const particles = pool.particles;
 
@@ -226,7 +240,7 @@ export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
       // Update color - brighter golden when in light shaft
       const baseR = 0.996; // #fef3c7
       const baseG = 0.953;
-      const baseB = 0.780;
+      const baseB = 0.78;
       colorArray[i * 3] = baseR + lightIntensity * 0.004;
       colorArray[i * 3 + 1] = baseG + lightIntensity * 0.047;
       colorArray[i * 3 + 2] = baseB + lightIntensity * 0.22;
@@ -247,11 +261,19 @@ export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
 
   // Use key to force remount when count changes, preventing buffer resize error
   return (
-    <instancedMesh ref={mesh} args={[undefined, undefined, count]} frustumCulled={false} key={`dust-particles-${count}`}>
+    <instancedMesh
+      ref={mesh}
+      args={[undefined, undefined, count]}
+      frustumCulled={false}
+      key={`dust-particles-${count}`}
+    >
       <dodecahedronGeometry args={[0.04, 0]}>
         <instancedBufferAttribute
           ref={colorAttr}
           attach="attributes-color"
+          count={count}
+          array={colorArray}
+          itemSize={3}
           args={[colorArray, 3]}
         />
       </dodecahedronGeometry>
@@ -263,8 +285,11 @@ export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
 // Grain particles flowing through pipes (visual effect) - with pooling
 export const GrainFlow: React.FC = () => {
   const particlesRef = useRef<THREE.Points>(null);
-  const graphics = useMillStore((state) => state.graphics);
-  const isEnabled = graphics.enableGrainFlow;
+  const { enableGrainFlow, quality } = useMillStore((state: any) => ({
+    enableGrainFlow: state.graphics.enableGrainFlow,
+    quality: state.graphics.quality,
+  }));
+  const isEnabled = enableGrainFlow;
 
   const count = 200;
 
@@ -288,8 +313,12 @@ export const GrainFlow: React.FC = () => {
     return { positions: pos, velocities: vel };
   }, []);
 
+  // Throttle grain flow updates
+  const throttleLevel = getThrottleLevel(quality);
+
   useFrame(() => {
     if (!particlesRef.current || !isEnabled) return;
+    if (!shouldRunThisFrame(throttleLevel)) return;
     const posArray = particlesRef.current.geometry.attributes.position.array as Float32Array;
 
     for (let i = 0; i < count; i++) {
@@ -323,51 +352,49 @@ export const GrainFlow: React.FC = () => {
           count={count}
           array={positions}
           itemSize={3}
+          args={[positions, 3]}
         />
       </bufferGeometry>
-      <pointsMaterial
-        size={0.12}
-        color="#fcd34d"
-        transparent
-        opacity={0.8}
-        sizeAttenuation
-      />
+      <pointsMaterial size={0.12} color="#fcd34d" transparent opacity={0.8} sizeAttenuation />
     </points>
   );
 };
 
 // Atmospheric haze for depth and industrial atmosphere
 export const AtmosphericHaze: React.FC = () => {
-  const graphics = useMillStore((state) => state.graphics);
-  const isEnabled = graphics.enableAtmosphericHaze;
+  const enableAtmosphericHaze = useMillStore((state: any) => state.graphics.enableAtmosphericHaze);
+  const isEnabled = enableAtmosphericHaze;
 
   // Pre-created materials for better performance - depthTest false to prevent flickering
-  const materials = useMemo(() => ({
-    main: new THREE.MeshBasicMaterial({
-      color: '#fef3c7',
-      transparent: true,
-      opacity: 0.012,
-      side: THREE.BackSide,
-      depthWrite: false,
-      depthTest: false,
+  const materials = useMemo(
+    () => ({
+      main: new THREE.MeshBasicMaterial({
+        color: '#fef3c7',
+        transparent: true,
+        opacity: 0.012,
+        side: THREE.BackSide,
+        depthWrite: false,
+        depthTest: false,
+      }),
+      lower: new THREE.MeshBasicMaterial({
+        color: '#e2e8f0',
+        transparent: true,
+        opacity: 0.018,
+        side: THREE.BackSide,
+        depthWrite: false,
+        depthTest: false,
+      }),
+      accent: new THREE.MeshBasicMaterial({
+        color: '#fcd34d',
+        transparent: true,
+        opacity: 0.008,
+        side: THREE.BackSide,
+        depthWrite: false,
+        depthTest: false,
+      }),
     }),
-    lower: new THREE.MeshBasicMaterial({
-      color: '#e2e8f0',
-      transparent: true,
-      opacity: 0.018,
-      side: THREE.BackSide,
-      depthWrite: false,
-      depthTest: false,
-    }),
-    accent: new THREE.MeshBasicMaterial({
-      color: '#fcd34d',
-      transparent: true,
-      opacity: 0.008,
-      side: THREE.BackSide,
-      depthWrite: false,
-      depthTest: false,
-    }),
-  }), []);
+    []
+  );
 
   // Return null if disabled (after all hooks have been called)
   if (!isEnabled) {
@@ -401,11 +428,7 @@ interface MachineSteamProps {
   intensity?: number;
 }
 
-const MachineSteamParticle: React.FC<MachineSteamProps> = ({
-  position,
-  type,
-  intensity = 1
-}) => {
+const MachineSteamParticle: React.FC<MachineSteamProps> = ({ position, type, intensity = 1 }) => {
   const particlesRef = useRef<THREE.Points>(null);
   const count = type === 'dust' ? 30 : 20;
 
@@ -431,8 +454,10 @@ const MachineSteamParticle: React.FC<MachineSteamProps> = ({
     return { positions: pos, velocities: vel, lifetimes: life };
   }, [count, type]);
 
+  // Throttle steam particle updates - runs at ~20fps
   useFrame((_, delta) => {
     if (!particlesRef.current) return;
+    if (!shouldRunThisFrame(3)) return;
     const pos = particlesRef.current.geometry.attributes.position.array as Float32Array;
 
     for (let i = 0; i < count; i++) {
@@ -448,7 +473,8 @@ const MachineSteamParticle: React.FC<MachineSteamProps> = ({
 
         // Reset velocity
         velocities[i * 3] = (Math.random() - 0.5) * 0.3;
-        velocities[i * 3 + 1] = type === 'steam' ? 0.8 + Math.random() * 0.5 : 0.3 + Math.random() * 0.3;
+        velocities[i * 3 + 1] =
+          type === 'steam' ? 0.8 + Math.random() * 0.5 : 0.3 + Math.random() * 0.3;
         velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.3;
       }
 
@@ -483,6 +509,7 @@ const MachineSteamParticle: React.FC<MachineSteamProps> = ({
           count={count}
           array={positions}
           itemSize={3}
+          args={[positions, 3]}
         />
       </bufferGeometry>
       <pointsMaterial
@@ -499,37 +526,55 @@ const MachineSteamParticle: React.FC<MachineSteamProps> = ({
 
 // Steam vents component - renders multiple steam sources near machines
 export const MachineSteamVents: React.FC = () => {
-  const graphics = useMillStore((state) => state.graphics);
-  const isEnabled = graphics.quality !== 'low';
+  const quality = useMillStore((state: any) => state.graphics.quality);
+  const isEnabled = quality !== 'low';
 
   // Machine positions from MillScene zones:
   // Zone 2 (z=-6): Roller Mills - hot grinding process creates steam/heat
   // Zone 3 (z=6, y=9): Plansifters - dust from sifting
   // Zone 4 (z=20): Packers - dust from packaging
 
-  const steamSources = useMemo(() => [
-    // Roller mill steam vents (grinding creates heat)
-    { position: [-18, 4, -6] as [number, number, number], type: 'steam' as const, intensity: 0.8 },
-    { position: [-10, 4, -6] as [number, number, number], type: 'steam' as const, intensity: 0.7 },
-    { position: [-2, 4, -6] as [number, number, number], type: 'exhaust' as const, intensity: 0.6 },
-    { position: [6, 4, -6] as [number, number, number], type: 'steam' as const, intensity: 0.9 },
-    { position: [14, 4, -6] as [number, number, number], type: 'exhaust' as const, intensity: 0.7 },
+  const steamSources = useMemo(
+    () => [
+      // Roller mill steam vents (grinding creates heat)
+      {
+        position: [-18, 4, -6] as [number, number, number],
+        type: 'steam' as const,
+        intensity: 0.8,
+      },
+      {
+        position: [-10, 4, -6] as [number, number, number],
+        type: 'steam' as const,
+        intensity: 0.7,
+      },
+      {
+        position: [-2, 4, -6] as [number, number, number],
+        type: 'exhaust' as const,
+        intensity: 0.6,
+      },
+      { position: [6, 4, -6] as [number, number, number], type: 'steam' as const, intensity: 0.9 },
+      {
+        position: [14, 4, -6] as [number, number, number],
+        type: 'exhaust' as const,
+        intensity: 0.7,
+      },
 
-    // Plansifter dust (sifting creates fine flour dust)
-    { position: [-12, 12, 6] as [number, number, number], type: 'dust' as const, intensity: 1 },
-    { position: [0, 12, 6] as [number, number, number], type: 'dust' as const, intensity: 0.9 },
-    { position: [12, 12, 6] as [number, number, number], type: 'dust' as const, intensity: 0.8 },
+      // Plansifter dust (sifting creates fine flour dust)
+      { position: [-12, 12, 6] as [number, number, number], type: 'dust' as const, intensity: 1 },
+      { position: [0, 12, 6] as [number, number, number], type: 'dust' as const, intensity: 0.9 },
+      { position: [12, 12, 6] as [number, number, number], type: 'dust' as const, intensity: 0.8 },
 
-    // Packer dust (packaging creates airborne flour)
-    { position: [-15, 3, 20] as [number, number, number], type: 'dust' as const, intensity: 0.7 },
-    { position: [0, 3, 20] as [number, number, number], type: 'dust' as const, intensity: 0.8 },
-    { position: [15, 3, 20] as [number, number, number], type: 'dust' as const, intensity: 0.6 },
-  ], []);
+      // Packer dust (packaging creates airborne flour)
+      { position: [-15, 3, 20] as [number, number, number], type: 'dust' as const, intensity: 0.7 },
+      { position: [0, 3, 20] as [number, number, number], type: 'dust' as const, intensity: 0.8 },
+      { position: [15, 3, 20] as [number, number, number], type: 'dust' as const, intensity: 0.6 },
+    ],
+    []
+  );
 
   // On medium quality, reduce number of sources
-  const activeSources = graphics.quality === 'medium'
-    ? steamSources.filter((_, i) => i % 2 === 0)
-    : steamSources;
+  const activeSources =
+    quality === 'medium' ? steamSources.filter((_, i) => i % 2 === 0) : steamSources;
 
   // Return null if disabled (after all hooks have been called)
   if (!isEnabled) {

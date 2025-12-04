@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scada-proxy
+  namespace: millos-scada
+  labels:
+    app.kubernetes.io/name: scada-proxy
+    app.kubernetes.io/component: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: scada-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: scada-proxy
+        app.kubernetes.io/component: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3001"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: scada-proxy
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      containers:
+        - name: scada-proxy
+          image: millos/scada-proxy:latest
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 3001
+              protocol: TCP
+
+          env:
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: scada-proxy-config
+                  key: PORT
+            - name: POLL_INTERVAL
+              valueFrom:
+                configMapKeyRef:
+                  name: scada-proxy-config
+                  key: POLL_INTERVAL
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: scada-proxy-config
+                  key: LOG_LEVEL
+            - name: CORS_ORIGIN
+              valueFrom:
+                configMapKeyRef:
+                  name: scada-proxy-config
+                  key: CORS_ORIGIN
+            - name: OPCUA_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: scada-proxy-secrets
+                  key: OPCUA_USERNAME
+                  optional: true
+            - name: OPCUA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: scada-proxy-secrets
+                  key: OPCUA_PASSWORD
+                  optional: true
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: scada-proxy-secrets
+                  key: API_KEY
+
+          volumeMounts:
+            - name: tags-config
+              mountPath: /app/tags.json
+              subPath: tags.json
+              readOnly: true
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+      volumes:
+        - name: tags-config
+          configMap:
+            name: scada-proxy-config
+            items:
+              - key: tags.json
+                path: tags.json
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: scada-proxy
+                topologyKey: kubernetes.io/hostname

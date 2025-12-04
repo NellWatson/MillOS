@@ -1,5 +1,4 @@
 <div align="center">
-<img width="900" alt="MillOS Digital Twin" src="assets/Screenshot.png" />
 
 <br/>
 
@@ -8,17 +7,18 @@
   <img src="https://img.shields.io/badge/Three.js-R169-black?style=for-the-badge&logo=three.js&logoColor=white" alt="Three.js" />
   <img src="https://img.shields.io/badge/TypeScript-5.6-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Vite-6.0-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
+  <img src="https://img.shields.io/badge/SCADA-ISA--18.2-00A86B?style=for-the-badge" alt="SCADA" />
 </p>
 
 # MillOS
 
-### AI-Powered Grain Mill Digital Twin Simulator
+### AI-Powered Grain Mill Digital Twin Simulator with Industrial SCADA Integration
 
 *An Agentic AI Experiment by Nell Watson*
 
 <br/>
 
-A browser-based 3D industrial simulation featuring autonomous workers, intelligent forklifts,<br/>real-time production metrics, and an AI command center — all visualizing a complete grain milling operation.
+A browser-based 3D industrial simulation featuring autonomous workers, intelligent forklifts,<br/>real-time production metrics, SCADA integration, and an AI command center — all visualizing a complete grain milling operation.
 
 [View in AI Studio](https://ai.studio/apps/drive/1dzg8VQBWvFW1SYHiqYyClsvakjN8uidt)
 
@@ -26,22 +26,45 @@ A browser-based 3D industrial simulation featuring autonomous workers, intellige
 
 ---
 
+## A Note from Nell Watson
+
+This project represents something I find genuinely exciting about where we are in late 2025: **the emergence of agentic AI as a creative and engineering partner**.
+
+MillOS was not built the traditional way. There is no team of developers who spent months writing boilerplate, debugging physics engines, or hand-tuning shader parameters. Instead, this simulation emerged through sustained dialogue with Claude—describing intentions, reviewing generated code, iterating on failures, and gradually shaping a coherent vision into reality.
+
+What you're seeing here is a snapshot of the current state of the art in **agentic game and simulation engineering**. The term "agentic" matters: it describes AI systems that don't merely respond to prompts but maintain context across complex multi-step tasks, reason about architecture, debug their own mistakes, and collaborate meaningfully on creative and technical challenges. This isn't autocomplete. It's genuine partnership.
+
+The implications extend far beyond one grain mill simulation:
+
+- **Accessibility**: Domain experts who understand industrial processes can now build sophisticated simulations without traditional programming expertise
+- **Velocity**: What once required months of specialized development can emerge in days through iterative human-AI collaboration
+- **Fidelity**: Complex systems like ISA-18.2 compliant SCADA integration—typically the domain of specialized consultancies—become achievable for small teams or individuals
+- **Iteration**: The conversation never ends; refinements, new features, and corrections flow naturally through continued dialogue
+
+I share this project not as a finished product but as evidence of a threshold being crossed. The tools that built this simulation will only grow more capable. The workflows being pioneered today will become standard practice tomorrow. And the people who learn to collaborate effectively with agentic AI—directing intent while trusting execution—will shape what gets built in this new era.
+
+If you're exploring agentic development yourself, I hope MillOS serves as both inspiration and a practical reference. The future of simulation, gaming, and software engineering is being written right now, one conversation at a time.
+
+— **Nell Watson**, December 2025
+
+---
+
 ## Overview
 
-MillOS is a fully interactive digital twin of a grain mill factory, built with React Three Fiber. Watch 10 autonomous workers patrol the factory floor, observe 2 intelligent forklifts navigate around obstacles, and monitor real-time production data as 14 machines process grain across 4 production zones.
+MillOS is a fully interactive digital twin of a grain mill factory, built with React Three Fiber. Watch 10 autonomous workers patrol the factory floor, observe 2 intelligent forklifts navigate around obstacles, and monitor real-time SCADA data as 14 machines process grain across 4 production zones. The integrated SCADA system provides industrial-grade monitoring with 90 process tags, ISA-18.2 compliant alarms, and support for real PLC connections via OPC-UA and Modbus protocols.
 
 <table>
 <tr>
 <td align="center"><strong>14</strong><br/>Interactive Machines</td>
+<td align="center"><strong>90</strong><br/>SCADA Tags</td>
 <td align="center"><strong>10</strong><br/>Autonomous Workers</td>
 <td align="center"><strong>4</strong><br/>Production Zones</td>
-<td align="center"><strong>500+</strong><br/>Animated Particles</td>
 </tr>
 <tr>
-<td align="center"><strong>1,240</strong><br/>Tonnes/Hour</td>
-<td align="center"><strong>42</strong><br/>Bags/Minute</td>
-<td align="center"><strong>99.7%</strong><br/>Uptime</td>
-<td align="center"><strong>98.2%</strong><br/>Efficiency</td>
+<td align="center"><strong>6</strong><br/>Protocol Adapters</td>
+<td align="center"><strong>ISA-18.2</strong><br/>Alarm Standard</td>
+<td align="center"><strong>24h</strong><br/>History Retention</td>
+<td align="center"><strong>500+</strong><br/>Animated Particles</td>
 </tr>
 </table>
 
@@ -107,6 +130,42 @@ Real-time KPIs with 30-minute historical trends:
 - **Atmospheric effects** — 500+ dust particles with instanced rendering
 - **Industrial lighting** — Colored accent spots and skylights
 
+### SCADA Integration
+
+Full industrial SCADA system with real-time process monitoring:
+
+| Feature | Description |
+|---------|-------------|
+| **90 Process Tags** | ISA-5.1 compliant naming (e.g., `RM101.TT001.PV`) |
+| **5-Tab Monitor Panel** | Tags, Alarms, Trends, Test, Config |
+| **ISA-18.2 Alarms** | UNACK/ACKED/RTN state machine with 4 priority levels |
+| **Historical Trends** | 24-hour retention in IndexedDB with CSV/JSON export |
+| **Fault Injection** | Sensor failures, spikes, drift, stuck values, noise |
+| **Protocol Adapters** | Simulation, REST, MQTT, WebSocket, OPC-UA, Modbus |
+
+**Protocol Support:**
+
+| Protocol | Browser-Native | Connection Method |
+|----------|:--------------:|-------------------|
+| Simulation | Yes | In-browser physics engine |
+| REST API | Yes | Direct `fetch()` polling |
+| MQTT | Yes | WebSocket (port 8883) |
+| WebSocket | Yes | Direct connection |
+| OPC-UA | No | Via backend proxy |
+| Modbus TCP | No | Via backend proxy |
+
+**Tag Hierarchy by Zone:**
+
+| Zone | Equipment | Tags |
+|:----:|-----------|:----:|
+| 1 | 5 Silos (Alpha-Epsilon) | 20 |
+| 2 | 6 Roller Mills (RM-101-106) | 36 |
+| 3 | 3 Plansifters (A-C) | 12 |
+| 4 | 3 Packers (Lines 1-3) | 12 |
+| - | Utility/Ambient Systems | 10 |
+
+See [SCADA_PLAN.md](SCADA_PLAN.md) for complete API documentation.
+
 ---
 
 ## Quick Start
@@ -143,6 +202,27 @@ Open [http://localhost:3000](http://localhost:3000) to view the simulation.
 | `npm run dev` | Start development server (port 3000) |
 | `npm run build` | Create production build |
 | `npm run preview` | Preview production build locally |
+| `npm test` | Run test suite |
+
+### SCADA Backend Proxy (Optional)
+
+For OPC-UA or Modbus connections to real PLCs:
+
+```bash
+cd scada-proxy
+npm install
+npm run dev          # Development mode
+# Or with Docker
+docker-compose up    # Includes MQTT broker
+```
+
+Configure in `.env`:
+```bash
+PORT=3001
+OPCUA_ENDPOINT=opc.tcp://192.168.1.100:4840
+MODBUS_HOST=192.168.1.101
+MODBUS_PORT=502
+```
 
 ---
 
@@ -156,7 +236,12 @@ Open [http://localhost:3000](http://localhost:3000) to view the simulation.
 | **Click machine** | Open machine detail panel |
 | **Click worker** | Open worker profile |
 | **Z** | Toggle safety zone visibility |
-| **A** | Toggle AI Command Center |
+| **I** | Toggle AI Command Center |
+| **S** | Toggle SCADA Panel |
+| **H** | Toggle heatmap view |
+| **F1-F4** | Graphics quality presets |
+| **Spacebar** | Emergency stop |
+| **?** | Show keyboard shortcuts |
 
 ---
 
@@ -184,9 +269,44 @@ src/
 │   │   # UI Overlays (React DOM)
 │   ├── UIOverlay.tsx           # Production controls & machine info
 │   ├── AICommandCenter.tsx     # AI decision slide-out panel
+│   ├── SCADAPanel.tsx          # SCADA monitor with 5 tabs
 │   ├── WorkerDetailPanel.tsx   # Worker profile modal
 │   ├── ProductionMetrics.tsx   # Charts & KPIs
 │   └── AlertSystem.tsx         # Toast notifications
+│
+├── scada/                      # SCADA Integration Layer
+│   ├── types.ts                # TypeScript interfaces
+│   ├── tagDatabase.ts          # 90 process tags (ISA-5.1 naming)
+│   ├── AlarmManager.ts         # ISA-18.2 alarm state machine
+│   ├── HistoryStore.ts         # IndexedDB with 24h retention
+│   ├── SCADAService.ts         # Main orchestration service
+│   ├── SCADABridge.ts          # SCADA-to-3D visual mapping
+│   ├── useSCADA.ts             # React hooks
+│   ├── useSCADAVisuals.ts      # 3D visualization hooks
+│   └── adapters/
+│       ├── SimulationAdapter.ts    # Physics-based simulation
+│       ├── RESTAdapter.ts          # HTTP polling
+│       ├── MQTTAdapter.ts          # MQTT over WebSocket
+│       └── WebSocketAdapter.ts     # Direct WebSocket
+│
+├── hooks/                      # Reusable React Hooks
+│   ├── useKeyboardShortcuts.ts # Keyboard navigation (F1-F4, Z, I, H, etc.)
+│   ├── useProceduralTextures.ts # Metal, concrete, wall textures
+│   └── useDisposable.ts        # Three.js resource cleanup
+│
+└── test/                       # Test suite
+    └── setup.ts                # Vitest configuration
+
+scada-proxy/                    # Backend Proxy Service
+├── src/
+│   ├── index.ts                # Express server
+│   ├── TagRegistry.ts          # Tag management
+│   └── adapters/
+│       ├── OPCUAAdapter.ts     # OPC-UA client
+│       └── ModbusAdapter.ts    # Modbus TCP client
+├── Dockerfile
+├── docker-compose.yml
+└── mosquitto/                  # MQTT broker config
 ```
 
 ### State Management
@@ -235,10 +355,29 @@ A custom **PositionRegistry** singleton enables inter-entity awareness:
 | **Build Tool** | Vite |
 | **Language** | TypeScript |
 | **AI Integration** | Google Gemini API |
+| **SCADA Protocols** | OPC-UA (node-opcua), Modbus (jsmodbus) |
+| **Testing** | Vitest |
+| **Data Storage** | IndexedDB (via idb) |
+| **Containerization** | Docker, Docker Compose |
 
 ---
 
 ## Roadmap
+
+### Completed
+
+- [x] Full SCADA integration with 90 process tags
+- [x] ISA-18.2 compliant alarm management
+- [x] Multiple protocol adapters (REST, MQTT, WebSocket)
+- [x] OPC-UA and Modbus backend proxy
+- [x] Historical data with 24-hour retention
+- [x] Fault injection for testing scenarios
+- [x] Refactored hook architecture (keyboard, textures)
+- [x] Comprehensive test suite with Vitest
+- [x] Docker containerization for backend services
+- [x] CI/CD workflows (GitHub Actions)
+
+### Planned
 
 - [ ] Live Gemini API integration for dynamic AI decisions
 - [ ] WebSocket support for multi-user observation
@@ -246,6 +385,7 @@ A custom **PositionRegistry** singleton enables inter-entity awareness:
 - [ ] Historical playback and time-travel debugging
 - [ ] Custom scenario editor
 - [ ] Mobile touch controls
+- [ ] Integration with real SCADA historians (OSIsoft PI, Wonderware)
 
 ---
 
@@ -269,6 +409,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
+- Built with [Claude Code](https://claude.ai/code) (Opus 4.5), with assistance from GPT-5.1-codex-max xhigh and Gemini 2.5
 - Built with [React Three Fiber](https://docs.pmnd.rs/react-three-fiber)
 - State management by [Zustand](https://github.com/pmndrs/zustand)
 - UI animations with [Framer Motion](https://www.framer.com/motion/)
@@ -279,9 +420,9 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**MillOS v2.0**
+**MillOS v3.0**
 
-*Transforming grain milling through digital twin technology*
+*Transforming grain milling through digital twin technology and industrial SCADA integration*
 
 <br/>
 

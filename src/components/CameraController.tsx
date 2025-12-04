@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { create } from 'zustand';
@@ -22,33 +22,45 @@ export interface CameraPreset {
 export const CAMERA_PRESETS: CameraPreset[] = [
   {
     name: 'Overview',
-    position: [40, 25, 40],
+    position: [70, 40, 70],
     target: [0, 5, 0],
     description: 'Full factory overview',
   },
   {
     name: 'Silos',
-    position: [0, 15, -40],
+    position: [0, 18, -45],
     target: [0, 10, -22],
     description: 'Raw material storage (Zone 1)',
   },
   {
     name: 'Milling',
-    position: [25, 12, -6],
+    position: [35, 15, -6],
     target: [0, 3, -6],
     description: 'Roller mills (Zone 2)',
   },
   {
     name: 'Sifting',
-    position: [0, 18, 20],
+    position: [0, 20, 25],
     target: [0, 9, 6],
     description: 'Plansifters (Zone 3)',
   },
   {
     name: 'Packing',
-    position: [-30, 10, 25],
-    target: [0, 2, 20],
+    position: [-35, 12, 35],
+    target: [0, 2, 25],
     description: 'Packaging lines (Zone 4)',
+  },
+  {
+    name: 'Shipping',
+    position: [30, 15, 60],
+    target: [0, 2, 48],
+    description: 'Shipping dock (front)',
+  },
+  {
+    name: 'Receiving',
+    position: [-30, 15, -60],
+    target: [0, 2, -48],
+    description: 'Receiving dock (back)',
   },
 ];
 
@@ -91,7 +103,7 @@ interface CameraControllerProps {
 export const CameraController: React.FC<CameraControllerProps> = ({
   orbitControlsRef,
   autoRotateEnabled = true,
-  targetSpeed = 0.15
+  targetSpeed = 0.15,
 }) => {
   const { camera } = useThree();
   const { targetPosition, targetLookAt, isAnimating, clearAnimation } = useCameraStore();
@@ -113,7 +125,11 @@ export const CameraController: React.FC<CameraControllerProps> = ({
 
       const key = e.key.toLowerCase();
       // Track movement keys
-      if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'q', 'e'].includes(key)) {
+      if (
+        ['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'q', 'e'].includes(
+          key
+        )
+      ) {
         pressedKeys.add(key);
       }
     };
@@ -262,7 +278,9 @@ export const CameraPresetIndicator: React.FC = () => {
 
   return (
     <div className="fixed bottom-4 right-4 z-40 pointer-events-none">
-      <div className={`flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900/80 backdrop-blur-sm border border-slate-700/50 shadow-lg transition-all duration-300 ${isAnimating ? 'scale-105' : ''}`}>
+      <div
+        className={`flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900/80 backdrop-blur-sm border border-slate-700/50 shadow-lg transition-all duration-300 ${isAnimating ? 'scale-105' : ''}`}
+      >
         {/* Preset number badge */}
         <div className="w-6 h-6 rounded-md bg-cyan-600 flex items-center justify-center">
           <span className="text-white text-sm font-bold">{activePreset + 1}</span>
@@ -273,9 +291,7 @@ export const CameraPresetIndicator: React.FC = () => {
           <span className="text-slate-400 text-[10px]">{preset.description}</span>
         </div>
         {/* Animating indicator */}
-        {isAnimating && (
-          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse ml-1" />
-        )}
+        {isAnimating && <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse ml-1" />}
       </div>
       {/* Keyboard hint */}
       <div className="flex justify-end gap-1 mt-1 opacity-50">
@@ -283,9 +299,7 @@ export const CameraPresetIndicator: React.FC = () => {
           <div
             key={i}
             className={`w-4 h-4 rounded text-[9px] font-mono flex items-center justify-center transition-colors ${
-              i === activePreset
-                ? 'bg-cyan-600 text-white'
-                : 'bg-slate-800 text-slate-500'
+              i === activePreset ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-500'
             }`}
           >
             {i + 1}

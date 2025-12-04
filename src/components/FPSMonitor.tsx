@@ -32,12 +32,25 @@ interface FPSStore {
   lowFpsStartTime: number;
   highFpsStartTime: number;
   setFPS: (fps: number, frameTime: number) => void;
-  setRendererStats: (stats: { triangles: number; drawCalls: number; geometries: number; textures: number; programs: number }) => void;
+  setRendererStats: (stats: {
+    triangles: number;
+    drawCalls: number;
+    geometries: number;
+    textures: number;
+    programs: number;
+  }) => void;
   setProfilingEnabled: (enabled: boolean) => void;
   setQualitySuggestionsEnabled: (enabled: boolean) => void;
-  setPendingSuggestion: (suggestion: { type: 'lower' | 'raise'; targetQuality: GraphicsQuality } | null) => void;
+  setPendingSuggestion: (
+    suggestion: { type: 'lower' | 'raise'; targetQuality: GraphicsQuality } | null
+  ) => void;
   setSuggestionDismissedAt: (time: number) => void;
-  setProfileData: (data: { render: number; scripts: number; physics: number; other: number }) => void;
+  setProfileData: (data: {
+    render: number;
+    scripts: number;
+    physics: number;
+    other: number;
+  }) => void;
   setLowFpsStartTime: (time: number) => void;
   setHighFpsStartTime: (time: number) => void;
 }
@@ -76,18 +89,21 @@ export const useFPSStore = create<FPSStore>((set) => ({
     // Try to get memory usage if available
     let memoryUsage = 0;
     if ((performance as unknown as { memory?: { usedJSHeapSize: number } }).memory) {
-      memoryUsage = (performance as unknown as { memory: { usedJSHeapSize: number } }).memory.usedJSHeapSize / (1024 * 1024);
+      memoryUsage =
+        (performance as unknown as { memory: { usedJSHeapSize: number } }).memory.usedJSHeapSize /
+        (1024 * 1024);
     }
 
     set({ fps, avgFps, minFps, maxFps, frameTime, memoryUsage });
   },
-  setRendererStats: (stats) => set({
-    triangles: stats.triangles,
-    drawCalls: stats.drawCalls,
-    geometries: stats.geometries,
-    textures: stats.textures,
-    programs: stats.programs,
-  }),
+  setRendererStats: (stats) =>
+    set({
+      triangles: stats.triangles,
+      drawCalls: stats.drawCalls,
+      geometries: stats.geometries,
+      textures: stats.textures,
+      programs: stats.programs,
+    }),
   setProfilingEnabled: (enabled) => set({ profilingEnabled: enabled }),
   setQualitySuggestionsEnabled: (enabled) => set({ qualitySuggestionsEnabled: enabled }),
   setPendingSuggestion: (suggestion) => set({ pendingSuggestion: suggestion }),
@@ -102,8 +118,8 @@ const QUALITY_ORDER: GraphicsQuality[] = ['ultra', 'high', 'medium', 'low'];
 
 // 3D component to track FPS (must be inside Canvas)
 export const FPSTracker: React.FC = () => {
-  const lastTime = useRef(performance.now());
   const frameCount = useRef(0);
+  const frameAccumulator = useRef(0);
   const { gl } = useThree();
   const setFPS = useFPSStore((state) => state.setFPS);
   const setRendererStats = useFPSStore((state) => state.setRendererStats);
@@ -118,21 +134,30 @@ export const FPSTracker: React.FC = () => {
   const setLowFpsStartTime = useFPSStore((state) => state.setLowFpsStartTime);
   const setHighFpsStartTime = useFPSStore((state) => state.setHighFpsStartTime);
 
-  const currentQuality = useMillStore((state) => state.graphics.quality);
+  const currentQuality = useMillStore((state: any) => state.graphics.quality);
 
   // Track frame times for profiling
   const frameTimes = useRef<number[]>([]);
+  const SAMPLE_INTERVAL_DEFAULT = 0.5; // seconds
+  const SAMPLE_INTERVAL_PROFILING = 0.1; // seconds
 
-  useFrame(() => {
-    const frameStart = performance.now();
+  useFrame((_, delta) => {
+    const sampleInterval = profilingEnabled ? SAMPLE_INTERVAL_PROFILING : SAMPLE_INTERVAL_DEFAULT;
+
     frameCount.current++;
-    const currentTime = performance.now();
-    const elapsed = currentTime - lastTime.current;
+    frameAccumulator.current += delta;
 
-    // Update FPS every 100ms for smoother readings
-    if (elapsed >= 100) {
-      const fps = Math.round((frameCount.current * 1000) / elapsed);
-      const frameTime = elapsed / frameCount.current;
+    if (profilingEnabled) {
+      frameTimes.current.push(delta * 1000);
+      if (frameTimes.current.length > 120) {
+        frameTimes.current.shift();
+      }
+    }
+
+    if (frameAccumulator.current >= sampleInterval) {
+      const elapsedSeconds = frameAccumulator.current;
+      const fps = Math.round(frameCount.current / elapsedSeconds);
+      const frameTime = (elapsedSeconds * 1000) / frameCount.current;
       setFPS(fps, frameTime);
 
       // Get renderer stats
@@ -147,7 +172,8 @@ export const FPSTracker: React.FC = () => {
 
       // Profiling data estimation
       if (profilingEnabled && frameTimes.current.length > 0) {
-        const avgFrameTime = frameTimes.current.reduce((a, b) => a + b, 0) / frameTimes.current.length;
+        const avgFrameTime =
+          frameTimes.current.reduce((a, b) => a + b, 0) / frameTimes.current.length;
         const renderTime = avgFrameTime * 0.6;
         const scriptsTime = avgFrameTime * 0.25;
         const physicsTime = avgFrameTime * 0.05;
@@ -177,7 +203,7 @@ export const FPSTracker: React.FC = () => {
             } else if (now - lowFpsStartTime > 3000) {
               setPendingSuggestion({
                 type: 'lower',
-                targetQuality: QUALITY_ORDER[currentIndex + 1]
+                targetQuality: QUALITY_ORDER[currentIndex + 1],
               });
               setLowFpsStartTime(0);
             }
@@ -192,7 +218,7 @@ export const FPSTracker: React.FC = () => {
             } else if (now - highFpsStartTime > 10000) {
               setPendingSuggestion({
                 type: 'raise',
-                targetQuality: QUALITY_ORDER[currentIndex - 1]
+                targetQuality: QUALITY_ORDER[currentIndex - 1],
               });
               setHighFpsStartTime(0);
             }
@@ -203,16 +229,7 @@ export const FPSTracker: React.FC = () => {
       }
 
       frameCount.current = 0;
-      lastTime.current = currentTime;
-    }
-
-    // Track frame time for profiling
-    if (profilingEnabled) {
-      const frameEnd = performance.now();
-      frameTimes.current.push(frameEnd - frameStart);
-      if (frameTimes.current.length > 60) {
-        frameTimes.current.shift();
-      }
+      frameAccumulator.current = 0;
     }
   });
 
@@ -276,18 +293,16 @@ const FPSGraph: React.FC<{ history: number[] }> = ({ history }) => {
     }
   }, [history]);
 
-  return (
-    <canvas
-      ref={canvasRef}
-      width={80}
-      height={30}
-      className="rounded"
-    />
-  );
+  return <canvas ref={canvasRef} width={80} height={30} className="rounded" />;
 };
 
 // Profile bar component
-const ProfileBar: React.FC<{ label: string; value: number; max: number; color: string }> = ({ label, value, max, color }) => {
+const ProfileBar: React.FC<{ label: string; value: number; max: number; color: string }> = ({
+  label,
+  value,
+  max,
+  color,
+}) => {
   const percentage = Math.min((value / max) * 100, 100);
   return (
     <div className="flex items-center gap-2 text-[10px]">
@@ -308,7 +323,7 @@ const QualitySuggestion: React.FC = () => {
   const pendingSuggestion = useFPSStore((state) => state.pendingSuggestion);
   const setPendingSuggestion = useFPSStore((state) => state.setPendingSuggestion);
   const setSuggestionDismissedAt = useFPSStore((state) => state.setSuggestionDismissedAt);
-  const setGraphicsQuality = useMillStore((state) => state.setGraphicsQuality);
+  const setGraphicsQuality = useMillStore((state: any) => state.setGraphicsQuality);
   const fps = useFPSStore((state) => state.fps);
 
   if (!pendingSuggestion) return null;
@@ -326,24 +341,25 @@ const QualitySuggestion: React.FC = () => {
   const isLowering = pendingSuggestion.type === 'lower';
 
   return (
-    <div className={`mt-2 p-2 rounded-lg border ${
-      isLowering
-        ? 'bg-red-900/30 border-red-500/50'
-        : 'bg-green-900/30 border-green-500/50'
-    }`}>
+    <div
+      className={`mt-2 p-2 rounded-lg border ${
+        isLowering ? 'bg-red-900/30 border-red-500/50' : 'bg-green-900/30 border-green-500/50'
+      }`}
+    >
       <div className="flex items-start gap-2">
         <div className={`mt-0.5 ${isLowering ? 'text-red-400' : 'text-green-400'}`}>
           {isLowering ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
         </div>
         <div className="flex-1">
-          <div className={`text-[10px] font-bold ${isLowering ? 'text-red-300' : 'text-green-300'}`}>
+          <div
+            className={`text-[10px] font-bold ${isLowering ? 'text-red-300' : 'text-green-300'}`}
+          >
             {isLowering ? 'Performance Issue Detected' : 'Room for Better Quality'}
           </div>
           <div className="text-[9px] text-slate-400 mt-0.5">
             {isLowering
               ? `FPS is ${fps}. Switch to ${pendingSuggestion.targetQuality.toUpperCase()} for better performance?`
-              : `FPS is stable at ${fps}. Try ${pendingSuggestion.targetQuality.toUpperCase()} for better visuals?`
-            }
+              : `FPS is stable at ${fps}. Try ${pendingSuggestion.targetQuality.toUpperCase()} for better visuals?`}
           </div>
           <div className="flex gap-1.5 mt-2">
             <button
@@ -376,13 +392,25 @@ interface FPSDisplayProps {
 
 export const FPSDisplay: React.FC<FPSDisplayProps> = ({ showDetailed = false }) => {
   const {
-    fps, avgFps, minFps, maxFps, frameTime, triangles, drawCalls,
-    geometries, textures, programs, memoryUsage,
-    profilingEnabled, profileData, qualitySuggestionsEnabled,
-    setProfilingEnabled, setQualitySuggestionsEnabled
+    fps,
+    avgFps,
+    minFps,
+    maxFps,
+    frameTime,
+    triangles,
+    drawCalls,
+    geometries,
+    textures,
+    programs,
+    memoryUsage,
+    profilingEnabled,
+    profileData,
+    qualitySuggestionsEnabled,
+    setProfilingEnabled,
+    setQualitySuggestionsEnabled,
   } = useFPSStore();
   const [history, setHistory] = useState<number[]>([]);
-  const currentQuality = useMillStore((state) => state.graphics.quality);
+  const currentQuality = useMillStore((state: any) => state.graphics.quality);
 
   useEffect(() => {
     setHistory((prev) => {
@@ -395,7 +423,8 @@ export const FPSDisplay: React.FC<FPSDisplayProps> = ({ showDetailed = false }) 
   }, [fps]);
 
   const fpsColor = fps >= 55 ? 'text-green-400' : fps >= 30 ? 'text-yellow-400' : 'text-red-400';
-  const fpsColorBg = fps >= 55 ? 'bg-green-500/20' : fps >= 30 ? 'bg-yellow-500/20' : 'bg-red-500/20';
+  const fpsColorBg =
+    fps >= 55 ? 'bg-green-500/20' : fps >= 30 ? 'bg-yellow-500/20' : 'bg-red-500/20';
 
   if (!showDetailed) {
     return (
@@ -484,11 +513,33 @@ export const FPSDisplay: React.FC<FPSDisplayProps> = ({ showDetailed = false }) 
       {/* Profiling breakdown */}
       {profilingEnabled && (
         <div className="space-y-1.5 border-t border-slate-700/50 pt-2">
-          <div className="text-[9px] text-slate-500 uppercase tracking-wider mb-1">Frame Breakdown</div>
-          <ProfileBar label="Render" value={profileData.render} max={frameTime} color="bg-cyan-500" />
-          <ProfileBar label="Scripts" value={profileData.scripts} max={frameTime} color="bg-purple-500" />
-          <ProfileBar label="Physics" value={profileData.physics} max={frameTime} color="bg-green-500" />
-          <ProfileBar label="Other" value={profileData.other} max={frameTime} color="bg-orange-500" />
+          <div className="text-[9px] text-slate-500 uppercase tracking-wider mb-1">
+            Frame Breakdown
+          </div>
+          <ProfileBar
+            label="Render"
+            value={profileData.render}
+            max={frameTime}
+            color="bg-cyan-500"
+          />
+          <ProfileBar
+            label="Scripts"
+            value={profileData.scripts}
+            max={frameTime}
+            color="bg-purple-500"
+          />
+          <ProfileBar
+            label="Physics"
+            value={profileData.physics}
+            max={frameTime}
+            color="bg-green-500"
+          />
+          <ProfileBar
+            label="Other"
+            value={profileData.other}
+            max={frameTime}
+            color="bg-orange-500"
+          />
 
           <div className="grid grid-cols-3 gap-1 text-[9px] mt-2 pt-2 border-t border-slate-800">
             <div className="text-center">

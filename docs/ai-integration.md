@@ -257,22 +257,26 @@ Visual indicator when AI is "processing":
 
 ### Gemini API Configuration
 
-The project includes environment configuration for Gemini API:
+> **SECURITY WARNING**: Never embed API keys in client-side bundles. Use a backend proxy instead.
+
+For AI integration, use a serverless function or backend API:
 
 ```typescript
-// vite.config.ts
-define: {
-  'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-  'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+// api/ai-decision.ts (serverless function)
+export default async function handler(req, res) {
+  const apiKey = process.env.GEMINI_API_KEY; // Server-side only
+  // Make API call here
 }
 ```
 
 ### Environment Setup
 
 ```bash
-# .env.local
+# .env.local (for local backend/serverless)
 GEMINI_API_KEY=your_api_key_here
 ```
+
+**Note**: The `.env.local` file is gitignored and should never be committed.
 
 ### Potential Integration Points
 
@@ -312,6 +316,57 @@ async function generateAIDecision() {
   addAIDecision(decision);
 }
 ```
+
+### SCADA Data Integration
+
+The AI system can leverage real-time SCADA data for more accurate decision-making:
+
+```typescript
+import { useSCADA, useSCADAAlarms } from '../scada';
+
+async function generateSCADAInformedDecision() {
+  const { values, getValue } = useSCADA();
+  const { alarms, hasCritical } = useSCADAAlarms();
+
+  // Get current sensor readings
+  const rm101Temp = getValue('RM101.TT001.PV')?.value;
+  const rm101Vibration = getValue('RM101.VT001.PV')?.value;
+
+  // Build context with real sensor data
+  const scadaContext = {
+    temperatures: Array.from(values.entries())
+      .filter(([id]) => id.includes('.TT'))
+      .map(([id, val]) => ({ tagId: id, value: val.value, quality: val.quality })),
+    activeAlarms: alarms.map(a => ({
+      tagId: a.tagId,
+      priority: a.priority,
+      state: a.state,
+      message: a.message
+    })),
+    hasCriticalAlarms: hasCritical
+  };
+
+  const response = await fetch('/api/ai/analyze', {
+    method: 'POST',
+    body: JSON.stringify({
+      scadaData: scadaContext,
+      context: 'predictive_maintenance'
+    })
+  });
+
+  return response.json();
+}
+```
+
+**Available SCADA Hooks for AI Integration:**
+
+| Hook | Data Provided |
+|------|---------------|
+| `useSCADA()` | Tag values, history, fault injection |
+| `useSCADAAlarms()` | Active alarms, summaries, acknowledge controls |
+| `useSCADAMachineVisuals()` | Derived visual states from SCADA data |
+
+See [SCADA_PLAN.md](../SCADA_PLAN.md) for complete SCADA API documentation.
 
 ---
 

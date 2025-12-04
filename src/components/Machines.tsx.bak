@@ -1,0 +1,2015 @@
+import React, { useRef, useState, useEffect, useMemo, Suspense } from 'react';
+import { useFrame } from '@react-three/fiber';
+import { MachineData, MachineType, GrainQuality } from '../types';
+import * as THREE from 'three';
+import { Html, Text, useGLTF } from '@react-three/drei';
+import { audioManager } from '../utils/audioManager';
+import { useMillStore } from '../store';
+import { getStatusColor } from '../utils/statusColors';
+import { useSCADAMachineVisuals, useSCADAAlarmVisuals } from '../scada';
+import { useModelAvailable, MODEL_PATHS } from '../utils/modelLoader';
+import { shouldRunThisFrame, getThrottleLevel } from '../utils/frameThrottle';
+
+// Grain quality color mapping
+const QUALITY_COLORS: Record<GrainQuality, string> = {
+  premium: '#22c55e',  // Green
+  standard: '#3b82f6', // Blue
+  economy: '#f59e0b',  // Amber
+  mixed: '#8b5cf6',    // Purple
+};
+
+const QUALITY_LABELS: Record<GrainQuality, string> = {
+  premium: 'Premium',
+  standard: 'Standard',
+  economy: 'Economy',
+  mixed: 'Mixed',
+};
+
+// Grain types for silos
+const GRAIN_TYPES = ['Wheat', 'Corn', 'Barley', 'Oats', 'Rye'];
+
+// Fill level indicator for silos
+const SiloFillIndicator: React.FC<{
+  fillLevel: number;
+  quality: GrainQuality;
+  grainType: string;
+  radius: number;
+  height: number;
+}> = React.memo(({ fillLevel, quality, grainType, radius, height }) => {
+  const fillHeight = (fillLevel / 100) * height * 0.85;
+  const qualityColor = QUALITY_COLORS[quality];
+  const graphicsQuality = useMillStore(state => state.graphics.quality);
+
+  return (
+    <group>
+      {/* Grain fill visualization */}
+      <mesh position={[0, -height / 2 + fillHeight / 2 + 0.5, 0]}>
+        <cylinderGeometry args={[radius - 0.15, radius - 0.15, fillHeight, graphicsQuality === 'low' ? 16 : 32]} />
+        {graphicsQuality === 'low' ? (
+          <meshBasicMaterial
+            color={quality === 'premium' ? '#f5d78e' : quality === 'economy' ? '#d4a574' : '#e8c872'}
+            transparent
+            opacity={0.7}
+          />
+        ) : (
+          <meshStandardMaterial
+            color={quality === 'premium' ? '#f5d78e' : quality === 'economy' ? '#d4a574' : '#e8c872'}
+            roughness={0.9}
+            transparent
+            opacity={0.7}
+          />
+        )}
+      </mesh>
+
+      {/* Quality indicator ring at fill level - skip on low */}
+      {graphicsQuality !== 'low' && (
+        <mesh position={[0, -height / 2 + fillHeight + 0.5, 0]}>
+          <torusGeometry args={[radius - 0.1, 0.05, 8, 32]} />
+          <meshStandardMaterial
+            color={qualityColor}
+            emissive={qualityColor}
+            emissiveIntensity={0.5}
+            toneMapped={false}
+          />
+        </mesh>
+      )}
+
+      {/* Fill level percentage display - skip on low */}
+      {graphicsQuality !== 'low' && (
+        <Html position={[radius + 0.8, 0, 0]} center distanceFactor={15}>
+          <div className="bg-slate-900/90 backdrop-blur px-2 py-1 rounded-lg border border-slate-700 min-w-[70px]">
+            <div className="text-xs font-mono text-white font-bold">{fillLevel.toFixed(0)}%</div>
+            <div className="text-[9px] text-slate-400">{grainType}</div>
+            <div className="flex items-center gap-1 mt-0.5">
+              <span
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: qualityColor }}
+              />
+              <span className="text-[8px]" style={{ color: qualityColor }}>
+                {QUALITY_LABELS[quality]}
+              </span>
+            </div>
+          </div>
+        </Html>
+      )}
+    </group>
+  );
+});
+
+// Module-level cache for procedural textures to avoid regenerating identical textures
+const textureCache = new Map<string, { roughnessMap: THREE.CanvasTexture; normalMap: THREE.CanvasTexture }>();
+
+// Maintenance countdown timer display
+const MaintenanceCountdown: React.FC<{
+  hoursRemaining: number;
+  position: [number, number, number];
+}> = React.memo(({ hoursRemaining, position }) => {
+  const graphics = useMillStore(state => state.graphics.quality);
+
+  // Skip Html overlay on low graphics
+  if (graphics === 'low') return null;
+
+  const isUrgent = hoursRemaining < 24;
+  const isCritical = hoursRemaining < 8;
+
+  const color = isCritical ? '#ef4444' : isUrgent ? '#f59e0b' : '#22c55e';
+
+  // Format hours to days/hours display
+  const formatTime = (hours: number) => {
+    if (hours >= 24) {
+      const days = Math.floor(hours / 24);
+      const remainingHours = Math.floor(hours % 24);
+      return `${days}d ${remainingHours}h`;
+    }
+    return `${Math.floor(hours)}h`;
+  };
+
+  return (
+    <Html position={position} center distanceFactor={12}>
+      <div className={`bg-slate-900/90 backdrop-blur px-2 py-1 rounded border ${
+        isCritical ? 'border-red-500/50 animate-pulse' : isUrgent ? 'border-amber-500/50' : 'border-slate-700'
+      }`}>
+        <div className="text-[8px] text-slate-500 uppercase tracking-wider">Maintenance</div>
+        <div className="text-xs font-mono font-bold flex items-center gap-1" style={{ color }}>
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          {formatTime(hoursRemaining)}
+        </div>
+      </div>
+    </Html>
+  );
+});
+
+// Procedural texture generator for enhanced metal surfaces
+const useProceduralMetalTexture = (enabled: boolean, seed: number = 0) => {
+  const texturesRef = useRef<{ roughnessMap: THREE.CanvasTexture | null; normalMap: THREE.CanvasTexture | null }>({
+    roughnessMap: null,
+    normalMap: null
+  });
+
+  useEffect(() => {
+    if (!enabled) {
+      texturesRef.current = { roughnessMap: null, normalMap: null };
+      return;
+    }
+
+    // Check cache first - avoid regenerating identical textures for same seed
+    const cacheKey = `metal-${seed}`;
+    if (textureCache.has(cacheKey)) {
+      texturesRef.current = textureCache.get(cacheKey)!;
+      return;
+    }
+
+    const random = (s: number) => Math.abs(Math.sin(s * 12.9898 + 78.233) * 43758.5453) % 1;
+
+    // Create roughness variation texture
+    const roughnessCanvas = document.createElement('canvas');
+    roughnessCanvas.width = roughnessCanvas.height = 256;
+    const rCtx = roughnessCanvas.getContext('2d')!;
+
+    rCtx.fillStyle = '#666';
+    rCtx.fillRect(0, 0, 256, 256);
+
+    // Weld lines
+    rCtx.fillStyle = '#444';
+    for (let y = 40; y < 256; y += 60) {
+      rCtx.fillRect(0, y + (seed % 10), 256, 3);
+    }
+
+    // Scratches
+    rCtx.strokeStyle = '#555';
+    rCtx.lineWidth = 1;
+    for (let i = 0; i < 30; i++) {
+      rCtx.beginPath();
+      rCtx.moveTo(random(seed + i) * 256, random(seed + i + 100) * 256);
+      rCtx.lineTo(random(seed + i + 50) * 256, random(seed + i + 150) * 256);
+      rCtx.stroke();
+    }
+
+    // Wear spots
+    for (let i = 0; i < 15; i++) {
+      const x = random(seed + i * 3) * 256;
+      const y = random(seed + i * 3 + 1) * 256;
+      const r = 5 + random(seed + i * 3 + 2) * 15;
+      const gradient = rCtx.createRadialGradient(x, y, 0, x, y, r);
+      gradient.addColorStop(0, `rgb(${100 + random(seed + i) * 40}, ${100 + random(seed + i) * 40}, ${100 + random(seed + i) * 40})`);
+      gradient.addColorStop(1, 'rgba(102, 102, 102, 0)');
+      rCtx.fillStyle = gradient;
+      rCtx.beginPath();
+      rCtx.arc(x, y, r, 0, Math.PI * 2);
+      rCtx.fill();
+    }
+
+    const roughnessTexture = new THREE.CanvasTexture(roughnessCanvas);
+    roughnessTexture.wrapS = roughnessTexture.wrapT = THREE.RepeatWrapping;
+    roughnessTexture.repeat.set(1, 2);
+
+    // Create enhanced normal map with industrial details
+    const normalCanvas = document.createElement('canvas');
+    const normalSize = 256;
+    normalCanvas.width = normalCanvas.height = normalSize;
+    const nCtx = normalCanvas.getContext('2d')!;
+
+    // Base neutral normal (pointing up: R=128, G=128, B=255)
+    nCtx.fillStyle = 'rgb(128, 128, 255)';
+    nCtx.fillRect(0, 0, normalSize, normalSize);
+
+    // Helper to draw normal-mapped features
+    const drawNormalBump = (x: number, y: number, radius: number, height: number) => {
+      const gradient = nCtx.createRadialGradient(x, y, 0, x, y, radius);
+      // Center is raised (brighter green = pointing forward)
+      const centerG = Math.min(255, 128 + height * 60);
+      gradient.addColorStop(0, `rgb(128, ${centerG}, 255)`);
+      gradient.addColorStop(0.7, 'rgb(128, 128, 255)');
+      gradient.addColorStop(1, `rgb(128, ${Math.max(0, 128 - height * 30)}, 255)`);
+      nCtx.fillStyle = gradient;
+      nCtx.beginPath();
+      nCtx.arc(x, y, radius, 0, Math.PI * 2);
+      nCtx.fill();
+    };
+
+    // Add rivets in grid pattern
+    const rivetSpacing = 48;
+    const rivetRadius = 4;
+    for (let row = 0; row < normalSize / rivetSpacing; row++) {
+      for (let col = 0; col < normalSize / rivetSpacing; col++) {
+        const x = 24 + col * rivetSpacing + (random(seed + row * 10 + col) - 0.5) * 4;
+        const y = 24 + row * rivetSpacing + (random(seed + row * 10 + col + 50) - 0.5) * 4;
+        drawNormalBump(x, y, rivetRadius, 1.5);
+      }
+    }
+
+    // Panel seam lines (horizontal) - create edge lighting effect
+    for (let y = 64; y < normalSize; y += 64) {
+      // Top edge of seam (light from above)
+      nCtx.fillStyle = 'rgb(128, 160, 255)';
+      nCtx.fillRect(0, y - 2, normalSize, 2);
+      // Bottom edge of seam (shadow)
+      nCtx.fillStyle = 'rgb(128, 96, 255)';
+      nCtx.fillRect(0, y, normalSize, 2);
+    }
+
+    // Panel seam lines (vertical)
+    for (let x = 128; x < normalSize; x += 128) {
+      // Left edge (light)
+      nCtx.fillStyle = 'rgb(160, 128, 255)';
+      nCtx.fillRect(x - 2, 0, 2, normalSize);
+      // Right edge (shadow)
+      nCtx.fillStyle = 'rgb(96, 128, 255)';
+      nCtx.fillRect(x, 0, 2, normalSize);
+    }
+
+    // Scratches with directional normals
+    for (let i = 0; i < 20; i++) {
+      const x1 = random(seed + i * 7) * normalSize;
+      const y1 = random(seed + i * 7 + 1) * normalSize;
+      const angle = random(seed + i * 7 + 2) * Math.PI;
+      const length = 20 + random(seed + i * 7 + 3) * 40;
+      const x2 = x1 + Math.cos(angle) * length;
+      const y2 = y1 + Math.sin(angle) * length;
+
+      // Scratch creates a groove - perpendicular normal displacement
+      const perpAngle = angle + Math.PI / 2;
+      const normalX = Math.cos(perpAngle) * 30;
+      const normalY = Math.sin(perpAngle) * 30;
+
+      nCtx.strokeStyle = `rgb(${128 + normalX}, ${128 + normalY}, 240)`;
+      nCtx.lineWidth = 1;
+      nCtx.beginPath();
+      nCtx.moveTo(x1, y1);
+      nCtx.lineTo(x2, y2);
+      nCtx.stroke();
+    }
+
+    // Dents (inverted bumps)
+    for (let i = 0; i < 5; i++) {
+      const x = random(seed + i * 11) * normalSize;
+      const y = random(seed + i * 11 + 1) * normalSize;
+      const radius = 8 + random(seed + i * 11 + 2) * 12;
+      const gradient = nCtx.createRadialGradient(x, y, 0, x, y, radius);
+      // Center is depressed (darker green)
+      gradient.addColorStop(0, 'rgb(128, 80, 255)');
+      gradient.addColorStop(0.6, 'rgb(128, 128, 255)');
+      gradient.addColorStop(1, 'rgb(128, 150, 255)');
+      nCtx.fillStyle = gradient;
+      nCtx.beginPath();
+      nCtx.arc(x, y, radius, 0, Math.PI * 2);
+      nCtx.fill();
+    }
+
+    // Add subtle surface noise
+    const imageData = nCtx.getImageData(0, 0, normalSize, normalSize);
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      const noise = (random(seed + i) - 0.5) * 6;
+      imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
+      imageData.data[i + 1] = Math.max(0, Math.min(255, imageData.data[i + 1] + noise));
+    }
+    nCtx.putImageData(imageData, 0, 0);
+
+    const normalTexture = new THREE.CanvasTexture(normalCanvas);
+    normalTexture.wrapS = normalTexture.wrapT = THREE.RepeatWrapping;
+
+    texturesRef.current = { roughnessMap: roughnessTexture, normalMap: normalTexture };
+
+    // Store in cache for future reuse
+    textureCache.set(cacheKey, { roughnessMap: roughnessTexture, normalMap: normalTexture });
+
+    // Cleanup function to dispose textures
+    return () => {
+      if (texturesRef.current.roughnessMap) {
+        texturesRef.current.roughnessMap.dispose();
+      }
+      if (texturesRef.current.normalMap) {
+        texturesRef.current.normalMap.dispose();
+      }
+    };
+  }, [enabled, seed]);
+
+  return texturesRef.current;
+};
+
+// Weathering/dust layer for machines
+const WeatheringLayer: React.FC<{
+  size: [number, number, number];
+  yOffset?: number;
+  enabled: boolean;
+}> = ({ size, yOffset = 0, enabled }) => {
+  if (!enabled) return null;
+
+  return (
+    <group position={[0, yOffset, 0]}>
+      <mesh position={[0, size[1] / 2 + 0.003, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[size[0] * 0.95, size[2] * 0.95]} />
+        <meshStandardMaterial color="#e8dcc8" transparent opacity={0.2} roughness={1} depthWrite={false} />
+      </mesh>
+      <mesh position={[0, -size[1] / 2 + 0.15, size[2] / 2 + 0.003]}>
+        <planeGeometry args={[size[0], 0.3]} />
+        <meshStandardMaterial color="#8b7355" transparent opacity={0.15} roughness={1} depthWrite={false} />
+      </mesh>
+    </group>
+  );
+};
+
+// Weld seams for silos
+const WeldSeams: React.FC<{ radius: number; height: number; enabled: boolean }> = ({ radius, height, enabled }) => {
+  if (!enabled) return null;
+  const seamCount = Math.floor(height / 3);
+  return (
+    <group>
+      {Array.from({ length: seamCount }).map((_, i) => (
+        <mesh key={i} position={[0, -height / 2 + (i + 1) * (height / (seamCount + 1)), 0]}>
+          <torusGeometry args={[radius + 0.02, 0.015, 8, 32]} />
+          <meshStandardMaterial color="#94a3b8" metalness={0.8} roughness={0.3} />
+        </mesh>
+      ))}
+    </group>
+  );
+};
+
+// Heat shimmer effect for hot machines
+const HeatShimmer: React.FC<{ position: [number, number, number]; temperature: number; size: [number, number, number] }> = React.memo(({
+  position,
+  temperature,
+  size
+}) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const materialRef = useRef<THREE.ShaderMaterial | null>(null);
+
+  // Only show shimmer for temperatures above 45°C
+  const intensity = Math.max(0, (temperature - 45) / 30); // 0-1 based on temp 45-75°C
+
+  useEffect(() => {
+    if (intensity <= 0) return;
+
+    const shaderMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        time: { value: 0 },
+        intensity: { value: intensity }
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float time;
+        uniform float intensity;
+        varying vec2 vUv;
+
+        void main() {
+          float distort = sin(vUv.y * 20.0 + time * 3.0) * 0.02 * intensity;
+          float alpha = (1.0 - vUv.y) * 0.08 * intensity;
+          alpha *= sin(vUv.x * 3.14159);
+          gl_FragColor = vec4(1.0, 0.95, 0.9, alpha);
+        }
+      `,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+
+    materialRef.current = shaderMaterial;
+
+    return () => {
+      if (materialRef.current) {
+        materialRef.current.dispose();
+        materialRef.current = null;
+      }
+    };
+  }, [intensity]);
+
+  useFrame((state) => {
+    if (materialRef.current) {
+      materialRef.current.uniforms.time.value = state.clock.elapsedTime;
+    }
+  });
+
+  if (intensity <= 0 || !materialRef.current) return null;
+
+  return (
+    <mesh
+      ref={meshRef}
+      position={[position[0], position[1] + size[1] + 1.5, position[2]]}
+      material={materialRef.current}
+    >
+      <planeGeometry args={[size[0] * 1.5, 4]} />
+    </mesh>
+  );
+});
+
+// Steam vent effect for hot machinery
+const SteamVent: React.FC<{ position: [number, number, number]; intensity: number }> = React.memo(({ position, intensity }) => {
+  const particlesRef = useRef<THREE.Points>(null);
+  const count = 30;
+
+  const positions = useMemo(() => {
+    const pos = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * 0.3;
+      pos[i * 3 + 1] = Math.random() * 2;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 0.3;
+    }
+    return pos;
+  }, []);
+
+  const velocities = useMemo(() => {
+    return Array.from({ length: count }, () => ({
+      speed: 0.5 + Math.random() * 1,
+      drift: (Math.random() - 0.5) * 0.02
+    }));
+  }, []);
+
+  useFrame((_, delta) => {
+    // Throttle steam vent animation - looks fine at 30fps
+    if (!shouldRunThisFrame(2)) return;
+    if (!particlesRef.current || intensity <= 0) return;
+    const pos = particlesRef.current.geometry.attributes.position.array as Float32Array;
+
+    // Compensate for skipped frames
+    const adjustedDelta = delta * 2;
+    for (let i = 0; i < count; i++) {
+      pos[i * 3 + 1] += velocities[i].speed * adjustedDelta * intensity;
+      pos[i * 3] += velocities[i].drift * 2;
+      pos[i * 3 + 2] += velocities[i].drift * 2;
+
+      if (pos[i * 3 + 1] > 2.5) {
+        pos[i * 3 + 1] = 0;
+        pos[i * 3] = (Math.random() - 0.5) * 0.3;
+        pos[i * 3 + 2] = (Math.random() - 0.5) * 0.3;
+      }
+    }
+    particlesRef.current.geometry.attributes.position.needsUpdate = true;
+  });
+
+  if (intensity <= 0) return null;
+
+  return (
+    <points ref={particlesRef} position={position}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" count={count} array={positions} itemSize={3} />
+      </bufferGeometry>
+      <pointsMaterial size={0.15} color="#e2e8f0" transparent opacity={0.4 * intensity} sizeAttenuation />
+    </points>
+  );
+});
+
+// Blinking control panel with LED indicators
+const ControlPanel: React.FC<{
+  position: [number, number, number];
+  rotation?: [number, number, number];
+  status: 'running' | 'idle' | 'warning' | 'critical';
+  enabled: boolean;
+}> = React.memo(({ position, rotation = [0, 0, 0], status, enabled }) => {
+  const blinkStateRef = useRef(0);
+  const [, forceUpdate] = useState(0);
+
+  // Shared geometries - created once and reused
+  const ledGeometry = useMemo(() => new THREE.CircleGeometry(0.02, 8), []);
+  const buttonGeometry = useMemo(() => new THREE.CylinderGeometry(0.015, 0.015, 0.02, 8), []);
+
+  useFrame((state) => {
+    // Throttle LED blink animation - only needs 15fps
+    if (!shouldRunThisFrame(4)) return;
+    if (!enabled) return;
+    // Different blink patterns based on status
+    const time = state.clock.elapsedTime;
+    let newState = 0;
+    if (status === 'running') {
+      newState = Math.floor(time * 2) % 4; // Slow cycle through LEDs
+    } else if (status === 'warning') {
+      newState = Math.sin(time * 6) > 0 ? 1 : 0; // Fast blink
+    } else if (status === 'critical') {
+      newState = Math.sin(time * 10) > 0 ? 2 : 3; // Very fast alternating
+    }
+    // Only trigger re-render when state actually changes
+    if (newState !== blinkStateRef.current) {
+      blinkStateRef.current = newState;
+      forceUpdate(n => n + 1);
+    }
+  });
+
+  const blinkState = blinkStateRef.current;
+
+  if (!enabled) return null;
+
+  const ledColors = {
+    running: ['#22c55e', '#22c55e', '#3b82f6', '#3b82f6'],
+    idle: ['#64748b', '#64748b', '#64748b', '#64748b'],
+    warning: ['#f59e0b', '#1e293b', '#f59e0b', '#1e293b'],
+    critical: ['#ef4444', '#ef4444', '#1e293b', '#1e293b']
+  };
+
+  const colors = ledColors[status];
+
+  return (
+    <group position={position} rotation={rotation}>
+      {/* Panel backing */}
+      <mesh>
+        <boxGeometry args={[0.4, 0.3, 0.05]} />
+        <meshStandardMaterial color="#1e293b" metalness={0.8} roughness={0.3} />
+      </mesh>
+
+      {/* Screen/display area */}
+      <mesh position={[0, 0.02, 0.026]}>
+        <planeGeometry args={[0.25, 0.12]} />
+        <meshStandardMaterial
+          color={status === 'critical' ? '#450a0a' : status === 'warning' ? '#451a03' : '#0f172a'}
+          emissive={status === 'critical' ? '#ef4444' : status === 'warning' ? '#f59e0b' : '#3b82f6'}
+          emissiveIntensity={0.3}
+        />
+      </mesh>
+
+      {/* LED indicators */}
+      {[[-0.12, -0.08], [-0.04, -0.08], [0.04, -0.08], [0.12, -0.08]].map(([x, y], i) => (
+        <mesh key={i} position={[x, y, 0.026]} geometry={ledGeometry}>
+          <meshStandardMaterial
+            color={colors[(blinkState + i) % 4]}
+            emissive={colors[(blinkState + i) % 4]}
+            emissiveIntensity={colors[(blinkState + i) % 4] !== '#1e293b' && colors[(blinkState + i) % 4] !== '#64748b' ? 0.8 : 0}
+            toneMapped={false}
+          />
+        </mesh>
+      ))}
+
+      {/* Buttons */}
+      {[[0.15, 0.08], [0.15, 0.0]].map(([x, y], i) => (
+        <mesh key={i} position={[x, y, 0.03]} geometry={buttonGeometry}>
+          <meshStandardMaterial color={i === 0 ? '#22c55e' : '#ef4444'} roughness={0.4} />
+        </mesh>
+      ))}
+    </group>
+  );
+});
+
+// Anisotropic metal surface (brushed metal effect for rollers)
+const AnisotropicRoller: React.FC<{
+  position: [number, number, number];
+  radius: number;
+  length: number;
+  rotation?: [number, number, number];
+  enabled: boolean;
+  rpm?: number;
+}> = ({ position, radius, length, rotation = [0, 0, Math.PI / 2], enabled, rpm = 0 }) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  // Create anisotropic normal map
+  const normalMap = useMemo(() => {
+    if (!enabled) return null;
+
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    // Base neutral normal
+    ctx.fillStyle = 'rgb(128, 128, 255)';
+    ctx.fillRect(0, 0, size, size);
+
+    // Horizontal brushed lines (anisotropic direction)
+    for (let y = 0; y < size; y += 2) {
+      const intensity = 20 + Math.random() * 20;
+      ctx.strokeStyle = `rgb(128, ${128 + intensity}, 255)`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(size, y + (Math.random() - 0.5) * 2);
+      ctx.stroke();
+    }
+
+    // Add some scratches perpendicular to brush direction
+    ctx.strokeStyle = 'rgb(150, 128, 240)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 10; i++) {
+      ctx.beginPath();
+      const x = Math.random() * size;
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + (Math.random() - 0.5) * 20, size);
+      ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(4, 1);
+    return texture;
+  }, [enabled]);
+
+  // Animate rotation based on RPM
+  useFrame((_, delta) => {
+    if (meshRef.current && rpm > 0) {
+      meshRef.current.rotation.x += (rpm / 60) * Math.PI * 2 * delta;
+    }
+  });
+
+  return (
+    <mesh ref={meshRef} position={position} rotation={rotation}>
+      <cylinderGeometry args={[radius, radius, length, 32]} />
+      <meshStandardMaterial
+        color="#94a3b8"
+        metalness={0.95}
+        roughness={enabled ? 0.15 : 0.3}
+        normalMap={normalMap}
+        normalScale={enabled ? new THREE.Vector2(0.5, 0.1) : undefined}
+      />
+    </mesh>
+  );
+};
+
+// Sparks effect for grinding/milling machinery
+const Sparks: React.FC<{ position: [number, number, number]; active: boolean }> = React.memo(({ position, active }) => {
+  const particlesRef = useRef<THREE.Points>(null);
+  const count = 20;
+  const nextSparkRef = useRef(0);
+
+  const positions = useMemo(() => new Float32Array(count * 3), []);
+  const velocities = useMemo(() => Array.from({ length: count }, () => ({ x: 0, y: 0, z: 0, life: 0 })), []);
+
+  useFrame((state, delta) => {
+    // Throttle sparks animation - 30fps is sufficient
+    if (!shouldRunThisFrame(2)) return;
+    if (!particlesRef.current || !active) return;
+    const pos = particlesRef.current.geometry.attributes.position.array as Float32Array;
+
+    // Compensate for skipped frames
+    const adjustedDelta = delta * 2;
+
+    // Occasionally spawn new sparks
+    nextSparkRef.current -= adjustedDelta;
+    if (nextSparkRef.current <= 0 && Math.random() > 0.7) {
+      const idx = Math.floor(Math.random() * count);
+      pos[idx * 3] = 0;
+      pos[idx * 3 + 1] = 0;
+      pos[idx * 3 + 2] = 0;
+      velocities[idx] = {
+        x: (Math.random() - 0.5) * 3,
+        y: Math.random() * 2 + 1,
+        z: (Math.random() - 0.5) * 3,
+        life: 1
+      };
+      nextSparkRef.current = 0.05 + Math.random() * 0.1;
+    }
+
+    // Update spark positions
+    for (let i = 0; i < count; i++) {
+      if (velocities[i].life > 0) {
+        pos[i * 3] += velocities[i].x * adjustedDelta;
+        pos[i * 3 + 1] += velocities[i].y * adjustedDelta;
+        pos[i * 3 + 2] += velocities[i].z * adjustedDelta;
+        velocities[i].y -= 5 * adjustedDelta; // Gravity
+        velocities[i].life -= adjustedDelta * 2;
+      } else {
+        pos[i * 3 + 1] = -100; // Hide dead sparks
+      }
+    }
+    particlesRef.current.geometry.attributes.position.needsUpdate = true;
+  });
+
+  if (!active) return null;
+
+  return (
+    <points ref={particlesRef} position={position}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" count={count} array={positions} itemSize={3} />
+      </bufferGeometry>
+      <pointsMaterial size={0.08} color="#fcd34d" transparent opacity={0.9} sizeAttenuation />
+    </points>
+  );
+});
+
+// Rotating fan for machine ventilation
+const RotatingFan: React.FC<{ position: [number, number, number]; speed: number; size?: number }> = React.memo(({
+  position,
+  speed,
+  size = 0.4
+}) => {
+  const fanRef = useRef<THREE.Group>(null);
+
+  // Shared geometry for all fan blades
+  const bladeGeometry = useMemo(() => new THREE.BoxGeometry(size * 1.8, 0.02, size * 0.3), [size]);
+
+  useFrame((_, delta) => {
+    if (fanRef.current && speed > 0) {
+      fanRef.current.rotation.z += delta * speed * 0.5;
+    }
+  });
+
+  return (
+    <group position={position}>
+      {/* Fan housing */}
+      <mesh>
+        <cylinderGeometry args={[size + 0.05, size + 0.05, 0.1, 16]} />
+        <meshStandardMaterial color="#374151" metalness={0.8} roughness={0.3} />
+      </mesh>
+      {/* Rotating blades */}
+      <group ref={fanRef} position={[0, 0.06, 0]}>
+        {[0, 1, 2, 3].map((i) => (
+          <mesh key={i} rotation={[0, 0, (i * Math.PI) / 2]} position={[0, 0, 0]} geometry={bladeGeometry}>
+            <meshStandardMaterial color="#64748b" metalness={0.6} roughness={0.4} />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  );
+});
+
+// Animated gauge with needle
+const AnimatedGauge: React.FC<{ position: [number, number, number]; value: number; maxValue: number }> = React.memo(({
+  position,
+  value,
+  maxValue
+}) => {
+  const needleRef = useRef<THREE.Mesh>(null);
+  const targetAngle = useRef(0);
+
+  useFrame(() => {
+    // Throttle gauge animation - 20fps is sufficient for smooth needle movement
+    if (!shouldRunThisFrame(3)) return;
+    if (!needleRef.current) return;
+    // Map value to angle (-135 to +135 degrees)
+    const normalizedValue = Math.min(value / maxValue, 1);
+    targetAngle.current = (-0.75 + normalizedValue * 1.5) * Math.PI;
+    // Increase lerp factor to compensate for lower framerate
+    needleRef.current.rotation.z = THREE.MathUtils.lerp(
+      needleRef.current.rotation.z,
+      targetAngle.current,
+      0.12
+    );
+  });
+
+  return (
+    <group position={position}>
+      {/* Gauge face */}
+      <mesh>
+        <circleGeometry args={[0.12, 32]} />
+        <meshBasicMaterial color="#1e293b" />
+      </mesh>
+      {/* Gauge markings */}
+      <mesh position={[0, 0, 0.001]}>
+        <ringGeometry args={[0.08, 0.1, 32, 1, -2.35, 4.7]} />
+        <meshBasicMaterial color="#22c55e" />
+      </mesh>
+      {/* Warning zone */}
+      <mesh position={[0, 0, 0.001]}>
+        <ringGeometry args={[0.08, 0.1, 32, 1, 1.57, 0.78]} />
+        <meshBasicMaterial color="#ef4444" />
+      </mesh>
+      {/* Needle */}
+      <mesh ref={needleRef} position={[0, 0, 0.002]}>
+        <boxGeometry args={[0.015, 0.08, 0.005]} />
+        <meshBasicMaterial color="#f59e0b" />
+      </mesh>
+      {/* Center cap */}
+      <mesh position={[0, 0, 0.003]}>
+        <circleGeometry args={[0.02, 16]} />
+        <meshStandardMaterial color="#374151" metalness={0.9} roughness={0.2} />
+      </mesh>
+    </group>
+  );
+});
+
+// Alarm indicator that pulses when there are active alarms
+const AlarmIndicator: React.FC<{
+  position: [number, number, number];
+  priority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | null;
+  pulseSpeed: number;
+  hasUnacknowledged: boolean;
+}> = React.memo(({ position, priority, pulseSpeed, hasUnacknowledged }) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const glowRef = useRef<THREE.Mesh>(null);
+  const graphics = useMillStore(state => state.graphics.quality);
+
+  // Skip on low graphics or no alarm
+  if (graphics === 'low' || !priority) return null;
+
+  const colors = {
+    CRITICAL: '#ef4444',
+    HIGH: '#f97316',
+    MEDIUM: '#eab308',
+    LOW: '#3b82f6'
+  };
+
+  const color = colors[priority];
+
+  useFrame((state) => {
+    if (!meshRef.current || pulseSpeed === 0) return;
+
+    const t = state.clock.elapsedTime * pulseSpeed;
+    const pulse = hasUnacknowledged ? (Math.sin(t) * 0.5 + 0.5) : 0.3;
+
+    // Pulse the emissive intensity
+    const mat = meshRef.current.material as THREE.MeshStandardMaterial;
+    mat.emissiveIntensity = 0.5 + pulse * 2;
+
+    // Scale the glow
+    if (glowRef.current) {
+      const scale = 1 + pulse * 0.3;
+      glowRef.current.scale.setScalar(scale);
+    }
+  });
+
+  return (
+    <group position={position}>
+      {/* Outer glow */}
+      <mesh ref={glowRef}>
+        <sphereGeometry args={[0.35, 16, 16]} />
+        <meshBasicMaterial
+          color={color}
+          transparent
+          opacity={0.3}
+          depthWrite={false}
+        />
+      </mesh>
+      {/* Inner indicator */}
+      <mesh ref={meshRef}>
+        <octahedronGeometry args={[0.2]} />
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={1}
+          toneMapped={false}
+        />
+      </mesh>
+    </group>
+  );
+});
+
+// SCADA value display overlay
+const SCADAValueOverlay: React.FC<{
+  position: [number, number, number];
+  tagValues: {
+    temperature?: number;
+    vibration?: number;
+    rpm?: number;
+    current?: number;
+    level?: number;
+  };
+  temperatureColor: string;
+  vibrationColor: string;
+}> = React.memo(({ position, tagValues, temperatureColor, vibrationColor }) => {
+  const graphics = useMillStore(state => state.graphics.quality);
+
+  // Skip on low/medium graphics
+  if (graphics === 'low' || graphics === 'medium') return null;
+
+  return (
+    <Html position={position} center distanceFactor={15}>
+      <div className="bg-slate-900/85 backdrop-blur px-2 py-1 rounded border border-slate-700/50 min-w-[80px] pointer-events-none">
+        <div className="text-[8px] text-slate-500 uppercase tracking-wider mb-0.5">SCADA Live</div>
+        <div className="space-y-0.5">
+          {tagValues.temperature !== undefined && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[9px] text-slate-400">Temp</span>
+              <span className="text-[10px] font-mono font-bold" style={{ color: temperatureColor }}>
+                {tagValues.temperature.toFixed(1)}C
+              </span>
+            </div>
+          )}
+          {tagValues.vibration !== undefined && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[9px] text-slate-400">Vib</span>
+              <span className="text-[10px] font-mono font-bold" style={{ color: vibrationColor }}>
+                {tagValues.vibration.toFixed(2)} mm/s
+              </span>
+            </div>
+          )}
+          {tagValues.rpm !== undefined && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[9px] text-slate-400">RPM</span>
+              <span className="text-[10px] font-mono font-bold text-cyan-400">
+                {Math.round(tagValues.rpm)}
+              </span>
+            </div>
+          )}
+          {tagValues.current !== undefined && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[9px] text-slate-400">Curr</span>
+              <span className="text-[10px] font-mono font-bold text-purple-400">
+                {tagValues.current.toFixed(1)}A
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    </Html>
+  );
+});
+
+// === GLTF Machine Model Components ===
+
+// GLTF Silo base model
+const GLTFSiloBase: React.FC<{
+  size: [number, number, number];
+  matProps: { emissive: string; emissiveIntensity: number };
+}> = React.memo(({ size, matProps }) => {
+  const { scene } = useGLTF(MODEL_PATHS.silo);
+
+  const clonedScene = useMemo(() => {
+    const clone = scene.clone();
+    clone.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+        // Apply emissive properties for hover/status effects
+        const mesh = child as THREE.Mesh;
+        if (mesh.material && 'emissive' in mesh.material) {
+          const mat = mesh.material as THREE.MeshStandardMaterial;
+          mat.emissive = new THREE.Color(matProps.emissive);
+          mat.emissiveIntensity = matProps.emissiveIntensity;
+        }
+      }
+    });
+    return clone;
+  }, [scene, matProps.emissive, matProps.emissiveIntensity]);
+
+  // Scale to match the expected size (size[1] is height ~12, GLTF silo is ~9 units tall)
+  const scale = size[1] / 9;
+
+  return (
+    <group position={[0, size[1] / 2, 0]}>
+      <primitive object={clonedScene} scale={scale * 1.2} position={[0, -size[1] / 2, 0]} />
+    </group>
+  );
+});
+
+// GLTF Mill base model
+const GLTFMillBase: React.FC<{
+  size: [number, number, number];
+  matProps: { emissive: string; emissiveIntensity: number };
+}> = React.memo(({ size, matProps }) => {
+  const { scene } = useGLTF(MODEL_PATHS.rollerMill);
+
+  const clonedScene = useMemo(() => {
+    const clone = scene.clone();
+    clone.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+        const mesh = child as THREE.Mesh;
+        if (mesh.material && 'emissive' in mesh.material) {
+          const mat = mesh.material as THREE.MeshStandardMaterial;
+          mat.emissive = new THREE.Color(matProps.emissive);
+          mat.emissiveIntensity = matProps.emissiveIntensity;
+        }
+      }
+    });
+    return clone;
+  }, [scene, matProps.emissive, matProps.emissiveIntensity]);
+
+  // Scale to match expected size (size[1] is height ~4, GLTF mill is ~3 units tall)
+  const scale = size[1] / 3;
+
+  return (
+    <group position={[0, size[1] / 2, 0]}>
+      <primitive object={clonedScene} scale={scale * 0.8} position={[0, -size[1] / 2 + 0.2, 0]} />
+    </group>
+  );
+};
+
+interface MachinesProps {
+  machines: MachineData[];
+  onSelect: (data: MachineData) => void;
+}
+
+export const Machines: React.FC<MachinesProps> = ({ machines, onSelect }) => {
+  return (
+    <group>
+      {machines.map((m) => (
+        <MachineMesh key={m.id} data={m} onClick={() => onSelect(m)} />
+      ))}
+    </group>
+  );
+};
+
+const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ data, onClick }) => {
+  const { type, position, size, rotation, status } = data;
+  const groupRef = useRef<THREE.Group>(null);
+  const [hovered, setHovered] = useState(false);
+
+  // Graphics settings
+  const graphics = useMillStore(state => state.graphics);
+  const enableVibration = graphics.enableMachineVibration;
+  const enableTextures = graphics.enableProceduralTextures;
+  const enableWeathering = graphics.enableWeathering;
+  const enableControlPanels = graphics.enableControlPanels;
+  const enableAnisotropicReflections = graphics.enableAnisotropicReflections;
+
+  // Check GLTF model availability
+  const siloModelAvailable = useModelAvailable('silo');
+  const millModelAvailable = useModelAvailable('rollerMill');
+  // Use GLTF models on medium+ graphics when available
+  const useGLTFModels = graphics.quality !== 'low';
+
+  // SCADA visual properties
+  const scadaVisuals = useSCADAMachineVisuals(data.id, status);
+  const scadaAlarms = useSCADAAlarmVisuals(data.id);
+
+  // Use SCADA-derived status color, falling back to standard status color
+  const statusColor = scadaVisuals.hasActiveAlarm
+    ? scadaVisuals.statusColor
+    : getStatusColor(status);
+
+  // Generate unique seed for this machine's textures
+  const textureSeed = useMemo(() => {
+    let hash = 0;
+    for (let i = 0; i < data.id.length; i++) {
+      hash = ((hash << 5) - hash) + data.id.charCodeAt(i);
+      hash |= 0;
+    }
+    return Math.abs(hash);
+  }, [data.id]);
+
+  const { roughnessMap, normalMap } = useProceduralMetalTexture(enableTextures, textureSeed);
+
+  // Shared geometries for repeated elements - created once and reused across maps
+  const motorFinGeometry = useMemo(() => new THREE.CylinderGeometry(0.52, 0.52, 0.02, 16), []);
+  const conveyorRollerGeometry = useMemo(() => new THREE.CylinderGeometry(0.04, 0.04, size[0] * 0.12, 12), [size]);
+  const legCylinderGeometry = useMemo(() => new THREE.CylinderGeometry(0.15, 0.2, 4), []);
+
+  // Machine-specific sounds based on type and status
+  useEffect(() => {
+    if (status !== 'running') {
+      audioManager.stopMachineSound(data.id);
+      return;
+    }
+
+    // Start appropriate sound for machine type
+    switch (type) {
+      case MachineType.ROLLER_MILL:
+        audioManager.playMillSound(data.id, data.metrics.rpm);
+        break;
+      case MachineType.PLANSIFTER:
+        audioManager.playSifterSound(data.id, data.metrics.rpm);
+        break;
+      case MachineType.PACKER:
+        audioManager.playPackerSound(data.id);
+        break;
+    }
+
+    return () => {
+      audioManager.stopMachineSound(data.id);
+    };
+  }, [data.id, type, status, data.metrics.rpm]);
+
+  useFrame((state) => {
+    if (status === 'running' && groupRef.current && enableVibration) {
+      const time = state.clock.elapsedTime;
+      // Use SCADA-derived RPM if available, otherwise fall back to metrics
+      const rpm = scadaVisuals.tagValues.rpm ?? data.metrics.rpm ?? 0;
+      const rpmFactor = scadaVisuals.rpmMultiplier; // SCADA-derived 0-1 multiplier
+      // Use SCADA vibration intensity multiplier
+      const vibIntensity = scadaVisuals.vibrationIntensity;
+
+      switch (type) {
+        case MachineType.PLANSIFTER: {
+          // Sifters have strong circular oscillation, scaled by SCADA vibration
+          const intensity = (0.04 + rpmFactor * 0.03) * vibIntensity;
+          const speed = 12 + rpmFactor * 8;
+          groupRef.current.position.x = position[0] + Math.cos(time * speed) * intensity;
+          groupRef.current.position.z = position[2] + Math.sin(time * speed) * intensity;
+          // Add slight rotation wobble
+          groupRef.current.rotation.x = Math.sin(time * speed * 0.5) * 0.003 * vibIntensity;
+          groupRef.current.rotation.z = Math.cos(time * speed * 0.5) * 0.003 * vibIntensity;
+          break;
+        }
+        case MachineType.ROLLER_MILL: {
+          // Mills have high-frequency vertical vibration, scaled by SCADA
+          const intensity = (0.005 + rpmFactor * 0.015) * vibIntensity;
+          const speed = 30 + rpmFactor * 30;
+          groupRef.current.position.y = position[1] + Math.sin(time * speed) * intensity;
+          // Add harmonic vibration
+          groupRef.current.position.x = position[0] + Math.sin(time * speed * 2.3) * intensity * 0.3;
+          break;
+        }
+        case MachineType.PACKER: {
+          // Packers have rhythmic mechanical motion
+          const cycleTime = time * 3;
+          const cycle = Math.sin(cycleTime) > 0.7 ? 1 : 0;
+          groupRef.current.position.y = position[1] + cycle * 0.02 * vibIntensity;
+          // Subtle continuous vibration
+          groupRef.current.position.x = position[0] + Math.sin(time * 15) * 0.003 * vibIntensity;
+          break;
+        }
+        case MachineType.SILO: {
+          // Silos have very subtle low-frequency rumble when filling
+          const load = scadaVisuals.fillLevel ?? data.metrics.load ?? 0;
+          if (load > 50) {
+            const intensity = 0.002 * (load / 100) * vibIntensity;
+            groupRef.current.position.x = position[0] + Math.sin(time * 5) * intensity;
+            groupRef.current.position.z = position[2] + Math.cos(time * 4) * intensity;
+          }
+          break;
+        }
+      }
+    } else if (groupRef.current && !enableVibration) {
+      // Reset position when vibration is disabled
+      groupRef.current.position.set(position[0], position[1], position[2]);
+      groupRef.current.rotation.set(0, rotation, 0);
+    }
+
+    // Register machine position for spatial audio
+    if (status === 'running') {
+      audioManager.registerSoundPosition(data.id, position[0], position[1] + size[1] / 2, position[2]);
+      audioManager.updateMachineSpatialVolume(data.id);
+    }
+  });
+
+  // matProps now incorporates SCADA temperature glow when hot
+  const matProps = {
+    emissive: hovered ? '#3b82f6' : scadaVisuals.temperatureGlow > 0 ? scadaVisuals.temperatureColor : '#000000',
+    emissiveIntensity: hovered ? 0.3 : scadaVisuals.temperatureGlow
+  };
+
+  const renderGeometry = () => {
+    switch (type) {
+      case MachineType.SILO:
+        // Use SCADA fill level if available, otherwise fall back to data or generate
+        const fillLevel = scadaVisuals.fillLevel ?? data.fillLevel ?? (50 + Math.sin(textureSeed) * 30);
+        const grainQuality = data.grainQuality ?? (['premium', 'standard', 'economy', 'mixed'] as const)[textureSeed % 4];
+        const grainType = data.grainType ?? GRAIN_TYPES[textureSeed % GRAIN_TYPES.length];
+        const maintenanceHours = data.maintenanceCountdown ?? (48 + (textureSeed % 200));
+        const useSiloGLTF = useGLTFModels && siloModelAvailable === true;
+
+        return (
+          <group position={[0, size[1] / 2, 0]}>
+            {/* Main silo body - GLTF or procedural */}
+            {useSiloGLTF ? (
+              <Suspense fallback={
+                <mesh castShadow receiveShadow>
+                  <cylinderGeometry args={[size[0] / 2, size[0] / 2, size[1], 32]} />
+                  <meshStandardMaterial color="#cbd5e1" metalness={0.7} roughness={0.2} {...matProps} />
+                </mesh>
+              }>
+                <GLTFSiloBase size={size as [number, number, number]} matProps={matProps} />
+              </Suspense>
+            ) : (
+              <mesh castShadow receiveShadow>
+                <cylinderGeometry args={[size[0] / 2, size[0] / 2, size[1], 32]} />
+                <meshStandardMaterial
+                  color="#cbd5e1"
+                  metalness={0.7}
+                  roughness={0.2}
+                  roughnessMap={roughnessMap}
+                  normalMap={normalMap}
+                  normalScale={normalMap ? new THREE.Vector2(0.3, 0.3) : undefined}
+                  {...matProps}
+                />
+              </mesh>
+            )}
+
+            {/* Fill level visualization */}
+            <SiloFillIndicator
+              fillLevel={fillLevel}
+              quality={grainQuality}
+              grainType={grainType}
+              radius={size[0] / 2}
+              height={size[1]}
+            />
+
+            {/* Weld seams */}
+            <WeldSeams radius={size[0] / 2} height={size[1]} enabled={enableTextures} />
+            {/* Top cone */}
+            <mesh position={[0, size[1] / 2 + 1, 0]} castShadow>
+              <coneGeometry args={[size[0] / 2, 2, 32]} />
+              <meshStandardMaterial color="#94a3b8" metalness={0.7} roughness={0.2} {...matProps} />
+            </mesh>
+            {/* Dust on top of cone */}
+            {enableWeathering && (
+              <mesh position={[0, size[1] / 2 + 2.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+                <circleGeometry args={[size[0] / 2 * 0.6, 16]} />
+                <meshStandardMaterial color="#e8dcc8" transparent opacity={0.25} roughness={1} depthWrite={false} />
+              </mesh>
+            )}
+            {/* Bottom cone (hopper) */}
+            <mesh position={[0, -size[1] / 2 - 1, 0]} castShadow>
+              <coneGeometry args={[size[0] / 2, 2, 32]} />
+              <meshStandardMaterial color="#94a3b8" metalness={0.7} roughness={0.2} {...matProps} />
+            </mesh>
+            {/* Legs */}
+            {[1, -1].map(x => [1, -1].map(z => (
+              <mesh key={`${x}-${z}`} position={[x * size[0] / 3, -size[1] / 2 - 3, z * size[0] / 3]} geometry={legCylinderGeometry}>
+                <meshStandardMaterial color="#374151" metalness={0.8} roughness={0.3} />
+              </mesh>
+            )))}
+            {/* Access ladder */}
+            <mesh position={[size[0] / 2 + 0.2, 0, 0]} castShadow>
+              <boxGeometry args={[0.1, size[1], 0.4]} />
+              <meshStandardMaterial color="#475569" metalness={0.8} roughness={0.3} />
+            </mesh>
+
+            {/* Maintenance countdown - skip on low graphics */}
+            {graphics.quality !== 'low' && (
+              <MaintenanceCountdown
+                hoursRemaining={maintenanceHours}
+                position={[-(size[0] / 2 + 1), size[1] / 2 - 1, 0]}
+              />
+            )}
+          </group>
+        );
+
+      case MachineType.ROLLER_MILL:
+        // Detailed industrial roller mill - Bühler-style grain processing machine
+        const w = size[0], h = size[1], d = size[2];
+        return (
+          <group position={[0, size[1] / 2, 0]}>
+            {/* === MAIN HOUSING === */}
+            {/* Lower grinding chamber - heavy steel */}
+            <mesh castShadow receiveShadow position={[0, -h * 0.15, 0]}>
+              <boxGeometry args={[w, h * 0.7, d]} />
+              <meshPhysicalMaterial
+                color="#2563eb"
+                metalness={0.4}
+                roughness={0.35}
+                roughnessMap={roughnessMap}
+                clearcoat={0.6}
+                clearcoatRoughness={0.3}
+                {...matProps}
+              />
+            </mesh>
+
+            {/* Upper feed section - lighter color */}
+            <mesh castShadow receiveShadow position={[0, h * 0.35, 0]}>
+              <boxGeometry args={[w * 0.9, h * 0.3, d * 0.85]} />
+              <meshStandardMaterial color="#60a5fa" metalness={0.5} roughness={0.3} {...matProps} />
+            </mesh>
+
+            {/* === FEED HOPPER === */}
+            <group position={[0, h * 0.55, 0]}>
+              {/* Hopper walls - trapezoidal */}
+              <mesh castShadow>
+                <boxGeometry args={[w * 0.7, 0.08, d * 0.6]} />
+                <meshStandardMaterial color="#94a3b8" metalness={0.7} roughness={0.2} />
+              </mesh>
+              {/* Hopper sides */}
+              {[[-1, 0], [1, 0], [0, -1], [0, 1]].map(([x, z], i) => (
+                <mesh key={i} castShadow position={[x * w * 0.35, 0.3, z * d * 0.3]}
+                  rotation={[z ? (z > 0 ? -0.4 : 0.4) : 0, 0, x ? (x > 0 ? 0.4 : -0.4) : 0]}>
+                  <boxGeometry args={[x ? 0.05 : w * 0.7, 0.6, z ? 0.05 : d * 0.6]} />
+                  <meshStandardMaterial color="#cbd5e1" metalness={0.6} roughness={0.25} />
+                </mesh>
+              ))}
+              {/* Feed gate adjustment wheel */}
+              <mesh position={[w * 0.4, 0.2, 0]} rotation={[0, 0, Math.PI / 2]}>
+                <torusGeometry args={[0.12, 0.02, 8, 16]} />
+                <meshStandardMaterial color="#ef4444" metalness={0.6} roughness={0.4} />
+              </mesh>
+            </group>
+
+            {/* === ROLLER COMPARTMENTS (3 pairs visible through windows) === */}
+            {[-0.25, 0, 0.25].map((yOffset, pairIdx) => (
+              <group key={pairIdx} position={[0, -h * 0.1 + yOffset * h, 0]}>
+                {/* Roller pair housing */}
+                <mesh position={[0, 0, d * 0.52]}>
+                  <boxGeometry args={[w * 0.85, h * 0.22, 0.08]} />
+                  <meshStandardMaterial color="#1e3a5f" metalness={0.5} roughness={0.4} />
+                </mesh>
+                {/* Viewing window frame */}
+                <mesh position={[0, 0, d * 0.54]}>
+                  <boxGeometry args={[w * 0.5, h * 0.15, 0.02]} />
+                  <meshStandardMaterial color="#0f172a" metalness={0.7} roughness={0.2} />
+                </mesh>
+                {/* Glass window */}
+                <mesh position={[0, 0, d * 0.55]}>
+                  <planeGeometry args={[w * 0.45, h * 0.12]} />
+                  <meshPhysicalMaterial
+                    color="#1e40af"
+                    metalness={0.1}
+                    roughness={0.1}
+                    transmission={0.6}
+                    transparent
+                    opacity={0.4}
+                  />
+                </mesh>
+                {/* Actual rollers visible through window */}
+                <AnisotropicRoller
+                  position={[0, 0.08, d * 0.35]}
+                  radius={0.18}
+                  length={w * 0.75}
+                  enabled={enableAnisotropicReflections}
+                  rpm={status === 'running' ? data.metrics.rpm * (0.6 + pairIdx * 0.15) : 0}
+                />
+                <AnisotropicRoller
+                  position={[0, -0.08, d * 0.35]}
+                  radius={0.16}
+                  length={w * 0.75}
+                  enabled={enableAnisotropicReflections}
+                  rpm={status === 'running' ? -data.metrics.rpm * (0.6 + pairIdx * 0.15) : 0}
+                />
+              </group>
+            ))}
+
+            {/* === MOTOR HOUSING (side mount) === */}
+            <group position={[-w * 0.5 - 0.4, -h * 0.1, 0]}>
+              {/* Motor body */}
+              <mesh castShadow rotation={[0, 0, Math.PI / 2]}>
+                <cylinderGeometry args={[0.5, 0.5, 0.7, 16]} />
+                <meshStandardMaterial color="#374151" metalness={0.7} roughness={0.3} />
+              </mesh>
+              {/* Motor fins (cooling) */}
+              {Array.from({ length: 8 }).map((_, i) => (
+                <mesh key={i} position={[-0.35 + i * 0.1, 0, 0]} rotation={[0, 0, Math.PI / 2]} geometry={motorFinGeometry}>
+                  <meshStandardMaterial color="#1f2937" metalness={0.8} roughness={0.2} />
+                </mesh>
+              ))}
+              {/* Motor shaft */}
+              <mesh position={[0.4, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+                <cylinderGeometry args={[0.08, 0.08, 0.15, 12]} />
+                <meshStandardMaterial color="#6b7280" metalness={0.9} roughness={0.1} />
+              </mesh>
+              {/* Belt guard cover */}
+              <mesh castShadow position={[0.55, 0, 0]}>
+                <boxGeometry args={[0.25, 0.8, 0.6]} />
+                <meshStandardMaterial color="#fbbf24" metalness={0.3} roughness={0.5} />
+              </mesh>
+              {/* Warning stripes on belt guard */}
+              {[-0.25, 0, 0.25].map((y, i) => (
+                <mesh key={i} position={[0.68, y, 0]}>
+                  <planeGeometry args={[0.01, 0.08]} />
+                  <meshBasicMaterial color="#1f2937" />
+                </mesh>
+              ))}
+              {/* Ventilation fan */}
+              <RotatingFan
+                position={[-0.4, 0, 0]}
+                speed={status === 'running' ? data.metrics.rpm / 80 : 0}
+                size={0.4}
+              />
+            </group>
+
+            {/* === CONTROL PANEL === */}
+            <group position={[w * 0.5 + 0.15, 0.2, 0]}>
+              {/* Panel housing */}
+              <mesh castShadow>
+                <boxGeometry args={[0.2, 1.4, d * 0.7]} />
+                <meshStandardMaterial color="#1e293b" metalness={0.6} roughness={0.3} />
+              </mesh>
+              {/* Control panel face */}
+              <ControlPanel
+                position={[0.11, 0.3, 0]}
+                rotation={[0, -Math.PI / 2, 0]}
+                status={status}
+                enabled={enableControlPanels}
+              />
+              {/* Gauges */}
+              <AnimatedGauge
+                position={[0.11, 0.55, d * 0.2]}
+                value={scadaVisuals.tagValues.rpm ?? data.metrics.rpm}
+                maxValue={1600}
+              />
+              <AnimatedGauge
+                position={[0.11, 0.55, -d * 0.2]}
+                value={scadaVisuals.tagValues.temperature ?? data.metrics.temperature}
+                maxValue={80}
+              />
+              {/* Roll gap adjustment handwheels */}
+              {[-0.3, 0, 0.3].map((z, i) => (
+                <group key={i} position={[0.12, -0.3, z]}>
+                  <mesh rotation={[0, 0, Math.PI / 2]}>
+                    <torusGeometry args={[0.08, 0.015, 8, 16]} />
+                    <meshStandardMaterial color="#dc2626" metalness={0.5} roughness={0.4} />
+                  </mesh>
+                  <mesh rotation={[0, 0, Math.PI / 2]}>
+                    <cylinderGeometry args={[0.02, 0.02, 0.04, 8]} />
+                    <meshStandardMaterial color="#7f1d1d" metalness={0.6} roughness={0.3} />
+                  </mesh>
+                </group>
+              ))}
+            </group>
+
+            {/* === DISCHARGE CHUTE === */}
+            <group position={[0, -h * 0.55, d * 0.3]}>
+              <mesh castShadow rotation={[0.25, 0, 0]}>
+                <boxGeometry args={[w * 0.6, 0.08, 0.8]} />
+                <meshStandardMaterial color="#94a3b8" metalness={0.7} roughness={0.2} />
+              </mesh>
+              {/* Chute sides */}
+              {[-1, 1].map((x) => (
+                <mesh key={x} castShadow position={[x * w * 0.3, 0, 0]} rotation={[0.25, 0, 0]}>
+                  <boxGeometry args={[0.04, 0.15, 0.8]} />
+                  <meshStandardMaterial color="#64748b" metalness={0.6} roughness={0.3} />
+                </mesh>
+              ))}
+            </group>
+
+            {/* === ASPIRATION/DUST PORTS === */}
+            {[-1, 1].map((z) => (
+              <group key={z} position={[0, h * 0.2, z * d * 0.52]}>
+                <mesh castShadow rotation={[Math.PI / 2, 0, 0]}>
+                  <cylinderGeometry args={[0.15, 0.12, 0.2, 12]} />
+                  <meshStandardMaterial color="#6b7280" metalness={0.7} roughness={0.25} />
+                </mesh>
+                {/* Flange */}
+                <mesh position={[0, 0, z * 0.1]} rotation={[Math.PI / 2, 0, 0]}>
+                  <cylinderGeometry args={[0.18, 0.18, 0.03, 12]} />
+                  <meshStandardMaterial color="#4b5563" metalness={0.8} roughness={0.2} />
+                </mesh>
+              </group>
+            ))}
+
+            {/* === SUPPORT FRAME === */}
+            {[[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([x, z], i) => (
+              <group key={i}>
+                {/* Vertical legs */}
+                <mesh castShadow position={[x * (w * 0.45), -h * 0.75, z * (d * 0.4)]}>
+                  <boxGeometry args={[0.12, h * 0.5, 0.12]} />
+                  <meshStandardMaterial color="#1e3a5f" metalness={0.6} roughness={0.35} />
+                </mesh>
+                {/* Foot pads */}
+                <mesh position={[x * (w * 0.45), -h, z * (d * 0.4)]}>
+                  <boxGeometry args={[0.2, 0.05, 0.2]} />
+                  <meshStandardMaterial color="#374151" metalness={0.7} roughness={0.3} />
+                </mesh>
+              </group>
+            ))}
+            {/* Cross bracing */}
+            <mesh castShadow position={[0, -h * 0.65, -d * 0.4]}>
+              <boxGeometry args={[w * 0.9, 0.08, 0.06]} />
+              <meshStandardMaterial color="#1e3a5f" metalness={0.6} roughness={0.35} />
+            </mesh>
+            <mesh castShadow position={[0, -h * 0.65, d * 0.4]}>
+              <boxGeometry args={[w * 0.9, 0.08, 0.06]} />
+              <meshStandardMaterial color="#1e3a5f" metalness={0.6} roughness={0.35} />
+            </mesh>
+
+            {/* === ACCESS DOORS === */}
+            {[-1, 1].map((z) => (
+              <group key={z} position={[0, -h * 0.15, z * d * 0.51]}>
+                {/* Door panel */}
+                <mesh>
+                  <boxGeometry args={[w * 0.4, h * 0.35, 0.03]} />
+                  <meshStandardMaterial color="#3b82f6" metalness={0.45} roughness={0.35} />
+                </mesh>
+                {/* Door handle */}
+                <mesh position={[w * 0.15, 0, z * 0.03]}>
+                  <boxGeometry args={[0.08, 0.15, 0.04]} />
+                  <meshStandardMaterial color="#1f2937" metalness={0.8} roughness={0.2} />
+                </mesh>
+                {/* Hinges */}
+                {[-0.12, 0.12].map((y, hi) => (
+                  <mesh key={hi} position={[-w * 0.18, y, z * 0.02]}>
+                    <cylinderGeometry args={[0.02, 0.02, 0.06, 8]} />
+                    <meshStandardMaterial color="#374151" metalness={0.9} roughness={0.1} />
+                  </mesh>
+                ))}
+              </group>
+            ))}
+
+            {/* Weathering layer */}
+            <WeatheringLayer size={size as [number, number, number]} enabled={enableWeathering} />
+
+            {/* Steam vents when hot */}
+            {graphics.quality !== 'low' && status === 'running' && data.metrics.temperature > 50 && (
+              <SteamVent
+                position={[0, h * 0.6, 0]}
+                intensity={(data.metrics.temperature - 50) / 25}
+              />
+            )}
+
+            {/* Sparks from milling process at high RPM */}
+            {graphics.quality !== 'low' && status === 'running' && data.metrics.rpm > 1400 && (
+              <Sparks position={[0, -h * 0.4, d * 0.3]} active />
+            )}
+          </group>
+        );
+
+      case MachineType.PLANSIFTER:
+        // Detailed plansifter - Bühler MPAG style oscillating sieve box
+        const sw = size[0], sh = size[1], sd = size[2];
+        return (
+          <group position={[0, size[1] / 2, 0]}>
+            {/* === SUSPENSION SYSTEM === */}
+            {/* Ceiling mounting frame */}
+            <group position={[0, sh * 0.6, 0]}>
+              {/* Main beam */}
+              <mesh castShadow>
+                <boxGeometry args={[sw * 1.3, 0.15, 0.15]} />
+                <meshStandardMaterial color="#374151" metalness={0.7} roughness={0.3} />
+              </mesh>
+              {/* Cross beams */}
+              {[-1, 1].map((x) => (
+                <mesh key={x} castShadow position={[x * sw * 0.5, 0, 0]}>
+                  <boxGeometry args={[0.12, 0.15, sd * 0.8]} />
+                  <meshStandardMaterial color="#374151" metalness={0.7} roughness={0.3} />
+                </mesh>
+              ))}
+            </group>
+
+            {/* Suspension rods with spring dampers */}
+            {[[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([x, z], i) => (
+              <group key={i} position={[x * (sw / 2 - 0.2), sh * 0.35, z * (sd / 2 - 0.2)]}>
+                {/* Rod */}
+                <mesh>
+                  <cylinderGeometry args={[0.025, 0.025, sh * 0.5, 8]} />
+                  <meshStandardMaterial color="#1f2937" metalness={0.9} roughness={0.1} />
+                </mesh>
+                {/* Spring coil (visual) */}
+                <mesh position={[0, sh * 0.15, 0]}>
+                  <torusGeometry args={[0.06, 0.015, 8, 16]} />
+                  <meshStandardMaterial color="#6b7280" metalness={0.8} roughness={0.2} />
+                </mesh>
+                <mesh position={[0, sh * 0.1, 0]}>
+                  <torusGeometry args={[0.06, 0.015, 8, 16]} />
+                  <meshStandardMaterial color="#6b7280" metalness={0.8} roughness={0.2} />
+                </mesh>
+                {/* Upper bracket */}
+                <mesh position={[0, sh * 0.25, 0]}>
+                  <boxGeometry args={[0.1, 0.05, 0.1]} />
+                  <meshStandardMaterial color="#374151" metalness={0.7} roughness={0.3} />
+                </mesh>
+              </group>
+            ))}
+
+            {/* === MAIN SIFTER BOX === */}
+            {/* Outer casing - cream white */}
+            <mesh castShadow receiveShadow>
+              <boxGeometry args={[sw, sh, sd]} />
+              <meshPhysicalMaterial
+                color="#faf5eb"
+                metalness={0.1}
+                roughness={0.2}
+                roughnessMap={roughnessMap}
+                clearcoat={0.8}
+                clearcoatRoughness={0.15}
+                {...matProps}
+              />
+            </mesh>
+
+            {/* Sieve compartment dividers visible through sides */}
+            {Array.from({ length: 6 }).map((_, i) => (
+              <mesh key={i} position={[0, sh * 0.35 - i * (sh * 0.12), 0]}>
+                <boxGeometry args={[sw * 1.01, 0.02, sd * 0.95]} />
+                <meshStandardMaterial color="#e7e5e4" metalness={0.3} roughness={0.5} />
+              </mesh>
+            ))}
+
+            {/* Corner trim strips */}
+            {[[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([x, z], i) => (
+              <mesh key={i} castShadow position={[x * sw * 0.5, 0, z * sd * 0.5]}>
+                <boxGeometry args={[0.08, sh, 0.08]} />
+                <meshStandardMaterial color="#a8a29e" metalness={0.5} roughness={0.3} />
+              </mesh>
+            ))}
+
+            {/* === VIEWING WINDOWS === */}
+            {[-1, 1].map((x) => (
+              <group key={x} position={[x * (sw * 0.51), 0, 0]}>
+                {/* Window frames */}
+                {[-0.2, 0.15].map((y, wi) => (
+                  <group key={wi} position={[0, sh * y, 0]}>
+                    <mesh position={[x * 0.01, 0, 0]}>
+                      <boxGeometry args={[0.03, sh * 0.25, sd * 0.4]} />
+                      <meshStandardMaterial color="#78716c" metalness={0.6} roughness={0.3} />
+                    </mesh>
+                    {/* Glass */}
+                    <mesh position={[x * 0.02, 0, 0]}>
+                      <planeGeometry args={[sh * 0.2, sd * 0.35]} />
+                      <meshPhysicalMaterial
+                        color="#fafaf9"
+                        metalness={0.05}
+                        roughness={0.05}
+                        transmission={0.7}
+                        transparent
+                        opacity={0.3}
+                      />
+                    </mesh>
+                  </group>
+                ))}
+              </group>
+            ))}
+
+            {/* === OUTLET CHUTES (different fractions) === */}
+            {/* Fine flour outlet */}
+            <group position={[-sw * 0.25, -sh * 0.52, sd * 0.3]}>
+              <mesh castShadow rotation={[0.3, 0, 0]}>
+                <boxGeometry args={[0.4, 0.08, 0.5]} />
+                <meshStandardMaterial color="#94a3b8" metalness={0.7} roughness={0.2} />
+              </mesh>
+              <mesh position={[0.22, 0, -0.1]}>
+                <boxGeometry args={[0.03, 0.12, 0.4]} />
+                <meshStandardMaterial color="#64748b" metalness={0.6} roughness={0.3} />
+              </mesh>
+            </group>
+            {/* Middlings outlet */}
+            <group position={[0, -sh * 0.52, sd * 0.35]}>
+              <mesh castShadow rotation={[0.25, 0, 0]}>
+                <boxGeometry args={[0.5, 0.1, 0.6]} />
+                <meshStandardMaterial color="#a8a29e" metalness={0.6} roughness={0.25} />
+              </mesh>
+            </group>
+            {/* Bran/coarse outlet */}
+            <group position={[sw * 0.25, -sh * 0.52, sd * 0.25]}>
+              <mesh castShadow rotation={[0.35, 0, 0]}>
+                <boxGeometry args={[0.35, 0.08, 0.45]} />
+                <meshStandardMaterial color="#78716c" metalness={0.65} roughness={0.25} />
+              </mesh>
+            </group>
+
+            {/* Product inlet on top */}
+            <group position={[0, sh * 0.52, 0]}>
+              <mesh castShadow>
+                <cylinderGeometry args={[0.25, 0.2, 0.15, 12]} />
+                <meshStandardMaterial color="#6b7280" metalness={0.7} roughness={0.2} />
+              </mesh>
+              {/* Flange */}
+              <mesh position={[0, 0.08, 0]}>
+                <cylinderGeometry args={[0.3, 0.3, 0.04, 12]} />
+                <meshStandardMaterial color="#4b5563" metalness={0.8} roughness={0.15} />
+              </mesh>
+            </group>
+
+            {/* === ECCENTRIC DRIVE MECHANISM === */}
+            <group position={[0, -sh * 0.35, -sd * 0.4]}>
+              {/* Drive motor */}
+              <mesh castShadow rotation={[Math.PI / 2, 0, 0]}>
+                <cylinderGeometry args={[0.25, 0.25, 0.35, 16]} />
+                <meshStandardMaterial color="#374151" metalness={0.7} roughness={0.3} />
+              </mesh>
+              {/* Motor mount bracket */}
+              <mesh castShadow position={[0, 0.15, -0.1]}>
+                <boxGeometry args={[0.5, 0.08, 0.25]} />
+                <meshStandardMaterial color="#1f2937" metalness={0.6} roughness={0.4} />
+              </mesh>
+              {/* Eccentric weight housing */}
+              <mesh castShadow position={[0, 0, 0.25]}>
+                <cylinderGeometry args={[0.15, 0.15, 0.2, 12]} />
+                <meshStandardMaterial color="#dc2626" metalness={0.5} roughness={0.4} />
+              </mesh>
+              {/* Belt guard */}
+              <mesh castShadow position={[0.3, 0, 0]}>
+                <boxGeometry args={[0.15, 0.4, 0.3]} />
+                <meshStandardMaterial color="#fbbf24" metalness={0.3} roughness={0.5} />
+              </mesh>
+            </group>
+
+            {/* === ACCESS DOORS === */}
+            {[-1, 1].map((z) => (
+              <group key={z} position={[0, -sh * 0.1, z * sd * 0.51]}>
+                <mesh>
+                  <boxGeometry args={[sw * 0.5, sh * 0.5, 0.04]} />
+                  <meshStandardMaterial color="#f5f5f4" metalness={0.15} roughness={0.25} />
+                </mesh>
+                {/* Door handle/latch */}
+                <mesh position={[sw * 0.2, 0, z * 0.03]}>
+                  <boxGeometry args={[0.06, 0.12, 0.03]} />
+                  <meshStandardMaterial color="#78716c" metalness={0.7} roughness={0.25} />
+                </mesh>
+                {/* Latches */}
+                {[-0.15, 0.15].map((y, li) => (
+                  <mesh key={li} position={[sw * 0.22, y, z * 0.03]} rotation={[0, 0, Math.PI / 4]}>
+                    <boxGeometry args={[0.04, 0.04, 0.02]} />
+                    <meshStandardMaterial color="#374151" metalness={0.8} roughness={0.2} />
+                  </mesh>
+                ))}
+              </group>
+            ))}
+
+            {/* Weathering - flour dust */}
+            <WeatheringLayer size={size as [number, number, number]} enabled={enableWeathering} />
+
+            {/* Control panel */}
+            <ControlPanel
+              position={[sw * 0.51, -sh * 0.3, 0]}
+              rotation={[0, -Math.PI / 2, 0]}
+              status={status}
+              enabled={enableControlPanels}
+            />
+
+            {/* Inspection light */}
+            <mesh position={[-sw * 0.4, sh * 0.45, sd * 0.3]}>
+              <sphereGeometry args={[0.08, 12, 12]} />
+              <meshStandardMaterial
+                color={status === 'running' ? '#22c55e' : '#6b7280'}
+                emissive={status === 'running' ? '#22c55e' : '#000000'}
+                emissiveIntensity={status === 'running' ? 0.5 : 0}
+              />
+            </mesh>
+          </group>
+        );
+
+      case MachineType.PACKER:
+        // Detailed bag packer - flour/grain bagging machine
+        const pw = size[0], ph = size[1], pd = size[2];
+        return (
+          <group position={[0, size[1] / 2, 0]}>
+            {/* === MAIN FRAME === */}
+            {/* Vertical frame posts */}
+            {[[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([x, z], i) => (
+              <mesh key={i} castShadow position={[x * pw * 0.45, 0, z * pd * 0.4]}>
+                <boxGeometry args={[0.1, ph * 1.1, 0.1]} />
+                <meshStandardMaterial color="#f97316" metalness={0.4} roughness={0.4} />
+              </mesh>
+            ))}
+            {/* Top frame */}
+            <mesh castShadow position={[0, ph * 0.55, 0]}>
+              <boxGeometry args={[pw * 0.95, 0.08, pd * 0.85]} />
+              <meshStandardMaterial color="#ea580c" metalness={0.45} roughness={0.35} />
+            </mesh>
+
+            {/* === WEIGHING HOPPER === */}
+            <group position={[0, ph * 0.35, 0]}>
+              {/* Hopper body - tapered */}
+              <mesh castShadow>
+                <boxGeometry args={[pw * 0.6, ph * 0.3, pd * 0.5]} />
+                <meshStandardMaterial color="#94a3b8" metalness={0.7} roughness={0.2} />
+              </mesh>
+              {/* Hopper taper bottom */}
+              <mesh castShadow position={[0, -ph * 0.2, 0]}>
+                <boxGeometry args={[pw * 0.4, ph * 0.12, pd * 0.35]} />
+                <meshStandardMaterial color="#64748b" metalness={0.6} roughness={0.25} />
+              </mesh>
+              {/* Load cells (visual) */}
+              {[-1, 1].map((x) => (
+                <mesh key={x} position={[x * pw * 0.25, ph * 0.18, 0]}>
+                  <boxGeometry args={[0.15, 0.08, 0.15]} />
+                  <meshStandardMaterial color="#22c55e" metalness={0.5} roughness={0.4} />
+                </mesh>
+              ))}
+              {/* Weight display */}
+              <group position={[pw * 0.35, 0, pd * 0.28]}>
+                <mesh>
+                  <boxGeometry args={[0.35, 0.2, 0.08]} />
+                  <meshStandardMaterial color="#1e293b" metalness={0.6} roughness={0.3} />
+                </mesh>
+                <mesh position={[0, 0, 0.041]}>
+                  <planeGeometry args={[0.3, 0.15]} />
+                  <meshBasicMaterial color="#22c55e" />
+                </mesh>
+              </group>
+            </group>
+
+            {/* === FILLING SPOUT === */}
+            <group position={[0, ph * 0.05, 0]}>
+              {/* Spout tube */}
+              <mesh castShadow>
+                <cylinderGeometry args={[0.12, 0.18, ph * 0.35, 12]} />
+                <meshStandardMaterial color="#6b7280" metalness={0.75} roughness={0.2} />
+              </mesh>
+              {/* Spout collar */}
+              <mesh position={[0, -ph * 0.15, 0]}>
+                <cylinderGeometry args={[0.22, 0.2, 0.08, 12]} />
+                <meshStandardMaterial color="#374151" metalness={0.8} roughness={0.15} />
+              </mesh>
+              {/* Butterfly valve indicator */}
+              <mesh position={[0.15, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+                <cylinderGeometry args={[0.03, 0.03, 0.08, 8]} />
+                <meshStandardMaterial color="#dc2626" metalness={0.5} roughness={0.4} />
+              </mesh>
+            </group>
+
+            {/* === BAG CLAMP MECHANISM === */}
+            <group position={[0, -ph * 0.2, 0]}>
+              {/* Clamp arms */}
+              {[-1, 1].map((x) => (
+                <group key={x}>
+                  <mesh castShadow position={[x * 0.3, 0, 0]}>
+                    <boxGeometry args={[0.08, 0.25, pd * 0.4]} />
+                    <meshStandardMaterial color="#374151" metalness={0.7} roughness={0.3} />
+                  </mesh>
+                  {/* Clamp pads */}
+                  <mesh position={[x * 0.25, -0.05, 0]}>
+                    <boxGeometry args={[0.06, 0.15, pd * 0.35]} />
+                    <meshStandardMaterial color="#1f2937" roughness={0.8} />
+                  </mesh>
+                  {/* Pneumatic cylinders */}
+                  <mesh castShadow position={[x * 0.4, 0.05, 0]} rotation={[0, 0, x * 0.3]}>
+                    <cylinderGeometry args={[0.04, 0.04, 0.2, 8]} />
+                    <meshStandardMaterial color="#6b7280" metalness={0.8} roughness={0.15} />
+                  </mesh>
+                </group>
+              ))}
+              {/* Bag shape indicator (when running) */}
+              {status === 'running' && (
+                <mesh position={[0, -0.25, 0]}>
+                  <boxGeometry args={[0.5, 0.4, 0.3]} />
+                  <meshStandardMaterial color="#fef3c7" roughness={0.7} transparent opacity={0.8} />
+                </mesh>
+              )}
+            </group>
+
+            {/* === CONVEYOR SYSTEM === */}
+            <group position={[0, -ph * 0.48, pd * 0.5]}>
+              {/* Conveyor frame */}
+              <mesh castShadow>
+                <boxGeometry args={[pw * 1.2, 0.08, pd * 0.8]} />
+                <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.35} />
+              </mesh>
+              {/* Rollers */}
+              {Array.from({ length: 8 }).map((_, i) => (
+                <mesh key={i} position={[-pw * 0.5 + i * (pw * 0.15), 0.06, 0]} rotation={[0, 0, Math.PI / 2]} geometry={conveyorRollerGeometry}>
+                  <meshStandardMaterial color="#6b7280" metalness={0.8} roughness={0.15} />
+                </mesh>
+              ))}
+              {/* Conveyor belt surface */}
+              <mesh position={[0, 0.1, 0]}>
+                <boxGeometry args={[pw * 1.1, 0.02, pd * 0.6]} />
+                <meshStandardMaterial color="#1f2937" roughness={0.9} />
+              </mesh>
+              {/* Side guides */}
+              {[-1, 1].map((z) => (
+                <mesh key={z} castShadow position={[0, 0.15, z * pd * 0.35]}>
+                  <boxGeometry args={[pw * 1.2, 0.1, 0.03]} />
+                  <meshStandardMaterial color="#f97316" metalness={0.4} roughness={0.4} />
+                </mesh>
+              ))}
+              {/* Filled bag (when running) */}
+              {status === 'running' && (
+                <mesh position={[pw * 0.4, 0.2, 0]}>
+                  <boxGeometry args={[0.45, 0.25, 0.35]} />
+                  <meshStandardMaterial color="#fef3c7" roughness={0.75} />
+                </mesh>
+              )}
+            </group>
+
+            {/* === CONTROL STATION === */}
+            <group position={[-pw * 0.55, 0, 0]}>
+              {/* Control cabinet */}
+              <mesh castShadow>
+                <boxGeometry args={[0.25, ph * 0.7, pd * 0.5]} />
+                <meshStandardMaterial color="#1e293b" metalness={0.5} roughness={0.35} />
+              </mesh>
+              {/* Control panel face */}
+              <ControlPanel
+                position={[-0.13, ph * 0.15, 0]}
+                rotation={[0, Math.PI / 2, 0]}
+                status={status}
+                enabled={enableControlPanels}
+              />
+              {/* Emergency stop */}
+              <group position={[-0.13, -ph * 0.15, pd * 0.15]}>
+                <mesh>
+                  <cylinderGeometry args={[0.06, 0.06, 0.03, 16]} />
+                  <meshStandardMaterial color="#dc2626" metalness={0.4} roughness={0.5} />
+                </mesh>
+                <mesh position={[0, 0.025, 0]}>
+                  <cylinderGeometry args={[0.045, 0.045, 0.02, 16]} />
+                  <meshStandardMaterial color="#7f1d1d" metalness={0.5} roughness={0.4} />
+                </mesh>
+              </group>
+              {/* Start button */}
+              <mesh position={[-0.13, -ph * 0.15, -pd * 0.15]}>
+                <cylinderGeometry args={[0.04, 0.04, 0.025, 12]} />
+                <meshStandardMaterial
+                  color="#22c55e"
+                  emissive={status === 'running' ? '#22c55e' : '#000000'}
+                  emissiveIntensity={status === 'running' ? 0.5 : 0}
+                />
+              </mesh>
+            </group>
+
+            {/* === SAFETY GUARDS === */}
+            {/* Side guard panels */}
+            {[-1, 1].map((z) => (
+              <mesh key={z} position={[pw * 0.3, -ph * 0.1, z * pd * 0.45]}>
+                <boxGeometry args={[pw * 0.5, ph * 0.6, 0.02]} />
+                <meshStandardMaterial color="#fbbf24" metalness={0.3} roughness={0.5} transparent opacity={0.9} />
+              </mesh>
+            ))}
+
+            {/* Warning stripes on frame */}
+            {[[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([x, z], i) => (
+              <group key={i}>
+                {[0, 1, 2].map((stripe) => (
+                  <mesh key={stripe} position={[x * pw * 0.45, -ph * 0.3 + stripe * 0.15, z * pd * 0.41]}>
+                    <boxGeometry args={[0.11, 0.05, 0.01]} />
+                    <meshBasicMaterial color={stripe % 2 === 0 ? '#1f2937' : '#fbbf24'} />
+                  </mesh>
+                ))}
+              </group>
+            ))}
+
+            {/* Weathering */}
+            <WeatheringLayer size={size as [number, number, number]} enabled={enableWeathering} />
+
+            {/* Status beacon */}
+            <mesh position={[pw * 0.4, ph * 0.6, pd * 0.3]}>
+              <cylinderGeometry args={[0.06, 0.06, 0.1, 12]} />
+              <meshStandardMaterial
+                color={status === 'running' ? '#22c55e' : status === 'warning' ? '#f59e0b' : '#6b7280'}
+                emissive={status === 'running' ? '#22c55e' : status === 'warning' ? '#f59e0b' : '#000000'}
+                emissiveIntensity={status !== 'idle' ? 0.6 : 0}
+              />
+            </mesh>
+          </group>
+        );
+
+      default: return null;
+    }
+  };
+
+  return (
+    <group
+      ref={groupRef}
+      position={new THREE.Vector3(...position)}
+      rotation={[0, rotation, 0]}
+      onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer'; }}
+      onPointerOut={() => { setHovered(false); document.body.style.cursor = 'auto'; }}
+      onClick={(e) => { e.stopPropagation(); audioManager.playClick(); onClick(); }}
+    >
+      {renderGeometry()}
+
+      {/* Heat shimmer effect for hot machines - uses SCADA temperature */}
+      {status === 'running' && (type === MachineType.ROLLER_MILL || type === MachineType.PACKER) && (
+        <HeatShimmer
+          position={position as [number, number, number]}
+          temperature={scadaVisuals.tagValues.temperature ?? data.metrics.temperature}
+          size={size as [number, number, number]}
+        />
+      )}
+
+      {/* Status light - uses SCADA-derived color */}
+      <mesh position={[0, size[1] + 1.5, 0]}>
+        <sphereGeometry args={[0.3]} />
+        <meshStandardMaterial color={statusColor} emissive={statusColor} emissiveIntensity={3} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, size[1] + 0.75, 0]}>
+        <cylinderGeometry args={[0.05, 0.05, 1.5]} />
+        <meshStandardMaterial color="#374151" metalness={0.8} roughness={0.3} />
+      </mesh>
+
+      {/* SCADA Alarm Indicator - pulsing octahedron when alarms are active */}
+      {scadaAlarms.highestPriority && (
+        <AlarmIndicator
+          position={[size[0] / 2 + 0.8, size[1] + 1.5, 0]}
+          priority={scadaAlarms.highestPriority}
+          pulseSpeed={scadaVisuals.alarmPulseSpeed}
+          hasUnacknowledged={scadaAlarms.hasUnacknowledged}
+        />
+      )}
+
+      {/* SCADA Live Values Overlay - shows on hover for high/ultra graphics */}
+      {hovered && Object.keys(scadaVisuals.tagValues).length > 0 && (
+        <SCADAValueOverlay
+          position={[-(size[0] / 2 + 1.5), size[1] / 2, 0]}
+          tagValues={scadaVisuals.tagValues}
+          temperatureColor={scadaVisuals.temperatureColor}
+          vibrationColor={scadaVisuals.vibrationColor}
+        />
+      )}
+
+      {/* Hover tooltip */}
+      {hovered && (
+        <Html position={[0, size[1] + 2.5, 0]} center distanceFactor={12}>
+          <div className="bg-slate-900/95 backdrop-blur-xl border border-cyan-500/30 px-4 py-2 rounded-lg shadow-2xl pointer-events-none min-w-[180px]">
+            <div className="font-bold text-white text-sm">{data.name}</div>
+            <div className="text-xs text-cyan-400">{data.type.replace('_', ' ')}</div>
+            <div className="flex items-center gap-1 mt-1">
+              <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: statusColor }}></span>
+              <span className="text-xs text-slate-400 capitalize">{scadaVisuals.derivedStatus}</span>
+            </div>
+            {scadaAlarms.highestPriority && (
+              <div className="flex items-center gap-1 mt-1">
+                <span className="text-[10px] text-red-400">
+                  {scadaAlarms.alarms.length} alarm{scadaAlarms.alarms.length > 1 ? 's' : ''} active
+                </span>
+              </div>
+            )}
+            <div className="text-[10px] text-slate-500 mt-1">Click to inspect</div>
+          </div>
+        </Html>
+      )}
+    </group>
+  );
+};

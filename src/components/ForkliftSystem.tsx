@@ -4,13 +4,18 @@ import { Text, Line } from '@react-three/drei';
 import { positionRegistry } from '../utils/positionRegistry';
 import { audioManager } from '../utils/audioManager';
 import { useMillStore } from '../store';
+import { getForkliftWarningColor } from '../utils/statusColors';
+import { ForkliftModel } from './models';
 import * as THREE from 'three';
 
 // Path visualization component - shows forklift routes on the floor
-const ForkliftPath: React.FC<{ path: [number, number, number][]; color: string }> = ({ path, color }) => {
+const ForkliftPath: React.FC<{ path: [number, number, number][]; color: string }> = ({
+  path,
+  color,
+}) => {
   // Create a closed loop by adding the first point at the end
   const points = useMemo(() => {
-    const pts = path.map(p => new THREE.Vector3(p[0], 0.05, p[2])); // Slightly above floor
+    const pts = path.map((p) => new THREE.Vector3(p[0], 0.05, p[2])); // Slightly above floor
     pts.push(pts[0].clone()); // Close the loop
     return pts;
   }, [path]);
@@ -38,10 +43,14 @@ const ForkliftPath: React.FC<{ path: [number, number, number][]; color: string }
           {/* Direction arrow to next point */}
           {i < path.length && (
             <mesh
-              rotation={[-Math.PI / 2, 0, Math.atan2(
-                path[(i + 1) % path.length][0] - point[0],
-                path[(i + 1) % path.length][2] - point[2]
-              )]}
+              rotation={[
+                -Math.PI / 2,
+                0,
+                Math.atan2(
+                  path[(i + 1) % path.length][0] - point[0],
+                  path[(i + 1) % path.length][2] - point[2]
+                ),
+              ]}
               position={[0, 0.01, 0]}
             >
               <coneGeometry args={[0.2, 0.4, 3]} />
@@ -55,21 +64,35 @@ const ForkliftPath: React.FC<{ path: [number, number, number][]; color: string }
 };
 
 // Warning light component that changes color based on state
-const WarningLight: React.FC<{ isStopped: boolean; isInCrossing: boolean }> = ({ isStopped, isInCrossing }) => {
-  const [flash, setFlash] = useState(false);
+const WarningLight: React.FC<{ isStopped: boolean; isInCrossing: boolean }> = ({
+  isStopped,
+  isInCrossing,
+}) => {
+  // Use ref instead of useState to avoid triggering re-renders in useFrame
+  const flashRef = useRef(false);
+  const materialRef = useRef<THREE.MeshStandardMaterial>(null);
+  const lightRef = useRef<THREE.PointLight>(null);
 
   useFrame((state) => {
     // Flash faster when stopped (red), medium for crossing (blue), slower when moving (amber)
     const flashSpeed = isStopped ? 15 : isInCrossing ? 10 : 5;
     const newFlash = Math.sin(state.clock.elapsedTime * flashSpeed) > 0;
-    if (newFlash !== flash) {
-      setFlash(newFlash);
+
+    // Update material directly via ref instead of triggering re-render
+    if (newFlash !== flashRef.current) {
+      flashRef.current = newFlash;
+      if (materialRef.current) {
+        materialRef.current.emissiveIntensity = newFlash ? 3 : 0.5;
+      }
+      if (lightRef.current) {
+        lightRef.current.visible = newFlash && (isStopped || isInCrossing);
+      }
     }
   });
 
   // Red when stopped, blue when in crossing zone, amber when normal
-  const color = isStopped ? '#ef4444' : isInCrossing ? '#3b82f6' : '#f59e0b';
-  const glowColor = isStopped ? '#ef4444' : isInCrossing ? '#3b82f6' : '#f59e0b';
+  const color = getForkliftWarningColor(isStopped, isInCrossing);
+  const glowColor = getForkliftWarningColor(isStopped, isInCrossing);
 
   return (
     <group position={[0, 2.3, -0.3]}>
@@ -77,19 +100,58 @@ const WarningLight: React.FC<{ isStopped: boolean; isInCrossing: boolean }> = ({
       <mesh>
         <cylinderGeometry args={[0.1, 0.1, 0.15, 8]} />
         <meshStandardMaterial
+          ref={materialRef}
           color={color}
           emissive={color}
-          emissiveIntensity={flash ? 3 : 0.5}
+          emissiveIntensity={0.5}
           toneMapped={false}
         />
       </mesh>
       {/* Glow effect when stopped or in crossing */}
-      {(isStopped || isInCrossing) && flash && (
-        <pointLight color={glowColor} intensity={2} distance={5} />
+      {(isStopped || isInCrossing) && (
+        <pointLight ref={lightRef} color={glowColor} intensity={2} distance={5} visible={false} />
       )}
     </group>
   );
 };
+
+// Simplified forklift billboard for distant rendering (50+ units away)
+// Uses only 4 meshes instead of ~40+ for massive performance improvement
+const ForkliftBillboard: React.FC<{ hasCargo: boolean }> = ({ hasCargo }) => {
+  return (
+    <group>
+      {/* Simple body - single box */}
+      <mesh position={[0, 0.7, 0]} castShadow>
+        <boxGeometry args={[1.5, 1.2, 2.5]} />
+        <meshStandardMaterial color="#f59e0b" roughness={0.6} />
+      </mesh>
+      {/* Cabin */}
+      <mesh position={[0, 1.5, -0.3]} castShadow>
+        <boxGeometry args={[1.2, 0.8, 1]} />
+        <meshStandardMaterial color="#1f2937" roughness={0.8} />
+      </mesh>
+      {/* Mast */}
+      <mesh position={[0, 1.2, 1.3]} castShadow>
+        <boxGeometry args={[0.8, 2, 0.15]} />
+        <meshStandardMaterial color="#374151" roughness={0.4} />
+      </mesh>
+      {/* Cargo if present */}
+      {hasCargo && (
+        <mesh position={[0, 1.4, 1.8]} castShadow>
+          <boxGeometry args={[0.9, 0.7, 0.9]} />
+          <meshStandardMaterial color="#fef3c7" roughness={0.7} />
+        </mesh>
+      )}
+    </group>
+  );
+};
+
+type ForkliftOperation = 'traveling' | 'loading' | 'unloading' | 'waiting';
+
+interface WaypointAction {
+  type: 'pickup' | 'dropoff' | 'none';
+  duration: number; // seconds to spend at this waypoint
+}
 
 interface Forklift {
   id: string;
@@ -97,6 +159,7 @@ interface Forklift {
   rotation: number;
   speed: number;
   path: [number, number, number][];
+  pathActions: WaypointAction[]; // Action at each waypoint
   pathIndex: number;
   cargo: 'empty' | 'pallet';
   operatorName: string;
@@ -106,7 +169,7 @@ interface Forklift {
 const PATH_COLORS = ['#f59e0b', '#3b82f6']; // Amber for first, blue for second
 
 // Conveyor crossing zones - areas where forklifts must yield
-// Main conveyor at z=19, roller conveyor at z=16
+// Main conveyor at z=24, roller conveyor at z=21 (updated for new layout)
 interface CrossingZone {
   id: string;
   xMin: number;
@@ -117,10 +180,14 @@ interface CrossingZone {
 }
 
 const CROSSING_ZONES: CrossingZone[] = [
-  // Main conveyor crossing zone (z=19, with buffer)
-  { id: 'main-conveyor', xMin: -28, xMax: 28, zMin: 17, zMax: 21, type: 'conveyor' },
-  // Roller conveyor crossing zone (z=16, with buffer)
-  { id: 'roller-conveyor', xMin: -16, xMax: 16, zMin: 14, zMax: 18, type: 'conveyor' },
+  // Main conveyor crossing zone (z=24, with buffer)
+  { id: 'main-conveyor', xMin: -28, xMax: 28, zMin: 22, zMax: 26, type: 'conveyor' },
+  // Roller conveyor crossing zone (z=21, with buffer)
+  { id: 'roller-conveyor', xMin: -16, xMax: 16, zMin: 19, zMax: 23, type: 'conveyor' },
+  // Shipping dock approach (front, z=40-50)
+  { id: 'shipping-dock', xMin: -20, xMax: 20, zMin: 40, zMax: 50, type: 'intersection' },
+  // Receiving dock approach (back, z=-50 to -40)
+  { id: 'receiving-dock', xMin: -20, xMax: 20, zMin: -50, zMax: -40, type: 'intersection' },
 ];
 
 // Check if a position is within any crossing zone
@@ -140,20 +207,32 @@ const CrossingZoneMarkers: React.FC = () => {
       {CROSSING_ZONES.map((zone) => (
         <group key={zone.id}>
           {/* Hazard stripe markings on floor */}
-          <mesh position={[(zone.xMin + zone.xMax) / 2, 0.02, zone.zMin]} rotation={[-Math.PI / 2, 0, 0]}>
+          <mesh
+            position={[(zone.xMin + zone.xMax) / 2, 0.02, zone.zMin]}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
             <planeGeometry args={[zone.xMax - zone.xMin, 0.3]} />
             <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
           </mesh>
-          <mesh position={[(zone.xMin + zone.xMax) / 2, 0.02, zone.zMax]} rotation={[-Math.PI / 2, 0, 0]}>
+          <mesh
+            position={[(zone.xMin + zone.xMax) / 2, 0.02, zone.zMax]}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
             <planeGeometry args={[zone.xMax - zone.xMin, 0.3]} />
             <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
           </mesh>
           {/* Side markers */}
-          <mesh position={[zone.xMin, 0.02, (zone.zMin + zone.zMax) / 2]} rotation={[-Math.PI / 2, 0, 0]}>
+          <mesh
+            position={[zone.xMin, 0.02, (zone.zMin + zone.zMax) / 2]}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
             <planeGeometry args={[0.3, zone.zMax - zone.zMin]} />
             <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
           </mesh>
-          <mesh position={[zone.xMax, 0.02, (zone.zMin + zone.zMax) / 2]} rotation={[-Math.PI / 2, 0, 0]}>
+          <mesh
+            position={[zone.xMax, 0.02, (zone.zMin + zone.zMax) / 2]}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
             <planeGeometry args={[0.3, zone.zMax - zone.zMin]} />
             <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
           </mesh>
@@ -184,34 +263,93 @@ const CrossingZoneMarkers: React.FC = () => {
   );
 };
 
-export const ForkliftSystem: React.FC = () => {
-  // Adjusted paths to avoid conveyor belt intersections
-  // Main conveyor at z=19, roller conveyor at z=16
-  // Keep forklifts in safe zones: z < 12 or use designated crossing points
-  const forklifts = useMemo<Forklift[]>(() => [
-    {
-      id: 'forklift-1',
-      position: [-25, 0, -15],
-      rotation: 0,
-      speed: 3,
-      // Adjusted path: stays at z=10 max to avoid roller conveyor (z=16)
-      path: [[-25, 0, -15], [-25, 0, 10], [25, 0, 10], [25, 0, -15]],
-      pathIndex: 0,
-      cargo: 'pallet',
-      operatorName: 'Tom'
-    },
-    {
-      id: 'forklift-2',
-      position: [25, 0, 5],
-      rotation: Math.PI,
-      speed: 2.5,
-      // Adjusted path: stays at z=5 max, well clear of conveyors
-      path: [[25, 0, 5], [25, 0, -20], [-20, 0, -20], [-20, 0, 5]],
-      pathIndex: 0,
-      cargo: 'empty',
-      operatorName: 'Jake'
-    }
-  ], []);
+export interface ForkliftData {
+  id: string;
+  operatorName: string;
+  cargo: 'empty' | 'pallet';
+  position: [number, number, number];
+}
+
+interface ForkliftSystemProps {
+  showSpeedZones?: boolean;
+  onSelectForklift?: (forklift: ForkliftData) => void;
+}
+
+export const ForkliftSystem: React.FC<ForkliftSystemProps> = ({ onSelectForklift }) => {
+  // Updated paths for new factory layout (120x160 floor):
+  // - Shipping dock at z=50 (front), Receiving dock at z=-50 (back)
+  // - Packers at z=25, Silos at z=-22
+  // - Conveyors at z=24 (main, x:-28 to 28) and z=21 (roller, x:-15 to 15)
+  // IMPORTANT: Forklifts must go AROUND conveyors, not through them
+  // Main conveyor blocks z=22.5-25.5 for x in [-28, 28]
+  // Roller conveyor blocks z=19.5-22.5 for x in [-15, 15]
+  const forklifts = useMemo<Forklift[]>(
+    () => [
+      {
+        id: 'forklift-1',
+        position: [45, 0, 32], // Start in east corridor (clear of amenities)
+        rotation: 0,
+        speed: 3.5,
+        // Shipping route: Packing area -> Shipping dock (front, z=50)
+        // IMPORTANT: Dock platform obstacle is x:-10 to 10, z:44 to 54
+        // Must stay outside those bounds - approach from side at x=15
+        // IMPORTANT: Break room at [35,0,25] (x:32-38, z:22.5-27.5) and
+        // Toilet block at [35,0,35] (x:31-39, z:32.5-37.5) - route around east side
+        path: [
+          [28, 0, 20], // Packing area (pickup point) - west of break room
+          [45, 0, 20], // Move east to clear corridor
+          [45, 0, 42], // Move north along east corridor (clear of toilet block)
+          [15, 0, 42], // Approach shipping dock from side (outside platform)
+          [15, 0, 43], // At dock edge (dropoff point) - just outside z=44 obstacle
+          [15, 0, 42], // Pull back from dock
+          [45, 0, 42], // Return to east corridor
+          [45, 0, 20], // Head south
+        ],
+        pathActions: [
+          { type: 'pickup', duration: 2.0 }, // Load pallet at packing area
+          { type: 'none', duration: 0 },
+          { type: 'none', duration: 0 },
+          { type: 'none', duration: 0 },
+          { type: 'dropoff', duration: 2.0 }, // Unload at shipping dock
+          { type: 'none', duration: 0 },
+          { type: 'none', duration: 0 },
+          { type: 'none', duration: 0 },
+        ],
+        pathIndex: 0,
+        cargo: 'empty',
+        operatorName: 'Tom',
+      },
+      {
+        id: 'forklift-2',
+        position: [-15, 0, -38], // Start in west corridor
+        rotation: Math.PI,
+        speed: 3,
+        // Receiving route: Receiving dock (back, z=-50) -> Silo area
+        // IMPORTANT: Dock platform obstacle is x:-10 to 10, z:-54 to -44
+        // Must stay outside - approach from side at x=-15
+        path: [
+          [-15, 0, -43], // At receiving dock edge (pickup point) - just outside z=-44 obstacle
+          [-15, 0, -38], // Pull out from dock
+          [-20, 0, -30], // West corridor
+          [-20, 0, -22], // Near silos (dropoff point)
+          [-20, 0, -30], // Return to west corridor
+          [-15, 0, -38], // Approach receiving dock
+        ],
+        pathActions: [
+          { type: 'pickup', duration: 2.0 }, // Load at receiving dock
+          { type: 'none', duration: 0 },
+          { type: 'none', duration: 0 },
+          { type: 'dropoff', duration: 2.0 }, // Unload at silos
+          { type: 'none', duration: 0 },
+          { type: 'none', duration: 0 },
+        ],
+        pathIndex: 0,
+        cargo: 'empty',
+        operatorName: 'Jake',
+      },
+    ],
+    []
+  );
 
   return (
     <group>
@@ -219,34 +357,62 @@ export const ForkliftSystem: React.FC = () => {
       <CrossingZoneMarkers />
       {/* Render path lines on floor */}
       {forklifts.map((f, i) => (
-        <ForkliftPath key={`path-${f.id}`} path={f.path} color={PATH_COLORS[i % PATH_COLORS.length]} />
+        <ForkliftPath
+          key={`path-${f.id}`}
+          path={f.path}
+          color={PATH_COLORS[i % PATH_COLORS.length]}
+        />
       ))}
       {/* Render forklifts */}
-      {forklifts.map(f => (
-        <Forklift key={f.id} data={f} />
+      {forklifts.map((f) => (
+        <Forklift key={f.id} data={f} onSelect={onSelectForklift} />
       ))}
     </group>
   );
 };
 
-const Forklift: React.FC<{ data: Forklift }> = ({ data }) => {
+// Reusable vectors at module level to avoid GC pressure (currently unused but reserved for future optimization)
+// const _tempVec1 = new THREE.Vector3();
+// const _tempVec2 = new THREE.Vector3();
+// const _tempVec3 = new THREE.Vector3();
+
+const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) => void }> = ({
+  data,
+  onSelect,
+}) => {
   const ref = useRef<THREE.Group>(null);
   const pathIndexRef = useRef(0);
   const currentTarget = useRef(new THREE.Vector3(...data.path[0]));
   const [isStopped, setIsStopped] = useState(false);
-  const [isReversing, setIsReversing] = useState(false);
-  const [isInCrossing, setIsInCrossing] = useState(false); // Track if in crossing zone
+  const [distanceTier, setDistanceTier] = useState<'close' | 'far'>('close'); // LOD tier for rendering
+  const [hasCargo, setHasCargo] = useState(data.cargo === 'pallet');
+  const [currentOperation, setCurrentOperation] = useState<ForkliftOperation>('traveling');
+  const [forkHeight, setForkHeight] = useState(0); // State for fork animation to trigger re-renders
+  const hasCargoRef = useRef(data.cargo === 'pallet'); // Ref mirror for useFrame access
+  const operationRef = useRef<ForkliftOperation>('traveling'); // Ref mirror for useFrame access
+  const cameraDistanceRef = useRef(0); // Track distance to camera
+  const isReversingRef = useRef(false); // Changed to ref to avoid re-renders in useFrame
+  const isInCrossingRef = useRef(false); // Changed to ref to avoid re-renders // Track if in crossing zone
   const directionRef = useRef(new THREE.Vector3());
   const dirNormalizedRef = useRef(new THREE.Vector3());
   const prevDirectionRef = useRef(new THREE.Vector3(0, 0, 1));
   const wasStoppedRef = useRef(false);
   const stateChangeTimerRef = useRef(0); // Hysteresis timer
+  const frameCountRef = useRef(0); // Frame counter for throttling
+  const lastCollisionCheckRef = useRef({
+    pathClear: true,
+    workersNearby: [] as any[],
+    forkliftsNearby: [] as any[],
+  });
   const crossingTimerRef = useRef(0); // Time spent waiting at crossing
+  const operationTimerRef = useRef(0); // Time spent on current loading/unloading operation
+  const operationDurationRef = useRef(0); // Target duration for current operation
   const wheelRefsRef = useRef<THREE.Mesh[]>([]); // Cached wheel references
   const HYSTERESIS_TIME = 0.15; // 150ms before state can change
   const CROSSING_WAIT_TIME = 1.5; // Wait 1.5s before entering crossing zone
   const CROSSING_APPROACH_DISTANCE = 3; // Distance to start slowing for crossing
-  const recordSafetyStop = useMillStore(state => state.recordSafetyStop);
+  const FORK_LIFT_HEIGHT = 1.2; // Max height forks raise during load/unload
+  const recordSafetyStop = useMillStore((state) => state.recordSafetyStop);
 
   // Play horn when stopping for safety
   useEffect(() => {
@@ -269,6 +435,16 @@ const Forklift: React.FC<{ data: Forklift }> = ({ data }) => {
   useFrame((state, delta) => {
     if (!ref.current) return;
 
+    // Update camera distance for LOD (with hysteresis to prevent flickering)
+    cameraDistanceRef.current = state.camera.position.distanceTo(ref.current.position);
+    const FAR_THRESHOLD = 50;
+    const CLOSE_THRESHOLD = 40;
+    if (distanceTier === 'close' && cameraDistanceRef.current > FAR_THRESHOLD) {
+      setDistanceTier('far');
+    } else if (distanceTier === 'far' && cameraDistanceRef.current < CLOSE_THRESHOLD) {
+      setDistanceTier('close');
+    }
+
     const pos = ref.current.position;
     const target = currentTarget.current;
     // Reuse Vector3 refs to avoid GC pressure
@@ -284,8 +460,8 @@ const Forklift: React.FC<{ data: Forklift }> = ({ data }) => {
     // Detect if reversing (direction changed significantly)
     const dotProduct = dirNormalized.dot(prevDirectionRef.current);
     const reversing = dotProduct < -0.5; // Roughly opposite direction
-    if (reversing !== isReversing) {
-      setIsReversing(reversing);
+    if (reversing !== isReversingRef.current) {
+      isReversingRef.current = reversing;
     }
 
     // Play backup beeper when reversing
@@ -295,20 +471,45 @@ const Forklift: React.FC<{ data: Forklift }> = ({ data }) => {
 
     prevDirectionRef.current.copy(dirNormalized);
 
-    // Check path is clear of workers and other forklifts
-    const pathClear = positionRegistry.isPathClear(
-      pos.x, pos.z,
-      dirNormalized.x, dirNormalized.z,
-      CHECK_DISTANCE,
-      SAFETY_RADIUS,
-      data.id // Pass forklift ID to also check for other forklifts
-    );
+    // Throttle expensive collision detection to every 3 frames (~20Hz instead of 60Hz)
+    // This significantly reduces CPU load while still being responsive enough for safety
+    frameCountRef.current++;
+    const shouldCheckCollisions = frameCountRef.current % 3 === 0;
 
-    // Check immediate vicinity for workers
-    const workersNearby = positionRegistry.getWorkersNearby(pos.x, pos.z, SAFETY_RADIUS);
+    let pathClear: boolean;
+    let workersNearby: any[];
+    let forkliftsNearby: any[];
 
-    // Check immediate vicinity for other forklifts
-    const forkliftsNearby = positionRegistry.getForkliftsNearby(pos.x, pos.z, FORKLIFT_SAFETY_RADIUS, data.id);
+    if (shouldCheckCollisions) {
+      // Check path is clear of workers, other forklifts, and static obstacles
+      pathClear = positionRegistry.isPathClear(
+        pos.x,
+        pos.z,
+        dirNormalized.x,
+        dirNormalized.z,
+        CHECK_DISTANCE,
+        SAFETY_RADIUS,
+        data.id, // Pass forklift ID to also check for other forklifts
+        true // Enable obstacle checking
+      );
+
+      // Check immediate vicinity for workers
+      workersNearby = positionRegistry.getWorkersNearby(pos.x, pos.z, SAFETY_RADIUS);
+
+      // Check immediate vicinity for other forklifts
+      forkliftsNearby = positionRegistry.getForkliftsNearby(
+        pos.x,
+        pos.z,
+        FORKLIFT_SAFETY_RADIUS,
+        data.id
+      );
+
+      // Cache the results
+      lastCollisionCheckRef.current = { pathClear, workersNearby, forkliftsNearby };
+    } else {
+      // Use cached results
+      ({ pathClear, workersNearby, forkliftsNearby } = lastCollisionCheckRef.current);
+    }
 
     // Check if currently in or approaching a crossing zone
     const currentCrossingZone = isInCrossingZone(pos.x, pos.z);
@@ -320,8 +521,8 @@ const Forklift: React.FC<{ data: Forklift }> = ({ data }) => {
 
     // Update crossing state
     const nowInCrossing = currentCrossingZone !== null || approachingCrossingZone !== null;
-    if (nowInCrossing !== isInCrossing) {
-      setIsInCrossing(nowInCrossing);
+    if (nowInCrossing !== isInCrossingRef.current) {
+      isInCrossingRef.current = nowInCrossing;
     }
 
     // Crossing zone logic: slow down or wait before entering
@@ -343,12 +544,21 @@ const Forklift: React.FC<{ data: Forklift }> = ({ data }) => {
       crossingTimerRef.current = 0; // Reset when not near crossing
     }
 
-    const isSafeToMove = pathClear && workersNearby.length === 0 && forkliftsNearby.length === 0 && crossingClear;
+    const isSafeToMove =
+      pathClear && workersNearby.length === 0 && forkliftsNearby.length === 0 && crossingClear;
     const newIsStopped = !isSafeToMove;
 
     // Register position with CURRENT frame's stopped state (not delayed React state)
     // This ensures workers see the forklift's intent immediately
-    positionRegistry.register(data.id, pos.x, pos.z, 'forklift', dirNormalized.x, dirNormalized.z, newIsStopped);
+    positionRegistry.register(
+      data.id,
+      pos.x,
+      pos.z,
+      'forklift',
+      dirNormalized.x,
+      dirNormalized.z,
+      newIsStopped
+    );
 
     // Hysteresis: require stable state for HYSTERESIS_TIME before changing React state
     if (newIsStopped !== isStopped) {
@@ -361,10 +571,73 @@ const Forklift: React.FC<{ data: Forklift }> = ({ data }) => {
       stateChangeTimerRef.current = 0; // Reset timer if state matches
     }
 
+    // Handle loading/unloading operations (use ref for immediate access)
+    const currentOp = operationRef.current;
+    if (currentOp === 'loading' || currentOp === 'unloading') {
+      operationTimerRef.current += delta;
+      const duration = operationDurationRef.current || 1; // Prevent division by zero
+      const progress = Math.min(operationTimerRef.current / duration, 1);
+
+      // Animate forks: raise during first half, lower during second half
+      let newForkHeight: number;
+      if (progress < 0.5) {
+        // Raising forks
+        newForkHeight = THREE.MathUtils.lerp(0, FORK_LIFT_HEIGHT, progress * 2);
+      } else {
+        // Lowering forks
+        newForkHeight = THREE.MathUtils.lerp(FORK_LIFT_HEIGHT, 0, (progress - 0.5) * 2);
+      }
+      // Only update state every few frames to reduce re-renders
+      if (frameCountRef.current % 3 === 0) {
+        setForkHeight(newForkHeight);
+      }
+
+      // Toggle cargo at midpoint of operation
+      if (progress >= 0.5 && !hasCargoRef.current && currentOp === 'loading') {
+        hasCargoRef.current = true;
+        setHasCargo(true);
+      } else if (progress >= 0.5 && hasCargoRef.current && currentOp === 'unloading') {
+        hasCargoRef.current = false;
+        setHasCargo(false);
+      }
+
+      // Operation complete
+      if (progress >= 1) {
+        operationTimerRef.current = 0;
+        operationRef.current = 'traveling';
+        setCurrentOperation('traveling');
+        setForkHeight(0);
+        // Move to next waypoint
+        pathIndexRef.current = (pathIndexRef.current + 1) % data.path.length;
+        currentTarget.current.set(...data.path[pathIndexRef.current]);
+      }
+      return; // Don't move while operating
+    }
+
     if (distance < 0.5) {
-      // Move to next waypoint
-      pathIndexRef.current = (pathIndexRef.current + 1) % data.path.length;
-      currentTarget.current.set(...data.path[pathIndexRef.current]);
+      // Arrived at waypoint - check for action
+      const action = data.pathActions[pathIndexRef.current];
+      const currentlyHasCargo = hasCargoRef.current; // Use ref for immediate value
+
+      if (action.type === 'pickup' && !currentlyHasCargo) {
+        // Start loading operation
+        operationTimerRef.current = 0;
+        operationDurationRef.current = action.duration;
+        operationRef.current = 'loading';
+        setCurrentOperation('loading');
+        return;
+      } else if (action.type === 'dropoff' && currentlyHasCargo) {
+        // Start unloading operation
+        operationTimerRef.current = 0;
+        operationDurationRef.current = action.duration;
+        operationRef.current = 'unloading';
+        setCurrentOperation('unloading');
+        return;
+      } else {
+        // No action or action not applicable, move to next waypoint
+        pathIndexRef.current = (pathIndexRef.current + 1) % data.path.length;
+        currentTarget.current.set(...data.path[pathIndexRef.current]);
+      }
     } else if (isSafeToMove) {
       // Move towards target only if path is clear
       // Apply speed multiplier for crossing zone slowdown
@@ -387,97 +660,71 @@ const Forklift: React.FC<{ data: Forklift }> = ({ data }) => {
     }
   });
 
+  // Determine if currently performing an operation (for UI display)
+  const isOperating = currentOperation === 'loading' || currentOperation === 'unloading';
+
+  // Handle click on forklift
+  const handleClick = (e: { stopPropagation: () => void }) => {
+    e.stopPropagation();
+    if (onSelect && ref.current) {
+      onSelect({
+        id: data.id,
+        operatorName: data.operatorName,
+        cargo: hasCargo ? 'pallet' : 'empty',
+        position: [ref.current.position.x, ref.current.position.y, ref.current.position.z],
+      });
+    }
+  };
+
   return (
-    <group ref={ref}>
-      {/* Main body */}
-      <mesh castShadow position={[0, 0.6, 0]}>
-        <boxGeometry args={[1.5, 1, 2.5]} />
-        <meshStandardMaterial color="#f59e0b" metalness={0.3} roughness={0.6} />
-      </mesh>
-
-      {/* Cabin */}
-      <mesh castShadow position={[0, 1.4, -0.3]}>
-        <boxGeometry args={[1.3, 1.2, 1.2]} />
-        <meshStandardMaterial color="#1f2937" />
-      </mesh>
-
-      {/* Roof */}
-      <mesh castShadow position={[0, 2.1, -0.3]}>
-        <boxGeometry args={[1.4, 0.1, 1.3]} />
-        <meshStandardMaterial color="#f59e0b" metalness={0.3} roughness={0.6} />
-      </mesh>
-
-      {/* Mast */}
-      <mesh castShadow position={[0, 1.2, 1.3]}>
-        <boxGeometry args={[0.1, 2, 0.1]} />
-        <meshStandardMaterial color="#374151" />
-      </mesh>
-      <mesh castShadow position={[0.5, 1.2, 1.3]}>
-        <boxGeometry args={[0.1, 2, 0.1]} />
-        <meshStandardMaterial color="#374151" />
-      </mesh>
-      <mesh castShadow position={[-0.5, 1.2, 1.3]}>
-        <boxGeometry args={[0.1, 2, 0.1]} />
-        <meshStandardMaterial color="#374151" />
-      </mesh>
-
-      {/* Forks */}
-      <mesh castShadow position={[-0.3, 0.3, 1.8]}>
-        <boxGeometry args={[0.1, 0.08, 1.2]} />
-        <meshStandardMaterial color="#6b7280" metalness={0.8} roughness={0.2} />
-      </mesh>
-      <mesh castShadow position={[0.3, 0.3, 1.8]}>
-        <boxGeometry args={[0.1, 0.08, 1.2]} />
-        <meshStandardMaterial color="#6b7280" metalness={0.8} roughness={0.2} />
-      </mesh>
-
-      {/* Wheels */}
-      <mesh castShadow position={[-0.6, 0.25, 0.8]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.25, 0.25, 0.2, 16]} />
-        <meshStandardMaterial color="#1f2937" />
-      </mesh>
-      <mesh castShadow position={[0.6, 0.25, 0.8]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.25, 0.25, 0.2, 16]} />
-        <meshStandardMaterial color="#1f2937" />
-      </mesh>
-      <mesh castShadow position={[-0.6, 0.25, -0.8]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.25, 0.25, 0.2, 16]} />
-        <meshStandardMaterial color="#1f2937" />
-      </mesh>
-      <mesh castShadow position={[0.6, 0.25, -0.8]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.25, 0.25, 0.2, 16]} />
-        <meshStandardMaterial color="#1f2937" />
-      </mesh>
-
-      {/* Cargo (pallet) */}
-      {data.cargo === 'pallet' && (
-        <group position={[0, 0.6, 2]}>
-          <mesh castShadow>
-            <boxGeometry args={[1, 0.15, 1]} />
-            <meshStandardMaterial color="#a16207" />
-          </mesh>
-          <mesh castShadow position={[0, 0.4, 0]}>
-            <boxGeometry args={[0.9, 0.6, 0.9]} />
-            <meshStandardMaterial color="#fef3c7" />
-          </mesh>
-        </group>
+    <group ref={ref} onClick={handleClick} onPointerOver={() => (document.body.style.cursor = 'pointer')} onPointerOut={() => (document.body.style.cursor = 'auto')}>
+      {/* Forklift model - full detail when close, billboard when far */}
+      {distanceTier === 'close' ? (
+        <ForkliftModel
+          hasCargo={hasCargo}
+          isMoving={!isStopped && !isOperating}
+          speedMultiplier={1}
+          forkHeight={forkHeight}
+        />
+      ) : (
+        <ForkliftBillboard hasCargo={hasCargo} />
       )}
 
-      {/* Warning light - flashes red when stopped */}
-      <WarningLight isStopped={isStopped} isInCrossing={isInCrossing} />
+      {/* Warning light - only render when close (flashing light not visible from far anyway) */}
+      {distanceTier === 'close' && (
+        <WarningLight isStopped={isStopped} isInCrossing={isInCrossingRef.current} />
+      )}
 
-      {/* Operator name */}
-      <Text
-        position={[0, 2.6, 0]}
-        fontSize={0.25}
-        color="white"
-        anchorX="center"
-        anchorY="middle"
-        outlineWidth={0.02}
-        outlineColor="#000"
-      >
-        {data.operatorName}
-      </Text>
+      {/* Operator name and status - only render when close */}
+      {distanceTier === 'close' && (
+        <group>
+          <Text
+            position={[0, 2.6, 0]}
+            fontSize={0.25}
+            color="white"
+            anchorX="center"
+            anchorY="middle"
+            outlineWidth={0.02}
+            outlineColor="#000"
+          >
+            {data.operatorName}
+          </Text>
+          {/* Show operation status when loading/unloading */}
+          {isOperating && (
+            <Text
+              position={[0, 2.9, 0]}
+              fontSize={0.2}
+              color={currentOperation === 'loading' ? '#22c55e' : '#f59e0b'}
+              anchorX="center"
+              anchorY="middle"
+              outlineWidth={0.02}
+              outlineColor="#000"
+            >
+              {currentOperation === 'loading' ? 'LOADING' : 'UNLOADING'}
+            </Text>
+          )}
+        </group>
+      )}
     </group>
   );
 };

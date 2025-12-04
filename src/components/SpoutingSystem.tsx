@@ -3,14 +3,32 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { MachineData, MachineType } from '../types';
 import { audioManager } from '../utils/audioManager';
+import { PIPE_MATERIALS } from '../utils/sharedMaterials';
+import { shouldRunThisFrame } from '../utils/frameThrottle';
 
 export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines }) => {
+  // Extract stable machine data to prevent unnecessary re-renders
+  // Only recompute when machine IDs or positions actually change
+  const machineKey = useMemo(() => {
+    return machines
+      .filter((m) =>
+        [
+          MachineType.SILO,
+          MachineType.ROLLER_MILL,
+          MachineType.PLANSIFTER,
+          MachineType.PACKER,
+        ].includes(m.type)
+      )
+      .map((m) => `${m.id}:${m.position.join(',')}`)
+      .join('|');
+  }, [machines]);
+
   // Calculate spouting sound positions (midpoints of key pipe connections)
   const spoutPositions = useMemo(() => {
     const positions: { id: string; x: number; y: number; z: number }[] = [];
-    const silos = machines.filter(m => m.type === MachineType.SILO);
-    const mills = machines.filter(m => m.type === MachineType.ROLLER_MILL);
-    const sifters = machines.filter(m => m.type === MachineType.PLANSIFTER);
+    const silos = machines.filter((m) => m.type === MachineType.SILO);
+    const mills = machines.filter((m) => m.type === MachineType.ROLLER_MILL);
+    const sifters = machines.filter((m) => m.type === MachineType.PLANSIFTER);
 
     // Add sound positions at key pipe junctions
     mills.forEach((mill, i) => {
@@ -20,7 +38,7 @@ export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines
           id: `spout-silo-mill-${i}`,
           x: (silo.position[0] + mill.position[0]) / 2,
           y: 8,
-          z: (silo.position[2] + mill.position[2]) / 2
+          z: (silo.position[2] + mill.position[2]) / 2,
         });
       }
     });
@@ -30,21 +48,22 @@ export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines
         id: `spout-sifter-${i}`,
         x: sifter.position[0],
         y: sifter.position[1],
-        z: sifter.position[2]
+        z: sifter.position[2],
       });
     });
 
     return positions;
-  }, [machines]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [machineKey]); // Use stable key instead of full machines array
 
   // Start spouting sounds on mount
   useEffect(() => {
-    spoutPositions.forEach(pos => {
+    spoutPositions.forEach((pos) => {
       audioManager.startSpoutingSound(pos.id, pos.x, pos.y, pos.z);
     });
 
     return () => {
-      spoutPositions.forEach(pos => {
+      spoutPositions.forEach((pos) => {
         audioManager.stopSpoutingSound(pos.id);
       });
     };
@@ -52,21 +71,31 @@ export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines
 
   // Update spatial audio volumes each frame
   useFrame(() => {
-    spoutPositions.forEach(pos => {
+    // Spatial volume is fine at ~30fps; throttle to reduce per-frame audio work
+    if (!shouldRunThisFrame(2)) return;
+
+    spoutPositions.forEach((pos) => {
       audioManager.updateSpoutingSpatialVolume(pos.id);
     });
   });
 
-  const pipes = useMemo(() => {
-    const _pipes: React.ReactNode[] = [];
+  const pipeData = useMemo(() => {
+    const pipeElements: React.ReactNode[] = [];
+    const geometries: THREE.TubeGeometry[] = [];
+    const materials: THREE.MeshStandardMaterial[] = [];
     const tubeRadius = 0.18;
 
-    const silos = machines.filter(m => m.type === MachineType.SILO);
-    const mills = machines.filter(m => m.type === MachineType.ROLLER_MILL);
-    const sifters = machines.filter(m => m.type === MachineType.PLANSIFTER);
-    const packers = machines.filter(m => m.type === MachineType.PACKER);
+    const silos = machines.filter((m) => m.type === MachineType.SILO);
+    const mills = machines.filter((m) => m.type === MachineType.ROLLER_MILL);
+    const sifters = machines.filter((m) => m.type === MachineType.PLANSIFTER);
+    const packers = machines.filter((m) => m.type === MachineType.PACKER);
 
-    const createConnection = (start: THREE.Vector3, end: THREE.Vector3, key: string, color: string = '#94a3b8') => {
+    const createConnection = (
+      start: THREE.Vector3,
+      end: THREE.Vector3,
+      key: string,
+      color: string = '#94a3b8'
+    ) => {
       const mid1 = start.clone().lerp(end, 0.25);
       mid1.y = Math.max(start.y, end.y) + 5;
       const mid2 = start.clone().lerp(end, 0.75);
@@ -77,8 +106,11 @@ export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines
       const material = new THREE.MeshStandardMaterial({
         color,
         metalness: 0.85,
-        roughness: 0.15
+        roughness: 0.15,
       });
+
+      geometries.push(geometry);
+      materials.push(material);
 
       return <mesh key={key} geometry={geometry} material={material} castShadow />;
     };
@@ -88,15 +120,23 @@ export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines
       const silo = silos[i % silos.length];
       if (!silo) return;
       const start = new THREE.Vector3(silo.position[0], 3, silo.position[2]);
-      const end = new THREE.Vector3(mill.position[0], mill.position[1] + mill.size[1] + 1.5, mill.position[2]);
-      _pipes.push(createConnection(start, end, `pipe-s-m-${i}`, '#64748b'));
+      const end = new THREE.Vector3(
+        mill.position[0],
+        mill.position[1] + mill.size[1] + 1.5,
+        mill.position[2]
+      );
+      pipeElements.push(createConnection(start, end, `pipe-s-m-${i}`, '#64748b'));
     });
 
     // Mills to Sifters (pneumatic lift)
     mills.forEach((mill, i) => {
       const sifter = sifters[i % sifters.length];
       if (!sifter) return;
-      const start = new THREE.Vector3(mill.position[0], mill.position[1] + mill.size[1], mill.position[2]);
+      const start = new THREE.Vector3(
+        mill.position[0],
+        mill.position[1] + mill.size[1],
+        mill.position[2]
+      );
       // Use deterministic offset based on index instead of random (prevents pipes jumping on re-render)
       const offsetX = ((i % 3) - 1) * 1.5; // -1.5, 0, or 1.5 based on index
       const end = new THREE.Vector3(
@@ -104,57 +144,75 @@ export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines
         sifter.position[1] + sifter.size[1] / 2,
         sifter.position[2]
       );
-      _pipes.push(createConnection(start, end, `pipe-m-s-${i}`, '#cbd5e1'));
+      pipeElements.push(createConnection(start, end, `pipe-m-s-${i}`, '#cbd5e1'));
     });
 
     // Sifters to Packers
     packers.forEach((packer, i) => {
       const sifter = sifters[i % sifters.length];
       if (!sifter) return;
-      const start = new THREE.Vector3(sifter.position[0], sifter.position[1] - 2, sifter.position[2]);
-      const end = new THREE.Vector3(packer.position[0], packer.position[1] + packer.size[1] + 1, packer.position[2]);
-      _pipes.push(createConnection(start, end, `pipe-s-p-${i}`, '#e2e8f0'));
+      const start = new THREE.Vector3(
+        sifter.position[0],
+        sifter.position[1] - 2,
+        sifter.position[2]
+      );
+      const end = new THREE.Vector3(
+        packer.position[0],
+        packer.position[1] + packer.size[1] + 1,
+        packer.position[2]
+      );
+      pipeElements.push(createConnection(start, end, `pipe-s-p-${i}`, '#e2e8f0'));
     });
 
-    return _pipes;
-  }, [machines]);
+    return { pipeElements, geometries, materials };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [machineKey]); // Use stable key instead of full machines array
+
+  // Dispose geometries and materials on unmount or when dependencies change
+  useEffect(() => {
+    return () => {
+      pipeData.geometries.forEach((geometry) => geometry.dispose());
+      pipeData.materials.forEach((material) => material.dispose());
+    };
+  }, [pipeData]);
 
   return (
     <group>
-      {pipes}
+      {pipeData.pipeElements}
       {/* Pipe supports */}
       <PipeSupports />
     </group>
   );
 };
 
-const PipeSupports: React.FC = () => {
-  const supports = useMemo(() => {
-    const positions: [number, number, number][] = [
-      [-15, 10, -12],
-      [0, 10, -12],
-      [15, 10, -12],
-      [-10, 12, 0],
-      [10, 12, 0],
-      [-8, 10, 10],
-      [8, 10, 10],
-    ];
+// Pipe support positions (static, defined at module level)
+const PIPE_SUPPORT_POSITIONS: [number, number, number][] = [
+  [-15, 10, -12],
+  [0, 10, -12],
+  [15, 10, -12],
+  [-10, 12, 0],
+  [10, 12, 0],
+  [-8, 10, 10],
+  [8, 10, 10],
+];
 
-    return positions.map((pos, i) => (
-      <group key={i} position={pos}>
-        {/* Vertical support */}
-        <mesh castShadow>
-          <cylinderGeometry args={[0.1, 0.1, pos[1] * 2]} />
-          <meshStandardMaterial color="#374151" metalness={0.8} roughness={0.3} />
-        </mesh>
-        {/* Cross beam */}
-        <mesh position={[0, 0, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-          <cylinderGeometry args={[0.08, 0.08, 3]} />
-          <meshStandardMaterial color="#475569" metalness={0.8} roughness={0.3} />
-        </mesh>
-      </group>
-    ));
-  }, []);
-
-  return <group>{supports}</group>;
-};
+const PipeSupports: React.FC = React.memo(() => {
+  return (
+    <group>
+      {PIPE_SUPPORT_POSITIONS.map((pos, i) => (
+        <group key={i} position={pos}>
+          {/* Vertical support - main structure gets shadows */}
+          <mesh castShadow>
+            <cylinderGeometry args={[0.1, 0.1, pos[1] * 2]} />
+            <primitive object={PIPE_MATERIALS.supportGray} attach="material" />
+          </mesh>
+          {/* Cross beam - no shadow for smaller cross members */}
+          <mesh position={[0, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.08, 0.08, 3]} />
+            <primitive object={PIPE_MATERIALS.supportSlate} attach="material" />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  );
+});

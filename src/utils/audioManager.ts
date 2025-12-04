@@ -1,4 +1,18 @@
 // Audio manager for realistic factory sounds using Web Audio API
+import { logger } from './logger';
+
+// Use centralized audio logger
+const audioLog = {
+  info: (message: string, ...args: unknown[]) => {
+    logger.audio.info(message, ...args);
+  },
+  warn: (message: string, ...args: unknown[]) => {
+    logger.audio.warn(message, ...args);
+  },
+  error: (message: string, error?: unknown, ...args: unknown[]) => {
+    logger.audio.error(message, error, ...args);
+  },
+};
 
 class AudioManager {
   private audioContext: AudioContext | null = null;
@@ -9,6 +23,14 @@ class AudioManager {
   private _volume: number = 0.5;
   private listeners: Set<() => void> = new Set();
   private _initialized: boolean = false;
+
+  // Pre-generated noise buffers to avoid blocking main thread during playback
+  private cachedNoiseBuffers: {
+    brown4s?: AudioBuffer; // 4-second brown noise for compressor
+    pink4s?: AudioBuffer; // 4-second pink noise for PA speech
+    white1s?: AudioBuffer; // 1-second white noise for various effects
+  } = {};
+  private noiseBuffersGenerated: boolean = false;
 
   get initialized(): boolean {
     return this._initialized;
@@ -26,11 +48,15 @@ class AudioManager {
   private machineNodes: Map<string, { source: AudioBufferSourceNode; gain: GainNode }> = new Map();
 
   // Forklift engine sounds
-  private forkliftEngines: Map<string, { source: AudioBufferSourceNode; gain: GainNode; lfo: OscillatorNode }> = new Map();
+  private forkliftEngines: Map<
+    string,
+    { source: AudioBufferSourceNode; gain: GainNode; lfo: OscillatorNode }
+  > = new Map();
+  private backgroundMuted = false;
 
   // Radio chatter state
   private radioChatterActive: boolean = false;
-  private radioChatterInterval: ReturnType<typeof setInterval> | null = null;
+  private radioChatterInterval: NodeJS.Timeout | number | null = null;
 
   // Outdoor ambient sounds
   private outdoorNodes: {
@@ -45,6 +71,54 @@ class AudioManager {
   // Sound source positions for spatial calculation
   private soundPositions: Map<string, { x: number; y: number; z: number }> = new Map();
 
+  // Background music
+  private musicAudio: HTMLAudioElement | null = null;
+  private _musicEnabled: boolean = true;
+  private _musicVolume: number = 0.3;
+  private _currentTrackIndex: number = 0;
+
+  // Available music tracks (shuffled on init, excludes victory fanfare)
+  // Music by Kevin MacLeod (incompetech.com) - Licensed under CC BY 3.0/4.0
+  // Jolly, upbeat working/driving music for factory vibes
+  private readonly allMusicTracks = [
+    { id: 'the_builder', name: 'The Builder', file: '/The Builder.mp3' },
+    { id: 'space_jazz', name: 'Space Jazz', file: '/Space Jazz.mp3' },
+    { id: 'upbeat_forever', name: 'Upbeat Forever', file: '/Upbeat Forever.mp3' },
+    { id: 'fuzzball_parade', name: 'Fuzzball Parade', file: '/Fuzzball Parade.mp3' },
+    { id: 'i_got_a_stick', name: 'I Got a Stick', file: '/I Got a Stick Feat James Gavins.mp3' },
+    { id: 'boogie_party', name: 'Boogie Party', file: '/Boogie Party.mp3' },
+    { id: 'voxel_revolution', name: 'Voxel Revolution', file: '/Voxel Revolution.mp3' },
+    { id: 'newer_wave', name: 'Newer Wave', file: '/Newer Wave.mp3' },
+    { id: 'neon_laser_horizon', name: 'Neon Laser Horizon', file: '/Neon Laser Horizon.mp3' },
+    { id: 'cloud_dancer', name: 'Cloud Dancer', file: '/Cloud Dancer.mp3' },
+  ];
+
+  // Shuffled playlist (Fisher-Yates shuffle on init)
+  private musicTracks: { id: string; name: string; file: string }[];
+
+  // Victory fanfare - only played when quota hits 100%
+  // Music by Kevin MacLeod (incompetech.com) - Licensed under CC BY 4.0
+  private readonly victoryFanfare = {
+    id: 'fanfare_for_space',
+    name: 'Victory!',
+    file: '/Fanfare for Space.mp3',
+  };
+  private victoryAudio: HTMLAudioElement | null = null;
+  private _quotaReached: boolean = false;
+
+  constructor() {
+    // Shuffle tracks on initialization using Fisher-Yates algorithm
+    this.musicTracks = [...this.allMusicTracks];
+    this.shufflePlaylist();
+  }
+
+  private shufflePlaylist(): void {
+    for (let i = this.musicTracks.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.musicTracks[i], this.musicTracks[j]] = [this.musicTracks[j], this.musicTracks[i]];
+    }
+  }
+
   get muted(): boolean {
     return this._muted;
   }
@@ -52,6 +126,7 @@ class AudioManager {
   set muted(value: boolean) {
     this._muted = value;
     this.updateMasterVolume();
+    this.updateMusicVolume();
     this.notifyListeners();
   }
 
@@ -65,13 +140,120 @@ class AudioManager {
     this.notifyListeners();
   }
 
+  get musicEnabled(): boolean {
+    return this._musicEnabled;
+  }
+
+  set musicEnabled(value: boolean) {
+    this._musicEnabled = value;
+    if (value) {
+      this.startMusic();
+    } else {
+      this.stopMusic();
+    }
+    this.notifyListeners();
+  }
+
+  get musicVolume(): number {
+    return this._musicVolume;
+  }
+
+  set musicVolume(value: number) {
+    this._musicVolume = Math.max(0, Math.min(1, value));
+    this.updateMusicVolume();
+    this.notifyListeners();
+  }
+
+  get currentTrack(): { id: string; name: string; file: string } {
+    return this.musicTracks[this._currentTrackIndex];
+  }
+
+  get trackCount(): number {
+    return this.musicTracks.length;
+  }
+
+  get trackIndex(): number {
+    return this._currentTrackIndex;
+  }
+
+  nextTrack(): void {
+    this._currentTrackIndex = this._currentTrackIndex + 1;
+    // Reshuffle playlist when we've played all tracks
+    if (this._currentTrackIndex >= this.musicTracks.length) {
+      this._currentTrackIndex = 0;
+      this.shufflePlaylist();
+    }
+    if (this._musicEnabled && this.musicAudio) {
+      this.musicAudio.src = this.currentTrack.file;
+      this.musicAudio.play().catch(() => {});
+    }
+    this.notifyListeners();
+  }
+
+  prevTrack(): void {
+    this._currentTrackIndex =
+      (this._currentTrackIndex - 1 + this.musicTracks.length) % this.musicTracks.length;
+    if (this._musicEnabled && this.musicAudio) {
+      this.musicAudio.src = this.currentTrack.file;
+      this.musicAudio.play().catch(() => {});
+    }
+    this.notifyListeners();
+  }
+
+  // Play victory fanfare when daily quota reaches 100%
+  // This interrupts current music briefly, then resumes
+  playVictoryFanfare(): void {
+    // Only play once per quota achievement (reset when quota drops below 100%)
+    if (this._quotaReached) return;
+    this._quotaReached = true;
+
+    // Pause current music
+    const wasPlaying = this.musicAudio && !this.musicAudio.paused;
+    const currentTime = this.musicAudio?.currentTime || 0;
+    if (wasPlaying && this.musicAudio) {
+      this.musicAudio.pause();
+    }
+
+    // Play victory fanfare
+    if (!this.victoryAudio) {
+      this.victoryAudio = new Audio(this.victoryFanfare.file);
+    }
+    this.victoryAudio.volume = this._muted ? 0 : this._musicVolume * 1.2; // Slightly louder
+    this.victoryAudio.currentTime = 0;
+
+    // Resume music after fanfare ends
+    this.victoryAudio.onended = () => {
+      if (wasPlaying && this.musicAudio && this._musicEnabled) {
+        this.musicAudio.currentTime = currentTime;
+        this.musicAudio.play().catch(() => {});
+      }
+    };
+
+    this.victoryAudio.play().catch((e) => {
+      audioLog.warn('Victory fanfare playback failed', e);
+      // Resume music if fanfare failed
+      if (wasPlaying && this.musicAudio && this._musicEnabled) {
+        this.musicAudio.play().catch(() => {});
+      }
+    });
+  }
+
+  // Reset quota flag when production drops below 100%
+  resetQuotaFlag(): void {
+    this._quotaReached = false;
+  }
+
+  get quotaReached(): boolean {
+    return this._quotaReached;
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
   private notifyListeners(): void {
-    this.listeners.forEach(listener => listener());
+    this.listeners.forEach((listener) => listener());
   }
 
   private getContext(): AudioContext | null {
@@ -83,8 +265,82 @@ class AudioManager {
       this.masterGain = this.audioContext.createGain();
       this.masterGain.connect(this.audioContext.destination);
       this.updateMasterVolume();
+      // Pre-generate noise buffers asynchronously to avoid blocking during playback
+      this.preGenerateNoiseBuffers();
     }
     return this.audioContext;
+  }
+
+  // Pre-generate commonly used noise buffers to prevent main thread blocking
+  // during sound playback (which causes music interruption)
+  private preGenerateNoiseBuffers(): void {
+    if (this.noiseBuffersGenerated || !this.audioContext) return;
+    this.noiseBuffersGenerated = true;
+
+    // Use requestIdleCallback or setTimeout to generate buffers without blocking
+    const generateBuffers = () => {
+      if (!this.audioContext) return;
+      const sampleRate = this.audioContext.sampleRate;
+
+      // Generate 4-second brown noise (for compressor)
+      this.cachedNoiseBuffers.brown4s = this.generateNoiseBufferInternal(4, 'brown', sampleRate);
+
+      // Generate 4-second pink noise (for PA speech - covers 2-4s range)
+      this.cachedNoiseBuffers.pink4s = this.generateNoiseBufferInternal(4, 'pink', sampleRate);
+
+      // Generate 1-second white noise (for various short effects)
+      this.cachedNoiseBuffers.white1s = this.generateNoiseBufferInternal(1, 'white', sampleRate);
+
+      audioLog.info('Noise buffers pre-generated');
+    };
+
+    // Use requestIdleCallback if available, otherwise use setTimeout
+    if (typeof requestIdleCallback !== 'undefined') {
+      requestIdleCallback(generateBuffers, { timeout: 2000 });
+    } else {
+      setTimeout(generateBuffers, 100);
+    }
+  }
+
+  // Internal buffer generation (used by preGenerateNoiseBuffers)
+  private generateNoiseBufferInternal(
+    duration: number,
+    type: 'white' | 'pink' | 'brown',
+    sampleRate: number
+  ): AudioBuffer | null {
+    if (!this.audioContext) return null;
+    const bufferSize = sampleRate * duration;
+    const buffer = this.audioContext.createBuffer(1, bufferSize, sampleRate);
+    const data = buffer.getChannelData(0);
+
+    let b0 = 0,
+      b1 = 0,
+      b2 = 0,
+      b3 = 0,
+      b4 = 0,
+      b5 = 0,
+      b6 = 0;
+
+    for (let i = 0; i < bufferSize; i++) {
+      const white = Math.random() * 2 - 1;
+
+      if (type === 'white') {
+        data[i] = white;
+      } else if (type === 'pink') {
+        b0 = 0.99886 * b0 + white * 0.0555179;
+        b1 = 0.99332 * b1 + white * 0.0750759;
+        b2 = 0.969 * b2 + white * 0.153852;
+        b3 = 0.8665 * b3 + white * 0.3104856;
+        b4 = 0.55 * b4 + white * 0.5329522;
+        b5 = -0.7616 * b5 - white * 0.016898;
+        data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+        b6 = white * 0.115926;
+      } else {
+        // brown
+        data[i] = (b0 = (b0 + 0.02 * white) / 1.02) * 3.5;
+      }
+    }
+    return buffer;
   }
 
   private getMasterGain(): GainNode | null {
@@ -100,40 +356,87 @@ class AudioManager {
     }
   }
 
+  // Reduce audio load when tab is hidden (keep user volume intact)
+  setBackgroundVisibility(hidden: boolean): void {
+    const ctx = this.audioContext;
+    const gain = this.masterGain;
+    if (!ctx || !gain) return;
+
+    if (hidden && !this.backgroundMuted) {
+      this.backgroundMuted = true;
+      gain.gain.setTargetAtTime(0, ctx.currentTime, 0.1);
+    } else if (!hidden && this.backgroundMuted) {
+      this.backgroundMuted = false;
+      this.updateMasterVolume();
+      if (this._musicEnabled && this.musicAudio && this.musicAudio.paused) {
+        this.musicAudio.play().catch(() => {});
+      }
+    }
+  }
+
+  private updateMusicVolume(): void {
+    if (this.musicAudio) {
+      // Music has its own independent volume control
+      this.musicAudio.volume = this._muted ? 0 : this._musicVolume;
+    }
+  }
+
+  startMusic(): void {
+    if (!this._musicEnabled) return;
+
+    if (!this.musicAudio) {
+      this.musicAudio = new Audio(this.currentTrack.file);
+      this.musicAudio.loop = false; // Don't loop single track - advance through playlist
+      this.updateMusicVolume();
+
+      // Auto-advance to next track when current ends
+      this.musicAudio.addEventListener('ended', () => {
+        this.nextTrack();
+      });
+    } else if (this.musicAudio.src !== window.location.origin + this.currentTrack.file) {
+      this.musicAudio.src = this.currentTrack.file;
+    }
+
+    this.musicAudio.play().catch((e) => {
+      audioLog.warn('Music playback failed (user interaction required)', e);
+    });
+  }
+
+  stopMusic(): void {
+    if (this.musicAudio) {
+      this.musicAudio.pause();
+      this.musicAudio.currentTime = 0;
+    }
+  }
+
   private getEffectiveVolume(): number {
     return this._muted ? 0 : this._volume;
   }
 
   // Create noise buffer for various industrial sounds
-  private createNoiseBuffer(duration: number, type: 'white' | 'pink' | 'brown' = 'white'): AudioBuffer | null {
+  // Uses pre-generated cached buffers when available to avoid blocking main thread
+  private createNoiseBuffer(
+    duration: number,
+    type: 'white' | 'pink' | 'brown' = 'white'
+  ): AudioBuffer | null {
     const ctx = this.getContext();
     if (!ctx) return null;
-    const sampleRate = ctx.sampleRate;
-    const bufferSize = sampleRate * duration;
-    const buffer = ctx.createBuffer(1, bufferSize, sampleRate);
-    const data = buffer.getChannelData(0);
 
-    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
-
-    for (let i = 0; i < bufferSize; i++) {
-      const white = Math.random() * 2 - 1;
-
-      if (type === 'white') {
-        data[i] = white;
-      } else if (type === 'pink') {
-        b0 = 0.99886 * b0 + white * 0.0555179;
-        b1 = 0.99332 * b1 + white * 0.0750759;
-        b2 = 0.96900 * b2 + white * 0.1538520;
-        b3 = 0.86650 * b3 + white * 0.3104856;
-        b4 = 0.55000 * b4 + white * 0.5329522;
-        b5 = -0.7616 * b5 - white * 0.0168980;
-        data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
-        b6 = white * 0.115926;
-      } else { // brown
-        data[i] = (b0 = (b0 + (0.02 * white)) / 1.02) * 3.5;
-      }
+    // Return cached buffers for common use cases to avoid main thread blocking
+    // The cached buffers are longer than needed, which is fine - we just use a portion
+    if (type === 'brown' && duration <= 4 && this.cachedNoiseBuffers.brown4s) {
+      return this.cachedNoiseBuffers.brown4s;
     }
-    return buffer;
+    if (type === 'pink' && duration <= 4 && this.cachedNoiseBuffers.pink4s) {
+      return this.cachedNoiseBuffers.pink4s;
+    }
+    if (type === 'white' && duration <= 1 && this.cachedNoiseBuffers.white1s) {
+      return this.cachedNoiseBuffers.white1s;
+    }
+
+    // Fall back to generating a new buffer for uncached sizes/types
+    const sampleRate = ctx.sampleRate;
+    return this.generateNoiseBufferInternal(duration, type, sampleRate);
   }
 
   // === FORKLIFT SOUNDS ===
@@ -158,7 +461,7 @@ class AudioManager {
       const gains: GainNode[] = [];
       const oscillators: OscillatorNode[] = [];
 
-      frequencies.forEach((freq, i) => {
+      frequencies.forEach((freq) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         const filter = ctx.createBiquadFilter();
@@ -213,9 +516,8 @@ class AudioManager {
 
       noiseSource.start(currentTime);
       noiseSource.stop(currentTime + 0.45);
-
     } catch (e) {
-      // Audio not supported or blocked
+      audioLog.warn('Click sound playback failed', e);
     }
   }
 
@@ -272,9 +574,8 @@ class AudioManager {
       osc2.start(currentTime);
       osc1.stop(currentTime + 0.5);
       osc2.stop(currentTime + 0.5);
-
     } catch (e) {
-      // Audio not supported or blocked
+      audioLog.warn('Backup beep sound failed', { forkliftId }, e);
     }
   }
 
@@ -389,18 +690,19 @@ class AudioManager {
 
         this.ambientNodes.grainFlow = { source, gain };
       }
-
     } catch (e) {
-      // Audio not supported or blocked
+      audioLog.warn('Ambient factory sounds initialization failed', e);
     }
   }
 
   stopAmbientSounds() {
-    Object.values(this.ambientNodes).forEach(node => {
+    Object.values(this.ambientNodes).forEach((node) => {
       if (node) {
         try {
           node.source.stop();
-        } catch (e) {}
+        } catch (e) {
+          audioLog.warn('Failed to stop ambient sound node', e);
+        }
       }
     });
     this.ambientNodes = {};
@@ -431,7 +733,7 @@ class AudioManager {
       source.loop = true;
 
       // Filter frequency based on RPM
-      const filterFreq = 200 + (rpm / 10);
+      const filterFreq = 200 + rpm / 10;
       filter.type = 'bandpass';
       filter.frequency.setValueAtTime(filterFreq, ctx.currentTime);
       filter.Q.setValueAtTime(3, ctx.currentTime);
@@ -453,8 +755,9 @@ class AudioManager {
       lfo.start();
 
       this.machineNodes.set(machineId, { source, gain });
-
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Mill sound initialization failed', { machineId }, e);
+    }
   }
 
   stopMillSound(machineId: string) {
@@ -462,7 +765,9 @@ class AudioManager {
     if (node) {
       try {
         node.source.stop();
-      } catch (e) {}
+      } catch (e) {
+        audioLog.warn('Failed to stop mill sound', { machineId }, e);
+      }
       this.machineNodes.delete(machineId);
     }
   }
@@ -495,7 +800,7 @@ class AudioManager {
       const lfo = ctx.createOscillator();
       const lfoGain = ctx.createGain();
       lfo.type = 'sine';
-      lfo.frequency.setValueAtTime(rpm / 60 * 2, ctx.currentTime); // Double the shake rate
+      lfo.frequency.setValueAtTime((rpm / 60) * 2, ctx.currentTime); // Double the shake rate
       lfoGain.gain.setValueAtTime(0.015, ctx.currentTime);
 
       gain.gain.setValueAtTime(0.025, ctx.currentTime);
@@ -510,8 +815,9 @@ class AudioManager {
       lfo.start();
 
       this.machineNodes.set(machineId, { source, gain });
-
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Sifter sound initialization failed', { machineId }, e);
+    }
   }
 
   // Packer pneumatic/mechanical sound
@@ -557,8 +863,9 @@ class AudioManager {
       lfo.start();
 
       this.machineNodes.set(machineId, { source, gain });
-
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Packer sound initialization failed', { machineId }, e);
+    }
   }
 
   stopMachineSound(machineId: string) {
@@ -566,7 +873,9 @@ class AudioManager {
     if (node) {
       try {
         node.source.stop();
-      } catch (e) {}
+      } catch (e) {
+        audioLog.warn('Failed to stop machine sound', { machineId }, e);
+      }
       this.machineNodes.delete(machineId);
     }
   }
@@ -603,8 +912,9 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.2);
-
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Clunk sound playback failed', e);
+    }
   }
 
   // Alert/warning sound
@@ -638,8 +948,9 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.2);
       }
-
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Alert sound failed', e);
+    }
   }
 
   // Grain pouring/flowing sound
@@ -676,8 +987,9 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + duration + 0.5);
-
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Alert sound playback failed', e);
+    }
   }
 
   // === TRUCK SOUNDS ===
@@ -728,7 +1040,9 @@ class AudioManager {
       lfo.start();
 
       this.truckEngines.set(truckId, { source, gain });
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Grain flow sound playback failed', e);
+    }
   }
 
   updateTruckEngine(truckId: string, isMoving: boolean) {
@@ -744,7 +1058,9 @@ class AudioManager {
     if (engine) {
       try {
         engine.source.stop();
-      } catch (e) {}
+      } catch (e) {
+        audioLog.warn('Truck engine start failed', { truckId }, e);
+      }
       this.truckEngines.delete(truckId);
     }
   }
@@ -780,7 +1096,77 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + 0.7);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Air brake sound failed', e);
+    }
+  }
+
+  // Backup beeper for trucks reversing
+  private backupBeepers: Map<
+    string,
+    { oscillator: OscillatorNode; gain: GainNode; interval: number | NodeJS.Timeout }
+  > = new Map();
+
+  startBackupBeeper(truckId: string) {
+    if (this.backupBeepers.has(truckId)) return;
+    if (this.getEffectiveVolume() === 0) return;
+
+    try {
+      const ctx = this.getContext();
+      const masterGain = this.getMasterGain();
+      if (!ctx || !masterGain) return;
+
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      oscillator.type = 'square';
+      oscillator.frequency.setValueAtTime(1200, ctx.currentTime);
+
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+
+      oscillator.connect(gain);
+      gain.connect(masterGain);
+      oscillator.start();
+
+      // Beep pattern: on for 0.3s, off for 0.5s - only beep twice then stop
+      let beepCount = 0;
+      const maxBeeps = 2;
+      let isOn = false;
+
+      const interval = setInterval(
+        () => {
+          if (!this.audioContext) return;
+          isOn = !isOn;
+          gain.gain.setTargetAtTime(isOn ? 0.03 : 0, this.audioContext.currentTime, 0.01);
+
+          // Count completed beeps (when turning off after being on)
+          if (!isOn) {
+            beepCount++;
+            if (beepCount >= maxBeeps) {
+              this.stopBackupBeeper(truckId);
+            }
+          }
+        },
+        isOn ? 300 : 500
+      );
+
+      this.backupBeepers.set(truckId, { oscillator, gain, interval });
+    } catch (e) {
+      audioLog.warn('Backup beeper start failed', e);
+    }
+  }
+
+  stopBackupBeeper(truckId: string) {
+    const beeper = this.backupBeepers.get(truckId);
+    if (beeper) {
+      try {
+        clearInterval(beeper.interval as number);
+        beeper.oscillator.stop();
+      } catch (e) {
+        audioLog.warn('Backup beeper stop failed', e);
+      }
+      this.backupBeepers.delete(truckId);
+    }
   }
 
   // === FOOTSTEP SOUNDS ===
@@ -827,7 +1213,9 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + 0.1);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Clunk sound playback failed', e);
+    }
   }
 
   // === AI DECISION SOUNDS ===
@@ -863,7 +1251,9 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.15);
       });
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('AI critical alert sound failed', e);
+    }
   }
 
   // AI decision notification sound (subtle)
@@ -895,7 +1285,9 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.18);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('AI decision sound failed', e);
+    }
   }
 
   // AI anomaly detection sound
@@ -937,7 +1329,9 @@ class AudioManager {
       lfo.start(currentTime);
       osc.stop(currentTime + 0.55);
       lfo.stop(currentTime + 0.55);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('AI anomaly sound failed', e);
+    }
   }
 
   // AI success chime (for completed decisions)
@@ -970,7 +1364,9 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.25);
       });
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('AI success sound failed', e);
+    }
   }
 
   // === UI SOUNDS ===
@@ -1000,7 +1396,9 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.08);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('UI click sound failed', e);
+    }
   }
 
   // Hover sound (subtle)
@@ -1027,7 +1425,9 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.04);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Hover sound failed', e);
+    }
   }
 
   // Panel open/close sound
@@ -1055,7 +1455,9 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.15);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Panel open sound failed', e);
+    }
   }
 
   playPanelClose() {
@@ -1082,7 +1484,9 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.15);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Panel close sound failed', e);
+    }
   }
 
   // Resume audio context if suspended (needed for user interaction requirement)
@@ -1109,7 +1513,11 @@ class AudioManager {
   }
 
   // Calculate volume attenuation based on distance from camera
-  private calculateSpatialVolume(sourceId: string, baseVolume: number, maxDistance: number = 50): number {
+  private calculateSpatialVolume(
+    sourceId: string,
+    baseVolume: number,
+    maxDistance: number = 50
+  ): number {
     const sourcePos = this.soundPositions.get(sourceId);
     if (!sourcePos) return baseVolume;
 
@@ -1119,7 +1527,7 @@ class AudioManager {
     const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
     // Inverse distance falloff with minimum
-    const attenuation = Math.max(0, 1 - (distance / maxDistance));
+    const attenuation = Math.max(0, 1 - distance / maxDistance);
     return baseVolume * attenuation * attenuation; // Squared for more natural falloff
   }
 
@@ -1135,7 +1543,7 @@ class AudioManager {
   // === WORKER VOICE SOUNDS ===
 
   private workerVoiceActive: boolean = false;
-  private workerVoiceInterval: ReturnType<typeof setInterval> | null = null;
+  private workerVoiceInterval: NodeJS.Timeout | number | null = null;
 
   startWorkerVoices() {
     if (this.workerVoiceActive) return;
@@ -1218,8 +1626,9 @@ class AudioManager {
         osc.start(currentTime);
         osc.stop(currentTime + duration + 0.1);
       });
-
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Failed to stop worker voices', e);
+    }
   }
 
   // Worker whistle (attention-getting)
@@ -1251,8 +1660,9 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.55);
-
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Audio playback failed', e);
+    }
   }
 
   // Worker call (muffled distant voice)
@@ -1293,8 +1703,9 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + duration + 0.1);
-
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Audio playback failed', e);
+    }
   }
 
   // === TIME-OF-DAY AUDIO ===
@@ -1343,7 +1754,7 @@ class AudioManager {
     }
   }
 
-  private nightAmbientInterval: ReturnType<typeof setInterval> | null = null;
+  private nightAmbientInterval: NodeJS.Timeout | number | null = null;
 
   private startNightAmbient() {
     if (this.nightAmbientInterval) return;
@@ -1395,8 +1806,9 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.06);
       }
-
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Time of day audio update failed', e);
+    }
   }
 
   // === CONVEYOR SPATIAL AUDIO ===
@@ -1437,8 +1849,9 @@ class AudioManager {
 
       this.conveyorNodes.set(conveyorId, { source, gain });
       this.registerSoundPosition(conveyorId, x, y, z);
-
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Conveyor sound start failed', { conveyorId }, e);
+    }
   }
 
   updateConveyorSpatialVolume(conveyorId: string) {
@@ -1454,7 +1867,9 @@ class AudioManager {
     if (node) {
       try {
         node.source.stop();
-      } catch (e) {}
+      } catch (e) {
+        audioLog.warn('Failed to stop conveyor sound', { conveyorId }, e);
+      }
       this.conveyorNodes.delete(conveyorId);
     }
   }
@@ -1473,7 +1888,7 @@ class AudioManager {
 
       // Deep truck horn (two-tone)
       const hornFreqs = [180, 220];
-      hornFreqs.forEach((freq, i) => {
+      hornFreqs.forEach((freq) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         const filter = ctx.createBiquadFilter();
@@ -1500,8 +1915,9 @@ class AudioManager {
 
       // Air brake release after horn
       setTimeout(() => this.playAirBrake(), 700);
-
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Air brake sound failed', e);
+    }
   }
 
   // Truck departure sound (engine rev + release)
@@ -1541,8 +1957,390 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + 2.1);
+    } catch (e) {
+      audioLog.warn('Truck departure sound failed', e);
+    }
+  }
 
-    } catch (e) {}
+  // Standalone truck horn blast (for departures or warnings)
+  playTruckHorn(truckId: string, isLong: boolean = false) {
+    if (this.getEffectiveVolume() === 0) return;
+
+    try {
+      const ctx = this.getContext();
+      const masterGain = this.getMasterGain();
+      if (!ctx || !masterGain) return;
+      const currentTime = ctx.currentTime;
+
+      const duration = isLong ? 1.2 : 0.5;
+
+      // Two-tone air horn (classic semi-truck sound)
+      const hornFreqs = [180, 220]; // Low and high tones
+      hornFreqs.forEach((freq) => {
+        const osc = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const filter = ctx.createBiquadFilter();
+
+        // Main tone
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq, currentTime);
+
+        // Slight detuning for richness
+        osc2.type = 'sawtooth';
+        osc2.frequency.setValueAtTime(freq * 1.003, currentTime);
+
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(800, currentTime);
+        filter.Q.setValueAtTime(2, currentTime);
+
+        // Envelope
+        gain.gain.setValueAtTime(0, currentTime);
+        gain.gain.linearRampToValueAtTime(0.08, currentTime + 0.03);
+        gain.gain.setValueAtTime(0.08, currentTime + duration - 0.1);
+        gain.gain.exponentialRampToValueAtTime(0.001, currentTime + duration);
+
+        osc.connect(filter);
+        osc2.connect(filter);
+        filter.connect(gain);
+        gain.connect(masterGain);
+
+        osc.start(currentTime);
+        osc.stop(currentTime + duration + 0.1);
+        osc2.start(currentTime);
+        osc2.stop(currentTime + duration + 0.1);
+      });
+
+      audioLog.info('Truck horn played', { truckId, isLong });
+    } catch (e) {
+      audioLog.warn('Truck horn sound failed', { truckId }, e);
+    }
+  }
+
+  // Jake brake (engine compression braking) - loud rattling exhaust sound
+  playJakeBrake(truckId: string, duration: number = 2) {
+    if (this.getEffectiveVolume() === 0) return;
+
+    try {
+      const ctx = this.getContext();
+      const masterGain = this.getMasterGain();
+      if (!ctx || !masterGain) return;
+      const currentTime = ctx.currentTime;
+
+      // Create the distinctive jake brake rumble
+      const buffer = this.createNoiseBuffer(duration + 0.5, 'brown');
+      if (!buffer) return;
+      const source = ctx.createBufferSource();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      const lfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+
+      source.buffer = buffer;
+
+      // Low frequency with heavy modulation for the staccato effect
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(120, currentTime);
+      filter.Q.setValueAtTime(8, currentTime);
+
+      // LFO creates the rapid "brapping" sound
+      lfo.type = 'square';
+      lfo.frequency.setValueAtTime(25, currentTime); // Rapid pulsing
+
+      lfoGain.gain.setValueAtTime(0.03, currentTime);
+
+      // Volume envelope
+      gain.gain.setValueAtTime(0, currentTime);
+      gain.gain.linearRampToValueAtTime(0.1, currentTime + 0.1);
+      gain.gain.setValueAtTime(0.1, currentTime + duration - 0.3);
+      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + duration);
+
+      source.connect(filter);
+      filter.connect(gain);
+      lfo.connect(lfoGain);
+      lfoGain.connect(filter.frequency);
+      gain.connect(masterGain);
+
+      source.start(currentTime);
+      source.stop(currentTime + duration + 0.1);
+      lfo.start(currentTime);
+      lfo.stop(currentTime + duration + 0.1);
+
+      audioLog.info('Jake brake played', { truckId, duration });
+    } catch (e) {
+      audioLog.warn('Jake brake sound failed', { truckId }, e);
+    }
+  }
+
+  // Tire squeal (during tight turns)
+  playTireSqueal(vehicleId: string, intensity: number = 0.5) {
+    if (this.getEffectiveVolume() === 0) return;
+
+    try {
+      const ctx = this.getContext();
+      const masterGain = this.getMasterGain();
+      if (!ctx || !masterGain) return;
+      const currentTime = ctx.currentTime;
+
+      const duration = 0.8 + intensity * 0.5;
+
+      // High-pitched friction sound
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+
+      // Screaming tire frequencies
+      osc1.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(800 + Math.random() * 200, currentTime);
+      osc1.frequency.linearRampToValueAtTime(600 + Math.random() * 100, currentTime + duration);
+
+      osc2.type = 'sawtooth';
+      osc2.frequency.setValueAtTime(1200 + Math.random() * 300, currentTime);
+      osc2.frequency.linearRampToValueAtTime(900 + Math.random() * 150, currentTime + duration);
+
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(2000, currentTime);
+      filter.Q.setValueAtTime(3, currentTime);
+
+      // Volume envelope
+      gain.gain.setValueAtTime(0, currentTime);
+      gain.gain.linearRampToValueAtTime(0.04 * intensity, currentTime + 0.05);
+      gain.gain.setValueAtTime(0.04 * intensity, currentTime + duration * 0.7);
+      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + duration);
+
+      osc1.connect(filter);
+      osc2.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+
+      osc1.start(currentTime);
+      osc1.stop(currentTime + duration + 0.1);
+      osc2.start(currentTime);
+      osc2.stop(currentTime + duration + 0.1);
+    } catch (e) {
+      audioLog.warn('Tire squeal sound failed', { vehicleId }, e);
+    }
+  }
+
+  // Diesel pump clicking at fuel island
+  playDieselPumpClick() {
+    if (this.getEffectiveVolume() === 0) return;
+
+    try {
+      const ctx = this.getContext();
+      const masterGain = this.getMasterGain();
+      if (!ctx || !masterGain) return;
+      const currentTime = ctx.currentTime;
+
+      // Mechanical clicking sound of fuel pump meter
+      const clickCount = 8 + Math.floor(Math.random() * 5);
+      for (let i = 0; i < clickCount; i++) {
+        const startTime = currentTime + i * 0.12 + Math.random() * 0.03;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(1500 + Math.random() * 300, startTime);
+
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.015, startTime + 0.002);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.03);
+
+        osc.connect(gain);
+        gain.connect(masterGain);
+
+        osc.start(startTime);
+        osc.stop(startTime + 0.04);
+      }
+
+      // Add the fuel flow hiss
+      const buffer = this.createNoiseBuffer(1.5, 'white');
+      if (buffer) {
+        const source = ctx.createBufferSource();
+        const gain = ctx.createGain();
+        const filter = ctx.createBiquadFilter();
+
+        source.buffer = buffer;
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(4000, currentTime);
+        filter.Q.setValueAtTime(2, currentTime);
+
+        gain.gain.setValueAtTime(0, currentTime);
+        gain.gain.linearRampToValueAtTime(0.008, currentTime + 0.1);
+        gain.gain.setValueAtTime(0.008, currentTime + 1.2);
+        gain.gain.exponentialRampToValueAtTime(0.001, currentTime + 1.5);
+
+        source.connect(filter);
+        filter.connect(gain);
+        gain.connect(masterGain);
+
+        source.start(currentTime);
+        source.stop(currentTime + 1.6);
+      }
+    } catch (e) {
+      audioLog.warn('Diesel pump click sound failed', e);
+    }
+  }
+
+  // Glad hands air hiss when connecting/disconnecting
+  playGladHandsHiss() {
+    if (this.getEffectiveVolume() === 0) return;
+
+    try {
+      const ctx = this.getContext();
+      const masterGain = this.getMasterGain();
+      if (!ctx || !masterGain) return;
+      const currentTime = ctx.currentTime;
+
+      // Air hiss sound - shorter than air brake release
+      const buffer = this.createNoiseBuffer(0.8, 'white');
+      if (!buffer) return;
+      const source = ctx.createBufferSource();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+
+      source.buffer = buffer;
+
+      filter.type = 'highpass';
+      filter.frequency.setValueAtTime(3000, currentTime);
+      filter.Q.setValueAtTime(1, currentTime);
+
+      // Quick burst then fade
+      gain.gain.setValueAtTime(0, currentTime);
+      gain.gain.linearRampToValueAtTime(0.06, currentTime + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.02, currentTime + 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + 0.7);
+
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+
+      source.start(currentTime);
+      source.stop(currentTime + 0.8);
+
+      // Metallic clunk when coupling
+      const osc = ctx.createOscillator();
+      const oscGain = ctx.createGain();
+      const oscFilter = ctx.createBiquadFilter();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(180, currentTime);
+      osc.frequency.exponentialRampToValueAtTime(60, currentTime + 0.1);
+
+      oscFilter.type = 'lowpass';
+      oscFilter.frequency.setValueAtTime(300, currentTime);
+
+      oscGain.gain.setValueAtTime(0.08, currentTime);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, currentTime + 0.15);
+
+      osc.connect(oscFilter);
+      oscFilter.connect(oscGain);
+      oscGain.connect(masterGain);
+
+      osc.start(currentTime);
+      osc.stop(currentTime + 0.2);
+    } catch (e) {
+      audioLog.warn('Glad hands hiss sound failed', e);
+    }
+  }
+
+  // Pallet jack warning beeps
+  playPalletJackBeep() {
+    if (this.getEffectiveVolume() === 0) return;
+
+    try {
+      const ctx = this.getContext();
+      const masterGain = this.getMasterGain();
+      if (!ctx || !masterGain) return;
+      const currentTime = ctx.currentTime;
+
+      // Two quick beeps
+      for (let i = 0; i < 2; i++) {
+        const startTime = currentTime + i * 0.2;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(2800, startTime);
+
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.03, startTime + 0.01);
+        gain.gain.setValueAtTime(0.03, startTime + 0.1);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.15);
+
+        osc.connect(gain);
+        gain.connect(masterGain);
+
+        osc.start(startTime);
+        osc.stop(startTime + 0.16);
+      }
+    } catch (e) {
+      audioLog.warn('Pallet jack beep sound failed', e);
+    }
+  }
+
+  // Scale ticket printer sound
+  playScaleTicketPrinter() {
+    if (this.getEffectiveVolume() === 0) return;
+
+    try {
+      const ctx = this.getContext();
+      const masterGain = this.getMasterGain();
+      if (!ctx || !masterGain) return;
+      const currentTime = ctx.currentTime;
+
+      // Dot matrix printer sound - rapid clicking
+      const clickCount = 15;
+      for (let i = 0; i < clickCount; i++) {
+        const startTime = currentTime + i * 0.08;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(2000 + Math.random() * 500, startTime);
+
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.02, startTime + 0.005);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.04);
+
+        osc.connect(gain);
+        gain.connect(masterGain);
+
+        osc.start(startTime);
+        osc.stop(startTime + 0.05);
+      }
+
+      // Paper feed sound at the end
+      setTimeout(
+        () => {
+          const buffer = this.createNoiseBuffer(0.3, 'white');
+          if (!buffer) return;
+          const source = ctx.createBufferSource();
+          const gain = ctx.createGain();
+          const filter = ctx.createBiquadFilter();
+
+          source.buffer = buffer;
+          filter.type = 'highpass';
+          filter.frequency.setValueAtTime(3000, ctx.currentTime);
+
+          gain.gain.setValueAtTime(0.015, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+
+          source.connect(filter);
+          filter.connect(gain);
+          gain.connect(masterGain);
+
+          source.start(ctx.currentTime);
+          source.stop(ctx.currentTime + 0.3);
+        },
+        clickCount * 80 + 100
+      );
+
+      audioLog.info('Scale ticket printer sound played');
+    } catch (e) {
+      audioLog.warn('Scale ticket printer sound failed', e);
+    }
   }
 
   // === FORKLIFT ENGINE SOUNDS ===
@@ -1590,7 +2388,9 @@ class AudioManager {
       lfo.start();
 
       this.forkliftEngines.set(forkliftId, { source, gain, lfo });
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Forklift engine start failed', { forkliftId }, e);
+    }
   }
 
   updateForkliftEngine(forkliftId: string, isMoving: boolean, isStopped: boolean) {
@@ -1616,7 +2416,9 @@ class AudioManager {
       try {
         engine.source.stop();
         engine.lfo.stop();
-      } catch (e) {}
+      } catch (e) {
+        audioLog.warn('Failed to stop forklift engine', { forkliftId }, e);
+      }
       this.forkliftEngines.delete(forkliftId);
     }
   }
@@ -1693,7 +2495,9 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + duration + 0.2);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Failed to stop radio chatter', e);
+    }
   }
 
   // Radio acknowledgment beep
@@ -1726,7 +2530,9 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.1);
       }
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Audio playback failed', e);
+    }
   }
 
   // Radio squelch sound (click when releasing talk button)
@@ -1761,7 +2567,9 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + 0.15);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Audio playback failed', e);
+    }
   }
 
   // === OUTDOOR AMBIENT SOUNDS ===
@@ -1874,16 +2682,19 @@ class AudioManager {
 
         this.outdoorNodes.traffic = { source, gain };
       }
-
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Outdoor ambient sound start failed', e);
+    }
   }
 
   stopOutdoorAmbient() {
-    Object.values(this.outdoorNodes).forEach(node => {
+    Object.values(this.outdoorNodes).forEach((node) => {
       if (node) {
         try {
           node.source.stop();
-        } catch (e) {}
+        } catch (e) {
+          audioLog.warn('Failed to stop outdoor ambient', e);
+        }
       }
     });
     this.outdoorNodes = {};
@@ -1928,7 +2739,9 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.25);
       });
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Speed zone enter sound failed', { forkliftId }, e);
+    }
   }
 
   // Ascending chime when exiting speed zone
@@ -1966,7 +2779,9 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.2);
       });
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Speed zone exit sound failed', { forkliftId }, e);
+    }
   }
 
   // === EMERGENCY STOP SOUNDS ===
@@ -2009,14 +2824,18 @@ class AudioManager {
       lfo.start();
 
       this.emergencyAlarmNode = { source: osc, gain };
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Emergency alarm start failed', e);
+    }
   }
 
   stopEmergencyAlarm() {
     if (this.emergencyAlarmNode) {
       try {
         this.emergencyAlarmNode.source.stop();
-      } catch (e) {}
+      } catch (e) {
+        audioLog.warn('Failed to stop emergency alarm', e);
+      }
       this.emergencyAlarmNode = null;
     }
   }
@@ -2053,7 +2872,9 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.65);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Emergency stop sound failed', e);
+    }
   }
 
   // === FORKLIFT-TO-FORKLIFT ACKNOWLEDGMENT ===
@@ -2087,13 +2908,15 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.12);
       }
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Forklift acknowledge sound failed', { forkliftId }, e);
+    }
   }
 
   // === PA SYSTEM ANNOUNCEMENTS ===
 
   private paSystemActive: boolean = false;
-  private paSystemInterval: ReturnType<typeof setInterval> | null = null;
+  private paSystemInterval: NodeJS.Timeout | number | null = null;
 
   startPASystem() {
     if (this.paSystemActive) return;
@@ -2160,7 +2983,9 @@ class AudioManager {
 
       // Follow with muffled speech-like sound
       setTimeout(() => this.playPASpeech(), 1200);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('PA chime playback failed', e);
+    }
   }
 
   private playPASpeech() {
@@ -2200,7 +3025,9 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + duration + 0.2);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('PA speech playback failed', e);
+    }
   }
 
   private playShiftBell() {
@@ -2235,7 +3062,9 @@ class AudioManager {
           osc.stop(startTime + 0.65);
         });
       }
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Failed to stop PA system', e);
+    }
   }
 
   private playPATone() {
@@ -2264,14 +3093,16 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.75);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Audio playback failed', e);
+    }
   }
 
   // === INDUSTRIAL AMBIENT SOUNDS ===
 
   // Compressor cycling state
   private compressorActive: boolean = false;
-  private compressorInterval: ReturnType<typeof setInterval> | null = null;
+  private compressorInterval: NodeJS.Timeout | number | null = null;
   private compressorNodes: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
 
   // Start industrial compressor cycling (kicks on/off periodically)
@@ -2365,7 +3196,9 @@ class AudioManager {
 
       // Play startup clunk
       this.playCompressorStartup();
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Compressor startup sound failed', e);
+    }
   }
 
   private stopCompressorSound() {
@@ -2378,11 +3211,15 @@ class AudioManager {
           setTimeout(() => {
             try {
               this.compressorNodes?.source.stop();
-            } catch (e) {}
+            } catch (e) {
+              audioLog.warn('Failed to stop compressor cycling', e);
+            }
             this.compressorNodes = null;
           }, 500);
         }
-      } catch (e) {}
+      } catch (e) {
+        audioLog.warn('Audio playback failed', e);
+      }
     }
   }
 
@@ -2417,13 +3254,15 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.3);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Compressor startup sound failed', e);
+    }
   }
 
   // === RANDOM METAL CLANKS ===
 
   private metalClankActive: boolean = false;
-  private metalClankInterval: ReturnType<typeof setInterval> | null = null;
+  private metalClankInterval: NodeJS.Timeout | number | null = null;
 
   // Start random metal clanks from factory floor
   startMetalClanks() {
@@ -2519,7 +3358,9 @@ class AudioManager {
 
       noiseSource.start(currentTime);
       noiseSource.stop(currentTime + 0.1);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Failed to stop metal clanks', e);
+    }
   }
 
   // Light metal clank (wrench, small tool)
@@ -2550,7 +3391,9 @@ class AudioManager {
         osc.start(currentTime);
         osc.stop(currentTime + 0.15);
       });
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Audio playback failed', e);
+    }
   }
 
   // Metal ping (pipe, railing)
@@ -2578,7 +3421,9 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.45);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Audio playback failed', e);
+    }
   }
 
   // Chain rattle
@@ -2610,13 +3455,15 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.04);
       }
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Audio playback failed', e);
+    }
   }
 
   // === HYDRAULIC SOUNDS ===
 
   // Hydraulic lift sound for forklift operations
-  playHydraulicLift(forkliftId: string, duration: number = 1.5) {
+  playHydraulicLift(_forkliftId: string, duration: number = 1.5) {
     if (this.getEffectiveVolume() === 0) return;
 
     try {
@@ -2660,7 +3507,9 @@ class AudioManager {
 
       // Add hydraulic fluid whoosh
       this.playHydraulicFluid(duration);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Hydraulic fluid sound failed', e);
+    }
   }
 
   // Hydraulic lower sound (slower, different character)
@@ -2699,7 +3548,9 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + duration + 0.2);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Hydraulic lower sound failed', { forkliftId }, e);
+    }
   }
 
   // Hydraulic fluid movement sound
@@ -2734,7 +3585,9 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + duration + 0.1);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Hydraulic fluid sound failed', e);
+    }
   }
 
   // === WEATHER SOUNDS ===
@@ -2750,7 +3603,7 @@ class AudioManager {
   }
 
   private notifyThunderListeners(): void {
-    this.thunderListeners.forEach(listener => listener());
+    this.thunderListeners.forEach((listener) => listener());
   }
 
   startRain() {
@@ -2789,7 +3642,9 @@ class AudioManager {
       source.start();
       this.weatherNodes.rain = { source, gain };
       this.scheduleThunder();
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Rain sound start failed', e);
+    }
   }
 
   stopRain() {
@@ -2800,11 +3655,17 @@ class AudioManager {
         if (ctx) {
           this.weatherNodes.rain.gain.gain.setTargetAtTime(0, ctx.currentTime, 1);
           setTimeout(() => {
-            try { this.weatherNodes.rain?.source.stop(); } catch (e) {}
+            try {
+              this.weatherNodes.rain?.source.stop();
+            } catch (e) {
+              audioLog.warn('Failed to stop rain sound', e);
+            }
             this.weatherNodes.rain = undefined;
           }, 3000);
         }
-      } catch (e) {}
+      } catch (e) {
+        audioLog.warn('Rain fade-out failed', e);
+      }
     }
   }
 
@@ -2853,7 +3714,9 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + duration + 0.5);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Thunder sound playback failed', e);
+    }
   }
 
   // === PNEUMATIC/SPOUTING SOUNDS ===
@@ -2891,7 +3754,9 @@ class AudioManager {
       source.start();
       this.spoutingNodes.set(spoutId, { source, gain });
       this.registerSoundPosition(spoutId, x, y, z);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Spouting sound start failed', { spoutId }, e);
+    }
   }
 
   updateSpoutingSpatialVolume(spoutId: string) {
@@ -2905,7 +3770,11 @@ class AudioManager {
   stopSpoutingSound(spoutId: string) {
     const node = this.spoutingNodes.get(spoutId);
     if (node) {
-      try { node.source.stop(); } catch (e) {}
+      try {
+        node.source.stop();
+      } catch (e) {
+        audioLog.warn('Failed to stop spouting sound', { spoutId }, e);
+      }
       this.spoutingNodes.delete(spoutId);
     }
   }
@@ -2965,7 +3834,9 @@ class AudioManager {
       lfo.start();
 
       this.ventilationFanNodes = { source, gain };
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Ventilation fan sound start failed', e);
+    }
   }
 
   stopVentilationFanSound() {
@@ -2975,11 +3846,17 @@ class AudioManager {
         if (ctx) {
           this.ventilationFanNodes.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.5);
           setTimeout(() => {
-            try { this.ventilationFanNodes?.source.stop(); } catch (e) {}
+            try {
+              this.ventilationFanNodes?.source.stop();
+            } catch (e) {
+              audioLog.warn('Failed to stop ventilation fan source', e);
+            }
             this.ventilationFanNodes = null;
           }, 1000);
         }
-      } catch (e) {}
+      } catch (e) {
+        audioLog.warn('Ventilation fan fade-out failed', e);
+      }
     }
   }
 
@@ -3051,7 +3928,9 @@ class AudioManager {
         noiseSource.start(currentTime);
         noiseSource.stop(currentTime + duration);
       }
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Power flicker sound failed', e);
+    }
   }
 
   // === WATER DRIP SOUNDS ===
@@ -3123,7 +4002,9 @@ class AudioManager {
         noiseSource.start(currentTime);
         noiseSource.stop(currentTime + 0.1);
       }
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Water drip sound failed', e);
+    }
   }
 
   // === LOADING BAY DOOR SOUNDS ===
@@ -3163,7 +4044,9 @@ class AudioManager {
       source.stop(currentTime + duration + 0.2);
 
       setTimeout(() => this.playDoorClunk(), (duration - 0.2) * 1000);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Door clunk sound failed', e);
+    }
   }
 
   playDoorClose() {
@@ -3201,7 +4084,9 @@ class AudioManager {
       source.stop(currentTime + duration + 0.2);
 
       setTimeout(() => this.playDoorClunk(), (duration - 0.1) * 1000);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Door clunk sound failed', e);
+    }
   }
 
   private playDoorClunk() {
@@ -3228,11 +4113,233 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.35);
-    } catch (e) {}
+    } catch (e) {
+      audioLog.warn('Door clunk sound failed', e);
+    }
+  }
+
+  // === DOCK OPERATIONS SOUNDS ===
+
+  // Stretch wrap machine buzzing sound
+  private stretchWrapNode: { source: OscillatorNode; gain: GainNode } | null = null;
+
+  startStretchWrapSound() {
+    if (this.getEffectiveVolume() === 0 || this.stretchWrapNode) return;
+
+    try {
+      const ctx = this.getContext();
+      const masterGain = this.getMasterGain();
+      if (!ctx || !masterGain) return;
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(60, ctx.currentTime);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(200, ctx.currentTime);
+      filter.Q.setValueAtTime(2, ctx.currentTime);
+
+      gain.gain.setValueAtTime(0.02, ctx.currentTime);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+
+      osc.start();
+      this.stretchWrapNode = { source: osc, gain };
+    } catch (e) {
+      audioLog.warn('Stretch wrap sound failed', e);
+    }
+  }
+
+  stopStretchWrapSound() {
+    if (this.stretchWrapNode) {
+      try {
+        this.stretchWrapNode.source.stop();
+      } catch (e) {
+        // Already stopped
+      }
+      this.stretchWrapNode = null;
+    }
+  }
+
+  // Dock leveler hydraulic whine
+  playDockLevelerSound() {
+    if (this.getEffectiveVolume() === 0) return;
+
+    try {
+      const ctx = this.getContext();
+      const masterGain = this.getMasterGain();
+      if (!ctx || !masterGain) return;
+      const currentTime = ctx.currentTime;
+
+      // Hydraulic motor sound - rising whine
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(80, currentTime);
+      osc.frequency.linearRampToValueAtTime(150, currentTime + 1.5);
+      osc.frequency.linearRampToValueAtTime(80, currentTime + 2);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(400, currentTime);
+
+      gain.gain.setValueAtTime(0, currentTime);
+      gain.gain.linearRampToValueAtTime(0.04, currentTime + 0.1);
+      gain.gain.setValueAtTime(0.04, currentTime + 1.8);
+      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + 2);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+
+      osc.start(currentTime);
+      osc.stop(currentTime + 2.1);
+    } catch (e) {
+      audioLog.warn('Dock leveler sound failed', e);
+    }
+  }
+
+  // Reefer (refrigeration) unit humming
+  private reeferNodes: Map<
+    string,
+    { source: OscillatorNode; gain: GainNode; lfo: OscillatorNode }
+  > = new Map();
+
+  startReeferSound(reeferId: string) {
+    if (this.getEffectiveVolume() === 0 || this.reeferNodes.has(reeferId)) return;
+
+    try {
+      const ctx = this.getContext();
+      const masterGain = this.getMasterGain();
+      if (!ctx || !masterGain) return;
+      const currentTime = ctx.currentTime;
+
+      // Main compressor drone
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      const lfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(50, currentTime);
+
+      // LFO for slight pulsing
+      lfo.type = 'sine';
+      lfo.frequency.setValueAtTime(2, currentTime);
+      lfoGain.gain.setValueAtTime(0.005, currentTime);
+
+      lfo.connect(lfoGain);
+      lfoGain.connect(gain.gain);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(150, currentTime);
+      filter.Q.setValueAtTime(1, currentTime);
+
+      gain.gain.setValueAtTime(0.025, currentTime);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+
+      osc.start();
+      lfo.start();
+
+      this.reeferNodes.set(reeferId, { source: osc, gain, lfo });
+    } catch (e) {
+      audioLog.warn('Reefer sound failed', e);
+    }
+  }
+
+  stopReeferSound(reeferId: string) {
+    const node = this.reeferNodes.get(reeferId);
+    if (node) {
+      try {
+        node.source.stop();
+        node.lfo.stop();
+      } catch (e) {
+        // Already stopped
+      }
+      this.reeferNodes.delete(reeferId);
+    }
+  }
+
+  // Radio dispatch chatter at guard shack
+  playRadioDispatch() {
+    if (this.getEffectiveVolume() === 0) return;
+
+    try {
+      const ctx = this.getContext();
+      const masterGain = this.getMasterGain();
+      if (!ctx || !masterGain) return;
+      const currentTime = ctx.currentTime;
+
+      // Static burst + voice-like modulation
+      const duration = 1.5 + Math.random() * 1;
+
+      // Static noise
+      const buffer = this.createNoiseBuffer(duration, 'white');
+      if (!buffer) return;
+      const source = ctx.createBufferSource();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      const filter2 = ctx.createBiquadFilter();
+
+      source.buffer = buffer;
+
+      // Bandpass for radio quality
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(1200, currentTime);
+      filter.Q.setValueAtTime(5, currentTime);
+
+      // Voice-like modulation with second filter
+      filter2.type = 'lowpass';
+      filter2.frequency.setValueAtTime(2500, currentTime);
+
+      // Crackling envelope
+      gain.gain.setValueAtTime(0, currentTime);
+      gain.gain.linearRampToValueAtTime(0.02, currentTime + 0.05);
+
+      // Random volume variations to simulate speech patterns
+      const numVariations = Math.floor(duration * 4);
+      for (let i = 0; i < numVariations; i++) {
+        const t = currentTime + 0.1 + (i / numVariations) * (duration - 0.2);
+        const vol = 0.01 + Math.random() * 0.015;
+        gain.gain.linearRampToValueAtTime(vol, t);
+      }
+
+      gain.gain.linearRampToValueAtTime(0.02, currentTime + duration - 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + duration);
+
+      source.connect(filter);
+      filter.connect(filter2);
+      filter2.connect(gain);
+      gain.connect(masterGain);
+
+      source.start(currentTime);
+      source.stop(currentTime + duration);
+
+      // Add squelch tail
+      setTimeout(
+        () => {
+          this.playRadioSquelch();
+        },
+        duration * 1000 - 100
+      );
+    } catch (e) {
+      audioLog.warn('Radio dispatch sound failed', e);
+    }
   }
 
   // Stop all sounds
   stopAll() {
+    this.stopMusic();
     this.stopAmbientSounds();
     this.stopOutdoorAmbient();
     this.stopRadioChatter();
@@ -3244,21 +4351,28 @@ class AudioManager {
     this.stopCompressorCycling();
     this.stopMetalClanks();
     this.stopVentilationFanSound();
-    this.machineNodes.forEach((node, id) => {
+    this.machineNodes.forEach((_node, id) => {
       this.stopMachineSound(id);
     });
-    this.forkliftEngines.forEach((engine, id) => {
+    this.forkliftEngines.forEach((_engine, id) => {
       this.stopForkliftEngine(id);
     });
     this.forkliftEngines.clear();
-    this.truckEngines.forEach((engine, id) => {
+    this.truckEngines.forEach((_engine, id) => {
       this.stopTruckEngine(id);
     });
-    this.conveyorNodes.forEach((node, id) => {
+    this.backupBeepers.forEach((_beeper, id) => {
+      this.stopBackupBeeper(id);
+    });
+    this.conveyorNodes.forEach((_node, id) => {
       this.stopConveyorSound(id);
     });
-    this.spoutingNodes.forEach((node, id) => {
+    this.spoutingNodes.forEach((_node, id) => {
       this.stopSpoutingSound(id);
+    });
+    this.stopStretchWrapSound();
+    this.reeferNodes.forEach((_node, id) => {
+      this.stopReeferSound(id);
     });
   }
 }
