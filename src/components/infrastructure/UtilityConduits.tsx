@@ -109,7 +109,7 @@ export const UtilityConduits: React.FC<UtilityConduitsProps> = () => {
   const showCables = graphics.enableCableConduits;
 
   return (
-    <group>
+    <group matrixAutoUpdate={false}>
       {/* Cable trays and conduits - high/ultra graphics only */}
       {showCables && (
         <>

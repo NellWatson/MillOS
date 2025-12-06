@@ -56,12 +56,26 @@ export const TruckModel: React.FC<TruckModelProps> = ({
   const reverseLightRightRef = useRef<THREE.MeshStandardMaterial>(null);
   const leftSignalRef = useRef<THREE.MeshStandardMaterial>(null);
   const rightSignalRef = useRef<THREE.MeshStandardMaterial>(null);
+  /* ... refs ... */
   const markerLightsRef = useRef<THREE.MeshStandardMaterial[]>([]);
+  const cabGroupRef = useRef<THREE.Group>(null); // New ref for cab physics
 
   useFrame((state) => {
     if (!isTabVisible) return;
     const truckState = getTruckState();
     const time = state.clock.elapsedTime;
+
+    // Apply Chassis Physics (Roll/Pitch)
+    if (cabGroupRef.current) {
+      // Smooth lerp for weight feeling
+      cabGroupRef.current.rotation.z = THREE.MathUtils.lerp(cabGroupRef.current.rotation.z, truckState.cabRoll, 0.1);
+      cabGroupRef.current.rotation.x = THREE.MathUtils.lerp(cabGroupRef.current.rotation.x, truckState.cabPitch, 0.1);
+    }
+
+    // Apply partial roll to trailer (stiffer suspension)
+    if (trailerRef.current) {
+      trailerRef.current.rotation.z = THREE.MathUtils.lerp(trailerRef.current.rotation.z, truckState.cabRoll * 0.5, 0.1);
+    }
 
     // Rotate wheels
     if (frontLeftWheelRef.current) {
@@ -139,7 +153,7 @@ export const TruckModel: React.FC<TruckModelProps> = ({
   return (
     <group>
       {/* === CAB === */}
-      <group position={[0, 0, 2]}>
+      <group ref={cabGroupRef} position={[0, 0, 2]}>
         {/* Main cab body */}
         <mesh position={[0, 2, 0]} castShadow>
           <boxGeometry args={[2.8, 2.4, 2.2]} />

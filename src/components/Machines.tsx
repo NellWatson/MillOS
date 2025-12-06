@@ -153,6 +153,10 @@ const QUALITY_LABELS: Record<GrainQuality, string> = {
 // Grain types for silos
 const GRAIN_TYPES = ['Wheat', 'Corn', 'Barley', 'Oats', 'Rye'];
 
+const UNIT_CYLINDER = new THREE.CylinderGeometry(1, 1, 1, 32);
+const UNIT_CYLINDER_LOW = new THREE.CylinderGeometry(1, 1, 1, 16);
+
+
 // Fill level indicator for silos
 const SiloFillIndicator: React.FC<{
   fillLevel: number;
@@ -165,13 +169,23 @@ const SiloFillIndicator: React.FC<{
   const qualityColor = QUALITY_COLORS[quality];
   const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
 
+  // Calculate scales
+  const cylinderRadius = radius - 0.15;
+  // Position calculation: 
+  // Base is at -height/2 + 0.5.
+  // We want the visual center of the cylinder to be at base + fillHeight/2.
+  // Original: position={[0, -height / 2 + fillHeight / 2 + 0.5, 0]} with height=fillHeight
+  // New: Same position, but geometry is height 1, so we scale Y by fillHeight.
+  const posY = -height / 2 + fillHeight / 2 + 0.5;
+
   return (
     <group>
       {/* Grain fill visualization */}
-      <mesh position={[0, -height / 2 + fillHeight / 2 + 0.5, 0]}>
-        <cylinderGeometry
-          args={[radius - 0.15, radius - 0.15, fillHeight, graphicsQuality === 'low' ? 16 : 32]}
-        />
+      <mesh
+        position={[0, posY, 0]}
+        scale={[cylinderRadius, fillHeight, cylinderRadius]}
+        geometry={graphicsQuality === 'low' ? UNIT_CYLINDER_LOW : UNIT_CYLINDER}
+      >
         {graphicsQuality === 'low' ? (
           <meshBasicMaterial
             color={
@@ -194,7 +208,7 @@ const SiloFillIndicator: React.FC<{
 
       {/* Quality indicator ring at fill level - skip on low */}
       {graphicsQuality !== 'low' && (
-        <mesh position={[0, -height / 2 + fillHeight + 0.5, 0]}>
+        <mesh position={[0, -height / 2 + fillHeight + 0.5, 0]} rotation={[Math.PI / 2, 0, 0]}>
           <torusGeometry args={[radius - 0.1, 0.05, 8, 32]} />
           <meshStandardMaterial
             color={qualityColor}

@@ -3,6 +3,7 @@ import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { create } from 'zustand';
 import { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
+import { useCameraPositionStore, isPositionInsideFactory } from '../stores/useCameraPositionStore';
 
 // Movement key tracking
 const pressedKeys = new Set<string>();
@@ -261,6 +262,40 @@ export const CameraController: React.FC<CameraControllerProps> = ({
   return null;
 };
 
+/**
+ * Camera Bounds Tracker
+ * 
+ * Tracks whether the camera is inside or outside the factory bounds.
+ * Used to conditionally render interior vs exterior components for performance.
+ * Throttled to every 10 frames (~6 checks/second at 60fps) to minimize overhead.
+ */
+export const CameraBoundsTracker: React.FC = () => {
+  const { camera } = useThree();
+  const setIsCameraInside = useCameraPositionStore((state) => state.setIsCameraInside);
+  const frameCountRef = useRef(0);
+  const lastInsideRef = useRef(true);
+
+  useFrame(() => {
+    // Throttle to every 10 frames for performance
+    frameCountRef.current++;
+    if (frameCountRef.current % 10 !== 0) return;
+
+    const isInside = isPositionInsideFactory(
+      camera.position.x,
+      camera.position.y,
+      camera.position.z
+    );
+
+    // Only update store if state changed (prevents unnecessary re-renders)
+    if (isInside !== lastInsideRef.current) {
+      lastInsideRef.current = isInside;
+      setIsCameraInside(isInside);
+    }
+  });
+
+  return null;
+};
+
 // Hook to get camera preset info for UI
 export const useActivePreset = () => {
   const activePreset = useCameraStore((state) => state.activePreset);
@@ -298,9 +333,8 @@ export const CameraPresetIndicator: React.FC = () => {
         {CAMERA_PRESETS.map((_, i) => (
           <div
             key={i}
-            className={`w-4 h-4 rounded text-[9px] font-mono flex items-center justify-center transition-colors ${
-              i === activePreset ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-500'
-            }`}
+            className={`w-4 h-4 rounded text-[9px] font-mono flex items-center justify-center transition-colors ${i === activePreset ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-500'
+              }`}
           >
             {i + 1}
           </div>

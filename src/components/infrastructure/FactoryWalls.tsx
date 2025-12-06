@@ -885,7 +885,7 @@ export const FactoryWalls: React.FC<FactoryWallsProps> = () => {
 
 
   return (
-    <group>
+    <group matrixAutoUpdate={false}>
       {/* Break Room Areas - positioned inside factory along side walls */}
       {/* PERF: Restored to MEDIUM+ with meshBasicMaterial optimization */}
       {!isLowGraphics && (

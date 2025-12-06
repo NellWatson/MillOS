@@ -406,7 +406,7 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
   }, [actualWidth, actualDepth]);
 
   return (
-    <group>
+    <group matrixAutoUpdate={false}>
       {/* Main floor - standard material on low/medium, reflector only on high/ultra */}
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}

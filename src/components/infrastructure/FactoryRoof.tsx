@@ -30,6 +30,7 @@ const VolumetricFog: React.FC<{ density?: number }> = React.memo(({ density = 0.
           transparent
           opacity={timeBasedDensity * 2}
           depthWrite={false}
+          depthTest={false} // Added for explicit depth testing control
           side={THREE.DoubleSide}
         />
       </mesh>
@@ -48,6 +49,7 @@ const VolumetricFog: React.FC<{ density?: number }> = React.memo(({ density = 0.
             transparent
             opacity={timeBasedDensity * 0.8}
             depthWrite={false}
+            depthTest={false} // Added for explicit depth testing control
             side={THREE.BackSide}
           />
         </mesh>
@@ -62,6 +64,7 @@ const VolumetricFog: React.FC<{ density?: number }> = React.memo(({ density = 0.
             transparent
             opacity={timeBasedDensity * 0.5}
             depthWrite={false}
+            depthTest={false} // Added for explicit depth testing control
             side={THREE.DoubleSide}
           />
         </mesh>

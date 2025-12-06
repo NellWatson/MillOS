@@ -50,7 +50,6 @@ const DustAnimationContext = createContext<DustAnimationContextValue | null>(nul
 export const DustAnimationManager: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const entriesRef = useRef<Map<string, DustEntry>>(new Map());
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
-  const quality = useGraphicsStore((state) => state.graphics.quality);
 
   const register = useCallback((id: string, entry: DustEntry) => {
     entriesRef.current.set(id, entry);

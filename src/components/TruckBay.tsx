@@ -13,7 +13,7 @@ import {
   OptimizedSpeedBumpInstances,
   OptimizedStripeInstances
 } from './TruckBayInstances';
-
+import { calculateShippingTruckState as calcShipping, calculateReceivingTruckState as calcReceiving } from './truckbay/useTruckPhysics';
 // --- Animation Registries ---
 type AnimationType = 'rotation' | 'pulse' | 'lerp' | 'oscillation' | 'custom';
 
@@ -160,615 +160,19 @@ interface TruckAnimState {
   trailerAngle: number; // Articulation angle relative to cab
   throttle: number; // 0-1 for exhaust intensity
   doorsOpen: boolean;
+  cabRoll: number;
+  cabPitch: number;
 }
 
-// Easing functions
-const easeInOutCubic = (t: number): number => {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-};
-
-const easeOutQuad = (t: number): number => {
-  return 1 - (1 - t) * (1 - t);
-};
-
-const easeInQuad = (t: number): number => {
-  return t * t;
-};
-
-// Interpolate along a curved path (quadratic bezier)
-const bezierPoint = (
-  p0: [number, number],
-  p1: [number, number],
-  p2: [number, number],
-  t: number
-): [number, number] => {
-  const x = (1 - t) * (1 - t) * p0[0] + 2 * (1 - t) * t * p1[0] + t * t * p2[0];
-  const z = (1 - t) * (1 - t) * p0[1] + 2 * (1 - t) * t * p1[1] + t * t * p2[1];
-  return [x, z];
-};
-
-// Calculate tangent angle along bezier curve
-const bezierTangentAngle = (
-  p0: [number, number],
-  p1: [number, number],
-  p2: [number, number],
-  t: number
-): number => {
-  const dx = 2 * (1 - t) * (p1[0] - p0[0]) + 2 * t * (p2[0] - p1[0]);
-  const dz = 2 * (1 - t) * (p1[1] - p0[1]) + 2 * t * (p2[1] - p1[1]);
-  return Math.atan2(dx, dz);
-};
 
 // Calculate truck state for SHIPPING dock (front of building, z=50)
 const calculateShippingTruckState = (cycle: number, time: number): TruckAnimState => {
-  const ROAD_Z = 110;
-  const YARD_ENTRY_Z = 75;
-  const TURN_START_Z = 70;
-  const TURN_END_X = -18;
-  const ALIGN_Z = 68;
-  const DOCK_Z = 59;
-  const ENTRY_X = 20;
-
-  const turnStart: [number, number] = [ENTRY_X, TURN_START_Z];
-  const turnControl: [number, number] = [-5, TURN_START_Z + 5];
-  const turnEnd: [number, number] = [TURN_END_X, ALIGN_Z];
-  const departTurnStart: [number, number] = [0, ALIGN_Z + 5];
-  const departTurnControl: [number, number] = [ENTRY_X * 0.8, ALIGN_Z + 12];
-  const departTurnEnd: [number, number] = [ENTRY_X, YARD_ENTRY_Z + 10];
-
-  const signalBlink = Math.sin(time * 8) > 0;
-
-  if (cycle < 5) {
-    const t = easeOutQuad(cycle / 5);
-    return {
-      phase: 'entering',
-      x: ENTRY_X,
-      z: THREE.MathUtils.lerp(ROAD_Z, YARD_ENTRY_Z, t),
-      rotation: Math.PI,
-      speed: 1.0 - t * 0.3,
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: true && signalBlink,
-      rightSignal: false,
-      trailerAngle: 0,
-      throttle: 0.6,
-      doorsOpen: false,
-    };
-  } else if (cycle < 8) {
-    const t = easeInQuad((cycle - 5) / 3);
-    return {
-      phase: 'slowing',
-      x: ENTRY_X,
-      z: THREE.MathUtils.lerp(YARD_ENTRY_Z, TURN_START_Z, t),
-      rotation: Math.PI,
-      speed: 0.7 - t * 0.4,
-      steeringAngle: -t * 0.3,
-      brakeLights: true,
-      reverseLights: false,
-      leftSignal: true && signalBlink,
-      rightSignal: false,
-      trailerAngle: t * 0.02,
-      throttle: 0.2,
-      doorsOpen: false,
-    };
-  } else if (cycle < 16) {
-    const t = easeInOutCubic((cycle - 8) / 8);
-    const [x, z] = bezierPoint(turnStart, turnControl, turnEnd, t);
-    const angle = bezierTangentAngle(turnStart, turnControl, turnEnd, t);
-    // Trailer lags behind during turn - articulation angle
-    const trailerLag = Math.sin(t * Math.PI) * 0.15;
-    return {
-      phase: 'turning_in',
-      x,
-      z,
-      rotation: angle + Math.PI,
-      speed: 0.3 + Math.sin(t * Math.PI) * 0.2,
-      steeringAngle: -0.5 + t * 0.3,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: true && signalBlink,
-      rightSignal: false,
-      trailerAngle: trailerLag,
-      throttle: 0.4 + Math.sin(t * Math.PI) * 0.3,
-      doorsOpen: false,
-    };
-  } else if (cycle < 19) {
-    const t = easeInOutCubic((cycle - 16) / 3);
-    return {
-      phase: 'straightening',
-      x: THREE.MathUtils.lerp(TURN_END_X, 0, t),
-      z: ALIGN_Z,
-      rotation: THREE.MathUtils.lerp(Math.PI * 0.6, 0, t),
-      speed: 0.3 - t * 0.2,
-      steeringAngle: 0.3 - t * 0.3,
-      brakeLights: t > 0.7,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: (1 - t) * 0.08,
-      throttle: 0.3 - t * 0.2,
-      doorsOpen: false,
-    };
-  } else if (cycle < 21) {
-    return {
-      phase: 'stopping_to_back',
-      x: 0,
-      z: ALIGN_Z,
-      rotation: 0,
-      speed: 0,
-      steeringAngle: 0,
-      brakeLights: true,
-      reverseLights: cycle > 20,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      throttle: 0.15,
-      doorsOpen: false,
-    };
-  } else if (cycle < 32) {
-    const t = easeInOutCubic((cycle - 21) / 11);
-    const wobble = Math.sin(cycle * 2) * 0.02 * (1 - t);
-    return {
-      phase: 'backing',
-      x: wobble * 2,
-      z: THREE.MathUtils.lerp(ALIGN_Z, DOCK_Z + 1, t),
-      rotation: wobble,
-      speed: -0.15,
-      steeringAngle: wobble * 2,
-      brakeLights: false,
-      reverseLights: true,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: -wobble * 0.5,
-      throttle: 0.25,
-      doorsOpen: false,
-    };
-  } else if (cycle < 34) {
-    const t = easeOutQuad((cycle - 32) / 2);
-    return {
-      phase: 'final_adjustment',
-      x: 0,
-      z: THREE.MathUtils.lerp(DOCK_Z + 1, DOCK_Z, t),
-      rotation: 0,
-      speed: -0.05,
-      steeringAngle: 0,
-      brakeLights: t > 0.8,
-      reverseLights: true,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      throttle: 0.15,
-      doorsOpen: false,
-    };
-  } else if (cycle < 36) {
-    // Doors opening
-    const t = (cycle - 34) / 2;
-    return {
-      phase: 'docked',
-      x: 0,
-      z: DOCK_Z,
-      rotation: 0,
-      speed: 0,
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      throttle: 0.1,
-      doorsOpen: t > 0.5,
-    };
-  } else if (cycle < 48) {
-    // Docked - loading/unloading
-    return {
-      phase: 'docked',
-      x: 0,
-      z: DOCK_Z,
-      rotation: 0,
-      speed: 0,
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      throttle: 0.1,
-      doorsOpen: true,
-    };
-  } else if (cycle < 50) {
-    // Doors closing
-    const t = (cycle - 48) / 2;
-    return {
-      phase: 'docked',
-      x: 0,
-      z: DOCK_Z,
-      rotation: 0,
-      speed: 0,
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      throttle: 0.1,
-      doorsOpen: t < 0.5,
-    };
-  } else if (cycle < 52) {
-    return {
-      phase: 'preparing_to_leave',
-      x: 0,
-      z: DOCK_Z,
-      rotation: 0,
-      speed: 0,
-      steeringAngle: 0,
-      brakeLights: true,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: true && signalBlink,
-      trailerAngle: 0,
-      throttle: 0.3,
-      doorsOpen: false,
-    };
-  } else if (cycle < 55) {
-    const t = easeInQuad((cycle - 52) / 3);
-    return {
-      phase: 'pulling_out',
-      x: 0,
-      z: THREE.MathUtils.lerp(DOCK_Z, ALIGN_Z, t),
-      rotation: 0,
-      speed: t * 0.4,
-      steeringAngle: t * 0.2,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: true && signalBlink,
-      trailerAngle: t * 0.03,
-      throttle: 0.5,
-      doorsOpen: false,
-    };
-  } else if (cycle < 58) {
-    const t = easeInOutCubic((cycle - 55) / 3);
-    const straightPortion = 0.25;
-    if (t < straightPortion) {
-      const tStraight = t / straightPortion;
-      return {
-        phase: 'turning_out',
-        x: 0,
-        z: THREE.MathUtils.lerp(ALIGN_Z, departTurnStart[1], tStraight),
-        rotation: 0,
-        speed: 0.65,
-        steeringAngle: 0.06,
-        brakeLights: false,
-        reverseLights: false,
-        leftSignal: false,
-        rightSignal: true && signalBlink,
-        trailerAngle: -0.025 * (1 - tStraight),
-        throttle: 0.7,
-        doorsOpen: false,
-      };
-    }
-
-    const tCurve = (t - straightPortion) / (1 - straightPortion);
-    const [x, z] = bezierPoint(departTurnStart, departTurnControl, departTurnEnd, tCurve);
-    const angle = bezierTangentAngle(departTurnStart, departTurnControl, departTurnEnd, tCurve);
-    return {
-      phase: 'turning_out',
-      x,
-      z,
-      rotation: THREE.MathUtils.lerp(angle, 0, Math.pow(tCurve, 1.1)),
-      speed: 0.65,
-      steeringAngle: THREE.MathUtils.lerp(0.28, 0, tCurve),
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: true && signalBlink,
-      trailerAngle: -Math.sin(tCurve * Math.PI) * 0.065 * (1 - tCurve * 0.35),
-      throttle: 0.7,
-      doorsOpen: false,
-    };
-  } else {
-    const t = easeInQuad((cycle - 58) / 2);
-    return {
-      phase: 'leaving',
-      x: ENTRY_X,
-      z: THREE.MathUtils.lerp(departTurnEnd[1], ROAD_Z, t),
-      rotation: 0,
-      speed: 0.75 + t * 0.7,
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      throttle: 0.8 + t * 0.2,
-      doorsOpen: false,
-    };
-  }
+  return calcShipping(cycle, time) as unknown as TruckAnimState;
 };
 
 // Calculate truck state for RECEIVING dock (back of building, z=-50)
 const calculateReceivingTruckState = (cycle: number, time: number): TruckAnimState => {
-  const ROAD_Z = -110;
-  const YARD_ENTRY_Z = -75;
-  const TURN_START_Z = -70;
-  const TURN_END_X = 18;
-  const ALIGN_Z = -68;
-  const DOCK_Z = -59;
-  const ENTRY_X = -20;
-
-  const turnStart: [number, number] = [ENTRY_X, TURN_START_Z];
-  const turnControl: [number, number] = [5, TURN_START_Z - 5];
-  const turnEnd: [number, number] = [TURN_END_X, ALIGN_Z];
-  const departTurnStart: [number, number] = [0, ALIGN_Z - 5];
-  const departTurnControl: [number, number] = [ENTRY_X * 0.8, ALIGN_Z - 12];
-  const departTurnEnd: [number, number] = [ENTRY_X, YARD_ENTRY_Z - 10];
-
-  const signalBlink = Math.sin(time * 8) > 0;
-
-  if (cycle < 5) {
-    const t = easeOutQuad(cycle / 5);
-    return {
-      phase: 'entering',
-      x: ENTRY_X,
-      z: THREE.MathUtils.lerp(ROAD_Z, YARD_ENTRY_Z, t),
-      rotation: 0,
-      speed: 1.0 - t * 0.3,
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: true && signalBlink,
-      trailerAngle: 0,
-      throttle: 0.6,
-      doorsOpen: false,
-    };
-  } else if (cycle < 8) {
-    const t = easeInQuad((cycle - 5) / 3);
-    return {
-      phase: 'slowing',
-      x: ENTRY_X,
-      z: THREE.MathUtils.lerp(YARD_ENTRY_Z, TURN_START_Z, t),
-      rotation: 0,
-      speed: 0.7 - t * 0.4,
-      steeringAngle: t * 0.3,
-      brakeLights: true,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: true && signalBlink,
-      trailerAngle: -t * 0.02,
-      throttle: 0.2,
-      doorsOpen: false,
-    };
-  } else if (cycle < 16) {
-    const t = easeInOutCubic((cycle - 8) / 8);
-    const [x, z] = bezierPoint(turnStart, turnControl, turnEnd, t);
-    const angle = bezierTangentAngle(turnStart, turnControl, turnEnd, t);
-    const trailerLag = -Math.sin(t * Math.PI) * 0.15;
-    return {
-      phase: 'turning_in',
-      x,
-      z,
-      rotation: angle,
-      speed: 0.3 + Math.sin(t * Math.PI) * 0.2,
-      steeringAngle: 0.5 - t * 0.3,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: true && signalBlink,
-      trailerAngle: trailerLag,
-      throttle: 0.4 + Math.sin(t * Math.PI) * 0.3,
-      doorsOpen: false,
-    };
-  } else if (cycle < 19) {
-    const t = easeInOutCubic((cycle - 16) / 3);
-    return {
-      phase: 'straightening',
-      x: THREE.MathUtils.lerp(TURN_END_X, 0, t),
-      z: ALIGN_Z,
-      rotation: THREE.MathUtils.lerp(-Math.PI * 0.6, -Math.PI, t),
-      speed: 0.3 - t * 0.2,
-      steeringAngle: -0.3 + t * 0.3,
-      brakeLights: t > 0.7,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: -(1 - t) * 0.08,
-      throttle: 0.3 - t * 0.2,
-      doorsOpen: false,
-    };
-  } else if (cycle < 21) {
-    return {
-      phase: 'stopping_to_back',
-      x: 0,
-      z: ALIGN_Z,
-      rotation: Math.PI,
-      speed: 0,
-      steeringAngle: 0,
-      brakeLights: true,
-      reverseLights: cycle > 20,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      throttle: 0.15,
-      doorsOpen: false,
-    };
-  } else if (cycle < 32) {
-    const t = easeInOutCubic((cycle - 21) / 11);
-    const wobble = Math.sin(cycle * 2) * 0.02 * (1 - t);
-    return {
-      phase: 'backing',
-      x: wobble * 2,
-      z: THREE.MathUtils.lerp(ALIGN_Z, DOCK_Z + 1, t),
-      rotation: Math.PI + wobble,
-      speed: -0.15,
-      steeringAngle: wobble * 2,
-      brakeLights: false,
-      reverseLights: true,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: wobble * 0.5,
-      throttle: 0.25,
-      doorsOpen: false,
-    };
-  } else if (cycle < 34) {
-    const t = easeOutQuad((cycle - 32) / 2);
-    return {
-      phase: 'final_adjustment',
-      x: 0,
-      z: THREE.MathUtils.lerp(DOCK_Z + 1, DOCK_Z, t),
-      rotation: Math.PI,
-      speed: -0.05,
-      steeringAngle: 0,
-      brakeLights: t > 0.8,
-      reverseLights: true,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      throttle: 0.15,
-      doorsOpen: false,
-    };
-  } else if (cycle < 36) {
-    const t = (cycle - 34) / 2;
-    return {
-      phase: 'docked',
-      x: 0,
-      z: DOCK_Z,
-      rotation: Math.PI,
-      speed: 0,
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      throttle: 0.1,
-      doorsOpen: t > 0.5,
-    };
-  } else if (cycle < 48) {
-    return {
-      phase: 'docked',
-      x: 0,
-      z: DOCK_Z,
-      rotation: Math.PI,
-      speed: 0,
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      throttle: 0.1,
-      doorsOpen: true,
-    };
-  } else if (cycle < 50) {
-    const t = (cycle - 48) / 2;
-    return {
-      phase: 'docked',
-      x: 0,
-      z: DOCK_Z,
-      rotation: Math.PI,
-      speed: 0,
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      throttle: 0.1,
-      doorsOpen: t < 0.5,
-    };
-  } else if (cycle < 52) {
-    return {
-      phase: 'preparing_to_leave',
-      x: 0,
-      z: DOCK_Z,
-      rotation: Math.PI,
-      speed: 0,
-      steeringAngle: 0,
-      brakeLights: true,
-      reverseLights: false,
-      leftSignal: true && signalBlink,
-      rightSignal: false,
-      trailerAngle: 0,
-      throttle: 0.3,
-      doorsOpen: false,
-    };
-  } else if (cycle < 55) {
-    const t = easeInQuad((cycle - 52) / 3);
-    return {
-      phase: 'pulling_out',
-      x: 0,
-      z: THREE.MathUtils.lerp(DOCK_Z, ALIGN_Z, t),
-      rotation: Math.PI,
-      speed: t * 0.4,
-      steeringAngle: -t * 0.2,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: true && signalBlink,
-      rightSignal: false,
-      trailerAngle: -t * 0.03,
-      throttle: 0.5,
-      doorsOpen: false,
-    };
-  } else if (cycle < 58) {
-    const t = easeInOutCubic((cycle - 55) / 3);
-    const straightPortion = 0.25;
-    if (t < straightPortion) {
-      const tStraight = t / straightPortion;
-      return {
-        phase: 'turning_out',
-        x: 0,
-        z: THREE.MathUtils.lerp(ALIGN_Z, departTurnStart[1], tStraight),
-        rotation: Math.PI,
-        speed: 0.65,
-        steeringAngle: -0.06,
-        brakeLights: false,
-        reverseLights: false,
-        leftSignal: true && signalBlink,
-        rightSignal: false,
-        trailerAngle: 0.025 * (1 - tStraight),
-        throttle: 0.7,
-        doorsOpen: false,
-      };
-    }
-
-    const tCurve = (t - straightPortion) / (1 - straightPortion);
-    const [x, z] = bezierPoint(departTurnStart, departTurnControl, departTurnEnd, tCurve);
-    const angle = bezierTangentAngle(departTurnStart, departTurnControl, departTurnEnd, tCurve);
-    return {
-      phase: 'turning_out',
-      x,
-      z,
-      rotation: THREE.MathUtils.lerp(angle, Math.PI, Math.pow(tCurve, 1.1)),
-      speed: 0.65,
-      steeringAngle: THREE.MathUtils.lerp(-0.28, 0, tCurve),
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: true && signalBlink,
-      rightSignal: false,
-      trailerAngle: Math.sin(tCurve * Math.PI) * 0.065 * (1 - tCurve * 0.35),
-      throttle: 0.7,
-      doorsOpen: false,
-    };
-  } else {
-    const t = easeInQuad((cycle - 58) / 2);
-    return {
-      phase: 'leaving',
-      x: ENTRY_X,
-      z: THREE.MathUtils.lerp(departTurnEnd[1], ROAD_Z, t),
-      rotation: Math.PI,
-      speed: 0.75 + t * 0.7,
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      throttle: 0.8 + t * 0.2,
-      doorsOpen: false,
-    };
-  }
+  return calcReceiving(cycle, time) as unknown as TruckAnimState;
 };
 
 // Exhaust particle system
@@ -881,7 +285,7 @@ const WheelChock: React.FC<{
   }, [isDeployed]);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
       <group ref={chockRef} position={[0.5, 0, 0]}>
         {/* Wedge shape */}
         <mesh position={[0, 0.08, 0]} rotation={[0, 0, 0]}>
@@ -1176,7 +580,7 @@ const TruckWashStation: React.FC<{ position: [number, number, number]; rotation?
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
       {/* Main structure - overhead frame */}
       <mesh position={[0, 5, 0]}>
         <boxGeometry args={[8, 0.4, 12]} />
@@ -1295,7 +699,7 @@ const DriverBreakRoom: React.FC<{ position: [number, number, number]; rotation?:
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     {/* Main building */}
     <mesh position={[0, 2, 0]} castShadow>
       <boxGeometry args={[8, 4, 6]} />
@@ -1394,7 +798,7 @@ const EmployeeParking: React.FC<{ position: [number, number, number]; rotation?:
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     {/* Parking lot surface */}
     <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
       <planeGeometry args={[25, 18]} />
@@ -1518,7 +922,7 @@ const PropaneTankCage: React.FC<{ position: [number, number, number]; rotation?:
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     {/* Concrete pad */}
     <mesh position={[0, 0.05, 0]}>
       <boxGeometry args={[3, 0.1, 2]} />
@@ -1599,7 +1003,7 @@ const DumpsterArea: React.FC<{ position: [number, number, number]; rotation?: nu
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     {/* Concrete pad */}
     <mesh position={[0, 0.03, 0]}>
       <boxGeometry args={[8, 0.06, 5]} />
@@ -1829,7 +1233,7 @@ const ManifestHolder: React.FC<{ position: [number, number, number]; rotation?: 
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     {/* Wall-mounted box */}
     <mesh position={[0, 0, 0]}>
       <boxGeometry args={[0.5, 0.7, 0.12]} />
@@ -1887,7 +1291,7 @@ const TimeClockStation: React.FC<{ position: [number, number, number]; rotation?
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
       {/* Wall mount backing */}
       <mesh position={[0, 1.4, 0]}>
         <boxGeometry args={[0.8, 1, 0.08]} />
@@ -2273,7 +1677,7 @@ const WeightScale: React.FC<{ position: [number, number, number]; rotation?: num
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
       {/* Scale platform */}
       <mesh position={[0, 0.1, 0]}>
         <boxGeometry args={[4, 0.2, 12]} />
@@ -2559,7 +1963,7 @@ const TireInspectionArea: React.FC<{ position: [number, number, number]; rotatio
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     <mesh position={[0, 0.05, 0]}>
       <boxGeometry args={[4, 0.1, 8]} />
       <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
@@ -2628,7 +2032,7 @@ const FuelIsland: React.FC<{ position: [number, number, number]; rotation?: numb
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     <mesh position={[0, 0.15, 0]}>
       <boxGeometry args={[3, 0.3, 8]} />
       <meshStandardMaterial color="#fbbf24" roughness={0.7} />
@@ -2716,7 +2120,7 @@ const GuardShack: React.FC<{ position: [number, number, number]; rotation?: numb
     return () => unregisterAnimation(id);
   }, []);
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
       <mesh position={[0, 1.4, 0]}>
         <boxGeometry args={[3, 2.8, 3]} />
         <meshStandardMaterial color="#e2e8f0" roughness={0.6} />
@@ -2797,7 +2201,7 @@ const NoIdlingSign: React.FC<{ position: [number, number, number]; rotation?: nu
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     {/* Post */}
     <mesh position={[0, 1.2, 0]}>
       <cylinderGeometry args={[0.05, 0.05, 2.4, 8]} />
@@ -3764,7 +3168,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             <IntercomCallBox position={[20, 0, 55]} rotation={-Math.PI / 2} />
 
             {/* Yard jockey patrolling */}
-            <YardJockey position={[0, 0, 25]} rotation={0} />
+            <YardJockey position={[-15, 0, 25]} rotation={0} />
 
             {/* Truck wash station */}
             <TruckWashStation position={[-30, 0, 55]} rotation={0} />
@@ -3789,7 +3193,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             <ScaleTicketKiosk position={[3, 0, 52]} rotation={0} />
 
             {/* Overhead crane in maintenance bay */}
-            <OverheadCrane position={[55, 5.5, 20]} spanWidth={10} />
+            <OverheadCrane position={[75, 5.5, 20]} spanWidth={10} />
 
             {/* Stretch wrap machine */}
             <StretchWrapMachine
@@ -3837,7 +3241,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         <TrailerDropYard position={[-45, 0, 35]} rotation={0} />
 
         {/* Maintenance bay */}
-        <MaintenanceBay position={[55, 0, 20]} rotation={-Math.PI / 2} />
+        <MaintenanceBay position={[70, 0, 20]} rotation={-Math.PI / 2} />
 
         {/* Dock bumpers with wear indicators */}
         <DockBumperWithWear position={[-3, 1.2, -1]} wearLevel={0.3} />
@@ -4101,8 +3505,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Cardboard compactor/baler for receiving area */}
         <CardboardCompactor position={[40, 0, -15]} rotation={-Math.PI / 2} />
 
-        {/* Time clock station for receiving area */}
-        <TimeClockStation position={[9, 0, 4]} rotation={-Math.PI / 2} />
+        {/* Time clock station for receiving area - moved to yard */}
+        <TimeClockStation position={[9, 0, -8]} rotation={-Math.PI / 2} />
 
         {/* Air hose station */}
         <AirHoseStation position={[-30, 0, -20]} rotation={Math.PI / 2} />
@@ -4110,16 +3514,16 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Scale ticket kiosk */}
         <ScaleTicketKiosk position={[-3, 0, -52]} rotation={Math.PI} />
 
-        {/* Stretch wrap machine */}
+        {/* Stretch wrap machine - moved to yard */}
         <StretchWrapMachine
-          position={[15, 0, 0]}
+          position={[15, 0, -10]}
           rotation={Math.PI}
           isActive={receivingDoorsOpenRef.current}
         />
 
-        {/* Dock bumpers with wear indicators */}
-        <DockBumperWithWear position={[-3, 1.2, 1]} wearLevel={0.5} />
-        <DockBumperWithWear position={[3, 1.2, 1]} wearLevel={0.2} />
+        {/* Dock bumpers with wear indicators - moved closer to dock building wall */}
+        <DockBumperWithWear position={[-3, 1.2, -2]} wearLevel={0.5} />
+        <DockBumperWithWear position={[3, 1.2, -2]} wearLevel={0.2} />
 
         {/* Floor markings */}
         <DockFloorMarkings position={[0, 0, -3]} />
@@ -4128,12 +3532,12 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         <SafetyMirror position={[-8, 3, -5]} rotation={Math.PI + Math.PI / 4} />
         <SafetyMirror position={[8, 3, -5]} rotation={Math.PI - Math.PI / 4} />
 
-        {/* Fire extinguisher stations */}
-        <FireExtinguisherStation position={[-9, 0, 0]} rotation={Math.PI / 2} />
-        <FireExtinguisherStation position={[9, 0, 0]} rotation={-Math.PI / 2} />
+        {/* Fire extinguisher stations - moved alongside dock */}
+        <FireExtinguisherStation position={[-9, 0, -4]} rotation={Math.PI / 2} />
+        <FireExtinguisherStation position={[9, 0, -4]} rotation={-Math.PI / 2} />
 
-        {/* Truck alignment laser guides */}
-        <TruckAlignmentGuides position={[0, 0, 0]} />
+        {/* Truck alignment laser guides - on the dock approach */}
+        <TruckAlignmentGuides position={[0, 0, -8]} />
 
         {/* Pallet jack charging station */}
         <PalletJackChargingStation position={[-12, 0, -5]} rotation={Math.PI / 2} />
@@ -4178,6 +3582,11 @@ const RealisticTruck: React.FC<{
   const leftSignalRef = useRef<THREE.MeshStandardMaterial>(null);
   const rightSignalRef = useRef<THREE.MeshStandardMaterial>(null);
   const markerLightsRef = useRef<THREE.MeshStandardMaterial[]>([]);
+  // Physics refs
+  const cabBodyRef = useRef<THREE.Group>(null);
+  const steerLeftRef = useRef<THREE.Group>(null);
+  const steerRightRef = useRef<THREE.Group>(null);
+
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const quality = useGraphicsStore((state) => state.graphics.quality);
 
@@ -4258,6 +3667,22 @@ const RealisticTruck: React.FC<{
         mat.emissiveIntensity = 0.4 + Math.sin(time * 2) * 0.1;
       }
     });
+
+    // Apply Cab Physics (Suspension)
+    if (cabBodyRef.current) {
+      // Apply roll and pitch to the cab body
+      // Damping could be applied here if not in calculations, but useTruckPhysics handles easing
+      cabBodyRef.current.rotation.z = THREE.MathUtils.lerp(cabBodyRef.current.rotation.z, truckState.cabRoll, 0.1);
+      cabBodyRef.current.rotation.x = THREE.MathUtils.lerp(cabBodyRef.current.rotation.x, truckState.cabPitch, 0.1);
+    }
+
+    // Apply Steering
+    if (steerLeftRef.current) {
+      steerLeftRef.current.rotation.y = THREE.MathUtils.lerp(steerLeftRef.current.rotation.y, truckState.steeringAngle, 0.2);
+    }
+    if (steerRightRef.current) {
+      steerRightRef.current.rotation.y = THREE.MathUtils.lerp(steerRightRef.current.rotation.y, truckState.steeringAngle, 0.2);
+    }
   });
 
   const isEngineRunning = getTruckState().phase !== 'docked' || throttle.current > 0.05;
@@ -4265,7 +3690,7 @@ const RealisticTruck: React.FC<{
   return (
     <group>
       {/* === CAB === */}
-      <group position={[0, 0, 2]}>
+      <group position={[0, 0, 2]} ref={cabBodyRef}>
         {/* Main cab body */}
         <mesh position={[0, 2, 0]} castShadow>
           <boxGeometry args={[2.8, 2.4, 2.2]} />
@@ -4640,39 +4065,39 @@ const RealisticTruck: React.FC<{
       </group>
 
       {/* === FRONT WHEELS === */}
-      <mesh
-        ref={frontLeftWheelRef}
-        position={[-1.4, 0.55, 2.5]}
-        rotation={[0, 0, Math.PI / 2]}
-        castShadow
-      >
-        <cylinderGeometry args={[0.55, 0.55, 0.35, 12]} />
-        <meshStandardMaterial color="#1f2937" roughness={0.7} />
-      </mesh>
-      <mesh
-        ref={frontRightWheelRef}
-        position={[1.4, 0.55, 2.5]}
-        rotation={[0, 0, Math.PI / 2]}
-        castShadow
-      >
-        <cylinderGeometry args={[0.55, 0.55, 0.35, 12]} />
-        <meshStandardMaterial color="#1f2937" roughness={0.7} />
-      </mesh>
-
-      {/* Wheel hubs (chrome) */}
-      {[
-        [-1.4, 2.5],
-        [1.4, 2.5],
-      ].map(([x, z], i) => (
+      <group ref={steerLeftRef} position={[-1.4, 0.55, 2.5]}>
         <mesh
-          key={i}
-          position={[x > 0 ? x + 0.18 : x - 0.18, 0.55, z]}
+          ref={frontLeftWheelRef}
           rotation={[0, 0, Math.PI / 2]}
+          castShadow
         >
+          <cylinderGeometry args={[0.55, 0.55, 0.35, 12]} />
+          <meshStandardMaterial color="#1f2937" roughness={0.7} />
+        </mesh>
+        {/* Hub */}
+        <mesh position={[-0.18, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[0.2, 0.2, 0.05, 12]} />
           <meshStandardMaterial color="#94a3b8" metalness={0.9} roughness={0.1} />
         </mesh>
-      ))}
+      </group>
+
+      <group ref={steerRightRef} position={[1.4, 0.55, 2.5]}>
+        <mesh
+          ref={frontRightWheelRef}
+          rotation={[0, 0, Math.PI / 2]}
+          castShadow
+        >
+          <cylinderGeometry args={[0.55, 0.55, 0.35, 12]} />
+          <meshStandardMaterial color="#1f2937" roughness={0.7} />
+        </mesh>
+        {/* Hub */}
+        <mesh position={[0.18, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.2, 0.2, 0.05, 12]} />
+          <meshStandardMaterial color="#94a3b8" metalness={0.9} roughness={0.1} />
+        </mesh>
+      </group>
+
+      {/* Wheel hubs (chrome) - REMOVED: now inside steering groups */}
     </group>
   );
 };
@@ -5308,7 +4733,7 @@ const AirHoseStation: React.FC<{ position: [number, number, number]; rotation?: 
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
       <mesh position={[0, 1.5, 0]}>
         <cylinderGeometry args={[0.1, 0.12, 3, 12]} />
         <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
@@ -5377,7 +4802,7 @@ const ScaleTicketKiosk: React.FC<{ position: [number, number, number]; rotation?
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
       <mesh position={[0, 1.5, 0]}>
         <boxGeometry args={[0.8, 1.8, 0.6]} />
         <meshStandardMaterial color="#374151" roughness={0.6} />
@@ -5429,7 +4854,7 @@ const DriverRestroom: React.FC<{ position: [number, number, number]; rotation?: 
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     <mesh position={[0, 1.5, 0]} castShadow>
       <boxGeometry args={[6, 3, 4]} />
       <meshStandardMaterial color="#78716c" roughness={0.8} />
@@ -5482,7 +4907,7 @@ const TrailerDropYard: React.FC<{ position: [number, number, number]; rotation?:
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
       <planeGeometry args={[20, 30]} />
       <meshStandardMaterial color="#57534e" roughness={0.95} />
@@ -5547,7 +4972,7 @@ const MaintenanceBay: React.FC<{ position: [number, number, number]; rotation?: 
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     <mesh position={[0, 3, 0]} castShadow>
       <boxGeometry args={[12, 6, 10]} />
       <meshStandardMaterial color="#64748b" roughness={0.7} />
@@ -5634,7 +5059,7 @@ const StretchWrapMachine: React.FC<{
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
       <mesh position={[0, 0.05, 0]}>
         <cylinderGeometry args={[1.2, 1.2, 0.1, 24]} />
         <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
@@ -5816,7 +5241,7 @@ const SafetyMirror: React.FC<{ position: [number, number, number]; rotation?: nu
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     <mesh position={[0, 0, -0.3]}>
       <boxGeometry args={[0.08, 0.08, 0.6]} />
       <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
@@ -5840,7 +5265,7 @@ const FireExtinguisherStation: React.FC<{
   position: [number, number, number];
   rotation?: number;
 }> = ({ position, rotation = 0 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     <mesh position={[0, 1.2, 0]}>
       <boxGeometry args={[0.5, 0.8, 0.08]} />
       <meshStandardMaterial color="#dc2626" roughness={0.5} />
@@ -5999,7 +5424,7 @@ const PalletJackChargingStation: React.FC<{
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
       {/* Charging station base */}
       <mesh position={[0, 0.3, 0]}>
         <boxGeometry args={[1.5, 0.6, 1]} />
@@ -6269,7 +5694,7 @@ const CardboardCompactor: React.FC<{ position: [number, number, number]; rotatio
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
       {/* Main body/hopper */}
       <mesh position={[0, 1.2, 0]}>
         <boxGeometry args={[2.5, 2.4, 2]} />
@@ -6374,7 +5799,7 @@ const IntercomCallBox: React.FC<{ position: [number, number, number]; rotation?:
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
       {/* Post */}
       <mesh position={[0, 0.75, 0]}>
         <cylinderGeometry args={[0.05, 0.06, 1.5, 8]} />

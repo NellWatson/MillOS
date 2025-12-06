@@ -7,7 +7,7 @@ import { ConveyorSystem } from './ConveyorSystem';
 import { WorkerSystem } from './WorkerSystem';
 import { FactoryInfrastructure } from './FactoryInfrastructure';
 import { SpoutingSystem } from './SpoutingSystem';
-import { DustParticles, GrainFlow, MachineSteamVents } from './DustParticles';
+import { DustParticles, GrainFlow, MachineSteamVents, DustAnimationManager } from './DustParticles';
 import { TruckBay } from './TruckBay';
 import { ForkliftSystem, ForkliftData } from './ForkliftSystem';
 import { FactoryEnvironment } from './Environment';
@@ -24,6 +24,8 @@ import { useSafetyStore } from '../stores/safetyStore';
 import { positionRegistry, Obstacle } from '../utils/positionRegistry';
 import { useShallow } from 'zustand/react/shallow';
 import { trackRender } from '../utils/renderProfiler';
+import { CameraBoundsTracker } from './CameraController';
+import { useCameraPositionStore } from '../stores/useCameraPositionStore';
 
 // Single heat map point with ref-based animation (throttled to reduce CPU load)
 // Memoized to prevent re-renders when parent updates
@@ -502,6 +504,9 @@ export const MillScene: React.FC<MillSceneProps> = ({
   const perfDebug = useGraphicsStore((state) => state.graphics.perfDebug);
   const isLowGraphics = graphicsQuality === 'low';
 
+  // Camera-based visibility culling - hide interior when outside, hide exterior when inside
+  const isCameraInside = useCameraPositionStore((state) => state.isCameraInside);
+
   // Performance debug - log when toggles change
   useEffect(() => {
     if (perfDebug?.showPerfOverlay) {
@@ -523,11 +528,15 @@ export const MillScene: React.FC<MillSceneProps> = ({
       {/* Environment & Lighting */}
       {!perfDebug?.disableEnvironment && <FactoryEnvironment />}
 
+      {/* Camera bounds tracker for inside/outside detection */}
+      <CameraBoundsTracker />
+
       {/* Main Systems - Respect perfDebug toggles for A/B testing */}
-      {!perfDebug?.disableMachines && (
+      {/* PERFORMANCE: Interior systems only render when camera is inside factory */}
+      {isCameraInside && !perfDebug?.disableMachines && (
         <Machines machines={displayMachines} onSelect={onSelectMachine} />
       )}
-      {!isLowGraphics && !perfDebug?.disableMachines && (
+      {isCameraInside && !isLowGraphics && !perfDebug?.disableMachines && (
         <SpoutingSystem machines={displayMachines} />
       )}
       {/* CRITICAL: Wrapped in Suspense to prevent MeshReflectorMaterial from breaking scene on quality change */}
@@ -541,46 +550,47 @@ export const MillScene: React.FC<MillSceneProps> = ({
       </Suspense>
 
       {/* Dynamic Elements - Respect perfDebug toggles */}
-      {!perfDebug?.disableConveyorSystem && (
+      {/* PERFORMANCE: Interior systems only render when camera is inside factory */}
+      {isCameraInside && !perfDebug?.disableConveyorSystem && (
         <ConveyorSystem productionSpeed={productionSpeed} />
       )}
-      {!perfDebug?.disableWorkerSystem && (
+      {isCameraInside && !perfDebug?.disableWorkerSystem && (
         <WorkerSystem onSelectWorker={onSelectWorker} />
       )}
-      {!perfDebug?.disableForkliftSystem && (
+      {isCameraInside && !perfDebug?.disableForkliftSystem && (
         <ForkliftSystem showSpeedZones={showZones} onSelectForklift={onSelectForklift} />
       )}
-      {/* PERFORMANCE: TruckBay has 27+ useFrame hooks - enable on medium/high/ultra */}
-      {(graphicsQuality === 'medium' || graphicsQuality === 'high' || graphicsQuality === 'ultra') &&
+      {/* PERFORMANCE: TruckBay renders only when camera is OUTSIDE (exterior view) */}
+      {!isCameraInside &&
+        (graphicsQuality === 'medium' || graphicsQuality === 'high' || graphicsQuality === 'ultra') &&
         !perfDebug?.disableTruckBay && <TruckBay productionSpeed={productionSpeed} />}
 
       {/* Theme Hospital-inspired Mood & Chaos Systems */}
-      {/* PERFORMANCE: These systems have 50+ useFrame callbacks combined - ultra only */}
-      {/* Visible chaos events - rats, pigeons, grain spills, etc. */}
-      {graphicsQuality === 'ultra' && <VisibleChaos />}
-      {/* Factory plants, dust accumulation, coffee machine */}
-      {graphicsQuality === 'ultra' && <FactoryEnvironmentSystem />}
-      {/* Maintenance workers with sweeping, watering, oiling animations */}
-      {graphicsQuality === 'ultra' && <MaintenanceSystem />}
+      {/* PERFORMANCE: Interior-only systems, ultra quality only */}
+      {isCameraInside && graphicsQuality === 'ultra' && <VisibleChaos />}
+      {isCameraInside && graphicsQuality === 'ultra' && <FactoryEnvironmentSystem />}
+      {isCameraInside && graphicsQuality === 'ultra' && <MaintenanceSystem />}
 
       {/* Incident Heat Map Visualization */}
       <IncidentHeatMap />
 
       {/* Atmospheric Effects - heavily reduced for performance */}
-      {/* PERFORMANCE: Disable particle effects on low, reduce on medium */}
-      {graphicsQuality !== 'low' && (
-        <DustParticles
-          count={graphicsQuality === 'ultra' ? 150 : graphicsQuality === 'high' ? 80 : 30}
-        />
+      {/* PERFORMANCE: Interior-only particle effects */}
+      {isCameraInside && graphicsQuality !== 'low' && (
+        <DustAnimationManager>
+          <DustParticles
+            count={graphicsQuality === 'ultra' ? 150 : graphicsQuality === 'high' ? 80 : 30}
+          />
+          {(graphicsQuality === 'high' || graphicsQuality === 'ultra') && <GrainFlow />}
+          {(graphicsQuality === 'high' || graphicsQuality === 'ultra') && <MachineSteamVents />}
+        </DustAnimationManager>
       )}
-      {(graphicsQuality === 'high' || graphicsQuality === 'ultra') && <GrainFlow />}
-      {(graphicsQuality === 'high' || graphicsQuality === 'ultra') && <MachineSteamVents />}
 
-      {/* Holographic Displays - only high/ultra (has multiple useFrame callbacks) */}
-      {(graphicsQuality === 'high' || graphicsQuality === 'ultra') && <HolographicDisplays />}
+      {/* Holographic Displays - interior only, high/ultra */}
+      {isCameraInside && (graphicsQuality === 'high' || graphicsQuality === 'ultra') && <HolographicDisplays />}
 
-      {/* Ambient Details - micro polish elements, only high/ultra (many animated lights cause flickering) */}
-      {graphicsQuality === 'ultra' && <AmbientDetailsGroup />}
+      {/* Ambient Details - interior only, ultra */}
+      {isCameraInside && graphicsQuality === 'ultra' && <AmbientDetailsGroup />}
     </group>
   );
 };

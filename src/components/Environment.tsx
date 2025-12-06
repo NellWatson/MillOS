@@ -18,6 +18,7 @@ import React, { useMemo, useRef, useEffect, useState, useCallback, memo } from '
 import { useFrame } from '@react-three/fiber';
 import { ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
+import { SkySystem } from './SkySystem';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useProductionStore } from '../stores/productionStore';
@@ -310,92 +311,6 @@ const LightShaft: React.FC<{ position: [number, number, number] }> = memo(({ pos
     </mesh>
   );
 });
-
-// Gradient sky dome with time-of-day response
-const GradientSky: React.FC = () => {
-  const gameTime = useGameSimulationStore((state) => state.gameTime);
-  const materialRef = useRef<THREE.ShaderMaterial | null>(null);
-
-  const skyColors = useMemo(() => {
-    // Determine sky colors based on time of day
-    if (gameTime >= 20 || gameTime < 5) {
-      // Night
-      return { top: '#0c1929', bottom: '#1e293b' };
-    } else if (gameTime >= 5 && gameTime < 7) {
-      // Dawn
-      return { top: '#1e3a5a', bottom: '#f97316' };
-    } else if (gameTime >= 7 && gameTime < 10) {
-      // Morning
-      return { top: '#0ea5e9', bottom: '#fbbf24' };
-    } else if (gameTime >= 10 && gameTime < 16) {
-      // Midday
-      return { top: '#0369a1', bottom: '#7dd3fc' };
-    } else if (gameTime >= 16 && gameTime < 18) {
-      // Afternoon
-      return { top: '#0c4a6e', bottom: '#fbbf24' };
-    } else {
-      // Dusk
-      return { top: '#1e293b', bottom: '#ea580c' };
-    }
-  }, [gameTime]);
-
-  useEffect(() => {
-    const shaderMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        topColor: { value: new THREE.Color(skyColors.top) },
-        bottomColor: { value: new THREE.Color(skyColors.bottom) },
-        offset: { value: 20 },
-        exponent: { value: 0.6 },
-      },
-      vertexShader: `
-        varying vec3 vWorldPosition;
-        void main() {
-          vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-          vWorldPosition = worldPosition.xyz;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform vec3 topColor;
-        uniform vec3 bottomColor;
-        uniform float offset;
-        uniform float exponent;
-        varying vec3 vWorldPosition;
-        void main() {
-          float h = normalize(vWorldPosition + offset).y;
-          gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
-        }
-      `,
-      side: THREE.BackSide,
-    });
-
-    materialRef.current = shaderMaterial;
-
-    return () => {
-      if (materialRef.current) {
-        materialRef.current.dispose();
-        materialRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Intentionally empty - material created once, colors updated in separate effect
-
-  // Update colors when time changes
-  useEffect(() => {
-    if (materialRef.current) {
-      materialRef.current.uniforms.topColor.value.set(skyColors.top);
-      materialRef.current.uniforms.bottomColor.value.set(skyColors.bottom);
-    }
-  }, [skyColors]);
-
-  if (!materialRef.current) return null;
-
-  return (
-    <mesh material={materialRef.current}>
-      <sphereGeometry args={[200, 32, 32]} />
-    </mesh>
-  );
-};
 
 // Global frame counter - increments once per frame for all throttling utilities
 const GlobalFrameCounter: React.FC = () => {
@@ -698,8 +613,10 @@ export const FactoryEnvironment: React.FC = () => {
         />
       )}
 
-      {/* Gradient sky dome with time-of-day response */}
-      <GradientSky />
+      {/* Enhanced Sky System with Day/Night Cycle, Clouds, and Horizon */}
+      <React.Suspense fallback={null}>
+        <SkySystem />
+      </React.Suspense>
 
       {/* Factory walls - planes facing inward (only visible from inside) */}
       {/* Back wall - with receiving dock opening */}

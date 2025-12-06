@@ -28,16 +28,16 @@ interface LightingRefs {
   type: LightingRefType;
   id: string;
   // Flickering light refs
-  lightRef?: React.RefObject<THREE.PointLight>;
-  tubeRef?: React.RefObject<THREE.Mesh>;
+  lightRef?: React.RefObject<THREE.PointLight | null>;
+  tubeRef?: React.RefObject<THREE.Mesh | null>;
   flickerState?: React.MutableRefObject<{ nextFlicker: number; isFlickering: boolean; flickerEnd: number }>;
   // God rays refs
-  particlesRef?: React.RefObject<THREE.Points>;
+  particlesRef?: React.RefObject<THREE.Points | null>;
   particleCount?: number;
   // Warning light refs
   isActive?: boolean;
   // LED refs
-  meshRef?: React.RefObject<THREE.Mesh>;
+  meshRef?: React.RefObject<THREE.Mesh | null>;
   blinkPattern?: 'steady' | 'slow' | 'fast' | 'pulse';
   // Pulsing indicator refs
   baseColor?: string;

@@ -119,7 +119,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     enableWeathering: false,
     enableDustParticles: true,
     enableGrainFlow: false,
-    enableAtmosphericHaze: true,
+    enableAtmosphericHaze: false,
     enableLightShafts: false,
     enableContactShadows: true,
     enableHighResShadows: false,
@@ -132,7 +132,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     enableSignage: false,
     enableVentilationDucts: false,
     enableAnisotropicReflections: false,
-    dustParticleCount: 200,
+    dustParticleCount: 40,
     shadowMapSize: 2048,
     ssaoSamples: 12,
     workerLodDistance: 60, // Medium quality: fairly long LOD distance for detailed workers
