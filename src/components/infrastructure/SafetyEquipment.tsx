@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
-import { useMillStore } from '../../store';
+import { useGraphicsStore } from '../../stores/graphicsStore';
 
 interface SafetyEquipmentProps {
   floorWidth: number;
@@ -454,15 +454,18 @@ const PerimeterFence: React.FC<{
 };
 
 export const SafetyEquipment: React.FC<SafetyEquipmentProps> = () => {
-  const graphics = useMillStore((state) => state.graphics);
-  const isLowGraphics = graphics.quality === 'low';
+  const graphics = useGraphicsStore((state) => state.graphics);
+
+  // PERFORMANCE: Decorative safety equipment moved to HIGH+ only
+  const isHighGraphics = graphics.quality === 'high' || graphics.quality === 'ultra';
   const showWarehouseClutter = graphics.enableWarehouseClutter;
   const showSignage = graphics.enableSignage;
 
   return (
     <group>
-      {/* Safety Stations around the factory - skip on low graphics */}
-      {!isLowGraphics && (
+      {/* Safety Stations around the factory - HIGH+ only for performance */}
+      {/* PERF: Moved to HIGH+ only - saves ~50 draw calls on MEDIUM */}
+      {isHighGraphics && (
         <>
           <SafetyStation position={[0, 0, 35]} type="first-aid" />
           <SafetyStation position={[-25, 0, -10]} type="eyewash" />
@@ -478,8 +481,9 @@ export const SafetyEquipment: React.FC<SafetyEquipmentProps> = () => {
         </>
       )}
 
-      {/* Perimeter fence with barbed wire */}
-      {!isLowGraphics && (
+      {/* Perimeter fence with barbed wire - HIGH+ only */}
+      {/* PERF: Moved to HIGH+ only - saves ~40 draw calls on MEDIUM */}
+      {isHighGraphics && (
         <>
           {/* Front perimeter (shipping side) */}
           <PerimeterFence start={[-58, 0, 75]} end={[-35, 0, 75]} height={2.5} />

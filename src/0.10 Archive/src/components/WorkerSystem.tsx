@@ -599,7 +599,7 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = ({ data, on
       waveTimeoutRef.current = setTimeout(() => setIsWaving(false), 1500);
     }
     wasEvadingRef.current = isEvadingRef.current;
-  });
+  }, [recordWorkerEvasion]);
 
   // Cleanup timeout on unmount
   useEffect(() => {

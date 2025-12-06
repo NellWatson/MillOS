@@ -400,7 +400,7 @@ class AudioManager {
       if (node) {
         try {
           node.source.stop();
-        } catch (e) {}
+        } catch { /* Audio API error - silent */ }
       }
     });
     this.ambientNodes = {};
@@ -454,7 +454,7 @@ class AudioManager {
 
       this.machineNodes.set(machineId, { source, gain });
 
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   stopMillSound(machineId: string) {
@@ -462,7 +462,7 @@ class AudioManager {
     if (node) {
       try {
         node.source.stop();
-      } catch (e) {}
+      } catch { /* Audio API error - silent */ }
       this.machineNodes.delete(machineId);
     }
   }
@@ -511,7 +511,7 @@ class AudioManager {
 
       this.machineNodes.set(machineId, { source, gain });
 
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Packer pneumatic/mechanical sound
@@ -558,7 +558,7 @@ class AudioManager {
 
       this.machineNodes.set(machineId, { source, gain });
 
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   stopMachineSound(machineId: string) {
@@ -566,7 +566,7 @@ class AudioManager {
     if (node) {
       try {
         node.source.stop();
-      } catch (e) {}
+      } catch { /* Audio API error - silent */ }
       this.machineNodes.delete(machineId);
     }
   }
@@ -604,7 +604,7 @@ class AudioManager {
       osc.start(currentTime);
       osc.stop(currentTime + 0.2);
 
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Alert/warning sound
@@ -639,7 +639,7 @@ class AudioManager {
         osc.stop(startTime + 0.2);
       }
 
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Grain pouring/flowing sound
@@ -677,7 +677,7 @@ class AudioManager {
       source.start(currentTime);
       source.stop(currentTime + duration + 0.5);
 
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === TRUCK SOUNDS ===
@@ -728,7 +728,7 @@ class AudioManager {
       lfo.start();
 
       this.truckEngines.set(truckId, { source, gain });
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   updateTruckEngine(truckId: string, isMoving: boolean) {
@@ -744,7 +744,7 @@ class AudioManager {
     if (engine) {
       try {
         engine.source.stop();
-      } catch (e) {}
+      } catch { /* Audio API error - silent */ }
       this.truckEngines.delete(truckId);
     }
   }
@@ -780,7 +780,7 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + 0.7);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === FOOTSTEP SOUNDS ===
@@ -827,7 +827,7 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + 0.1);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === AI DECISION SOUNDS ===
@@ -863,7 +863,7 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.15);
       });
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // AI decision notification sound (subtle)
@@ -895,7 +895,7 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.18);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // AI anomaly detection sound
@@ -937,7 +937,7 @@ class AudioManager {
       lfo.start(currentTime);
       osc.stop(currentTime + 0.55);
       lfo.stop(currentTime + 0.55);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // AI success chime (for completed decisions)
@@ -970,7 +970,7 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.25);
       });
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === UI SOUNDS ===
@@ -1000,7 +1000,7 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.08);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Hover sound (subtle)
@@ -1027,7 +1027,7 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.04);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Panel open/close sound
@@ -1055,7 +1055,7 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.15);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   playPanelClose() {
@@ -1082,7 +1082,7 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.15);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Resume audio context if suspended (needed for user interaction requirement)
@@ -1219,7 +1219,7 @@ class AudioManager {
         osc.stop(currentTime + duration + 0.1);
       });
 
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Worker whistle (attention-getting)
@@ -1252,7 +1252,7 @@ class AudioManager {
       osc.start(currentTime);
       osc.stop(currentTime + 0.55);
 
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Worker call (muffled distant voice)
@@ -1294,7 +1294,7 @@ class AudioManager {
       source.start(currentTime);
       source.stop(currentTime + duration + 0.1);
 
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === TIME-OF-DAY AUDIO ===
@@ -1396,7 +1396,7 @@ class AudioManager {
         osc.stop(startTime + 0.06);
       }
 
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === CONVEYOR SPATIAL AUDIO ===
@@ -1438,7 +1438,7 @@ class AudioManager {
       this.conveyorNodes.set(conveyorId, { source, gain });
       this.registerSoundPosition(conveyorId, x, y, z);
 
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   updateConveyorSpatialVolume(conveyorId: string) {
@@ -1454,7 +1454,7 @@ class AudioManager {
     if (node) {
       try {
         node.source.stop();
-      } catch (e) {}
+      } catch { /* Audio API error - silent */ }
       this.conveyorNodes.delete(conveyorId);
     }
   }
@@ -1501,7 +1501,7 @@ class AudioManager {
       // Air brake release after horn
       setTimeout(() => this.playAirBrake(), 700);
 
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Truck departure sound (engine rev + release)
@@ -1542,7 +1542,7 @@ class AudioManager {
       source.start(currentTime);
       source.stop(currentTime + 2.1);
 
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === FORKLIFT ENGINE SOUNDS ===
@@ -1590,7 +1590,7 @@ class AudioManager {
       lfo.start();
 
       this.forkliftEngines.set(forkliftId, { source, gain, lfo });
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   updateForkliftEngine(forkliftId: string, isMoving: boolean, isStopped: boolean) {
@@ -1616,7 +1616,7 @@ class AudioManager {
       try {
         engine.source.stop();
         engine.lfo.stop();
-      } catch (e) {}
+      } catch { /* Audio API error - silent */ }
       this.forkliftEngines.delete(forkliftId);
     }
   }
@@ -1693,7 +1693,7 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + duration + 0.2);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Radio acknowledgment beep
@@ -1726,7 +1726,7 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.1);
       }
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Radio squelch sound (click when releasing talk button)
@@ -1761,7 +1761,7 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + 0.15);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === OUTDOOR AMBIENT SOUNDS ===
@@ -1875,7 +1875,7 @@ class AudioManager {
         this.outdoorNodes.traffic = { source, gain };
       }
 
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   stopOutdoorAmbient() {
@@ -1883,7 +1883,7 @@ class AudioManager {
       if (node) {
         try {
           node.source.stop();
-        } catch (e) {}
+        } catch { /* Audio API error - silent */ }
       }
     });
     this.outdoorNodes = {};
@@ -1928,7 +1928,7 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.25);
       });
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Ascending chime when exiting speed zone
@@ -1966,7 +1966,7 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.2);
       });
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === EMERGENCY STOP SOUNDS ===
@@ -2009,14 +2009,14 @@ class AudioManager {
       lfo.start();
 
       this.emergencyAlarmNode = { source: osc, gain };
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   stopEmergencyAlarm() {
     if (this.emergencyAlarmNode) {
       try {
         this.emergencyAlarmNode.source.stop();
-      } catch (e) {}
+      } catch { /* Audio API error - silent */ }
       this.emergencyAlarmNode = null;
     }
   }
@@ -2053,7 +2053,7 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.65);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === FORKLIFT-TO-FORKLIFT ACKNOWLEDGMENT ===
@@ -2087,7 +2087,7 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.12);
       }
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === PA SYSTEM ANNOUNCEMENTS ===
@@ -2160,7 +2160,7 @@ class AudioManager {
 
       // Follow with muffled speech-like sound
       setTimeout(() => this.playPASpeech(), 1200);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   private playPASpeech() {
@@ -2200,7 +2200,7 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + duration + 0.2);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   private playShiftBell() {
@@ -2235,7 +2235,7 @@ class AudioManager {
           osc.stop(startTime + 0.65);
         });
       }
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   private playPATone() {
@@ -2264,7 +2264,7 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.75);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === INDUSTRIAL AMBIENT SOUNDS ===
@@ -2365,7 +2365,7 @@ class AudioManager {
 
       // Play startup clunk
       this.playCompressorStartup();
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   private stopCompressorSound() {
@@ -2378,11 +2378,11 @@ class AudioManager {
           setTimeout(() => {
             try {
               this.compressorNodes?.source.stop();
-            } catch (e) {}
+            } catch { /* Audio API error - silent */ }
             this.compressorNodes = null;
           }, 500);
         }
-      } catch (e) {}
+      } catch { /* Audio API error - silent */ }
     }
   }
 
@@ -2417,7 +2417,7 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.3);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === RANDOM METAL CLANKS ===
@@ -2519,7 +2519,7 @@ class AudioManager {
 
       noiseSource.start(currentTime);
       noiseSource.stop(currentTime + 0.1);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Light metal clank (wrench, small tool)
@@ -2550,7 +2550,7 @@ class AudioManager {
         osc.start(currentTime);
         osc.stop(currentTime + 0.15);
       });
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Metal ping (pipe, railing)
@@ -2578,7 +2578,7 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.45);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Chain rattle
@@ -2610,7 +2610,7 @@ class AudioManager {
         osc.start(startTime);
         osc.stop(startTime + 0.04);
       }
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === HYDRAULIC SOUNDS ===
@@ -2660,7 +2660,7 @@ class AudioManager {
 
       // Add hydraulic fluid whoosh
       this.playHydraulicFluid(duration);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Hydraulic lower sound (slower, different character)
@@ -2699,7 +2699,7 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + duration + 0.2);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Hydraulic fluid movement sound
@@ -2734,7 +2734,7 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + duration + 0.1);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === WEATHER SOUNDS ===
@@ -2789,7 +2789,7 @@ class AudioManager {
       source.start();
       this.weatherNodes.rain = { source, gain };
       this.scheduleThunder();
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   stopRain() {
@@ -2800,11 +2800,11 @@ class AudioManager {
         if (ctx) {
           this.weatherNodes.rain.gain.gain.setTargetAtTime(0, ctx.currentTime, 1);
           setTimeout(() => {
-            try { this.weatherNodes.rain?.source.stop(); } catch (e) {}
+            try { this.weatherNodes.rain?.source.stop(); } catch { /* Audio API error - silent */ }
             this.weatherNodes.rain = undefined;
           }, 3000);
         }
-      } catch (e) {}
+      } catch { /* Audio API error - silent */ }
     }
   }
 
@@ -2853,7 +2853,7 @@ class AudioManager {
 
       source.start(currentTime);
       source.stop(currentTime + duration + 0.5);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === PNEUMATIC/SPOUTING SOUNDS ===
@@ -2891,7 +2891,7 @@ class AudioManager {
       source.start();
       this.spoutingNodes.set(spoutId, { source, gain });
       this.registerSoundPosition(spoutId, x, y, z);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   updateSpoutingSpatialVolume(spoutId: string) {
@@ -2905,7 +2905,7 @@ class AudioManager {
   stopSpoutingSound(spoutId: string) {
     const node = this.spoutingNodes.get(spoutId);
     if (node) {
-      try { node.source.stop(); } catch (e) {}
+      try { node.source.stop(); } catch { /* Audio API error - silent */ }
       this.spoutingNodes.delete(spoutId);
     }
   }
@@ -2965,7 +2965,7 @@ class AudioManager {
       lfo.start();
 
       this.ventilationFanNodes = { source, gain };
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   stopVentilationFanSound() {
@@ -2975,11 +2975,11 @@ class AudioManager {
         if (ctx) {
           this.ventilationFanNodes.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.5);
           setTimeout(() => {
-            try { this.ventilationFanNodes?.source.stop(); } catch (e) {}
+            try { this.ventilationFanNodes?.source.stop(); } catch { /* Audio API error - silent */ }
             this.ventilationFanNodes = null;
           }, 1000);
         }
-      } catch (e) {}
+      } catch { /* Audio API error - silent */ }
     }
   }
 
@@ -3051,7 +3051,7 @@ class AudioManager {
         noiseSource.start(currentTime);
         noiseSource.stop(currentTime + duration);
       }
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === WATER DRIP SOUNDS ===
@@ -3123,7 +3123,7 @@ class AudioManager {
         noiseSource.start(currentTime);
         noiseSource.stop(currentTime + 0.1);
       }
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // === LOADING BAY DOOR SOUNDS ===
@@ -3163,7 +3163,7 @@ class AudioManager {
       source.stop(currentTime + duration + 0.2);
 
       setTimeout(() => this.playDoorClunk(), (duration - 0.2) * 1000);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   playDoorClose() {
@@ -3201,7 +3201,7 @@ class AudioManager {
       source.stop(currentTime + duration + 0.2);
 
       setTimeout(() => this.playDoorClunk(), (duration - 0.1) * 1000);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   private playDoorClunk() {
@@ -3228,7 +3228,7 @@ class AudioManager {
 
       osc.start(currentTime);
       osc.stop(currentTime + 0.35);
-    } catch (e) {}
+    } catch { /* Audio API error - silent */ }
   }
 
   // Stop all sounds

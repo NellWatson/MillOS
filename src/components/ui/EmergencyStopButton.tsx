@@ -1,12 +1,12 @@
 import React from 'react';
 import { OctagonX } from 'lucide-react';
-import { useMillStore } from '../../store';
+import { useSafetyStore } from '../../stores/safetyStore';
 import { audioManager } from '../../utils/audioManager';
 
 export const EmergencyStopButton: React.FC = () => {
-  const forkliftEmergencyStop = useMillStore((state) => state.forkliftEmergencyStop);
-  const setForkliftEmergencyStop = useMillStore((state) => state.setForkliftEmergencyStop);
-  const addSafetyIncident = useMillStore((state) => state.addSafetyIncident);
+  const forkliftEmergencyStop = useSafetyStore((state) => state.forkliftEmergencyStop);
+  const setForkliftEmergencyStop = useSafetyStore((state) => state.setForkliftEmergencyStop);
+  const addSafetyIncident = useSafetyStore((state) => state.addSafetyIncident);
 
   const handleEmergencyStop = () => {
     const newState = !forkliftEmergencyStop;

@@ -24,6 +24,10 @@ import {
 // Helper to get random item from array
 const randomFrom = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
+// Throttling for mood simulation (similar to gameSimulationStore)
+let lastMoodTickTime = 0;
+let accumulatedDeltaMinutes = 0;
+
 // Worker reaction types for chaos events
 export type WorkerReaction = 'none' | 'slipping' | 'coughing' | 'startled';
 
@@ -183,7 +187,11 @@ export const useWorkerMoodStore = create<WorkerMoodStore>((set, get) => ({
   triggerWorkerReaction: (workerId, reaction, duration = 2000) => {
     // Don't interrupt existing reactions
     const existing = get().workerReactions[workerId];
-    if (existing && existing.reaction !== 'none' && Date.now() - existing.startTime < existing.duration) {
+    if (
+      existing &&
+      existing.reaction !== 'none' &&
+      Date.now() - existing.startTime < existing.duration
+    ) {
       return;
     }
 
@@ -283,10 +291,7 @@ export const useWorkerMoodStore = create<WorkerMoodStore>((set, get) => ({
     affectedWorkerIds.forEach((id) => {
       const reaction = randomFrom(config.workerReactions);
       get().setWorkerSpeaking(id, reaction);
-      setTimeout(
-        () => get().clearWorkerSpeech(id),
-        4000 + Math.random() * 2000
-      );
+      setTimeout(() => get().clearWorkerSpeech(id), 4000 + Math.random() * 2000);
     });
   },
 
@@ -318,7 +323,9 @@ export const useWorkerMoodStore = create<WorkerMoodStore>((set, get) => ({
       factoryEnvironment: {
         ...state.factoryEnvironment,
         plants: state.factoryEnvironment.plants.map((p) =>
-          p.id === plantId ? { ...p, health: Math.min(100, p.health + 30), lastWatered: Date.now() } : p
+          p.id === plantId
+            ? { ...p, health: Math.min(100, p.health + 30), lastWatered: Date.now() }
+            : p
         ),
       },
     })),
@@ -368,35 +375,51 @@ export const useWorkerMoodStore = create<WorkerMoodStore>((set, get) => ({
 
   // Simulation tick
   tickMoodSimulation: (gameTime, deltaMinutes) => {
+    // Throttling: Only run every 200ms (accumulate deltaMinutes for accuracy)
+    const now = Date.now();
+    if (now - lastMoodTickTime < 200) {
+      accumulatedDeltaMinutes += deltaMinutes;
+      return;
+    }
+
+    const effectiveDelta = deltaMinutes + accumulatedDeltaMinutes;
+    lastMoodTickTime = now;
+    accumulatedDeltaMinutes = 0;
+
     const state = get();
 
-    // Update each worker's mood
-    Object.keys(state.workerMoods).forEach((workerId) => {
-      const mood = state.workerMoods[workerId];
+    // Collect side effects to execute after state update
+    const sideEffects: Array<() => void> = [];
 
+    // Calculate active chaos count once
+    const activeChaos = state.chaosEvents.filter((e) => !e.resolved).length;
+    const hourOfDay = gameTime % 24;
+    const isBreakTime =
+      (hourOfDay >= 10 && hourOfDay < 10.5) || (hourOfDay >= 14 && hourOfDay < 14.5);
+
+    // Calculate all mood updates first (batch phase)
+    const updatedMoods: Record<string, WorkerMood> = {};
+    Object.entries(state.workerMoods).forEach(([workerId, mood]) => {
       // Energy depletes VERY slowly - workers are hardy folk!
       const energyDrain = mood.state === 'frustrated' ? 0.08 : 0.04;
-      let newEnergy = Math.max(0, mood.energy - energyDrain * deltaMinutes);
+      let newEnergy = Math.max(0, mood.energy - energyDrain * effectiveDelta);
 
       // Patience depletes only during active chaos
-      const activeChaos = state.chaosEvents.filter((e) => !e.resolved).length;
       const patienceDrain = activeChaos * 0.1;
-      let newPatience = Math.max(0, mood.patience - patienceDrain * deltaMinutes);
+      let newPatience = Math.max(0, mood.patience - patienceDrain * effectiveDelta);
 
       // Satisfaction trends toward HIGH baseline (85) - they love their jobs!
-      let newSatisfaction = mood.satisfaction + (85 - mood.satisfaction) * 0.02 * deltaMinutes;
+      let newSatisfaction = mood.satisfaction + (85 - mood.satisfaction) * 0.02 * effectiveDelta;
 
       // Passive recovery even while working (they're resilient)
-      newEnergy = Math.min(100, newEnergy + 0.02 * deltaMinutes);
-      newPatience = Math.min(100, newPatience + 0.03 * deltaMinutes);
+      newEnergy = Math.min(100, newEnergy + 0.02 * effectiveDelta);
+      newPatience = Math.min(100, newPatience + 0.03 * effectiveDelta);
 
       // Break time recovery (workers on break between certain hours)
-      const hourOfDay = gameTime % 24;
-      const isBreakTime = (hourOfDay >= 10 && hourOfDay < 10.5) || (hourOfDay >= 14 && hourOfDay < 14.5);
       if (isBreakTime) {
-        newEnergy = Math.min(100, newEnergy + 3 * deltaMinutes);
-        newPatience = Math.min(100, newPatience + 2 * deltaMinutes);
-        newSatisfaction = Math.min(100, newSatisfaction + 1 * deltaMinutes);
+        newEnergy = Math.min(100, newEnergy + 3 * effectiveDelta);
+        newPatience = Math.min(100, newPatience + 2 * effectiveDelta);
+        newSatisfaction = Math.min(100, newSatisfaction + 1 * effectiveDelta);
       }
 
       // Determine mood state - LOWER thresholds for bad moods (harder to reach)
@@ -416,45 +439,58 @@ export const useWorkerMoodStore = create<WorkerMoodStore>((set, get) => ({
       }
 
       // Random chance to speak - much lower for grumbles
-      const grumbleChance = (mood.state === 'tired' || mood.state === 'frustrated' || mood.state === 'hangry')
-        ? 0.015 * deltaMinutes  // Grumble occasionally when unhappy
-        : 0.008 * deltaMinutes; // Rarely speak when content (just enjoying work)
+      const grumbleChance =
+        mood.state === 'tired' || mood.state === 'frustrated' || mood.state === 'hangry'
+          ? 0.015 * effectiveDelta // Grumble occasionally when unhappy
+          : 0.008 * effectiveDelta; // Rarely speak when content (just enjoying work)
 
       if (Math.random() < grumbleChance) {
-        get().triggerRandomGrumble(workerId);
+        // Queue grumble side effect for later
+        sideEffects.push(() => get().triggerRandomGrumble(workerId));
       }
 
-      state.updateWorkerMood(workerId, {
+      // Store updated mood
+      updatedMoods[workerId] = {
+        ...mood,
         energy: newEnergy,
         patience: newPatience,
         satisfaction: newSatisfaction,
         state: newState,
-      });
+      };
     });
 
-    // Accumulate dust slowly
-    state.addDust(0.05 * deltaMinutes);
+    // Calculate plant health updates
+    const updatedPlants = state.factoryEnvironment.plants.map((plant) => ({
+      ...plant,
+      health: plant.health > 0 ? Math.max(0, plant.health - 0.02 * effectiveDelta) : 0,
+    }));
 
-    // Plant health decreases slowly
-    state.factoryEnvironment.plants.forEach((plant) => {
-      if (plant.health > 0) {
-        state.updateEnvironment({
-          plants: state.factoryEnvironment.plants.map((p) =>
-            p.id === plant.id ? { ...p, health: Math.max(0, p.health - 0.02 * deltaMinutes) } : p
-          ),
-        });
-      }
-    });
+    // Calculate new dust level
+    const newDustLevel = Math.min(100, state.factoryEnvironment.dustLevel + 0.05 * effectiveDelta);
 
     // Small chance for random chaos
-    if (Math.random() < 0.005 * deltaMinutes) {
-      state.triggerRandomChaos();
+    if (Math.random() < 0.005 * effectiveDelta) {
+      sideEffects.push(() => get().triggerRandomChaos());
     }
 
     // Clean up resolved chaos events older than 2 minutes
     const twoMinutesAgo = Date.now() - 120000;
-    set((s) => ({
-      chaosEvents: s.chaosEvents.filter((e) => !e.resolved || e.startTime > twoMinutesAgo),
-    }));
+    const filteredChaosEvents = state.chaosEvents.filter(
+      (e) => !e.resolved || e.startTime > twoMinutesAgo
+    );
+
+    // Single batched state update
+    set({
+      workerMoods: updatedMoods,
+      factoryEnvironment: {
+        ...state.factoryEnvironment,
+        dustLevel: newDustLevel,
+        plants: updatedPlants,
+      },
+      chaosEvents: filteredChaosEvents,
+    });
+
+    // Execute side effects after state update (using queueMicrotask for next tick)
+    sideEffects.forEach((effect) => queueMicrotask(effect));
   },
 }));

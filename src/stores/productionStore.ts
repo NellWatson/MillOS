@@ -62,12 +62,6 @@ function rebuildMachineIndex(machines: MachineData[]): Map<string, MachineData> 
   return index;
 }
 
-function rebuildWorkerIndex(workers: WorkerData[]): Map<string, WorkerData> {
-  const index = new Map<string, WorkerData>();
-  workers.forEach((worker) => index.set(worker.id, worker));
-  return index;
-}
-
 function getGridKey(x: number, z: number, threshold: number): string {
   return `${Math.round(x / threshold)}_${Math.round(z / threshold)}`;
 }
@@ -214,11 +208,17 @@ export const useProductionStore = create<ProductionStore>()(
         const updatedWorkers = state.workers.map((w) =>
           w.id === workerId ? { ...w, currentTask: task, targetMachine } : w
         );
+        // PERFORMANCE FIX: Incremental update instead of full rebuild O(n) -> O(1)
+        const newWorkersById = new Map(state._indices.workersById);
+        const updatedWorker = updatedWorkers.find((w) => w.id === workerId);
+        if (updatedWorker) {
+          newWorkersById.set(workerId, updatedWorker);
+        }
         return {
           workers: updatedWorkers,
           _indices: {
             ...state._indices,
-            workersById: rebuildWorkerIndex(updatedWorkers),
+            workersById: newWorkersById,
           },
         };
       }),
@@ -231,11 +231,17 @@ export const useProductionStore = create<ProductionStore>()(
         const updatedMachines = state.machines.map((m) =>
           m.id === machineId ? { ...m, status } : m
         );
+        // PERFORMANCE FIX: Incremental update instead of full rebuild O(n) -> O(1)
+        const newMachinesById = new Map(state._indices.machinesById);
+        const updatedMachine = updatedMachines.find((m) => m.id === machineId);
+        if (updatedMachine) {
+          newMachinesById.set(machineId, updatedMachine);
+        }
         return {
           machines: updatedMachines,
           _indices: {
             ...state._indices,
-            machinesById: rebuildMachineIndex(updatedMachines),
+            machinesById: newMachinesById,
           },
         };
       }),
@@ -294,11 +300,17 @@ export const useProductionStore = create<ProductionStore>()(
         const updatedMachines = state.machines.map((m) =>
           m.id === machineId ? { ...m, metrics: { ...m.metrics, ...metrics } } : m
         );
+        // PERFORMANCE FIX: Incremental update instead of full rebuild O(n) -> O(1)
+        const newMachinesById = new Map(state._indices.machinesById);
+        const updatedMachine = updatedMachines.find((m) => m.id === machineId);
+        if (updatedMachine) {
+          newMachinesById.set(machineId, updatedMachine);
+        }
         return {
           machines: updatedMachines,
           _indices: {
             ...state._indices,
-            machinesById: rebuildMachineIndex(updatedMachines),
+            machinesById: newMachinesById,
           },
         };
       }),
@@ -591,12 +603,7 @@ export const useProductionStore = create<ProductionStore>()(
 
     // Worker leaderboard
     workerLeaderboard: [],
-    updateWorkerScore: (
-      workerId: string,
-      name: string,
-      score: number,
-      tasksCompleted: number
-    ) =>
+    updateWorkerScore: (workerId: string, name: string, score: number, tasksCompleted: number) =>
       set((state) => {
         const existing = state.workerLeaderboard.findIndex((w) => w.workerId === workerId);
         const newBoard = [...state.workerLeaderboard];

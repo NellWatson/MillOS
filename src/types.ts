@@ -299,10 +299,10 @@ export const GRUMBLE_PHRASES: Record<MoodState, string[]> = {
   tired: [
     '*yaaawn* Is it break time yet?',
     'Need... coffee...',
-    "Who scheduled 6am starts? Oh right, me.",
+    'Who scheduled 6am starts? Oh right, me.',
     '*stretches dramatically*',
     'Five more minutes...',
-    "My kingdom for an espresso.",
+    'My kingdom for an espresso.',
   ],
   frustrated: [
     'This again?!',
@@ -383,7 +383,7 @@ export const CHAOS_EVENT_CONFIG: Record<
   },
   temperature_spike: {
     defaultDuration: 20,
-    workerReactions: ['Is it hot in here?', "Like a sauna!", "Who touched the thermostat?!"],
+    workerReactions: ['Is it hot in here?', 'Like a sauna!', 'Who touched the thermostat?!'],
     description: 'Temperature spike. Steam venting dramatically.',
   },
   rat_sighting: {
@@ -437,7 +437,13 @@ export interface FactoryPlant {
 
 export interface MaintenanceTask {
   id: string;
-  type: 'sweeping' | 'oiling' | 'lightbulb' | 'plant_watering' | 'spill_cleanup' | 'general_tidying';
+  type:
+    | 'sweeping'
+    | 'oiling'
+    | 'lightbulb'
+    | 'plant_watering'
+    | 'spill_cleanup'
+    | 'general_tidying';
   position: [number, number, number];
   priority: 'low' | 'medium' | 'high';
   assignedWorkerId?: string;

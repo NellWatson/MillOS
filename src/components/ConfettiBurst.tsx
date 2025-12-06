@@ -2,6 +2,7 @@ import React, { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getThrottleLevel } from '../utils/frameThrottle';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
 
 interface ConfettiBurstProps {
   position: [number, number, number];
@@ -16,6 +17,7 @@ export const ConfettiBurst: React.FC<ConfettiBurstProps> = ({
   duration = 3,
   onComplete,
 }) => {
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const pointsRef = useRef<THREE.Points>(null);
   const startTime = useRef<number>(Date.now());
   const velocitiesRef = useRef<Float32Array | null>(null);
@@ -71,6 +73,7 @@ export const ConfettiBurst: React.FC<ConfettiBurstProps> = ({
 
   // Animate particles
   useFrame(() => {
+    if (!isTabVisible) return;
     if (!pointsRef.current || !velocitiesRef.current) return;
 
     // Throttle to every 2nd frame for confetti (still smooth at 30 FPS)

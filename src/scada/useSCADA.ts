@@ -9,7 +9,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from 'react';
-import { useMillStore } from '../store';
+import { useProductionStore } from '../stores/productionStore';
 import { initializeSCADA, shutdownSCADA, getSCADAService } from './SCADAService';
 import type {
   TagValue,
@@ -246,7 +246,7 @@ export function useSCADA(): UseSCADAReturn {
   const [activeFaults, setActiveFaults] = useState<any[]>([]);
 
   // Get machines from store for sync
-  const machines = useMillStore((state: { machines: any[] }) => state.machines);
+  const machines = useProductionStore((state) => state.machines);
 
   // Initialize shared SCADA service with reference counting
   useEffect(() => {

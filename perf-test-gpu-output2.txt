@@ -1,0 +1,59 @@
+🚀 Starting MillOS Performance Test (GPU Enabled)
+
+📱 Opening http://localhost:3000...
+✅ Page loaded
+
+⏳ Waiting 10s for app to stabilize...
+
+============================================================
+📊 RENDER REPORT (from app)
+============================================================
+
+Components with most renders:
+  1. MillScene: 4 renders
+  2. App: 1 renders
+
+============================================================
+📊 FPS MEASUREMENT (10 seconds)
+============================================================
+
+   Average FPS:  17
+   Min FPS:      1
+   Max FPS:      25
+   Samples:      16
+   FPS Timeline: 3, 24, 17, 9, 7, 25, 20, 25, 19, 18, 22, 16, 22, 17, 23, 1
+
+============================================================
+🎮 THREE.JS RENDERER INFO
+============================================================
+
+   Vendor:   Google Inc. (Apple)
+   Renderer: ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Max, Unspecified Version)
+   Version:  WebGL 2.0 (OpenGL ES 3.0 Chromium)
+
+============================================================
+🔬 QUALITY LEVEL COMPARISON
+============================================================
+
+
+Testing LOW quality...
+   LOW: 16 FPS
+
+Testing MEDIUM quality...
+   MEDIUM: 17 FPS
+
+Testing HIGH quality...
+   HIGH: 19 FPS
+
+============================================================
+🎯 PERFORMANCE SUMMARY
+============================================================
+
+   Grade: 🔴 CRITICAL
+   Average FPS: 17
+   Target: 60 FPS
+   Gap: 43 FPS
+
+✅ Test complete! Browser left open for manual inspection.
+   Press Ctrl+C to close.
+

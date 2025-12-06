@@ -15,11 +15,10 @@ import React, { useRef, Suspense, useMemo } from 'react';
 import { useGLTF } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import {
-  useModelAvailable,
-  WorkerVariant,
-  getWorkerVariantPath,
-} from '../../utils/modelLoader';
+import { useModelAvailable, WorkerVariant, getWorkerVariantPath } from '../../utils/modelLoader';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
+import { shouldRunThisFrame } from '../../utils/frameThrottle';
+import { useGraphicsStore } from '../../stores/graphicsStore';
 
 interface WorkerModelProps {
   uniformColor: string;
@@ -46,6 +45,7 @@ const GLTFWorker: React.FC<WorkerModelProps> = ({
   const { scene } = useGLTF(modelPath);
   const modelRef = useRef<THREE.Group>(null);
   const bobPhase = useRef(0);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   // Clone scene for each instance and enable shadows
   const clonedScene = useMemo(() => {
@@ -59,19 +59,32 @@ const GLTFWorker: React.FC<WorkerModelProps> = ({
     return clone;
   }, [scene]);
 
+  // Graphics quality for throttling
+  const quality = useGraphicsStore((state) => state.graphics.quality);
+
   // Simple walk animation (bobbing motion) since Kenney characters aren't rigged
+  // PERFORMANCE: Throttle to 20fps on LOW, 30fps on MEDIUM
   useFrame((_, delta) => {
+    if (!isTabVisible) return;
+    // PERFORMANCE: Skip entirely on LOW quality - workers stay static
+    if (quality === 'low') return;
+    // PERFORMANCE: Throttle to every 2nd frame on MEDIUM (~30fps)
+    if (quality === 'medium' && !shouldRunThisFrame(2)) return;
     if (!modelRef.current) return;
 
+    // Scale delta by throttle factor to maintain animation speed
+    const throttleFactor = quality === 'medium' ? 2 : 1;
+    const scaledDelta = delta * throttleFactor;
+
     if (!isIdle) {
-      bobPhase.current += delta * 8;
+      bobPhase.current += scaledDelta * 8;
       // Subtle vertical bob while walking
       modelRef.current.position.y = Math.abs(Math.sin(bobPhase.current)) * 0.05;
       // Slight rotation sway
       modelRef.current.rotation.z = Math.sin(bobPhase.current) * 0.03;
     } else {
       // Breathing motion when idle
-      bobPhase.current += delta * 1.5;
+      bobPhase.current += scaledDelta * 1.5;
       modelRef.current.position.y = Math.sin(bobPhase.current) * 0.01;
       modelRef.current.rotation.z = 0;
     }
@@ -115,16 +128,28 @@ const ProceduralWorker: React.FC<WorkerModelProps> = ({
   const rightArmRef = useRef<THREE.Group>(null);
   const leftLegRef = useRef<THREE.Group>(null);
   const rightLegRef = useRef<THREE.Group>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const quality = useGraphicsStore((state) => state.graphics.quality);
 
+  // PERFORMANCE: Throttle limb animations on LOW/MEDIUM quality
   useFrame(() => {
+    if (!isTabVisible) return;
+    // PERFORMANCE: Skip entirely on LOW quality - workers stay static
+    if (quality === 'low') return;
+    // PERFORMANCE: Throttle to every 2nd frame on MEDIUM (~30fps)
+    if (quality === 'medium' && !shouldRunThisFrame(2)) return;
+
     const armSwing = isIdle ? Math.sin(walkCycle) * 0.05 : Math.sin(walkCycle) * 0.5;
     const legSwing = isIdle ? 0 : Math.sin(walkCycle) * 0.6;
+
+    // Adjust lerp speed based on quality (faster lerp on lower FPS to maintain animation speed)
+    const lerpSpeed = quality === 'medium' ? 0.2 : 0.1;
 
     if (leftArmRef.current) {
       leftArmRef.current.rotation.x = THREE.MathUtils.lerp(
         leftArmRef.current.rotation.x,
         armSwing,
-        0.1
+        lerpSpeed
       );
     }
     if (rightArmRef.current) {
@@ -135,12 +160,12 @@ const ProceduralWorker: React.FC<WorkerModelProps> = ({
         rightArmRef.current.rotation.x = THREE.MathUtils.lerp(
           rightArmRef.current.rotation.x,
           -armSwing,
-          0.1
+          lerpSpeed
         );
         rightArmRef.current.rotation.z = THREE.MathUtils.lerp(
           rightArmRef.current.rotation.z,
           0,
-          0.1
+          lerpSpeed
         );
       }
     }
@@ -148,14 +173,14 @@ const ProceduralWorker: React.FC<WorkerModelProps> = ({
       leftLegRef.current.rotation.x = THREE.MathUtils.lerp(
         leftLegRef.current.rotation.x,
         -legSwing,
-        0.1
+        lerpSpeed
       );
     }
     if (rightLegRef.current) {
       rightLegRef.current.rotation.x = THREE.MathUtils.lerp(
         rightLegRef.current.rotation.x,
         legSwing,
-        0.1
+        lerpSpeed
       );
     }
   });

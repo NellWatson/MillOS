@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { History, ChevronDown, ChevronUp, Clock } from 'lucide-react';
-import { useMillStore } from '../../store';
+import { useSafetyStore } from '../../stores/safetyStore';
+import { useUIStore } from '../../stores/uiStore';
 
 export const IncidentHistoryPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
-  const safetyIncidents = useMillStore((state) => state.safetyIncidents);
-  const clearSafetyIncidents = useMillStore((state) => state.clearSafetyIncidents);
-  const theme = useMillStore((state) => state.theme);
+  const safetyIncidents = useSafetyStore((state) => state.safetyIncidents);
+  const clearSafetyIncidents = useSafetyStore((state) => state.clearSafetyIncidents);
+  const theme = useUIStore((state) => state.theme);
 
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp);

@@ -3,9 +3,11 @@ import { useFrame } from '@react-three/fiber';
 import { Text, Line } from '@react-three/drei';
 import { positionRegistry } from '../utils/positionRegistry';
 import { audioManager } from '../utils/audioManager';
-import { useMillStore } from '../store';
+import { useSafetyStore } from '../stores/safetyStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { getForkliftWarningColor } from '../utils/statusColors';
 import { ForkliftModel } from './models';
+import { shouldRunThisFrame } from '../utils/frameThrottle';
 import * as THREE from 'three';
 
 // Path visualization component - shows forklift routes on the floor
@@ -72,8 +74,13 @@ const WarningLight: React.FC<{ isStopped: boolean; isInCrossing: boolean }> = ({
   const flashRef = useRef(false);
   const materialRef = useRef<THREE.MeshStandardMaterial>(null);
   const lightRef = useRef<THREE.PointLight>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state) => {
+    // PERFORMANCE: Skip animations when tab hidden
+    if (!isTabVisible) return;
+    // PERFORMANCE: Throttle flash check to every 2nd frame (~30fps is plenty for light flashing)
+    if (!shouldRunThisFrame(2)) return;
     // Flash faster when stopped (red), medium for crossing (blue), slower when moving (amber)
     const flashSpeed = isStopped ? 15 : isInCrossing ? 10 : 5;
     const newFlash = Math.sin(state.clock.elapsedTime * flashSpeed) > 0;
@@ -387,7 +394,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
   const [distanceTier, setDistanceTier] = useState<'close' | 'far'>('close'); // LOD tier for rendering
   const [hasCargo, setHasCargo] = useState(data.cargo === 'pallet');
   const [currentOperation, setCurrentOperation] = useState<ForkliftOperation>('traveling');
-  const [forkHeight, setForkHeight] = useState(0); // State for fork animation to trigger re-renders
+  const forkHeightRef = useRef(0); // Ref for fork animation - avoids re-renders
   const hasCargoRef = useRef(data.cargo === 'pallet'); // Ref mirror for useFrame access
   const operationRef = useRef<ForkliftOperation>('traveling'); // Ref mirror for useFrame access
   const cameraDistanceRef = useRef(0); // Track distance to camera
@@ -412,7 +419,8 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
   const CROSSING_WAIT_TIME = 1.5; // Wait 1.5s before entering crossing zone
   const CROSSING_APPROACH_DISTANCE = 3; // Distance to start slowing for crossing
   const FORK_LIFT_HEIGHT = 1.2; // Max height forks raise during load/unload
-  const recordSafetyStop = useMillStore((state) => state.recordSafetyStop);
+  const recordSafetyStop = useSafetyStore((state) => state.recordSafetyStop);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   // Play horn when stopping for safety
   useEffect(() => {
@@ -433,7 +441,8 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
   }, [data.position]);
 
   useFrame((state, delta) => {
-    if (!ref.current) return;
+    // PERFORMANCE: Skip all forklift logic when tab hidden
+    if (!ref.current || !isTabVisible) return;
 
     // Update camera distance for LOD (with hysteresis to prevent flickering)
     cameraDistanceRef.current = state.camera.position.distanceTo(ref.current.position);
@@ -587,10 +596,8 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
         // Lowering forks
         newForkHeight = THREE.MathUtils.lerp(FORK_LIFT_HEIGHT, 0, (progress - 0.5) * 2);
       }
-      // Only update state every few frames to reduce re-renders
-      if (frameCountRef.current % 3 === 0) {
-        setForkHeight(newForkHeight);
-      }
+      // Update fork height ref directly (no re-renders)
+      forkHeightRef.current = newForkHeight;
 
       // Toggle cargo at midpoint of operation
       if (progress >= 0.5 && !hasCargoRef.current && currentOp === 'loading') {
@@ -606,7 +613,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
         operationTimerRef.current = 0;
         operationRef.current = 'traveling';
         setCurrentOperation('traveling');
-        setForkHeight(0);
+        forkHeightRef.current = 0;
         // Move to next waypoint
         pathIndexRef.current = (pathIndexRef.current + 1) % data.path.length;
         currentTarget.current.set(...data.path[pathIndexRef.current]);
@@ -677,14 +684,19 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
   };
 
   return (
-    <group ref={ref} onClick={handleClick} onPointerOver={() => (document.body.style.cursor = 'pointer')} onPointerOut={() => (document.body.style.cursor = 'auto')}>
+    <group
+      ref={ref}
+      onClick={handleClick}
+      onPointerOver={() => (document.body.style.cursor = 'pointer')}
+      onPointerOut={() => (document.body.style.cursor = 'auto')}
+    >
       {/* Forklift model - full detail when close, billboard when far */}
       {distanceTier === 'close' ? (
         <ForkliftModel
           hasCargo={hasCargo}
           isMoving={!isStopped && !isOperating}
           speedMultiplier={1}
-          forkHeight={forkHeight}
+          forkHeightRef={forkHeightRef}
         />
       ) : (
         <ForkliftBillboard hasCargo={hasCargo} />

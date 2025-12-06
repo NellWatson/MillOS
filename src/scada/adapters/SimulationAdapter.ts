@@ -96,12 +96,13 @@ export class SimulationAdapter implements IProtocolAdapter {
       });
     });
 
-    // Start simulation loop (100ms tick = 10Hz update rate)
-    this.simulationInterval = setInterval(() => this.tick(), 100);
+    // PERFORMANCE FIX: Reduced from 100ms (10Hz) to 1000ms (1Hz)
+    // 10Hz was causing 900 tag updates/second - way too much overhead
+    this.simulationInterval = setInterval(() => this.tick(), 1000);
     this.connected = true;
     this.connectTime = Date.now();
 
-    console.log(`[SimulationAdapter] Connected. Simulating ${this.tags.size} tags at 10Hz`);
+    console.log(`[SimulationAdapter] Connected. Simulating ${this.tags.size} tags at 1Hz`);
   }
 
   async disconnect(): Promise<void> {

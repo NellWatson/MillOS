@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect, useState } from 'react';
+import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
@@ -1012,9 +1012,6 @@ const WetFloorSign: React.FC<{ position: [number, number, number] }> = ({ positi
 const WetFloorSigns: React.FC<{ puddlePositions: { x: number; z: number; size: number }[] }> = ({ puddlePositions }) => {
   const weather = useMillStore((state) => state.weather);
 
-  // Only show signs during rain
-  if (weather !== 'rain' && weather !== 'storm') return null;
-
   // Place signs near larger puddles
   const signPositions = useMemo(() => {
     return puddlePositions
@@ -1024,6 +1021,9 @@ const WetFloorSigns: React.FC<{ puddlePositions: { x: number; z: number; size: n
         z: p.z + p.size * 0.3
       }));
   }, [puddlePositions]);
+
+  // Only show signs during rain
+  if (weather !== 'rain' && weather !== 'storm') return null;
 
   return (
     <group>

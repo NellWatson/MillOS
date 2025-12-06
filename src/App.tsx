@@ -1,13 +1,14 @@
 import React, { useState, Suspense, useEffect, useCallback, useRef, lazy } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Preload } from '@react-three/drei';
 import { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
 import { MillScene } from './components/MillScene';
+import { trackRender } from './utils/renderProfiler';
 import { UIOverlay } from './components/UIOverlay';
 import { AlertSystem } from './components/AlertSystem';
 import { SpatialAudioTracker } from './components/SpatialAudioTracker';
-import { FPSTracker } from './components/FPSMonitor';
+import { FPSTracker, useFPSStore } from './components/FPSMonitor';
 import { EmergencyOverlay } from './components/EmergencyOverlay';
 import { CameraController, CameraPresetIndicator } from './components/CameraController';
 import {
@@ -21,8 +22,14 @@ import { ForkliftData } from './components/ForkliftSystem';
 import { AnimatePresence, motion } from 'framer-motion';
 import { audioManager } from './utils/audioManager';
 import { initializeAIEngine } from './utils/aiEngine';
-import { useMillStore, initializeSCADASync } from './store';
+import { useGraphicsStore, useUIStore, initializeSCADASync, useGameSimulationStore } from './store';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
+
+// Expose stores to window for performance debugging (dev mode only)
+if (import.meta.env.DEV) {
+  (window as unknown as { useGraphicsStore: typeof useGraphicsStore; useFPSStore: typeof useFPSStore }).useGraphicsStore = useGraphicsStore;
+  (window as unknown as { useFPSStore: typeof useFPSStore }).useFPSStore = useFPSStore;
+}
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 
 // Lazy-load heavy panels to reduce initial bundle size (saves ~300KB gzipped)
@@ -35,35 +42,17 @@ const SCADAPanel = lazy(() =>
 const WorkerDetailPanel = lazy(() =>
   import('./components/WorkerDetailPanel').then((m) => ({ default: m.WorkerDetailPanel }))
 );
-const PostProcessing = lazy(() =>
-  import('./components/PostProcessing').then((m) => ({ default: m.PostProcessing }))
-);
+// const PostProcessing = lazy(() =>
+//   import('./components/PostProcessing').then((m) => ({ default: m.PostProcessing }))
+// );
 
-// Frame limiter component - triggers renders at 30fps when using frameloop="demand"
-const FrameLimiter: React.FC<{ fps?: number }> = ({ fps = 30 }) => {
-  const { invalidate } = useThree();
-  const lastTime = useRef(0);
-  const frameInterval = 1000 / fps;
-
-  useEffect(() => {
-    let animationId: number;
-
-    const tick = (time: number) => {
-      if (time - lastTime.current >= frameInterval) {
-        lastTime.current = time;
-        invalidate();
-      }
-      animationId = requestAnimationFrame(tick);
-    };
-
-    animationId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animationId);
-  }, [invalidate, frameInterval]);
-
-  return null;
-};
+// NOTE: FrameLimiter component was removed - it caused the 30fps performance ceiling
+// that made v0.20 run "like treacle". Default frameloop="always" is now used instead.
 
 const App: React.FC = () => {
+  // PERF DEBUG: Track App re-renders
+  trackRender('App');
+
   const [productionSpeed, setProductionSpeed] = useState(0.8);
   const [showZones, setShowZones] = useState(true);
   const [showAIPanel, setShowAIPanel] = useState(false);
@@ -75,27 +64,49 @@ const App: React.FC = () => {
   const [qualityNotification, setQualityNotification] = useState<string | null>(null);
   const [autoRotate, setAutoRotate] = useState(true);
 
-  const currentQuality = useMillStore(
-    (state: { graphics: { quality: string } }) => state.graphics.quality
-  );
-  const postProcessingEnabled = useMillStore((state: any) => {
-    const g = state.graphics;
-    return (
-      g.enableSSAO ||
-      g.enableBloom ||
-      g.enableVignette ||
-      g.enableChromaticAberration ||
-      g.enableFilmGrain ||
-      g.enableDepthOfField
-    );
-  });
-  const fpsMode = useMillStore((state: { fpsMode: boolean }) => state.fpsMode);
+  const currentQuality = useGraphicsStore((state) => state.graphics.quality);
+  // CRITICAL: Canvas WebGL props (shadows, antialias, dpr) cannot change at runtime.
+  // Use a stable initial quality to prevent Canvas recreation when quality changes.
+  // This ref captures the initial quality and is used for Canvas-level settings.
+  const initialQualityRef = useRef(currentQuality);
+  const canvasQuality = initialQualityRef.current;
+  // const postProcessingEnabled = useGraphicsStore(
+  //   (state) =>
+  //     state.graphics.enableSSAO ||
+  //     state.graphics.enableBloom ||
+  //     state.graphics.enableVignette ||
+  //     state.graphics.enableChromaticAberration ||
+  //     state.graphics.enableFilmGrain ||
+  //     state.graphics.enableDepthOfField
+  // );
+  const fpsMode = useUIStore((state) => state.fpsMode);
   const [showFpsInstructions, setShowFpsInstructions] = useState(false);
   const orbitControlsRef = useRef<OrbitControlsImpl>(null);
   const glRef = useRef<THREE.WebGLRenderer | null>(null);
   const webglHandlersRef = useRef<{ lost: (event: Event) => void; restored: () => void } | null>(
     null
   );
+
+  // Memoized callbacks to prevent unnecessary re-renders
+  const handleCloseSelection = useCallback(() => setSelectedMachine(null), []);
+  const handleCloseAIPanel = useCallback(() => setShowAIPanel(false), []);
+  const handleCloseSCADAPanel = useCallback(() => setShowSCADAPanel(false), []);
+  const handleCloseWorker = useCallback(() => setSelectedWorker(null), []);
+  const handleCloseForklift = useCallback(() => setSelectedForklift(null), []);
+  const handleSelectMachine = useCallback(
+    (machine: MachineData) => setSelectedMachine(machine),
+    []
+  );
+  const handleSelectWorker = useCallback((worker: WorkerData) => setSelectedWorker(worker), []);
+  const handleSelectForklift = useCallback(
+    (forklift: ForkliftData) => setSelectedForklift(forklift),
+    []
+  );
+  const handleLockChange = useCallback((locked: boolean) => {
+    if (locked) {
+      setShowFpsInstructions(false);
+    }
+  }, []);
 
   // Show FPS instructions when entering FPS mode
   useEffect(() => {
@@ -163,13 +174,19 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // PERFORMANCE: Pause animations when tab is hidden
+  const setTabVisible = useGameSimulationStore((state) => state.setTabVisible);
   useEffect(() => {
     const handleVisibility = () => {
+      const isVisible = !document.hidden;
       audioManager.setBackgroundVisibility(document.hidden);
+      setTabVisible(isVisible);
     };
+    // Set initial state
+    setTabVisible(!document.hidden);
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, []);
+  }, [setTabVisible]);
 
   useEffect(() => {
     return () => {
@@ -188,12 +205,17 @@ const App: React.FC = () => {
     return cleanup;
   }, []);
 
-  // Initialize SCADA system with bidirectional store sync
-  // This starts the simulation adapter and syncs machine states
+  // Initialize SCADA system with bidirectional store sync (if enabled)
+  // PERFORMANCE FIX: SCADA is now OFF by default - causes 900 updates/sec overhead
+  const enableSCADA = useGraphicsStore((state) => state.graphics.enableSCADA);
   useEffect(() => {
+    if (!enableSCADA) {
+      // SCADA disabled - skip initialization for performance
+      return;
+    }
     const cleanup = initializeSCADASync();
     return cleanup;
-  }, []);
+  }, [enableSCADA]);
 
   // Panel open/close sounds
   const prevShowAIPanelRef = React.useRef(showAIPanel);
@@ -271,7 +293,7 @@ const App: React.FC = () => {
         showSCADAPanel={showSCADAPanel}
         setShowSCADAPanel={setShowSCADAPanel}
         selectedMachine={selectedMachine}
-        onCloseSelection={() => setSelectedMachine(null)}
+        onCloseSelection={handleCloseSelection}
       />
 
       {/* Alert System */}
@@ -282,22 +304,18 @@ const App: React.FC = () => {
 
       {/* AI Command Center Slide-out */}
       <AnimatePresence>
-        {showAIPanel && (
-          <AICommandCenter isOpen={showAIPanel} onClose={() => setShowAIPanel(false)} />
-        )}
+        {showAIPanel && <AICommandCenter isOpen={showAIPanel} onClose={handleCloseAIPanel} />}
       </AnimatePresence>
 
       {/* SCADA Monitor Panel */}
       <AnimatePresence>
-        {showSCADAPanel && (
-          <SCADAPanel isOpen={showSCADAPanel} onClose={() => setShowSCADAPanel(false)} />
-        )}
+        {showSCADAPanel && <SCADAPanel isOpen={showSCADAPanel} onClose={handleCloseSCADAPanel} />}
       </AnimatePresence>
 
       {/* Worker Detail Panel */}
       <AnimatePresence>
         {selectedWorker && (
-          <WorkerDetailPanel worker={selectedWorker} onClose={() => setSelectedWorker(null)} />
+          <WorkerDetailPanel worker={selectedWorker} onClose={handleCloseWorker} />
         )}
       </AnimatePresence>
 
@@ -313,7 +331,7 @@ const App: React.FC = () => {
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-amber-400 font-bold text-lg">Forklift</h3>
               <button
-                onClick={() => setSelectedForklift(null)}
+                onClick={handleCloseForklift}
                 className="text-gray-400 hover:text-white transition-colors"
               >
                 ×
@@ -330,14 +348,18 @@ const App: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">Cargo:</span>
-                <span className={selectedForklift.cargo === 'pallet' ? 'text-green-400' : 'text-gray-500'}>
+                <span
+                  className={
+                    selectedForklift.cargo === 'pallet' ? 'text-green-400' : 'text-gray-500'
+                  }
+                >
                   {selectedForklift.cargo === 'pallet' ? 'Loaded' : 'Empty'}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">Position:</span>
                 <span className="text-white font-mono text-xs">
-                  [{selectedForklift.position.map(p => p.toFixed(1)).join(', ')}]
+                  [{selectedForklift.position.map((p) => p.toFixed(1)).join(', ')}]
                 </span>
               </div>
             </div>
@@ -348,11 +370,13 @@ const App: React.FC = () => {
       {/* 3D Canvas with Error Boundary */}
       <ErrorBoundary fallback={WebGLErrorFallback}>
         <Canvas
-          frameloop="demand"
-          shadows={currentQuality !== 'low' ? { type: THREE.PCFShadowMap } : false}
+          // PERFORMANCE FIX: Removed frameloop="demand" which was capping FPS at 30
+          // CRITICAL: Use canvasQuality (stable) instead of currentQuality (reactive)
+          // WebGL context props cannot change at runtime without breaking the canvas
+          shadows={canvasQuality !== 'low' ? { type: THREE.PCFShadowMap } : false}
           camera={{ position: [70, 40, 70], fov: 65, near: 0.5, far: 300 }}
           gl={{
-            antialias: currentQuality !== 'low',
+            antialias: canvasQuality !== 'low',
             alpha: false,
             toneMappingExposure: 1.1,
             powerPreference: 'high-performance',
@@ -360,7 +384,7 @@ const App: React.FC = () => {
             preserveDrawingBuffer: false,
             failIfMajorPerformanceCaveat: false,
           }}
-          dpr={currentQuality === 'low' ? 1 : Math.min(window.devicePixelRatio, 1.5)}
+          dpr={canvasQuality === 'low' ? 1 : Math.min(window.devicePixelRatio, 1.5)}
           onCreated={({ gl }) => {
             glRef.current = gl;
 
@@ -395,18 +419,12 @@ const App: React.FC = () => {
         >
           <color attach="background" args={['#0a0f1a']} />
           <fog attach="fog" args={['#0a0f1a', 150, 350]} />
-          <FrameLimiter fps={30} />
+          {/* PERFORMANCE FIX: Removed FrameLimiter - was causing 30fps ceiling */}
 
           <Suspense fallback={null}>
             {/* Camera controls - conditionally render Orbit or FPS mode */}
             {fpsMode ? (
-              <FirstPersonController
-                onLockChange={(locked) => {
-                  if (locked) {
-                    setShowFpsInstructions(false);
-                  }
-                }}
-              />
+              <FirstPersonController onLockChange={handleLockChange} />
             ) : (
               <>
                 {/* Note: OrbitControls uses non-passive wheel event listeners for camera zoom.
@@ -431,9 +449,9 @@ const App: React.FC = () => {
             <MillScene
               productionSpeed={productionSpeed}
               showZones={showZones}
-              onSelectMachine={setSelectedMachine}
-              onSelectWorker={setSelectedWorker}
-              onSelectForklift={setSelectedForklift}
+              onSelectMachine={handleSelectMachine}
+              onSelectWorker={handleSelectWorker}
+              onSelectForklift={handleSelectForklift}
             />
 
             {/* Spatial audio tracking - updates audio volume based on camera distance */}
@@ -453,7 +471,14 @@ const App: React.FC = () => {
               />
             )}
 
-            {postProcessingEnabled && <PostProcessing />}
+            {/* CRITICAL FIX: PostProcessing disabled until we fix runtime quality switch issues.
+                EffectComposer breaks scene when mounted during quality change.
+                TODO: Investigate if we can preload EffectComposer or use stable initial quality */}
+            {/* {postProcessingEnabled && (
+              <Suspense fallback={null}>
+                <PostProcessing />
+              </Suspense>
+            )} */}
             <Preload all />
           </Suspense>
         </Canvas>
@@ -461,7 +486,7 @@ const App: React.FC = () => {
 
       {/* Loading overlay */}
       <div className="fixed bottom-4 left-4 text-slate-600 text-xs pointer-events-none">
-        MillOS Digital Twin v0.10 | Powered by AI
+        MillOS Digital Twin v0.20 | Powered by AI
       </div>
 
       {/* Camera preset indicator (orbit mode only) */}
@@ -481,21 +506,20 @@ const App: React.FC = () => {
             className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none"
           >
             <div
-              className={`px-6 py-4 rounded-xl backdrop-blur-xl border shadow-2xl ${
-                qualityNotification === 'EMERGENCY STOP'
-                  ? 'bg-red-900/95 border-red-500 text-red-100 animate-pulse'
-                  : qualityNotification === 'E-STOP RELEASED'
-                    ? 'bg-green-900/90 border-green-600 text-green-300'
-                    : qualityNotification === 'low'
-                      ? 'bg-slate-800/90 border-slate-600 text-slate-300'
-                      : qualityNotification === 'medium'
-                        ? 'bg-yellow-900/90 border-yellow-600 text-yellow-300'
-                        : qualityNotification === 'high'
-                          ? 'bg-cyan-900/90 border-cyan-600 text-cyan-300'
-                          : qualityNotification === 'ultra'
-                            ? 'bg-purple-900/90 border-purple-600 text-purple-300'
-                            : 'bg-slate-800/90 border-slate-600 text-slate-300'
-              }`}
+              className={`px-6 py-4 rounded-xl backdrop-blur-xl border shadow-2xl ${qualityNotification === 'EMERGENCY STOP'
+                ? 'bg-red-900/95 border-red-500 text-red-100 animate-pulse'
+                : qualityNotification === 'E-STOP RELEASED'
+                  ? 'bg-green-900/90 border-green-600 text-green-300'
+                  : qualityNotification === 'low'
+                    ? 'bg-slate-800/90 border-slate-600 text-slate-300'
+                    : qualityNotification === 'medium'
+                      ? 'bg-yellow-900/90 border-yellow-600 text-yellow-300'
+                      : qualityNotification === 'high'
+                        ? 'bg-cyan-900/90 border-cyan-600 text-cyan-300'
+                        : qualityNotification === 'ultra'
+                          ? 'bg-purple-900/90 border-purple-600 text-purple-300'
+                          : 'bg-slate-800/90 border-slate-600 text-slate-300'
+                }`}
             >
               <div className="text-center">
                 <div className="text-3xl font-bold uppercase tracking-wider">
@@ -503,7 +527,7 @@ const App: React.FC = () => {
                 </div>
                 <div className="text-xs opacity-70 mt-1">
                   {qualityNotification.includes('EMERGENCY') ||
-                  qualityNotification.includes('E-STOP')
+                    qualityNotification.includes('E-STOP')
                     ? 'Safety System'
                     : ['low', 'medium', 'high', 'ultra'].includes(qualityNotification)
                       ? 'Graphics Quality'

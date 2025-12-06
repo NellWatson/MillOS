@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Keyboard, X } from 'lucide-react';
-import { useMillStore } from '../../store';
+import { useUIStore } from '../../stores/uiStore';
 
 interface KeyboardShortcutsModalProps {
   isOpen: boolean;
@@ -12,7 +12,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
   isOpen,
   onClose,
 }) => {
-  const theme = useMillStore((state) => state.theme);
+  const theme = useUIStore((state) => state.theme);
 
   if (!isOpen) return null;
 

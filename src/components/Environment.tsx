@@ -18,7 +18,9 @@ import React, { useMemo, useRef, useEffect, useState, useCallback, memo } from '
 import { useFrame } from '@react-three/fiber';
 import { ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
-import { useMillStore } from '../store';
+import { useGraphicsStore } from '../stores/graphicsStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
+import { useProductionStore } from '../stores/productionStore';
 import { audioManager } from '../utils/audioManager';
 import { shouldRunThisFrame, incrementGlobalFrame } from '../utils/frameThrottle';
 import { useShallow } from 'zustand/react/shallow';
@@ -32,7 +34,8 @@ interface LensFlareData {
 }
 
 const LensFlareSystem: React.FC<{ flares: LensFlareData[] }> = memo(({ flares }) => {
-  const gameTime = useMillStore((state: any) => state.gameTime);
+  const gameTime = useGameSimulationStore((state) => state.gameTime);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   // Shared Vector3 refs for all flares to reduce GC pressure
   const lightPosRef = useRef(new THREE.Vector3());
   const toCameraRef = useRef(new THREE.Vector3());
@@ -43,8 +46,8 @@ const LensFlareSystem: React.FC<{ flares: LensFlareData[] }> = memo(({ flares })
   const daylightIntensity = isDaytime ? 1 : 0;
 
   useFrame(({ camera }) => {
-    // Throttle to every 2nd frame (30fps) - visibility doesn't need 60fps checking
-    if (!shouldRunThisFrame(2) || daylightIntensity === 0) return;
+    // PERFORMANCE: Skip when tab hidden or not daytime
+    if (!isTabVisible || !shouldRunThisFrame(2) || daylightIntensity === 0) return;
 
     // Calculate camera direction once for all flares
     const cameraDir = cameraDirRef.current.set(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -255,7 +258,7 @@ const getDaylightProperties = (hour: number) => {
 // Physical glass window component that responds to game time daylight
 const DaylightWindow: React.FC<{ position: [number, number, number]; size: [number, number] }> =
   memo(({ position, size }) => {
-    const gameTime = useMillStore((state: any) => state.gameTime);
+    const gameTime = useGameSimulationStore((state) => state.gameTime);
     const { color, intensity } = getDaylightProperties(gameTime);
 
     return (
@@ -287,8 +290,8 @@ const DaylightWindow: React.FC<{ position: [number, number, number]; size: [numb
 
 // Light shaft component for volumetric effect from skylights
 const LightShaft: React.FC<{ position: [number, number, number] }> = memo(({ position }) => {
-  const gameTime = useMillStore((state: any) => state.gameTime);
-  const enableLightShafts = useMillStore((state: any) => state.graphics.enableLightShafts);
+  const gameTime = useGameSimulationStore((state) => state.gameTime);
+  const enableLightShafts = useGraphicsStore((state) => state.graphics.enableLightShafts);
   const { intensity } = getDaylightProperties(gameTime);
 
   // Check if light shafts are enabled and if it's bright enough
@@ -310,7 +313,7 @@ const LightShaft: React.FC<{ position: [number, number, number] }> = memo(({ pos
 
 // Gradient sky dome with time-of-day response
 const GradientSky: React.FC = () => {
-  const gameTime = useMillStore((state: any) => state.gameTime);
+  const gameTime = useGameSimulationStore((state) => state.gameTime);
   const materialRef = useRef<THREE.ShaderMaterial | null>(null);
 
   const skyColors = useMemo(() => {
@@ -404,10 +407,12 @@ const GlobalFrameCounter: React.FC = () => {
 
 // Game time ticker component - throttled to every 500ms to reduce re-renders
 const GameTimeTicker: React.FC = () => {
-  const tickGameTime = useMillStore((state: any) => state.tickGameTime);
+  const tickGameTime = useGameSimulationStore((state) => state.tickGameTime);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const lastTickRef = useRef(0);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     const now = state.clock.elapsedTime;
     if (now - lastTickRef.current >= 0.5) {
       // Tick every 500ms
@@ -428,9 +433,11 @@ const powerFlickerState = {
 
 // Storm power flicker controller - manages flicker timing
 const StormPowerFlicker: React.FC = () => {
-  const weather = useMillStore((state: any) => state.weather);
+  const weather = useGameSimulationStore((state) => state.weather);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     const isStormy = weather === 'storm';
     const now = state.clock.elapsedTime;
 
@@ -475,7 +482,8 @@ const StormPowerFlicker: React.FC = () => {
 
 // Consolidated light animation system - manages overhead + emergency lights in ONE useFrame
 const ConsolidatedLightingSystem: React.FC = () => {
-  const weather = useMillStore((state: any) => state.weather);
+  const weather = useGameSimulationStore((state) => state.weather);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const overheadLightRefs = useRef<THREE.PointLight[]>([]);
   const overheadEmissiveRefs = useRef<THREE.MeshStandardMaterial[]>([]);
   const emergencyLightRefs = useRef<THREE.PointLight[]>([]);
@@ -493,7 +501,8 @@ const ConsolidatedLightingSystem: React.FC = () => {
 
   // Consolidated useFrame for ALL light animations - throttled to every 3rd frame (~20 FPS)
   useFrame(() => {
-    if (!shouldRunThisFrame(3)) return;
+    // PERFORMANCE: Skip when tab hidden
+    if (!isTabVisible || !shouldRunThisFrame(3)) return;
 
     // Update overhead flickering lights
     const overheadIntensity = baseIntensity * powerFlickerState.intensity;
@@ -589,8 +598,8 @@ const ConsolidatedLightingSystem: React.FC = () => {
 export const FactoryEnvironment: React.FC = () => {
   const wallTexture = useWallTexture();
   const wallRoughnessMap = useWallRoughnessMap();
-  const { quality, enableContactShadows, enableHighResShadows, shadowMapSize } = useMillStore(
-    useShallow((state: any) => ({
+  const { quality, enableContactShadows, enableHighResShadows, shadowMapSize } = useGraphicsStore(
+    useShallow((state) => ({
       quality: state.graphics.quality,
       enableContactShadows: state.graphics.enableContactShadows,
       enableHighResShadows: state.graphics.enableHighResShadows,
@@ -868,6 +877,7 @@ const VentilationFan: React.FC<{
 }> = memo(({ position, rotation = 0, size = 1.5 }) => {
   const bladeRef = useRef<THREE.Group>(null);
   const [speed] = useState(2 + Math.random() * 2);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   // Start fan sound on mount
   useEffect(() => {
@@ -876,6 +886,8 @@ const VentilationFan: React.FC<{
   }, [position]);
 
   useFrame((_, delta) => {
+    // PERFORMANCE: Skip when tab hidden
+    if (!isTabVisible) return;
     if (bladeRef.current) {
       bladeRef.current.rotation.z += delta * speed * 2;
     }
@@ -949,8 +961,10 @@ const RippleMesh: React.FC<{ data: { x: number; z: number; scale: number; opacit
     const materialRef = useRef<THREE.MeshBasicMaterial>(null);
     const scaleRef = useRef(data.scale);
     const opacityRef = useRef(data.opacity);
+    const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
     useFrame((_, delta) => {
+      if (!isTabVisible) return;
       scaleRef.current += delta * 2;
       opacityRef.current -= delta * 0.8;
       if (meshRef.current && materialRef.current) {
@@ -975,8 +989,9 @@ const RippleMesh: React.FC<{ data: { x: number; z: number; scale: number; opacit
 
 // Puddle reflections on floor during rain
 const PuddleReflections: React.FC = () => {
-  const weather = useMillStore((state: any) => state.weather);
-  const quality = useMillStore((state: any) => state.graphics.quality);
+  const weather = useGameSimulationStore((state) => state.weather);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const quality = useGraphicsStore((state) => state.graphics.quality);
   const puddleRef = useRef<THREE.Group>(null);
   // Use a ref for ripple data and only re-render when adding new ripples
   const [rippleKeys, setRippleKeys] = useState<number[]>([]);
@@ -1002,6 +1017,8 @@ const PuddleReflections: React.FC = () => {
 
   // Add new ripples during rain (infrequent state updates)
   useFrame(() => {
+    // PERFORMANCE: Skip on LOW/MEDIUM quality - weather effects are HIGH+ only
+    if (!isTabVisible || quality === 'low' || quality === 'medium') return;
     if ((weather === 'rain' || weather === 'storm') && Math.random() < 0.1) {
       const puddle = puddlePositions[Math.floor(Math.random() * puddlePositions.length)];
       const offsetX = (Math.random() - 0.5) * puddle.size * 0.8;
@@ -1078,8 +1095,10 @@ const PuddleReflections: React.FC = () => {
 // Wet floor warning sign component - memoized
 const WetFloorSign: React.FC<{ position: [number, number, number] }> = memo(({ position }) => {
   const signRef = useRef<THREE.Group>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (signRef.current) {
       // Gentle sway animation
       signRef.current.rotation.y = Math.sin(state.clock.elapsedTime * 0.5) * 0.05;
@@ -1129,7 +1148,7 @@ const WetFloorSign: React.FC<{ position: [number, number, number] }> = memo(({ p
 const WetFloorSigns: React.FC<{ puddlePositions: { x: number; z: number; size: number }[] }> = ({
   puddlePositions,
 }) => {
-  const weather = useMillStore((state: any) => state.weather);
+  const weather = useGameSimulationStore((state) => state.weather);
 
   // Place signs near larger puddles
   const signPositions = useMemo(() => {
@@ -1165,8 +1184,10 @@ interface TireTrack {
 const TrackMesh: React.FC<{ track: TireTrack; fadeRate: number }> = memo(({ track, fadeRate }) => {
   const materialRef = useRef<THREE.MeshBasicMaterial>(null);
   const opacityRef = useRef(track.opacity);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((_, delta) => {
+    if (!isTabVisible) return;
     opacityRef.current -= delta * fadeRate;
     if (materialRef.current) {
       materialRef.current.opacity = Math.max(0, opacityRef.current);
@@ -1196,7 +1217,8 @@ const TrackMesh: React.FC<{ track: TireTrack; fadeRate: number }> = memo(({ trac
 const TireTrackSystem: React.FC<{ puddlePositions: { x: number; z: number; size: number }[] }> = ({
   puddlePositions,
 }) => {
-  const weather = useMillStore((state: any) => state.weather);
+  const weather = useGameSimulationStore((state) => state.weather);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const [trackKeys, setTrackKeys] = useState<number[]>([]);
   const trackDataRef = useRef<Map<number, TireTrack>>(new Map());
   const trackIdRef = useRef(0);
@@ -1219,6 +1241,7 @@ const TireTrackSystem: React.FC<{ puddlePositions: { x: number; z: number; size:
   isRainingRef.current = weather === 'rain' || weather === 'storm';
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (!isRainingRef.current) return;
 
     // Check forklift positions from the scene
@@ -1312,8 +1335,10 @@ const DripMesh: React.FC<{
   const vyRef = useRef(0);
   const opacityRef = useRef(0.8);
   const hasImpactedRef = useRef(false);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((_, delta) => {
+    if (!isTabVisible) return;
     if (hasImpactedRef.current) return;
 
     vyRef.current -= 25 * delta;
@@ -1375,8 +1400,10 @@ const SplashMesh: React.FC<{ data: SplashParticle }> = memo(({ data }) => {
   const posRef = useRef({ x: data.x, y: data.y, z: data.z });
   const velRef = useRef({ vx: data.vx, vy: data.vy, vz: data.vz });
   const lifeRef = useRef(data.life);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((_, delta) => {
+    if (!isTabVisible) return;
     velRef.current.vy -= 15 * delta;
     posRef.current.x += velRef.current.vx * delta;
     posRef.current.y = Math.max(0, posRef.current.y + velRef.current.vy * delta);
@@ -1419,8 +1446,9 @@ const SplashMesh: React.FC<{ data: SplashParticle }> = memo(({ data }) => {
 
 // Ceiling drips during/after rain with splash effects
 const CeilingDrips: React.FC = () => {
-  const weather = useMillStore((state: any) => state.weather);
-  const quality = useMillStore((state: any) => state.graphics.quality);
+  const weather = useGameSimulationStore((state) => state.weather);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const quality = useGraphicsStore((state) => state.graphics.quality);
   const [dripKeys, setDripKeys] = useState<number[]>([]);
   const [splashKeys, setSplashKeys] = useState<number[]>([]);
   const dripDataRef = useRef<Map<number, { x: number; z: number }>>(new Map());
@@ -1474,6 +1502,7 @@ const CeilingDrips: React.FC = () => {
 
   // Spawn new drips during rain
   useFrame((state) => {
+    if (!isTabVisible) return;
     const isRaining = weather === 'rain' || weather === 'storm';
     if (!isRaining || quality === 'low') return;
 
@@ -1510,8 +1539,9 @@ const CeilingDrips: React.FC = () => {
 
 // Weather effects component with enhanced rain
 const WeatherEffects: React.FC = () => {
-  const weather = useMillStore((state: any) => state.weather);
-  const quality = useMillStore((state: any) => state.graphics.quality);
+  const weather = useGameSimulationStore((state) => state.weather);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const quality = useGraphicsStore((state) => state.graphics.quality);
   const rainRef = useRef<THREE.Points>(null);
   const rainStreaksRef = useRef<THREE.Points>(null);
   const splashRef = useRef<THREE.Points>(null);
@@ -1565,8 +1595,8 @@ const WeatherEffects: React.FC = () => {
 
   // Consolidated weather animation - all rain particles in ONE useFrame, throttled to 30fps
   useFrame((_, delta) => {
-    // Skip if not rendering or throttle to every 2nd frame (30fps)
-    if (!shouldRender || !shouldRunThisFrame(2)) return;
+    // PERFORMANCE: Skip when tab hidden or not rendering
+    if (!isTabVisible || !shouldRender || !shouldRunThisFrame(2)) return;
 
     const isRaining = weather === 'rain' || weather === 'storm';
     const isStorm = weather === 'storm';
@@ -1667,10 +1697,7 @@ const WeatherEffects: React.FC = () => {
       {(weather === 'rain' || weather === 'storm') && (
         <points ref={rainRef} key={`rain-${rainCount}`}>
           <bufferGeometry>
-            <bufferAttribute
-              attach="attributes-position"
-              args={[rainPositions, 3]}
-            />
+            <bufferAttribute attach="attributes-position" args={[rainPositions, 3]} />
           </bufferGeometry>
           <pointsMaterial
             size={weather === 'storm' ? 0.08 : 0.05}
@@ -1686,10 +1713,7 @@ const WeatherEffects: React.FC = () => {
       {weather === 'storm' && streakCount > 0 && (
         <points ref={rainStreaksRef} key={`streaks-${streakCount}`}>
           <bufferGeometry>
-            <bufferAttribute
-              attach="attributes-position"
-              args={[streakPositions, 3]}
-            />
+            <bufferAttribute attach="attributes-position" args={[streakPositions, 3]} />
           </bufferGeometry>
           <pointsMaterial size={0.15} color="#94a3b8" transparent opacity={0.4} sizeAttenuation />
         </points>
@@ -1699,10 +1723,7 @@ const WeatherEffects: React.FC = () => {
       {(weather === 'rain' || weather === 'storm') && splashCount > 0 && (
         <points ref={splashRef} key={`splash-${splashCount}`}>
           <bufferGeometry>
-            <bufferAttribute
-              attach="attributes-position"
-              args={[splashPositions, 3]}
-            />
+            <bufferAttribute attach="attributes-position" args={[splashPositions, 3]} />
           </bufferGeometry>
           <pointsMaterial size={0.1} color="#b4c6e7" transparent opacity={0.6} sizeAttenuation />
         </points>
@@ -1717,14 +1738,14 @@ const WeatherEffects: React.FC = () => {
 // Lightning flash effect - synced with audio thunder
 const LightningFlash: React.FC = () => {
   const lightRef = useRef<THREE.PointLight>(null);
-  const [flashIntensity, setFlashIntensity] = useState(0);
+  const flashIntensityRef = useRef(0);
   const screenFlashRef = useRef<THREE.Mesh>(null);
   const flashTimeoutRefs = useRef<NodeJS.Timeout[]>([]);
 
   // Subscribe to thunder events from audio manager
   useEffect(() => {
     const triggerFlash = () => {
-      if (!lightRef.current) return;
+      if (!lightRef.current || !screenFlashRef.current) return;
 
       // Clear any existing timeouts
       flashTimeoutRefs.current.forEach((timeout) => clearTimeout(timeout));
@@ -1733,14 +1754,20 @@ const LightningFlash: React.FC = () => {
       // Multi-stage flash for realistic lightning
       // Stage 1: Initial bright flash
       lightRef.current.intensity = 300;
-      setFlashIntensity(0.15);
+      flashIntensityRef.current = 0.15;
+      if (screenFlashRef.current.material) {
+        (screenFlashRef.current.material as THREE.MeshBasicMaterial).opacity = 0.15;
+      }
 
       // Stage 2: Brief dim
       flashTimeoutRefs.current.push(
         setTimeout(() => {
-          if (lightRef.current) {
+          if (lightRef.current && screenFlashRef.current) {
             lightRef.current.intensity = 50;
-            setFlashIntensity(0.03);
+            flashIntensityRef.current = 0.03;
+            if (screenFlashRef.current.material) {
+              (screenFlashRef.current.material as THREE.MeshBasicMaterial).opacity = 0.03;
+            }
           }
         }, 60)
       );
@@ -1748,9 +1775,12 @@ const LightningFlash: React.FC = () => {
       // Stage 3: Second flash (often lightning has multiple strokes)
       flashTimeoutRefs.current.push(
         setTimeout(() => {
-          if (lightRef.current) {
+          if (lightRef.current && screenFlashRef.current) {
             lightRef.current.intensity = 250;
-            setFlashIntensity(0.12);
+            flashIntensityRef.current = 0.12;
+            if (screenFlashRef.current.material) {
+              (screenFlashRef.current.material as THREE.MeshBasicMaterial).opacity = 0.12;
+            }
           }
         }, 120)
       );
@@ -1758,9 +1788,12 @@ const LightningFlash: React.FC = () => {
       // Stage 4: Fade out
       flashTimeoutRefs.current.push(
         setTimeout(() => {
-          if (lightRef.current) {
+          if (lightRef.current && screenFlashRef.current) {
             lightRef.current.intensity = 100;
-            setFlashIntensity(0.05);
+            flashIntensityRef.current = 0.05;
+            if (screenFlashRef.current.material) {
+              (screenFlashRef.current.material as THREE.MeshBasicMaterial).opacity = 0.05;
+            }
           }
         }, 180)
       );
@@ -1768,9 +1801,12 @@ const LightningFlash: React.FC = () => {
       // Stage 5: Off
       flashTimeoutRefs.current.push(
         setTimeout(() => {
-          if (lightRef.current) {
+          if (lightRef.current && screenFlashRef.current) {
             lightRef.current.intensity = 0;
-            setFlashIntensity(0);
+            flashIntensityRef.current = 0;
+            if (screenFlashRef.current.material) {
+              (screenFlashRef.current.material as THREE.MeshBasicMaterial).opacity = 0;
+            }
           }
         }, 250)
       );
@@ -1797,27 +1833,25 @@ const LightningFlash: React.FC = () => {
         intensity={0}
         distance={150}
       />
-      {/* Screen flash overlay for dramatic effect */}
-      {flashIntensity > 0 && (
-        <mesh ref={screenFlashRef} position={[0, 15, 0]}>
-          <sphereGeometry args={[80, 8, 8]} />
-          <meshBasicMaterial
-            color="#f0f9ff"
-            transparent
-            opacity={flashIntensity}
-            side={THREE.BackSide}
-            depthWrite={false}
-          />
-        </mesh>
-      )}
+      {/* Screen flash overlay for dramatic effect - always rendered, opacity updated via ref */}
+      <mesh ref={screenFlashRef} position={[0, 15, 0]}>
+        <sphereGeometry args={[80, 8, 8]} />
+        <meshBasicMaterial
+          color="#f0f9ff"
+          transparent
+          opacity={0}
+          side={THREE.BackSide}
+          depthWrite={false}
+        />
+      </mesh>
     </group>
   );
 };
 
 // Heat map visualization
 const HeatMapVisualization: React.FC = () => {
-  const heatMapData = useMillStore((state: any) => state.heatMapData);
-  const showHeatMap = useMillStore((state: any) => state.showHeatMap);
+  const heatMapData = useProductionStore((state) => state.heatMapData);
+  const showHeatMap = useProductionStore((state) => state.showHeatMap);
 
   if (!showHeatMap || heatMapData.length === 0) return null;
 

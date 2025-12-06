@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Sun, Sunset, Moon } from 'lucide-react';
-import { useMillStore } from '../../store';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 
 // Speed options: 0 = paused, 1 = 1x, 60 = 60x (1 sec = 1 min), 300 = 5 min/sec
 const SPEED_OPTIONS = [
@@ -13,9 +13,9 @@ const SPEED_OPTIONS = [
 // Isolated Mill Clock component - uses store's gameTime for unified time across app
 export const MillClockDisplay: React.FC<{ theme: 'dark' | 'light' }> = React.memo(({ theme }) => {
   // Subscribe to gameTime, throttled to reduce re-renders (updates when integer hour changes or every ~30 game seconds)
-  const gameTime = useMillStore((state) => state.gameTime);
-  const gameSpeed = useMillStore((state) => state.gameSpeed);
-  const setGameSpeed = useMillStore((state) => state.setGameSpeed);
+  const gameTime = useGameSimulationStore((state) => state.gameTime);
+  const gameSpeed = useGameSimulationStore((state) => state.gameSpeed);
+  const setGameSpeed = useGameSimulationStore((state) => state.setGameSpeed);
 
   // Find current speed index for display
   const speedIndex = useMemo(() => {

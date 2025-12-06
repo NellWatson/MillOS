@@ -106,7 +106,7 @@ const CrisisTimer: React.FC = () => {
       setElapsed((prev) => {
         const next = prev + 1;
         // Auto-resolve after duration
-        if (next >= (crisisState.metadata?.duration as number || 120)) {
+        if (next >= ((crisisState.metadata?.duration as number) || 120)) {
           resolveCrisis();
           return 0;
         }
@@ -167,7 +167,7 @@ const CrisisTimer: React.FC = () => {
         </div>
 
         <div className="mt-2 text-xs text-slate-400 text-center">
-          {crisisState.metadata?.description as string || 'Crisis in progress...'}
+          {(crisisState.metadata?.description as string) || 'Crisis in progress...'}
         </div>
 
         {/* Manual resolve button */}
@@ -298,9 +298,7 @@ const CrisisActionItems: React.FC = () => {
               >
                 <div
                   className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                    isCompleted
-                      ? 'bg-green-600 border-green-500'
-                      : 'border-slate-600 bg-slate-900'
+                    isCompleted ? 'bg-green-600 border-green-500' : 'border-slate-600 bg-slate-900'
                   }`}
                 >
                   {isCompleted && <CheckCircle className="w-3 h-3 text-white" />}
@@ -312,9 +310,7 @@ const CrisisActionItems: React.FC = () => {
                     {item.label}
                   </div>
                   {item.critical && !isCompleted && (
-                    <span className="text-[10px] text-red-400 uppercase font-medium">
-                      Critical
-                    </span>
+                    <span className="text-[10px] text-red-400 uppercase font-medium">Critical</span>
                   )}
                 </div>
               </button>
@@ -502,7 +498,10 @@ export const CrisisControlPanel: React.FC<{ show: boolean; onClose: () => void }
         {CRISIS_SCENARIOS.map((scenario) => {
           const Icon = scenario.icon;
           return (
-            <div key={scenario.id} className="bg-slate-800/50 rounded-lg p-3 border border-slate-700">
+            <div
+              key={scenario.id}
+              className="bg-slate-800/50 rounded-lg p-3 border border-slate-700"
+            >
               <div className="flex items-start gap-3 mb-2">
                 <Icon className={`w-5 h-5 text-${scenario.color}-400 flex-shrink-0`} />
                 <div className="flex-1">

@@ -22,7 +22,10 @@ import {
   WORKER_ROSTER,
   MachineType,
 } from '../types';
-import { useMillStore } from '../store';
+import { useProductionStore } from '../stores/productionStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
+import { useSafetyStore } from '../stores/safetyStore';
+import { useUIStore } from '../stores/uiStore';
 import { logger } from './logger';
 
 // Types & Interfaces
@@ -227,7 +230,7 @@ function recordDecision(decision: AIDecision): void {
 
   // Issue 1 Fix: Automatically add decision to store to prevent loss before applyDecisionEffects
   // Decisions are now immediately persisted, eliminating the risk of loss during array trimming
-  useMillStore.getState().addAIDecision(decision);
+  useProductionStore.getState().addAIDecision(decision);
 }
 
 function hasRecentDecision(
@@ -1863,7 +1866,7 @@ function processDecisionChains(_context: FactoryContext): AIDecision | null {
 
   for (const [decisionId, chain] of aiMemory.pendingChains.entries()) {
     if (now >= chain.scheduledAt) {
-      const parentDecision = useMillStore
+      const parentDecision = useProductionStore
         .getState()
         .aiDecisions.find((d) => d.id === chain.parentId);
       if (!parentDecision) {
@@ -1942,7 +1945,7 @@ function processDecisionChains(_context: FactoryContext): AIDecision | null {
             priority: success ? 'low' : 'medium',
           };
 
-          useMillStore
+          useProductionStore
             .getState()
             .updateDecisionStatus(
               parentDecision.id,
@@ -1979,21 +1982,24 @@ function scheduleFollowup(decision: AIDecision, delayMs: number = 8000): void {
 // ============================================================================
 
 function getFactoryContext(): FactoryContext {
-  const store = useMillStore.getState();
+  const productionStore = useProductionStore.getState();
+  const uiStore = useUIStore.getState();
+  const safetyStore = useSafetyStore.getState();
+  const gameSimStore = useGameSimulationStore.getState();
   return {
-    machines: store.machines,
-    workers: store.workers,
-    alerts: store.alerts,
-    metrics: store.metrics,
-    safetyMetrics: store.safetyMetrics,
-    emergencyActive: store.emergencyActive,
-    emergencyMachineId: store.emergencyMachineId,
-    emergencyDrillMode: store.emergencyDrillMode,
-    gameTime: store.gameTime,
-    currentShift: store.currentShift,
-    weather: store.weather,
-    heatMapData: store.heatMapData,
-    workerSatisfaction: store.workerSatisfaction,
+    machines: productionStore.machines,
+    workers: productionStore.workers,
+    alerts: uiStore.alerts,
+    metrics: productionStore.metrics,
+    safetyMetrics: safetyStore.safetyMetrics,
+    emergencyActive: gameSimStore.emergencyActive,
+    emergencyMachineId: gameSimStore.emergencyMachineId,
+    emergencyDrillMode: gameSimStore.emergencyDrillMode,
+    gameTime: gameSimStore.gameTime,
+    currentShift: gameSimStore.currentShift,
+    weather: gameSimStore.weather,
+    heatMapData: productionStore.heatMapData,
+    workerSatisfaction: productionStore.workerSatisfaction,
   };
 }
 
@@ -2175,7 +2181,7 @@ export function reactToAlert(alert: AlertData): AIDecision | null {
 }
 
 export function applyDecisionEffects(decision: AIDecision): void {
-  const store = useMillStore.getState();
+  const store = useProductionStore.getState();
 
   if (decision.workerId && decision.type === 'assignment') {
     store.updateWorkerTask(
@@ -2346,25 +2352,23 @@ export function initializeShiftObserver(): () => void {
   shiftObserverInitialized = true;
 
   // Subscribe to store changes
-  const unsubscribe = useMillStore.subscribe(
-    (state) => state.currentShift,
-    (currentShift) => {
-      // Only reset if this is an actual shift change (not initial load)
-      if (lastObservedShift !== null && currentShift !== lastObservedShift) {
-        logger.ai.debug(
-          `Shift changed from ${lastObservedShift} to ${currentShift} - resetting shift stats`
-        );
-        resetShiftStats();
+  const unsubscribe = useGameSimulationStore.subscribe((state) => {
+    const currentShift = state.currentShift;
+    // Only reset if this is an actual shift change (not initial load)
+    if (lastObservedShift !== null && currentShift !== lastObservedShift) {
+      logger.ai.debug(
+        `Shift changed from ${lastObservedShift} to ${currentShift} - resetting shift stats`
+      );
+      resetShiftStats();
 
-        // Reset production target for new shift
-        aiMemory.productionTargets.current = 0;
-      }
-      lastObservedShift = currentShift;
+      // Reset production target for new shift
+      aiMemory.productionTargets.current = 0;
     }
-  );
+    lastObservedShift = currentShift;
+  });
 
   // Initialize lastObservedShift on first call
-  lastObservedShift = useMillStore.getState().currentShift;
+  lastObservedShift = useGameSimulationStore.getState().currentShift;
 
   return () => {
     unsubscribe();
@@ -2388,7 +2392,7 @@ export function initializeDecisionOutcomeTracking(): () => void {
   // Issue 2 Fix: Add debounce to prevent race conditions in status updates
   let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  const unsubscribe = useMillStore.subscribe(
+  const unsubscribe = useProductionStore.subscribe(
     (state) => state.aiDecisions,
     (decisions) => {
       // Clear existing timeout

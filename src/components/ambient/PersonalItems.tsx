@@ -2,6 +2,7 @@ import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { shouldRunThisFrame } from '../../utils/frameThrottle';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 
 interface PersonalCoffeeMugProps {
   position: [number, number, number];
@@ -14,6 +15,7 @@ export const PersonalCoffeeMug: React.FC<PersonalCoffeeMugProps> = ({
   color = '#3b82f6',
 }) => {
   const steamRef = useRef<THREE.Points>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   // Steam particles rising from coffee
   const steamGeometry = useMemo(() => {
@@ -31,6 +33,7 @@ export const PersonalCoffeeMug: React.FC<PersonalCoffeeMugProps> = ({
   }, []);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(2)) return;
     if (steamRef.current) {
       const positions = steamRef.current.geometry.attributes.position;
@@ -140,9 +143,7 @@ interface PersonalToolboxProps {
   workerName?: string;
 }
 
-export const PersonalToolbox: React.FC<PersonalToolboxProps> = ({
-  position,
-}) => {
+export const PersonalToolbox: React.FC<PersonalToolboxProps> = ({ position }) => {
   return (
     <group position={position}>
       {/* Toolbox base */}
@@ -219,8 +220,10 @@ interface RadioProps {
 
 export const Radio: React.FC<RadioProps> = ({ position }) => {
   const ledRef = useRef<THREE.Mesh>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(4)) return;
     if (ledRef.current) {
       const mat = ledRef.current.material as THREE.MeshStandardMaterial;

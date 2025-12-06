@@ -4,13 +4,136 @@ import { MachineData, MachineType, GrainQuality } from '../types';
 import * as THREE from 'three';
 import { Html, useGLTF } from '@react-three/drei';
 import { audioManager } from '../utils/audioManager';
-import { useMillStore } from '../store';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { getStatusColor } from '../utils/statusColors';
 import { useSCADAMachineVisuals, useSCADAAlarmVisuals } from '../scada';
 import { useModelAvailable, MODEL_PATHS } from '../utils/modelLoader';
-import { shouldRunThisFrame } from '../utils/frameThrottle';
+import { getThrottleLevel, shouldRunThisFrame } from '../utils/frameThrottle';
 import { MACHINE_MATERIALS, METAL_MATERIALS } from '../utils/sharedMaterials';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
+
+// =============================================================================
+// CENTRALIZED ANIMATION MANAGER
+// =============================================================================
+
+// Registries to track animated objects without React re-renders or prop drilling
+interface RollerAnimationState {
+  mesh: THREE.Mesh;
+  rpm: number;
+}
+const rollerRegistry = new Map<string, RollerAnimationState>();
+
+interface PanelAnimationState {
+  status: 'running' | 'idle' | 'warning' | 'critical';
+  ledMaterials: THREE.MeshStandardMaterial[];
+  screenMaterial: THREE.MeshStandardMaterial;
+}
+const panelRegistry = new Map<string, PanelAnimationState>();
+
+interface ShaderAnimationState {
+  uniforms: { [key: string]: { value: any } };
+}
+const shaderRegistry = new Map<string, ShaderAnimationState>();
+
+export const registerRoller = (id: string, state: RollerAnimationState) => {
+  rollerRegistry.set(id, state);
+};
+export const unregisterRoller = (id: string) => {
+  rollerRegistry.delete(id);
+};
+
+export const registerPanel = (id: string, state: PanelAnimationState) => {
+  panelRegistry.set(id, state);
+};
+export const unregisterPanel = (id: string) => {
+  panelRegistry.delete(id);
+};
+
+export const registerShader = (id: string, state: ShaderAnimationState) => {
+  shaderRegistry.set(id, state);
+};
+export const unregisterShader = (id: string) => {
+  shaderRegistry.delete(id);
+};
+
+// Manager component to handle all animations in a single consolidated loop
+const MachineAnimationManager: React.FC = () => {
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const quality = useGraphicsStore((state) => state.graphics.quality);
+
+  useFrame((state, delta) => {
+    // Skip if tab not visible or low quality (animations disabled on low)
+    if (!isTabVisible || quality === 'low') return;
+
+    // 1. Update Rollers (Throttle: Ultra=1, High=2, Medium=2)
+    const rollerThrottle = quality === 'ultra' ? 1 : 2;
+    if (rollerRegistry.size > 0 && shouldRunThisFrame(rollerThrottle)) {
+      const adjustedDelta = delta * rollerThrottle;
+      rollerRegistry.forEach((data) => {
+        if (data.rpm > 0) {
+          data.mesh.rotation.x += (data.rpm / 60) * Math.PI * 2 * adjustedDelta;
+        }
+      });
+    }
+
+    // 2. Update Panels (Throttle: 4 frames ~15fps is plenty for blinking)
+    if (panelRegistry.size > 0 && shouldRunThisFrame(4)) {
+      const time = state.clock.elapsedTime;
+
+      // Calculate blink states once per frame
+      const runningState = Math.floor(time * 2) % 4;
+      const warningState = Math.sin(time * 6) > 0 ? 1 : 0;
+      const criticalState = Math.sin(time * 10) > 0 ? 2 : 3;
+
+      const ledColors = {
+        running: ['#22c55e', '#22c55e', '#3b82f6', '#3b82f6'],
+        idle: ['#64748b', '#64748b', '#64748b', '#64748b'],
+        warning: ['#f59e0b', '#1e293b', '#f59e0b', '#1e293b'],
+        critical: ['#ef4444', '#ef4444', '#1e293b', '#1e293b'],
+      };
+
+
+
+      panelRegistry.forEach((data) => {
+        const status = data.status;
+        const colors = ledColors[status];
+        let idx = 0;
+
+        // Update blink state index
+        if (status === 'running') idx = runningState;
+        else if (status === 'warning') idx = warningState;
+        else if (status === 'critical') idx = criticalState;
+        else idx = 0;
+
+        // Update LEDs directly without React re-render
+        data.ledMaterials.forEach((mat, i) => {
+          const color = colors[(idx + i) % 4];
+          const isOff = color === '#1e293b' || (status === 'idle' && color === '#64748b');
+          mat.color.set(color);
+          mat.emissive.set(color);
+          mat.emissiveIntensity = isOff ? 0 : 0.8;
+        });
+
+        // Update screen only if status changed (handled by parent prop update mostly, but good to strictly enforce)
+        // Optimization: Screen color is static per status, no need to animate unless status changes
+        // We handle status changes by re-registering in useEffect
+      });
+    }
+
+    // 3. Update Shaders (Heat shimmer etc)
+    const shaderThrottle = quality === 'ultra' ? 1 : 2;
+    if (shaderRegistry.size > 0 && shouldRunThisFrame(shaderThrottle)) {
+      const time = state.clock.elapsedTime;
+      shaderRegistry.forEach((data) => {
+        if (data.uniforms.time) {
+          data.uniforms.time.value = time;
+        }
+      });
+    }
+  });
+
+  return null;
+};
 
 // Grain quality color mapping
 const QUALITY_COLORS: Record<GrainQuality, string> = {
@@ -40,7 +163,7 @@ const SiloFillIndicator: React.FC<{
 }> = React.memo(({ fillLevel, quality, grainType, radius, height }) => {
   const fillHeight = (fillLevel / 100) * height * 0.85;
   const qualityColor = QUALITY_COLORS[quality];
-  const graphicsQuality = useMillStore((state) => state.graphics.quality);
+  const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
 
   return (
     <group>
@@ -112,7 +235,7 @@ const MaintenanceCountdown: React.FC<{
   hoursRemaining: number;
   position: [number, number, number];
 }> = React.memo(({ hoursRemaining, position }) => {
-  const graphics = useMillStore((state) => state.graphics.quality);
+  const graphics = useGraphicsStore((state) => state.graphics.quality);
 
   // Skip Html overlay on low graphics
   if (graphics === 'low') return null;
@@ -135,13 +258,12 @@ const MaintenanceCountdown: React.FC<{
   return (
     <Html position={position} center distanceFactor={12}>
       <div
-        className={`bg-slate-900/90 backdrop-blur px-2 py-1 rounded border ${
-          isCritical
-            ? 'border-red-500/50 animate-pulse'
-            : isUrgent
-              ? 'border-amber-500/50'
-              : 'border-slate-700'
-        }`}
+        className={`bg-slate-900/90 backdrop-blur px-2 py-1 rounded border ${isCritical
+          ? 'border-red-500/50 animate-pulse'
+          : isUrgent
+            ? 'border-amber-500/50'
+            : 'border-slate-700'
+          }`}
       >
         <div className="text-[8px] text-slate-500 uppercase tracking-wider">Maintenance</div>
         <div className="text-xs font-mono font-bold flex items-center gap-1" style={{ color }}>
@@ -190,7 +312,7 @@ const useProceduralMetalTexture = (enabled: boolean, seed: number = 0) => {
     if (textureCache.has(cacheKey)) {
       texturesRef.current = textureCache.get(cacheKey)!;
       // Don't dispose cached textures on cleanup - they're shared
-      return () => {};
+      return () => { };
     }
 
     const random = (s: number) => Math.abs(Math.sin(s * 12.9898 + 78.233) * 43758.5453) % 1;
@@ -424,11 +546,16 @@ const HeatShimmer: React.FC<{
   temperature: number;
   size: [number, number, number];
 }> = React.memo(({ position, temperature, size }) => {
+  const graphicsQuality = useGraphicsStore.getState().graphics.quality;
+  const isLowQuality = graphicsQuality === 'low';
+
   const meshRef = useRef<THREE.Mesh>(null);
   const materialRef = useRef<THREE.ShaderMaterial | null>(null);
+  // const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   // Only show shimmer for temperatures above 45°C
   const intensity = Math.max(0, (temperature - 45) / 30); // 0-1 based on temp 45-75°C
+  // const shimmerThrottle = useMemo(() => getThrottleLevel(graphicsQuality), [graphicsQuality]);
 
   useEffect(() => {
     if (intensity <= 0) return;
@@ -472,14 +599,27 @@ const HeatShimmer: React.FC<{
     };
   }, [intensity]);
 
+  useEffect(() => {
+    if (materialRef.current) {
+      // Register shader for updates
+      const id = `shimmer-${Math.random()}`;
+      registerShader(id, { uniforms: materialRef.current.uniforms });
+      return () => unregisterShader(id);
+    }
+  }, [materialRef.current]);
+
+  // Removed per-instance useFrame
+  /*
   useFrame((state) => {
-    if (!shouldRunThisFrame(2)) return; // Skip frames for performance - 30fps is sufficient for light shaft animation
+    if (!isTabVisible || isLowQuality) return;
+    if (!shouldRunThisFrame(shimmerThrottle)) return;
     if (materialRef.current) {
       materialRef.current.uniforms.time.value = state.clock.elapsedTime;
     }
   });
+  */
 
-  if (intensity <= 0 || !materialRef.current) return null;
+  if (intensity <= 0 || !materialRef.current || isLowQuality) return null;
 
   return (
     <mesh
@@ -495,8 +635,16 @@ const HeatShimmer: React.FC<{
 // Steam vent effect for hot machinery
 const SteamVent: React.FC<{ position: [number, number, number]; intensity: number }> = React.memo(
   ({ position, intensity }) => {
+    const graphicsQuality = useGraphicsStore.getState().graphics.quality;
+    const isLowQuality = graphicsQuality === 'low';
+
     const particlesRef = useRef<THREE.Points>(null);
+    const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
     const count = 30;
+    const ventThrottle = useMemo(
+      () => Math.max(getThrottleLevel(graphicsQuality), 4),
+      [graphicsQuality]
+    );
 
     const positions = useMemo(() => {
       const pos = new Float32Array(count * 3);
@@ -516,8 +664,9 @@ const SteamVent: React.FC<{ position: [number, number, number]; intensity: numbe
     }, []);
 
     useFrame((_, delta) => {
-      // Throttle steam vent animation - looks fine at 30fps
-      if (!shouldRunThisFrame(2)) return;
+      if (!isTabVisible || isLowQuality) return;
+      // Throttle steam vent animation - looks fine at 15-20fps
+      if (!shouldRunThisFrame(ventThrottle)) return;
       if (!particlesRef.current || intensity <= 0) return;
       const pos = particlesRef.current.geometry.attributes.position.array as Float32Array;
 
@@ -537,7 +686,7 @@ const SteamVent: React.FC<{ position: [number, number, number]; intensity: numbe
       particlesRef.current.geometry.attributes.position.needsUpdate = true;
     });
 
-    if (intensity <= 0) return null;
+    if (intensity <= 0 || isLowQuality) return null;
 
     return (
       <points ref={particlesRef} position={position}>
@@ -569,49 +718,66 @@ const ControlPanel: React.FC<{
   status: 'running' | 'idle' | 'warning' | 'critical';
   enabled: boolean;
 }> = React.memo(({ position, rotation = [0, 0, 0], status, enabled }) => {
-  const blinkStateRef = useRef(0);
-  const [, forceUpdate] = useState(0);
+  // const blinkStateRef = useRef(0);
+  // const [, forceUpdate] = useState(0);
+  // const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   // Shared geometries - created once and reused
   const ledGeometry = useMemo(() => new THREE.CircleGeometry(0.02, 8), []);
   const buttonGeometry = useMemo(() => new THREE.CylinderGeometry(0.015, 0.015, 0.02, 8), []);
 
+  // Removed per-instance useFrame and state-based blinking
+  /*
   useFrame((state) => {
-    // Throttle LED blink animation - only needs 15fps
-    if (!shouldRunThisFrame(4)) return;
-    if (!enabled) return;
-    // Different blink patterns based on status
-    const time = state.clock.elapsedTime;
-    let newState = 0;
-    if (status === 'running') {
-      newState = Math.floor(time * 2) % 4; // Slow cycle through LEDs
-    } else if (status === 'warning') {
-      newState = Math.sin(time * 6) > 0 ? 1 : 0; // Fast blink
-    } else if (status === 'critical') {
-      newState = Math.sin(time * 10) > 0 ? 2 : 3; // Very fast alternating
-    }
-    // Only trigger re-render when state actually changes
-    if (newState !== blinkStateRef.current) {
-      blinkStateRef.current = newState;
-      forceUpdate((n) => n + 1);
-    }
+    ...
   });
+  */
 
-  const blinkState = blinkStateRef.current;
+  const ledMaterials = useRef<THREE.MeshStandardMaterial[]>([]);
+  const screenMaterial = useRef<THREE.MeshStandardMaterial>(null);
+
+  // Initialize material refs array
+  if (ledMaterials.current.length === 0) {
+    ledMaterials.current = Array(4).fill(null).map(() => new THREE.MeshStandardMaterial({
+      color: '#1e293b',
+      emissive: '#1e293b',
+      emissiveIntensity: 0,
+      toneMapped: false
+    })); // Create unique materials for this panel instance
+  }
+
+  // Register with manager
+  useEffect(() => {
+    if (!enabled) return;
+    const id = `panel-${Math.random()}`;
+
+    // Ensure screen material is ready
+    if (screenMaterial.current) {
+      registerPanel(id, {
+        status,
+        ledMaterials: ledMaterials.current,
+        screenMaterial: screenMaterial.current
+      });
+    }
+
+    return () => unregisterPanel(id);
+  }, [enabled, status]); // Re-register when status changes to update manager's known status
 
   if (!enabled) return null;
 
-  const ledColors = {
-    running: ['#22c55e', '#22c55e', '#3b82f6', '#3b82f6'],
-    idle: ['#64748b', '#64748b', '#64748b', '#64748b'],
-    warning: ['#f59e0b', '#1e293b', '#f59e0b', '#1e293b'],
-    critical: ['#ef4444', '#ef4444', '#1e293b', '#1e293b'],
-  };
+  // const blinkState = blinkStateRef.current;
 
-  const colors = ledColors[status];
+  if (!enabled) return null;
+
+  // Pre-calculated static colors for screen (LEDs handled by manager)
+  // const ledColors... removed
+  // const colors... removed
 
   return (
-    <group position={position} rotation={Array.isArray(rotation) ? rotation as [number, number, number] : rotation}>
+    <group
+      position={position}
+      rotation={Array.isArray(rotation) ? (rotation as [number, number, number]) : rotation}
+    >
       {/* Panel backing - using shared materials */}
       <mesh>
         <boxGeometry args={[0.4, 0.3, 0.05]} />
@@ -622,6 +788,7 @@ const ControlPanel: React.FC<{
       <mesh position={[0, 0.02, 0.026]}>
         <planeGeometry args={[0.25, 0.12]} />
         <meshStandardMaterial
+          ref={screenMaterial}
           color={status === 'critical' ? '#450a0a' : status === 'warning' ? '#451a03' : '#0f172a'}
           emissive={
             status === 'critical' ? '#ef4444' : status === 'warning' ? '#f59e0b' : '#3b82f6'
@@ -631,25 +798,14 @@ const ControlPanel: React.FC<{
       </mesh>
 
       {/* LED indicators */}
+      {/* LED indicators - using unique materials controlled by manager */}
       {[
         [-0.12, -0.08],
         [-0.04, -0.08],
         [0.04, -0.08],
         [0.12, -0.08],
       ].map(([x, y], i) => (
-        <mesh key={i} position={[x, y, 0.026]} geometry={ledGeometry}>
-          <meshStandardMaterial
-            color={colors[(blinkState + i) % 4]}
-            emissive={colors[(blinkState + i) % 4]}
-            emissiveIntensity={
-              colors[(blinkState + i) % 4] !== '#1e293b' &&
-              colors[(blinkState + i) % 4] !== '#64748b'
-                ? 0.8
-                : 0
-            }
-            toneMapped={false}
-          />
-        </mesh>
+        <mesh key={i} position={[x, y, 0.026]} geometry={ledGeometry} material={ledMaterials.current[i]} />
       ))}
 
       {/* Buttons */}
@@ -675,6 +831,7 @@ const AnisotropicRoller: React.FC<{
   rpm?: number;
 }> = ({ position, radius, length, rotation = [0, 0, Math.PI / 2], enabled, rpm = 0 }) => {
   const meshRef = useRef<THREE.Mesh>(null);
+  // const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   // Create anisotropic normal map
   const normalMap = useMemo(() => {
@@ -720,11 +877,22 @@ const AnisotropicRoller: React.FC<{
   }, [enabled]);
 
   // Animate rotation based on RPM
+  // Register for centralized rotation update
+  useEffect(() => {
+    if (!meshRef.current || rpm <= 0) return;
+    const id = `roller-${Math.random()}`;
+    registerRoller(id, { mesh: meshRef.current, rpm });
+    return () => unregisterRoller(id);
+  }, [rpm]);
+
+  /* Removed per-instance useFrame
   useFrame((_, delta) => {
+    if (!isTabVisible) return;
     if (meshRef.current && rpm > 0) {
       meshRef.current.rotation.x += (rpm / 60) * Math.PI * 2 * delta;
     }
   });
+  */
 
   return (
     <mesh ref={meshRef} position={position} rotation={rotation}>
@@ -743,9 +911,17 @@ const AnisotropicRoller: React.FC<{
 // Sparks effect for grinding/milling machinery
 const Sparks: React.FC<{ position: [number, number, number]; active: boolean }> = React.memo(
   ({ position, active }) => {
+    const graphicsQuality = useGraphicsStore.getState().graphics.quality;
+    const isLowQuality = graphicsQuality === 'low';
+
     const particlesRef = useRef<THREE.Points>(null);
+    const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
     const count = 20;
     const nextSparkRef = useRef(0);
+    const sparkThrottle = useMemo(
+      () => Math.max(getThrottleLevel(graphicsQuality), 3),
+      [graphicsQuality]
+    );
 
     const positions = useMemo(() => new Float32Array(count * 3), []);
     const velocities = useMemo(
@@ -754,8 +930,9 @@ const Sparks: React.FC<{ position: [number, number, number]; active: boolean }> 
     );
 
     useFrame((_state, delta) => {
-      // Throttle sparks animation - 30fps is sufficient
-      if (!shouldRunThisFrame(2)) return;
+      if (!isTabVisible || isLowQuality) return;
+      // Throttle sparks animation - 20fps+ is sufficient
+      if (!shouldRunThisFrame(sparkThrottle)) return;
       if (!particlesRef.current || !active) return;
       const pos = particlesRef.current.geometry.attributes.position.array as Float32Array;
 
@@ -793,7 +970,7 @@ const Sparks: React.FC<{ position: [number, number, number]; active: boolean }> 
       particlesRef.current.geometry.attributes.position.needsUpdate = true;
     });
 
-    if (!active) return null;
+    if (!active || isLowQuality) return null;
 
     return (
       <points ref={particlesRef} position={position}>
@@ -816,6 +993,13 @@ const Sparks: React.FC<{ position: [number, number, number]; active: boolean }> 
 const RotatingFan: React.FC<{ position: [number, number, number]; speed: number; size?: number }> =
   React.memo(({ position, speed, size = 0.4 }) => {
     const fanRef = useRef<THREE.Group>(null);
+    const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+    const graphicsQuality = useGraphicsStore.getState().graphics.quality;
+    const isLowQuality = graphicsQuality === 'low';
+    const fanThrottle = useMemo(
+      () => Math.max(getThrottleLevel(graphicsQuality), 3),
+      [graphicsQuality]
+    );
 
     // Shared geometry for all fan blades
     const bladeGeometry = useMemo(
@@ -824,6 +1008,8 @@ const RotatingFan: React.FC<{ position: [number, number, number]; speed: number;
     );
 
     useFrame((_, delta) => {
+      if (!isTabVisible || isLowQuality) return;
+      if (!shouldRunThisFrame(fanThrottle)) return;
       if (fanRef.current && speed > 0) {
         fanRef.current.rotation.z += delta * speed * 0.5;
       }
@@ -861,10 +1047,18 @@ const AnimatedGauge: React.FC<{
 }> = React.memo(({ position, value, maxValue }) => {
   const needleRef = useRef<THREE.Mesh>(null);
   const targetAngle = useRef(0);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const graphicsQuality = useGraphicsStore.getState().graphics.quality;
+  const isLowQuality = graphicsQuality === 'low';
+  const gaugeThrottle = useMemo(
+    () => Math.max(getThrottleLevel(graphicsQuality), 3),
+    [graphicsQuality]
+  );
 
   useFrame(() => {
-    // Throttle gauge animation - 20fps is sufficient for smooth needle movement
-    if (!shouldRunThisFrame(3)) return;
+    if (!isTabVisible || isLowQuality) return;
+    // Throttle gauge animation - 15-20fps is sufficient for smooth needle movement
+    if (!shouldRunThisFrame(gaugeThrottle)) return;
     if (!needleRef.current) return;
     // Map value to angle (-135 to +135 degrees)
     const normalizedValue = Math.min(value / maxValue, 1);
@@ -917,7 +1111,9 @@ const AlarmIndicator: React.FC<{
 }> = React.memo(({ position, priority, pulseSpeed, hasUnacknowledged }) => {
   const meshRef = useRef<THREE.Mesh>(null);
   const glowRef = useRef<THREE.Mesh>(null);
-  const graphics = useMillStore((state) => state.graphics.quality);
+  const graphics = useGraphicsStore((state) => state.graphics.quality);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const indicatorThrottle = useMemo(() => Math.max(getThrottleLevel(graphics), 3), [graphics]);
 
   const colors = {
     CRITICAL: '#ef4444',
@@ -929,6 +1125,8 @@ const AlarmIndicator: React.FC<{
   const color = priority ? colors[priority] : '#3b82f6';
 
   useFrame((state) => {
+    if (!isTabVisible) return;
+    if (!shouldRunThisFrame(indicatorThrottle)) return;
     // Skip animation when not visible
     if (!meshRef.current || pulseSpeed === 0 || !priority || graphics === 'low') return;
 
@@ -983,7 +1181,7 @@ const SCADAValueOverlay: React.FC<{
   temperatureColor: string;
   vibrationColor: string;
 }> = React.memo(({ position, tagValues, temperatureColor, vibrationColor }) => {
-  const graphics = useMillStore((state) => state.graphics.quality);
+  const graphics = useGraphicsStore((state) => state.graphics.quality);
 
   // Skip on low/medium graphics
   if (graphics === 'low' || graphics === 'medium') return null;
@@ -1073,17 +1271,189 @@ interface MachinesProps {
   onSelect: (data: MachineData) => void;
 }
 
+// Animation state stored per-machine for centralized useFrame
+interface MachineAnimationState {
+  groupRef: THREE.Group | null;
+  position: [number, number, number];
+  rotation: number;
+  type: MachineType;
+  status: 'running' | 'idle' | 'warning' | 'critical';
+  scadaRpmMultiplier: number;
+  scadaVibrationIntensity: number;
+  scadaFillLevel: number | undefined;
+  metricsLoad: number;
+  enableVibration: boolean;
+}
+
 export const Machines: React.FC<MachinesProps> = ({ machines, onSelect }) => {
+  // PERFORMANCE: Centralized animation state for all machines
+  // This eliminates 17 separate useFrame hooks, reducing per-frame overhead
+  const machineStatesRef = useRef<Map<string, MachineAnimationState>>(new Map());
+  const frameCountRef = useRef(0);
+  const audioRegisteredRef = useRef<Set<string>>(new Set());
+
+  // Get global state for animation control
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const quality = useGraphicsStore((state) => state.graphics.quality);
+  const isLowQuality = quality === 'low';
+
+  // Callback for MachineMesh to register its animation state
+  const updateMachineState = React.useCallback(
+    (id: string, state: MachineAnimationState | null) => {
+      if (state === null) {
+        machineStatesRef.current.delete(id);
+        audioRegisteredRef.current.delete(id);
+      } else {
+        machineStatesRef.current.set(id, state);
+      }
+    },
+    []
+  );
+
+  // CENTRALIZED useFrame - runs once per frame instead of 17 times
+  useFrame((state) => {
+    if (!isTabVisible) return;
+
+    frameCountRef.current++;
+
+    // On LOW quality, skip all animation - only handle audio registration
+    if (isLowQuality) {
+      // Only run audio logic every 30 frames (~0.5s at 60fps)
+      if (frameCountRef.current % 30 === 0) {
+        machineStatesRef.current.forEach((machineState, machineId) => {
+          if (machineState.status === 'running') {
+            // Register audio position if not already done
+            if (!audioRegisteredRef.current.has(machineId)) {
+              audioManager.registerSoundPosition(
+                machineId,
+                machineState.position[0],
+                machineState.position[1] + 1, // Approximate center
+                machineState.position[2]
+              );
+              audioRegisteredRef.current.add(machineId);
+            }
+            audioManager.updateMachineSpatialVolume(machineId);
+          }
+        });
+      }
+      // Reset positions once on first frame
+      if (frameCountRef.current === 1) {
+        machineStatesRef.current.forEach((machineState) => {
+          if (machineState.groupRef) {
+            machineState.groupRef.position.set(
+              machineState.position[0],
+              machineState.position[1],
+              machineState.position[2]
+            );
+            machineState.groupRef.rotation.set(0, machineState.rotation, 0);
+          }
+        });
+      }
+      return; // Skip all animation on LOW quality
+    }
+
+    const time = state.clock.elapsedTime;
+
+    // Iterate through all machines and apply animations
+    machineStatesRef.current.forEach((machineState, machineId) => {
+      const {
+        groupRef,
+        position,
+        rotation,
+        type,
+        status,
+        scadaRpmMultiplier,
+        scadaVibrationIntensity,
+        scadaFillLevel,
+        metricsLoad,
+        enableVibration,
+      } = machineState;
+
+      if (!groupRef) return;
+
+      if (status === 'running' && enableVibration) {
+        const rpmFactor = scadaRpmMultiplier;
+        const vibIntensity = scadaVibrationIntensity;
+
+        switch (type) {
+          case MachineType.PLANSIFTER: {
+            // Sifters have strong circular oscillation
+            const intensity = (0.04 + rpmFactor * 0.03) * vibIntensity;
+            const speed = 12 + rpmFactor * 8;
+            groupRef.position.x = position[0] + Math.cos(time * speed) * intensity;
+            groupRef.position.z = position[2] + Math.sin(time * speed) * intensity;
+            groupRef.rotation.x = Math.sin(time * speed * 0.5) * 0.003 * vibIntensity;
+            groupRef.rotation.z = Math.cos(time * speed * 0.5) * 0.003 * vibIntensity;
+            break;
+          }
+          case MachineType.ROLLER_MILL: {
+            // Mills have high-frequency vertical vibration
+            const intensity = (0.005 + rpmFactor * 0.015) * vibIntensity;
+            const speed = 30 + rpmFactor * 30;
+            groupRef.position.y = position[1] + Math.sin(time * speed) * intensity;
+            groupRef.position.x = position[0] + Math.sin(time * speed * 2.3) * intensity * 0.3;
+            break;
+          }
+          case MachineType.PACKER: {
+            // Packers have rhythmic mechanical motion
+            const cycleTime = time * 3;
+            const cycle = Math.sin(cycleTime) > 0.7 ? 1 : 0;
+            groupRef.position.y = position[1] + cycle * 0.02 * vibIntensity;
+            groupRef.position.x = position[0] + Math.sin(time * 15) * 0.003 * vibIntensity;
+            break;
+          }
+          case MachineType.SILO: {
+            // Silos have subtle low-frequency rumble when filling
+            const load = scadaFillLevel ?? metricsLoad ?? 0;
+            if (load > 50) {
+              const intensity = 0.002 * (load / 100) * vibIntensity;
+              groupRef.position.x = position[0] + Math.sin(time * 5) * intensity;
+              groupRef.position.z = position[2] + Math.cos(time * 4) * intensity;
+            }
+            break;
+          }
+        }
+      } else if (!enableVibration) {
+        // Reset position when vibration is disabled
+        groupRef.position.set(position[0], position[1], position[2]);
+        groupRef.rotation.set(0, rotation, 0);
+      }
+
+      // Register machine position for spatial audio (throttled)
+      if (status === 'running' && frameCountRef.current % 10 === 0) {
+        audioManager.registerSoundPosition(
+          machineId,
+          position[0],
+          position[1] + 1,
+          position[2]
+        );
+        audioManager.updateMachineSpatialVolume(machineId);
+      }
+    });
+  });
+
   return (
     <group>
-      {machines.map((m: any) => (
-        <MachineMesh key={m.id} data={m} onClick={() => onSelect(m)} />
+      <MachineAnimationManager />
+      {machines.map((m: MachineData) => (
+        <MachineMesh
+          key={m.id}
+          data={m}
+          onClick={() => onSelect(m)}
+          onStateUpdate={updateMachineState}
+        />
       ))}
     </group>
   );
 };
 
-const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ data, onClick }) => {
+interface MachineMeshProps {
+  data: MachineData;
+  onClick: () => void;
+  onStateUpdate: (id: string, state: MachineAnimationState | null) => void;
+}
+
+const MachineMesh: React.FC<MachineMeshProps> = ({ data, onClick, onStateUpdate }) => {
   const { type, position, size, rotation, status } = data;
   const groupRef = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
@@ -1097,6 +1467,8 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
     (state) => state.graphics.enableAnisotropicReflections
   );
   const quality = useGraphicsStore((state) => state.graphics.quality);
+  // PERFORMANCE: Skip animated sub-components on LOW quality
+  const isLowQuality = quality === 'low';
 
   // Check GLTF model availability
   const siloModelAvailable = useModelAvailable('silo');
@@ -1157,73 +1529,40 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
     };
   }, [data.id, type, status, data.metrics.rpm]);
 
-  useFrame((state) => {
-    if (status === 'running' && groupRef.current && enableVibration) {
-      const time = state.clock.elapsedTime;
-      // Use SCADA-derived values
-      const rpmFactor = scadaVisuals.rpmMultiplier; // SCADA-derived 0-1 multiplier
-      // Use SCADA vibration intensity multiplier
-      const vibIntensity = scadaVisuals.vibrationIntensity;
+  // PERFORMANCE: Register animation state with parent for centralized useFrame
+  // This eliminates per-machine useFrame overhead - parent iterates once per frame
+  useEffect(() => {
+    // Register state with parent on mount and when relevant values change
+    onStateUpdate(data.id, {
+      groupRef: groupRef.current,
+      position,
+      rotation,
+      type,
+      status,
+      scadaRpmMultiplier: scadaVisuals.rpmMultiplier,
+      scadaVibrationIntensity: scadaVisuals.vibrationIntensity,
+      scadaFillLevel: scadaVisuals.fillLevel ?? undefined,
+      metricsLoad: data.metrics.load,
+      enableVibration,
+    });
 
-      switch (type) {
-        case MachineType.PLANSIFTER: {
-          // Sifters have strong circular oscillation, scaled by SCADA vibration
-          const intensity = (0.04 + rpmFactor * 0.03) * vibIntensity;
-          const speed = 12 + rpmFactor * 8;
-          groupRef.current.position.x = position[0] + Math.cos(time * speed) * intensity;
-          groupRef.current.position.z = position[2] + Math.sin(time * speed) * intensity;
-          // Add slight rotation wobble
-          groupRef.current.rotation.x = Math.sin(time * speed * 0.5) * 0.003 * vibIntensity;
-          groupRef.current.rotation.z = Math.cos(time * speed * 0.5) * 0.003 * vibIntensity;
-          break;
-        }
-        case MachineType.ROLLER_MILL: {
-          // Mills have high-frequency vertical vibration, scaled by SCADA
-          const intensity = (0.005 + rpmFactor * 0.015) * vibIntensity;
-          const speed = 30 + rpmFactor * 30;
-          groupRef.current.position.y = position[1] + Math.sin(time * speed) * intensity;
-          // Add harmonic vibration
-          groupRef.current.position.x =
-            position[0] + Math.sin(time * speed * 2.3) * intensity * 0.3;
-          break;
-        }
-        case MachineType.PACKER: {
-          // Packers have rhythmic mechanical motion
-          const cycleTime = time * 3;
-          const cycle = Math.sin(cycleTime) > 0.7 ? 1 : 0;
-          groupRef.current.position.y = position[1] + cycle * 0.02 * vibIntensity;
-          // Subtle continuous vibration
-          groupRef.current.position.x = position[0] + Math.sin(time * 15) * 0.003 * vibIntensity;
-          break;
-        }
-        case MachineType.SILO: {
-          // Silos have very subtle low-frequency rumble when filling
-          const load = scadaVisuals.fillLevel ?? data.metrics.load ?? 0;
-          if (load > 50) {
-            const intensity = 0.002 * (load / 100) * vibIntensity;
-            groupRef.current.position.x = position[0] + Math.sin(time * 5) * intensity;
-            groupRef.current.position.z = position[2] + Math.cos(time * 4) * intensity;
-          }
-          break;
-        }
-      }
-    } else if (groupRef.current && !enableVibration) {
-      // Reset position when vibration is disabled
-      groupRef.current.position.set(position[0], position[1], position[2]);
-      groupRef.current.rotation.set(0, rotation, 0);
-    }
-
-    // Register machine position for spatial audio
-    if (status === 'running') {
-      audioManager.registerSoundPosition(
-        data.id,
-        position[0],
-        position[1] + size[1] / 2,
-        position[2]
-      );
-      audioManager.updateMachineSpatialVolume(data.id);
-    }
-  });
+    // Cleanup: unregister from parent on unmount
+    return () => {
+      onStateUpdate(data.id, null);
+    };
+  }, [
+    data.id,
+    position,
+    rotation,
+    type,
+    status,
+    scadaVisuals.rpmMultiplier,
+    scadaVisuals.vibrationIntensity,
+    scadaVisuals.fillLevel,
+    data.metrics.load,
+    enableVibration,
+    onStateUpdate,
+  ]);
 
   // matProps now incorporates SCADA temperature glow when hot
   const matProps = {
@@ -1268,7 +1607,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
                 <GLTFSiloBase size={size as [number, number, number]} matProps={matProps} />
               </Suspense>
             ) : (
-              <mesh castShadow receiveShadow>
+              <mesh receiveShadow>
                 <cylinderGeometry args={[size[0] / 2, size[0] / 2, size[1], 32]} />
                 <meshStandardMaterial
                   color="#cbd5e1"
@@ -1294,7 +1633,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
             {/* Weld seams */}
             <WeldSeams radius={size[0] / 2} height={size[1]} enabled={enableTextures} />
             {/* Top cone */}
-            <mesh position={[0, size[1] / 2 + 1, 0]} castShadow>
+            <mesh position={[0, size[1] / 2 + 1, 0]}>
               <coneGeometry args={[size[0] / 2, 2, 32]} />
               <meshStandardMaterial color="#94a3b8" metalness={0.7} roughness={0.2} {...matProps} />
             </mesh>
@@ -1312,7 +1651,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
               </mesh>
             )}
             {/* Bottom cone (hopper) */}
-            <mesh position={[0, -size[1] / 2 - 1, 0]} castShadow>
+            <mesh position={[0, -size[1] / 2 - 1, 0]}>
               <coneGeometry args={[size[0] / 2, 2, 32]} />
               <meshStandardMaterial color="#94a3b8" metalness={0.7} roughness={0.2} {...matProps} />
             </mesh>
@@ -1329,7 +1668,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
               ))
             )}
             {/* Access ladder - using shared materials */}
-            <mesh position={[size[0] / 2 + 0.2, 0, 0]} castShadow>
+            <mesh position={[size[0] / 2 + 0.2, 0, 0]}>
               <boxGeometry args={[0.1, size[1], 0.4]} />
               <primitive object={METAL_MATERIALS.steelDark} attach="material" />
             </mesh>
@@ -1368,7 +1707,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
             </mesh>
 
             {/* Upper feed section - lighter color */}
-            <mesh castShadow receiveShadow position={[0, h * 0.35, 0]}>
+            <mesh receiveShadow position={[0, h * 0.35, 0]}>
               <boxGeometry args={[w * 0.9, h * 0.3, d * 0.85]} />
               <meshStandardMaterial color="#60a5fa" metalness={0.5} roughness={0.3} {...matProps} />
             </mesh>
@@ -1376,7 +1715,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
             {/* === FEED HOPPER === */}
             <group position={[0, h * 0.55, 0]}>
               {/* Hopper walls - trapezoidal */}
-              <mesh castShadow>
+              <mesh>
                 <boxGeometry args={[w * 0.7, 0.08, d * 0.6]} />
                 <meshStandardMaterial color="#94a3b8" metalness={0.7} roughness={0.2} />
               </mesh>
@@ -1429,28 +1768,32 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
                     opacity={0.4}
                   />
                 </mesh>
-                {/* Actual rollers visible through window */}
-                <AnisotropicRoller
-                  position={[0, 0.08, d * 0.35]}
-                  radius={0.18}
-                  length={w * 0.75}
-                  enabled={enableAnisotropicReflections}
-                  rpm={status === 'running' ? data.metrics.rpm * (0.6 + pairIdx * 0.15) : 0}
-                />
-                <AnisotropicRoller
-                  position={[0, -0.08, d * 0.35]}
-                  radius={0.16}
-                  length={w * 0.75}
-                  enabled={enableAnisotropicReflections}
-                  rpm={status === 'running' ? -data.metrics.rpm * (0.6 + pairIdx * 0.15) : 0}
-                />
+                {/* Actual rollers visible through window - PERFORMANCE: Skip on LOW quality */}
+                {!isLowQuality && (
+                  <>
+                    <AnisotropicRoller
+                      position={[0, 0.08, d * 0.35]}
+                      radius={0.18}
+                      length={w * 0.75}
+                      enabled={enableAnisotropicReflections}
+                      rpm={status === 'running' ? data.metrics.rpm * (0.6 + pairIdx * 0.15) : 0}
+                    />
+                    <AnisotropicRoller
+                      position={[0, -0.08, d * 0.35]}
+                      radius={0.16}
+                      length={w * 0.75}
+                      enabled={enableAnisotropicReflections}
+                      rpm={status === 'running' ? -data.metrics.rpm * (0.6 + pairIdx * 0.15) : 0}
+                    />
+                  </>
+                )}
               </group>
             ))}
 
             {/* === MOTOR HOUSING (side mount) === */}
             <group position={[-w * 0.5 - 0.4, -h * 0.1, 0]}>
               {/* Motor body - using shared materials */}
-              <mesh castShadow rotation={[0, 0, Math.PI / 2]}>
+              <mesh rotation={[0, 0, Math.PI / 2]}>
                 <cylinderGeometry args={[0.5, 0.5, 0.7, 16]} />
                 <primitive object={MACHINE_MATERIALS.millBody} attach="material" />
               </mesh>
@@ -1471,7 +1814,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
                 <primitive object={MACHINE_MATERIALS.shaft} attach="material" />
               </mesh>
               {/* Belt guard cover */}
-              <mesh castShadow position={[0.55, 0, 0]}>
+              <mesh position={[0.55, 0, 0]}>
                 <boxGeometry args={[0.25, 0.8, 0.6]} />
                 <meshStandardMaterial color="#fbbf24" metalness={0.3} roughness={0.5} />
               </mesh>
@@ -1482,18 +1825,20 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
                   <meshBasicMaterial color="#1f2937" />
                 </mesh>
               ))}
-              {/* Ventilation fan */}
-              <RotatingFan
-                position={[-0.4, 0, 0]}
-                speed={status === 'running' ? data.metrics.rpm / 80 : 0}
-                size={0.4}
-              />
+              {/* Ventilation fan - PERFORMANCE: Skip on LOW/MEDIUM quality */}
+              {(quality === 'high' || quality === 'ultra') && (
+                <RotatingFan
+                  position={[-0.4, 0, 0]}
+                  speed={status === 'running' ? data.metrics.rpm / 80 : 0}
+                  size={0.4}
+                />
+              )}
             </group>
 
             {/* === CONTROL PANEL === */}
             <group position={[w * 0.5 + 0.15, 0.2, 0]}>
               {/* Panel housing - using shared materials */}
-              <mesh castShadow>
+              <mesh>
                 <boxGeometry args={[0.2, 1.4, d * 0.7]} />
                 <primitive object={MACHINE_MATERIALS.panelBody} attach="material" />
               </mesh>
@@ -1504,17 +1849,21 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
                 status={status}
                 enabled={enableControlPanels}
               />
-              {/* Gauges */}
-              <AnimatedGauge
-                position={[0.11, 0.55, d * 0.2]}
-                value={scadaVisuals.tagValues.rpm ?? data.metrics.rpm}
-                maxValue={1600}
-              />
-              <AnimatedGauge
-                position={[0.11, 0.55, -d * 0.2]}
-                value={scadaVisuals.tagValues.temperature ?? data.metrics.temperature}
-                maxValue={80}
-              />
+              {/* Gauges - PERFORMANCE: Skip on LOW quality */}
+              {!isLowQuality && (
+                <>
+                  <AnimatedGauge
+                    position={[0.11, 0.55, d * 0.2]}
+                    value={scadaVisuals.tagValues.rpm ?? data.metrics.rpm}
+                    maxValue={1600}
+                  />
+                  <AnimatedGauge
+                    position={[0.11, 0.55, -d * 0.2]}
+                    value={scadaVisuals.tagValues.temperature ?? data.metrics.temperature}
+                    maxValue={80}
+                  />
+                </>
+              )}
               {/* Roll gap adjustment handwheels */}
               {[-0.3, 0, 0.3].map((z, i) => (
                 <group key={i} position={[0.12, -0.3, z]}>
@@ -1532,13 +1881,13 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
 
             {/* === DISCHARGE CHUTE === */}
             <group position={[0, -h * 0.55, d * 0.3]}>
-              <mesh castShadow rotation={[0.25, 0, 0]}>
+              <mesh rotation={[0.25, 0, 0]}>
                 <boxGeometry args={[w * 0.6, 0.08, 0.8]} />
                 <meshStandardMaterial color="#94a3b8" metalness={0.7} roughness={0.2} />
               </mesh>
               {/* Chute sides */}
               {[-1, 1].map((x) => (
-                <mesh key={x} castShadow position={[x * w * 0.3, 0, 0]} rotation={[0.25, 0, 0]}>
+                <mesh key={x} position={[x * w * 0.3, 0, 0]} rotation={[0.25, 0, 0]}>
                   <boxGeometry args={[0.04, 0.15, 0.8]} />
                   <meshStandardMaterial color="#64748b" metalness={0.6} roughness={0.3} />
                 </mesh>
@@ -1548,7 +1897,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
             {/* === ASPIRATION/DUST PORTS === */}
             {[-1, 1].map((z) => (
               <group key={z} position={[0, h * 0.2, z * d * 0.52]}>
-                <mesh castShadow rotation={[Math.PI / 2, 0, 0]}>
+                <mesh rotation={[Math.PI / 2, 0, 0]}>
                   <cylinderGeometry args={[0.15, 0.12, 0.2, 12]} />
                   <meshStandardMaterial color="#6b7280" metalness={0.7} roughness={0.25} />
                 </mesh>
@@ -1569,7 +1918,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
             ].map(([x, z], i) => (
               <group key={i}>
                 {/* Vertical legs */}
-                <mesh castShadow position={[x * (w * 0.45), -h * 0.75, z * (d * 0.4)]}>
+                <mesh position={[x * (w * 0.45), -h * 0.75, z * (d * 0.4)]}>
                   <boxGeometry args={[0.12, h * 0.5, 0.12]} />
                   <meshStandardMaterial color="#1e3a5f" metalness={0.6} roughness={0.35} />
                 </mesh>
@@ -1581,11 +1930,11 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
               </group>
             ))}
             {/* Cross bracing */}
-            <mesh castShadow position={[0, -h * 0.65, -d * 0.4]}>
+            <mesh position={[0, -h * 0.65, -d * 0.4]}>
               <boxGeometry args={[w * 0.9, 0.08, 0.06]} />
               <meshStandardMaterial color="#1e3a5f" metalness={0.6} roughness={0.35} />
             </mesh>
-            <mesh castShadow position={[0, -h * 0.65, d * 0.4]}>
+            <mesh position={[0, -h * 0.65, d * 0.4]}>
               <boxGeometry args={[w * 0.9, 0.08, 0.06]} />
               <meshStandardMaterial color="#1e3a5f" metalness={0.6} roughness={0.35} />
             </mesh>
@@ -1617,14 +1966,12 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
             <WeatheringLayer size={size as [number, number, number]} enabled={enableWeathering} />
 
             {/* Steam vents when hot */}
-            {quality !== 'low' &&
-              status === 'running' &&
-              data.metrics.temperature > 50 && (
-                <SteamVent
-                  position={[0, h * 0.6, 0]}
-                  intensity={(data.metrics.temperature - 50) / 25}
-                />
-              )}
+            {quality !== 'low' && status === 'running' && data.metrics.temperature > 50 && (
+              <SteamVent
+                position={[0, h * 0.6, 0]}
+                intensity={(data.metrics.temperature - 50) / 25}
+              />
+            )}
 
             {/* Sparks from milling process at high RPM */}
             {quality !== 'low' && status === 'running' && data.metrics.rpm > 1400 && (
@@ -1656,14 +2003,14 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
               </mesh>
               {/* I-beam flanges */}
               {[-1, 1].map((y) => (
-                <mesh key={y} castShadow position={[0, y * 0.08, 0]}>
+                <mesh key={y} position={[0, y * 0.08, 0]}>
                   <boxGeometry args={[sw * 1.4, 0.025, 0.2]} />
                   <meshStandardMaterial color="#1f2937" metalness={0.85} roughness={0.2} />
                 </mesh>
               ))}
               {/* Cross bracing beams */}
               {[-1, 1].map((x) => (
-                <mesh key={x} castShadow position={[x * sw * 0.55, 0, 0]}>
+                <mesh key={x} position={[x * sw * 0.55, 0, 0]}>
                   <boxGeometry args={[0.1, 0.15, sd * 0.9]} />
                   <meshStandardMaterial color="#374151" metalness={0.8} roughness={0.25} />
                 </mesh>
@@ -1748,11 +2095,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
                   <mesh
                     key={ci}
                     castShadow
-                    position={[
-                      cx * (compartmentWidth / 2 - 0.04),
-                      0,
-                      cz * (sd * 0.46 - 0.04),
-                    ]}
+                    position={[cx * (compartmentWidth / 2 - 0.04), 0, cz * (sd * 0.46 - 0.04)]}
                   >
                     <boxGeometry args={[0.1, sh * 0.86, 0.1]} />
                     <meshStandardMaterial color="#94a3b8" metalness={0.75} roughness={0.2} />
@@ -1776,10 +2119,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
                       </mesh>
                       {/* Channel guide rails */}
                       {[-1, 1].map((rail) => (
-                        <mesh
-                          key={rail}
-                          position={[rail * (compartmentWidth * 0.4), 0, -0.02]}
-                        >
+                        <mesh key={rail} position={[rail * (compartmentWidth * 0.4), 0, -0.02]}>
                           <boxGeometry args={[0.03, deckSpacing * 0.8, 0.08]} />
                           <meshStandardMaterial color="#a1a1aa" metalness={0.7} roughness={0.25} />
                         </mesh>
@@ -1860,7 +2200,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
 
                 {/* Product inlet (top of each compartment) */}
                 <group position={[0, sh * 0.44, 0]}>
-                  <mesh castShadow>
+                  <mesh>
                     <cylinderGeometry args={[0.18, 0.15, 0.12, 12]} />
                     <meshStandardMaterial color="#6b7280" metalness={0.75} roughness={0.2} />
                   </mesh>
@@ -1872,11 +2212,8 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
 
                 {/* Outlet chutes (bottom - multiple fractions) */}
                 {[-0.25, 0, 0.25].map((xOff, oi) => (
-                  <group
-                    key={oi}
-                    position={[compartmentWidth * xOff, -sh * 0.45, sd * 0.2]}
-                  >
-                    <mesh castShadow rotation={[0.35, 0, 0]}>
+                  <group key={oi} position={[compartmentWidth * xOff, -sh * 0.45, sd * 0.2]}>
+                    <mesh rotation={[0.35, 0, 0]}>
                       <boxGeometry args={[0.28, 0.06, 0.35]} />
                       <meshStandardMaterial
                         color={oi === 1 ? '#94a3b8' : '#78716c'}
@@ -1900,7 +2237,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
               {/* === LARGE ECCENTRIC FLYWHEEL (visible counterweight) === */}
               <group position={[0, -sh * 0.15, -sd * 0.48]}>
                 {/* Flywheel */}
-                <mesh castShadow rotation={[Math.PI / 2, 0, 0]}>
+                <mesh rotation={[Math.PI / 2, 0, 0]}>
                   <cylinderGeometry args={[sh * 0.28, sh * 0.28, 0.12, 24]} />
                   <meshStandardMaterial color="#1f2937" metalness={0.85} roughness={0.15} />
                 </mesh>
@@ -1939,7 +2276,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
               {/* Drive motor */}
               <group position={[0, -sh * 0.15, -sd * 0.58]}>
                 {/* Motor body */}
-                <mesh castShadow rotation={[Math.PI / 2, 0, 0]}>
+                <mesh rotation={[Math.PI / 2, 0, 0]}>
                   <cylinderGeometry args={[0.22, 0.22, 0.4, 16]} />
                   <meshStandardMaterial color="#1e3a5f" metalness={0.6} roughness={0.35} />
                 </mesh>
@@ -1967,7 +2304,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
               </group>
 
               {/* V-belt guard (yellow safety) */}
-              <mesh castShadow position={[0, -sh * 0.15, -sd * 0.52]}>
+              <mesh position={[0, -sh * 0.15, -sd * 0.52]}>
                 <boxGeometry args={[0.35, sh * 0.35, 0.08]} />
                 <meshStandardMaterial color="#eab308" metalness={0.3} roughness={0.45} />
               </mesh>
@@ -1976,12 +2313,12 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
             {/* === ASPIRATION SYSTEM (Dust Collection) === */}
             {/* Main aspiration duct on top */}
             <group position={[0, sh * 0.5, -sd * 0.3]}>
-              <mesh castShadow rotation={[0, 0, Math.PI / 2]}>
+              <mesh rotation={[0, 0, Math.PI / 2]}>
                 <cylinderGeometry args={[0.15, 0.15, sw * 0.8, 12]} />
                 <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.25} />
               </mesh>
               {/* Vertical exhaust riser */}
-              <mesh castShadow position={[0, 0.3, 0]}>
+              <mesh position={[0, 0.3, 0]}>
                 <cylinderGeometry args={[0.12, 0.15, 0.5, 12]} />
                 <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.25} />
               </mesh>
@@ -2021,13 +2358,15 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
             ))}
 
             {/* === CONTROL & MONITORING === */}
-            {/* Main control panel */}
-            <ControlPanel
-              position={[sw * 0.48, 0, sd * 0.35]}
-              rotation={[0, -Math.PI / 2, 0]}
-              status={status}
-              enabled={enableControlPanels}
-            />
+            {/* Main control panel - PERFORMANCE: Skip on LOW quality */}
+            {!isLowQuality && (
+              <ControlPanel
+                position={[sw * 0.48, 0, sd * 0.35]}
+                rotation={[0, -Math.PI / 2, 0]}
+                status={status}
+                enabled={enableControlPanels}
+              />
+            )}
 
             {/* Status indicator lights */}
             {[
@@ -2090,13 +2429,13 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
               [1, -1],
               [1, 1],
             ].map(([x, z], i) => (
-              <mesh key={i} castShadow position={[x * pw * 0.45, 0, z * pd * 0.4]}>
+              <mesh key={i} position={[x * pw * 0.45, 0, z * pd * 0.4]}>
                 <boxGeometry args={[0.1, ph * 1.1, 0.1]} />
                 <meshStandardMaterial color="#f97316" metalness={0.4} roughness={0.4} />
               </mesh>
             ))}
             {/* Top frame */}
-            <mesh castShadow position={[0, ph * 0.55, 0]}>
+            <mesh position={[0, ph * 0.55, 0]}>
               <boxGeometry args={[pw * 0.95, 0.08, pd * 0.85]} />
               <meshStandardMaterial color="#ea580c" metalness={0.45} roughness={0.35} />
             </mesh>
@@ -2104,12 +2443,12 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
             {/* === WEIGHING HOPPER === */}
             <group position={[0, ph * 0.35, 0]}>
               {/* Hopper body - tapered */}
-              <mesh castShadow>
+              <mesh>
                 <boxGeometry args={[pw * 0.6, ph * 0.3, pd * 0.5]} />
                 <meshStandardMaterial color="#94a3b8" metalness={0.7} roughness={0.2} />
               </mesh>
               {/* Hopper taper bottom */}
-              <mesh castShadow position={[0, -ph * 0.2, 0]}>
+              <mesh position={[0, -ph * 0.2, 0]}>
                 <boxGeometry args={[pw * 0.4, ph * 0.12, pd * 0.35]} />
                 <meshStandardMaterial color="#64748b" metalness={0.6} roughness={0.25} />
               </mesh>
@@ -2136,7 +2475,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
             {/* === FILLING SPOUT === */}
             <group position={[0, ph * 0.05, 0]}>
               {/* Spout tube */}
-              <mesh castShadow>
+              <mesh>
                 <cylinderGeometry args={[0.12, 0.18, ph * 0.35, 12]} />
                 <meshStandardMaterial color="#6b7280" metalness={0.75} roughness={0.2} />
               </mesh>
@@ -2157,7 +2496,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
               {/* Clamp arms */}
               {[-1, 1].map((x) => (
                 <group key={x}>
-                  <mesh castShadow position={[x * 0.3, 0, 0]}>
+                  <mesh position={[x * 0.3, 0, 0]}>
                     <boxGeometry args={[0.08, 0.25, pd * 0.4]} />
                     <meshStandardMaterial color="#374151" metalness={0.7} roughness={0.3} />
                   </mesh>
@@ -2167,7 +2506,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
                     <meshStandardMaterial color="#1f2937" roughness={0.8} />
                   </mesh>
                   {/* Pneumatic cylinders */}
-                  <mesh castShadow position={[x * 0.4, 0.05, 0]} rotation={[0, 0, x * 0.3]}>
+                  <mesh position={[x * 0.4, 0.05, 0]} rotation={[0, 0, x * 0.3]}>
                     <cylinderGeometry args={[0.04, 0.04, 0.2, 8]} />
                     <meshStandardMaterial color="#6b7280" metalness={0.8} roughness={0.15} />
                   </mesh>
@@ -2185,7 +2524,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
             {/* === CONVEYOR SYSTEM === */}
             <group position={[0, -ph * 0.48, pd * 0.5]}>
               {/* Conveyor frame */}
-              <mesh castShadow>
+              <mesh>
                 <boxGeometry args={[pw * 1.2, 0.08, pd * 0.8]} />
                 <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.35} />
               </mesh>
@@ -2207,7 +2546,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
               </mesh>
               {/* Side guides */}
               {[-1, 1].map((z) => (
-                <mesh key={z} castShadow position={[0, 0.15, z * pd * 0.35]}>
+                <mesh key={z} position={[0, 0.15, z * pd * 0.35]}>
                   <boxGeometry args={[pw * 1.2, 0.1, 0.03]} />
                   <meshStandardMaterial color="#f97316" metalness={0.4} roughness={0.4} />
                 </mesh>
@@ -2224,17 +2563,19 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
             {/* === CONTROL STATION === */}
             <group position={[-pw * 0.55, 0, 0]}>
               {/* Control cabinet */}
-              <mesh castShadow>
+              <mesh>
                 <boxGeometry args={[0.25, ph * 0.7, pd * 0.5]} />
                 <meshStandardMaterial color="#1e293b" metalness={0.5} roughness={0.35} />
               </mesh>
-              {/* Control panel face */}
-              <ControlPanel
-                position={[-0.13, ph * 0.15, 0]}
-                rotation={[0, Math.PI / 2, 0]}
-                status={status}
-                enabled={enableControlPanels}
-              />
+              {/* Control panel face - PERFORMANCE: Skip on LOW quality */}
+              {!isLowQuality && (
+                <ControlPanel
+                  position={[-0.13, ph * 0.15, 0]}
+                  rotation={[0, Math.PI / 2, 0]}
+                  status={status}
+                  enabled={enableControlPanels}
+                />
+              )}
               {/* Emergency stop */}
               <group position={[-0.13, -ph * 0.15, pd * 0.15]}>
                 <mesh>
@@ -2317,6 +2658,27 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
     }
   };
 
+  // PERFORMANCE: Simplified box representation for LOW quality
+  // Reduces ~150 draw calls per machine down to ~5
+  const renderSimplifiedGeometry = () => {
+    // Simple colored box based on machine type
+    const typeColors: Record<MachineType, string> = {
+      [MachineType.SILO]: '#94a3b8',
+      [MachineType.ROLLER_MILL]: '#64748b',
+      [MachineType.PLANSIFTER]: '#78716c',
+      [MachineType.PACKER]: '#475569',
+      [MachineType.CONTROL_ROOM]: '#64748b',
+    };
+    const color = typeColors[type] || '#64748b';
+
+    return (
+      <mesh position={[0, size[1] / 2, 0]}>
+        <boxGeometry args={[size[0], size[1], size[2]]} />
+        <meshBasicMaterial color={color} />
+      </mesh>
+    );
+  };
+
   return (
     <group
       ref={groupRef}
@@ -2337,10 +2699,13 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
         onClick();
       }}
     >
-      {renderGeometry()}
+      {/* PERFORMANCE: Use simplified box on LOW quality, full geometry on MEDIUM+ */}
+      {isLowQuality ? renderSimplifiedGeometry() : renderGeometry()}
 
       {/* Heat shimmer effect for hot machines - uses SCADA temperature */}
-      {status === 'running' &&
+      {/* PERFORMANCE: Disabled on LOW quality */}
+      {!isLowQuality &&
+        status === 'running' &&
         (type === MachineType.ROLLER_MILL || type === MachineType.PACKER) && (
           <HeatShimmer
             position={position as [number, number, number]}
@@ -2350,22 +2715,33 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
         )}
 
       {/* Status light - uses SCADA-derived color */}
-      <mesh position={[0, size[1] + 1.5, 0]}>
-        <sphereGeometry args={[0.3]} />
-        <meshStandardMaterial
-          color={statusColor}
-          emissive={statusColor}
-          emissiveIntensity={3}
-          toneMapped={false}
-        />
-      </mesh>
-      <mesh position={[0, size[1] + 0.75, 0]}>
-        <cylinderGeometry args={[0.05, 0.05, 1.5]} />
-        <meshStandardMaterial color="#374151" metalness={0.8} roughness={0.3} />
-      </mesh>
+      {/* PERFORMANCE: Simplified on LOW quality */}
+      {isLowQuality ? (
+        <mesh position={[0, size[1] + 0.5, 0]}>
+          <boxGeometry args={[0.5, 0.5, 0.5]} />
+          <meshBasicMaterial color={statusColor} />
+        </mesh>
+      ) : (
+        <>
+          <mesh position={[0, size[1] + 1.5, 0]}>
+            <sphereGeometry args={[0.3]} />
+            <meshStandardMaterial
+              color={statusColor}
+              emissive={statusColor}
+              emissiveIntensity={3}
+              toneMapped={false}
+            />
+          </mesh>
+          <mesh position={[0, size[1] + 0.75, 0]}>
+            <cylinderGeometry args={[0.05, 0.05, 1.5]} />
+            <meshStandardMaterial color="#374151" metalness={0.8} roughness={0.3} />
+          </mesh>
+        </>
+      )}
 
       {/* SCADA Alarm Indicator - pulsing octahedron when alarms are active */}
-      {scadaAlarms.highestPriority && (
+      {/* PERFORMANCE: Disabled on LOW quality */}
+      {!isLowQuality && scadaAlarms.highestPriority && (
         <AlarmIndicator
           position={[size[0] / 2 + 0.8, size[1] + 1.5, 0]}
           priority={scadaAlarms.highestPriority}
@@ -2384,8 +2760,8 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
         />
       )}
 
-      {/* Hover tooltip */}
-      {hovered && (
+      {/* Hover tooltip - PERFORMANCE: Disabled on LOW quality (Html overlays are expensive) */}
+      {!isLowQuality && hovered && (
         <Html position={[0, size[1] + 2.5, 0]} center distanceFactor={12}>
           <div className="bg-slate-900/95 backdrop-blur-xl border border-cyan-500/30 px-4 py-2 rounded-lg shadow-2xl pointer-events-none min-w-[180px]">
             <div className="font-bold text-white text-sm">{data.name}</div>

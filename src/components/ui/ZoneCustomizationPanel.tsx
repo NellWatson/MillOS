@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
-import { useMillStore } from '../../store';
+import { useSafetyStore } from '../../stores/safetyStore';
+import { useUIStore } from '../../stores/uiStore';
 
 export const ZoneCustomizationPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newZone, setNewZone] = useState({ name: '', x: 0, z: 0, radius: 4 });
-  const speedZones = useMillStore((state) => state.speedZones);
-  const addSpeedZone = useMillStore((state) => state.addSpeedZone);
-  const removeSpeedZone = useMillStore((state) => state.removeSpeedZone);
-  const theme = useMillStore((state) => state.theme);
+  const speedZones = useSafetyStore((state) => state.speedZones);
+  const addSpeedZone = useSafetyStore((state) => state.addSpeedZone);
+  const removeSpeedZone = useSafetyStore((state) => state.removeSpeedZone);
+  const theme = useUIStore((state) => state.theme);
 
   const handleAddZone = () => {
     if (newZone.name.trim()) {

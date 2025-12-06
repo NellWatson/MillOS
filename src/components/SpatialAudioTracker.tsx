@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { audioManager } from '../utils/audioManager';
-import { useMillStore } from '../store';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { shouldRunThisFrame } from '../utils/frameThrottle';
 
 /**
@@ -12,7 +12,7 @@ import { shouldRunThisFrame } from '../utils/frameThrottle';
  */
 export const SpatialAudioTracker: React.FC = () => {
   const { camera } = useThree();
-  const gameTime = useMillStore((state) => state.gameTime);
+  const gameTime = useGameSimulationStore((state) => state.gameTime);
   const lastCameraPosRef = useRef<[number, number, number]>([Infinity, Infinity, Infinity]);
   const lastGameTimeRef = useRef<number | null>(null);
 

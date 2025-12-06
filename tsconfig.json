@@ -1,4 +1,9 @@
 {
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/0.10 Archive"
+  ],
   "compilerOptions": {
     "target": "ES2022",
     "experimentalDecorators": true,
@@ -11,7 +16,8 @@
     ],
     "skipLibCheck": true,
     "types": [
-      "node"
+      "node",
+      "vite/client"
     ],
     "moduleResolution": "bundler",
     "isolatedModules": true,

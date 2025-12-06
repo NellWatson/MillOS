@@ -19,7 +19,7 @@ import React, { useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { audioManager } from '../utils/audioManager';
-import { useMillStore } from '../store';
+import { useProductionStore } from '../stores/productionStore';
 import {
   TruckPhase,
   calculateShippingTruckState,
@@ -59,7 +59,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
   const receivingTrailerAngleRef = useRef(0);
 
   // Dock status updates
-  const updateDockStatus = useMillStore((state) => state.updateDockStatus);
+  const updateDockStatus = useProductionStore((state) => state.updateDockStatus);
   const lastDockUpdateRef = useRef({ receiving: '', shipping: '' });
 
   // Audio initialization

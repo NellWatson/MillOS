@@ -1774,7 +1774,7 @@ function processDecisionChains(context: FactoryContext): AIDecision | null {
           });
           break;
 
-        case 'resolution':
+        case 'resolution': {
           const success = Math.random() > 0.1;
           followupDecision = {
             id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -1797,6 +1797,7 @@ function processDecisionChains(context: FactoryContext): AIDecision | null {
 
           useMillStore.getState().updateDecisionStatus(parentDecision.id, 'completed', success ? 'Resolved' : 'Escalated');
           break;
+        }
       }
 
       aiMemory.pendingChains.delete(decisionId);

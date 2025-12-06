@@ -26,19 +26,24 @@ export const CASUAL_DIALOGUE: DialogueLine[] = [
   { text: 'Did you catch the game last night?', type: 'casual', priority: 1 },
   { text: 'Almost lunch time!', type: 'casual', context: 'pre_break' },
   { text: 'How was your weekend?', type: 'casual', context: 'greeting' },
-  { text: "Anyone seen my safety glasses?", type: 'casual' },
+  { text: 'Anyone seen my safety glasses?', type: 'casual' },
   { text: "It's someone's birthday in the break room!", type: 'casual', priority: 3 },
   { text: 'New coffee machine works great!', type: 'casual', context: 'break_room', priority: 2 },
   { text: "I'll grab lunch, anyone want anything?", type: 'casual', context: 'pre_break' },
-  { text: "Traffic was terrible this morning!", type: 'casual', context: 'shift_start' },
+  { text: 'Traffic was terrible this morning!', type: 'casual', context: 'shift_start' },
   { text: 'Plans for the weekend?', type: 'casual' },
-  { text: "Check out the new forklift!", type: 'casual', priority: 2 },
+  { text: 'Check out the new forklift!', type: 'casual', priority: 2 },
   { text: "Who's winning the production bet?", type: 'casual' },
 ];
 
 // Work-related communication
 export const WORK_DIALOGUE: DialogueLine[] = [
-  { text: 'RM-103 sounds a bit off today', type: 'work', context: 'near_warning_machine', priority: 3 },
+  {
+    text: 'RM-103 sounds a bit off today',
+    type: 'work',
+    context: 'near_warning_machine',
+    priority: 3,
+  },
   { text: "We're ahead of schedule!", type: 'work', priority: 2 },
   { text: 'Need a hand with this calibration?', type: 'work', context: 'near_machine' },
   { text: 'Checking the silo levels now', type: 'work', context: 'near_silo' },
@@ -60,7 +65,12 @@ export const SAFETY_DIALOGUE: DialogueLine[] = [
   { text: 'Watch your step, wet floor!', type: 'safety', priority: 4 },
   { text: 'Forklift coming through!', type: 'safety', context: 'forklift_nearby', priority: 5 },
   { text: 'Remember your PPE!', type: 'safety', priority: 3 },
-  { text: 'Lockout/tagout procedure in progress', type: 'safety', context: 'maintenance', priority: 4 },
+  {
+    text: 'Lockout/tagout procedure in progress',
+    type: 'safety',
+    context: 'maintenance',
+    priority: 4,
+  },
   { text: 'Clear the area, please!', type: 'safety', priority: 4 },
   { text: 'Safety inspection in Zone 2', type: 'safety', priority: 3 },
   { text: 'Wear your hard hat in this zone!', type: 'safety', priority: 4 },
@@ -83,7 +93,12 @@ export const RADIO_DIALOGUE: DialogueLine[] = [
   { text: 'Supervisor to Zone 1, please', type: 'radio', priority: 3 },
   { text: 'Confirming grain delivery at receiving bay', type: 'radio', priority: 2 },
   { text: 'All personnel, shift change in 15 minutes', type: 'radio', priority: 3 },
-  { text: 'Starting system cooldown procedure', type: 'radio', context: 'near_machine', priority: 2 },
+  {
+    text: 'Starting system cooldown procedure',
+    type: 'radio',
+    context: 'near_machine',
+    priority: 2,
+  },
   { text: 'Temperature spike detected, checking now', type: 'radio', priority: 4 },
   { text: 'Silo levels at 80%, looking good', type: 'radio', priority: 2 },
   { text: 'Roger that, en route to your location', type: 'radio' },
@@ -91,10 +106,7 @@ export const RADIO_DIALOGUE: DialogueLine[] = [
 ];
 
 // Machine-specific responses based on status
-export const MACHINE_STATUS_DIALOGUE: Record<
-  MachineData['status'],
-  DialogueLine[]
-> = {
+export const MACHINE_STATUS_DIALOGUE: Record<MachineData['status'], DialogueLine[]> = {
   running: [
     { text: 'Machine running smoothly', type: 'work', priority: 1 },
     { text: 'All systems nominal', type: 'work', priority: 1 },
@@ -155,8 +167,8 @@ export const RESPONSE_CHAINS: ResponseChain[] = [
     trigger: "Coffee's ready in the break room",
     responses: [
       { text: "Finally! I'm exhausted!", type: 'casual' },
-      { text: "Be right there!", type: 'casual' },
-      { text: "Save me a cup!", type: 'casual' },
+      { text: 'Be right there!', type: 'casual' },
+      { text: 'Save me a cup!', type: 'casual' },
     ],
     delay: 1500,
   },
@@ -172,27 +184,27 @@ export const RESPONSE_CHAINS: ResponseChain[] = [
   {
     trigger: 'Need a hand with this calibration?',
     responses: [
-      { text: "Yes please, thanks!", type: 'work' },
+      { text: 'Yes please, thanks!', type: 'work' },
       { text: "I've got it, but appreciate it!", type: 'work' },
-      { text: "Actually, yeah - come take a look", type: 'work' },
+      { text: 'Actually, yeah - come take a look', type: 'work' },
     ],
     delay: 800,
   },
   {
     trigger: 'Forklift coming through!',
     responses: [
-      { text: "Heard, stepping aside!", type: 'safety' },
-      { text: "Thanks for the heads up!", type: 'safety' },
-      { text: "Clear!", type: 'safety' },
+      { text: 'Heard, stepping aside!', type: 'safety' },
+      { text: 'Thanks for the heads up!', type: 'safety' },
+      { text: 'Clear!', type: 'safety' },
     ],
     delay: 500,
   },
   {
     trigger: 'CRITICAL: Need maintenance here NOW!',
     responses: [
-      { text: "On my way!", type: 'radio' },
-      { text: "Supervisor notified!", type: 'radio' },
-      { text: "Maintenance team dispatched!", type: 'radio' },
+      { text: 'On my way!', type: 'radio' },
+      { text: 'Supervisor notified!', type: 'radio' },
+      { text: 'Maintenance team dispatched!', type: 'radio' },
     ],
     delay: 600,
   },
@@ -217,7 +229,10 @@ export function getContextualDialogue(params: {
   }
 
   // Priority 2: Machine status (if near critical/warning machine)
-  if (nearbyMachine && (nearbyMachine.status === 'critical' || nearbyMachine.status === 'warning')) {
+  if (
+    nearbyMachine &&
+    (nearbyMachine.status === 'critical' || nearbyMachine.status === 'warning')
+  ) {
     const options = MACHINE_STATUS_DIALOGUE[nearbyMachine.status];
     return options[Math.floor(Math.random() * options.length)];
   }

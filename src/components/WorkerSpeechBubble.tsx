@@ -105,14 +105,10 @@ export const WorkerSpeechBubble: React.FC<WorkerSpeechBubbleProps> = ({
                 `}
               >
                 {/* Radio icon for radio chatter */}
-                {type === 'radio' && (
-                  <Radio className="w-4 h-4 flex-shrink-0 animate-pulse" />
-                )}
+                {type === 'radio' && <Radio className="w-4 h-4 flex-shrink-0 animate-pulse" />}
 
                 {/* Text content */}
-                <span className="text-sm font-medium leading-tight">
-                  {text}
-                </span>
+                <span className="text-sm font-medium leading-tight">{text}</span>
               </div>
 
               {/* Bubble tail (pointing down to worker) */}

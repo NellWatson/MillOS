@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { OctagonX, Shield } from 'lucide-react';
-import { useMillStore } from '../store';
+import { useSafetyStore } from '../stores/safetyStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
 
 // Calculate safety score based on incident history
 const useSafetyScore = () => {
-  const safetyIncidents = useMillStore((state) => state.safetyIncidents);
-  const safetyMetrics = useMillStore((state) => state.safetyMetrics);
+  const safetyIncidents = useSafetyStore((state) => state.safetyIncidents);
+  const safetyMetrics = useSafetyStore((state) => state.safetyMetrics);
 
   // Calculate score (100 = perfect, decreases with incidents)
   const recentIncidents = safetyIncidents.filter(
@@ -121,8 +122,8 @@ export const SafetyScoreBadge: React.FC<{ compact?: boolean }> = ({ compact = fa
 
 // Emergency Overlay Component - shows flashing red border
 export const EmergencyOverlay: React.FC = () => {
-  const forkliftEmergencyStop = useMillStore((state) => state.forkliftEmergencyStop);
-  const emergencyActive = useMillStore((state) => state.emergencyActive);
+  const forkliftEmergencyStop = useSafetyStore((state) => state.forkliftEmergencyStop);
+  const emergencyActive = useGameSimulationStore((state) => state.emergencyActive);
   const [flash, setFlash] = useState(true);
 
   // Either emergency type triggers the overlay

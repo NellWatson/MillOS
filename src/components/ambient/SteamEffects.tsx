@@ -2,11 +2,13 @@ import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { shouldRunThisFrame } from '../../utils/frameThrottle';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 
 // Steam/vapor vent
 export const SteamVent: React.FC<{ position: [number, number, number] }> = ({ position }) => {
   const steamRef = useRef<THREE.Points>(null);
   const particleCount = 30;
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   const particles = useMemo(() => {
     const positions = new Float32Array(particleCount * 3);
@@ -23,6 +25,7 @@ export const SteamVent: React.FC<{ position: [number, number, number] }> = ({ po
   }, []);
 
   useFrame(() => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(3)) return;
     if (!steamRef.current) return;
     const positions = steamRef.current.geometry.attributes.position.array as Float32Array;
@@ -81,8 +84,10 @@ export const CondensationDrip: React.FC<{ position: [number, number, number] }> 
   const dropYRef = useRef(0);
   const startY = 0;
   const endY = -3;
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((_, delta) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(2)) return;
     let newY = dropYRef.current - delta * 1.5;
     if (newY < endY) {

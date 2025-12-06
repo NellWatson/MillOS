@@ -1,9 +1,185 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, createContext, useContext, useCallback } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { shouldRunThisFrame } from '../../utils/frameThrottle';
 import { audioManager } from '../../utils/audioManager';
 import { WarningLight } from './LightingEffects';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
+
+// ============================================================
+// Industrial Animation Manager - Centralized useFrame for all industrial details
+// ============================================================
+
+interface CableTrayEntry {
+  type: 'cableTray';
+  wiresRef: React.RefObject<THREE.Group | null>;
+}
+
+interface ElectricalPanelEntry {
+  type: 'electricalPanel';
+  sparkRef: React.RefObject<THREE.PointLight | null>;
+  sparkState: React.RefObject<{ nextSpark: number; sparking: boolean; sparkEnd: number }>;
+}
+
+interface SwingingChainEntry {
+  type: 'swingingChain';
+  chainRef: React.RefObject<THREE.Group | null>;
+  swingSpeed: number;
+  swingAmount: number;
+}
+
+interface PressureGaugeEntry {
+  type: 'pressureGauge';
+  needleRef: React.RefObject<THREE.Mesh | null>;
+}
+
+interface LoadingDockDoorEntry {
+  type: 'loadingDockDoor';
+  doorRef: React.RefObject<THREE.Group | null>;
+  currentOpenRef: React.RefObject<number>;
+  warningLightsActiveRef: React.RefObject<boolean>;
+  targetOpen: number;
+  doorHeight: number;
+  segments: number;
+  onWarningChange: (active: boolean) => void;
+}
+
+type IndustrialEntry =
+  | CableTrayEntry
+  | ElectricalPanelEntry
+  | SwingingChainEntry
+  | PressureGaugeEntry
+  | LoadingDockDoorEntry;
+
+interface IndustrialAnimationContextValue {
+  register: (id: string, entry: IndustrialEntry) => void;
+  unregister: (id: string) => void;
+}
+
+const IndustrialAnimationContext = createContext<IndustrialAnimationContextValue | null>(null);
+
+// Pure animation functions
+function animateCableTray(entry: CableTrayEntry, elapsedTime: number) {
+  if (!entry.wiresRef.current) return;
+  entry.wiresRef.current.children.forEach((wire, i) => {
+    wire.rotation.z = Math.sin(elapsedTime * 0.5 + i) * 0.02;
+  });
+}
+
+function animateElectricalPanel(entry: ElectricalPanelEntry, elapsedTime: number) {
+  if (!entry.sparkRef.current) return;
+  const sparkState = entry.sparkState.current;
+
+  if (elapsedTime > sparkState.nextSpark && !sparkState.sparking) {
+    sparkState.sparking = true;
+    sparkState.sparkEnd = elapsedTime + 0.1 + Math.random() * 0.2;
+    sparkState.nextSpark = elapsedTime + 20 + Math.random() * 60;
+  }
+
+  if (sparkState.sparking) {
+    if (elapsedTime < sparkState.sparkEnd) {
+      entry.sparkRef.current.intensity = Math.random() > 0.5 ? 5 : 0;
+    } else {
+      sparkState.sparking = false;
+      entry.sparkRef.current.intensity = 0;
+    }
+  }
+}
+
+function animateSwingingChain(entry: SwingingChainEntry, elapsedTime: number) {
+  if (!entry.chainRef.current) return;
+  entry.chainRef.current.rotation.z = Math.sin(elapsedTime * entry.swingSpeed) * entry.swingAmount;
+  entry.chainRef.current.rotation.x =
+    Math.cos(elapsedTime * entry.swingSpeed * 0.7) * entry.swingAmount * 0.5;
+}
+
+function animatePressureGauge(entry: PressureGaugeEntry, elapsedTime: number) {
+  if (!entry.needleRef.current) return;
+  const pressure = 0.3 + Math.sin(elapsedTime * 0.5) * 0.2;
+  entry.needleRef.current.rotation.z = -Math.PI / 4 + (pressure * Math.PI) / 2;
+}
+
+function animateLoadingDockDoor(entry: LoadingDockDoorEntry, delta: number) {
+  const speed = 0.5;
+  const diff = entry.targetOpen - entry.currentOpenRef.current;
+  if (Math.abs(diff) > 0.01) {
+    entry.currentOpenRef.current += diff * speed * delta * 10;
+
+    if (entry.doorRef.current) {
+      entry.doorRef.current.children.forEach((mesh, i) => {
+        const segmentHeight = entry.doorHeight / entry.segments;
+        const yOffset = entry.currentOpenRef.current * entry.doorHeight;
+        const baseY = (i + 0.5) * segmentHeight;
+        const y = Math.min(baseY + yOffset, entry.doorHeight + 0.5);
+        mesh.position.y = y;
+        mesh.visible = y <= entry.doorHeight + 0.3;
+      });
+    }
+
+    const shouldBeActive =
+      entry.currentOpenRef.current > 0.1 && entry.currentOpenRef.current < 0.9;
+    if (shouldBeActive !== entry.warningLightsActiveRef.current) {
+      entry.warningLightsActiveRef.current = shouldBeActive;
+      entry.onWarningChange(shouldBeActive);
+    }
+  }
+}
+
+export const IndustrialAnimationManager: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const entriesRef = useRef<Map<string, IndustrialEntry>>(new Map());
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+
+  const register = useCallback((id: string, entry: IndustrialEntry) => {
+    entriesRef.current.set(id, entry);
+  }, []);
+
+  const unregister = useCallback((id: string) => {
+    entriesRef.current.delete(id);
+  }, []);
+
+  useFrame((state, delta) => {
+    if (!isTabVisible) return;
+    if (!shouldRunThisFrame(3)) return;
+
+    const elapsedTime = state.clock.elapsedTime;
+
+    entriesRef.current.forEach((entry) => {
+      switch (entry.type) {
+        case 'cableTray':
+          animateCableTray(entry, elapsedTime);
+          break;
+        case 'electricalPanel':
+          animateElectricalPanel(entry, elapsedTime);
+          break;
+        case 'swingingChain':
+          animateSwingingChain(entry, elapsedTime);
+          break;
+        case 'pressureGauge':
+          animatePressureGauge(entry, elapsedTime);
+          break;
+        case 'loadingDockDoor':
+          // LoadingDockDoor uses delta, runs at different throttle
+          animateLoadingDockDoor(entry, delta);
+          break;
+      }
+    });
+  });
+
+  const contextValue = React.useMemo(() => ({ register, unregister }), [register, unregister]);
+
+  return (
+    <IndustrialAnimationContext.Provider value={contextValue}>
+      {children}
+    </IndustrialAnimationContext.Provider>
+  );
+};
+
+// Hook for components to access the context
+function useIndustrialAnimation() {
+  return useContext(IndustrialAnimationContext);
+}
 
 // Cable tray with hanging wires
 export const CableTray: React.FC<{
@@ -12,14 +188,24 @@ export const CableTray: React.FC<{
   rotation?: [number, number, number];
 }> = ({ position, length = 10, rotation = [0, 0, 0] }) => {
   const wiresRef = useRef<THREE.Group>(null);
+  const idRef = useRef(`cableTray-${Math.random().toString(36).slice(2, 9)}`);
+  const context = useIndustrialAnimation();
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
-  useFrame((state) => {
-    if (!shouldRunThisFrame(3)) return;
-    if (wiresRef.current) {
-      wiresRef.current.children.forEach((wire, i) => {
-        wire.rotation.z = Math.sin(state.clock.elapsedTime * 0.5 + i) * 0.02;
-      });
+  // Register with manager if available
+  useEffect(() => {
+    if (context) {
+      context.register(idRef.current, { type: 'cableTray', wiresRef });
+      return () => context.unregister(idRef.current);
     }
+  }, [context]);
+
+  // Fallback useFrame when not in manager context
+  useFrame((state) => {
+    if (context) return; // Manager handles animation
+    if (!isTabVisible) return;
+    if (!shouldRunThisFrame(3)) return;
+    animateCableTray({ type: 'cableTray', wiresRef }, state.clock.elapsedTime);
   });
 
   return (
@@ -80,26 +266,24 @@ export const ElectricalPanel: React.FC<{
 }> = ({ position, rotation = [0, 0, 0] }) => {
   const sparkRef = useRef<THREE.PointLight>(null);
   const sparkState = useRef({ nextSpark: 5 + Math.random() * 30, sparking: false, sparkEnd: 0 });
+  const idRef = useRef(`electricalPanel-${Math.random().toString(36).slice(2, 9)}`);
+  const context = useIndustrialAnimation();
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
+  // Register with manager if available
+  useEffect(() => {
+    if (context) {
+      context.register(idRef.current, { type: 'electricalPanel', sparkRef, sparkState });
+      return () => context.unregister(idRef.current);
+    }
+  }, [context]);
+
+  // Fallback useFrame when not in manager context
   useFrame((state) => {
+    if (context) return; // Manager handles animation
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(3)) return;
-    if (!sparkRef.current) return;
-    const time = state.clock.elapsedTime;
-
-    if (time > sparkState.current.nextSpark && !sparkState.current.sparking) {
-      sparkState.current.sparking = true;
-      sparkState.current.sparkEnd = time + 0.1 + Math.random() * 0.2;
-      sparkState.current.nextSpark = time + 20 + Math.random() * 60;
-    }
-
-    if (sparkState.current.sparking) {
-      if (time < sparkState.current.sparkEnd) {
-        sparkRef.current.intensity = Math.random() > 0.5 ? 5 : 0;
-      } else {
-        sparkState.current.sparking = false;
-        sparkRef.current.intensity = 0;
-      }
-    }
+    animateElectricalPanel({ type: 'electricalPanel', sparkRef, sparkState }, state.clock.elapsedTime);
   });
 
   return (
@@ -135,15 +319,32 @@ export const SwingingChain: React.FC<{ position: [number, number, number]; lengt
   const chainRef = useRef<THREE.Group>(null);
   const swingSpeed = useRef(0.5 + Math.random() * 0.5);
   const swingAmount = useRef(0.05 + Math.random() * 0.1);
+  const idRef = useRef(`swingingChain-${Math.random().toString(36).slice(2, 9)}`);
+  const context = useIndustrialAnimation();
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
-  useFrame((state) => {
-    if (!shouldRunThisFrame(3)) return;
-    if (chainRef.current) {
-      chainRef.current.rotation.z =
-        Math.sin(state.clock.elapsedTime * swingSpeed.current) * swingAmount.current;
-      chainRef.current.rotation.x =
-        Math.cos(state.clock.elapsedTime * swingSpeed.current * 0.7) * swingAmount.current * 0.5;
+  // Register with manager if available
+  useEffect(() => {
+    if (context) {
+      context.register(idRef.current, {
+        type: 'swingingChain',
+        chainRef,
+        swingSpeed: swingSpeed.current,
+        swingAmount: swingAmount.current,
+      });
+      return () => context.unregister(idRef.current);
     }
+  }, [context]);
+
+  // Fallback useFrame when not in manager context
+  useFrame((state) => {
+    if (context) return; // Manager handles animation
+    if (!isTabVisible) return;
+    if (!shouldRunThisFrame(3)) return;
+    animateSwingingChain(
+      { type: 'swingingChain', chainRef, swingSpeed: swingSpeed.current, swingAmount: swingAmount.current },
+      state.clock.elapsedTime
+    );
   });
 
   const links = Math.floor(length / 0.15);
@@ -176,13 +377,24 @@ export const PressureGauge: React.FC<{
   rotation?: [number, number, number];
 }> = ({ position, rotation = [0, 0, 0] }) => {
   const needleRef = useRef<THREE.Mesh>(null);
+  const idRef = useRef(`pressureGauge-${Math.random().toString(36).slice(2, 9)}`);
+  const context = useIndustrialAnimation();
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
-  useFrame((state) => {
-    if (!shouldRunThisFrame(3)) return;
-    if (needleRef.current) {
-      const pressure = 0.3 + Math.sin(state.clock.elapsedTime * 0.5) * 0.2;
-      needleRef.current.rotation.z = -Math.PI / 4 + (pressure * Math.PI) / 2;
+  // Register with manager if available
+  useEffect(() => {
+    if (context) {
+      context.register(idRef.current, { type: 'pressureGauge', needleRef });
+      return () => context.unregister(idRef.current);
     }
+  }, [context]);
+
+  // Fallback useFrame when not in manager context
+  useFrame((state) => {
+    if (context) return; // Manager handles animation
+    if (!isTabVisible) return;
+    if (!shouldRunThisFrame(3)) return;
+    animatePressureGauge({ type: 'pressureGauge', needleRef }, state.clock.elapsedTime);
   });
 
   return (
@@ -243,35 +455,54 @@ export const LoadingDockDoor: React.FC<{
   const currentOpenRef = useRef(0);
   const warningLightsActiveRef = useRef(false);
   const [warningActive, setWarningActive] = useState(false);
+  const idRef = useRef(`loadingDockDoor-${Math.random().toString(36).slice(2, 9)}`);
+  const context = useIndustrialAnimation();
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const targetOpen = isOpen ? 1 : 0;
 
   const doorHeight = 6;
   const segments = 8;
 
-  useFrame((_, delta) => {
-    if (!shouldRunThisFrame(2)) return;
-    const speed = 0.5;
-    const diff = targetOpen - currentOpenRef.current;
-    if (Math.abs(diff) > 0.01) {
-      currentOpenRef.current += diff * speed * delta * 10;
+  // Memoized callback to avoid re-registering on every render
+  const onWarningChange = useCallback((active: boolean) => {
+    setWarningActive(active);
+  }, []);
 
-      if (doorRef.current) {
-        doorRef.current.children.forEach((mesh, i) => {
-          const segmentHeight = doorHeight / segments;
-          const yOffset = currentOpenRef.current * doorHeight;
-          const baseY = (i + 0.5) * segmentHeight;
-          const y = Math.min(baseY + yOffset, doorHeight + 0.5);
-          mesh.position.y = y;
-          mesh.visible = y <= doorHeight + 0.3;
-        });
-      }
-
-      const shouldBeActive = currentOpenRef.current > 0.1 && currentOpenRef.current < 0.9;
-      if (shouldBeActive !== warningLightsActiveRef.current) {
-        warningLightsActiveRef.current = shouldBeActive;
-        setWarningActive(shouldBeActive);
-      }
+  // Register with manager if available - update targetOpen on change
+  useEffect(() => {
+    if (context) {
+      context.register(idRef.current, {
+        type: 'loadingDockDoor',
+        doorRef,
+        currentOpenRef,
+        warningLightsActiveRef,
+        targetOpen,
+        doorHeight,
+        segments,
+        onWarningChange,
+      });
+      return () => context.unregister(idRef.current);
     }
+  }, [context, targetOpen, onWarningChange]);
+
+  // Fallback useFrame when not in manager context
+  useFrame((_, delta) => {
+    if (context) return; // Manager handles animation
+    if (!isTabVisible) return;
+    if (!shouldRunThisFrame(2)) return;
+    animateLoadingDockDoor(
+      {
+        type: 'loadingDockDoor',
+        doorRef,
+        currentOpenRef,
+        warningLightsActiveRef,
+        targetOpen,
+        doorHeight,
+        segments,
+        onWarningChange,
+      },
+      delta
+    );
   });
 
   useEffect(() => {

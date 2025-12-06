@@ -116,7 +116,8 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, theme }
                         rel="noopener noreferrer"
                         className="text-blue-500 hover:underline inline-flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-cyan-500 rounded"
                       >
-                        Kenney Blocky Characters <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                        Kenney Blocky Characters{' '}
+                        <ExternalLink className="w-3 h-3" aria-hidden="true" />
                       </a>{' '}
                       (CC0)
                     </span>
@@ -130,7 +131,8 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, theme }
                         rel="noopener noreferrer"
                         className="text-blue-500 hover:underline inline-flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-cyan-500 rounded"
                       >
-                        Kenney City Kit Industrial <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                        Kenney City Kit Industrial{' '}
+                        <ExternalLink className="w-3 h-3" aria-hidden="true" />
                       </a>{' '}
                       (CC0)
                     </span>

@@ -1,7 +1,6 @@
 import React, { useMemo } from 'react';
-import { MeshReflectorMaterial } from '@react-three/drei';
 import * as THREE from 'three';
-import { useMillStore } from '../../store';
+import { useGraphicsStore } from '../../stores/graphicsStore';
 
 interface FactoryFloorProps {
   floorSize: number; // Legacy: used as fallback
@@ -356,7 +355,7 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
   showZones,
 }) => {
   useConcreteTexture();
-  const graphics = useMillStore((state: any) => state.graphics);
+  const graphics = useGraphicsStore((state) => state.graphics);
   const graphicsQuality = graphics.quality;
   const isLowGraphics = graphicsQuality === 'low';
 
@@ -368,6 +367,44 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
   const showPuddles = graphics.enableFloorPuddles;
   const showWornPaths = graphics.enableWornPaths;
 
+  // Create optimized grid texture - single mesh instead of 58!
+  const gridTexture = useMemo(() => {
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    // Transparent background
+    ctx.clearRect(0, 0, size, size);
+
+    // Draw grid lines
+    ctx.strokeStyle = 'rgba(51, 65, 85, 0.5)'; // #334155 with 50% opacity
+    ctx.lineWidth = 1;
+
+    // Vertical and horizontal lines every 5 units (scaled to texture)
+    const gridSpacing = size / 5; // 5 lines per texture repeat
+    for (let i = 0; i <= 5; i++) {
+      const pos = i * gridSpacing;
+      // Vertical
+      ctx.beginPath();
+      ctx.moveTo(pos, 0);
+      ctx.lineTo(pos, size);
+      ctx.stroke();
+      // Horizontal
+      ctx.beginPath();
+      ctx.moveTo(0, pos);
+      ctx.lineTo(size, pos);
+      ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(actualWidth / 5, actualDepth / 5);
+    return texture;
+  }, [actualWidth, actualDepth]);
+
   return (
     <group>
       {/* Main floor - standard material on low/medium, reflector only on high/ultra */}
@@ -377,48 +414,24 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
         receiveShadow={graphicsQuality === 'high' || graphicsQuality === 'ultra'}
       >
         <planeGeometry args={[actualWidth, actualDepth]} />
+        {/* CRITICAL FIX: MeshReflectorMaterial breaks scene when quality switches at runtime.
+            Using meshStandardMaterial for all non-low quality until reflector issue is resolved.
+            TODO: Investigate if reflector can be preloaded or if a stable ref approach works. */}
         {isLowGraphics ? (
           <meshBasicMaterial color="#1e293b" />
-        ) : graphicsQuality === 'medium' ? (
-          <meshStandardMaterial color="#1e293b" roughness={0.85} metalness={0.15} />
         ) : (
-          <MeshReflectorMaterial
-            blur={[100, 50]}
-            resolution={1024}
-            mixBlur={0.5}
-            mixStrength={4}
-            roughness={0.85}
-            depthScale={1.2}
-            minDepthThreshold={0.4}
-            maxDepthThreshold={1.4}
-            color="#1e293b"
-            metalness={0.15}
-            mirror={0}
-          />
+          <meshStandardMaterial color="#1e293b" roughness={0.85} metalness={0.15} />
         )}
       </mesh>
 
-      {/* Floor grid lines - skip on low, raised to prevent z-fighting */}
-      {!isLowGraphics &&
-        Array.from({ length: Math.ceil(actualWidth / 5) + 1 }).map((_, i) => (
-          <group key={`grid-${i}`}>
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-actualWidth / 2 + i * 5, 0.03, 0]}>
-              <planeGeometry args={[0.05, actualDepth]} />
-              <meshBasicMaterial color="#334155" transparent opacity={0.5} depthWrite={false} />
-            </mesh>
-          </group>
-        ))}
-      {!isLowGraphics &&
-        Array.from({ length: Math.ceil(actualDepth / 5) + 1 }).map((_, i) => (
-          <mesh
-            key={`gridz-${i}`}
-            rotation={[-Math.PI / 2, 0, 0]}
-            position={[0, 0.03, -actualDepth / 2 + i * 5]}
-          >
-            <planeGeometry args={[actualWidth, 0.05]} />
-            <meshBasicMaterial color="#334155" transparent opacity={0.5} depthWrite={false} />
-          </mesh>
-        ))}
+      {/* Floor grid lines - OPTIMIZED: Single textured mesh replaces 58 individual meshes */}
+      {/* RESTORED: Now shows on MEDIUM+ (!isLowGraphics) instead of HIGH+ only */}
+      {!isLowGraphics && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
+          <planeGeometry args={[actualWidth, actualDepth]} />
+          <meshBasicMaterial map={gridTexture} transparent depthWrite={false} />
+        </mesh>
+      )}
 
       {/* Safety walkways with industrial hazard stripe markings */}
       {showZones && (

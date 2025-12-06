@@ -6,14 +6,8 @@ describe('scadaToStoreMetrics', () => {
   it('maps machine names to tag prefixes for legacy IDs', () => {
     const now = Date.now();
     const values = new Map<string, TagValue>([
-      [
-        'RM101.ST001.PV',
-        { tagId: 'RM101.ST001.PV', value: 450, quality: 'GOOD', timestamp: now },
-      ],
-      [
-        'RM101.TT001.PV',
-        { tagId: 'RM101.TT001.PV', value: 55, quality: 'GOOD', timestamp: now },
-      ],
+      ['RM101.ST001.PV', { tagId: 'RM101.ST001.PV', value: 450, quality: 'GOOD', timestamp: now }],
+      ['RM101.TT001.PV', { tagId: 'RM101.TT001.PV', value: 55, quality: 'GOOD', timestamp: now }],
     ]);
 
     const result = scadaToStoreMetrics('mill-legacy', values, [] as Alarm[], 'RM-101');

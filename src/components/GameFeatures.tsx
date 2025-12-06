@@ -1,11 +1,4 @@
-import React, {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  createContext,
-  useContext,
-} from 'react';
+import React, { useState, useEffect, useRef, useCallback, createContext, useContext } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Target,
@@ -31,7 +24,10 @@ import {
   Star,
   AlertTriangle,
 } from 'lucide-react';
-import { useMillStore } from '../store';
+import { useProductionStore } from '../stores/productionStore';
+import { useUIStore } from '../stores/uiStore';
+import { useSafetyStore } from '../stores/safetyStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useShallow } from 'zustand/react/shallow';
 import { positionRegistry, type EntityPosition } from '../utils/positionRegistry';
 import { audioManager } from '../utils/audioManager';
@@ -85,8 +81,7 @@ const COFFEE_ANNOUNCEMENTS: AnnouncementConfig[] = [
     chaosWeight: 0.3,
   },
   {
-    message:
-      'The coffee machine in the break room has been restocked. This is not a drill.',
+    message: 'The coffee machine in the break room has been restocked. This is not a drill.',
     type: 'general',
     category: 'breakroom',
     chaosWeight: 0.2,
@@ -99,15 +94,13 @@ const COFFEE_ANNOUNCEMENTS: AnnouncementConfig[] = [
     chaosWeight: 0.3,
   },
   {
-    message:
-      'Reminder: Coffee breaks are 15 minutes. Not 15 minutes per cup.',
+    message: 'Reminder: Coffee breaks are 15 minutes. Not 15 minutes per cup.',
     type: 'general',
     category: 'breakroom',
     chaosWeight: 0.4,
   },
   {
-    message:
-      'The coffee machine has been upgraded. It now judges you silently while dispensing.',
+    message: 'The coffee machine has been upgraded. It now judges you silently while dispensing.',
     type: 'general',
     category: 'breakroom',
     chaosWeight: 0.2,
@@ -258,8 +251,7 @@ const FORKLIFT_ANNOUNCEMENTS: AnnouncementConfig[] = [
     chaosWeight: 0.4,
   },
   {
-    message:
-      'The forklift leaderboard has been removed. You know why. We all know why.',
+    message: 'The forklift leaderboard has been removed. You know why. We all know why.',
     type: 'general',
     category: 'equipment',
     chaosWeight: 0.3,
@@ -388,8 +380,7 @@ const DAVE_ANNOUNCEMENTS: AnnouncementConfig[] = [
     chaosWeight: 0.4,
   },
   {
-    message:
-      'Dave is no longer permitted in the silo area. Dave knows what he did.',
+    message: 'Dave is no longer permitted in the silo area. Dave knows what he did.',
     type: 'general',
     category: 'employee',
     chaosWeight: 0.3,
@@ -402,8 +393,7 @@ const DAVE_ANNOUNCEMENTS: AnnouncementConfig[] = [
     chaosWeight: 0.3,
   },
   {
-    message:
-      'Dave has been found. We did not know Dave was missing. This raises questions.',
+    message: 'Dave has been found. We did not know Dave was missing. This raises questions.',
     type: 'general',
     category: 'humor',
     chaosWeight: 0.3,
@@ -498,8 +488,7 @@ const BREAKROOM_ANNOUNCEMENTS: AnnouncementConfig[] = [
     chaosWeight: 0.2,
   },
   {
-    message:
-      'The vending machine accepts exact change only. Hitting it does not count as payment.',
+    message: 'The vending machine accepts exact change only. Hitting it does not count as payment.',
     type: 'general',
     category: 'breakroom',
     chaosWeight: 0.3,
@@ -595,8 +584,7 @@ const ADMIN_ANNOUNCEMENTS: AnnouncementConfig[] = [
     chaosWeight: 0.4,
   },
   {
-    message:
-      'The meeting about reducing meetings has been scheduled. It will be a long one.',
+    message: 'The meeting about reducing meetings has been scheduled. It will be a long one.',
     type: 'general',
     category: 'humor',
     chaosWeight: 0.2,
@@ -651,7 +639,7 @@ const SAFETY_HUMOR_ANNOUNCEMENTS: AnnouncementConfig[] = [
   },
   {
     message:
-      'Safety is everyone\'s responsibility. Blame is also everyone\'s responsibility. Please accept both.',
+      "Safety is everyone's responsibility. Blame is also everyone's responsibility. Please accept both.",
     type: 'safety',
     category: 'humor',
     chaosWeight: 0.3,
@@ -684,8 +672,7 @@ const SAFETY_HUMOR_ANNOUNCEMENTS: AnnouncementConfig[] = [
 // ==========================================================================
 const MAINTENANCE_ANNOUNCEMENTS: AnnouncementConfig[] = [
   {
-    message:
-      'Maintenance crew to Roller Mill RM-103. Bring your optimism. Leave your skepticism.',
+    message: 'Maintenance crew to Roller Mill RM-103. Bring your optimism. Leave your skepticism.',
     type: 'general',
     category: 'equipment',
     chaosWeight: 0.5,
@@ -713,7 +700,7 @@ const MAINTENANCE_ANNOUNCEMENTS: AnnouncementConfig[] = [
   },
   {
     message:
-      "Maintenance would like to announce that they have fixed the issue. They would also like you to stop asking what the issue was. It is classified. By them. Just now.",
+      'Maintenance would like to announce that they have fixed the issue. They would also like you to stop asking what the issue was. It is classified. By them. Just now.',
     type: 'general',
     category: 'equipment',
     chaosWeight: 0.5,
@@ -761,14 +748,13 @@ const TECHNOLOGY_ANNOUNCEMENTS: AnnouncementConfig[] = [
   },
   {
     message:
-      "IT would like to remind everyone that restarting your terminal fixes 90% of problems. The other 10% require coffee. And IT. Mostly coffee.",
+      'IT would like to remind everyone that restarting your terminal fixes 90% of problems. The other 10% require coffee. And IT. Mostly coffee.',
     type: 'general',
     category: 'general',
     chaosWeight: 0.3,
   },
   {
-    message:
-      'The printer is working. If you believe that, you have not used the printer.',
+    message: 'The printer is working. If you believe that, you have not used the printer.',
     type: 'general',
     category: 'humor',
     chaosWeight: 0.3,
@@ -823,7 +809,7 @@ const PHILOSOPHICAL_ANNOUNCEMENTS: AnnouncementConfig[] = [
   },
   {
     message:
-      "Fun fact: The average flour particle travels 2.3 kilometers through our facility. It does not enjoy the journey. It does not enjoy anything. It is flour.",
+      'Fun fact: The average flour particle travels 2.3 kilometers through our facility. It does not enjoy the journey. It does not enjoy anything. It is flour.',
     type: 'general',
     category: 'humor',
     chaosWeight: 0.2,
@@ -871,7 +857,7 @@ const PASSIVE_AGGRESSIVE_ANNOUNCEMENTS: AnnouncementConfig[] = [
   },
   {
     message:
-      "The parking lot is not a go-kart track. This message is for one person. They know who they are. Everyone knows who they are.",
+      'The parking lot is not a go-kart track. This message is for one person. They know who they are. Everyone knows who they are.',
     type: 'safety',
     category: 'safety',
     chaosWeight: 0.3,
@@ -919,7 +905,7 @@ const PASSIVE_AGGRESSIVE_ANNOUNCEMENTS: AnnouncementConfig[] = [
 const LOST_FOUND_ANNOUNCEMENTS: AnnouncementConfig[] = [
   {
     message:
-      'Lost and found: One hard hat, two safety goggles, and what appears to be someone\'s lunch from 2019. Please claim only what is yours.',
+      "Lost and found: One hard hat, two safety goggles, and what appears to be someone's lunch from 2019. Please claim only what is yours.",
     type: 'general',
     category: 'general',
     chaosWeight: 0.2,
@@ -960,7 +946,7 @@ const PRODUCTION_SASS_ANNOUNCEMENTS: AnnouncementConfig[] = [
   },
   {
     message:
-      "We are ahead of schedule. I repeat, we are ahead of schedule. Please do not break anything in celebration. We know you want to.",
+      'We are ahead of schedule. I repeat, we are ahead of schedule. Please do not break anything in celebration. We know you want to.',
     type: 'production',
     category: 'production',
     chaosWeight: 0.1,
@@ -1008,7 +994,7 @@ const PRODUCTION_SASS_ANNOUNCEMENTS: AnnouncementConfig[] = [
 const ENVIRONMENT_ANNOUNCEMENTS: AnnouncementConfig[] = [
   {
     message:
-      "It is raining outside. This has no impact on indoor operations, but we thought you should know. Now you know.",
+      'It is raining outside. This has no impact on indoor operations, but we thought you should know. Now you know.',
     type: 'general',
     category: 'general',
     chaosWeight: 0.1,
@@ -1097,7 +1083,7 @@ const CHAOS_ANNOUNCEMENTS: AnnouncementConfig[] = [
   },
   {
     message:
-      "Multiple issues detected. Prioritizing by how loudly they are beeping. The loudest wins. That is the system now.",
+      'Multiple issues detected. Prioritizing by how loudly they are beeping. The loudest wins. That is the system now.',
     type: 'production',
     category: 'chaos',
     chaosWeight: 0.8,
@@ -1125,7 +1111,7 @@ const CHAOS_ANNOUNCEMENTS: AnnouncementConfig[] = [
   },
   {
     message:
-      "If anyone knows what that alarm means, please contact the control room. We have forgotten. There are too many alarms.",
+      'If anyone knows what that alarm means, please contact the control room. We have forgotten. There are too many alarms.',
     type: 'safety',
     category: 'chaos',
     chaosWeight: 0.75,
@@ -1276,7 +1262,8 @@ const CALM_ANNOUNCEMENTS: AnnouncementConfig[] = [
 // ==========================================================================
 const PRODUCTION_ANNOUNCEMENTS: AnnouncementConfig[] = [
   {
-    message: 'Break time. Workers may proceed to break areas. Running is not necessary. Walking briskly is acceptable.',
+    message:
+      'Break time. Workers may proceed to break areas. Running is not necessary. Walking briskly is acceptable.',
     type: 'general',
     category: 'production',
     chaosWeight: 0.3,
@@ -1288,7 +1275,8 @@ const PRODUCTION_ANNOUNCEMENTS: AnnouncementConfig[] = [
     chaosWeight: 0.4,
   },
   {
-    message: 'Shift handover in 30 minutes. Please document everything. Yes, everything. Even that thing you think is not important.',
+    message:
+      'Shift handover in 30 minutes. Please document everything. Yes, everything. Even that thing you think is not important.',
     type: 'general',
     category: 'production',
     chaosWeight: 0.3,
@@ -1300,25 +1288,29 @@ const PRODUCTION_ANNOUNCEMENTS: AnnouncementConfig[] = [
 // ==========================================================================
 const SAFETY_ANNOUNCEMENTS: AnnouncementConfig[] = [
   {
-    message: 'Safety reminder: Wear PPE in all production zones. Fashion does not count. Your opinion does not count.',
+    message:
+      'Safety reminder: Wear PPE in all production zones. Fashion does not count. Your opinion does not count.',
     type: 'safety',
     category: 'safety',
     chaosWeight: 0.4,
   },
   {
-    message: 'Forklift traffic in Zone 2. Please stay alert. They weigh more than you. They care less than you.',
+    message:
+      'Forklift traffic in Zone 2. Please stay alert. They weigh more than you. They care less than you.',
     type: 'safety',
     category: 'safety',
     chaosWeight: 0.5,
   },
   {
-    message: 'Hearing protection required in Mill Zone. Your future self will thank you. Your present self finds them uncomfortable. Choose wisely.',
+    message:
+      'Hearing protection required in Mill Zone. Your future self will thank you. Your present self finds them uncomfortable. Choose wisely.',
     type: 'safety',
     category: 'safety',
     chaosWeight: 0.4,
   },
   {
-    message: 'Emergency exits are clearly marked. Please familiarize yourself. Just in case. Hopefully not in case.',
+    message:
+      'Emergency exits are clearly marked. Please familiarize yourself. Just in case. Hopefully not in case.',
     type: 'safety',
     category: 'safety',
     chaosWeight: 0.3,
@@ -1330,7 +1322,8 @@ const SAFETY_ANNOUNCEMENTS: AnnouncementConfig[] = [
     chaosWeight: 0.5,
   },
   {
-    message: 'Safety inspection in 1 hour. Please ensure your area looks like it always does. But better. Much better.',
+    message:
+      'Safety inspection in 1 hour. Please ensure your area looks like it always does. But better. Much better.',
     type: 'safety',
     category: 'safety',
     chaosWeight: 0.3,
@@ -1413,9 +1406,7 @@ const getRandomMachine = (): string => {
 };
 
 // Get a random machine from a specific category (exported for potential external use)
-export const getRandomMachineOfType = (
-  type: 'silos' | 'mills' | 'sifters' | 'packers'
-): string => {
+export const getRandomMachineOfType = (type: 'silos' | 'mills' | 'sifters' | 'packers'): string => {
   const machines = MACHINE_IDS[type];
   return machines[Math.floor(Math.random() * machines.length)];
 };
@@ -1428,47 +1419,56 @@ const DYNAMIC_TEMPLATES: Array<{
 }> = [
   // Worker-specific templates
   {
-    template: '{WORKER} has been spotted near the coffee machine. Again. For the third time this hour.',
+    template:
+      '{WORKER} has been spotted near the coffee machine. Again. For the third time this hour.',
     type: 'general',
     chaosWeight: 0.3,
   },
   {
-    template: '{WORKER} would like everyone to know that {THEIR} area is clean. Suspiciously clean.',
+    template:
+      '{WORKER} would like everyone to know that {THEIR} area is clean. Suspiciously clean.',
     type: 'general',
     chaosWeight: 0.2,
   },
   {
-    template: 'Would {WORKER} please report to the supervisor office. You are not in trouble. Probably.',
+    template:
+      'Would {WORKER} please report to the supervisor office. You are not in trouble. Probably.',
     type: 'general',
     chaosWeight: 0.4,
   },
   {
-    template: '{WORKER} has volunteered for the late shift. We appreciate {THEIR} sacrifice. Or desperation.',
+    template:
+      '{WORKER} has volunteered for the late shift. We appreciate {THEIR} sacrifice. Or desperation.',
     type: 'general',
     chaosWeight: 0.3,
   },
   {
-    template: '{WORKER} has completed {THEIR} safety training. {THEY} only fell asleep twice. This is an improvement.',
+    template:
+      '{WORKER} has completed {THEIR} safety training. {THEY} only fell asleep twice. This is an improvement.',
     type: 'safety',
     chaosWeight: 0.3,
   },
   {
-    template: 'Happy birthday to {WORKER}. Cake is in the break room. First come, first served. Run.',
+    template:
+      'Happy birthday to {WORKER}. Cake is in the break room. First come, first served. Run.',
     type: 'general',
     chaosWeight: 0.2,
   },
   {
-    template: '{WORKER} has found the missing clipboard. It was in the obvious place. The obvious place no one checked.',
+    template:
+      '{WORKER} has found the missing clipboard. It was in the obvious place. The obvious place no one checked.',
     type: 'general',
     chaosWeight: 0.2,
   },
   {
-    template: '{WORKER} is looking for {THEIR} safety goggles. They were last seen on {THEIR} head.',
+    template:
+      '{WORKER} is looking for {THEIR} safety goggles. They were last seen on {THEIR} head.',
     type: 'safety',
     chaosWeight: 0.3,
   },
   {
-    template: 'Congratulations to {WORKER} for zero incidents this week. The bar was low. {THEY} cleared it.',
+    template:
+      'Congratulations to {WORKER} for zero incidents this week. The bar was low. {THEY} cleared it.',
     type: 'general',
     chaosWeight: 0.2,
   },
@@ -1485,22 +1485,26 @@ const DYNAMIC_TEMPLATES: Array<{
     chaosWeight: 0.2,
   },
   {
-    template: '{MACHINE} would like a moment of silence for its previous self. The one that broke. RIP.',
+    template:
+      '{MACHINE} would like a moment of silence for its previous self. The one that broke. RIP.',
     type: 'general',
     chaosWeight: 0.4,
   },
   {
-    template: '{MACHINE} has been running for 72 hours straight. Unlike some of you, it does not complain.',
+    template:
+      '{MACHINE} has been running for 72 hours straight. Unlike some of you, it does not complain.',
     type: 'production',
     chaosWeight: 0.3,
   },
   {
-    template: 'Maintenance scheduled for {MACHINE}. Please say your goodbyes. It will return. Changed.',
+    template:
+      'Maintenance scheduled for {MACHINE}. Please say your goodbyes. It will return. Changed.',
     type: 'general',
     chaosWeight: 0.4,
   },
   {
-    template: '{MACHINE} is making the noise again. The concerning one. Engineering has been notified. They sighed.',
+    template:
+      '{MACHINE} is making the noise again. The concerning one. Engineering has been notified. They sighed.',
     type: 'production',
     chaosWeight: 0.6,
   },
@@ -1510,7 +1514,8 @@ const DYNAMIC_TEMPLATES: Array<{
     chaosWeight: 0.1,
   },
   {
-    template: 'Someone has left a coffee cup on {MACHINE}. {MACHINE} is not a table. {MACHINE} is hurt.',
+    template:
+      'Someone has left a coffee cup on {MACHINE}. {MACHINE} is not a table. {MACHINE} is hurt.',
     type: 'general',
     chaosWeight: 0.3,
   },
@@ -1522,7 +1527,8 @@ const DYNAMIC_TEMPLATES: Array<{
 
   // Combined worker + machine templates
   {
-    template: '{WORKER} has been assigned to {MACHINE}. {THEY} seem nervous. {MACHINE} seems indifferent.',
+    template:
+      '{WORKER} has been assigned to {MACHINE}. {THEY} seem nervous. {MACHINE} seems indifferent.',
     type: 'general',
     chaosWeight: 0.3,
   },
@@ -1532,12 +1538,14 @@ const DYNAMIC_TEMPLATES: Array<{
     chaosWeight: 0.2,
   },
   {
-    template: '{WORKER} claims {MACHINE} speaks to them. It does not. Unless it does. Please report any machine speech.',
+    template:
+      '{WORKER} claims {MACHINE} speaks to them. It does not. Unless it does. Please report any machine speech.',
     type: 'general',
     chaosWeight: 0.3,
   },
   {
-    template: '{WORKER} has fixed {MACHINE} using, quote, "intuition." Maintenance would like a word.',
+    template:
+      '{WORKER} has fixed {MACHINE} using, quote, "intuition." Maintenance would like a word.',
     type: 'general',
     chaosWeight: 0.5,
   },
@@ -1635,13 +1643,15 @@ const TIME_ANNOUNCEMENTS: Record<TimeOfDay, AnnouncementConfig[]> = {
   ],
   morning: [
     {
-      message: 'Morning productivity peak approaching. Please try to look busy. Or be busy. Either works.',
+      message:
+        'Morning productivity peak approaching. Please try to look busy. Or be busy. Either works.',
       type: 'production',
       category: 'humor',
       chaosWeight: 0.3,
     },
     {
-      message: 'Second coffee break is not a thing. First coffee break barely a thing. Please work.',
+      message:
+        'Second coffee break is not a thing. First coffee break barely a thing. Please work.',
       type: 'general',
       category: 'humor',
       chaosWeight: 0.4,
@@ -1655,19 +1665,22 @@ const TIME_ANNOUNCEMENTS: Record<TimeOfDay, AnnouncementConfig[]> = {
   ],
   midday: [
     {
-      message: 'Lunch break approaching. The break room will become a warzone. May the best employee win.',
+      message:
+        'Lunch break approaching. The break room will become a warzone. May the best employee win.',
       type: 'general',
       category: 'humor',
       chaosWeight: 0.3,
     },
     {
-      message: 'Midday slump detected. Coffee consumption increasing. Productivity graph... doing its best.',
+      message:
+        'Midday slump detected. Coffee consumption increasing. Productivity graph... doing its best.',
       type: 'production',
       category: 'humor',
       chaosWeight: 0.4,
     },
     {
-      message: 'Halfway through the day. The glass is half full. Unless you are maintenance. Then it is leaking.',
+      message:
+        'Halfway through the day. The glass is half full. Unless you are maintenance. Then it is leaking.',
       type: 'general',
       category: 'humor',
       chaosWeight: 0.3,
@@ -1681,19 +1694,22 @@ const TIME_ANNOUNCEMENTS: Record<TimeOfDay, AnnouncementConfig[]> = {
   ],
   afternoon: [
     {
-      message: 'Afternoon shift in full swing. The end is in sight. Do not mention this to the end. It moves.',
+      message:
+        'Afternoon shift in full swing. The end is in sight. Do not mention this to the end. It moves.',
       type: 'general',
       category: 'humor',
       chaosWeight: 0.3,
     },
     {
-      message: 'Post-lunch productivity dip observed. This is biology. Biology is not an excuse. Work anyway.',
+      message:
+        'Post-lunch productivity dip observed. This is biology. Biology is not an excuse. Work anyway.',
       type: 'production',
       category: 'humor',
       chaosWeight: 0.4,
     },
     {
-      message: 'Afternoon update: Everything is fine. This is either true or we have given up. You decide.',
+      message:
+        'Afternoon update: Everything is fine. This is either true or we have given up. You decide.',
       type: 'general',
       category: 'humor',
       chaosWeight: 0.3,
@@ -1713,13 +1729,15 @@ const TIME_ANNOUNCEMENTS: Record<TimeOfDay, AnnouncementConfig[]> = {
       chaosWeight: 0.2,
     },
     {
-      message: 'The sun is setting. Production is not. Production never sets. Production is eternal.',
+      message:
+        'The sun is setting. Production is not. Production never sets. Production is eternal.',
       type: 'production',
       category: 'humor',
       chaosWeight: 0.3,
     },
     {
-      message: 'Evening operations underway. The machines do not know it is evening. They do not care. Admire them.',
+      message:
+        'Evening operations underway. The machines do not know it is evening. They do not care. Admire them.',
       type: 'production',
       category: 'humor',
       chaosWeight: 0.2,
@@ -1745,13 +1763,15 @@ const TIME_ANNOUNCEMENTS: Record<TimeOfDay, AnnouncementConfig[]> = {
       chaosWeight: 0.4,
     },
     {
-      message: 'The witching hour approaches. The only witch here is deadline pressure. She is powerful.',
+      message:
+        'The witching hour approaches. The only witch here is deadline pressure. She is powerful.',
       type: 'general',
       category: 'humor',
       chaosWeight: 0.3,
     },
     {
-      message: 'Night shift report: All quiet. Too quiet. We are watching the machines suspiciously.',
+      message:
+        'Night shift report: All quiet. Too quiet. We are watching the machines suspiciously.',
       type: 'production',
       category: 'calm',
       chaosWeight: 0.1,
@@ -1795,7 +1815,8 @@ interface EventAnnouncementConfig {
 const MILESTONE_ANNOUNCEMENTS: Record<number, EventAnnouncementConfig[]> = {
   25: [
     {
-      message: '25% of daily target reached. A quarter of the way there. Three quarters to go. Math is beautiful.',
+      message:
+        '25% of daily target reached. A quarter of the way there. Three quarters to go. Math is beautiful.',
       type: 'production',
       priority: 'medium',
       duration: 16,
@@ -1803,13 +1824,15 @@ const MILESTONE_ANNOUNCEMENTS: Record<number, EventAnnouncementConfig[]> = {
   ],
   50: [
     {
-      message: 'HALFWAY POINT REACHED. 50% complete. The glass is half full. Unless maintenance spilled it.',
+      message:
+        'HALFWAY POINT REACHED. 50% complete. The glass is half full. Unless maintenance spilled it.',
       type: 'production',
       priority: 'high',
       duration: 20,
     },
     {
-      message: '50% of production target achieved. We are on track. This is not a drill. This is actual competence.',
+      message:
+        '50% of production target achieved. We are on track. This is not a drill. This is actual competence.',
       type: 'production',
       priority: 'high',
       duration: 20,
@@ -1817,7 +1840,8 @@ const MILESTONE_ANNOUNCEMENTS: Record<number, EventAnnouncementConfig[]> = {
   ],
   75: [
     {
-      message: '75% complete. The finish line is visible. Do not trip now. Metaphorically. Also literally.',
+      message:
+        '75% complete. The finish line is visible. Do not trip now. Metaphorically. Also literally.',
       type: 'production',
       priority: 'high',
       duration: 20,
@@ -1825,7 +1849,8 @@ const MILESTONE_ANNOUNCEMENTS: Record<number, EventAnnouncementConfig[]> = {
   ],
   90: [
     {
-      message: '90% OF TARGET REACHED. Almost there. Do not celebrate yet. The last 10% is always the hardest.',
+      message:
+        '90% OF TARGET REACHED. Almost there. Do not celebrate yet. The last 10% is always the hardest.',
       type: 'production',
       priority: 'high',
       duration: 20,
@@ -1833,13 +1858,15 @@ const MILESTONE_ANNOUNCEMENTS: Record<number, EventAnnouncementConfig[]> = {
   ],
   100: [
     {
-      message: 'PRODUCTION TARGET ACHIEVED. 100% COMPLETE. You did it. We did it. The flour did it. Everyone wins.',
+      message:
+        'PRODUCTION TARGET ACHIEVED. 100% COMPLETE. You did it. We did it. The flour did it. Everyone wins.',
       type: 'production',
       priority: 'critical',
       duration: 30,
     },
     {
-      message: 'DAILY QUOTA REACHED. Excellence has been achieved. Pizza may be authorized. Stand by.',
+      message:
+        'DAILY QUOTA REACHED. Excellence has been achieved. Pizza may be authorized. Stand by.',
       type: 'production',
       priority: 'critical',
       duration: 30,
@@ -1851,19 +1878,22 @@ const MILESTONE_ANNOUNCEMENTS: Record<number, EventAnnouncementConfig[]> = {
 const MACHINE_STATUS_ANNOUNCEMENTS = {
   warning: [
     {
-      template: '{MACHINE} has entered warning state. It is sending a message. The message is "help."',
+      template:
+        '{MACHINE} has entered warning state. It is sending a message. The message is "help."',
       type: 'production' as const,
       priority: 'high' as const,
       duration: 20,
     },
     {
-      template: '{MACHINE} is unhappy. Please send maintenance. And kind words. Mostly maintenance.',
+      template:
+        '{MACHINE} is unhappy. Please send maintenance. And kind words. Mostly maintenance.',
       type: 'production' as const,
       priority: 'high' as const,
       duration: 20,
     },
     {
-      template: 'Warning detected on {MACHINE}. This is the machine equivalent of a sigh. Please respond.',
+      template:
+        'Warning detected on {MACHINE}. This is the machine equivalent of a sigh. Please respond.',
       type: 'production' as const,
       priority: 'medium' as const,
       duration: 16,
@@ -1871,7 +1901,8 @@ const MACHINE_STATUS_ANNOUNCEMENTS = {
   ],
   critical: [
     {
-      template: 'CRITICAL ALERT: {MACHINE} needs immediate attention. Not eventual attention. Immediate.',
+      template:
+        'CRITICAL ALERT: {MACHINE} needs immediate attention. Not eventual attention. Immediate.',
       type: 'emergency' as const,
       priority: 'critical' as const,
       duration: 30,
@@ -1891,7 +1922,8 @@ const MACHINE_STATUS_ANNOUNCEMENTS = {
       duration: 16,
     },
     {
-      template: '{MACHINE} recovery complete. Normal operations resumed. Crisis averted. Coffee earned.',
+      template:
+        '{MACHINE} recovery complete. Normal operations resumed. Crisis averted. Coffee earned.',
       type: 'production' as const,
       priority: 'medium' as const,
       duration: 16,
@@ -1908,13 +1940,15 @@ export const SAFETY_INCIDENT_ANNOUNCEMENTS: EventAnnouncementConfig[] = [
     duration: 20,
   },
   {
-    message: 'Near-miss recorded. A miss is as good as a mile. Unless you are playing darts. This is not darts.',
+    message:
+      'Near-miss recorded. A miss is as good as a mile. Unless you are playing darts. This is not darts.',
     type: 'safety',
     priority: 'high',
     duration: 20,
   },
   {
-    message: 'Safety event detected. Forklift and human have disagreed on who has right of way. Forklift won. As always.',
+    message:
+      'Safety event detected. Forklift and human have disagreed on who has right of way. Forklift won. As always.',
     type: 'safety',
     priority: 'high',
     duration: 24,
@@ -1924,6 +1958,9 @@ export const SAFETY_INCIDENT_ANNOUNCEMENTS: EventAnnouncementConfig[] = [
 // Track previous milestone for detecting achievements
 let lastMilestoneReached = 0;
 let lastMachineStatuses: Record<string, string> = {};
+// Cooldown tracking for machine status announcements (prevents duplicate alerts)
+let lastMachineStatusAnnouncementTime: Record<string, number> = {};
+const MACHINE_STATUS_COOLDOWN_MS = 30000; // 30 second cooldown between same-type announcements
 
 // Check for and generate event-triggered announcements
 const checkEventAnnouncements = (
@@ -1934,7 +1971,7 @@ const checkEventAnnouncements = (
     priority: 'low' | 'medium' | 'high' | 'critical';
   }) => void
 ): void => {
-  const state = useMillStore.getState();
+  const state = useProductionStore.getState();
 
   // Check production milestones
   const productionTarget = state.productionTarget;
@@ -1968,23 +2005,33 @@ const checkEventAnnouncements = (
 
   // Check machine status changes
   const machines = state.machines || [];
+  const now = Date.now();
   machines.forEach((machine: { id: string; name?: string; status: string }) => {
     const prevStatus = lastMachineStatuses[machine.id];
     const currentStatus = machine.status;
 
     if (prevStatus && prevStatus !== currentStatus) {
-      // Status changed - generate announcement
-      const statusAnnouncements =
-        MACHINE_STATUS_ANNOUNCEMENTS[currentStatus as keyof typeof MACHINE_STATUS_ANNOUNCEMENTS];
-      if (statusAnnouncements) {
-        const template = statusAnnouncements[Math.floor(Math.random() * statusAnnouncements.length)];
-        const machineName = machine.name || machine.id;
-        addAnnouncement({
-          type: template.type,
-          message: template.template.replace('{MACHINE}', machineName),
-          duration: template.duration,
-          priority: template.priority,
-        });
+      // Status changed - check cooldown before announcing
+      const lastAnnouncementTime = lastMachineStatusAnnouncementTime[currentStatus] || 0;
+      const timeSinceLastAnnouncement = now - lastAnnouncementTime;
+
+      // Only announce if cooldown has passed for this status type
+      if (timeSinceLastAnnouncement >= MACHINE_STATUS_COOLDOWN_MS) {
+        const statusAnnouncements =
+          MACHINE_STATUS_ANNOUNCEMENTS[currentStatus as keyof typeof MACHINE_STATUS_ANNOUNCEMENTS];
+        if (statusAnnouncements) {
+          const template =
+            statusAnnouncements[Math.floor(Math.random() * statusAnnouncements.length)];
+          const machineName = machine.name || machine.id;
+          addAnnouncement({
+            type: template.type,
+            message: template.template.replace('{MACHINE}', machineName),
+            duration: template.duration,
+            priority: template.priority,
+          });
+          // Update cooldown timer for this status type
+          lastMachineStatusAnnouncementTime[currentStatus] = now;
+        }
       }
     }
 
@@ -1994,7 +2041,7 @@ const checkEventAnnouncements = (
 
 // Hook for event-triggered announcements
 const useEventAnnouncementScheduler = () => {
-  const addAnnouncement = useMillStore((state) => state.addAnnouncement);
+  const addAnnouncement = useProductionStore((state) => state.addAnnouncement);
 
   useEffect(() => {
     // Check for events every 5 seconds
@@ -2012,7 +2059,7 @@ const useEventAnnouncementScheduler = () => {
 
 // Calculate chaos level from current state (0-1)
 const calculateChaosLevel = (): number => {
-  const productionState = useMillStore.getState();
+  const productionState = useProductionStore.getState();
 
   let chaosScore = 0;
 
@@ -2021,25 +2068,19 @@ const calculateChaosLevel = (): number => {
   const criticalMachines = machines.filter(
     (m: { status: string }) => m.status === 'critical'
   ).length;
-  const warningMachines = machines.filter(
-    (m: { status: string }) => m.status === 'warning'
-  ).length;
+  const warningMachines = machines.filter((m: { status: string }) => m.status === 'warning').length;
   chaosScore += criticalMachines * 0.3;
   chaosScore += warningMachines * 0.1;
 
   // Check for alerts
-  const alerts = productionState.alerts || [];
-  const criticalAlerts = alerts.filter(
-    (a: { type: string }) => a.type === 'critical'
-  ).length;
-  const warningAlerts = alerts.filter(
-    (a: { type: string }) => a.type === 'warning'
-  ).length;
+  const alerts = useUIStore.getState().alerts || [];
+  const criticalAlerts = alerts.filter((a: { type: string }) => a.type === 'critical').length;
+  const warningAlerts = alerts.filter((a: { type: string }) => a.type === 'warning').length;
   chaosScore += criticalAlerts * 0.25;
   chaosScore += warningAlerts * 0.08;
 
   // Check safety incidents (if available via combined store)
-  const safetyIncidents = productionState.safetyIncidents || [];
+  const safetyIncidents = useSafetyStore.getState().safetyIncidents || [];
   const recentIncidents = safetyIncidents.filter(
     (i: { timestamp: number }) => Date.now() - i.timestamp < 300000 // last 5 minutes
   ).length;
@@ -2117,7 +2158,7 @@ const getShiftAnnouncement = (
 
 // Hook to trigger periodic PA announcements with context-aware selection
 const usePAScheduler = () => {
-  const addAnnouncement = useMillStore((state) => state.addAnnouncement);
+  const addAnnouncement = useProductionStore((state) => state.addAnnouncement);
   const lastShiftAnnouncementRef = useRef<number>(0);
   const lastAnnouncementRef = useRef<string>(''); // Prevent repeats
 
@@ -2134,7 +2175,7 @@ const usePAScheduler = () => {
     const scheduleNext = () => {
       const delay = getNextDelay();
       return setTimeout(() => {
-        const gameTime = useMillStore.getState().gameTime;
+        const gameTime = useGameSimulationStore.getState().gameTime;
 
         // Check if we should play a shift announcement
         const shiftAnnouncement = getShiftAnnouncement(gameTime);
@@ -2208,9 +2249,9 @@ const usePAScheduler = () => {
 
 // PA System Announcements Component
 export const PAAnnouncementSystem: React.FC = () => {
-  const announcements = useMillStore((state) => state.announcements);
-  const dismissAnnouncement = useMillStore((state) => state.dismissAnnouncement);
-  const clearOldAnnouncements = useMillStore((state) => state.clearOldAnnouncements);
+  const announcements = useProductionStore((state) => state.announcements);
+  const dismissAnnouncement = useProductionStore((state) => state.dismissAnnouncement);
+  const clearOldAnnouncements = useProductionStore((state) => state.clearOldAnnouncements);
 
   // Schedule periodic announcements
   usePAScheduler();
@@ -2266,8 +2307,8 @@ export const PAAnnouncementSystem: React.FC = () => {
             className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 backdrop-blur-xl shadow-2xl min-w-[300px] max-w-[500px] ${getPriorityStyles(announcement.priority)}`}
           >
             <div className="flex-shrink-0">{getTypeIcon(announcement.type)}</div>
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-sm">{announcement.message}</p>
+            <div className="flex-1 min-w-0 text-center">
+              <p className="font-medium text-sm text-balance">{announcement.message}</p>
               <p className="text-xs opacity-70">PA System</p>
             </div>
             <button
@@ -2286,8 +2327,8 @@ export const PAAnnouncementSystem: React.FC = () => {
 // Daily Production Targets Widget
 export const ProductionTargetsWidget: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
-  const productionTarget = useMillStore((state) => state.productionTarget);
-  const totalBagsProduced = useMillStore((state) => state.totalBagsProduced);
+  const productionTarget = useProductionStore((state) => state.productionTarget);
+  const totalBagsProduced = useProductionStore((state) => state.totalBagsProduced);
 
   const progress = productionTarget
     ? (productionTarget.producedBags / productionTarget.targetBags) * 100
@@ -2386,7 +2427,7 @@ export const ProductionTargetsWidget: React.FC = () => {
 
 // Achievements Panel
 export const AchievementsPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
-  const achievements = useMillStore((state) => state.achievements);
+  const achievements = useProductionStore((state) => state.achievements);
 
   const getCategoryColor = (category: string) => {
     switch (category) {
@@ -2494,9 +2535,9 @@ export const AchievementsPanel: React.FC<{ onClose: () => void }> = ({ onClose }
 
 // Worker Leaderboard Panel
 export const WorkerLeaderboard: React.FC<{ onClose: () => void }> = ({ onClose }) => {
-  const workerLeaderboard = useMillStore((state) => state.workerLeaderboard);
-  const workers = useMillStore((state) => state.workers);
-  const updateWorkerScore = useMillStore((state) => state.updateWorkerScore);
+  const workerLeaderboard = useProductionStore((state) => state.workerLeaderboard);
+  const workers = useProductionStore((state) => state.workers);
+  const updateWorkerScore = useProductionStore((state) => state.updateWorkerScore);
 
   // Derive leaderboard from actual workers in the store
   useEffect(() => {
@@ -2618,7 +2659,7 @@ export const WorkerLeaderboard: React.FC<{ onClose: () => void }> = ({ onClose }
 
 // Mini-Map Component
 export const MiniMap: React.FC = () => {
-  const showMiniMap = useMillStore((state) => state.showMiniMap);
+  const showMiniMap = useUIStore((state) => state.showMiniMap);
   const [positions, setPositions] = useState<{
     workers: EntityPosition[];
     forklifts: EntityPosition[];
@@ -2627,12 +2668,14 @@ export const MiniMap: React.FC = () => {
   useEffect(() => {
     if (!showMiniMap) return;
 
+    // PERFORMANCE FIX: Reduced from 100ms (10Hz) to 500ms (2Hz)
+    // 10Hz was excessive for a mini map - 2Hz is sufficient
     const interval = setInterval(() => {
       setPositions({
         workers: positionRegistry.getAllWorkers(),
         forklifts: positionRegistry.getAllForklifts(),
       });
-    }, 100);
+    }, 500);
 
     return () => clearInterval(interval);
   }, [showMiniMap]);
@@ -2768,16 +2811,17 @@ export const ScreenshotButton: React.FC = () => {
   };
 
   const handleExportReport = () => {
-    const store = useMillStore.getState();
+    const store = useProductionStore.getState();
+    const safetyStore = useSafetyStore.getState();
 
     const report = {
       timestamp: new Date().toISOString(),
       metrics: store.metrics,
-      safetyMetrics: store.safetyMetrics,
+      safetyMetrics: safetyStore.safetyMetrics,
       productionTarget: store.productionTarget,
       totalBagsProduced: store.totalBagsProduced,
       achievements: store.achievements.filter((a) => a.unlockedAt),
-      safetyIncidents: store.safetyIncidents.slice(0, 20),
+      safetyIncidents: safetyStore.safetyIncidents.slice(0, 20),
     };
 
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
@@ -2819,7 +2863,7 @@ export const IncidentReplayControls: React.FC = () => {
     setReplayMode,
     setReplayIndex,
     clearReplayFrames,
-  } = useMillStore(
+  } = useProductionStore(
     useShallow((state) => ({
       replayMode: state.replayMode,
       replayFrames: state.replayFrames,
@@ -2938,21 +2982,15 @@ export const IncidentReplayControls: React.FC = () => {
 export const GamificationBar: React.FC = () => {
   const [showAchievements, setShowAchievements] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
-  const {
-    showMiniMap,
-    setShowMiniMap,
-    showGamificationBar,
-    setShowGamificationBar,
-    achievements,
-  } = useMillStore(
+  const { showMiniMap, setShowMiniMap, showGamificationBar, setShowGamificationBar } = useUIStore(
     useShallow((state) => ({
       showMiniMap: state.showMiniMap,
       setShowMiniMap: state.setShowMiniMap,
       showGamificationBar: state.showGamificationBar,
       setShowGamificationBar: state.setShowGamificationBar,
-      achievements: state.achievements,
     }))
   );
+  const achievements = useProductionStore((state) => state.achievements);
 
   const unlockedCount = achievements.filter((a) => a.unlockedAt).length;
 

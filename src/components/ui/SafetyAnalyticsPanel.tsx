@@ -1,18 +1,19 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TrendingUp, ChevronDown, ChevronUp, Truck, FileText, Download } from 'lucide-react';
-import { useMillStore } from '../../store';
+import { useSafetyStore } from '../../stores/safetyStore';
+import { useUIStore } from '../../stores/uiStore';
 
 export const SafetyAnalyticsPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
-  const safetyIncidents = useMillStore((state) => state.safetyIncidents);
-  const forkliftMetrics = useMillStore((state) => state.forkliftMetrics);
-  const incidentHeatMap = useMillStore((state) => state.incidentHeatMap);
-  const showIncidentHeatMap = useMillStore((state) => state.showIncidentHeatMap);
-  const setShowIncidentHeatMap = useMillStore((state) => state.setShowIncidentHeatMap);
-  const clearIncidentHeatMap = useMillStore((state) => state.clearIncidentHeatMap);
-  const resetForkliftMetrics = useMillStore((state) => state.resetForkliftMetrics);
-  const theme = useMillStore((state) => state.theme);
+  const safetyIncidents = useSafetyStore((state) => state.safetyIncidents);
+  const forkliftMetrics = useSafetyStore((state) => state.forkliftMetrics);
+  const incidentHeatMap = useSafetyStore((state) => state.incidentHeatMap);
+  const showIncidentHeatMap = useSafetyStore((state) => state.showIncidentHeatMap);
+  const setShowIncidentHeatMap = useSafetyStore((state) => state.setShowIncidentHeatMap);
+  const clearIncidentHeatMap = useSafetyStore((state) => state.clearIncidentHeatMap);
+  const resetForkliftMetrics = useSafetyStore((state) => state.resetForkliftMetrics);
+  const theme = useUIStore((state) => state.theme);
 
   // Calculate stats
   const today = new Date();

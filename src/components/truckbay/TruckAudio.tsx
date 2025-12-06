@@ -2,6 +2,7 @@ import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { shouldRunThisFrame } from '../../utils/frameThrottle';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 
 interface ExhaustSmokeProps {
   position: [number, number, number];
@@ -10,6 +11,7 @@ interface ExhaustSmokeProps {
 }
 
 export const ExhaustSmoke: React.FC<ExhaustSmokeProps> = ({ position, throttle, isRunning }) => {
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const particlesRef = useRef<THREE.Points>(null);
   const particleCount = 20;
 
@@ -34,6 +36,7 @@ export const ExhaustSmoke: React.FC<ExhaustSmokeProps> = ({ position, throttle, 
   }, []);
 
   useFrame((_, delta) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(2)) return; // Throttle particles to 30fps
     if (!particlesRef.current || !isRunning) return;
 

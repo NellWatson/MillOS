@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useCallback } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { PointerLockControls } from '@react-three/drei';
 import * as THREE from 'three';
-import { useMillStore } from '../store';
+import { useUIStore } from '../stores/uiStore';
 
 // Movement configuration
 const MOVE_SPEED = 12; // Units per second (walking speed)
@@ -227,7 +227,7 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
     onLockChange?.(false);
 
     // Exit FPS mode when pointer lock is lost
-    useMillStore.getState().setFpsMode(false);
+    useUIStore.getState().setFpsMode(false);
   }, [onLockChange]);
 
   return <PointerLockControls ref={controlsRef} onLock={handleLock} onUnlock={handleUnlock} />;
@@ -235,7 +235,7 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
 
 // Crosshair overlay for FPS mode
 export const FPSCrosshair: React.FC = () => {
-  const fpsMode = useMillStore((state: any) => state.fpsMode);
+  const fpsMode = useUIStore((state) => state.fpsMode);
 
   if (!fpsMode) return null;
 

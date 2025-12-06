@@ -1,5 +1,9 @@
 import { useEffect, useRef } from 'react';
-import { useMillStore, GraphicsQuality } from '../store';
+import { GraphicsQuality } from '../store';
+import { useGraphicsStore } from '../stores/graphicsStore';
+import { useProductionStore } from '../stores/productionStore';
+import { useSafetyStore } from '../stores/safetyStore';
+import { useUIStore } from '../stores/uiStore';
 import { audioManager } from '../utils/audioManager';
 import { useCameraStore, CAMERA_PRESETS } from '../components/CameraController';
 import { MachineData, WorkerData } from '../types';
@@ -74,16 +78,16 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
   }, [selectedWorker]);
 
   // Graphics quality shortcuts
-  const setGraphicsQuality = useMillStore((state) => state.setGraphicsQuality);
+  const setGraphicsQuality = useGraphicsStore((state) => state.setGraphicsQuality);
 
   // Emergency stop state (use ref to avoid dependency churn)
-  const forkliftEmergencyStop = useMillStore((state) => state.forkliftEmergencyStop);
+  const forkliftEmergencyStop = useSafetyStore((state) => state.forkliftEmergencyStop);
   const forkliftEmergencyStopRef = useRef(forkliftEmergencyStop);
   useEffect(() => {
     forkliftEmergencyStopRef.current = forkliftEmergencyStop;
   }, [forkliftEmergencyStop]);
-  const setForkliftEmergencyStop = useMillStore((state) => state.setForkliftEmergencyStop);
-  const addSafetyIncident = useMillStore((state) => state.addSafetyIncident);
+  const setForkliftEmergencyStop = useSafetyStore((state) => state.setForkliftEmergencyStop);
+  const addSafetyIncident = useSafetyStore((state) => state.addSafetyIncident);
 
   // Camera presets
   const setCameraPreset = useCameraStore((state) => state.setPreset);
@@ -205,8 +209,8 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
       if (key === 'h') {
         e.preventDefault();
         audioManager.playClick();
-        const currentHeatMap = useMillStore.getState().showHeatMap;
-        useMillStore.getState().setShowHeatMap(!currentHeatMap);
+        const currentHeatMap = useProductionStore.getState().showHeatMap;
+        useProductionStore.getState().setShowHeatMap(!currentHeatMap);
         setQualityNotification(currentHeatMap ? 'HEATMAP OFF' : 'HEATMAP ON');
         setTimeout(() => setQualityNotification(null), 1500);
         return;
@@ -234,8 +238,8 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
       if (key === 'm') {
         e.preventDefault();
         audioManager.playClick();
-        const currentMinimized = useMillStore.getState().panelMinimized;
-        useMillStore.getState().setPanelMinimized(!currentMinimized);
+        const currentMinimized = useUIStore.getState().panelMinimized;
+        useUIStore.getState().setPanelMinimized(!currentMinimized);
         return;
       }
 
@@ -243,8 +247,8 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
       if (e.key === '?' || (e.shiftKey && e.key === '/')) {
         e.preventDefault();
         audioManager.playClick();
-        const currentShow = useMillStore.getState().showShortcuts;
-        useMillStore.getState().setShowShortcuts(!currentShow);
+        const currentShow = useUIStore.getState().showShortcuts;
+        useUIStore.getState().setShowShortcuts(!currentShow);
         return;
       }
 
@@ -277,8 +281,8 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
       if (key === 'g') {
         e.preventDefault();
         audioManager.playClick();
-        const current = useMillStore.getState().showMiniMap;
-        useMillStore.getState().setShowMiniMap(!current);
+        const current = useUIStore.getState().showMiniMap;
+        useUIStore.getState().setShowMiniMap(!current);
         setQualityNotification(current ? 'GPS OFF' : 'GPS ON');
         setTimeout(() => setQualityNotification(null), 1500);
         return;
@@ -288,8 +292,8 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
       if (key === 'v') {
         e.preventDefault();
         audioManager.playClick();
-        const current = useMillStore.getState().fpsMode;
-        useMillStore.getState().setFpsMode(!current);
+        const current = useUIStore.getState().fpsMode;
+        useUIStore.getState().setFpsMode(!current);
         setQualityNotification(current ? 'ORBIT MODE' : 'FPS MODE');
         setTimeout(() => setQualityNotification(null), 1500);
         return;

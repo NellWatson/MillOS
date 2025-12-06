@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { create } from 'zustand';
-import { useMillStore, GraphicsQuality } from '../store';
+import { GraphicsQuality } from '../store';
+import { useGraphicsStore } from '../stores/graphicsStore';
 import { ChevronUp, ChevronDown, X } from 'lucide-react';
 
 // FPS store for sharing FPS data between 3D scene and UI
@@ -58,7 +59,7 @@ interface FPSStore {
 const fpsHistory: number[] = [];
 const HISTORY_SIZE = 60; // 1 second at 60fps
 
-export const useFPSStore = create<FPSStore>((set) => ({
+const _useFPSStore = create<FPSStore>((set) => ({
   fps: 60,
   avgFps: 60,
   minFps: 60,
@@ -113,6 +114,14 @@ export const useFPSStore = create<FPSStore>((set) => ({
   setHighFpsStartTime: (time) => set({ highFpsStartTime: time }),
 }));
 
+// Export the store with window exposure for perf testing
+export const useFPSStore = _useFPSStore;
+
+// Expose to window for performance testing (dev mode only)
+if (typeof window !== 'undefined' && import.meta.env?.DEV) {
+  (window as unknown as Record<string, unknown>).useFPSStore = _useFPSStore;
+}
+
 // Quality order for suggestions
 const QUALITY_ORDER: GraphicsQuality[] = ['ultra', 'high', 'medium', 'low'];
 
@@ -134,7 +143,7 @@ export const FPSTracker: React.FC = () => {
   const setLowFpsStartTime = useFPSStore((state) => state.setLowFpsStartTime);
   const setHighFpsStartTime = useFPSStore((state) => state.setHighFpsStartTime);
 
-  const currentQuality = useMillStore((state: any) => state.graphics.quality);
+  const currentQuality = useGraphicsStore((state) => state.graphics.quality);
 
   // Track frame times for profiling
   const frameTimes = useRef<number[]>([]);
@@ -323,7 +332,7 @@ const QualitySuggestion: React.FC = () => {
   const pendingSuggestion = useFPSStore((state) => state.pendingSuggestion);
   const setPendingSuggestion = useFPSStore((state) => state.setPendingSuggestion);
   const setSuggestionDismissedAt = useFPSStore((state) => state.setSuggestionDismissedAt);
-  const setGraphicsQuality = useMillStore((state: any) => state.setGraphicsQuality);
+  const setGraphicsQuality = useGraphicsStore((state) => state.setGraphicsQuality);
   const fps = useFPSStore((state) => state.fps);
 
   if (!pendingSuggestion) return null;
@@ -410,7 +419,7 @@ export const FPSDisplay: React.FC<FPSDisplayProps> = ({ showDetailed = false }) 
     setQualitySuggestionsEnabled,
   } = useFPSStore();
   const [history, setHistory] = useState<number[]>([]);
-  const currentQuality = useMillStore((state: any) => state.graphics.quality);
+  const currentQuality = useGraphicsStore((state) => state.graphics.quality);
 
   useEffect(() => {
     setHistory((prev) => {

@@ -4,19 +4,313 @@
  * Theme Hospital-inspired visible disasters and events.
  * Grain spills, dust clouds, rat sightings, pigeon incursions,
  * and the ever-critical coffee machine breakdown.
+ *
+ * PERFORMANCE: Consolidated from 9 separate useFrame hooks into 1 centralized manager
  */
 
-import React, { useRef, useMemo } from 'react';
-import { useFrame } from '@react-three/fiber';
+import React, { useRef, useMemo, useCallback, createContext, useContext } from 'react';
+import { useFrame, type RootState } from '@react-three/fiber';
 import { Billboard, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { useWorkerMoodStore } from '../stores/workerMoodStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import type { ChaosEvent } from '../types';
+
+// =========================================================================
+// ANIMATION MANAGER - Single useFrame for all chaos events
+// =========================================================================
+
+interface ChaosRefs {
+  type: ChaosEvent['type'];
+  eventId: string;
+  startTime: number;
+  duration: number;
+  position: [number, number, number];
+  // Common refs
+  groupRef?: React.RefObject<THREE.Group>;
+  particlesRef?: React.RefObject<THREE.InstancedMesh | THREE.Points>;
+  materialRef?: React.RefObject<THREE.MeshStandardMaterial>;
+  lightRef?: React.RefObject<THREE.PointLight>;
+  // Grain spill specific
+  scaleRef?: React.MutableRefObject<number>;
+  positions?: Array<{ x: number; z: number; delay: number; scale: number }>;
+  dummy?: THREE.Object3D;
+  // Rat specific
+  tailRef?: React.RefObject<THREE.Mesh>;
+  angleRef?: React.MutableRefObject<number>;
+  radiusRef?: React.MutableRefObject<number>;
+  panicModeRef?: React.MutableRefObject<boolean>;
+  // Pigeon specific
+  wingLeftRef?: React.RefObject<THREE.Mesh>;
+  wingRightRef?: React.RefObject<THREE.Mesh>;
+  headRef?: React.RefObject<THREE.Mesh>;
+  isFlying?: React.MutableRefObject<boolean>;
+  flyTargetRef?: React.MutableRefObject<{ x: number; y: number; z: number }>;
+  flyTargetVecRef?: React.MutableRefObject<THREE.Vector3>;
+  // Temperature spike specific
+  glowRef?: React.RefObject<THREE.Mesh>;
+  steamPositions?: Float32Array;
+  smokePositions?: Float32Array;
+}
+
+type RegisterFn = (refs: ChaosRefs) => void;
+type UnregisterFn = (eventId: string) => void;
+
+const ChaosAnimationContext = createContext<{
+  register: RegisterFn;
+  unregister: UnregisterFn;
+} | null>(null);
+
+const useChaosAnimation = () => {
+  const ctx = useContext(ChaosAnimationContext);
+  if (!ctx) throw new Error('useChaosAnimation must be used within ChaosAnimationProvider');
+  return ctx;
+};
+
+// =========================================================================
+// ANIMATION FUNCTIONS - Pure functions for each chaos type
+// =========================================================================
+
+function animateGrainSpill(refs: ChaosRefs, state: RootState): void {
+  if (!refs.particlesRef?.current || !refs.positions || !refs.dummy || !refs.scaleRef) return;
+
+  const elapsed = (Date.now() - refs.startTime) / 1000;
+  refs.scaleRef.current = Math.min(1, elapsed / 2);
+
+  refs.positions.forEach((p, i) => {
+    const spreadProgress = Math.max(0, Math.min(1, (refs.scaleRef!.current - p.delay) / 0.5));
+    refs.dummy!.position.set(
+      refs.position[0] + p.x * spreadProgress * 1.5,
+      0.02 + Math.sin(state.clock.elapsedTime * 3 + i) * 0.01,
+      refs.position[2] + p.z * spreadProgress * 1.5
+    );
+    refs.dummy!.scale.setScalar(p.scale * spreadProgress);
+    refs.dummy!.updateMatrix();
+    (refs.particlesRef!.current as THREE.InstancedMesh).setMatrixAt(i, refs.dummy!.matrix);
+  });
+  (refs.particlesRef!.current as THREE.InstancedMesh).instanceMatrix.needsUpdate = true;
+}
+
+function animateDustCloud(refs: ChaosRefs, state: RootState): void {
+  if (!refs.particlesRef?.current) return;
+  const particles = refs.particlesRef.current as THREE.Points;
+
+  const elapsed = (Date.now() - refs.startTime) / 1000;
+  const expansion = Math.min(3, elapsed * 2);
+  const fade = Math.max(0, 1 - elapsed / refs.duration);
+
+  particles.scale.setScalar(expansion);
+  (particles.material as THREE.PointsMaterial).opacity = fade * 0.4;
+  particles.rotation.y = state.clock.elapsedTime * 0.2;
+}
+
+function animateRat(refs: ChaosRefs, state: RootState): void {
+  if (!refs.groupRef?.current || !refs.angleRef || !refs.radiusRef || !refs.panicModeRef) return;
+
+  const time = state.clock.elapsedTime;
+
+  // Rat scurries in expanding circles, occasionally panicking
+  if (Math.random() < 0.01) refs.panicModeRef.current = !refs.panicModeRef.current;
+
+  const speed = refs.panicModeRef.current ? 8 : 3;
+  refs.angleRef.current += 0.05 * speed;
+  refs.radiusRef.current = 1 + Math.sin(time * 0.5) * 2;
+
+  const x = refs.position[0] + Math.cos(refs.angleRef.current) * refs.radiusRef.current;
+  const z = refs.position[2] + Math.sin(refs.angleRef.current) * refs.radiusRef.current;
+
+  refs.groupRef.current.position.set(x, 0.05, z);
+  refs.groupRef.current.rotation.y = refs.angleRef.current + Math.PI / 2;
+
+  // Tail wiggle
+  if (refs.tailRef?.current) {
+    refs.tailRef.current.rotation.y = Math.sin(time * 15) * 0.5;
+  }
+}
+
+function animatePigeon(refs: ChaosRefs, state: RootState): void {
+  if (!refs.groupRef?.current || !refs.isFlying || !refs.flyTargetRef || !refs.flyTargetVecRef) return;
+
+  const time = state.clock.elapsedTime;
+
+  // Randomly decide to fly or walk
+  if (Math.random() < 0.005) {
+    refs.isFlying.current = !refs.isFlying.current;
+    if (refs.isFlying.current) {
+      refs.flyTargetRef.current = {
+        x: refs.position[0] + (Math.random() - 0.5) * 6,
+        y: 1 + Math.random() * 2,
+        z: refs.position[2] + (Math.random() - 0.5) * 6,
+      };
+    }
+  }
+
+  const pos = refs.groupRef.current.position;
+
+  if (refs.isFlying.current) {
+    // Flying behavior
+    refs.flyTargetVecRef.current.set(
+      refs.flyTargetRef.current.x,
+      refs.flyTargetRef.current.y,
+      refs.flyTargetRef.current.z
+    );
+    pos.lerp(refs.flyTargetVecRef.current, 0.02);
+
+    // Wing flapping
+    if (refs.wingLeftRef?.current && refs.wingRightRef?.current) {
+      const flap = Math.sin(time * 20) * 0.8;
+      refs.wingLeftRef.current.rotation.z = flap;
+      refs.wingRightRef.current.rotation.z = -flap;
+    }
+  } else {
+    // Walking/pecking behavior
+    pos.y = 0.1;
+
+    // Waddle walk
+    if (Math.random() < 0.02) {
+      pos.x += (Math.random() - 0.5) * 0.1;
+      pos.z += (Math.random() - 0.5) * 0.1;
+    }
+
+    // Wings folded
+    if (refs.wingLeftRef?.current && refs.wingRightRef?.current) {
+      refs.wingLeftRef.current.rotation.z = THREE.MathUtils.lerp(
+        refs.wingLeftRef.current.rotation.z,
+        0,
+        0.1
+      );
+      refs.wingRightRef.current.rotation.z = THREE.MathUtils.lerp(
+        refs.wingRightRef.current.rotation.z,
+        0,
+        0.1
+      );
+    }
+
+    // Head bobbing (classic pigeon)
+    if (refs.headRef?.current) {
+      refs.headRef.current.position.z = 0.06 + Math.sin(time * 8) * 0.02;
+    }
+  }
+}
+
+function animatePuddle(refs: ChaosRefs, state: RootState): void {
+  if (refs.materialRef?.current) {
+    refs.materialRef.current.opacity = 0.6 + Math.sin(state.clock.elapsedTime * 2) * 0.1;
+  }
+}
+
+function animateConveyorJam(refs: ChaosRefs, state: RootState): void {
+  if (refs.groupRef?.current) {
+    refs.groupRef.current.rotation.y = Math.sin(state.clock.elapsedTime) * 0.02;
+  }
+}
+
+function animateTemperatureSpike(refs: ChaosRefs, state: RootState): void {
+  if (refs.particlesRef?.current) {
+    const steam = refs.particlesRef.current as THREE.Points;
+    steam.rotation.y = state.clock.elapsedTime * 0.3;
+    const geo = steam.geometry;
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      pos.setY(i, (pos.getY(i) + 0.02) % 2);
+    }
+    pos.needsUpdate = true;
+  }
+  if (refs.glowRef?.current) {
+    const pulse = 0.8 + Math.sin(state.clock.elapsedTime * 4) * 0.2;
+    refs.glowRef.current.scale.setScalar(pulse);
+  }
+}
+
+function animatePowerFlicker(refs: ChaosRefs): void {
+  if (refs.lightRef?.current) {
+    const flicker = Math.random() > 0.3 ? 1 : 0.2;
+    refs.lightRef.current.intensity = flicker * 2;
+  }
+}
+
+function animateCoffeeMachine(refs: ChaosRefs): void {
+  if (refs.particlesRef?.current) {
+    const smoke = refs.particlesRef.current as THREE.Points;
+    const geo = smoke.geometry;
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      pos.setY(i, (pos.getY(i) + 0.01) % 1);
+    }
+    pos.needsUpdate = true;
+  }
+}
+
+// =========================================================================
+// CHAOS ANIMATION MANAGER - Single useFrame for all events
+// =========================================================================
+
+const ChaosAnimationManager: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const chaosRefsMap = useRef<Map<string, ChaosRefs>>(new Map());
+  const frameCountRef = useRef(0);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+
+  const register = useCallback<RegisterFn>((refs) => {
+    chaosRefsMap.current.set(refs.eventId, refs);
+  }, []);
+
+  const unregister = useCallback<UnregisterFn>((eventId) => {
+    chaosRefsMap.current.delete(eventId);
+  }, []);
+
+  // Single useFrame for ALL chaos events (consolidates 9 hooks into 1)
+  useFrame((state) => {
+    if (!isTabVisible) return;
+    frameCountRef.current++;
+    if (frameCountRef.current % 3 !== 0) return; // Throttle to ~20fps
+
+    chaosRefsMap.current.forEach((refs) => {
+      switch (refs.type) {
+        case 'grain_spill':
+          animateGrainSpill(refs, state);
+          break;
+        case 'dust_cloud':
+          animateDustCloud(refs, state);
+          break;
+        case 'rat_sighting':
+          animateRat(refs, state);
+          break;
+        case 'pigeon_incursion':
+          animatePigeon(refs, state);
+          break;
+        case 'mysterious_puddle':
+          animatePuddle(refs, state);
+          break;
+        case 'conveyor_jam':
+          animateConveyorJam(refs, state);
+          break;
+        case 'temperature_spike':
+          animateTemperatureSpike(refs, state);
+          break;
+        case 'power_flicker':
+          animatePowerFlicker(refs);
+          break;
+        case 'coffee_machine_broken':
+          animateCoffeeMachine(refs);
+          break;
+      }
+    });
+  });
+
+  const contextValue = useMemo(() => ({ register, unregister }), [register, unregister]);
+
+  return (
+    <ChaosAnimationContext.Provider value={contextValue}>
+      {children}
+    </ChaosAnimationContext.Provider>
+  );
+};
 
 // =========================================================================
 // GRAIN SPILL - Animated pile spreading on floor
 // =========================================================================
 const GrainSpill: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
+  const { register, unregister } = useChaosAnimation();
   const groupRef = useRef<THREE.Group>(null);
   const particlesRef = useRef<THREE.InstancedMesh>(null);
   const scaleRef = useRef(0);
@@ -32,25 +326,22 @@ const GrainSpill: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
     }));
   }, []);
 
-  useFrame((state) => {
-    if (!particlesRef.current) return;
-
-    const elapsed = (Date.now() - event.startTime) / 1000;
-    scaleRef.current = Math.min(1, elapsed / 2); // Spread over 2 seconds
-
-    positions.forEach((p, i) => {
-      const spreadProgress = Math.max(0, Math.min(1, (scaleRef.current - p.delay) / 0.5));
-      dummy.position.set(
-        event.position[0] + p.x * spreadProgress * 1.5,
-        0.02 + Math.sin(state.clock.elapsedTime * 3 + i) * 0.01,
-        event.position[2] + p.z * spreadProgress * 1.5
-      );
-      dummy.scale.setScalar(p.scale * spreadProgress);
-      dummy.updateMatrix();
-      particlesRef.current!.setMatrixAt(i, dummy.matrix);
+  // Register with animation manager
+  React.useEffect(() => {
+    register({
+      type: 'grain_spill',
+      eventId: event.id,
+      startTime: event.startTime,
+      duration: event.duration,
+      position: event.position,
+      groupRef,
+      particlesRef: particlesRef as React.RefObject<THREE.InstancedMesh | THREE.Points>,
+      scaleRef,
+      positions,
+      dummy,
     });
-    particlesRef.current.instanceMatrix.needsUpdate = true;
-  });
+    return () => unregister(event.id);
+  }, [register, unregister, event.id, event.startTime, event.duration, event.position, positions, dummy]);
 
   return (
     <group ref={groupRef} position={[event.position[0], 0, event.position[2]]}>
@@ -81,6 +372,7 @@ GrainSpill.displayName = 'GrainSpill';
 // DUST CLOUD - Particle burst, workers cough dramatically
 // =========================================================================
 const DustCloud: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
+  const { register, unregister } = useChaosAnimation();
   const particlesRef = useRef<THREE.Points>(null);
 
   const particleCount = 100;
@@ -94,17 +386,18 @@ const DustCloud: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
     return arr;
   }, []);
 
-  useFrame((state) => {
-    if (!particlesRef.current) return;
-
-    const elapsed = (Date.now() - event.startTime) / 1000;
-    const expansion = Math.min(3, elapsed * 2);
-    const fade = Math.max(0, 1 - elapsed / event.duration);
-
-    particlesRef.current.scale.setScalar(expansion);
-    (particlesRef.current.material as THREE.PointsMaterial).opacity = fade * 0.4;
-    particlesRef.current.rotation.y = state.clock.elapsedTime * 0.2;
-  });
+  // Register with animation manager
+  React.useEffect(() => {
+    register({
+      type: 'dust_cloud',
+      eventId: event.id,
+      startTime: event.startTime,
+      duration: event.duration,
+      position: event.position,
+      particlesRef: particlesRef as React.RefObject<THREE.InstancedMesh | THREE.Points>,
+    });
+    return () => unregister(event.id);
+  }, [register, unregister, event.id, event.startTime, event.duration, event.position]);
 
   return (
     <group position={event.position}>
@@ -123,35 +416,29 @@ DustCloud.displayName = 'DustCloud';
 // RAT - Animated rat scurrying around. Everyone panics (slightly)
 // =========================================================================
 const Rat: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
+  const { register, unregister } = useChaosAnimation();
   const groupRef = useRef<THREE.Group>(null);
   const tailRef = useRef<THREE.Mesh>(null);
   const angleRef = useRef(Math.random() * Math.PI * 2);
   const radiusRef = useRef(0);
   const panicModeRef = useRef(false);
 
-  useFrame((state) => {
-    if (!groupRef.current) return;
-
-    const time = state.clock.elapsedTime;
-
-    // Rat scurries in expanding circles, occasionally panicking
-    if (Math.random() < 0.01) panicModeRef.current = !panicModeRef.current;
-
-    const speed = panicModeRef.current ? 8 : 3;
-    angleRef.current += 0.05 * speed;
-    radiusRef.current = 1 + Math.sin(time * 0.5) * 2;
-
-    const x = event.position[0] + Math.cos(angleRef.current) * radiusRef.current;
-    const z = event.position[2] + Math.sin(angleRef.current) * radiusRef.current;
-
-    groupRef.current.position.set(x, 0.05, z);
-    groupRef.current.rotation.y = angleRef.current + Math.PI / 2;
-
-    // Tail wiggle
-    if (tailRef.current) {
-      tailRef.current.rotation.y = Math.sin(time * 15) * 0.5;
-    }
-  });
+  // Register with animation manager
+  React.useEffect(() => {
+    register({
+      type: 'rat_sighting',
+      eventId: event.id,
+      startTime: event.startTime,
+      duration: event.duration,
+      position: event.position,
+      groupRef,
+      tailRef,
+      angleRef,
+      radiusRef,
+      panicModeRef,
+    });
+    return () => unregister(event.id);
+  }, [register, unregister, event.id, event.startTime, event.duration, event.position]);
 
   return (
     <group ref={groupRef}>
@@ -214,6 +501,7 @@ Rat.displayName = 'Rat';
 // PIGEON - A pigeon got in. It's judging everyone.
 // =========================================================================
 const Pigeon: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
+  const { register, unregister } = useChaosAnimation();
   const groupRef = useRef<THREE.Group>(null);
   const wingLeftRef = useRef<THREE.Mesh>(null);
   const wingRightRef = useRef<THREE.Mesh>(null);
@@ -222,62 +510,24 @@ const Pigeon: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
   const flyTargetRef = useRef({ x: event.position[0], y: 0.5, z: event.position[2] });
   const flyTargetVecRef = useRef(new THREE.Vector3());
 
-  useFrame((state) => {
-    if (!groupRef.current) return;
-
-    const time = state.clock.elapsedTime;
-
-    // Randomly decide to fly or walk
-    if (Math.random() < 0.005) {
-      isFlying.current = !isFlying.current;
-      if (isFlying.current) {
-        flyTargetRef.current = {
-          x: event.position[0] + (Math.random() - 0.5) * 6,
-          y: 1 + Math.random() * 2,
-          z: event.position[2] + (Math.random() - 0.5) * 6,
-        };
-      }
-    }
-
-    const pos = groupRef.current.position;
-
-    if (isFlying.current) {
-      // Flying behavior
-      flyTargetVecRef.current.set(
-        flyTargetRef.current.x,
-        flyTargetRef.current.y,
-        flyTargetRef.current.z
-      );
-      pos.lerp(flyTargetVecRef.current, 0.02);
-
-      // Wing flapping
-      if (wingLeftRef.current && wingRightRef.current) {
-        const flap = Math.sin(time * 20) * 0.8;
-        wingLeftRef.current.rotation.z = flap;
-        wingRightRef.current.rotation.z = -flap;
-      }
-    } else {
-      // Walking/pecking behavior
-      pos.y = 0.1;
-
-      // Waddle walk
-      if (Math.random() < 0.02) {
-        pos.x += (Math.random() - 0.5) * 0.1;
-        pos.z += (Math.random() - 0.5) * 0.1;
-      }
-
-      // Wings folded
-      if (wingLeftRef.current && wingRightRef.current) {
-        wingLeftRef.current.rotation.z = THREE.MathUtils.lerp(wingLeftRef.current.rotation.z, 0, 0.1);
-        wingRightRef.current.rotation.z = THREE.MathUtils.lerp(wingRightRef.current.rotation.z, 0, 0.1);
-      }
-
-      // Head bobbing (classic pigeon)
-      if (headRef.current) {
-        headRef.current.position.z = 0.06 + Math.sin(time * 8) * 0.02;
-      }
-    }
-  });
+  // Register with animation manager
+  React.useEffect(() => {
+    register({
+      type: 'pigeon_incursion',
+      eventId: event.id,
+      startTime: event.startTime,
+      duration: event.duration,
+      position: event.position,
+      groupRef,
+      wingLeftRef,
+      wingRightRef,
+      headRef,
+      isFlying,
+      flyTargetRef,
+      flyTargetVecRef,
+    });
+    return () => unregister(event.id);
+  }, [register, unregister, event.id, event.startTime, event.duration, event.position]);
 
   return (
     <group ref={groupRef} position={[event.position[0], 0.5, event.position[2]]}>
@@ -352,14 +602,21 @@ Pigeon.displayName = 'Pigeon';
 // MYSTERIOUS PUDDLE - Nobody knows where it came from
 // =========================================================================
 const MysteriousPuddle: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
+  const { register, unregister } = useChaosAnimation();
   const materialRef = useRef<THREE.MeshStandardMaterial>(null);
 
-  useFrame((state) => {
-    if (materialRef.current) {
-      // Subtle ripple effect
-      materialRef.current.opacity = 0.6 + Math.sin(state.clock.elapsedTime * 2) * 0.1;
-    }
-  });
+  // Register with animation manager
+  React.useEffect(() => {
+    register({
+      type: 'mysterious_puddle',
+      eventId: event.id,
+      startTime: event.startTime,
+      duration: event.duration,
+      position: event.position,
+      materialRef,
+    });
+    return () => unregister(event.id);
+  }, [register, unregister, event.id, event.startTime, event.duration, event.position]);
 
   return (
     <group position={[event.position[0], 0.01, event.position[2]]}>
@@ -395,29 +652,41 @@ MysteriousPuddle.displayName = 'MysteriousPuddle';
 // CONVEYOR JAM - Bags piling up ominously
 // =========================================================================
 const ConveyorJam: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
+  const { register, unregister } = useChaosAnimation();
   const bagsRef = useRef<THREE.Group>(null);
 
   const bagPositions = useMemo(() => {
     return Array.from({ length: 8 }, (_, i) => ({
       x: (Math.random() - 0.5) * 1.5,
-      y: 0.15 + (i * 0.12) + Math.random() * 0.05,
+      y: 0.15 + i * 0.12 + Math.random() * 0.05,
       z: (Math.random() - 0.5) * 0.8,
       rotX: (Math.random() - 0.5) * 0.3,
       rotZ: (Math.random() - 0.5) * 0.3,
     }));
   }, []);
 
-  useFrame((state) => {
-    if (bagsRef.current) {
-      // Subtle wobble
-      bagsRef.current.rotation.y = Math.sin(state.clock.elapsedTime) * 0.02;
-    }
-  });
+  // Register with animation manager
+  React.useEffect(() => {
+    register({
+      type: 'conveyor_jam',
+      eventId: event.id,
+      startTime: event.startTime,
+      duration: event.duration,
+      position: event.position,
+      groupRef: bagsRef,
+    });
+    return () => unregister(event.id);
+  }, [register, unregister, event.id, event.startTime, event.duration, event.position]);
 
   return (
     <group ref={bagsRef} position={event.position}>
       {bagPositions.map((pos, i) => (
-        <mesh key={i} position={[pos.x, pos.y, pos.z]} rotation={[pos.rotX, 0, pos.rotZ]} castShadow>
+        <mesh
+          key={i}
+          position={[pos.x, pos.y, pos.z]}
+          rotation={[pos.rotX, 0, pos.rotZ]}
+          castShadow
+        >
           <boxGeometry args={[0.3, 0.2, 0.15]} />
           <meshStandardMaterial color={i % 2 === 0 ? '#e5d5c5' : '#d4c4b4'} roughness={0.9} />
         </mesh>
@@ -438,6 +707,7 @@ ConveyorJam.displayName = 'ConveyorJam';
 // TEMPERATURE SPIKE - Steam venting, red glow
 // =========================================================================
 const TemperatureSpike: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
+  const { register, unregister } = useChaosAnimation();
   const steamRef = useRef<THREE.Points>(null);
   const glowRef = useRef<THREE.Mesh>(null);
 
@@ -451,21 +721,20 @@ const TemperatureSpike: React.FC<{ event: ChaosEvent }> = React.memo(({ event })
     return arr;
   }, []);
 
-  useFrame((state) => {
-    if (steamRef.current) {
-      steamRef.current.rotation.y = state.clock.elapsedTime * 0.3;
-      const geo = steamRef.current.geometry;
-      const pos = geo.attributes.position as THREE.BufferAttribute;
-      for (let i = 0; i < pos.count; i++) {
-        pos.setY(i, (pos.getY(i) + 0.02) % 2);
-      }
-      pos.needsUpdate = true;
-    }
-    if (glowRef.current) {
-      const pulse = 0.8 + Math.sin(state.clock.elapsedTime * 4) * 0.2;
-      glowRef.current.scale.setScalar(pulse);
-    }
-  });
+  // Register with animation manager
+  React.useEffect(() => {
+    register({
+      type: 'temperature_spike',
+      eventId: event.id,
+      startTime: event.startTime,
+      duration: event.duration,
+      position: event.position,
+      particlesRef: steamRef as React.RefObject<THREE.InstancedMesh | THREE.Points>,
+      glowRef,
+      steamPositions,
+    });
+    return () => unregister(event.id);
+  }, [register, unregister, event.id, event.startTime, event.duration, event.position, steamPositions]);
 
   return (
     <group position={event.position}>
@@ -498,15 +767,21 @@ TemperatureSpike.displayName = 'TemperatureSpike';
 // POWER FLICKER - Handled via scene lighting, this is just the indicator
 // =========================================================================
 const PowerFlicker: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
+  const { register, unregister } = useChaosAnimation();
   const lightRef = useRef<THREE.PointLight>(null);
 
-  useFrame(() => {
-    if (lightRef.current) {
-      // Flickering effect
-      const flicker = Math.random() > 0.3 ? 1 : 0.2;
-      lightRef.current.intensity = flicker * 2;
-    }
-  });
+  // Register with animation manager
+  React.useEffect(() => {
+    register({
+      type: 'power_flicker',
+      eventId: event.id,
+      startTime: event.startTime,
+      duration: event.duration,
+      position: event.position,
+      lightRef,
+    });
+    return () => unregister(event.id);
+  }, [register, unregister, event.id, event.startTime, event.duration, event.position]);
 
   return (
     <group position={event.position}>
@@ -525,6 +800,7 @@ PowerFlicker.displayName = 'PowerFlicker';
 // COFFEE MACHINE BROKEN - The most serious disaster
 // =========================================================================
 const CoffeeMachineBroken: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
+  const { register, unregister } = useChaosAnimation();
   const smokeRef = useRef<THREE.Points>(null);
 
   const smokePositions = useMemo(() => {
@@ -537,16 +813,19 @@ const CoffeeMachineBroken: React.FC<{ event: ChaosEvent }> = React.memo(({ event
     return arr;
   }, []);
 
-  useFrame(() => {
-    if (smokeRef.current) {
-      const geo = smokeRef.current.geometry;
-      const pos = geo.attributes.position as THREE.BufferAttribute;
-      for (let i = 0; i < pos.count; i++) {
-        pos.setY(i, (pos.getY(i) + 0.01) % 1);
-      }
-      pos.needsUpdate = true;
-    }
-  });
+  // Register with animation manager
+  React.useEffect(() => {
+    register({
+      type: 'coffee_machine_broken',
+      eventId: event.id,
+      startTime: event.startTime,
+      duration: event.duration,
+      position: event.position,
+      particlesRef: smokeRef as React.RefObject<THREE.InstancedMesh | THREE.Points>,
+      smokePositions,
+    });
+    return () => unregister(event.id);
+  }, [register, unregister, event.id, event.startTime, event.duration, event.position, smokePositions]);
 
   return (
     <group position={event.position}>
@@ -617,15 +896,19 @@ const ChaosEventRenderer: React.FC<{ event: ChaosEvent }> = ({ event }) => {
 };
 
 // Main visible chaos system component
+// PERFORMANCE: Wraps all chaos events in ChaosAnimationManager
+// to consolidate 9 separate useFrame hooks into 1 centralized manager
 export const VisibleChaos: React.FC = () => {
   const chaosEvents = useWorkerMoodStore((state) => state.chaosEvents);
 
   return (
-    <group>
-      {chaosEvents.map((event) => (
-        <ChaosEventRenderer key={event.id} event={event} />
-      ))}
-    </group>
+    <ChaosAnimationManager>
+      <group>
+        {chaosEvents.map((event) => (
+          <ChaosEventRenderer key={event.id} event={event} />
+        ))}
+      </group>
+    </ChaosAnimationManager>
   );
 };
 

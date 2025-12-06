@@ -2,14 +2,16 @@ import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Text, Billboard, RoundedBox } from '@react-three/drei';
 import * as THREE from 'three';
-import { useMillStore } from '../store';
+import { useProductionStore } from '../stores/productionStore';
+import { useGraphicsStore } from '../stores/graphicsStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useShallow } from 'zustand/react/shallow';
 import { shouldRunThisFrame, getThrottleLevel } from '../utils/frameThrottle';
 import { MachineType } from '../types';
 
 export const HolographicDisplays: React.FC = () => {
   // Use useShallow to prevent re-renders when unrelated store values change
-  const { dockStatus, machines, metrics, totalBagsProduced, productionSpeed } = useMillStore(
+  const { dockStatus, machines, metrics, totalBagsProduced, productionSpeed } = useProductionStore(
     useShallow((state) => ({
       dockStatus: state.dockStatus,
       machines: state.machines,
@@ -169,9 +171,27 @@ interface HoloPanelProps {
 const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue, color, size }) => {
   const groupRef = useRef<THREE.Group>(null);
   const glowRef = useRef<THREE.Mesh>(null);
-  const graphicsQuality = useMillStore((state) => state.graphics.quality);
+  const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+
+  // Memoize computed positions to prevent array recreation on each render
+  const topBorderPos = useMemo(() => [0, size[1] / 2 - 0.1, 0.03] as const, [size]);
+  const titlePos = useMemo(() => [0, size[1] / 2 - 0.35, 0.04] as const, [size]);
+  const valuePos = useMemo(() => [0, subValue ? 0.1 : 0, 0.04] as const, [subValue]);
+  const cornerPositions = useMemo(
+    () =>
+      [
+        [-1, 1],
+        [1, 1],
+        [-1, -1],
+        [1, -1],
+      ].map(([x, y]) => [x * (size[0] / 2 - 0.15), y * (size[1] / 2 - 0.15), 0.03] as const),
+    [size]
+  );
 
   useFrame((state) => {
+    // PERFORMANCE: Skip when tab hidden
+    if (!isTabVisible) return;
     // Use shared throttle utility for consistent performance
     const throttle = getThrottleLevel(graphicsQuality);
     if (!shouldRunThisFrame(throttle)) return;
@@ -212,30 +232,18 @@ const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue,
         </mesh>
 
         {/* Top border accent */}
-        <mesh position={[0, size[1] / 2 - 0.1, 0.03]}>
+        <mesh position={topBorderPos}>
           <planeGeometry args={[size[0] - 0.2, 0.05]} />
           <meshBasicMaterial color={color} />
         </mesh>
 
         {/* Title */}
-        <Text
-          position={[0, size[1] / 2 - 0.35, 0.04]}
-          fontSize={0.2}
-          color="#94a3b8"
-          anchorX="center"
-          anchorY="middle"
-        >
+        <Text position={titlePos} fontSize={0.2} color="#94a3b8" anchorX="center" anchorY="middle">
           {title}
         </Text>
 
         {/* Main value */}
-        <Text
-          position={[0, subValue ? 0.1 : 0, 0.04]}
-          fontSize={0.5}
-          color={color}
-          anchorX="center"
-          anchorY="middle"
-        >
+        <Text position={valuePos} fontSize={0.5} color={color} anchorX="center" anchorY="middle">
           {value}
         </Text>
 
@@ -253,13 +261,8 @@ const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue,
         )}
 
         {/* Corner accents */}
-        {[
-          [-1, 1],
-          [1, 1],
-          [-1, -1],
-          [1, -1],
-        ].map(([x, y], i) => (
-          <mesh key={i} position={[x * (size[0] / 2 - 0.15), y * (size[1] / 2 - 0.15), 0.03]}>
+        {cornerPositions.map((pos, i) => (
+          <mesh key={i} position={pos}>
             <circleGeometry args={[0.05, 16]} />
             <meshBasicMaterial color={color} />
           </mesh>
@@ -271,7 +274,8 @@ const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue,
 
 const DataParticles: React.FC = React.memo(() => {
   const particlesRef = useRef<THREE.Points>(null);
-  const graphicsQuality = useMillStore((state) => state.graphics.quality);
+  const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const count = graphicsQuality === 'low' ? 50 : 100; // Reduce particle count on low
 
   const positions = React.useMemo(() => {
@@ -285,6 +289,8 @@ const DataParticles: React.FC = React.memo(() => {
   }, [count]);
 
   useFrame(() => {
+    // PERFORMANCE: Skip when tab hidden
+    if (!isTabVisible) return;
     // Use shared throttle utility for consistent performance
     const throttle = getThrottleLevel(graphicsQuality);
     if (!shouldRunThisFrame(throttle)) return;
@@ -307,10 +313,7 @@ const DataParticles: React.FC = React.memo(() => {
   return (
     <points ref={particlesRef} key={`data-particles-${count}`}>
       <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          args={[positions, 3]}
-        />
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
       <pointsMaterial size={0.1} color="#06b6d4" transparent opacity={0.6} sizeAttenuation />
     </points>

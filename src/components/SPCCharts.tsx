@@ -37,12 +37,7 @@ import { useUIStore } from '../stores/uiStore';
 
 type ChartType = 'xbar' | 'r-chart' | 'i-mr' | 'p-chart';
 
-type MetricType =
-  | 'temperature'
-  | 'vibration'
-  | 'production_rate'
-  | 'quality_grade'
-  | 'bag_weight';
+type MetricType = 'temperature' | 'vibration' | 'production_rate' | 'quality_grade' | 'bag_weight';
 
 interface SPCDataPoint {
   timestamp: number;
@@ -76,9 +71,7 @@ interface WesternElectricViolation {
 // Western Electric Rules Detection
 // ============================================================================
 
-const detectWesternElectricRules = (
-  dataPoints: SPCDataPoint[]
-): WesternElectricViolation[] => {
+const detectWesternElectricRules = (dataPoints: SPCDataPoint[]): WesternElectricViolation[] => {
   const violations: WesternElectricViolation[] = [];
 
   dataPoints.forEach((point, i) => {
@@ -98,9 +91,7 @@ const detectWesternElectricRules = (
     // Rule 2: 2 of 3 consecutive points beyond 2σ (warning limits)
     if (i >= 2) {
       const last3 = dataPoints.slice(i - 2, i + 1);
-      const beyond2Sigma = last3.filter(
-        (p) => p.value > p.uwl || p.value < p.lwl
-      ).length;
+      const beyond2Sigma = last3.filter((p) => p.value > p.uwl || p.value < p.lwl).length;
       if (beyond2Sigma >= 2) {
         ruleViolations.push('Rule 2: 2 of 3 beyond 2σ');
         violations.push({
@@ -159,8 +150,7 @@ const detectWesternElectricRules = (
 
 const calculateControlLimits = (values: number[]): ControlLimits => {
   const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
-  const variance =
-    values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / values.length;
+  const variance = values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / values.length;
   const stdDev = Math.sqrt(variance);
 
   return {
@@ -176,10 +166,7 @@ const calculateControlLimits = (values: number[]): ControlLimits => {
 // Mock Data Generator (replace with real SCADA data)
 // ============================================================================
 
-const generateMockData = (
-  metricType: MetricType,
-  hours = 24
-): SPCDataPoint[] => {
+const generateMockData = (metricType: MetricType, hours = 24): SPCDataPoint[] => {
   const points: number[] = [];
   const now = Date.now();
   const interval = (hours * 60 * 60 * 1000) / 50; // 50 data points
@@ -278,10 +265,7 @@ interface SPCChartsProps {
 // Main Component
 // ============================================================================
 
-export const SPCCharts: React.FC<SPCChartsProps> = ({
-  className = '',
-  embedded = false,
-}) => {
+export const SPCCharts: React.FC<SPCChartsProps> = ({ className = '', embedded = false }) => {
   // State
   const [selectedMetric, setSelectedMetric] = useState<MetricType>('temperature');
   const [_selectedChart, setSelectedChart] = useState<ChartType>('xbar');
@@ -313,18 +297,14 @@ export const SPCCharts: React.FC<SPCChartsProps> = ({
 
     const values = data.map((d) => d.value);
     const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
-    const variance =
-      values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / values.length;
+    const variance = values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / values.length;
     const stdDev = Math.sqrt(variance);
 
     const inControl = data.filter((d) => d.status === 'in-control').length;
     const warning = data.filter((d) => d.status === 'warning').length;
     const outOfControl = data.filter((d) => d.status === 'out-of-control').length;
 
-    const cpk = Math.min(
-      (data[0].ucl - mean) / (3 * stdDev),
-      (mean - data[0].lcl) / (3 * stdDev)
-    );
+    const cpk = Math.min((data[0].ucl - mean) / (3 * stdDev), (mean - data[0].lcl) / (3 * stdDev));
 
     return {
       mean: mean.toFixed(2),
@@ -350,16 +330,7 @@ export const SPCCharts: React.FC<SPCChartsProps> = ({
     if (payload?.status === 'warning') fill = '#eab308'; // yellow
     if (payload?.status === 'out-of-control') fill = '#ef4444'; // red
 
-    return (
-      <circle
-        cx={cx}
-        cy={cy}
-        r={4}
-        fill={fill}
-        stroke="#1e293b"
-        strokeWidth={1}
-      />
-    );
+    return <circle cx={cx} cy={cy} r={4} fill={fill} stroke="#1e293b" strokeWidth={1} />;
   };
 
   // Handle export
@@ -495,14 +466,10 @@ export const SPCCharts: React.FC<SPCChartsProps> = ({
                 <div className="grid grid-cols-4 gap-3">
                   {/* Metric Selection */}
                   <div>
-                    <label className="text-xs text-slate-400 mb-1 block">
-                      Metric
-                    </label>
+                    <label className="text-xs text-slate-400 mb-1 block">Metric</label>
                     <select
                       value={selectedMetric}
-                      onChange={(e) =>
-                        setSelectedMetric(e.target.value as MetricType)
-                      }
+                      onChange={(e) => setSelectedMetric(e.target.value as MetricType)}
                       className="w-full text-sm bg-slate-700 text-white rounded px-3 py-2 border border-slate-600"
                     >
                       <option value="temperature">Temperature (C)</option>
@@ -515,9 +482,7 @@ export const SPCCharts: React.FC<SPCChartsProps> = ({
 
                   {/* Chart Type */}
                   <div>
-                    <label className="text-xs text-slate-400 mb-1 block">
-                      Chart Type
-                    </label>
+                    <label className="text-xs text-slate-400 mb-1 block">Chart Type</label>
                     <select
                       value={_selectedChart}
                       onChange={(e) => setSelectedChart(e.target.value as ChartType)}
@@ -532,9 +497,7 @@ export const SPCCharts: React.FC<SPCChartsProps> = ({
 
                   {/* Time Range */}
                   <div>
-                    <label className="text-xs text-slate-400 mb-1 block">
-                      Time Range
-                    </label>
+                    <label className="text-xs text-slate-400 mb-1 block">Time Range</label>
                     <select
                       value={timeRange}
                       onChange={(e) => setTimeRange(Number(e.target.value) as 1 | 8 | 24)}
@@ -551,9 +514,7 @@ export const SPCCharts: React.FC<SPCChartsProps> = ({
                     <button
                       onClick={() => setShowAnnotations(!_showAnnotations)}
                       className={`flex-1 text-xs px-3 py-2 rounded transition-colors ${
-                        _showAnnotations
-                          ? 'bg-cyan-600 text-white'
-                          : 'bg-slate-700 text-slate-300'
+                        _showAnnotations ? 'bg-cyan-600 text-white' : 'bg-slate-700 text-slate-300'
                       }`}
                     >
                       Annotations
@@ -574,15 +535,11 @@ export const SPCCharts: React.FC<SPCChartsProps> = ({
                 <div className="grid grid-cols-6 gap-3 p-4 bg-slate-800/30">
                   <div className="text-center">
                     <div className="text-xs text-slate-400 mb-1">Mean</div>
-                    <div className="text-lg font-bold text-white font-mono">
-                      {stats.mean}
-                    </div>
+                    <div className="text-lg font-bold text-white font-mono">{stats.mean}</div>
                   </div>
                   <div className="text-center">
                     <div className="text-xs text-slate-400 mb-1">Std Dev</div>
-                    <div className="text-lg font-bold text-cyan-400 font-mono">
-                      {stats.stdDev}
-                    </div>
+                    <div className="text-lg font-bold text-cyan-400 font-mono">{stats.stdDev}</div>
                   </div>
                   <div className="text-center">
                     <div className="text-xs text-slate-400 mb-1">Cpk</div>
@@ -627,10 +584,7 @@ export const SPCCharts: React.FC<SPCChartsProps> = ({
                         tick={{ fill: '#94a3b8', fontSize: 12 }}
                         interval="preserveStartEnd"
                       />
-                      <YAxis
-                        stroke="#94a3b8"
-                        tick={{ fill: '#94a3b8', fontSize: 12 }}
-                      />
+                      <YAxis stroke="#94a3b8" tick={{ fill: '#94a3b8', fontSize: 12 }} />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: '#1e293b',
@@ -644,10 +598,7 @@ export const SPCCharts: React.FC<SPCChartsProps> = ({
                           name,
                         ]}
                       />
-                      <Legend
-                        wrapperStyle={{ paddingTop: '20px' }}
-                        iconType="line"
-                      />
+                      <Legend wrapperStyle={{ paddingTop: '20px' }} iconType="line" />
 
                       {/* Control Limits */}
                       <ReferenceLine
@@ -666,11 +617,7 @@ export const SPCCharts: React.FC<SPCChartsProps> = ({
                       >
                         <Label value="LCL" position="right" fill="#ef4444" />
                       </ReferenceLine>
-                      <ReferenceLine
-                        y={data[0]?.cl}
-                        stroke="#22c55e"
-                        strokeWidth={2}
-                      >
+                      <ReferenceLine y={data[0]?.cl} stroke="#22c55e" strokeWidth={2}>
                         <Label value="CL" position="right" fill="#22c55e" />
                       </ReferenceLine>
 
@@ -759,15 +706,10 @@ export const SPCCharts: React.FC<SPCChartsProps> = ({
                           <Info className="w-4 h-4 text-yellow-400 mt-0.5" />
                         )}
                         <div className="flex-1">
-                          <div className="text-sm font-medium text-white">
-                            {violation.rule}
-                          </div>
-                          <div className="text-xs text-slate-400">
-                            {violation.description}
-                          </div>
+                          <div className="text-sm font-medium text-white">{violation.rule}</div>
+                          <div className="text-xs text-slate-400">{violation.description}</div>
                           <div className="text-xs text-slate-500 mt-1">
-                            Point #{violation.index + 1} -{' '}
-                            {data[violation.index]?.time}
+                            Point #{violation.index + 1} - {data[violation.index]?.time}
                           </div>
                         </div>
                       </div>

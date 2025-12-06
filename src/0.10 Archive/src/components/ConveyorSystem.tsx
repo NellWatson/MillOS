@@ -1,6 +1,6 @@
 import React, { useRef, useMemo, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Text, Billboard, Html } from '@react-three/drei';
+import { Text, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { audioManager } from '../utils/audioManager';
 import { useMillStore } from '../store';
@@ -307,13 +307,16 @@ const ConveyorBelt: React.FC<{ position: [number, number, number]; length: numbe
     // Skip animations on low graphics
     if (graphics.quality === 'low') return;
 
+    // Cap delta to prevent huge jumps when tab regains focus (max 100ms)
+    const cappedDelta = Math.min(delta, 0.1);
+
     if (beltRef.current && beltTexture) {
       // Animate the belt texture scrolling - wrap to prevent float precision issues
-      beltTexture.offset.x = (beltTexture.offset.x + delta * productionSpeed * 0.3) % 1;
+      beltTexture.offset.x = (beltTexture.offset.x + cappedDelta * productionSpeed * 0.3) % 1;
     }
     // Animate drive rollers - wrap to prevent float precision issues
     if (driveRollerRef.current) {
-      driveRollerRef.current.rotation.z = (driveRollerRef.current.rotation.z + delta * productionSpeed * 3) % (Math.PI * 2);
+      driveRollerRef.current.rotation.z = (driveRollerRef.current.rotation.z + cappedDelta * productionSpeed * 3) % (Math.PI * 2);
     }
     // Update spatial audio volume based on camera distance
     audioManager.updateConveyorSpatialVolume(conveyorId);
@@ -413,11 +416,15 @@ const RollerConveyor: React.FC<{ position: [number, number, number]; productionS
     // Skip animations on low graphics
     if (graphics.quality === 'low') return;
 
+    // Cap delta to prevent huge jumps when tab regains focus (max 100ms)
+    const cappedDelta = Math.min(delta, 0.1);
+
     if (rollersRef.current) {
       rollersRef.current.children.forEach((roller, index) => {
         // Vary rotation speed slightly for each roller
         const speedVariation = 1 + Math.sin(index * 0.5) * 0.1;
-        roller.rotation.z += delta * productionSpeed * 5 * speedVariation;
+        // Wrap rotation to prevent float precision issues
+        roller.rotation.z = (roller.rotation.z + cappedDelta * productionSpeed * 5 * speedVariation) % (Math.PI * 2);
       });
     }
     // Update spatial audio volume based on camera distance
@@ -502,22 +509,32 @@ const RollerConveyor: React.FC<{ position: [number, number, number]; productionS
   );
 };
 
-const FlourBagMesh: React.FC<{ data: FlourBag; speedMulti: number }> = ({ data, speedMulti }) => {
+// Bag movement boundary (wraps from +BOUNDARY to -BOUNDARY)
+const BAG_BOUNDARY = 28;
+
+const FlourBagMesh: React.FC<{ data: FlourBag; speedMulti: number }> = React.memo(({ data, speedMulti }) => {
   const ref = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
-  const boundary = 28;
   const graphics = useMillStore((state) => state.graphics);
   const incrementBagsProduced = useMillStore((state) => state.incrementBagsProduced);
   const crossedBoundaryRef = useRef(false);
 
+  // Track current X position in a ref to avoid position prop interfering
+  const currentX = useRef(data.position[0]);
+
   useFrame((_, delta) => {
     if (!ref.current) return;
-    const prevX = ref.current.position.x;
-    ref.current.position.x += data.speed * speedMulti * delta;
+
+    // Cap delta to prevent huge jumps when tab regains focus (max 100ms)
+    const cappedDelta = Math.min(delta, 0.1);
+
+    currentX.current += data.speed * speedMulti * cappedDelta;
 
     // Track when bag crosses the boundary (simulating packed bag)
-    if (ref.current.position.x > boundary) {
-      ref.current.position.x = -boundary;
+    if (currentX.current > BAG_BOUNDARY) {
+      // Preserve overflow to prevent stuttering/bunching
+      const overflow = currentX.current - BAG_BOUNDARY;
+      currentX.current = -BAG_BOUNDARY + overflow;
       if (!crossedBoundaryRef.current) {
         incrementBagsProduced(1);
         crossedBoundaryRef.current = true;
@@ -525,15 +542,27 @@ const FlourBagMesh: React.FC<{ data: FlourBag; speedMulti: number }> = ({ data, 
     } else {
       crossedBoundaryRef.current = false;
     }
+
+    // Apply position from ref (not from props)
+    ref.current.position.x = currentX.current;
   });
 
   const showDetails = graphics.enableProceduralTextures;
   const qualityColor = QUALITY_COLORS[data.quality];
 
+  // Extract position values for stable initial position (animated via ref after mount)
+  const initPosX = data.position[0];
+  const initPosY = data.position[1];
+  const initPosZ = data.position[2];
+  const initialPosition = useMemo<[number, number, number]>(
+    () => [initPosX, initPosY, initPosZ],
+    [initPosX, initPosY, initPosZ]
+  );
+
   return (
     <group
       ref={ref}
-      position={new THREE.Vector3(...data.position)}
+      position={initialPosition}
       rotation={[0, data.rotation, 0]}
       onPointerOver={() => setHovered(true)}
       onPointerOut={() => setHovered(false)}
@@ -618,4 +647,4 @@ const FlourBagMesh: React.FC<{ data: FlourBag; speedMulti: number }> = ({ data, 
       )}
     </group>
   );
-};
+});

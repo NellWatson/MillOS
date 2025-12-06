@@ -8,11 +8,7 @@ import { useEffect, RefObject } from 'react';
  * @param isOpen - Whether the modal is currently open
  * @param onClose - Callback to close the modal
  */
-export const useFocusTrap = (
-  ref: RefObject<HTMLElement>,
-  isOpen: boolean,
-  onClose: () => void
-) => {
+export const useFocusTrap = (ref: RefObject<HTMLElement>, isOpen: boolean, onClose: () => void) => {
   useEffect(() => {
     if (!isOpen || !ref.current) return;
 

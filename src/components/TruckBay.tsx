@@ -4,7 +4,125 @@ import { shouldRunThisFrame } from '../utils/frameThrottle';
 import { Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { audioManager } from '../utils/audioManager';
-import { useMillStore } from '../store';
+import { useProductionStore } from '../stores/productionStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
+import { useGraphicsStore } from '../stores/graphicsStore';
+import {
+  OptimizedTrafficConeInstances,
+  OptimizedBollardInstances,
+  OptimizedSpeedBumpInstances,
+  OptimizedStripeInstances
+} from './TruckBayInstances';
+
+// --- Animation Registries ---
+type AnimationType = 'rotation' | 'pulse' | 'lerp' | 'oscillation' | 'custom';
+
+interface AnimationState {
+  type: AnimationType;
+  mesh: THREE.Object3D | THREE.Material | null;
+  data: any;
+  // For 'custom' type: a callback function that receives (time, delta, mesh)
+  callback?: (time: number, delta: number, mesh: THREE.Object3D | THREE.Material | null, data: any) => void;
+}
+
+const animationRegistry = new Map<string, AnimationState>();
+
+export const registerAnimation = (
+  id: string,
+  type: AnimationType,
+  mesh: THREE.Object3D | THREE.Material | null,
+  data: any,
+  callback?: (time: number, delta: number, mesh: THREE.Object3D | THREE.Material | null, data: any) => void
+) => {
+  animationRegistry.set(id, { type, mesh, data, callback });
+};
+
+export const unregisterAnimation = (id: string) => {
+  animationRegistry.delete(id);
+};
+
+// Centralized Animation Manager Component
+const TruckAnimationManager: React.FC = () => {
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const quality = useGraphicsStore((state) => state.graphics.quality);
+
+  useFrame((state, delta) => {
+    if (!isTabVisible) return;
+
+    // Throttle based on quality
+    // Ultra: 1 (60fps), High: 2 (30fps), Medium: 3 (20fps), Low: 4 (15fps)
+    const throttle = quality === 'ultra' ? 1 : quality === 'high' ? 2 : quality === 'medium' ? 3 : 4;
+
+    if (!shouldRunThisFrame(throttle)) return;
+
+    const time = state.clock.elapsedTime;
+    const adjustDelta = delta * throttle;
+
+    animationRegistry.forEach((anim) => {
+      // 1. Rotation Animation
+      if (anim.type === 'rotation') {
+        const mesh = anim.mesh as THREE.Object3D;
+        const { axis = 'y', speed = 1 } = anim.data;
+        if (mesh) {
+          // @ts-ignore
+          mesh.rotation[axis] += speed * adjustDelta;
+        }
+      }
+
+      // 2. Pulse (Emissive) Animation
+      else if (anim.type === 'pulse') {
+        const mat = anim.mesh as THREE.MeshStandardMaterial;
+        const { speed = 2, min = 0.5, max = 1.0, offset = 0 } = anim.data;
+        if (mat) {
+          mat.emissiveIntensity = min + (Math.sin(time * speed + offset) * 0.5 + 0.5) * (max - min);
+        }
+      }
+
+      // 3. Lerp (Position/Rotation/Scale) Animation
+      else if (anim.type === 'lerp') {
+        const mesh = anim.mesh as THREE.Object3D;
+        const {
+          target,
+          speed = 0.1,
+          property = 'position', // position, rotation, scale
+          axis = 'x'
+        } = anim.data;
+
+        if (mesh) {
+          // @ts-ignore
+          const currVal = mesh[property][axis];
+          if (Math.abs(currVal - target) > 0.001) {
+            const newVal = THREE.MathUtils.lerp(currVal, target, speed * (60 * adjustDelta)); // normalizing speed to 60fps base
+            // @ts-ignore
+            mesh[property][axis] = newVal;
+
+            // Optional visibility toggle for "slide out" effects
+            if (anim.data.autoHide && property === 'position') {
+              mesh.visible = newVal > anim.data.hideThreshold;
+            }
+          }
+        }
+      }
+
+      // 4. Oscillation
+      else if (anim.type === 'oscillation') {
+        const mesh = anim.mesh as THREE.Object3D;
+        const { axis = 'x', speed = 1, amplitude = 1, offset = 0, base = 0 } = anim.data;
+        if (mesh) {
+          // @ts-ignore
+          mesh.position[axis] = base + Math.sin(time * speed + offset) * amplitude;
+        }
+      }
+
+      // 5. Custom callback animation
+      else if (anim.type === 'custom' && anim.callback) {
+        anim.callback(time, adjustDelta, anim.mesh, anim.data);
+      }
+    });
+  });
+
+  return null;
+};
 
 interface TruckBayProps {
   productionSpeed: number;
@@ -661,6 +779,7 @@ const ExhaustSmoke: React.FC<{
 }> = ({ position, throttle, isRunning }) => {
   const particlesRef = useRef<THREE.Points>(null);
   const particleCount = 20;
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   const { positions, velocities, lifetimes, maxLifetimes } = useMemo(() => {
     const pos = new Float32Array(particleCount * 3);
@@ -683,6 +802,7 @@ const ExhaustSmoke: React.FC<{
   }, []);
 
   useFrame((_, delta) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(2)) return; // Throttle particles to 30fps
     if (!particlesRef.current || !isRunning) return;
 
@@ -720,10 +840,7 @@ const ExhaustSmoke: React.FC<{
   return (
     <points ref={particlesRef} position={position}>
       <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          args={[positions, 3]}
-        />
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
       <pointsMaterial
         size={0.15 + throttle * 0.1}
@@ -737,66 +854,6 @@ const ExhaustSmoke: React.FC<{
   );
 };
 
-// Traffic cone component
-const TrafficCone: React.FC<{ position: [number, number, number] }> = React.memo(({ position }) => (
-  <group position={position}>
-    {/* Base */}
-    <mesh position={[0, 0.02, 0]}>
-      <boxGeometry args={[0.4, 0.04, 0.4]} />
-      <meshStandardMaterial color="#1f2937" roughness={0.8} />
-    </mesh>
-    {/* Cone body */}
-    <mesh position={[0, 0.25, 0]}>
-      <coneGeometry args={[0.12, 0.45, 8]} />
-      <meshStandardMaterial color="#f97316" roughness={0.6} />
-    </mesh>
-    {/* Reflective stripes */}
-    <mesh position={[0, 0.2, 0]}>
-      <cylinderGeometry args={[0.09, 0.11, 0.08, 8]} />
-      <meshStandardMaterial color="#ffffff" metalness={0.3} roughness={0.4} />
-    </mesh>
-    <mesh position={[0, 0.35, 0]}>
-      <cylinderGeometry args={[0.06, 0.08, 0.06, 8]} />
-      <meshStandardMaterial color="#ffffff" metalness={0.3} roughness={0.4} />
-    </mesh>
-  </group>
-));
-
-// Speed bump component
-const SpeedBump: React.FC<{ position: [number, number, number]; rotation?: number }> = React.memo(
-  ({ position, rotation = 0 }) => (
-    <group position={position} rotation={[0, rotation, 0]}>
-      <mesh position={[0, 0.06, 0]}>
-        <boxGeometry args={[6, 0.12, 0.5]} />
-        <meshStandardMaterial color="#fbbf24" roughness={0.7} />
-      </mesh>
-      {/* Warning stripes */}
-      {[-2.5, -1.5, -0.5, 0.5, 1.5, 2.5].map((x, i) => (
-        <mesh key={i} position={[x, 0.13, 0]}>
-          <boxGeometry args={[0.4, 0.02, 0.52]} />
-          <meshStandardMaterial color="#1f2937" roughness={0.8} />
-        </mesh>
-      ))}
-    </group>
-  )
-);
-
-// Concrete bollard component
-const ConcreteBollard: React.FC<{ position: [number, number, number] }> = React.memo(
-  ({ position }) => (
-    <group position={position}>
-      <mesh position={[0, 0.4, 0]} castShadow>
-        <cylinderGeometry args={[0.2, 0.25, 0.8, 12]} />
-        <meshStandardMaterial color="#6b7280" roughness={0.9} />
-      </mesh>
-      {/* Yellow warning cap */}
-      <mesh position={[0, 0.82, 0]}>
-        <cylinderGeometry args={[0.22, 0.2, 0.05, 12]} />
-        <meshStandardMaterial color="#fbbf24" roughness={0.6} />
-      </mesh>
-    </group>
-  )
-);
 
 // Wheel chock component - placed behind wheels when truck is docked
 const WheelChock: React.FC<{
@@ -806,20 +863,22 @@ const WheelChock: React.FC<{
 }> = ({ position, rotation = 0, isDeployed }) => {
   const chockRef = useRef<THREE.Group>(null);
 
-  useFrame(() => {
-    if (!shouldRunThisFrame(3)) return;
-    if (chockRef.current) {
-      // Animate chock sliding in/out
-      const targetX = isDeployed ? 0 : 0.5;
-      chockRef.current.position.x = THREE.MathUtils.lerp(
-        chockRef.current.position.x,
-        targetX,
-        0.08
-      );
-      // Fade opacity
-      chockRef.current.visible = isDeployed || chockRef.current.position.x > 0.1;
-    }
-  });
+  useEffect(() => {
+    if (!chockRef.current) return;
+    const id = `chock-${Math.random()}`;
+    const targetX = isDeployed ? 0 : 0.5;
+
+    registerAnimation(id, 'lerp', chockRef.current, {
+      target: targetX,
+      property: 'position',
+      axis: 'x',
+      speed: 0.08,
+      autoHide: true,
+      hideThreshold: 0.1
+    });
+
+    return () => unregisterAnimation(id);
+  }, [isDeployed]);
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
@@ -954,16 +1013,22 @@ const DOTMarkerLights: React.FC<{ side: 'left' | 'right' }> = ({ side }) => {
   const lightsRef = useRef<THREE.MeshStandardMaterial[]>([]);
   const xPos = side === 'right' ? 1.62 : -1.62;
 
-  useFrame((state) => {
-    if (!shouldRunThisFrame(4)) return;
-    const time = state.clock.elapsedTime;
+  useEffect(() => {
+    const ids: string[] = [];
     lightsRef.current.forEach((mat, i) => {
       if (mat) {
-        // Subtle glow variation
-        mat.emissiveIntensity = 0.3 + Math.sin(time * 2 + i * 0.5) * 0.1;
+        const id = `dot-light-${Math.random()}`;
+        registerAnimation(id, 'pulse', mat, {
+          speed: 2,
+          min: 0.2,
+          max: 0.4,
+          offset: i * 0.5
+        });
+        ids.push(id);
       }
     });
-  });
+    return () => ids.forEach(id => unregisterAnimation(id));
+  }, []);
 
   return (
     <group>
@@ -1103,13 +1168,12 @@ const TruckWashStation: React.FC<{ position: [number, number, number]; rotation?
 }) => {
   const brushRef = useRef<THREE.Group>(null);
 
-  useFrame((state) => {
-    if (!shouldRunThisFrame(3)) return;
-    if (brushRef.current) {
-      // Rotating brush animation
-      brushRef.current.rotation.y = state.clock.elapsedTime * 2;
-    }
-  });
+  useEffect(() => {
+    if (!brushRef.current) return;
+    const id = `wash-brush-${Math.random()}`;
+    registerAnimation(id, 'rotation', brushRef.current, { axis: 'y', speed: 2 });
+    return () => unregisterAnimation(id);
+  }, []);
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
@@ -1621,8 +1685,10 @@ const WarehouseWorkerWithPalletJack: React.FC<{
   const groupRef = useRef<THREE.Group>(null);
   const targetPos = useRef({ x: 0, z: 0 });
   const lastBeepTime = useRef(0);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(3)) return;
     if (!groupRef.current || !isActive) return;
 
@@ -1813,12 +1879,12 @@ const TimeClockStation: React.FC<{ position: [number, number, number]; rotation?
 }) => {
   const displayRef = useRef<THREE.MeshStandardMaterial>(null);
 
-  useFrame((state) => {
-    if (!shouldRunThisFrame(4)) return;
-    if (displayRef.current) {
-      displayRef.current.emissiveIntensity = 0.6 + Math.sin(state.clock.elapsedTime * 3) * 0.1;
-    }
-  });
+  useEffect(() => {
+    if (!displayRef.current) return;
+    const id = `clock-${Math.random()}`;
+    registerAnimation(id, 'pulse', displayRef.current, { speed: 3, min: 0.5, max: 0.7 });
+    return () => unregisterAnimation(id);
+  }, []);
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
@@ -1886,8 +1952,10 @@ const DockPlate: React.FC<{ position: [number, number, number]; isDeployed: bool
   isDeployed,
 }) => {
   const plateRef = useRef<THREE.Mesh>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame(() => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(3)) return;
     if (plateRef.current) {
       const targetRotation = isDeployed ? -0.15 : 0;
@@ -2013,7 +2081,7 @@ const MudflapWithLogo: React.FC<{
     {company === 'GRAIN CO' ? (
       <>
         <mesh position={[0, 0, 0.02]}>
-          <circleGeometry args={[0.2, 24]} />
+          <circleGeometry args={[0.2, 12]} />
           <meshStandardMaterial color="#fbbf24" metalness={0.7} roughness={0.3} />
         </mesh>
         <Text
@@ -2029,7 +2097,7 @@ const MudflapWithLogo: React.FC<{
     ) : (
       <>
         <mesh position={[0, 0, 0.02]}>
-          <circleGeometry args={[0.2, 24]} />
+          <circleGeometry args={[0.2, 12]} />
           <meshStandardMaterial color="#3b82f6" metalness={0.7} roughness={0.3} />
         </mesh>
         <Text
@@ -2050,7 +2118,7 @@ const MudflapWithLogo: React.FC<{
       [0, -0.28],
     ].map(([x, y], i) => (
       <mesh key={i} position={[x, y, 0.02]}>
-        <circleGeometry args={[0.03, 12]} />
+        <circleGeometry args={[0.03, 8]} />
         <meshStandardMaterial color="#ef4444" emissive="#ef4444" emissiveIntensity={0.3} />
       </mesh>
     ))}
@@ -2067,33 +2135,43 @@ const DockSpotter: React.FC<{
   const leftArmRef = useRef<THREE.Mesh>(null);
   const rightArmRef = useRef<THREE.Mesh>(null);
   const wandRef = useRef<THREE.Group>(null);
+  const animId = useRef(`spotter-${Math.random().toString(36).substr(2, 9)}`);
+  const isGuidingRef = useRef(isGuiding);
+  isGuidingRef.current = isGuiding;
 
-  useFrame((state) => {
-    if (!shouldRunThisFrame(3)) return;
-    const time = state.clock.elapsedTime;
-
-    if (isGuiding) {
-      // Wave arms to guide truck back
-      if (leftArmRef.current) {
-        leftArmRef.current.rotation.x = -0.5 + Math.sin(time * 4) * 0.4;
+  useEffect(() => {
+    const id = animId.current;
+    registerAnimation(
+      id,
+      'custom',
+      null,
+      {},
+      (time) => {
+        if (isGuidingRef.current) {
+          // Wave arms to guide truck back
+          if (leftArmRef.current) {
+            leftArmRef.current.rotation.x = -0.5 + Math.sin(time * 4) * 0.4;
+          }
+          if (rightArmRef.current) {
+            rightArmRef.current.rotation.x = -0.5 + Math.sin(time * 4 + Math.PI) * 0.4;
+          }
+          // Bob wands
+          if (wandRef.current) {
+            wandRef.current.rotation.z = Math.sin(time * 4) * 0.3;
+          }
+        } else {
+          // Idle pose
+          if (leftArmRef.current) {
+            leftArmRef.current.rotation.x = 0;
+          }
+          if (rightArmRef.current) {
+            rightArmRef.current.rotation.x = 0;
+          }
+        }
       }
-      if (rightArmRef.current) {
-        rightArmRef.current.rotation.x = -0.5 + Math.sin(time * 4 + Math.PI) * 0.4;
-      }
-      // Bob wands
-      if (wandRef.current) {
-        wandRef.current.rotation.z = Math.sin(time * 4) * 0.3;
-      }
-    } else {
-      // Idle pose
-      if (leftArmRef.current) {
-        leftArmRef.current.rotation.x = 0;
-      }
-      if (rightArmRef.current) {
-        rightArmRef.current.rotation.x = 0;
-      }
-    }
-  });
+    );
+    return () => unregisterAnimation(id);
+  }, []);
 
   return (
     <group ref={spotterRef} position={position} rotation={[0, rotation, 0]}>
@@ -2187,13 +2265,12 @@ const WeightScale: React.FC<{ position: [number, number, number]; rotation?: num
   const displayRef = useRef<THREE.MeshStandardMaterial>(null);
   const [weight] = React.useState(() => Math.floor(35000 + Math.random() * 15000));
 
-  useFrame((state) => {
-    // Slight flicker on display
-    if (!shouldRunThisFrame(3)) return;
-    if (displayRef.current) {
-      displayRef.current.emissiveIntensity = 0.8 + Math.sin(state.clock.elapsedTime * 10) * 0.1;
-    }
-  });
+  useEffect(() => {
+    if (!displayRef.current) return;
+    const id = `scale-${Math.random()}`;
+    registerAnimation(id, 'pulse', displayRef.current, { speed: 10, min: 0.7, max: 0.9 });
+    return () => unregisterAnimation(id);
+  }, []);
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
@@ -2413,18 +2490,29 @@ const YardJockey: React.FC<{ position: [number, number, number]; rotation?: numb
   rotation = 0,
 }) => {
   const jockeyRef = useRef<THREE.Group>(null);
-  useFrame((state) => {
-    if (!shouldRunThisFrame(3)) return;
-    if (jockeyRef.current) {
-      const time = state.clock.elapsedTime;
-      jockeyRef.current.position.x = Math.sin(time * 0.15) * 8;
-      jockeyRef.current.rotation.y = Math.cos(time * 0.15) * 0.3 + rotation;
-    }
-  });
+  const animId = useRef(`yardjockey-${Math.random().toString(36).substr(2, 9)}`);
+
+  useEffect(() => {
+    const id = animId.current;
+    registerAnimation(
+      id,
+      'custom',
+      null,
+      { rotation },
+      (time, _delta, _mesh, data) => {
+        if (jockeyRef.current) {
+          jockeyRef.current.position.x = Math.sin(time * 0.15) * 8;
+          jockeyRef.current.rotation.y = Math.cos(time * 0.15) * 0.3 + data.rotation;
+        }
+      }
+    );
+    return () => unregisterAnimation(id);
+  }, [rotation]);
+
   return (
     <group position={position}>
       <group ref={jockeyRef}>
-        <mesh position={[0, 1.3, 0]} castShadow>
+        <mesh position={[0, 1.3, 0]}>
           <boxGeometry args={[2, 1.6, 2.5]} />
           <meshStandardMaterial color="#fbbf24" metalness={0.4} roughness={0.6} />
         </mesh>
@@ -2433,7 +2521,7 @@ const YardJockey: React.FC<{ position: [number, number, number]; rotation?: numb
           <meshStandardMaterial color="#1e3a5f" metalness={0.9} roughness={0.1} />
         </mesh>
         <mesh position={[0, 0.9, -0.5]}>
-          <cylinderGeometry args={[0.5, 0.5, 0.1, 16]} />
+          <cylinderGeometry args={[0.5, 0.5, 0.1, 12]} />
           <meshStandardMaterial color="#374151" metalness={0.7} roughness={0.3} />
         </mesh>
         {[
@@ -2443,12 +2531,12 @@ const YardJockey: React.FC<{ position: [number, number, number]; rotation?: numb
           [0.9, -0.6],
         ].map(([x, z], i) => (
           <mesh key={i} position={[x, 0.4, z]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.4, 0.4, 0.25, 16]} />
+            <cylinderGeometry args={[0.4, 0.4, 0.25, 12]} />
             <meshStandardMaterial color="#1f2937" roughness={0.7} />
           </mesh>
         ))}
         <mesh position={[0, 2.2, 0]}>
-          <cylinderGeometry args={[0.1, 0.1, 0.15, 12]} />
+          <cylinderGeometry args={[0.1, 0.1, 0.15, 8]} />
           <meshStandardMaterial color="#f97316" emissive="#f97316" emissiveIntensity={0.8} />
         </mesh>
         <Text
@@ -2603,18 +2691,30 @@ const GuardShack: React.FC<{ position: [number, number, number]; rotation?: numb
   rotation = 0,
 }) => {
   const gateRef = useRef<THREE.Mesh>(null);
-  const [gateOpen, setGateOpen] = React.useState(false);
-  useFrame((state) => {
-    if (!shouldRunThisFrame(4)) return;
-    const shouldOpen = Math.sin(state.clock.elapsedTime * 0.3) > 0.5;
-    if (shouldOpen !== gateOpen) setGateOpen(shouldOpen);
-    if (gateRef.current)
-      gateRef.current.rotation.y = THREE.MathUtils.lerp(
-        gateRef.current.rotation.y,
-        gateOpen ? -Math.PI / 2 : 0,
-        0.05
-      );
-  });
+  const gateOpenRef = useRef(false);
+  const animId = useRef(`guard-${Math.random().toString(36).substr(2, 9)}`);
+
+  useEffect(() => {
+    const id = animId.current;
+    registerAnimation(
+      id,
+      'custom',
+      null,
+      {},
+      (time) => {
+        const shouldOpen = Math.sin(time * 0.3) > 0.5;
+        gateOpenRef.current = shouldOpen;
+        if (gateRef.current) {
+          gateRef.current.rotation.y = THREE.MathUtils.lerp(
+            gateRef.current.rotation.y,
+            shouldOpen ? -Math.PI / 2 : 0,
+            0.05
+          );
+        }
+      }
+    );
+    return () => unregisterAnimation(id);
+  }, []);
   return (
     <group position={position} rotation={[0, rotation, 0]}>
       <mesh position={[0, 1.4, 0]}>
@@ -2699,7 +2799,7 @@ const NoIdlingSign: React.FC<{ position: [number, number, number]; rotation?: nu
 }) => (
   <group position={position} rotation={[0, rotation, 0]}>
     {/* Post */}
-    <mesh position={[0, 1.2, 0]} castShadow>
+    <mesh position={[0, 1.2, 0]}>
       <cylinderGeometry args={[0.05, 0.05, 2.4, 8]} />
       <meshStandardMaterial color="#64748b" metalness={0.6} roughness={0.4} />
     </mesh>
@@ -2797,16 +2897,32 @@ const RollUpDoor: React.FC<{
 }> = ({ position, isOpen }) => {
   const doorRef = useRef<THREE.Mesh>(null);
 
-  useFrame(() => {
-    if (!shouldRunThisFrame(3)) return;
-    if (doorRef.current) {
-      const targetY = isOpen ? 4.5 : 2;
-      doorRef.current.position.y = THREE.MathUtils.lerp(doorRef.current.position.y, targetY, 0.05);
-      // Scale to simulate rolling up
-      const targetScaleY = isOpen ? 0.2 : 1;
-      doorRef.current.scale.y = THREE.MathUtils.lerp(doorRef.current.scale.y, targetScaleY, 0.05);
-    }
-  });
+  useEffect(() => {
+    if (!doorRef.current) return;
+    const posId = `door-pos-${Math.random()}`;
+    const scaleId = `door-scale-${Math.random()}`;
+
+    // Lerp Position Y
+    registerAnimation(posId, 'lerp', doorRef.current, {
+      target: isOpen ? 4.5 : 2,
+      property: 'position',
+      axis: 'y',
+      speed: 0.05
+    });
+
+    // Lerp Scale Y
+    registerAnimation(scaleId, 'lerp', doorRef.current, {
+      target: isOpen ? 0.2 : 1,
+      property: 'scale',
+      axis: 'y',
+      speed: 0.05
+    });
+
+    return () => {
+      unregisterAnimation(posId);
+      unregisterAnimation(scaleId);
+    };
+  }, [isOpen]);
 
   return (
     <group position={position}>
@@ -2848,23 +2964,29 @@ const DockShelter: React.FC<{
   const leftRef = useRef<THREE.Mesh>(null);
   const rightRef = useRef<THREE.Mesh>(null);
 
-  useFrame(() => {
-    if (!shouldRunThisFrame(3)) return;
+  useEffect(() => {
     const targetZ = isCompressed ? 0.5 : 1.5;
+    const speed = 0.05;
+    const ids: string[] = [];
+
     if (topRef.current) {
-      topRef.current.position.z = THREE.MathUtils.lerp(topRef.current.position.z, targetZ, 0.05);
+      const id = `shelter-top-${Math.random()}`;
+      registerAnimation(id, 'lerp', topRef.current, { target: targetZ, property: 'position', axis: 'z', speed });
+      ids.push(id);
     }
     if (leftRef.current) {
-      leftRef.current.position.z = THREE.MathUtils.lerp(leftRef.current.position.z, targetZ, 0.05);
+      const id = `shelter-left-${Math.random()}`;
+      registerAnimation(id, 'lerp', leftRef.current, { target: targetZ, property: 'position', axis: 'z', speed });
+      ids.push(id);
     }
     if (rightRef.current) {
-      rightRef.current.position.z = THREE.MathUtils.lerp(
-        rightRef.current.position.z,
-        targetZ,
-        0.05
-      );
+      const id = `shelter-right-${Math.random()}`;
+      registerAnimation(id, 'lerp', rightRef.current, { target: targetZ, property: 'position', axis: 'z', speed });
+      ids.push(id);
     }
-  });
+
+    return () => ids.forEach(id => unregisterAnimation(id));
+  }, [isCompressed]);
 
   return (
     <group position={position}>
@@ -2911,7 +3033,7 @@ const HeadlightBeam: React.FC<{
     <group position={position} rotation={rotation}>
       {/* Cone rotated to point forward (Z direction) - tip at light source, base spreading forward */}
       <mesh position={[0, 0, 2]} rotation={[-Math.PI / 2, 0, 0]}>
-        <coneGeometry args={[1.5, 4, 16, 1, true]} />
+        <coneGeometry args={[1.5, 4, 8, 1, true]} />
         <meshBasicMaterial
           color="#fef3c7"
           transparent
@@ -2987,60 +3109,63 @@ const DockForklift: React.FC<{
 }> = ({ dockPosition, isActive, cycleOffset }) => {
   const forkliftRef = useRef<THREE.Group>(null);
   const forkRef = useRef<THREE.Group>(null);
+  const animId = useRef(`forklift-${Math.random().toString(36).substr(2, 9)}`);
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
 
-  useFrame((state) => {
-    if (!shouldRunThisFrame(3)) return;
-    if (!forkliftRef.current || !forkRef.current) return;
+  useEffect(() => {
+    const id = animId.current;
+    registerAnimation(
+      id,
+      'custom',
+      null,
+      { cycleOffset },
+      (time, _delta, _mesh, data) => {
+        if (!forkliftRef.current || !forkRef.current) return;
 
-    if (isActive) {
-      // Forklift moves in and out of trailer during loading
-      const time = state.clock.elapsedTime + cycleOffset;
-      const loadCycle = (time * 0.3) % 1;
+        if (isActiveRef.current) {
+          const adjTime = time + data.cycleOffset;
+          const loadCycle = (adjTime * 0.3) % 1;
+          let zPos: number;
+          let forkHeight: number;
 
-      // Move forward (into trailer) then backward
-      let zPos: number;
-      let forkHeight: number;
+          if (loadCycle < 0.3) {
+            const t = loadCycle / 0.3;
+            zPos = THREE.MathUtils.lerp(-8, 2, t);
+            forkHeight = 0;
+          } else if (loadCycle < 0.4) {
+            const t = (loadCycle - 0.3) / 0.1;
+            zPos = 2;
+            forkHeight = t * 0.8;
+          } else if (loadCycle < 0.7) {
+            const t = (loadCycle - 0.4) / 0.3;
+            zPos = THREE.MathUtils.lerp(2, -8, t);
+            forkHeight = 0.8;
+          } else if (loadCycle < 0.8) {
+            const t = (loadCycle - 0.7) / 0.1;
+            zPos = -8;
+            forkHeight = (1 - t) * 0.8;
+          } else {
+            zPos = -8;
+            forkHeight = 0;
+          }
 
-      if (loadCycle < 0.3) {
-        // Moving into trailer with lowered forks
-        const t = loadCycle / 0.3;
-        zPos = THREE.MathUtils.lerp(-8, 2, t);
-        forkHeight = 0;
-      } else if (loadCycle < 0.4) {
-        // Raising forks
-        const t = (loadCycle - 0.3) / 0.1;
-        zPos = 2;
-        forkHeight = t * 0.8;
-      } else if (loadCycle < 0.7) {
-        // Backing out with load
-        const t = (loadCycle - 0.4) / 0.3;
-        zPos = THREE.MathUtils.lerp(2, -8, t);
-        forkHeight = 0.8;
-      } else if (loadCycle < 0.8) {
-        // Lowering forks
-        const t = (loadCycle - 0.7) / 0.1;
-        zPos = -8;
-        forkHeight = (1 - t) * 0.8;
-      } else {
-        // Pause
-        zPos = -8;
-        forkHeight = 0;
+          forkliftRef.current.position.z = zPos;
+          forkRef.current.position.y = forkHeight;
+        } else {
+          forkliftRef.current.position.z = -10;
+          forkRef.current.position.y = 0;
+        }
       }
-
-      forkliftRef.current.position.z = zPos;
-      forkRef.current.position.y = forkHeight;
-    } else {
-      // Parked position
-      forkliftRef.current.position.z = -10;
-      forkRef.current.position.y = 0;
-    }
-  });
+    );
+    return () => unregisterAnimation(id);
+  }, [cycleOffset]);
 
   return (
     <group position={dockPosition}>
       <group ref={forkliftRef} position={[0, 0, -10]}>
         {/* Forklift body */}
-        <mesh position={[0, 0.6, 0]} castShadow>
+        <mesh position={[0, 0.6, 0]}>
           <boxGeometry args={[1.5, 1, 2]} />
           <meshStandardMaterial color="#f59e0b" metalness={0.4} roughness={0.6} />
         </mesh>
@@ -3059,7 +3184,7 @@ const DockForklift: React.FC<{
           [0.6, 0.6],
         ].map(([x, z], i) => (
           <mesh key={i} position={[x * 0.9, 1.6, -0.2 + z * 0.4]}>
-            <cylinderGeometry args={[0.03, 0.03, 1.6, 8]} />
+            <cylinderGeometry args={[0.03, 0.03, 1.6, 6]} />
             <meshStandardMaterial color="#1f2937" />
           </mesh>
         ))}
@@ -3118,14 +3243,14 @@ const DockForklift: React.FC<{
           [0.5, 0.5],
         ].map(([x, z], i) => (
           <mesh key={i} position={[x, 0.2, z]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.2, 0.2, 0.15, 16]} />
+            <cylinderGeometry args={[0.2, 0.2, 0.15, 12]} />
             <meshStandardMaterial color="#1f2937" roughness={0.8} />
           </mesh>
         ))}
 
         {/* Warning light */}
         <mesh position={[0, 2.2, -0.2]}>
-          <sphereGeometry args={[0.1, 12, 12]} />
+          <sphereGeometry args={[0.1, 8, 8]} />
           <meshStandardMaterial color="#f97316" emissive="#f97316" emissiveIntensity={0.5} />
         </mesh>
       </group>
@@ -3168,18 +3293,21 @@ const DockLeveler: React.FC<{
   isDeployed: boolean;
 }> = ({ position, isDeployed }) => {
   const levelerRef = useRef<THREE.Mesh>(null);
-  const targetRotation = isDeployed ? -0.15 : 0;
 
-  useFrame(() => {
-    if (!shouldRunThisFrame(3)) return;
-    if (levelerRef.current) {
-      levelerRef.current.rotation.x = THREE.MathUtils.lerp(
-        levelerRef.current.rotation.x,
-        targetRotation,
-        0.05
-      );
-    }
-  });
+  useEffect(() => {
+    if (!levelerRef.current) return;
+    const id = `leveler-${Math.random()}`;
+    const targetRotation = isDeployed ? -0.15 : 0;
+
+    registerAnimation(id, 'lerp', levelerRef.current, {
+      target: targetRotation,
+      property: 'rotation',
+      axis: 'x',
+      speed: 0.05
+    });
+
+    return () => unregisterAnimation(id);
+  }, [isDeployed]);
 
   return (
     <group position={position}>
@@ -3217,8 +3345,14 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
   const receivingTrailerAngleRef = useRef(0);
 
   // Dock status updates
-  const updateDockStatus = useMillStore((state) => state.updateDockStatus);
+  const updateDockStatus = useProductionStore((state) => state.updateDockStatus);
   const lastDockUpdateRef = useRef({ receiving: '', shipping: '' });
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+
+  // PERFORMANCE: Only render decorative animations on ultra quality
+  // This saves ~20 useFrame hooks on high quality
+  const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
+  const showDecorativeAnimations = graphicsQuality === 'ultra';
 
   useEffect(() => {
     audioManager.startTruckEngine('shipping-truck', true);
@@ -3231,6 +3365,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
   }, []);
 
   useFrame((state, delta) => {
+    if (!isTabVisible) return;
     const time = state.clock.elapsedTime;
     const adjustedTime = time * (productionSpeed * 0.25 + 0.2);
     const CYCLE_LENGTH = 60;
@@ -3420,6 +3555,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
   return (
     <group>
+      <TruckAnimationManager />
       {/* ========== SHIPPING DOCK (Front of building, z=50) ========== */}
       <group position={[0, 0, 50]}>
         <mesh position={[0, 1, -3]} receiveShadow castShadow>
@@ -3428,7 +3564,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         </mesh>
 
         {[-5, -2.5, 0, 2.5, 5].map((x, i) => (
-          <mesh key={i} position={[x, 0.8, 0.2]} castShadow>
+          <mesh key={i} position={[x, 0.8, 0.2]}>
             <boxGeometry args={[0.8, 1.2, 0.6]} />
             <meshStandardMaterial color="#1f2937" />
           </mesh>
@@ -3446,10 +3582,14 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         <DockStatusLight position={[7, 4, -1]} isOccupied={shippingDockedRef.current} />
 
         {/* Concrete bollards around dock */}
-        <ConcreteBollard position={[-8, 0, 2]} />
-        <ConcreteBollard position={[8, 0, 2]} />
-        <ConcreteBollard position={[-8, 0, 5]} />
-        <ConcreteBollard position={[8, 0, 5]} />
+        <OptimizedBollardInstances
+          positions={[
+            [-8, 0, 2],
+            [8, 0, 2],
+            [-8, 0, 5],
+            [8, 0, 5],
+          ]}
+        />
 
         <Text
           position={[0, 6, -2]}
@@ -3520,59 +3660,61 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           <meshStandardMaterial color="#374151" roughness={0.85} />
         </mesh>
 
-        {[0, 10, 20, 30, 40].map((z, i) => (
-          <mesh key={`entry-${i}`} position={[18, 0.04, z]} rotation={[-Math.PI / 2, 0, 0]}>
-            <planeGeometry args={[0.15, 4]} />
-            <meshBasicMaterial color="#fef3c7" />
-          </mesh>
-        ))}
+        <OptimizedStripeInstances
+          positions={[0, 10, 20, 30, 40].map(z => [18, 0.05, z])}
+        />
 
-        {[0, 10, 20, 30, 40].map((z, i) => (
-          <mesh key={`exit-${i}`} position={[-18, 0.04, z]} rotation={[-Math.PI / 2, 0, 0]}>
-            <planeGeometry args={[0.15, 4]} />
-            <meshBasicMaterial color="#fef3c7" />
-          </mesh>
-        ))}
+        <OptimizedStripeInstances
+          positions={[0, 10, 20, 30, 40].map(z => [-18, 0.05, z])}
+        />
 
-        <mesh position={[0, 0.04, 10]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[0, 0.05, 10]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.15, 20]} />
           <meshBasicMaterial color="#3b82f6" />
         </mesh>
-        <mesh position={[-4, 0.04, 10]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[-4, 0.05, 10]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.1, 20]} />
           <meshBasicMaterial color="#3b82f6" transparent opacity={0.5} />
         </mesh>
-        <mesh position={[4, 0.04, 10]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[4, 0.05, 10]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.1, 20]} />
           <meshBasicMaterial color="#3b82f6" transparent opacity={0.5} />
         </mesh>
 
-        <mesh position={[0, 0.04, 2]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[0, 0.05, 2]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[14, 0.4]} />
           <meshBasicMaterial color="#ef4444" />
         </mesh>
 
         {/* Speed bumps */}
-        <SpeedBump position={[0, 0, 25]} />
-        <SpeedBump position={[0, 0, 45]} />
+        <OptimizedSpeedBumpInstances
+          bumps={[
+            { position: [0, 0, 25] },
+            { position: [0, 0, 45] }
+          ]}
+        />
 
         {/* Traffic cones - turn guidance */}
-        {[
-          [-12, 18],
-          [-10, 20],
-          [-8, 21],
-          [-5, 21],
-          [5, 21],
-          [8, 21],
-          [10, 20],
-          [12, 18],
-        ].map(([x, z], i) => (
-          <TrafficCone key={i} position={[x, 0, z]} />
-        ))}
+        <OptimizedTrafficConeInstances
+          positions={[
+            [-12, 0, 18],
+            [-10, 0, 20],
+            [-8, 0, 21],
+            [-5, 0, 21],
+            [5, 0, 21],
+            [8, 0, 21],
+            [10, 0, 20],
+            [12, 0, 18],
+          ]}
+        />
 
         {/* Concrete bollards at yard entrance */}
-        <ConcreteBollard position={[-22, 0, 55]} />
-        <ConcreteBollard position={[22, 0, 55]} />
+        <OptimizedBollardInstances
+          positions={[
+            [-22, 0, 55],
+            [22, 0, 55],
+          ]}
+        />
 
         {/* No idling signs */}
         <NoIdlingSign position={[-15, 0, 10]} rotation={Math.PI / 2} />
@@ -3585,7 +3727,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           [25, 55],
         ].map(([x, z], i) => (
           <group key={i} position={[x, 0, z]}>
-            <mesh position={[0, 7, 0]} castShadow>
+            <mesh position={[0, 7, 0]}>
               <cylinderGeometry args={[0.12, 0.15, 14, 8]} />
               <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
             </mesh>
@@ -3608,26 +3750,67 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           TRUCK STAGING
         </Text>
 
-        {/* Weight scale at yard entrance */}
-        <WeightScale position={[0, 0, 52]} rotation={0} />
+        {/* PERFORMANCE: Animated decorative components - only on ultra quality */}
+        {/* These components have useFrame hooks that add significant overhead */}
+        {showDecorativeAnimations && (
+          <>
+            {/* Weight scale at yard entrance */}
+            <WeightScale position={[0, 0, 52]} rotation={0} />
 
-        {/* Guard shack at entrance */}
-        <GuardShack position={[25, 0, 55]} rotation={-Math.PI / 2} />
+            {/* Guard shack at entrance */}
+            <GuardShack position={[25, 0, 55]} rotation={-Math.PI / 2} />
 
-        {/* Intercom call box at guard shack */}
-        <IntercomCallBox position={[20, 0, 55]} rotation={-Math.PI / 2} />
+            {/* Intercom call box at guard shack */}
+            <IntercomCallBox position={[20, 0, 55]} rotation={-Math.PI / 2} />
 
+            {/* Yard jockey patrolling */}
+            <YardJockey position={[0, 0, 25]} rotation={0} />
+
+            {/* Truck wash station */}
+            <TruckWashStation position={[-30, 0, 55]} rotation={0} />
+
+            {/* Cardboard compactor/baler for recycling */}
+            <CardboardCompactor position={[-40, 0, 15]} rotation={Math.PI / 2} />
+
+            {/* Warehouse workers with pallet jacks */}
+            <WarehouseWorkerWithPalletJack
+              position={[-10, 0, 5]}
+              isActive={shippingDoorsOpenRef.current}
+              workAreaBounds={{ minX: -8, maxX: 8, minZ: -5, maxZ: 8 }}
+            />
+
+            {/* Time clock station */}
+            <TimeClockStation position={[-9, 0, -4]} rotation={Math.PI / 2} />
+
+            {/* Air hose station */}
+            <AirHoseStation position={[30, 0, 20]} rotation={-Math.PI / 2} />
+
+            {/* Scale ticket kiosk */}
+            <ScaleTicketKiosk position={[3, 0, 52]} rotation={0} />
+
+            {/* Overhead crane in maintenance bay */}
+            <OverheadCrane position={[55, 5.5, 20]} spanWidth={10} />
+
+            {/* Stretch wrap machine */}
+            <StretchWrapMachine
+              position={[-15, 0, 0]}
+              isActive={shippingDoorsOpenRef.current}
+            />
+
+            {/* Pallet jack charging station */}
+            <PalletJackChargingStation position={[-12, 0, -8]} rotation={0} />
+
+            {/* Truck alignment guides */}
+            <TruckAlignmentGuides position={[0, 0, 4]} />
+          </>
+        )}
+
+        {/* Static decorative components (no useFrame) - always render */}
         {/* Fuel island */}
         <FuelIsland position={[-25, 0, 35]} rotation={Math.PI / 2} />
 
         {/* Tire inspection area */}
         <TireInspectionArea position={[25, 0, 35]} rotation={Math.PI / 2} />
-
-        {/* Yard jockey patrolling */}
-        <YardJockey position={[0, 0, 25]} rotation={0} />
-
-        {/* Truck wash station */}
-        <TruckWashStation position={[-30, 0, 55]} rotation={0} />
 
         {/* Driver break room/lounge */}
         <DriverBreakRoom position={[35, 0, 25]} rotation={-Math.PI / 2} />
@@ -3641,30 +3824,11 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Dumpster area */}
         <DumpsterArea position={[-35, 0, 15]} rotation={Math.PI / 2} />
 
-        {/* Cardboard compactor/baler for recycling */}
-        <CardboardCompactor position={[-40, 0, 15]} rotation={Math.PI / 2} />
-
-        {/* Warehouse workers with pallet jacks */}
-        <WarehouseWorkerWithPalletJack
-          position={[-10, 0, 5]}
-          isActive={shippingDoorsOpenRef.current}
-          workAreaBounds={{ minX: -8, maxX: 8, minZ: -5, maxZ: 8 }}
-        />
-
         {/* Manifest holder at dock */}
         <ManifestHolder position={[-8, 3, -1]} rotation={0} />
 
-        {/* Time clock station */}
-        <TimeClockStation position={[-9, 0, -4]} rotation={Math.PI / 2} />
-
-        {/* Dock plate */}
+        {/* Dock plate - needed for dock functionality */}
         <DockPlate position={[0, 2, 1]} isDeployed={shippingDockedRef.current} />
-
-        {/* Air hose station */}
-        <AirHoseStation position={[30, 0, 20]} rotation={-Math.PI / 2} />
-
-        {/* Scale ticket kiosk */}
-        <ScaleTicketKiosk position={[3, 0, 52]} rotation={0} />
 
         {/* Driver restroom/showers */}
         <DriverRestroom position={[40, 0, 45]} rotation={-Math.PI / 2} />
@@ -3674,16 +3838,6 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
         {/* Maintenance bay */}
         <MaintenanceBay position={[55, 0, 20]} rotation={-Math.PI / 2} />
-
-        {/* Overhead crane in maintenance bay */}
-        <OverheadCrane position={[55, 5.5, 20]} spanWidth={10} />
-
-        {/* Stretch wrap machine */}
-        <StretchWrapMachine
-          position={[-15, 0, 0]}
-          rotation={0}
-          isActive={shippingDoorsOpenRef.current}
-        />
 
         {/* Dock bumpers with wear indicators */}
         <DockBumperWithWear position={[-3, 1.2, -1]} wearLevel={0.3} />
@@ -3700,11 +3854,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         <FireExtinguisherStation position={[-9, 0, 0]} rotation={Math.PI / 2} />
         <FireExtinguisherStation position={[9, 0, 0]} rotation={-Math.PI / 2} />
 
-        {/* Truck alignment laser guides */}
-        <TruckAlignmentGuides position={[0, 0, 0]} />
-
-        {/* Pallet jack charging station */}
-        <PalletJackChargingStation position={[12, 0, 5]} rotation={-Math.PI / 2} />
+        {/* PERFORMANCE: TruckAlignmentGuides and PalletJackChargingStation moved to showDecorativeAnimations block */}
       </group>
 
       {/* Shipping truck */}
@@ -3722,13 +3872,13 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
       {/* ========== RECEIVING DOCK (Back of building, z=-50) ========== */}
       <group position={[0, 0, -50]} rotation={[0, Math.PI, 0]}>
-        <mesh position={[0, 1, -3]} receiveShadow castShadow>
+        <mesh position={[0, 1, -3]} receiveShadow>
           <boxGeometry args={[16, 2, 6]} />
           <meshStandardMaterial color="#475569" roughness={0.8} />
         </mesh>
 
         {[-5, -2.5, 0, 2.5, 5].map((x, i) => (
-          <mesh key={i} position={[x, 0.8, 0.2]} castShadow>
+          <mesh key={i} position={[x, 0.8, 0.2]}>
             <boxGeometry args={[0.8, 1.2, 0.6]} />
             <meshStandardMaterial color="#1f2937" />
           </mesh>
@@ -3746,10 +3896,14 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         <DockStatusLight position={[7, 4, -1]} isOccupied={receivingDockedRef.current} />
 
         {/* Concrete bollards around dock */}
-        <ConcreteBollard position={[-8, 0, 2]} />
-        <ConcreteBollard position={[8, 0, 2]} />
-        <ConcreteBollard position={[-8, 0, 5]} />
-        <ConcreteBollard position={[8, 0, 5]} />
+        <OptimizedBollardInstances
+          positions={[
+            [-8, 0, 2],
+            [8, 0, 2],
+            [-8, 0, 5],
+            [8, 0, 5],
+          ]}
+        />
 
         <Text
           position={[0, 6, -2]}
@@ -3833,59 +3987,61 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           <meshStandardMaterial color="#374151" roughness={0.85} />
         </mesh>
 
-        {[0, -10, -20, -30, -40].map((z, i) => (
-          <mesh key={`entry-${i}`} position={[-18, 0.04, z]} rotation={[-Math.PI / 2, 0, 0]}>
-            <planeGeometry args={[0.15, 4]} />
-            <meshBasicMaterial color="#fef3c7" />
-          </mesh>
-        ))}
+        <OptimizedStripeInstances
+          positions={[0, -10, -20, -30, -40].map(z => [-18, 0.05, z])}
+        />
 
-        {[0, -10, -20, -30, -40].map((z, i) => (
-          <mesh key={`exit-${i}`} position={[18, 0.04, z]} rotation={[-Math.PI / 2, 0, 0]}>
-            <planeGeometry args={[0.15, 4]} />
-            <meshBasicMaterial color="#fef3c7" />
-          </mesh>
-        ))}
+        <OptimizedStripeInstances
+          positions={[0, -10, -20, -30, -40].map(z => [18, 0.05, z])}
+        />
 
-        <mesh position={[0, 0.04, -10]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[0, 0.05, -10]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.15, 20]} />
           <meshBasicMaterial color="#3b82f6" />
         </mesh>
-        <mesh position={[-4, 0.04, -10]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[-4, 0.05, -10]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.1, 20]} />
           <meshBasicMaterial color="#3b82f6" transparent opacity={0.5} />
         </mesh>
-        <mesh position={[4, 0.04, -10]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[4, 0.05, -10]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.1, 20]} />
           <meshBasicMaterial color="#3b82f6" transparent opacity={0.5} />
         </mesh>
 
-        <mesh position={[0, 0.04, -2]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[0, 0.05, -2]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[14, 0.4]} />
           <meshBasicMaterial color="#ef4444" />
         </mesh>
 
         {/* Speed bumps */}
-        <SpeedBump position={[0, 0, -25]} />
-        <SpeedBump position={[0, 0, -45]} />
+        <OptimizedSpeedBumpInstances
+          bumps={[
+            { position: [0, 0, -25] },
+            { position: [0, 0, -45] }
+          ]}
+        />
 
         {/* Traffic cones - turn guidance */}
-        {[
-          [12, -18],
-          [10, -20],
-          [8, -21],
-          [5, -21],
-          [-5, -21],
-          [-8, -21],
-          [-10, -20],
-          [-12, -18],
-        ].map(([x, z], i) => (
-          <TrafficCone key={i} position={[x, 0, z]} />
-        ))}
+        <OptimizedTrafficConeInstances
+          positions={[
+            [12, 0, -18],
+            [10, 0, -20],
+            [8, 0, -21],
+            [5, 0, -21],
+            [-5, 0, -21],
+            [-8, 0, -21],
+            [-10, 0, -20],
+            [-12, 0, -18],
+          ]}
+        />
 
         {/* Concrete bollards at yard entrance */}
-        <ConcreteBollard position={[-22, 0, -55]} />
-        <ConcreteBollard position={[22, 0, -55]} />
+        <OptimizedBollardInstances
+          positions={[
+            [-22, 0, -55],
+            [22, 0, -55],
+          ]}
+        />
 
         {/* No idling signs */}
         <NoIdlingSign position={[-15, 0, -10]} rotation={-Math.PI / 2} />
@@ -3898,7 +4054,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           [-25, -55],
         ].map(([x, z], i) => (
           <group key={i} position={[x, 0, z]}>
-            <mesh position={[0, 7, 0]} castShadow>
+            <mesh position={[0, 7, 0]}>
               <cylinderGeometry args={[0.12, 0.15, 14, 8]} />
               <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
             </mesh>
@@ -4022,8 +4178,14 @@ const RealisticTruck: React.FC<{
   const leftSignalRef = useRef<THREE.MeshStandardMaterial>(null);
   const rightSignalRef = useRef<THREE.MeshStandardMaterial>(null);
   const markerLightsRef = useRef<THREE.MeshStandardMaterial[]>([]);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const quality = useGraphicsStore((state) => state.graphics.quality);
+
+  // Only show minor details on high/ultra quality
+  const showMinorDetails = quality === 'high' || quality === 'ultra';
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     const truckState = getTruckState();
     const time = state.clock.elapsedTime;
 
@@ -4111,7 +4273,7 @@ const RealisticTruck: React.FC<{
         </mesh>
 
         {/* Hood */}
-        <mesh position={[0, 1.2, 1.5]} castShadow>
+        <mesh position={[0, 1.2, 1.5]}>
           <boxGeometry args={[2.6, 1, 1.2]} />
           <meshStandardMaterial color={color} metalness={0.4} roughness={0.6} />
         </mesh>
@@ -4137,31 +4299,33 @@ const RealisticTruck: React.FC<{
         ))}
 
         {/* === DRIVER === */}
-        <group position={[0.4, 2.2, 0]}>
-          {/* Head */}
-          <mesh position={[0, 0.5, 0]}>
-            <sphereGeometry args={[0.18, 12, 12]} />
-            <meshStandardMaterial color="#d4a574" roughness={0.8} />
-          </mesh>
-          {/* Body */}
-          <mesh position={[0, 0.1, 0]}>
-            <boxGeometry args={[0.35, 0.5, 0.25]} />
-            <meshStandardMaterial color="#1e40af" roughness={0.7} />
-          </mesh>
-          {/* Arms on wheel */}
-          <mesh position={[0, 0, 0.3]} rotation={[0.3, 0, 0]}>
-            <boxGeometry args={[0.5, 0.12, 0.12]} />
-            <meshStandardMaterial color="#1e40af" roughness={0.7} />
-          </mesh>
-          {/* Cap */}
-          <mesh position={[0, 0.65, 0.05]}>
-            <cylinderGeometry args={[0.12, 0.15, 0.08, 12]} />
-            <meshStandardMaterial color="#1f2937" roughness={0.7} />
-          </mesh>
-        </group>
+        {showMinorDetails && (
+          <group position={[0.4, 2.2, 0]}>
+            {/* Head */}
+            <mesh position={[0, 0.5, 0]}>
+              <sphereGeometry args={[0.18, 8, 8]} />
+              <meshStandardMaterial color="#d4a574" roughness={0.8} />
+            </mesh>
+            {/* Body */}
+            <mesh position={[0, 0.1, 0]}>
+              <boxGeometry args={[0.35, 0.5, 0.25]} />
+              <meshStandardMaterial color="#1e40af" roughness={0.7} />
+            </mesh>
+            {/* Arms on wheel */}
+            <mesh position={[0, 0, 0.3]} rotation={[0.3, 0, 0]}>
+              <boxGeometry args={[0.5, 0.12, 0.12]} />
+              <meshStandardMaterial color="#1e40af" roughness={0.7} />
+            </mesh>
+            {/* Cap */}
+            <mesh position={[0, 0.65, 0.05]}>
+              <cylinderGeometry args={[0.12, 0.15, 0.08, 8]} />
+              <meshStandardMaterial color="#1f2937" roughness={0.7} />
+            </mesh>
+          </group>
+        )}
 
         {/* Roof fairing */}
-        <mesh position={[0, 3.5, -0.3]} castShadow>
+        <mesh position={[0, 3.5, -0.3]}>
           <boxGeometry args={[2.6, 0.8, 1.8]} />
           <meshStandardMaterial color={color} metalness={0.4} roughness={0.6} />
         </mesh>
@@ -4182,26 +4346,30 @@ const RealisticTruck: React.FC<{
         ))}
 
         {/* Exhaust stacks */}
-        <mesh position={[-1.2, 2.8, -0.8]} castShadow>
-          <cylinderGeometry args={[0.08, 0.1, 1.5, 12]} />
+        <mesh position={[-1.2, 2.8, -0.8]}>
+          <cylinderGeometry args={[0.08, 0.1, 1.5, 8]} />
           <meshStandardMaterial color="#374151" metalness={0.7} roughness={0.3} />
         </mesh>
-        <mesh position={[1.2, 2.8, -0.8]} castShadow>
-          <cylinderGeometry args={[0.08, 0.1, 1.5, 12]} />
+        <mesh position={[1.2, 2.8, -0.8]}>
+          <cylinderGeometry args={[0.08, 0.1, 1.5, 8]} />
           <meshStandardMaterial color="#374151" metalness={0.7} roughness={0.3} />
         </mesh>
 
         {/* Exhaust smoke */}
-        <ExhaustSmoke
-          position={[-1.2, 3.6, -0.8]}
-          throttle={throttle.current}
-          isRunning={isEngineRunning}
-        />
-        <ExhaustSmoke
-          position={[1.2, 3.6, -0.8]}
-          throttle={throttle.current}
-          isRunning={isEngineRunning}
-        />
+        {showMinorDetails && (
+          <>
+            <ExhaustSmoke
+              position={[-1.2, 3.6, -0.8]}
+              throttle={throttle.current}
+              isRunning={isEngineRunning}
+            />
+            <ExhaustSmoke
+              position={[1.2, 3.6, -0.8]}
+              throttle={throttle.current}
+              isRunning={isEngineRunning}
+            />
+          </>
+        )}
 
         {/* Side mirrors */}
         {[-1.6, 1.6].map((x, i) => (
@@ -4252,7 +4420,7 @@ const RealisticTruck: React.FC<{
         </mesh>
 
         {/* Front bumper */}
-        <mesh position={[0, 0.5, 2]} castShadow>
+        <mesh position={[0, 0.5, 2]}>
           <boxGeometry args={[2.8, 0.4, 0.3]} />
           <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
         </mesh>
@@ -4260,9 +4428,13 @@ const RealisticTruck: React.FC<{
         {/* Front license plate */}
         <LicensePlate position={[0, 0.5, 2.16]} plateNumber={plateNumber} />
 
-        {/* Headlight beams */}
-        <HeadlightBeam position={[-0.9, 1.4, 2.1]} rotation={[-0.1, 0, 0]} isOn={isEngineRunning} />
-        <HeadlightBeam position={[0.9, 1.4, 2.1]} rotation={[-0.1, 0, 0]} isOn={isEngineRunning} />
+        {/* Headlight beams - only on high/ultra quality */}
+        {showMinorDetails && (
+          <>
+            <HeadlightBeam position={[-0.9, 1.4, 2.1]} rotation={[-0.1, 0, 0]} isOn={isEngineRunning} />
+            <HeadlightBeam position={[0.9, 1.4, 2.1]} rotation={[-0.1, 0, 0]} isOn={isEngineRunning} />
+          </>
+        )}
 
         {/* === FUEL TANKS (on cab sides) === */}
         <FuelTank position={[-1.6, 0.8, -0.3]} side="left" />
@@ -4273,10 +4445,10 @@ const RealisticTruck: React.FC<{
         <DEFTank position={[1.6, 0.5, 0.5]} side="right" />
 
         {/* === CB ANTENNA (on roof) === */}
-        <CBAntennaComponent position={[1, 4, -0.2]} />
+        {showMinorDetails && <CBAntennaComponent position={[1, 4, -0.2]} />}
 
         {/* === SUN VISOR (above windshield) === */}
-        <SunVisor position={[0, 3.3, 1.4]} color={color} />
+        {showMinorDetails && <SunVisor position={[0, 3.3, 1.4]} color={color} />}
       </group>
 
       {/* === FIFTH WHEEL COUPLING (between cab and trailer) === */}
@@ -4285,7 +4457,7 @@ const RealisticTruck: React.FC<{
       {/* === TRAILER (articulated) === */}
       <group ref={trailerRef} position={[0, 0, -5]}>
         {/* Main trailer body */}
-        <mesh position={[0, 2.5, 0]} castShadow>
+        <mesh position={[0, 2.5, 0]}>
           <boxGeometry args={[3.2, 3.8, 11]} />
           <meshStandardMaterial color="#e2e8f0" metalness={0.4} roughness={0.4} />
         </mesh>
@@ -4299,7 +4471,7 @@ const RealisticTruck: React.FC<{
         ))}
 
         {/* Trailer undercarriage */}
-        <mesh position={[0, 0.6, 0]} castShadow>
+        <mesh position={[0, 0.6, 0]}>
           <boxGeometry args={[2.8, 0.4, 10]} />
           <meshStandardMaterial color="#1f2937" roughness={0.8} />
         </mesh>
@@ -4382,11 +4554,11 @@ const RealisticTruck: React.FC<{
         {[-1.6, 1.6].map((x, i) => (
           <group key={i}>
             <mesh position={[x, 1.5, -5.5]}>
-              <cylinderGeometry args={[0.05, 0.05, 0.3, 8]} />
+              <cylinderGeometry args={[0.05, 0.05, 0.3, 6]} />
               <meshStandardMaterial color="#1f2937" metalness={0.7} roughness={0.3} />
             </mesh>
             <mesh position={[x, 3, -5.5]}>
-              <cylinderGeometry args={[0.05, 0.05, 0.3, 8]} />
+              <cylinderGeometry args={[0.05, 0.05, 0.3, 6]} />
               <meshStandardMaterial color="#1f2937" metalness={0.7} roughness={0.3} />
             </mesh>
           </group>
@@ -4438,7 +4610,7 @@ const RealisticTruck: React.FC<{
         </mesh>
 
         {/* DOT bumper */}
-        <mesh position={[0, 0.4, -5.4]} castShadow>
+        <mesh position={[0, 0.4, -5.4]}>
           <boxGeometry args={[3, 0.3, 0.15]} />
           <meshStandardMaterial color="#dc2626" roughness={0.6} />
         </mesh>
@@ -4454,12 +4626,12 @@ const RealisticTruck: React.FC<{
         <group ref={rearWheelsRef}>
           {[-1.3, -1.55, 1.3, 1.55].map((x, i) => (
             <group key={i}>
-              <mesh position={[x, 0.55, -2.5]} rotation={[0, 0, Math.PI / 2]} castShadow>
-                <cylinderGeometry args={[0.55, 0.55, 0.3, 24]} />
+              <mesh position={[x, 0.55, -2.5]} rotation={[0, 0, Math.PI / 2]}>
+                <cylinderGeometry args={[0.55, 0.55, 0.3, 12]} />
                 <meshStandardMaterial color="#1f2937" roughness={0.7} />
               </mesh>
-              <mesh position={[x, 0.55, -4]} rotation={[0, 0, Math.PI / 2]} castShadow>
-                <cylinderGeometry args={[0.55, 0.55, 0.3, 24]} />
+              <mesh position={[x, 0.55, -4]} rotation={[0, 0, Math.PI / 2]}>
+                <cylinderGeometry args={[0.55, 0.55, 0.3, 12]} />
                 <meshStandardMaterial color="#1f2937" roughness={0.7} />
               </mesh>
             </group>
@@ -4474,7 +4646,7 @@ const RealisticTruck: React.FC<{
         rotation={[0, 0, Math.PI / 2]}
         castShadow
       >
-        <cylinderGeometry args={[0.55, 0.55, 0.35, 24]} />
+        <cylinderGeometry args={[0.55, 0.55, 0.35, 12]} />
         <meshStandardMaterial color="#1f2937" roughness={0.7} />
       </mesh>
       <mesh
@@ -4483,7 +4655,7 @@ const RealisticTruck: React.FC<{
         rotation={[0, 0, Math.PI / 2]}
         castShadow
       >
-        <cylinderGeometry args={[0.55, 0.55, 0.35, 24]} />
+        <cylinderGeometry args={[0.55, 0.55, 0.35, 12]} />
         <meshStandardMaterial color="#1f2937" roughness={0.7} />
       </mesh>
 
@@ -4883,12 +5055,14 @@ const FlourExpressLogo: React.FC<{ side: 'left' | 'right' }> = ({ side }) => {
 
 // Mudflap with chains/weights (enhanced version)
 // @ts-ignore - unused component kept for future use
-const _MudflapWithChains: React.FC<{
+const MudflapWithChains: React.FC<{
   position: [number, number, number];
 }> = ({ position }) => {
   const chainRefs = useRef<THREE.Mesh[]>([]);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(3)) return;
     const time = state.clock.elapsedTime;
     chainRefs.current.forEach((chain, i) => {
@@ -4935,7 +5109,7 @@ const _MudflapWithChains: React.FC<{
 
 // Tire Pressure Monitoring System sensor
 // @ts-ignore - unused component kept for future use
-const _TPMSSensor: React.FC<{
+const TPMSSensor: React.FC<{
   position: [number, number, number];
   pressure: number;
 }> = ({ position, pressure }) => {
@@ -4959,7 +5133,7 @@ const _TPMSSensor: React.FC<{
 
 // Trailer door lock rod handles
 // @ts-ignore - unused component kept for future use
-const _TrailerLockRods: React.FC<{
+const TrailerLockRods: React.FC<{
   position: [number, number, number];
   isLocked: boolean;
 }> = ({ position, isLocked }) => {
@@ -4993,14 +5167,16 @@ const _TrailerLockRods: React.FC<{
 
 // Reefer (refrigeration) unit for cold storage trailers
 // @ts-ignore - unused component kept for future use
-const _ReeferUnit: React.FC<{
+const ReeferUnit: React.FC<{
   position: [number, number, number];
   isRunning: boolean;
 }> = ({ position, isRunning }) => {
   const fanRef = useRef<THREE.Group>(null);
   const statusLightRef = useRef<THREE.MeshStandardMaterial>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state, delta) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(2)) return;
     if (fanRef.current && isRunning) {
       fanRef.current.rotation.z += delta * 15;
@@ -5113,17 +5289,27 @@ const AirHoseStation: React.FC<{ position: [number, number, number]; rotation?: 
   rotation = 0,
 }) => {
   const hoseRef = useRef<THREE.Group>(null);
+  const animId = useRef(`airhose-${Math.random().toString(36).substr(2, 9)}`);
 
-  useFrame((state) => {
-    if (!shouldRunThisFrame(3)) return;
-    if (hoseRef.current) {
-      hoseRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.5) * 0.02;
-    }
-  });
+  useEffect(() => {
+    const id = animId.current;
+    registerAnimation(
+      id,
+      'custom',
+      null,
+      {},
+      (time) => {
+        if (hoseRef.current) {
+          hoseRef.current.rotation.z = Math.sin(time * 0.5) * 0.02;
+        }
+      }
+    );
+    return () => unregisterAnimation(id);
+  }, []);
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
-      <mesh position={[0, 1.5, 0]} castShadow>
+      <mesh position={[0, 1.5, 0]}>
         <cylinderGeometry args={[0.1, 0.12, 3, 12]} />
         <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
       </mesh>
@@ -5172,17 +5358,27 @@ const ScaleTicketKiosk: React.FC<{ position: [number, number, number]; rotation?
   rotation = 0,
 }) => {
   const displayRef = useRef<THREE.MeshStandardMaterial>(null);
+  const animId = useRef(`kiosk-${Math.random().toString(36).substr(2, 9)}`);
 
-  useFrame((state) => {
-    if (!shouldRunThisFrame(3)) return;
-    if (displayRef.current) {
-      displayRef.current.emissiveIntensity = 0.6 + Math.sin(state.clock.elapsedTime * 2) * 0.1;
-    }
-  });
+  useEffect(() => {
+    const id = animId.current;
+    registerAnimation(
+      id,
+      'custom',
+      null,
+      {},
+      (time) => {
+        if (displayRef.current) {
+          displayRef.current.emissiveIntensity = 0.6 + Math.sin(time * 2) * 0.1;
+        }
+      }
+    );
+    return () => unregisterAnimation(id);
+  }, []);
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
-      <mesh position={[0, 1.5, 0]} castShadow>
+      <mesh position={[0, 1.5, 0]}>
         <boxGeometry args={[0.8, 1.8, 0.6]} />
         <meshStandardMaterial color="#374151" roughness={0.6} />
       </mesh>
@@ -5303,7 +5499,7 @@ const TrailerDropYard: React.FC<{ position: [number, number, number]; rotation?:
       [6, -8],
     ].map(([x, z], i) => (
       <group key={i} position={[x, 0, z]}>
-        <mesh position={[0, 2.3, 0]} castShadow>
+        <mesh position={[0, 2.3, 0]}>
           <boxGeometry args={[3, 4, 12]} />
           <meshStandardMaterial color={['#e2e8f0', '#d4d4d4', '#94a3b8'][i]} roughness={0.7} />
         </mesh>
@@ -5415,15 +5611,27 @@ const StretchWrapMachine: React.FC<{
   const turntableRef = useRef<THREE.Mesh>(null);
   const armRef = useRef<THREE.Group>(null);
   const wrapRollRef = useRef<THREE.Mesh>(null);
+  const animId = useRef(`wrapper-${Math.random().toString(36).substr(2, 9)}`);
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
 
-  useFrame((_, delta) => {
-    if (!shouldRunThisFrame(3)) return;
-    if (isActive) {
-      if (turntableRef.current) turntableRef.current.rotation.y += delta * 2;
-      if (armRef.current) armRef.current.rotation.y -= delta * 2;
-      if (wrapRollRef.current) wrapRollRef.current.rotation.x += delta * 8;
-    }
-  });
+  useEffect(() => {
+    const id = animId.current;
+    registerAnimation(
+      id,
+      'custom',
+      null,
+      {},
+      (_time, delta) => {
+        if (isActiveRef.current) {
+          if (turntableRef.current) turntableRef.current.rotation.y += delta * 2;
+          if (armRef.current) armRef.current.rotation.y -= delta * 2;
+          if (wrapRollRef.current) wrapRollRef.current.rotation.x += delta * 8;
+        }
+      }
+    );
+    return () => unregisterAnimation(id);
+  }, []);
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
@@ -5511,47 +5719,92 @@ const DockBumperWithWear: React.FC<{ position: [number, number, number]; wearLev
 };
 
 // Floor tape/markings inside dock
+// Floor tape/markings inside dock
 const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ position }) => (
   <group position={position}>
-    <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+    <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
       <planeGeometry args={[3, 10]} />
-      <meshBasicMaterial color="#22c55e" transparent opacity={0.3} />
+      <meshBasicMaterial
+        color="#22c55e"
+        transparent
+        opacity={0.3}
+        polygonOffset
+        polygonOffsetFactor={-10}
+        depthWrite={false}
+      />
     </mesh>
-    <mesh position={[-1.5, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+    <mesh position={[-1.5, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
       <planeGeometry args={[0.1, 10]} />
-      <meshBasicMaterial color="#22c55e" />
+      <meshBasicMaterial
+        color="#22c55e"
+        polygonOffset
+        polygonOffsetFactor={-10}
+        depthWrite={false}
+      />
     </mesh>
-    <mesh position={[1.5, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+    <mesh position={[1.5, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
       <planeGeometry args={[0.1, 10]} />
-      <meshBasicMaterial color="#22c55e" />
+      <meshBasicMaterial
+        color="#22c55e"
+        polygonOffset
+        polygonOffsetFactor={-10}
+        depthWrite={false}
+      />
     </mesh>
-    <mesh position={[3, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+    <mesh position={[3, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
       <planeGeometry args={[1.5, 10]} />
-      <meshBasicMaterial color="#3b82f6" transparent opacity={0.3} />
+      <meshBasicMaterial
+        color="#3b82f6"
+        transparent
+        opacity={0.3}
+        polygonOffset
+        polygonOffsetFactor={-10}
+        depthWrite={false}
+      />
     </mesh>
-    <mesh position={[-4, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+    <mesh position={[-4, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
       <planeGeometry args={[4, 5]} />
-      <meshBasicMaterial color="#fbbf24" transparent opacity={0.2} />
+      <meshBasicMaterial
+        color="#fbbf24"
+        transparent
+        opacity={0.2}
+        polygonOffset
+        polygonOffsetFactor={-10}
+        depthWrite={false}
+      />
     </mesh>
     {[
       [-6, 0],
       [-2, 0],
     ].map(([x], i) => (
-      <mesh key={i} position={[x, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh key={i} position={[x, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
         <planeGeometry args={[0.08, 5]} />
-        <meshBasicMaterial color="#fbbf24" />
+        <meshBasicMaterial
+          color="#fbbf24"
+          polygonOffset
+          polygonOffsetFactor={-10}
+          depthWrite={false}
+        />
       </mesh>
     ))}
-    <mesh position={[0, 0.01, -6]} rotation={[-Math.PI / 2, 0, 0]}>
+    <mesh position={[0, 0.02, -6]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
       <planeGeometry args={[5, 2]} />
-      <meshBasicMaterial color="#ef4444" transparent opacity={0.25} />
+      <meshBasicMaterial
+        color="#ef4444"
+        transparent
+        opacity={0.25}
+        polygonOffset
+        polygonOffsetFactor={-10}
+        depthWrite={false}
+      />
     </mesh>
     <Text
-      position={[0, 0.03, -6]}
+      position={[0, 0.04, -6]}
       rotation={[-Math.PI / 2, 0, 0]}
       fontSize={0.4}
       color="#ef4444"
       anchorX="center"
+      renderOrder={11} // Text on top of markings
     >
       KEEP CLEAR
     </Text>
@@ -5636,18 +5889,27 @@ const FireExtinguisherStation: React.FC<{
 const TruckAlignmentGuides: React.FC<{ position: [number, number, number] }> = ({ position }) => {
   const laserRef1 = useRef<THREE.Mesh>(null);
   const laserRef2 = useRef<THREE.Mesh>(null);
+  const animId = useRef(`laser-${Math.random().toString(36).substr(2, 9)}`);
 
-  useFrame((state) => {
-    if (!shouldRunThisFrame(4)) return;
-    // Pulsing laser effect
-    const intensity = 0.5 + Math.sin(state.clock.elapsedTime * 4) * 0.3;
-    if (laserRef1.current) {
-      (laserRef1.current.material as THREE.MeshStandardMaterial).emissiveIntensity = intensity;
-    }
-    if (laserRef2.current) {
-      (laserRef2.current.material as THREE.MeshStandardMaterial).emissiveIntensity = intensity;
-    }
-  });
+  useEffect(() => {
+    const id = animId.current;
+    registerAnimation(
+      id,
+      'custom',
+      null,
+      {},
+      (time) => {
+        const intensity = 0.5 + Math.sin(time * 4) * 0.3;
+        if (laserRef1.current) {
+          (laserRef1.current.material as THREE.MeshStandardMaterial).emissiveIntensity = intensity;
+        }
+        if (laserRef2.current) {
+          (laserRef2.current.material as THREE.MeshStandardMaterial).emissiveIntensity = intensity;
+        }
+      }
+    );
+    return () => unregisterAnimation(id);
+  }, []);
 
   return (
     <group position={position}>
@@ -5716,28 +5978,36 @@ const PalletJackChargingStation: React.FC<{
   rotation?: number;
 }> = ({ position, rotation = 0 }) => {
   const chargeIndicatorRef = useRef<THREE.Mesh>(null);
+  const animId = useRef(`charger-${Math.random().toString(36).substr(2, 9)}`);
 
-  useFrame((state) => {
-    if (!shouldRunThisFrame(3)) return;
-    // Charging indicator blink
-    if (chargeIndicatorRef.current) {
-      const blink = Math.sin(state.clock.elapsedTime * 2) > 0;
-      (chargeIndicatorRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity = blink
-        ? 0.8
-        : 0.2;
-    }
-  });
+  useEffect(() => {
+    const id = animId.current;
+    registerAnimation(
+      id,
+      'custom',
+      null,
+      {},
+      (time) => {
+        if (chargeIndicatorRef.current) {
+          const blink = Math.sin(time * 2) > 0;
+          (chargeIndicatorRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity =
+            blink ? 0.8 : 0.2;
+        }
+      }
+    );
+    return () => unregisterAnimation(id);
+  }, []);
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
       {/* Charging station base */}
-      <mesh position={[0, 0.3, 0]} castShadow>
+      <mesh position={[0, 0.3, 0]}>
         <boxGeometry args={[1.5, 0.6, 1]} />
         <meshStandardMaterial color="#374151" metalness={0.5} roughness={0.5} />
       </mesh>
 
       {/* Charging unit/panel */}
-      <mesh position={[0, 1, -0.4]} castShadow>
+      <mesh position={[0, 1, -0.4]}>
         <boxGeometry args={[1.2, 1, 0.2]} />
         <meshStandardMaterial color="#1f2937" roughness={0.6} />
       </mesh>
@@ -5763,19 +6033,19 @@ const PalletJackChargingStation: React.FC<{
       {/* Electric pallet jack parked at station */}
       <group position={[0, 0, 1.5]}>
         {/* Jack body */}
-        <mesh position={[0, 0.3, 0]} castShadow>
+        <mesh position={[0, 0.3, 0]}>
           <boxGeometry args={[0.6, 0.4, 1.5]} />
           <meshStandardMaterial color="#fbbf24" roughness={0.5} />
         </mesh>
         {/* Forks */}
         {[-0.25, 0.25].map((x, i) => (
-          <mesh key={i} position={[x, 0.1, 1]} castShadow>
+          <mesh key={i} position={[x, 0.1, 1]}>
             <boxGeometry args={[0.15, 0.08, 1.2]} />
             <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
           </mesh>
         ))}
         {/* Handle */}
-        <mesh position={[0, 0.8, -0.6]} castShadow>
+        <mesh position={[0, 0.8, -0.6]}>
           <boxGeometry args={[0.4, 0.6, 0.15]} />
           <meshStandardMaterial color="#1f2937" roughness={0.7} />
         </mesh>
@@ -5868,23 +6138,31 @@ const OverheadCrane: React.FC<{ position: [number, number, number]; spanWidth?: 
 }) => {
   const trolleyRef = useRef<THREE.Group>(null);
   const hookRef = useRef<THREE.Group>(null);
+  const animId = useRef(`crane-${Math.random().toString(36).substr(2, 9)}`);
 
-  useFrame((state) => {
-    // Slow trolley movement
-    if (!shouldRunThisFrame(3)) return;
-    if (trolleyRef.current) {
-      trolleyRef.current.position.x = Math.sin(state.clock.elapsedTime * 0.2) * (spanWidth / 2 - 1);
-    }
-    // Slight hook sway
-    if (hookRef.current) {
-      hookRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.5) * 0.05;
-    }
-  });
+  useEffect(() => {
+    const id = animId.current;
+    registerAnimation(
+      id,
+      'custom',
+      null,
+      { spanWidth },
+      (time, _delta, _mesh, data) => {
+        if (trolleyRef.current) {
+          trolleyRef.current.position.x = Math.sin(time * 0.2) * (data.spanWidth / 2 - 1);
+        }
+        if (hookRef.current) {
+          hookRef.current.rotation.z = Math.sin(time * 0.5) * 0.05;
+        }
+      }
+    );
+    return () => unregisterAnimation(id);
+  }, [spanWidth]);
 
   return (
     <group position={position}>
       {/* Main bridge beam */}
-      <mesh position={[0, 0, 0]} castShadow>
+      <mesh position={[0, 0, 0]}>
         <boxGeometry args={[spanWidth, 0.6, 0.8]} />
         <meshStandardMaterial color="#fbbf24" roughness={0.5} />
       </mesh>
@@ -5892,14 +6170,14 @@ const OverheadCrane: React.FC<{ position: [number, number, number]; spanWidth?: 
       {/* End trucks (on rails) */}
       {[-spanWidth / 2, spanWidth / 2].map((x, i) => (
         <group key={i} position={[x, 0, 0]}>
-          <mesh castShadow>
+          <mesh>
             <boxGeometry args={[0.8, 0.8, 1.2]} />
             <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
           </mesh>
           {/* Wheels */}
           {[-0.5, 0.5].map((z, j) => (
             <mesh key={j} position={[0, -0.3, z]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[0.15, 0.15, 0.2, 16]} />
+              <cylinderGeometry args={[0.15, 0.15, 0.2, 12]} />
               <meshStandardMaterial color="#1f2937" metalness={0.7} roughness={0.3} />
             </mesh>
           ))}
@@ -5908,33 +6186,33 @@ const OverheadCrane: React.FC<{ position: [number, number, number]; spanWidth?: 
 
       {/* Trolley */}
       <group ref={trolleyRef} position={[0, -0.4, 0]}>
-        <mesh castShadow>
+        <mesh>
           <boxGeometry args={[1.2, 0.4, 0.6]} />
           <meshStandardMaterial color="#64748b" metalness={0.6} roughness={0.4} />
         </mesh>
 
         {/* Hoist motor */}
-        <mesh position={[0, -0.3, 0]} castShadow>
-          <cylinderGeometry args={[0.2, 0.2, 0.4, 16]} />
+        <mesh position={[0, -0.3, 0]}>
+          <cylinderGeometry args={[0.2, 0.2, 0.4, 12]} />
           <meshStandardMaterial color="#f97316" roughness={0.5} />
         </mesh>
 
         {/* Cable */}
         <mesh position={[0, -1.2, 0]}>
-          <cylinderGeometry args={[0.015, 0.015, 1.5, 8]} />
+          <cylinderGeometry args={[0.015, 0.015, 1.5, 6]} />
           <meshStandardMaterial color="#1f2937" metalness={0.8} roughness={0.2} />
         </mesh>
 
         {/* Hook assembly */}
         <group ref={hookRef} position={[0, -2, 0]}>
           {/* Hook block */}
-          <mesh castShadow>
+          <mesh>
             <boxGeometry args={[0.3, 0.2, 0.15]} />
             <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
           </mesh>
           {/* Hook */}
           <mesh position={[0, -0.2, 0]} rotation={[0, 0, 0]}>
-            <torusGeometry args={[0.1, 0.025, 8, 16, Math.PI * 1.5]} />
+            <torusGeometry args={[0.1, 0.025, 6, 12, Math.PI * 1.5]} />
             <meshStandardMaterial color="#fbbf24" metalness={0.8} roughness={0.2} />
           </mesh>
         </group>
@@ -5966,25 +6244,34 @@ const CardboardCompactor: React.FC<{ position: [number, number, number]; rotatio
   rotation = 0,
 }) => {
   const ramRef = useRef<THREE.Mesh>(null);
+  const animId = useRef(`compactor-${Math.random().toString(36).substr(2, 9)}`);
 
-  useFrame((state) => {
-    if (!shouldRunThisFrame(3)) return;
-    // Occasional compacting motion
-    if (ramRef.current) {
-      const cycle = Math.floor(state.clock.elapsedTime / 8) % 2;
-      const t = (state.clock.elapsedTime % 8) / 8;
-      if (cycle === 0 && t < 0.5) {
-        ramRef.current.position.y = 1.8 - t * 1.2;
-      } else if (cycle === 0) {
-        ramRef.current.position.y = 1.2 + (t - 0.5) * 1.2;
+  useEffect(() => {
+    const id = animId.current;
+    registerAnimation(
+      id,
+      'custom',
+      null,
+      {},
+      (time) => {
+        if (ramRef.current) {
+          const cycle = Math.floor(time / 8) % 2;
+          const t = (time % 8) / 8;
+          if (cycle === 0 && t < 0.5) {
+            ramRef.current.position.y = 1.8 - t * 1.2;
+          } else if (cycle === 0) {
+            ramRef.current.position.y = 1.2 + (t - 0.5) * 1.2;
+          }
+        }
       }
-    }
-  });
+    );
+    return () => unregisterAnimation(id);
+  }, []);
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
       {/* Main body/hopper */}
-      <mesh position={[0, 1.2, 0]} castShadow>
+      <mesh position={[0, 1.2, 0]}>
         <boxGeometry args={[2.5, 2.4, 2]} />
         <meshStandardMaterial color="#22c55e" roughness={0.6} />
       </mesh>
@@ -5996,13 +6283,13 @@ const CardboardCompactor: React.FC<{ position: [number, number, number]; rotatio
       </mesh>
 
       {/* Hydraulic ram (animated) */}
-      <mesh ref={ramRef} position={[0, 1.8, 0]} castShadow>
+      <mesh ref={ramRef} position={[0, 1.8, 0]}>
         <boxGeometry args={[2.3, 0.3, 1.8]} />
         <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
       </mesh>
 
       {/* Bale discharge door */}
-      <mesh position={[-1.26, 0.8, 0]} castShadow>
+      <mesh position={[-1.26, 0.8, 0]}>
         <boxGeometry args={[0.1, 1.4, 1.6]} />
         <meshStandardMaterial color="#16a34a" roughness={0.5} />
       </mesh>
@@ -6065,28 +6352,37 @@ const IntercomCallBox: React.FC<{ position: [number, number, number]; rotation?:
   rotation = 0,
 }) => {
   const speakerRef = useRef<THREE.Mesh>(null);
+  const animId = useRef(`intercom-${Math.random().toString(36).substr(2, 9)}`);
 
-  useFrame((state) => {
-    // Occasional activity light
-    if (!shouldRunThisFrame(4)) return;
-    if (speakerRef.current) {
-      const active = Math.sin(state.clock.elapsedTime * 0.5) > 0.8;
-      (speakerRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity = active
-        ? 0.8
-        : 0.1;
-    }
-  });
+  useEffect(() => {
+    const id = animId.current;
+    registerAnimation(
+      id,
+      'custom',
+      null,
+      {},
+      (time) => {
+        if (speakerRef.current) {
+          const active = Math.sin(time * 0.5) > 0.8;
+          (speakerRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity = active
+            ? 0.8
+            : 0.1;
+        }
+      }
+    );
+    return () => unregisterAnimation(id);
+  }, []);
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
       {/* Post */}
-      <mesh position={[0, 0.75, 0]} castShadow>
+      <mesh position={[0, 0.75, 0]}>
         <cylinderGeometry args={[0.05, 0.06, 1.5, 8]} />
         <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
       </mesh>
 
       {/* Call box housing */}
-      <mesh position={[0, 1.3, 0.08]} castShadow>
+      <mesh position={[0, 1.3, 0.08]}>
         <boxGeometry args={[0.3, 0.4, 0.15]} />
         <meshStandardMaterial color="#1f2937" roughness={0.6} />
       </mesh>

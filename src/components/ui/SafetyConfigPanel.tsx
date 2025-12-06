@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, ChevronDown, ChevronUp } from 'lucide-react';
-import { useMillStore } from '../../store';
+import { useSafetyStore } from '../../stores/safetyStore';
+import { useUIStore } from '../../stores/uiStore';
 
 export const SafetyConfigPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
-  const safetyConfig = useMillStore((state) => state.safetyConfig);
-  const setSafetyConfig = useMillStore((state) => state.setSafetyConfig);
-  const theme = useMillStore((state) => state.theme);
+  const safetyConfig = useSafetyStore((state) => state.safetyConfig);
+  const setSafetyConfig = useSafetyStore((state) => state.setSafetyConfig);
+  const theme = useUIStore((state) => state.theme);
 
   return (
     <div

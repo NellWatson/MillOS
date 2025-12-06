@@ -1614,12 +1614,13 @@ const Graffiti: React.FC<{
     ctx.clearRect(0, 0, 128, 64);
 
     switch (type) {
-      case 'tag':
+      case 'tag': {
         ctx.font = 'bold 24px Arial';
         ctx.fillStyle = 'rgba(50, 50, 50, 0.6)';
         const tags = ['JAKE WUZ HERE', 'B.M. 2019', 'MILL CREW', 'SHIFT 3'];
         ctx.fillText(tags[Math.floor(Math.random() * tags.length)], 10, 40);
         break;
+      }
       case 'drawing':
         ctx.strokeStyle = 'rgba(60, 60, 60, 0.5)';
         ctx.lineWidth = 2;

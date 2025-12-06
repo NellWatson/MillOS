@@ -9,13 +9,230 @@
  * Also handles worker reactions to chaos events:
  * - Slipping on grain spills
  * - Coughing in dust clouds
+ *
+ * PERFORMANCE: Consolidated from 6 separate useFrame hooks into 1 centralized manager
  */
 
-import React, { useRef, useMemo, useEffect } from 'react';
-import { useFrame } from '@react-three/fiber';
+import React, { useRef, useMemo, useEffect, useCallback, createContext, useContext } from 'react';
+import { useFrame, type RootState } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useWorkerMoodStore } from '../stores/workerMoodStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { WORKER_ROSTER } from '../types';
+
+// =========================================================================
+// ANIMATION MANAGER - Single useFrame for all maintenance animations
+// =========================================================================
+
+type MaintenanceRefType =
+  | 'sweeping'
+  | 'watering'
+  | 'oiling'
+  | 'slip_effect'
+  | 'cough_effect'
+  | 'chaos_reactions';
+
+interface MaintenanceRefs {
+  type: MaintenanceRefType;
+  id: string;
+  // Sweeping refs
+  groupRef?: React.RefObject<THREE.Group>;
+  broomRef?: React.RefObject<THREE.Group>;
+  sweepPhaseRef?: React.MutableRefObject<number>;
+  positionRef?: React.MutableRefObject<THREE.Vector3>;
+  targetRef?: React.MutableRefObject<THREE.Vector3>;
+  directionRef?: React.MutableRefObject<THREE.Vector3>;
+  // Watering refs
+  canRef?: React.RefObject<THREE.Group>;
+  waterRef?: React.RefObject<THREE.Points>;
+  pourPhaseRef?: React.MutableRefObject<number>;
+  plantPosition?: [number, number, number];
+  // Oiling refs
+  squeezePhaseRef?: React.MutableRefObject<number>;
+  machinePosition?: [number, number, number];
+  // Slip effect refs
+  phaseRef?: React.MutableRefObject<number>;
+  // Cough effect refs
+  puffsRef?: React.MutableRefObject<THREE.Mesh[]>;
+  phases?: number[];
+}
+
+type RegisterMaintenanceFn = (refs: MaintenanceRefs) => void;
+type UnregisterMaintenanceFn = (id: string) => void;
+
+const MaintenanceAnimationContext = createContext<{
+  register: RegisterMaintenanceFn;
+  unregister: UnregisterMaintenanceFn;
+} | null>(null);
+
+const useMaintenanceAnimation = () => {
+  return useContext(MaintenanceAnimationContext);
+};
+
+// =========================================================================
+// ANIMATION FUNCTIONS - Pure functions for each maintenance type
+// =========================================================================
+
+function animateSweeping(refs: MaintenanceRefs, delta: number): void {
+  if (!refs.groupRef?.current || !refs.broomRef?.current) return;
+  if (!refs.positionRef || !refs.targetRef || !refs.sweepPhaseRef || !refs.directionRef) return;
+
+  // Move toward target slowly
+  refs.positionRef.current.lerp(refs.targetRef.current, delta * 0.3);
+  refs.groupRef.current.position.copy(refs.positionRef.current);
+
+  // Face movement direction
+  const dir = refs.directionRef.current.copy(refs.targetRef.current).sub(refs.positionRef.current);
+  if (dir.length() > 0.1) {
+    refs.groupRef.current.rotation.y = Math.atan2(dir.x, dir.z);
+  }
+
+  // Sweeping animation - back and forth
+  refs.sweepPhaseRef.current += delta * 4;
+  const sweepAngle = Math.sin(refs.sweepPhaseRef.current) * 0.4;
+  refs.broomRef.current.rotation.y = sweepAngle;
+  refs.broomRef.current.position.x = Math.sin(refs.sweepPhaseRef.current) * 0.15;
+}
+
+function animateWatering(refs: MaintenanceRefs, delta: number): void {
+  if (!refs.groupRef?.current || !refs.canRef?.current || !refs.plantPosition) return;
+  if (!refs.directionRef || !refs.pourPhaseRef) return;
+
+  // Face the plant
+  const dir = refs.directionRef.current.set(...refs.plantPosition).sub(refs.groupRef.current.position);
+  refs.groupRef.current.rotation.y = Math.atan2(dir.x, dir.z);
+
+  // Tilt watering can
+  refs.pourPhaseRef.current += delta * 2;
+  const tiltAmount = Math.sin(refs.pourPhaseRef.current * 0.5) * 0.1 + 0.5;
+  refs.canRef.current.rotation.z = -tiltAmount;
+
+  // Animate water droplets
+  if (refs.waterRef?.current) {
+    const geo = refs.waterRef.current.geometry;
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      let y = pos.getY(i) - delta * 0.5;
+      if (y < -0.4) y = 0;
+      pos.setY(i, y);
+    }
+    pos.needsUpdate = true;
+  }
+}
+
+function animateOiling(refs: MaintenanceRefs, delta: number): void {
+  if (!refs.groupRef?.current || !refs.canRef?.current || !refs.machinePosition) return;
+  if (!refs.directionRef || !refs.squeezePhaseRef) return;
+
+  // Face the machine
+  const dir = refs.directionRef.current.set(...refs.machinePosition).sub(refs.groupRef.current.position);
+  refs.groupRef.current.rotation.y = Math.atan2(dir.x, dir.z);
+
+  // Squeeze animation
+  refs.squeezePhaseRef.current += delta * 3;
+  const squeeze = Math.sin(refs.squeezePhaseRef.current) * 0.1;
+  refs.canRef.current.scale.x = 1 - Math.abs(squeeze);
+  refs.canRef.current.scale.z = 1 - Math.abs(squeeze);
+}
+
+function animateSlipEffect(refs: MaintenanceRefs, delta: number): void {
+  if (!refs.groupRef?.current || !refs.phaseRef) return;
+
+  refs.phaseRef.current += delta * 8;
+  refs.groupRef.current.rotation.z = Math.sin(refs.phaseRef.current) * 0.3;
+  refs.groupRef.current.position.y = 1.5 + Math.sin(refs.phaseRef.current * 2) * 0.1;
+}
+
+function animateCoughEffect(refs: MaintenanceRefs, state: RootState): void {
+  if (!refs.puffsRef?.current || !refs.phases) return;
+
+  refs.puffsRef.current.forEach((ref, i) => {
+    if (!ref) return;
+    const phase = (state.clock.elapsedTime * 2 + refs.phases![i]) % 1;
+
+    // Puffs expand and fade as they move outward
+    ref.position.z = 0.3 + phase * 0.4;
+    ref.position.y = 1.4 + phase * 0.2;
+    ref.scale.setScalar(0.05 + phase * 0.1);
+    (ref.material as THREE.MeshBasicMaterial).opacity = (1 - phase) * 0.6;
+  });
+}
+
+// =========================================================================
+// MAINTENANCE ANIMATION MANAGER - Single useFrame for all effects
+// =========================================================================
+
+const MaintenanceAnimationManager: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const maintenanceRefsMap = useRef<Map<string, MaintenanceRefs>>(new Map());
+  const frameCountRef = useRef(0);
+  const lastChaosCheckRef = useRef(0);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const chaosEvents = useWorkerMoodStore((state) => state.chaosEvents);
+  const triggerWorkerReaction = useWorkerMoodStore((state) => state.triggerWorkerReaction);
+
+  const register = useCallback<RegisterMaintenanceFn>((refs) => {
+    maintenanceRefsMap.current.set(refs.id, refs);
+  }, []);
+
+  const unregister = useCallback<UnregisterMaintenanceFn>((id) => {
+    maintenanceRefsMap.current.delete(id);
+  }, []);
+
+  // Single useFrame for ALL maintenance animations (consolidates 6 hooks into 1)
+  useFrame((state, delta) => {
+    if (!isTabVisible) return;
+    frameCountRef.current++;
+    if (frameCountRef.current % 3 !== 0) return; // Throttle to ~20fps
+
+    maintenanceRefsMap.current.forEach((refs) => {
+      switch (refs.type) {
+        case 'sweeping':
+          animateSweeping(refs, delta);
+          break;
+        case 'watering':
+          animateWatering(refs, delta);
+          break;
+        case 'oiling':
+          animateOiling(refs, delta);
+          break;
+        case 'slip_effect':
+          animateSlipEffect(refs, delta);
+          break;
+        case 'cough_effect':
+          animateCoughEffect(refs, state);
+          break;
+      }
+    });
+
+    // Chaos reactions check (every 500ms)
+    const now = Date.now();
+    if (now - lastChaosCheckRef.current >= 500) {
+      lastChaosCheckRef.current = now;
+
+      chaosEvents.forEach((event) => {
+        if (event.resolved) return;
+
+        WORKER_ROSTER.forEach((worker) => {
+          if (event.affectedWorkerIds.includes(worker.id) && Math.random() < 0.05) {
+            if (event.type === 'grain_spill') {
+              triggerWorkerReaction(worker.id, 'slipping', 1500);
+            } else if (event.type === 'dust_cloud') {
+              triggerWorkerReaction(worker.id, 'coughing', 2000);
+            }
+          }
+        });
+      });
+    }
+  });
+
+  const contextValue = useMemo(() => ({ register, unregister }), [register, unregister]);
+
+  return (
+    <MaintenanceAnimationContext.Provider value={contextValue}>
+      {children}
+    </MaintenanceAnimationContext.Provider>
+  );
+};
 
 // =========================================================================
 // MAINTENANCE WORKER WITH BROOM (Sweeping Animation)
@@ -23,9 +240,11 @@ import { WORKER_ROSTER } from '../types';
 interface SweepingWorkerProps {
   position: [number, number, number];
   targetPosition: [number, number, number];
+  taskId: string;
 }
 
-const SweepingWorker: React.FC<SweepingWorkerProps> = React.memo(({ position, targetPosition }) => {
+const SweepingWorker: React.FC<SweepingWorkerProps> = React.memo(({ position, targetPosition, taskId }) => {
+  const { register, unregister } = useMaintenanceAnimation();
   const groupRef = useRef<THREE.Group>(null);
   const broomRef = useRef<THREE.Group>(null);
   const sweepPhaseRef = useRef(0);
@@ -33,25 +252,20 @@ const SweepingWorker: React.FC<SweepingWorkerProps> = React.memo(({ position, ta
   const targetRef = useRef(new THREE.Vector3(...targetPosition));
   const directionRef = useRef(new THREE.Vector3());
 
-  useFrame((_state, delta) => {
-    if (!groupRef.current || !broomRef.current) return;
-
-    // Move toward target slowly
-    positionRef.current.lerp(targetRef.current, delta * 0.3);
-    groupRef.current.position.copy(positionRef.current);
-
-    // Face movement direction
-    const dir = directionRef.current.copy(targetRef.current).sub(positionRef.current);
-    if (dir.length() > 0.1) {
-      groupRef.current.rotation.y = Math.atan2(dir.x, dir.z);
-    }
-
-    // Sweeping animation - back and forth
-    sweepPhaseRef.current += delta * 4;
-    const sweepAngle = Math.sin(sweepPhaseRef.current) * 0.4;
-    broomRef.current.rotation.y = sweepAngle;
-    broomRef.current.position.x = Math.sin(sweepPhaseRef.current) * 0.15;
-  });
+  // Register with animation manager
+  useEffect(() => {
+    register({
+      type: 'sweeping',
+      id: `sweeping-${taskId}`,
+      groupRef,
+      broomRef,
+      sweepPhaseRef,
+      positionRef,
+      targetRef,
+      directionRef,
+    });
+    return () => unregister(`sweeping-${taskId}`);
+  }, [register, unregister, taskId]);
 
   return (
     <group ref={groupRef} position={position}>
@@ -97,9 +311,11 @@ SweepingWorker.displayName = 'SweepingWorker';
 interface WateringWorkerProps {
   position: [number, number, number];
   plantPosition: [number, number, number];
+  taskId: string;
 }
 
-const WateringWorker: React.FC<WateringWorkerProps> = React.memo(({ position, plantPosition }) => {
+const WateringWorker: React.FC<WateringWorkerProps> = React.memo(({ position, plantPosition, taskId }) => {
+  const { register, unregister } = useMaintenanceAnimation();
   const groupRef = useRef<THREE.Group>(null);
   const canRef = useRef<THREE.Group>(null);
   const waterRef = useRef<THREE.Points>(null);
@@ -117,30 +333,20 @@ const WateringWorker: React.FC<WateringWorkerProps> = React.memo(({ position, pl
     return arr;
   }, []);
 
-  useFrame((_state, delta) => {
-    if (!groupRef.current || !canRef.current) return;
-
-    // Face the plant
-    const dir = directionRef.current.set(...plantPosition).sub(groupRef.current.position);
-    groupRef.current.rotation.y = Math.atan2(dir.x, dir.z);
-
-    // Tilt watering can
-    pourPhaseRef.current += delta * 2;
-    const tiltAmount = Math.sin(pourPhaseRef.current * 0.5) * 0.1 + 0.5;
-    canRef.current.rotation.z = -tiltAmount;
-
-    // Animate water droplets
-    if (waterRef.current) {
-      const geo = waterRef.current.geometry;
-      const pos = geo.attributes.position as THREE.BufferAttribute;
-      for (let i = 0; i < pos.count; i++) {
-        let y = pos.getY(i) - delta * 0.5;
-        if (y < -0.4) y = 0;
-        pos.setY(i, y);
-      }
-      pos.needsUpdate = true;
-    }
-  });
+  // Register with animation manager
+  useEffect(() => {
+    register({
+      type: 'watering',
+      id: `watering-${taskId}`,
+      groupRef,
+      canRef,
+      waterRef,
+      pourPhaseRef,
+      directionRef,
+      plantPosition,
+    });
+    return () => unregister(`watering-${taskId}`);
+  }, [register, unregister, taskId, plantPosition]);
 
   return (
     <group ref={groupRef} position={position}>
@@ -193,27 +399,29 @@ WateringWorker.displayName = 'WateringWorker';
 interface OilingWorkerProps {
   position: [number, number, number];
   machinePosition: [number, number, number];
+  taskId: string;
 }
 
-const OilingWorker: React.FC<OilingWorkerProps> = React.memo(({ position, machinePosition }) => {
+const OilingWorker: React.FC<OilingWorkerProps> = React.memo(({ position, machinePosition, taskId }) => {
+  const { register, unregister } = useMaintenanceAnimation();
   const groupRef = useRef<THREE.Group>(null);
   const canRef = useRef<THREE.Group>(null);
   const squeezePhaseRef = useRef(0);
   const directionRef = useRef(new THREE.Vector3());
 
-  useFrame((_state, delta) => {
-    if (!groupRef.current || !canRef.current) return;
-
-    // Face the machine
-    const dir = directionRef.current.set(...machinePosition).sub(groupRef.current.position);
-    groupRef.current.rotation.y = Math.atan2(dir.x, dir.z);
-
-    // Squeeze animation
-    squeezePhaseRef.current += delta * 3;
-    const squeeze = Math.sin(squeezePhaseRef.current) * 0.1;
-    canRef.current.scale.x = 1 - Math.abs(squeeze);
-    canRef.current.scale.z = 1 - Math.abs(squeeze);
-  });
+  // Register with animation manager
+  useEffect(() => {
+    register({
+      type: 'oiling',
+      id: `oiling-${taskId}`,
+      groupRef,
+      canRef,
+      squeezePhaseRef,
+      directionRef,
+      machinePosition,
+    });
+    return () => unregister(`oiling-${taskId}`);
+  }, [register, unregister, taskId, machinePosition]);
 
   return (
     <group ref={groupRef} position={position}>
@@ -274,8 +482,8 @@ export const WorkerReactionOverlay: React.FC<WorkerReactionOverlayProps> = React
 
     return (
       <group position={position}>
-        {reaction.reaction === 'slipping' && <SlipEffect />}
-        {reaction.reaction === 'coughing' && <CoughEffect />}
+        {reaction.reaction === 'slipping' && <SlipEffect workerId={workerId} />}
+        {reaction.reaction === 'coughing' && <CoughEffect workerId={workerId} />}
       </group>
     );
   }
@@ -283,15 +491,36 @@ export const WorkerReactionOverlay: React.FC<WorkerReactionOverlayProps> = React
 WorkerReactionOverlay.displayName = 'WorkerReactionOverlay';
 
 // Slip effect - motion lines and stars
-const SlipEffect: React.FC = React.memo(() => {
+// Falls back to standalone useFrame when not in MaintenanceAnimationManager context
+const SlipEffect: React.FC<{ workerId: string }> = React.memo(({ workerId }) => {
+  const ctx = useMaintenanceAnimation();
   const groupRef = useRef<THREE.Group>(null);
   const phaseRef = useRef(0);
+  const frameCountRef = useRef(0);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
+  // Register with animation manager if available
+  useEffect(() => {
+    if (ctx) {
+      ctx.register({
+        type: 'slip_effect',
+        id: `slip-${workerId}`,
+        groupRef,
+        phaseRef,
+      });
+      return () => ctx.unregister(`slip-${workerId}`);
+    }
+  }, [ctx, workerId]);
+
+  // Fallback useFrame when not in context
   useFrame((_state, delta) => {
+    if (ctx) return; // Manager handles animation
+    if (!isTabVisible) return;
+    frameCountRef.current++;
+    if (frameCountRef.current % 3 !== 0) return;
     if (!groupRef.current) return;
-    phaseRef.current += delta * 8;
 
-    // Wobble the whole effect
+    phaseRef.current += delta * 8;
     groupRef.current.rotation.z = Math.sin(phaseRef.current) * 0.3;
     groupRef.current.position.y = 1.5 + Math.sin(phaseRef.current * 2) * 0.1;
   });
@@ -310,10 +539,7 @@ const SlipEffect: React.FC = React.memo(() => {
       {[0, 1, 2].map((i) => {
         const angle = (i / 3) * Math.PI * 2;
         return (
-          <mesh
-            key={`star-${i}`}
-            position={[Math.cos(angle) * 0.25, 0.2, Math.sin(angle) * 0.25]}
-          >
+          <mesh key={`star-${i}`} position={[Math.cos(angle) * 0.25, 0.2, Math.sin(angle) * 0.25]}>
             <octahedronGeometry args={[0.04]} />
             <meshBasicMaterial color="#fbbf24" />
           </mesh>
@@ -325,16 +551,37 @@ const SlipEffect: React.FC = React.memo(() => {
 SlipEffect.displayName = 'SlipEffect';
 
 // Cough effect - puff clouds
-const CoughEffect: React.FC = React.memo(() => {
+// Falls back to standalone useFrame when not in MaintenanceAnimationManager context
+const CoughEffect: React.FC<{ workerId: string }> = React.memo(({ workerId }) => {
+  const ctx = useMaintenanceAnimation();
   const puffsRef = useRef<THREE.Mesh[]>([]);
   const phases = useMemo(() => [0, 0.3, 0.6], []);
+  const frameCountRef = useRef(0);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
+  // Register with animation manager if available
+  useEffect(() => {
+    if (ctx) {
+      ctx.register({
+        type: 'cough_effect',
+        id: `cough-${workerId}`,
+        puffsRef,
+        phases,
+      });
+      return () => ctx.unregister(`cough-${workerId}`);
+    }
+  }, [ctx, workerId, phases]);
+
+  // Fallback useFrame when not in context
   useFrame((state) => {
+    if (ctx) return; // Manager handles animation
+    if (!isTabVisible) return;
+    frameCountRef.current++;
+    if (frameCountRef.current % 3 !== 0) return;
+
     puffsRef.current.forEach((ref, i) => {
       if (!ref) return;
       const phase = (state.clock.elapsedTime * 2 + phases[i]) % 1;
-
-      // Puffs expand and fade as they move outward
       ref.position.z = 0.3 + phase * 0.4;
       ref.position.y = 1.4 + phase * 0.2;
       ref.scale.setScalar(0.05 + phase * 0.1);
@@ -362,41 +609,9 @@ const CoughEffect: React.FC = React.memo(() => {
 CoughEffect.displayName = 'CoughEffect';
 
 // =========================================================================
-// CHAOS EVENT REACTIONS SYSTEM
-// Detects workers near chaos events and triggers reactions
-// =========================================================================
-export const useChaosReactions = () => {
-  const chaosEvents = useWorkerMoodStore((state) => state.chaosEvents);
-  const triggerWorkerReaction = useWorkerMoodStore((state) => state.triggerWorkerReaction);
-  const lastCheckRef = useRef(0);
-
-  useFrame(() => {
-    const now = Date.now();
-    // Check every 500ms
-    if (now - lastCheckRef.current < 500) return;
-    lastCheckRef.current = now;
-
-    // For each active chaos event, check if workers should react
-    chaosEvents.forEach((event) => {
-      if (event.resolved) return;
-
-      // Random chance for workers to react when near event
-      WORKER_ROSTER.forEach((worker) => {
-        // 5% chance per check to trigger reaction if affected
-        if (event.affectedWorkerIds.includes(worker.id) && Math.random() < 0.05) {
-          if (event.type === 'grain_spill') {
-            triggerWorkerReaction(worker.id, 'slipping', 1500);
-          } else if (event.type === 'dust_cloud') {
-            triggerWorkerReaction(worker.id, 'coughing', 2000);
-          }
-        }
-      });
-    });
-  });
-};
-
-// =========================================================================
 // MAIN MAINTENANCE SYSTEM COMPONENT
+// PERFORMANCE: Wraps all maintenance workers in MaintenanceAnimationManager
+// to consolidate 6 separate useFrame hooks into 1 centralized manager
 // =========================================================================
 export const MaintenanceSystem: React.FC = () => {
   const maintenanceTasks = useWorkerMoodStore((state) => state.maintenanceTasks);
@@ -404,14 +619,14 @@ export const MaintenanceSystem: React.FC = () => {
   const addMaintenanceTask = useWorkerMoodStore((state) => state.addMaintenanceTask);
   const cleanDust = useWorkerMoodStore((state) => state.cleanDust);
 
-  // Use the chaos reactions hook
-  useChaosReactions();
-
   // Auto-spawn maintenance tasks when needed
   useEffect(() => {
     const interval = setInterval(() => {
       // If dust is high and no sweeping task, add one
-      if (factoryEnvironment.dustLevel > 40 && !maintenanceTasks.some((t) => t.type === 'sweeping')) {
+      if (
+        factoryEnvironment.dustLevel > 40 &&
+        !maintenanceTasks.some((t) => t.type === 'sweeping')
+      ) {
         addMaintenanceTask({
           type: 'sweeping',
           position: [(Math.random() - 0.5) * 30, 0, (Math.random() - 0.5) * 40],
@@ -424,7 +639,9 @@ export const MaintenanceSystem: React.FC = () => {
       factoryEnvironment.plants.forEach((plant) => {
         if (
           plant.health < 50 &&
-          !maintenanceTasks.some((t) => t.type === 'plant_watering' && t.description.includes(plant.id))
+          !maintenanceTasks.some(
+            (t) => t.type === 'plant_watering' && t.description.includes(plant.id)
+          )
         ) {
           addMaintenanceTask({
             type: 'plant_watering',
@@ -450,39 +667,44 @@ export const MaintenanceSystem: React.FC = () => {
   }, [maintenanceTasks, cleanDust]);
 
   return (
-    <group>
-      {/* Render maintenance workers for active tasks */}
-      {maintenanceTasks.map((task) => {
-        if (task.type === 'sweeping') {
-          return (
-            <SweepingWorker
-              key={task.id}
-              position={[task.position[0] - 2, 0, task.position[2]]}
-              targetPosition={task.position}
-            />
-          );
-        }
-        if (task.type === 'plant_watering') {
-          return (
-            <WateringWorker
-              key={task.id}
-              position={[task.position[0] + 0.5, 0, task.position[2] + 0.5]}
-              plantPosition={task.position}
-            />
-          );
-        }
-        if (task.type === 'oiling') {
-          return (
-            <OilingWorker
-              key={task.id}
-              position={[task.position[0] + 1, 0, task.position[2]]}
-              machinePosition={task.position}
-            />
-          );
-        }
-        return null;
-      })}
-    </group>
+    <MaintenanceAnimationManager>
+      <group>
+        {/* Render maintenance workers for active tasks */}
+        {maintenanceTasks.map((task) => {
+          if (task.type === 'sweeping') {
+            return (
+              <SweepingWorker
+                key={task.id}
+                taskId={task.id}
+                position={[task.position[0] - 2, 0, task.position[2]]}
+                targetPosition={task.position}
+              />
+            );
+          }
+          if (task.type === 'plant_watering') {
+            return (
+              <WateringWorker
+                key={task.id}
+                taskId={task.id}
+                position={[task.position[0] + 0.5, 0, task.position[2] + 0.5]}
+                plantPosition={task.position}
+              />
+            );
+          }
+          if (task.type === 'oiling') {
+            return (
+              <OilingWorker
+                key={task.id}
+                taskId={task.id}
+                position={[task.position[0] + 1, 0, task.position[2]]}
+                machinePosition={task.position}
+              />
+            );
+          }
+          return null;
+        })}
+      </group>
+    </MaintenanceAnimationManager>
   );
 };
 

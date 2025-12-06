@@ -23,6 +23,7 @@ class AudioManager {
   private _volume: number = 0.5;
   private listeners: Set<() => void> = new Set();
   private _initialized: boolean = false;
+  private _isTabVisible: boolean = true; // Track tab visibility to pause audio when hidden
 
   // Pre-generated noise buffers to avoid blocking main thread during playback
   private cachedNoiseBuffers: {
@@ -80,17 +81,46 @@ class AudioManager {
   // Available music tracks (shuffled on init, excludes victory fanfare)
   // Music by Kevin MacLeod (incompetech.com) - Licensed under CC BY 3.0/4.0
   // Jolly, upbeat working/driving music for factory vibes
+  // Note: Using import.meta.env.BASE_URL for GitHub Pages subdirectory deployment
   private readonly allMusicTracks = [
-    { id: 'the_builder', name: 'The Builder', file: '/The Builder.mp3' },
-    { id: 'space_jazz', name: 'Space Jazz', file: '/Space Jazz.mp3' },
-    { id: 'upbeat_forever', name: 'Upbeat Forever', file: '/Upbeat Forever.mp3' },
-    { id: 'fuzzball_parade', name: 'Fuzzball Parade', file: '/Fuzzball Parade.mp3' },
-    { id: 'i_got_a_stick', name: 'I Got a Stick', file: '/I Got a Stick Feat James Gavins.mp3' },
-    { id: 'boogie_party', name: 'Boogie Party', file: '/Boogie Party.mp3' },
-    { id: 'voxel_revolution', name: 'Voxel Revolution', file: '/Voxel Revolution.mp3' },
-    { id: 'newer_wave', name: 'Newer Wave', file: '/Newer Wave.mp3' },
-    { id: 'neon_laser_horizon', name: 'Neon Laser Horizon', file: '/Neon Laser Horizon.mp3' },
-    { id: 'cloud_dancer', name: 'Cloud Dancer', file: '/Cloud Dancer.mp3' },
+    { id: 'the_builder', name: 'The Builder', file: `${import.meta.env.BASE_URL}The Builder.mp3` },
+    { id: 'space_jazz', name: 'Space Jazz', file: `${import.meta.env.BASE_URL}Space Jazz.mp3` },
+    {
+      id: 'upbeat_forever',
+      name: 'Upbeat Forever',
+      file: `${import.meta.env.BASE_URL}Upbeat Forever.mp3`,
+    },
+    {
+      id: 'fuzzball_parade',
+      name: 'Fuzzball Parade',
+      file: `${import.meta.env.BASE_URL}Fuzzball Parade.mp3`,
+    },
+    {
+      id: 'i_got_a_stick',
+      name: 'I Got a Stick',
+      file: `${import.meta.env.BASE_URL}I Got a Stick Feat James Gavins.mp3`,
+    },
+    {
+      id: 'boogie_party',
+      name: 'Boogie Party',
+      file: `${import.meta.env.BASE_URL}Boogie Party.mp3`,
+    },
+    {
+      id: 'voxel_revolution',
+      name: 'Voxel Revolution',
+      file: `${import.meta.env.BASE_URL}Voxel Revolution.mp3`,
+    },
+    { id: 'newer_wave', name: 'Newer Wave', file: `${import.meta.env.BASE_URL}Newer Wave.mp3` },
+    {
+      id: 'neon_laser_horizon',
+      name: 'Neon Laser Horizon',
+      file: `${import.meta.env.BASE_URL}Neon Laser Horizon.mp3`,
+    },
+    {
+      id: 'cloud_dancer',
+      name: 'Cloud Dancer',
+      file: `${import.meta.env.BASE_URL}Cloud Dancer.mp3`,
+    },
   ];
 
   // Shuffled playlist (Fisher-Yates shuffle on init)
@@ -101,7 +131,7 @@ class AudioManager {
   private readonly victoryFanfare = {
     id: 'fanfare_for_space',
     name: 'Victory!',
-    file: '/Fanfare for Space.mp3',
+    file: `${import.meta.env.BASE_URL}Fanfare for Space.mp3`,
   };
   private victoryAudio: HTMLAudioElement | null = null;
   private _quotaReached: boolean = false;
@@ -174,6 +204,16 @@ class AudioManager {
 
   get trackIndex(): number {
     return this._currentTrackIndex;
+  }
+
+  get isTabVisible(): boolean {
+    return this._isTabVisible;
+  }
+
+  set isTabVisible(value: boolean) {
+    this._isTabVisible = value;
+    // When tab becomes hidden, we let intervals continue but skip playback
+    // When tab becomes visible again, intervals will resume normal playback
   }
 
   nextTrack(): void {
@@ -283,13 +323,16 @@ class AudioManager {
       const sampleRate = this.audioContext.sampleRate;
 
       // Generate 4-second brown noise (for compressor)
-      this.cachedNoiseBuffers.brown4s = this.generateNoiseBufferInternal(4, 'brown', sampleRate);
+      this.cachedNoiseBuffers.brown4s =
+        this.generateNoiseBufferInternal(4, 'brown', sampleRate) ?? undefined;
 
       // Generate 4-second pink noise (for PA speech - covers 2-4s range)
-      this.cachedNoiseBuffers.pink4s = this.generateNoiseBufferInternal(4, 'pink', sampleRate);
+      this.cachedNoiseBuffers.pink4s =
+        this.generateNoiseBufferInternal(4, 'pink', sampleRate) ?? undefined;
 
       // Generate 1-second white noise (for various short effects)
-      this.cachedNoiseBuffers.white1s = this.generateNoiseBufferInternal(1, 'white', sampleRate);
+      this.cachedNoiseBuffers.white1s =
+        this.generateNoiseBufferInternal(1, 'white', sampleRate) ?? undefined;
 
       audioLog.info('Noise buffers pre-generated');
     };
@@ -358,6 +401,9 @@ class AudioManager {
 
   // Reduce audio load when tab is hidden (keep user volume intact)
   setBackgroundVisibility(hidden: boolean): void {
+    // Update visibility state to control interval-based sounds
+    this._isTabVisible = !hidden;
+
     const ctx = this.audioContext;
     const gain = this.masterGain;
     if (!ctx || !gain) return;
@@ -1552,13 +1598,16 @@ class AudioManager {
     const playRandomVoice = () => {
       if (!this.workerVoiceActive || this.getEffectiveVolume() === 0) return;
 
-      const voiceType = Math.random();
-      if (voiceType < 0.35) {
-        this.playWorkerShout();
-      } else if (voiceType < 0.6) {
-        this.playWorkerWhistle();
-      } else {
-        this.playWorkerCall();
+      // Skip playback when tab hidden but keep scheduling to resume when visible
+      if (this._isTabVisible) {
+        const voiceType = Math.random();
+        if (voiceType < 0.35) {
+          this.playWorkerShout();
+        } else if (voiceType < 0.6) {
+          this.playWorkerWhistle();
+        } else {
+          this.playWorkerCall();
+        }
       }
 
       // Schedule next voice (15-45 seconds)
@@ -1761,6 +1810,8 @@ class AudioManager {
 
     const playCrickets = () => {
       if (this.currentTimeOfDay !== 'night' || this.getEffectiveVolume() === 0) return;
+      // Skip playback when tab hidden
+      if (!this._isTabVisible) return;
       this.playCricketChirp();
     };
 
@@ -2433,13 +2484,16 @@ class AudioManager {
     const playRandomChatter = () => {
       if (!this.radioChatterActive || this.getEffectiveVolume() === 0) return;
 
-      const chatterType = Math.random();
-      if (chatterType < 0.4) {
-        this.playRadioStatic();
-      } else if (chatterType < 0.7) {
-        this.playRadioBeep();
-      } else {
-        this.playRadioSquelch();
+      // Skip playback when tab hidden but keep scheduling to resume when visible
+      if (this._isTabVisible) {
+        const chatterType = Math.random();
+        if (chatterType < 0.4) {
+          this.playRadioStatic();
+        } else if (chatterType < 0.7) {
+          this.playRadioBeep();
+        } else {
+          this.playRadioSquelch();
+        }
       }
 
       // Schedule next chatter (8-25 seconds)
@@ -2925,13 +2979,16 @@ class AudioManager {
     const playRandomAnnouncement = () => {
       if (!this.paSystemActive || this.getEffectiveVolume() === 0) return;
 
-      const announcementType = Math.random();
-      if (announcementType < 0.4) {
-        this.playPAChime();
-      } else if (announcementType < 0.7) {
-        this.playShiftBell();
-      } else {
-        this.playPATone();
+      // Skip playback when tab hidden but keep scheduling to resume when visible
+      if (this._isTabVisible) {
+        const announcementType = Math.random();
+        if (announcementType < 0.4) {
+          this.playPAChime();
+        } else if (announcementType < 0.7) {
+          this.playShiftBell();
+        } else {
+          this.playPATone();
+        }
       }
 
       // Schedule next announcement (60-180 seconds)
@@ -3030,7 +3087,7 @@ class AudioManager {
     }
   }
 
-  private playShiftBell() {
+  playShiftBell() {
     if (this.getEffectiveVolume() === 0) return;
 
     try {
@@ -3118,14 +3175,20 @@ class AudioManager {
       // Random off duration (15-45 seconds)
       const offDuration = 15000 + Math.random() * 30000;
 
-      this.startCompressorSound();
+      // Skip playback when tab hidden but keep scheduling to resume when visible
+      if (this._isTabVisible) {
+        this.startCompressorSound();
 
-      setTimeout(() => {
-        this.stopCompressorSound();
-        if (this.compressorActive) {
-          this.compressorInterval = setTimeout(cycleCompressor, offDuration);
-        }
-      }, onDuration);
+        setTimeout(() => {
+          this.stopCompressorSound();
+          if (this.compressorActive) {
+            this.compressorInterval = setTimeout(cycleCompressor, offDuration);
+          }
+        }, onDuration);
+      } else {
+        // When tab hidden, just schedule next cycle without playing
+        this.compressorInterval = setTimeout(cycleCompressor, offDuration);
+      }
     };
 
     // Start first cycle after a random delay
@@ -3272,15 +3335,18 @@ class AudioManager {
     const playRandomClank = () => {
       if (!this.metalClankActive || this.getEffectiveVolume() === 0) return;
 
-      const clankType = Math.random();
-      if (clankType < 0.3) {
-        this.playMetalClankHeavy();
-      } else if (clankType < 0.6) {
-        this.playMetalClankLight();
-      } else if (clankType < 0.85) {
-        this.playMetalPing();
-      } else {
-        this.playChainRattle();
+      // Skip playback when tab hidden but keep scheduling to resume when visible
+      if (this._isTabVisible) {
+        const clankType = Math.random();
+        if (clankType < 0.3) {
+          this.playMetalClankHeavy();
+        } else if (clankType < 0.6) {
+          this.playMetalClankLight();
+        } else if (clankType < 0.85) {
+          this.playMetalPing();
+        } else {
+          this.playChainRattle();
+        }
       }
 
       // Schedule next clank (10-40 seconds)

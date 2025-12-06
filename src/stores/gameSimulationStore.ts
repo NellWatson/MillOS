@@ -55,6 +55,10 @@ export interface CrisisState {
 }
 
 interface GameSimulationStore {
+  // Tab visibility - PERFORMANCE: animations should check this and skip when false
+  isTabVisible: boolean;
+  setTabVisible: (visible: boolean) => void;
+
   // Game Time (24-hour cycle)
   gameTime: number; // 0-24 representing hour of day
   gameSpeed: number; // 0 = paused, 60 = 1 real sec = 1 game min, 600 = 1 real sec = 10 game mins
@@ -101,7 +105,11 @@ interface GameSimulationStore {
 
   // Crisis system
   crisisState: CrisisState;
-  triggerCrisis: (type: CrisisType, severity: CrisisSeverity, metadata?: Record<string, unknown>) => void;
+  triggerCrisis: (
+    type: CrisisType,
+    severity: CrisisSeverity,
+    metadata?: Record<string, unknown>
+  ) => void;
   resolveCrisis: () => void;
 
   // Celebrations system
@@ -194,9 +202,18 @@ const createDefaultCrisisState = (): CrisisState => ({
   metadata: {},
 });
 
+// Throttling for tickGameTime - update every 100ms instead of every frame
+let lastTickTime = 0;
+let accumulatedDelta = 0;
+const TICK_INTERVAL = 100; // Update every 100ms
+
 export const useGameSimulationStore = create<GameSimulationStore>()(
   persist(
     (set, get) => ({
+      // Tab visibility - PERFORMANCE: animations check this to skip when tab hidden
+      isTabVisible: true,
+      setTabVisible: (visible) => set({ isTabVisible: visible }),
+
       // Game time starts at 6am (Day shift start)
       // gameSpeed: seconds of game time per real second (60 = 1 min/sec, 600 = 10 min/sec)
       gameTime: 6,
@@ -206,12 +223,25 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
 
       setGameSpeed: (speed) => set({ gameSpeed: speed }),
 
-      tickGameTime: (deltaSeconds) =>
+      tickGameTime: (deltaSeconds) => {
+        // Throttle updates to every 100ms to reduce re-renders
+        const now = Date.now();
+        if (now - lastTickTime < TICK_INTERVAL) {
+          // Accumulate delta for accuracy
+          accumulatedDelta += deltaSeconds;
+          return;
+        }
+
+        // Add accumulated delta to current delta
+        const totalDelta = deltaSeconds + accumulatedDelta;
+        accumulatedDelta = 0;
+        lastTickTime = now;
+
         set((state) => {
           if (state.gameSpeed === 0) return {}; // Paused
           // Convert: deltaSeconds * gameSpeed = game seconds elapsed
           // Then convert to hours: / 3600
-          const hoursElapsed = (deltaSeconds * state.gameSpeed) / 3600;
+          const hoursElapsed = (totalDelta * state.gameSpeed) / 3600;
           const newTime = (state.gameTime + hoursElapsed) % 24;
 
           // Calculate expected shift based on new time (handles midnight crossover correctly)
@@ -224,7 +254,8 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
           }
 
           return { gameTime: newTime };
-        }),
+        });
+      },
 
       resetGameState: () =>
         set({

@@ -92,8 +92,9 @@ export const AlertSystem: React.FC = () => {
 
   // Cleanup timeouts on unmount
   useEffect(() => {
+    const timers = timerStates.current;
     return () => {
-      timerStates.current.forEach(state => {
+      timers.forEach(state => {
         if (state.timeout) clearTimeout(state.timeout);
       });
     };

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Activity, AlertTriangle, Users, Shield } from 'lucide-react';
-import { useMillStore } from '../../store';
+import { useSafetyStore } from '../../stores/safetyStore';
+import { useUIStore } from '../../stores/uiStore';
 
 export const SafetyMetricsDisplay: React.FC = () => {
-  const safetyMetrics = useMillStore((state) => state.safetyMetrics);
-  const theme = useMillStore((state) => state.theme);
+  const safetyMetrics = useSafetyStore((state) => state.safetyMetrics);
+  const theme = useUIStore((state) => state.theme);
   const [prevMetrics, setPrevMetrics] = useState(safetyMetrics);
   const [flashStop, setFlashStop] = useState(false);
   const [flashEvasion, setFlashEvasion] = useState(false);

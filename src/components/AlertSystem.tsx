@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, CheckCircle, Info, Shield, Siren, Bell } from 'lucide-react';
 import { audioManager } from '../utils/audioManager';
-import { useMillStore } from '../store';
+import { useSafetyStore } from '../stores/safetyStore';
 import type { AlertData } from '../types';
 
 interface TimerState {
@@ -53,7 +53,7 @@ export const AlertSystem: React.FC = () => {
   const [totalAlertCount, setTotalAlertCount] = useState(0);
   const [liveRegionMessage, setLiveRegionMessage] = useState('');
   const isInitialMount = useRef(true);
-  const safetyMetrics = useMillStore((state: any) => state.safetyMetrics);
+  const safetyMetrics = useSafetyStore((state) => state.safetyMetrics);
   const prevSafetyStopsRef = useRef(safetyMetrics.safetyStops);
   const timerStates = useRef<Map<string, TimerState>>(new Map());
 
@@ -231,88 +231,83 @@ export const AlertSystem: React.FC = () => {
   return (
     <>
       {/* Screen reader announcements */}
-      <div
-        role="status"
-        aria-live="assertive"
-        aria-atomic="true"
-        className="sr-only"
-      >
+      <div role="status" aria-live="assertive" aria-atomic="true" className="sr-only">
         {liveRegionMessage}
       </div>
 
       <div className="fixed top-4 right-4 w-64 sm:w-72 z-30 space-y-1.5 max-h-[35vh] sm:max-h-[40vh] overflow-hidden">
         {/* Alert count badge */}
         {alerts.length === 0 && totalAlertCount > 0 && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="flex items-center justify-end gap-1.5 text-slate-500 text-[10px] pr-1"
-        >
-          <Bell className="w-3 h-3" />
-          <span>{totalAlertCount} alerts today</span>
-        </motion.div>
-      )}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="flex items-center justify-end gap-1.5 text-slate-500 text-[10px] pr-1"
+          >
+            <Bell className="w-3 h-3" />
+            <span>{totalAlertCount} alerts today</span>
+          </motion.div>
+        )}
 
-      <AnimatePresence mode="popLayout">
-        {alerts.slice(0, 3).map((alert, index) => {
-          const styles = getAlertStyles(alert.type);
-          return (
-            <motion.div
-              key={alert.id}
-              layout
-              initial={{ opacity: 0, x: 50, scale: 0.95 }}
-              animate={{ opacity: 1, x: 0, scale: 1 }}
-              exit={{ opacity: 0, x: 50, scale: 0.95 }}
-              transition={{ duration: 0.2, delay: index * 0.05 }}
-              onMouseEnter={() => pauseTimer(alert.id)}
-              onMouseLeave={() => resumeTimer(alert)}
-              className={`${styles.bg} ${styles.border} border-l-2 sm:border-l-3 rounded-lg p-1.5 sm:p-2 backdrop-blur-xl shadow-lg cursor-default`}
-              role="alert"
-              aria-live={alert.type === 'critical' ? 'assertive' : 'polite'}
-            >
-              <div className="flex items-start gap-1.5 sm:gap-2">
-                <div className="flex-shrink-0 mt-0.5 hidden sm:block">
-                  {React.cloneElement(styles.icon, { className: 'w-4 h-4', 'aria-hidden': true })}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <h4
-                      className={`font-semibold text-[11px] sm:text-xs ${styles.accent} truncate`}
-                    >
-                      {alert.title}
-                    </h4>
-                    <button
-                      onClick={() => dismissAlert(alert.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          dismissAlert(alert.id);
-                        }
-                      }}
-                      aria-label={`Dismiss ${alert.title} alert`}
-                      tabIndex={0}
-                      className="text-slate-500 hover:text-white text-sm leading-none flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-cyan-500 rounded"
-                    >
-                      ×
-                    </button>
+        <AnimatePresence mode="popLayout">
+          {alerts.slice(0, 3).map((alert, index) => {
+            const styles = getAlertStyles(alert.type);
+            return (
+              <motion.div
+                key={alert.id}
+                layout
+                initial={{ opacity: 0, x: 50, scale: 0.95 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={{ opacity: 0, x: 50, scale: 0.95 }}
+                transition={{ duration: 0.2, delay: index * 0.05 }}
+                onMouseEnter={() => pauseTimer(alert.id)}
+                onMouseLeave={() => resumeTimer(alert)}
+                className={`${styles.bg} ${styles.border} border-l-2 sm:border-l-3 rounded-lg p-1.5 sm:p-2 backdrop-blur-xl shadow-lg cursor-default`}
+                role="alert"
+                aria-live={alert.type === 'critical' ? 'assertive' : 'polite'}
+              >
+                <div className="flex items-start gap-1.5 sm:gap-2">
+                  <div className="flex-shrink-0 mt-0.5 hidden sm:block">
+                    {React.cloneElement(styles.icon, { className: 'w-4 h-4', 'aria-hidden': true })}
                   </div>
-                  <p className="text-[10px] sm:text-[11px] text-slate-300 mt-0.5 line-clamp-1">
-                    {alert.message}
-                  </p>
-                  <span className="text-[8px] sm:text-[9px] text-slate-600">
-                    {alert.timestamp.toLocaleTimeString()}
-                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4
+                        className={`font-semibold text-[11px] sm:text-xs ${styles.accent} truncate`}
+                      >
+                        {alert.title}
+                      </h4>
+                      <button
+                        onClick={() => dismissAlert(alert.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            dismissAlert(alert.id);
+                          }
+                        }}
+                        aria-label={`Dismiss ${alert.title} alert`}
+                        tabIndex={0}
+                        className="text-slate-500 hover:text-white text-sm leading-none flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-cyan-500 rounded"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <p className="text-[10px] sm:text-[11px] text-slate-300 mt-0.5 line-clamp-1">
+                      {alert.message}
+                    </p>
+                    <span className="text-[8px] sm:text-[9px] text-slate-600">
+                      {alert.timestamp.toLocaleTimeString()}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            </motion.div>
-          );
-        })}
-      </AnimatePresence>
-      {alerts.length > 3 && (
-        <div className="text-center text-[9px] sm:text-[10px] text-slate-500 py-1">
-          +{alerts.length - 3} more
-        </div>
-      )}
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
+        {alerts.length > 3 && (
+          <div className="text-center text-[9px] sm:text-[10px] text-slate-500 py-1">
+            +{alerts.length - 3} more
+          </div>
+        )}
       </div>
     </>
   );

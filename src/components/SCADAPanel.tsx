@@ -50,12 +50,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { useSCADA, useSCADAAlarms, getSCADAService } from '../scada';
-import type {
-  TagValue,
-  TagDefinition,
-  TagGroup,
-  ConnectionConfig,
-} from '../scada/types';
+import type { TagValue, TagDefinition, TagGroup, ConnectionConfig } from '../scada/types';
 
 interface SCADAPanelProps {
   isOpen: boolean;
@@ -341,7 +336,11 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-slate-700/50" role="tablist" aria-label="SCADA Panel Tabs">
+        <div
+          className="flex border-b border-slate-700/50"
+          role="tablist"
+          aria-label="SCADA Panel Tabs"
+        >
           <button
             onClick={() => setActiveTab('tags')}
             role="tab"
@@ -374,7 +373,10 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
             <Bell className="w-4 h-4 inline mr-2" aria-hidden="true" />
             Alarms
             {summary.unacknowledged > 0 && (
-              <span className="absolute top-1 right-2 bg-red-500 text-white text-xs rounded-full px-1.5" aria-label={`${summary.unacknowledged} unacknowledged alarms`}>
+              <span
+                className="absolute top-1 right-2 bg-red-500 text-white text-xs rounded-full px-1.5"
+                aria-label={`${summary.unacknowledged} unacknowledged alarms`}
+              >
                 {summary.unacknowledged}
               </span>
             )}
@@ -433,7 +435,13 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
         <div className="flex-1 overflow-hidden">
           {/* Tags Tab */}
           {activeTab === 'tags' && (
-            <div className="h-full flex flex-col" role="tabpanel" id="scada-tab-tags" aria-labelledby="scada-tab-button-tags" tabIndex={0}>
+            <div
+              className="h-full flex flex-col"
+              role="tabpanel"
+              id="scada-tab-tags"
+              aria-labelledby="scada-tab-button-tags"
+              tabIndex={0}
+            >
               {/* Search and filter */}
               <div className="p-3 space-y-2 border-b border-slate-700/50">
                 <div className="relative">
@@ -591,7 +599,13 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
 
           {/* Alarms Tab */}
           {activeTab === 'alarms' && (
-            <div className="h-full flex flex-col" role="tabpanel" id="scada-tab-alarms" aria-labelledby="scada-tab-button-alarms" tabIndex={0}>
+            <div
+              className="h-full flex flex-col"
+              role="tabpanel"
+              id="scada-tab-alarms"
+              aria-labelledby="scada-tab-button-alarms"
+              tabIndex={0}
+            >
               {/* Alarm summary */}
               <div className="p-3 border-b border-slate-700/50">
                 <div className="grid grid-cols-4 gap-2 text-center">
@@ -682,7 +696,13 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
 
           {/* Trends Tab */}
           {activeTab === 'trends' && (
-            <div className="h-full flex flex-col" role="tabpanel" id="scada-tab-trends" aria-labelledby="scada-tab-button-trends" tabIndex={0}>
+            <div
+              className="h-full flex flex-col"
+              role="tabpanel"
+              id="scada-tab-trends"
+              aria-labelledby="scada-tab-button-trends"
+              tabIndex={0}
+            >
               {/* Trend Controls */}
               <div className="p-3 border-b border-slate-700/50 space-y-3">
                 {/* Duration selector */}
@@ -868,7 +888,13 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
 
           {/* Faults Tab (for testing) */}
           {activeTab === 'faults' && (
-            <div className="h-full flex flex-col p-3" role="tabpanel" id="scada-tab-faults" aria-labelledby="scada-tab-button-faults" tabIndex={0}>
+            <div
+              className="h-full flex flex-col p-3"
+              role="tabpanel"
+              id="scada-tab-faults"
+              aria-labelledby="scada-tab-button-faults"
+              tabIndex={0}
+            >
               <div className="text-sm text-slate-400 mb-4">
                 Inject faults into the simulation for testing alarm detection and anomaly handling.
               </div>
@@ -925,7 +951,13 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
 
           {/* Settings Tab */}
           {activeTab === 'settings' && (
-            <div className="h-full flex flex-col" role="tabpanel" id="scada-tab-settings" aria-labelledby="scada-tab-button-settings" tabIndex={0}>
+            <div
+              className="h-full flex flex-col"
+              role="tabpanel"
+              id="scada-tab-settings"
+              aria-labelledby="scada-tab-button-settings"
+              tabIndex={0}
+            >
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {/* Current Status */}
                 <div className="bg-slate-800/30 rounded-lg p-3">

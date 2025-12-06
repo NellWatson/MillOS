@@ -340,7 +340,6 @@ const HeatShimmer: React.FC<{ position: [number, number, number]; temperature: n
 
   // Only show shimmer for temperatures above 45°C
   const intensity = Math.max(0, (temperature - 45) / 30); // 0-1 based on temp 45-75°C
-  if (intensity <= 0) return null;
 
   const shaderMaterial = useMemo(() => {
     return new THREE.ShaderMaterial({
@@ -378,6 +377,9 @@ const HeatShimmer: React.FC<{ position: [number, number, number]; temperature: n
       shaderMaterial.uniforms.time.value = state.clock.elapsedTime;
     }
   });
+
+  // Only show shimmer for temperatures above 45°C
+  if (intensity <= 0) return null;
 
   return (
     <mesh
@@ -876,7 +878,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
 
   const renderGeometry = () => {
     switch (type) {
-      case MachineType.SILO:
+      case MachineType.SILO: {
         // Generate fill level and quality if not set
         const fillLevel = data.fillLevel ?? (50 + Math.sin(textureSeed) * 30);
         const grainQuality = data.grainQuality ?? (['premium', 'standard', 'economy', 'mixed'] as const)[textureSeed % 4];
@@ -949,6 +951,7 @@ const MachineMesh: React.FC<{ data: MachineData; onClick: () => void }> = ({ dat
             )}
           </group>
         );
+      }
 
       case MachineType.ROLLER_MILL:
         return (

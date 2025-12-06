@@ -16,6 +16,7 @@ import {
   TagValue,
   TagHistoryPoint,
   Alarm,
+  AlarmSuppression,
   SCADAConfig,
   SCADAMode,
   FaultInjection,
@@ -101,21 +102,21 @@ export class SCADAService {
     // Create and connect adapter based on mode
     await this.createAdapter();
 
-      if (this.adapter) {
-        await this.adapter.connect();
+    if (this.adapter) {
+      await this.adapter.connect();
 
-        // Subscribe to all tags
-        const allTagIds = Array.from(this.tagRegistry.keys());
-        this.adapterUnsubscribe = this.adapter.subscribe(allTagIds, this.handleTagUpdates.bind(this));
+      // Subscribe to all tags
+      const allTagIds = Array.from(this.tagRegistry.keys());
+      this.adapterUnsubscribe = this.adapter.subscribe(allTagIds, this.handleTagUpdates.bind(this));
 
-        // Subscribe to alarm updates
-        if (this.config.alarmsEnabled) {
-          this.alarmUnsubscribe = this.alarmManager.subscribe(this.handleAlarmUpdates.bind(this));
-        }
-
-        console.log(`[SCADAService] Started. Monitoring ${allTagIds.length} tags.`);
+      // Subscribe to alarm updates
+      if (this.config.alarmsEnabled) {
+        this.alarmUnsubscribe = this.alarmManager.subscribe(this.handleAlarmUpdates.bind(this));
       }
+
+      console.log(`[SCADAService] Started. Monitoring ${allTagIds.length} tags.`);
     }
+  }
 
   /**
    * Stop the SCADA service

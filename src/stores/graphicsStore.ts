@@ -4,8 +4,25 @@ import { persist } from 'zustand/middleware';
 // Graphics quality presets
 export type GraphicsQuality = 'low' | 'medium' | 'high' | 'ultra';
 
+// Performance debug toggles - disable systems for A/B testing
+export interface PerfDebugSettings {
+  disableWorkerMoods: boolean;     // Disable useMoodSimulation hook
+  disableTruckBay: boolean;        // Disable TruckBay (28+ useFrame hooks)
+  disableWorkerSystem: boolean;    // Disable WorkerSystem (3+ useFrame hooks per worker)
+  disableForkliftSystem: boolean;  // Disable ForkliftSystem
+  disableConveyorSystem: boolean;  // Disable ConveyorSystem
+  disableMachines: boolean;        // Disable Machines (9 useFrame hooks)
+  disableEnvironment: boolean;     // Disable FactoryEnvironment
+  disableAllAnimations: boolean;   // Master toggle - disable all useFrame hooks
+  showPerfOverlay: boolean;        // Show performance metrics overlay
+}
+
 export interface GraphicsSettings {
   quality: GraphicsQuality;
+  // SCADA system toggle - OFF by default for performance
+  enableSCADA: boolean;
+  // Performance debug settings
+  perfDebug: PerfDebugSettings;
   // Individual toggles for fine-grained control
   enableSSAO: boolean;
   enableBloom: boolean;
@@ -39,10 +56,25 @@ export interface GraphicsSettings {
   workerLodDistance: number; // Distance at which workers switch to low-poly (0 = always high detail)
 }
 
+// Default perf debug settings (all systems enabled)
+const DEFAULT_PERF_DEBUG: PerfDebugSettings = {
+  disableWorkerMoods: false,
+  disableTruckBay: false,
+  disableWorkerSystem: false,
+  disableForkliftSystem: false,
+  disableConveyorSystem: false,
+  disableMachines: false,
+  disableEnvironment: false,
+  disableAllAnimations: false,
+  showPerfOverlay: false,
+};
+
 // Quality presets
 const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
   low: {
     quality: 'low',
+    enableSCADA: true, // SCADA enabled by default
+    perfDebug: { ...DEFAULT_PERF_DEBUG },
     enableSSAO: false,
     enableBloom: false,
     enableVignette: false,
@@ -74,6 +106,8 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
   },
   medium: {
     quality: 'medium',
+    enableSCADA: true, // SCADA enabled by default
+    perfDebug: { ...DEFAULT_PERF_DEBUG },
     enableSSAO: false,
     enableBloom: false,
     enableVignette: false,
@@ -105,6 +139,8 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
   },
   high: {
     quality: 'high',
+    enableSCADA: true, // SCADA enabled by default
+    perfDebug: { ...DEFAULT_PERF_DEBUG },
     enableSSAO: true,
     enableBloom: true,
     enableVignette: true,
@@ -136,6 +172,8 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
   },
   ultra: {
     quality: 'ultra',
+    enableSCADA: true, // Only enable SCADA on ultra quality
+    perfDebug: { ...DEFAULT_PERF_DEBUG },
     enableSSAO: true,
     enableBloom: true,
     enableVignette: true,
@@ -175,6 +213,9 @@ interface GraphicsStore {
     value: GraphicsSettings[K]
   ) => void;
   resetGraphicsToPreset: (quality: GraphicsQuality) => void;
+  // Performance debug actions
+  setPerfDebug: <K extends keyof PerfDebugSettings>(key: K, value: PerfDebugSettings[K]) => void;
+  resetPerfDebug: () => void;
 }
 
 export const useGraphicsStore = create<GraphicsStore>()(
@@ -195,6 +236,26 @@ export const useGraphicsStore = create<GraphicsStore>()(
         })),
 
       resetGraphicsToPreset: (quality) => set({ graphics: { ...GRAPHICS_PRESETS[quality] } }),
+
+      // Performance debug actions
+      setPerfDebug: (key, value) =>
+        set((state) => ({
+          graphics: {
+            ...state.graphics,
+            perfDebug: {
+              ...state.graphics.perfDebug,
+              [key]: value,
+            },
+          },
+        })),
+
+      resetPerfDebug: () =>
+        set((state) => ({
+          graphics: {
+            ...state.graphics,
+            perfDebug: { ...DEFAULT_PERF_DEBUG },
+          },
+        })),
     }),
     {
       name: 'millos-graphics',
@@ -216,6 +277,10 @@ export const useGraphicsStore = create<GraphicsStore>()(
               state.graphics = GRAPHICS_PRESETS.low;
             }
           }
+          // Ensure perfDebug exists (for backwards compatibility)
+          if (state.graphics && !state.graphics.perfDebug) {
+            state.graphics.perfDebug = { ...DEFAULT_PERF_DEBUG };
+          }
         }
       },
     }
@@ -223,4 +288,4 @@ export const useGraphicsStore = create<GraphicsStore>()(
 );
 
 // Export presets for use in UI
-export { GRAPHICS_PRESETS };
+export { GRAPHICS_PRESETS, DEFAULT_PERF_DEBUG };

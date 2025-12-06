@@ -10,10 +10,10 @@ import {
   DepthOfField,
 } from '@react-three/postprocessing';
 import { BlendFunction, ToneMappingMode } from 'postprocessing';
-import { useMillStore } from '../store';
+import { useGraphicsStore } from '../stores/graphicsStore';
 
 export const PostProcessing: React.FC = () => {
-  const graphics = useMillStore((state) => state.graphics);
+  const graphics = useGraphicsStore((state) => state.graphics);
 
   // Check if any post-processing effects are enabled
   const hasAnyEffect =
@@ -59,7 +59,9 @@ export const PostProcessing: React.FC = () => {
         )}
 
         {/* Film grain for industrial grittiness */}
-        {graphics.enableFilmGrain && <Noise opacity={0.025} blendFunction={BlendFunction.OVERLAY} />}
+        {graphics.enableFilmGrain && (
+          <Noise opacity={0.025} blendFunction={BlendFunction.OVERLAY} />
+        )}
 
         {/* Linear tone mapping - ACES can cause brightness fluctuations with animated lights */}
         <ToneMapping mode={ToneMappingMode.LINEAR} />

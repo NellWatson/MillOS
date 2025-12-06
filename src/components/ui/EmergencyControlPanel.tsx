@@ -1,18 +1,19 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, ChevronDown, ChevronUp } from 'lucide-react';
-import { useMillStore } from '../../store';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
+import { useUIStore } from '../../stores/uiStore';
 
 export const EmergencyControlPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
-  const emergencyActive = useMillStore((state) => state.emergencyActive);
-  const emergencyDrillMode = useMillStore((state) => state.emergencyDrillMode);
-  const startEmergencyDrill = useMillStore((state) => state.startEmergencyDrill);
-  const endEmergencyDrill = useMillStore((state) => state.endEmergencyDrill);
-  const shiftChangeActive = useMillStore((state) => state.shiftChangeActive);
-  const currentShift = useMillStore((state) => state.currentShift);
-  const triggerShiftChange = useMillStore((state) => state.triggerShiftChange);
-  const theme = useMillStore((state) => state.theme);
+  const emergencyActive = useGameSimulationStore((state) => state.emergencyActive);
+  const emergencyDrillMode = useGameSimulationStore((state) => state.emergencyDrillMode);
+  const startEmergencyDrill = useGameSimulationStore((state) => state.startEmergencyDrill);
+  const endEmergencyDrill = useGameSimulationStore((state) => state.endEmergencyDrill);
+  const shiftChangeActive = useGameSimulationStore((state) => state.shiftChangeActive);
+  const currentShift = useGameSimulationStore((state) => state.currentShift);
+  const triggerShiftChange = useGameSimulationStore((state) => state.triggerShiftChange);
+  const theme = useUIStore((state) => state.theme);
 
   return (
     <div

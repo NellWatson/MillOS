@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { useMillStore } from '../../store';
+import { useSafetyStore } from '../../stores/safetyStore';
 
 interface SafetyPosterProps {
   position: [number, number, number];
@@ -14,7 +14,7 @@ export const SafetyPoster: React.FC<SafetyPosterProps> = ({
   rotation = [0, 0, 0],
   type = 'safety_first',
 }) => {
-  const safetyMetrics = useMillStore((state) => state.safetyMetrics);
+  const safetyMetrics = useSafetyStore((state) => state.safetyMetrics);
 
   // Calculate days without incident
   const daysWithoutIncident = useMemo(() => {
@@ -131,7 +131,13 @@ export const SafetyPoster: React.FC<SafetyPosterProps> = ({
       >
         <div style={{ padding: '8px' }}>
           <div style={{ fontSize: '28px', lineHeight: '1' }}>{posterContent.icon}</div>
-          <div style={{ fontSize: '14px', marginTop: '6px', textShadow: '1px 1px 2px rgba(0,0,0,0.5)' }}>
+          <div
+            style={{
+              fontSize: '14px',
+              marginTop: '6px',
+              textShadow: '1px 1px 2px rgba(0,0,0,0.5)',
+            }}
+          >
             {posterContent.title}
           </div>
           <div style={{ fontSize: '9px', marginTop: '4px', opacity: 0.9 }}>
@@ -158,16 +164,36 @@ export const SafetyPoster: React.FC<SafetyPosterProps> = ({
 
 // Convenience component to place multiple posters
 interface SafetyPostersGroupProps {
-  positions?: Array<{ pos: [number, number, number]; rotation?: [number, number, number]; type?: SafetyPosterProps['type'] }>;
+  positions?: Array<{
+    pos: [number, number, number];
+    rotation?: [number, number, number];
+    type?: SafetyPosterProps['type'];
+  }>;
 }
 
 export const SafetyPostersGroup: React.FC<SafetyPostersGroupProps> = ({ positions }) => {
   const defaultPositions = useMemo(
     () => [
-      { pos: [-28, 3, -10] as [number, number, number], rotation: [0, Math.PI / 2, 0] as [number, number, number], type: 'safety_first' as const },
-      { pos: [28, 3, 0] as [number, number, number], rotation: [0, -Math.PI / 2, 0] as [number, number, number], type: 'look_out' as const },
-      { pos: [0, 3, -35] as [number, number, number], rotation: [0, 0, 0] as [number, number, number], type: 'incident_free' as const },
-      { pos: [-28, 3, 10] as [number, number, number], rotation: [0, Math.PI / 2, 0] as [number, number, number], type: 'ppe_required' as const },
+      {
+        pos: [-28, 3, -10] as [number, number, number],
+        rotation: [0, Math.PI / 2, 0] as [number, number, number],
+        type: 'safety_first' as const,
+      },
+      {
+        pos: [28, 3, 0] as [number, number, number],
+        rotation: [0, -Math.PI / 2, 0] as [number, number, number],
+        type: 'look_out' as const,
+      },
+      {
+        pos: [0, 3, -35] as [number, number, number],
+        rotation: [0, 0, 0] as [number, number, number],
+        type: 'incident_free' as const,
+      },
+      {
+        pos: [-28, 3, 10] as [number, number, number],
+        rotation: [0, Math.PI / 2, 0] as [number, number, number],
+        type: 'ppe_required' as const,
+      },
     ],
     []
   );
@@ -177,12 +203,7 @@ export const SafetyPostersGroup: React.FC<SafetyPostersGroupProps> = ({ position
   return (
     <group>
       {posters.map((poster, i) => (
-        <SafetyPoster
-          key={i}
-          position={poster.pos}
-          rotation={poster.rotation}
-          type={poster.type}
-        />
+        <SafetyPoster key={i} position={poster.pos} rotation={poster.rotation} type={poster.type} />
       ))}
     </group>
   );

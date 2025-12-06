@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useRef } from 'react';
+import React, { useMemo, useEffect, useRef, Suspense } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Environment, Text } from '@react-three/drei';
 import * as THREE from 'three';
@@ -18,8 +18,12 @@ import { FactoryEnvironmentSystem } from './FactoryEnvironment';
 import { MaintenanceSystem } from './MaintenanceSystem';
 import { useMoodSimulation } from './WorkerMoodOverlay';
 import { MachineData, MachineType, WorkerData } from '../types';
-import { useMillStore } from '../store';
+import { useGraphicsStore } from '../stores/graphicsStore';
+import { useProductionStore } from '../stores/productionStore';
+import { useSafetyStore } from '../stores/safetyStore';
 import { positionRegistry, Obstacle } from '../utils/positionRegistry';
+import { useShallow } from 'zustand/react/shallow';
+import { trackRender } from '../utils/renderProfiler';
 
 // Single heat map point with ref-based animation (throttled to reduce CPU load)
 // Memoized to prevent re-renders when parent updates
@@ -115,8 +119,8 @@ const HeatMapPoint = React.memo<{
 
 // Incident Heat Map 3D Visualization
 const IncidentHeatMap: React.FC = () => {
-  const incidentHeatMap = useMillStore((state) => state.incidentHeatMap);
-  const showIncidentHeatMap = useMillStore((state) => state.showIncidentHeatMap);
+  const incidentHeatMap = useSafetyStore((state) => state.incidentHeatMap);
+  const showIncidentHeatMap = useSafetyStore((state) => state.showIncidentHeatMap);
 
   if (!showIncidentHeatMap || incidentHeatMap.length === 0) return null;
 
@@ -148,11 +152,19 @@ export const MillScene: React.FC<MillSceneProps> = ({
   onSelectMachine,
   onSelectWorker,
 }) => {
-  const setMachines = useMillStore((state) => state.setMachines);
-  const storeMachines = useMillStore((state) => state.machines);
-  const updateMachineMetrics = useMillStore((state) => state.updateMachineMetrics);
-  const updateMachineStatus = useMillStore((state) => state.updateMachineStatus);
-  const scadaLive = useMillStore((state) => state.scadaLive);
+  // PERF DEBUG: Track renders
+  trackRender('MillScene');
+
+  const { setMachines, storeMachines, updateMachineMetrics, updateMachineStatus, scadaLive } =
+    useProductionStore(
+      useShallow((state) => ({
+        setMachines: state.setMachines,
+        storeMachines: state.machines,
+        updateMachineMetrics: state.updateMachineMetrics,
+        updateMachineStatus: state.updateMachineStatus,
+        scadaLive: state.scadaLive,
+      }))
+    );
   const lastUpdateRef = useRef(0);
   const frameCountRef = useRef(0);
 
@@ -486,43 +498,70 @@ export const MillScene: React.FC<MillSceneProps> = ({
 
   // Use store machines if available, otherwise use local machines
   const displayMachines = storeMachines.length > 0 ? storeMachines : machines;
-  const graphicsQuality = useMillStore((state) => state.graphics.quality);
+  const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
+  const perfDebug = useGraphicsStore((state) => state.graphics.perfDebug);
   const isLowGraphics = graphicsQuality === 'low';
+
+  // Performance debug - log when toggles change
+  useEffect(() => {
+    if (perfDebug?.showPerfOverlay) {
+      console.log('[PerfDebug] Active toggles:', perfDebug);
+    }
+  }, [perfDebug]);
 
   return (
     <group>
       {/* HDRI Environment for realistic reflections - disable on low */}
       {/* Uses local HDRI to avoid network dependency on GitHub CDN */}
+      {/* CRITICAL: Wrapped in its own Suspense to prevent blocking the entire scene during load */}
       {!isLowGraphics && (
-        <Environment files="/hdri/warehouse.hdr" background={false} environmentIntensity={0.4} />
+        <Suspense fallback={null}>
+          <Environment files="/hdri/warehouse.hdr" background={false} environmentIntensity={0.4} />
+        </Suspense>
       )}
 
       {/* Environment & Lighting */}
-      <FactoryEnvironment />
+      {!perfDebug?.disableEnvironment && <FactoryEnvironment />}
 
-      {/* Main Systems */}
-      <Machines machines={displayMachines} onSelect={onSelectMachine} />
-      {!isLowGraphics && <SpoutingSystem machines={displayMachines} />}
-      <FactoryInfrastructure
-        floorSize={FLOOR_SIZE}
-        floorWidth={FLOOR_SIZE_X}
-        floorDepth={FLOOR_SIZE_Z}
-        showZones={showZones}
-      />
+      {/* Main Systems - Respect perfDebug toggles for A/B testing */}
+      {!perfDebug?.disableMachines && (
+        <Machines machines={displayMachines} onSelect={onSelectMachine} />
+      )}
+      {!isLowGraphics && !perfDebug?.disableMachines && (
+        <SpoutingSystem machines={displayMachines} />
+      )}
+      {/* CRITICAL: Wrapped in Suspense to prevent MeshReflectorMaterial from breaking scene on quality change */}
+      <Suspense fallback={null}>
+        <FactoryInfrastructure
+          floorSize={FLOOR_SIZE}
+          floorWidth={FLOOR_SIZE_X}
+          floorDepth={FLOOR_SIZE_Z}
+          showZones={showZones}
+        />
+      </Suspense>
 
-      {/* Dynamic Elements */}
-      <ConveyorSystem productionSpeed={productionSpeed} />
-      <WorkerSystem onSelectWorker={onSelectWorker} />
-      <ForkliftSystem showSpeedZones={showZones} onSelectForklift={onSelectForklift} />
-      <TruckBay productionSpeed={productionSpeed} />
+      {/* Dynamic Elements - Respect perfDebug toggles */}
+      {!perfDebug?.disableConveyorSystem && (
+        <ConveyorSystem productionSpeed={productionSpeed} />
+      )}
+      {!perfDebug?.disableWorkerSystem && (
+        <WorkerSystem onSelectWorker={onSelectWorker} />
+      )}
+      {!perfDebug?.disableForkliftSystem && (
+        <ForkliftSystem showSpeedZones={showZones} onSelectForklift={onSelectForklift} />
+      )}
+      {/* PERFORMANCE: TruckBay has 27+ useFrame hooks - enable on medium/high/ultra */}
+      {(graphicsQuality === 'medium' || graphicsQuality === 'high' || graphicsQuality === 'ultra') &&
+        !perfDebug?.disableTruckBay && <TruckBay productionSpeed={productionSpeed} />}
 
       {/* Theme Hospital-inspired Mood & Chaos Systems */}
+      {/* PERFORMANCE: These systems have 50+ useFrame callbacks combined - ultra only */}
       {/* Visible chaos events - rats, pigeons, grain spills, etc. */}
-      <VisibleChaos />
+      {graphicsQuality === 'ultra' && <VisibleChaos />}
       {/* Factory plants, dust accumulation, coffee machine */}
-      {!isLowGraphics && <FactoryEnvironmentSystem />}
+      {graphicsQuality === 'ultra' && <FactoryEnvironmentSystem />}
       {/* Maintenance workers with sweeping, watering, oiling animations */}
-      <MaintenanceSystem />
+      {graphicsQuality === 'ultra' && <MaintenanceSystem />}
 
       {/* Incident Heat Map Visualization */}
       <IncidentHeatMap />

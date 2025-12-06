@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Wind, ChevronDown, ChevronUp } from 'lucide-react';
-import { useMillStore } from '../../store';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
+import { useProductionStore } from '../../stores/productionStore';
+import { useUIStore } from '../../stores/uiStore';
 
 export const WeatherControlPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
-  const weather = useMillStore((state) => state.weather);
-  const setWeather = useMillStore((state) => state.setWeather);
-  const showHeatMap = useMillStore((state) => state.showHeatMap);
-  const setShowHeatMap = useMillStore((state) => state.setShowHeatMap);
-  const clearHeatMap = useMillStore((state) => state.clearHeatMap);
-  const theme = useMillStore((state) => state.theme);
+  const weather = useGameSimulationStore((state) => state.weather);
+  const setWeather = useGameSimulationStore((state) => state.setWeather);
+  const showHeatMap = useProductionStore((state) => state.showHeatMap);
+  const setShowHeatMap = useProductionStore((state) => state.setShowHeatMap);
+  const clearHeatMap = useProductionStore((state) => state.clearHeatMap);
+  const theme = useUIStore((state) => state.theme);
 
   const weatherOptions: Array<{
     value: 'clear' | 'cloudy' | 'rain' | 'storm';

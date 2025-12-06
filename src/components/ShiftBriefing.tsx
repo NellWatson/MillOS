@@ -13,12 +13,12 @@ import {
   Package,
 } from 'lucide-react';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
-import { useMillStore } from '../store';
+import { useProductionStore } from '../stores/productionStore';
 
 export const ShiftBriefing: React.FC = () => {
   const { shiftData, completeShiftBriefing } = useGameSimulationStore();
-  const machines = useMillStore((state) => state.machines);
-  const workers = useMillStore((state) => state.workers);
+  const machines = useProductionStore((state) => state.machines);
+  const workers = useProductionStore((state) => state.workers);
 
   if (shiftData.handoverPhase !== 'briefing') return null;
 
@@ -60,7 +60,9 @@ export const ShiftBriefing: React.FC = () => {
                 <h2 className="text-2xl font-bold text-white">Shift Briefing</h2>
               </div>
               <p className="text-blue-100 text-sm">
-                {getShiftGreeting()} - {shiftData.currentShift.charAt(0).toUpperCase() + shiftData.currentShift.slice(1)} Shift
+                {getShiftGreeting()} -{' '}
+                {shiftData.currentShift.charAt(0).toUpperCase() + shiftData.currentShift.slice(1)}{' '}
+                Shift
               </p>
               <p className="text-blue-200 text-xs mt-1">
                 Supervisor: {shiftData.incomingSupervisor}
@@ -127,7 +129,9 @@ export const ShiftBriefing: React.FC = () => {
                   <p className="text-2xl font-bold text-white">
                     {shiftData.shiftProduction.actual}
                   </p>
-                  <p className="text-xs text-slate-500">/ {shiftData.shiftProduction.target} bags</p>
+                  <p className="text-xs text-slate-500">
+                    / {shiftData.shiftProduction.target} bags
+                  </p>
                 </div>
 
                 <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">

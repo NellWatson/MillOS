@@ -97,9 +97,7 @@ describe('AICommandCenter', () => {
 
   describe('Rendering', () => {
     it('should not render when isOpen is false', () => {
-      const { container } = render(
-        <AICommandCenter isOpen={false} onClose={vi.fn()} />
-      );
+      const { container } = render(<AICommandCenter isOpen={false} onClose={vi.fn()} />);
 
       expect(container.firstChild).toBeNull();
     });
@@ -343,9 +341,7 @@ describe('AICommandCenter', () => {
     });
 
     it('should reset decisionOutcomesRef on unmount', async () => {
-      const { unmount, rerender } = render(
-        <AICommandCenter isOpen={true} onClose={vi.fn()} />
-      );
+      const { unmount, rerender } = render(<AICommandCenter isOpen={true} onClose={vi.fn()} />);
 
       // Simulate some decisions being processed
       const storeWithDecisions = {

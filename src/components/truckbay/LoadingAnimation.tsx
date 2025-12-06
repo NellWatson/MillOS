@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { shouldRunThisFrame } from '../../utils/frameThrottle';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 
 interface LoadingAnimationProps {
   dockPosition: [number, number, number];
@@ -17,11 +18,13 @@ export const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
   isActive,
   cycleOffset,
 }) => {
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const forkliftRef = useRef<THREE.Group>(null);
   const forkRef = useRef<THREE.Group>(null);
   const palletRef = useRef<THREE.Group>(null);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(2)) return;
     if (!isActive || !forkliftRef.current || !forkRef.current || !palletRef.current) return;
 

@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { shouldRunThisFrame } from '../../utils/frameThrottle';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 
 // Oil puddle with reflections
 export const OilPuddle: React.FC<{ position: [number, number, number]; size?: number }> = ({
@@ -9,8 +10,10 @@ export const OilPuddle: React.FC<{ position: [number, number, number]; size?: nu
   size = 1,
 }) => {
   const meshRef = useRef<THREE.Mesh>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(3)) return;
     if (meshRef.current) {
       const mat = meshRef.current.material as THREE.MeshStandardMaterial;
@@ -44,8 +47,10 @@ export const RainPuddle: React.FC<{ position: [number, number, number]; size?: n
   size = 1.5,
 }) => {
   const meshRef = useRef<THREE.Mesh>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(3)) return;
     if (meshRef.current) {
       const mat = meshRef.current.material as THREE.MeshStandardMaterial;
@@ -274,8 +279,10 @@ export const HardHatHook: React.FC<{ position: [number, number, number]; color?:
   color = '#eab308',
 }) => {
   const hatRef = useRef<THREE.Group>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(3)) return;
     if (hatRef.current) {
       hatRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.8) * 0.03;

@@ -1,8 +1,214 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, createContext, useContext, useCallback, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useMillStore } from '../store';
+import { useGraphicsStore } from '../stores/graphicsStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { shouldRunThisFrame, getThrottleLevel } from '../utils/frameThrottle';
+
+// ============================================================
+// Dust Animation Manager - Centralized useFrame for all particle systems
+// ============================================================
+
+interface DustParticlesEntry {
+  type: 'dustParticles';
+  meshRef: React.RefObject<THREE.InstancedMesh | null>;
+  pool: ParticlePool;
+  colorArray: Float32Array;
+  colorAttr: React.RefObject<THREE.InstancedBufferAttribute | null>;
+  hiddenMatrix: THREE.Matrix4;
+  count: number;
+  isDaytime: boolean;
+  throttleLevel: number;
+}
+
+interface GrainFlowEntry {
+  type: 'grainFlow';
+  particlesRef: React.RefObject<THREE.Points | null>;
+  velocities: Float32Array;
+  count: number;
+  throttleLevel: number;
+}
+
+interface MachineSteamEntry {
+  type: 'machineSteam';
+  particlesRef: React.RefObject<THREE.Points | null>;
+  velocities: Float32Array;
+  lifetimes: Float32Array;
+  count: number;
+  steamType: 'steam' | 'dust' | 'exhaust';
+}
+
+type DustEntry = DustParticlesEntry | GrainFlowEntry | MachineSteamEntry;
+
+interface DustAnimationContextValue {
+  register: (id: string, entry: DustEntry) => void;
+  unregister: (id: string) => void;
+}
+
+const DustAnimationContext = createContext<DustAnimationContextValue | null>(null);
+
+export const DustAnimationManager: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const entriesRef = useRef<Map<string, DustEntry>>(new Map());
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const quality = useGraphicsStore((state) => state.graphics.quality);
+
+  const register = useCallback((id: string, entry: DustEntry) => {
+    entriesRef.current.set(id, entry);
+  }, []);
+
+  const unregister = useCallback((id: string) => {
+    entriesRef.current.delete(id);
+  }, []);
+
+  useFrame((_, delta) => {
+    if (!isTabVisible) return;
+
+    entriesRef.current.forEach((entry) => {
+      switch (entry.type) {
+        case 'dustParticles':
+          if (!shouldRunThisFrame(entry.throttleLevel)) return;
+          animateDustParticles(entry);
+          break;
+        case 'grainFlow':
+          if (!shouldRunThisFrame(entry.throttleLevel)) return;
+          animateGrainFlow(entry);
+          break;
+        case 'machineSteam':
+          if (!shouldRunThisFrame(3)) return;
+          animateMachineSteam(entry, delta);
+          break;
+      }
+    });
+  });
+
+  const contextValue = React.useMemo(() => ({ register, unregister }), [register, unregister]);
+
+  return (
+    <DustAnimationContext.Provider value={contextValue}>{children}</DustAnimationContext.Provider>
+  );
+};
+
+function useDustAnimation() {
+  return useContext(DustAnimationContext);
+}
+
+// Pure animation functions
+function animateDustParticles(entry: DustParticlesEntry) {
+  if (!entry.meshRef.current) return;
+  const mesh = entry.meshRef.current;
+  const particles = entry.pool.particles;
+
+  for (let i = 0; i < entry.count; i++) {
+    const particle = particles[i];
+
+    if (!particle.active) {
+      mesh.setMatrixAt(i, entry.hiddenMatrix);
+      continue;
+    }
+
+    particle.lifetime++;
+
+    if (particle.lifetime > particle.maxLifetime) {
+      particle.t = Math.random() * 100;
+      particle.xFactor = -40 + Math.random() * 80;
+      particle.yFactor = Math.random() * 25;
+      particle.zFactor = -30 + Math.random() * 60;
+      particle.lifetime = 0;
+      particle.maxLifetime = 200 + Math.random() * 300;
+    }
+
+    const { factor, speed, xFactor, yFactor, zFactor } = particle;
+    particle.t += speed;
+    const t = particle.t;
+
+    const s = Math.max(0.3, Math.cos(t) * 0.5 + 0.5);
+
+    const x = xFactor + Math.cos((t / 10) * factor) * 2;
+    let y = yFactor + Math.sin((t / 10) * factor) * 2 + 5;
+    const z = zFactor + Math.cos((t / 10) * factor) * 2;
+
+    if (y < 1) y = 25;
+    if (y > 30) y = 5;
+
+    const lightIntensity = entry.isDaytime ? isInLightShaft(x, y, z) : 0;
+
+    const scaleMultiplier = 1 + lightIntensity * 1.5;
+    const finalScale = s * 0.8 * scaleMultiplier;
+
+    tempPosition.set(x, y, z);
+    tempScale.setScalar(finalScale);
+    tempMatrix.compose(tempPosition, tempQuaternion, tempScale);
+
+    mesh.setMatrixAt(i, tempMatrix);
+
+    const baseR = 0.996;
+    const baseG = 0.953;
+    const baseB = 0.78;
+    entry.colorArray[i * 3] = baseR + lightIntensity * 0.004;
+    entry.colorArray[i * 3 + 1] = baseG + lightIntensity * 0.047;
+    entry.colorArray[i * 3 + 2] = baseB + lightIntensity * 0.22;
+  }
+
+  mesh.instanceMatrix.needsUpdate = true;
+
+  if (entry.colorAttr.current) {
+    entry.colorAttr.current.needsUpdate = true;
+  }
+}
+
+function animateGrainFlow(entry: GrainFlowEntry) {
+  if (!entry.particlesRef.current) return;
+  const posArray = entry.particlesRef.current.geometry.attributes.position.array as Float32Array;
+
+  for (let i = 0; i < entry.count; i++) {
+    const idx = i * 3;
+
+    posArray[idx] += entry.velocities[idx];
+    posArray[idx + 1] += entry.velocities[idx + 1];
+    posArray[idx + 2] += entry.velocities[idx + 2];
+
+    if (posArray[idx + 1] < 2) {
+      posArray[idx] = (Math.random() - 0.5) * 30;
+      posArray[idx + 1] = 18 + Math.random() * 5;
+      posArray[idx + 2] = -15;
+    }
+  }
+  entry.particlesRef.current.geometry.attributes.position.needsUpdate = true;
+}
+
+function animateMachineSteam(entry: MachineSteamEntry, delta: number) {
+  if (!entry.particlesRef.current) return;
+  const pos = entry.particlesRef.current.geometry.attributes.position.array as Float32Array;
+
+  for (let i = 0; i < entry.count; i++) {
+    entry.lifetimes[i] += delta * (entry.steamType === 'steam' ? 1.5 : 1);
+
+    if (entry.lifetimes[i] > 1) {
+      entry.lifetimes[i] = 0;
+      pos[i * 3] = (Math.random() - 0.5) * 0.5;
+      pos[i * 3 + 1] = Math.random() * 0.3;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 0.5;
+
+      entry.velocities[i * 3] = (Math.random() - 0.5) * 0.3;
+      entry.velocities[i * 3 + 1] =
+        entry.steamType === 'steam' ? 0.8 + Math.random() * 0.5 : 0.3 + Math.random() * 0.3;
+      entry.velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.3;
+    }
+
+    pos[i * 3] += entry.velocities[i * 3] * delta;
+    pos[i * 3 + 1] += entry.velocities[i * 3 + 1] * delta;
+    pos[i * 3 + 2] += entry.velocities[i * 3 + 2] * delta;
+
+    entry.velocities[i * 3] += (Math.random() - 0.5) * delta * 0.5;
+    entry.velocities[i * 3 + 2] += (Math.random() - 0.5) * delta * 0.5;
+
+    if (entry.steamType === 'steam') {
+      entry.velocities[i * 3 + 1] *= 0.98;
+    }
+  }
+
+  entry.particlesRef.current.geometry.attributes.position.needsUpdate = true;
+}
 
 interface DustParticlesProps {
   count: number;
@@ -141,12 +347,13 @@ class ParticlePool {
 
 export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
   const mesh = useRef<THREE.InstancedMesh>(null);
-  const gameTime = useMillStore((state: any) => state.gameTime);
-  const { dustParticleCount, enableDustParticles, quality } = useMillStore((state: any) => ({
-    dustParticleCount: state.graphics.dustParticleCount,
-    enableDustParticles: state.graphics.enableDustParticles,
-    quality: state.graphics.quality,
-  }));
+  const idRef = useRef(`dustParticles-${Math.random().toString(36).slice(2, 9)}`);
+  const context = useDustAnimation();
+  const gameTime = useGameSimulationStore((state) => state.gameTime);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const dustParticleCount = useGraphicsStore((state) => state.graphics.dustParticleCount);
+  const enableDustParticles = useGraphicsStore((state) => state.graphics.enableDustParticles);
+  const quality = useGraphicsStore((state) => state.graphics.quality);
 
   // Use graphics setting for particle count
   const effectiveCount = Math.min(count, dustParticleCount);
@@ -179,79 +386,40 @@ export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
   // Throttle particle updates based on graphics quality (200+ particles is expensive)
   const throttleLevel = getThrottleLevel(quality);
 
+  // Register with manager if available
+  useEffect(() => {
+    if (context && isEnabled) {
+      context.register(idRef.current, {
+        type: 'dustParticles',
+        meshRef: mesh,
+        pool,
+        colorArray,
+        colorAttr,
+        hiddenMatrix,
+        count,
+        isDaytime,
+        throttleLevel,
+      });
+      return () => context.unregister(idRef.current);
+    }
+  }, [context, isEnabled, pool, colorArray, hiddenMatrix, count, isDaytime, throttleLevel]);
+
+  // Fallback useFrame when not in manager context
   useFrame(() => {
-    if (!mesh.current || !isEnabled) return;
-    // Throttle updates - particles look fine at reduced update rate
+    if (context) return; // Manager handles animation
+    if (!mesh.current || !isEnabled || !isTabVisible) return;
     if (!shouldRunThisFrame(throttleLevel)) return;
-
-    const particles = pool.particles;
-
-    for (let i = 0; i < count; i++) {
-      const particle = particles[i];
-
-      if (!particle.active) {
-        // Hide inactive particles
-        mesh.current.setMatrixAt(i, hiddenMatrix);
-        continue;
-      }
-
-      // Update particle lifetime
-      particle.lifetime++;
-
-      // Recycle particle if lifetime exceeded
-      if (particle.lifetime > particle.maxLifetime) {
-        // Reset the particle
-        particle.t = Math.random() * 100;
-        particle.xFactor = -40 + Math.random() * 80;
-        particle.yFactor = Math.random() * 25;
-        particle.zFactor = -30 + Math.random() * 60;
-        particle.lifetime = 0;
-        particle.maxLifetime = 200 + Math.random() * 300;
-      }
-
-      const { factor, speed, xFactor, yFactor, zFactor } = particle;
-      particle.t += speed;
-      const t = particle.t;
-
-      const s = Math.max(0.3, Math.cos(t) * 0.5 + 0.5);
-
-      const x = xFactor + Math.cos((t / 10) * factor) * 2;
-      let y = yFactor + Math.sin((t / 10) * factor) * 2 + 5;
-      const z = zFactor + Math.cos((t / 10) * factor) * 2;
-
-      // Keep particles within bounds
-      if (y < 1) y = 25;
-      if (y > 30) y = 5;
-
-      // Check if particle is in a light shaft and adjust brightness
-      const lightIntensity = isDaytime ? isInLightShaft(x, y, z) : 0;
-
-      // Scale up particles in light shafts to make them more visible
-      const scaleMultiplier = 1 + lightIntensity * 1.5;
-      const finalScale = s * 0.8 * scaleMultiplier;
-
-      // Build matrix efficiently
-      tempPosition.set(x, y, z);
-      tempScale.setScalar(finalScale);
-      tempMatrix.compose(tempPosition, tempQuaternion, tempScale);
-
-      mesh.current.setMatrixAt(i, tempMatrix);
-
-      // Update color - brighter golden when in light shaft
-      const baseR = 0.996; // #fef3c7
-      const baseG = 0.953;
-      const baseB = 0.78;
-      colorArray[i * 3] = baseR + lightIntensity * 0.004;
-      colorArray[i * 3 + 1] = baseG + lightIntensity * 0.047;
-      colorArray[i * 3 + 2] = baseB + lightIntensity * 0.22;
-    }
-
-    mesh.current.instanceMatrix.needsUpdate = true;
-
-    // Update colors if attribute exists
-    if (colorAttr.current) {
-      colorAttr.current.needsUpdate = true;
-    }
+    animateDustParticles({
+      type: 'dustParticles',
+      meshRef: mesh,
+      pool,
+      colorArray,
+      colorAttr,
+      hiddenMatrix,
+      count,
+      isDaytime,
+      throttleLevel,
+    });
   });
 
   // Return null if disabled (after all hooks have been called)
@@ -285,10 +453,11 @@ export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
 // Grain particles flowing through pipes (visual effect) - with pooling
 export const GrainFlow: React.FC = () => {
   const particlesRef = useRef<THREE.Points>(null);
-  const { enableGrainFlow, quality } = useMillStore((state: any) => ({
-    enableGrainFlow: state.graphics.enableGrainFlow,
-    quality: state.graphics.quality,
-  }));
+  const idRef = useRef(`grainFlow-${Math.random().toString(36).slice(2, 9)}`);
+  const context = useDustAnimation();
+  const enableGrainFlow = useGraphicsStore((state) => state.graphics.enableGrainFlow);
+  const quality = useGraphicsStore((state) => state.graphics.quality);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const isEnabled = enableGrainFlow;
 
   const count = 200;
@@ -316,27 +485,32 @@ export const GrainFlow: React.FC = () => {
   // Throttle grain flow updates
   const throttleLevel = getThrottleLevel(quality);
 
-  useFrame(() => {
-    if (!particlesRef.current || !isEnabled) return;
-    if (!shouldRunThisFrame(throttleLevel)) return;
-    const posArray = particlesRef.current.geometry.attributes.position.array as Float32Array;
-
-    for (let i = 0; i < count; i++) {
-      const idx = i * 3;
-
-      // Apply pre-computed velocities
-      posArray[idx] += velocities[idx];
-      posArray[idx + 1] += velocities[idx + 1];
-      posArray[idx + 2] += velocities[idx + 2];
-
-      // Reset when below floor (recycling)
-      if (posArray[idx + 1] < 2) {
-        posArray[idx] = (Math.random() - 0.5) * 30;
-        posArray[idx + 1] = 18 + Math.random() * 5;
-        posArray[idx + 2] = -15;
-      }
+  // Register with manager if available
+  useEffect(() => {
+    if (context && isEnabled) {
+      context.register(idRef.current, {
+        type: 'grainFlow',
+        particlesRef,
+        velocities,
+        count,
+        throttleLevel,
+      });
+      return () => context.unregister(idRef.current);
     }
-    particlesRef.current.geometry.attributes.position.needsUpdate = true;
+  }, [context, isEnabled, velocities, throttleLevel]);
+
+  // Fallback useFrame when not in manager context
+  useFrame(() => {
+    if (context) return; // Manager handles animation
+    if (!particlesRef.current || !isEnabled || !isTabVisible) return;
+    if (!shouldRunThisFrame(throttleLevel)) return;
+    animateGrainFlow({
+      type: 'grainFlow',
+      particlesRef,
+      velocities,
+      count,
+      throttleLevel,
+    });
   });
 
   // Return null if disabled (after all hooks have been called)
@@ -362,7 +536,7 @@ export const GrainFlow: React.FC = () => {
 
 // Atmospheric haze for depth and industrial atmosphere
 export const AtmosphericHaze: React.FC = () => {
-  const enableAtmosphericHaze = useMillStore((state: any) => state.graphics.enableAtmosphericHaze);
+  const enableAtmosphericHaze = useGraphicsStore((state) => state.graphics.enableAtmosphericHaze);
   const isEnabled = enableAtmosphericHaze;
 
   // Pre-created materials for better performance - depthTest false to prevent flickering
@@ -430,6 +604,9 @@ interface MachineSteamProps {
 
 const MachineSteamParticle: React.FC<MachineSteamProps> = ({ position, type, intensity = 1 }) => {
   const particlesRef = useRef<THREE.Points>(null);
+  const idRef = useRef(`machineSteam-${Math.random().toString(36).slice(2, 9)}`);
+  const context = useDustAnimation();
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const count = type === 'dust' ? 30 : 20;
 
   const { positions, velocities, lifetimes } = useMemo(() => {
@@ -454,46 +631,37 @@ const MachineSteamParticle: React.FC<MachineSteamProps> = ({ position, type, int
     return { positions: pos, velocities: vel, lifetimes: life };
   }, [count, type]);
 
-  // Throttle steam particle updates - runs at ~20fps
-  useFrame((_, delta) => {
-    if (!particlesRef.current) return;
-    if (!shouldRunThisFrame(3)) return;
-    const pos = particlesRef.current.geometry.attributes.position.array as Float32Array;
-
-    for (let i = 0; i < count; i++) {
-      // Update lifetime
-      lifetimes[i] += delta * (type === 'steam' ? 1.5 : 1);
-
-      if (lifetimes[i] > 1) {
-        // Reset particle
-        lifetimes[i] = 0;
-        pos[i * 3] = (Math.random() - 0.5) * 0.5;
-        pos[i * 3 + 1] = Math.random() * 0.3;
-        pos[i * 3 + 2] = (Math.random() - 0.5) * 0.5;
-
-        // Reset velocity
-        velocities[i * 3] = (Math.random() - 0.5) * 0.3;
-        velocities[i * 3 + 1] =
-          type === 'steam' ? 0.8 + Math.random() * 0.5 : 0.3 + Math.random() * 0.3;
-        velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.3;
-      }
-
-      // Apply velocity with drift
-      pos[i * 3] += velocities[i * 3] * delta;
-      pos[i * 3 + 1] += velocities[i * 3 + 1] * delta;
-      pos[i * 3 + 2] += velocities[i * 3 + 2] * delta;
-
-      // Add turbulence
-      velocities[i * 3] += (Math.random() - 0.5) * delta * 0.5;
-      velocities[i * 3 + 2] += (Math.random() - 0.5) * delta * 0.5;
-
-      // Slow down vertical velocity for steam dissipation
-      if (type === 'steam') {
-        velocities[i * 3 + 1] *= 0.98;
-      }
+  // Register with manager if available
+  useEffect(() => {
+    if (context) {
+      context.register(idRef.current, {
+        type: 'machineSteam',
+        particlesRef,
+        velocities,
+        lifetimes,
+        count,
+        steamType: type,
+      });
+      return () => context.unregister(idRef.current);
     }
+  }, [context, velocities, lifetimes, count, type]);
 
-    particlesRef.current.geometry.attributes.position.needsUpdate = true;
+  // Fallback useFrame when not in manager context
+  useFrame((_, delta) => {
+    if (context) return; // Manager handles animation
+    if (!particlesRef.current || !isTabVisible) return;
+    if (!shouldRunThisFrame(3)) return;
+    animateMachineSteam(
+      {
+        type: 'machineSteam',
+        particlesRef,
+        velocities,
+        lifetimes,
+        count,
+        steamType: type,
+      },
+      delta
+    );
   });
 
   const color = type === 'steam' ? '#e2e8f0' : type === 'dust' ? '#d4a574' : '#9ca3af';
@@ -526,7 +694,7 @@ const MachineSteamParticle: React.FC<MachineSteamProps> = ({ position, type, int
 
 // Steam vents component - renders multiple steam sources near machines
 export const MachineSteamVents: React.FC = () => {
-  const quality = useMillStore((state: any) => state.graphics.quality);
+  const quality = useGraphicsStore((state) => state.graphics.quality);
   const isEnabled = quality !== 'low';
 
   // Machine positions from MillScene zones:

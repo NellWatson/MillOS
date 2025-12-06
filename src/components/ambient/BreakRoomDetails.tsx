@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { shouldRunThisFrame } from '../../utils/frameThrottle';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 
 interface VendingMachineProps {
   position: [number, number, number];
@@ -14,8 +15,10 @@ export const VendingMachine: React.FC<VendingMachineProps> = ({
   rotation = [0, 0, 0],
 }) => {
   const ledRef = useRef<THREE.Mesh>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(3)) return;
     if (ledRef.current) {
       const mat = ledRef.current.material as THREE.MeshStandardMaterial;
@@ -46,10 +49,7 @@ export const VendingMachine: React.FC<VendingMachineProps> = ({
       {/* Product rows (simulated) */}
       {Array.from({ length: 4 }).map((_, row) =>
         Array.from({ length: 6 }).map((_, col) => (
-          <mesh
-            key={`${row}-${col}`}
-            position={[-0.4 + col * 0.16, 0.7 - row * 0.25, 0.35]}
-          >
+          <mesh key={`${row}-${col}`} position={[-0.4 + col * 0.16, 0.7 - row * 0.25, 0.35]}>
             <boxGeometry args={[0.12, 0.18, 0.05]} />
             <meshStandardMaterial
               color={['#f97316', '#eab308', '#22c55e', '#3b82f6'][row % 4]}
@@ -133,11 +133,16 @@ interface CoffeeMakerProps {
 export const CoffeeMaker: React.FC<CoffeeMakerProps> = ({ position }) => {
   const steamRef = useRef<THREE.Points>(null);
   const ledRef = useRef<THREE.Mesh>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   const steamGeometry = useMemo(() => {
     const vertices: number[] = [];
     for (let i = 0; i < 30; i++) {
-      vertices.push((Math.random() - 0.5) * 0.08, Math.random() * 0.15, (Math.random() - 0.5) * 0.08);
+      vertices.push(
+        (Math.random() - 0.5) * 0.08,
+        Math.random() * 0.15,
+        (Math.random() - 0.5) * 0.08
+      );
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
@@ -145,6 +150,7 @@ export const CoffeeMaker: React.FC<CoffeeMakerProps> = ({ position }) => {
   }, []);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(2)) return;
     if (steamRef.current) {
       const positions = steamRef.current.geometry.attributes.position;
@@ -376,9 +382,7 @@ interface BreakRoomDetailsProps {
   position?: [number, number, number];
 }
 
-export const BreakRoomDetails: React.FC<BreakRoomDetailsProps> = ({
-  position = [-25, 0, 0],
-}) => {
+export const BreakRoomDetails: React.FC<BreakRoomDetailsProps> = ({ position = [-25, 0, 0] }) => {
   return (
     <group position={position}>
       {/* Vending machine */}

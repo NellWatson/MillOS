@@ -1,0 +1,5 @@
+src/0.10 Archive/**
+public/v0.10/**
+**/*.bak
+**/*.backup
+**/*.original

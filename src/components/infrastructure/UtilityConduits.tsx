@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
-import { useMillStore } from '../../store';
+import { useGraphicsStore } from '../../stores/graphicsStore';
 
 interface UtilityConduitsProps {
   floorWidth: number;
@@ -105,7 +105,7 @@ const ConduitPipe: React.FC<{
 };
 
 export const UtilityConduits: React.FC<UtilityConduitsProps> = () => {
-  const graphics = useMillStore((state: any) => state.graphics);
+  const graphics = useGraphicsStore((state) => state.graphics);
   const showCables = graphics.enableCableConduits;
 
   return (

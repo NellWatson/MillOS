@@ -186,16 +186,36 @@ export const HistoricalPhoto: React.FC<HistoricalPhotoProps> = ({
 
 // Convenience component for gallery wall
 interface HistoricalPhotosGalleryProps {
-  positions?: Array<{ pos: [number, number, number]; rotation?: [number, number, number]; type?: HistoricalPhotoProps['type'] }>;
+  positions?: Array<{
+    pos: [number, number, number];
+    rotation?: [number, number, number];
+    type?: HistoricalPhotoProps['type'];
+  }>;
 }
 
 export const HistoricalPhotosGallery: React.FC<HistoricalPhotosGalleryProps> = ({ positions }) => {
   const defaultPositions = useMemo(
     () => [
-      { pos: [-28, 2.5, -15] as [number, number, number], rotation: [0, Math.PI / 2, 0] as [number, number, number], type: 'founding' as const },
-      { pos: [-28, 2.5, -14] as [number, number, number], rotation: [0, Math.PI / 2, 0] as [number, number, number], type: 'old_equipment' as const },
-      { pos: [-28, 2.5, -13] as [number, number, number], rotation: [0, Math.PI / 2, 0] as [number, number, number], type: 'worker_group' as const },
-      { pos: [-28, 2.5, -12] as [number, number, number], rotation: [0, Math.PI / 2, 0] as [number, number, number], type: 'first_shipment' as const },
+      {
+        pos: [-28, 2.5, -15] as [number, number, number],
+        rotation: [0, Math.PI / 2, 0] as [number, number, number],
+        type: 'founding' as const,
+      },
+      {
+        pos: [-28, 2.5, -14] as [number, number, number],
+        rotation: [0, Math.PI / 2, 0] as [number, number, number],
+        type: 'old_equipment' as const,
+      },
+      {
+        pos: [-28, 2.5, -13] as [number, number, number],
+        rotation: [0, Math.PI / 2, 0] as [number, number, number],
+        type: 'worker_group' as const,
+      },
+      {
+        pos: [-28, 2.5, -12] as [number, number, number],
+        rotation: [0, Math.PI / 2, 0] as [number, number, number],
+        type: 'first_shipment' as const,
+      },
     ],
     []
   );
@@ -205,12 +225,7 @@ export const HistoricalPhotosGallery: React.FC<HistoricalPhotosGalleryProps> = (
   return (
     <group>
       {gallery.map((photo, i) => (
-        <HistoricalPhoto
-          key={i}
-          position={photo.pos}
-          rotation={photo.rotation}
-          type={photo.type}
-        />
+        <HistoricalPhoto key={i} position={photo.pos} rotation={photo.rotation} type={photo.type} />
       ))}
     </group>
   );

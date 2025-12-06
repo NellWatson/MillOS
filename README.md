@@ -411,7 +411,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-- Built with [Claude Code](https://claude.ai/code) (Opus 4.5), with assistance from GPT-5.1-codex-max xhigh and Gemini 2.5
+- Built with [Claude Code](https://claude.ai/code) (Opus 4.5), with assistance from GPT-5.1-codex-max xhigh, Gemini 2.5, and Gemini 3.0 Pro
 - Built with [React Three Fiber](https://docs.pmnd.rs/react-three-fiber)
 - State management by [Zustand](https://github.com/pmndrs/zustand)
 - UI animations with [Framer Motion](https://www.framer.com/motion/)

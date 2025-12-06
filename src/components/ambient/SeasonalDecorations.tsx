@@ -2,6 +2,7 @@ import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { shouldRunThisFrame } from '../../utils/frameThrottle';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 
 // Get current season based on month
 const getCurrentSeason = (): 'winter' | 'spring' | 'summer' | 'fall' => {
@@ -20,16 +21,17 @@ interface StringLightsProps {
 export const StringLights: React.FC<StringLightsProps> = ({ position, length = 5 }) => {
   const lightsRef = useRef<THREE.Group>(null);
   const bulbCount = Math.floor(length / 0.3);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(3)) return;
     if (lightsRef.current) {
       lightsRef.current.children.forEach((child, i) => {
         if (child instanceof THREE.Mesh) {
           const mat = child.material as THREE.MeshStandardMaterial;
           const offset = i * 0.5;
-          mat.emissiveIntensity =
-            0.6 + Math.sin(state.clock.elapsedTime * 2 + offset) * 0.4;
+          mat.emissiveIntensity = 0.6 + Math.sin(state.clock.elapsedTime * 2 + offset) * 0.4;
         }
       });
     }
@@ -125,11 +127,7 @@ export const PottedPlant: React.FC<PottedPlantProps> = ({ position, type = 'medi
         return (
           <mesh
             key={i}
-            position={[
-              Math.cos(angle) * 0.08,
-              heightPos,
-              Math.sin(angle) * 0.08,
-            ]}
+            position={[Math.cos(angle) * 0.08, heightPos, Math.sin(angle) * 0.08]}
             rotation={[0, angle, Math.PI / 3]}
           >
             <circleGeometry args={[0.08, 8]} />
@@ -148,8 +146,10 @@ interface DeskFanProps {
 
 export const DeskFan: React.FC<DeskFanProps> = ({ position, rotation = [0, 0, 0] }) => {
   const bladesRef = useRef<THREE.Group>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame(() => {
+    if (!isTabVisible) return;
     if (bladesRef.current) {
       bladesRef.current.rotation.z += 0.3;
     }
@@ -184,11 +184,7 @@ export const DeskFan: React.FC<DeskFanProps> = ({ position, rotation = [0, 0, 0]
       {/* Blades */}
       <group ref={bladesRef} position={[0, 0.22, 0.05]}>
         {[0, 1, 2].map((i) => (
-          <mesh
-            key={i}
-            rotation={[0, 0, (i * Math.PI * 2) / 3]}
-            position={[0.05, 0, 0]}
-          >
+          <mesh key={i} rotation={[0, 0, (i * Math.PI * 2) / 3]} position={[0.05, 0, 0]}>
             <boxGeometry args={[0.08, 0.04, 0.002]} />
             <meshStandardMaterial color="#94a3b8" roughness={0.3} metalness={0.7} />
           </mesh>

@@ -26,12 +26,13 @@ import { useGLTF } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useModelAvailable, MODEL_PATHS } from '../../utils/modelLoader';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 
 interface ForkliftModelProps {
   hasCargo: boolean;
   isMoving: boolean;
   speedMultiplier?: number;
-  forkHeight?: number; // Height offset for fork animation during loading/unloading
+  forkHeightRef?: React.MutableRefObject<number>; // Ref for fork animation - avoids re-renders
 }
 
 // GLTF Model version
@@ -39,10 +40,12 @@ const GLTFForklift: React.FC<ForkliftModelProps> = ({
   hasCargo,
   isMoving,
   speedMultiplier = 1,
-  forkHeight = 0,
+  forkHeightRef,
 }) => {
   const { scene } = useGLTF(MODEL_PATHS.forklift);
   const modelRef = useRef<THREE.Group>(null);
+  const cargoRef = useRef<THREE.Group>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   // Clone the scene and enable shadows
   const clonedScene = React.useMemo(() => {
@@ -56,9 +59,17 @@ const GLTFForklift: React.FC<ForkliftModelProps> = ({
     return clone;
   }, [scene]);
 
-  // Animate wheels if moving
+  // Animate wheels if moving and update fork height from ref
   useFrame((_, delta) => {
-    if (!modelRef.current || !isMoving) return;
+    if (!isTabVisible) return;
+    if (!modelRef.current) return;
+
+    // Update fork height directly from ref (no re-render needed)
+    if (cargoRef.current && forkHeightRef) {
+      cargoRef.current.position.y = 1.2 + forkHeightRef.current;
+    }
+
+    if (!isMoving) return;
 
     // Find wheel meshes and rotate them
     modelRef.current.traverse((child) => {
@@ -78,9 +89,9 @@ const GLTFForklift: React.FC<ForkliftModelProps> = ({
         position={[0, 0.3, 0]}
         rotation={[0, Math.PI, 0]}
       />
-      {/* Add cargo on top if needed - moves with forkHeight */}
+      {/* Add cargo on top if needed - position animated via useFrame */}
       {hasCargo && (
-        <group position={[0, 1.2 + forkHeight, 1.5]}>
+        <group ref={cargoRef} position={[0, 1.2, 1.5]}>
           <mesh castShadow>
             <boxGeometry args={[1, 0.15, 1]} />
             <meshStandardMaterial color="#a16207" />
@@ -103,11 +114,25 @@ const ProceduralForklift: React.FC<ForkliftModelProps> = ({
   hasCargo,
   isMoving,
   speedMultiplier = 1,
-  forkHeight = 0,
+  forkHeightRef,
 }) => {
   const wheelRefs = useRef<THREE.Mesh[]>([]);
+  const forksRef = useRef<THREE.Group>(null);
+  const cargoRef = useRef<THREE.Group>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((_, delta) => {
+    if (!isTabVisible) return;
+
+    // Update fork height directly from ref (no re-render needed)
+    const forkHeight = forkHeightRef?.current ?? 0;
+    if (forksRef.current) {
+      forksRef.current.position.y = forkHeight;
+    }
+    if (cargoRef.current) {
+      cargoRef.current.position.y = 0.6 + forkHeight;
+    }
+
     if (!isMoving) return;
     wheelRefs.current.forEach((wheel) => {
       if (wheel) wheel.rotation.x += delta * 5 * speedMultiplier;
@@ -258,8 +283,8 @@ const ProceduralForklift: React.FC<ForkliftModelProps> = ({
         ))}
       </group>
 
-      {/* Forks - with thickness, animated by forkHeight */}
-      <group position={[0, forkHeight, 0]}>
+      {/* Forks - with thickness, animated via useFrame */}
+      <group ref={forksRef} position={[0, 0, 0]}>
         {[-0.3, 0.3].map((x, i) => (
           <group key={i} position={[x, 0.3, 1.8]}>
             <mesh castShadow>
@@ -340,9 +365,9 @@ const ProceduralForklift: React.FC<ForkliftModelProps> = ({
         </group>
       ))}
 
-      {/* Cargo (pallet with boxes) - moves with forkHeight */}
+      {/* Cargo (pallet with boxes) - animated via useFrame */}
       {hasCargo && (
-        <group position={[0, 0.6 + forkHeight, 2]}>
+        <group ref={cargoRef} position={[0, 0.6, 2]}>
           {/* Pallet */}
           <mesh castShadow>
             <boxGeometry args={[1, 0.12, 1]} />

@@ -254,7 +254,8 @@ export const ComplianceDashboard: React.FC<ComplianceDashboardProps> = ({ isOpen
               Unack: <span className="text-red-400">{summary.unacknowledged}</span>
             </span>
             <span>
-              SLA: <span className="text-green-400">{complianceMetrics.slaCompliance.toFixed(1)}%</span>
+              SLA:{' '}
+              <span className="text-green-400">{complianceMetrics.slaCompliance.toFixed(1)}%</span>
             </span>
             {hasCritical && (
               <span className="flex items-center gap-1 text-red-400 animate-pulse">
@@ -520,9 +521,7 @@ export const ComplianceDashboard: React.FC<ComplianceDashboardProps> = ({ isOpen
                             </div>
                           </div>
 
-                          <div className="text-sm text-white font-medium mb-1">
-                            {alarm.tagName}
-                          </div>
+                          <div className="text-sm text-white font-medium mb-1">{alarm.tagName}</div>
                           <div className="flex items-center justify-between text-xs text-slate-400">
                             <span>
                               Value: {alarm.value.toFixed(2)} | Limit: {alarm.threshold}
@@ -547,9 +546,7 @@ export const ComplianceDashboard: React.FC<ComplianceDashboardProps> = ({ isOpen
                                 </div>
                                 <div>
                                   <div className="text-slate-500">Machine</div>
-                                  <div className="text-slate-300">
-                                    {alarm.machineId || 'N/A'}
-                                  </div>
+                                  <div className="text-slate-300">{alarm.machineId || 'N/A'}</div>
                                 </div>
                                 <div>
                                   <div className="text-slate-500">Raised At</div>

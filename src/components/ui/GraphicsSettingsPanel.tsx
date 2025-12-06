@@ -16,15 +16,18 @@ import {
   Keyboard,
   RotateCcw,
 } from 'lucide-react';
-import { useMillStore, GraphicsQuality } from '../../store';
+import { useGraphicsStore, GraphicsQuality } from '../../stores/graphicsStore';
+import { useUIStore } from '../../stores/uiStore';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { FPSDisplay } from '../FPSMonitor';
 
 export const GraphicsSettingsPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
-  const graphics = useMillStore((state) => state.graphics);
-  const setGraphicsQuality = useMillStore((state) => state.setGraphicsQuality);
-  const setGraphicsSetting = useMillStore((state) => state.setGraphicsSetting);
-  const theme = useMillStore((state) => state.theme);
+  const graphics = useGraphicsStore((state) => state.graphics);
+  const setGraphicsQuality = useGraphicsStore((state) => state.setGraphicsQuality);
+  const setGraphicsSetting = useGraphicsStore((state) => state.setGraphicsSetting);
+  const theme = useUIStore((state) => state.theme);
+  const resetGameState = useGameSimulationStore((state) => state.resetGameState);
 
   const qualityColors: Record<GraphicsQuality, string> = {
     low: 'text-slate-400',
@@ -493,7 +496,7 @@ export const GraphicsSettingsPanel: React.FC = () => {
 
             {/* Reset Game Time Button */}
             <button
-              onClick={() => useMillStore.getState().resetGameState()}
+              onClick={resetGameState}
               className={`w-full mt-2 py-1.5 rounded text-[10px] font-medium transition-all flex items-center justify-center gap-1 ${
                 theme === 'light'
                   ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'

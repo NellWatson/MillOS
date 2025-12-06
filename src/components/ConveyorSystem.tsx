@@ -3,10 +3,48 @@ import { useFrame } from '@react-three/fiber';
 import { Text, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { audioManager } from '../utils/audioManager';
-import { useMillStore } from '../store';
+import { useGraphicsStore } from '../stores/graphicsStore';
+import { useProductionStore } from '../stores/productionStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { GrainQuality } from '../types';
 import { METAL_MATERIALS, SAFETY_MATERIALS, SHARED_GEOMETRIES } from '../utils/sharedMaterials';
 import { shouldRunThisFrame } from '../utils/frameThrottle';
+
+// Module-level registry for centralized conveyor audio updates
+const conveyorAudioRegistry = new Map<string, { position: THREE.Vector3; isRunning: boolean }>();
+
+export const registerConveyorAudio = (id: string, position: THREE.Vector3, isRunning: boolean) => {
+  conveyorAudioRegistry.set(id, { position, isRunning });
+};
+
+export const unregisterConveyorAudio = (id: string) => {
+  conveyorAudioRegistry.delete(id);
+};
+
+// Module-level registry for centralized bag animations (15-60 bags → 1 useFrame)
+interface BagAnimationState {
+  ref: THREE.Group;
+  speed: number;
+  currentX: number;
+  crossedBoundary: boolean;
+}
+const bagAnimationRegistry = new Map<string, BagAnimationState>();
+
+export const registerBagAnimation = (id: string, state: BagAnimationState) => {
+  bagAnimationRegistry.set(id, state);
+};
+
+export const unregisterBagAnimation = (id: string) => {
+  bagAnimationRegistry.delete(id);
+};
+
+export const updateBagPosition = (id: string, x: number, crossedBoundary: boolean) => {
+  const state = bagAnimationRegistry.get(id);
+  if (state) {
+    state.currentX = x;
+    state.crossedBoundary = crossedBoundary;
+  }
+};
 
 // Generate batch number in format: YYYYMMDD-XXX
 const generateBatchNumber = (index: number): string => {
@@ -90,6 +128,78 @@ const useConveyorBeltTexture = (): THREE.CanvasTexture => {
   return useMemo(() => createConveyorBeltTexture(), []);
 };
 
+// Centralized audio manager component - updates all conveyors in one pass
+const ConveyorAudioManager: React.FC<{ productionSpeed: number }> = ({ productionSpeed }) => {
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+
+  useFrame(() => {
+    // PERFORMANCE: Skip audio updates when tab hidden
+    if (!isTabVisible) return;
+    // Skip if no conveyors are registered (avoid per-frame loop when scene hidden)
+    if (conveyorAudioRegistry.size === 0) return;
+    // Throttle to every 4th frame (was 2nd frame per conveyor)
+    // With 10-15 conveyors, this reduces from 150-225 updates/sec to 37-56 updates/sec
+    if (!shouldRunThisFrame(4)) return;
+    if (productionSpeed === 0) return;
+
+    // Update all registered conveyors in one pass
+    conveyorAudioRegistry.forEach((data, id) => {
+      if (data.isRunning) {
+        audioManager.updateConveyorSpatialVolume(id);
+      }
+    });
+  });
+  return null;
+};
+
+// Centralized bag animation manager - updates all bags in ONE useFrame (15-60 bags → 1 call)
+const BagAnimationManager: React.FC<{
+  productionSpeed: number;
+  incrementBagsProduced: (count: number) => void;
+}> = ({ productionSpeed, incrementBagsProduced }) => {
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const quality = useGraphicsStore((state) => state.graphics.quality);
+
+  useFrame((_, delta) => {
+    // PERFORMANCE: Skip when tab hidden or production stopped
+    if (!isTabVisible || productionSpeed === 0) return;
+    // Skip if no bags registered
+    if (bagAnimationRegistry.size === 0) return;
+
+    // Throttle based on quality (ultra=1, high=2, medium=3, low=4)
+    const movementThrottle = quality === 'ultra' ? 1 : quality === 'high' ? 2 : quality === 'medium' ? 3 : 4;
+    if (!shouldRunThisFrame(movementThrottle)) return;
+
+    // Cap delta to prevent huge jumps when tab regains focus (max 100ms)
+    const cappedDelta = Math.min(delta * movementThrottle, 0.1);
+
+    // Update all bags in a single pass
+    bagAnimationRegistry.forEach((state) => {
+      if (!state.ref) return;
+
+      state.currentX += state.speed * productionSpeed * cappedDelta;
+
+      // Track when bag crosses the boundary (simulating packed bag)
+      if (state.currentX > BAG_BOUNDARY) {
+        // Preserve overflow to prevent stuttering/bunching
+        const overflow = state.currentX - BAG_BOUNDARY;
+        state.currentX = -BAG_BOUNDARY + overflow;
+        if (!state.crossedBoundary) {
+          incrementBagsProduced(1);
+          state.crossedBoundary = true;
+        }
+      } else {
+        state.crossedBoundary = false;
+      }
+
+      // Apply position to mesh
+      state.ref.position.x = state.currentX;
+    });
+  });
+
+  return null;
+};
+
 interface ConveyorSystemProps {
   productionSpeed: number;
 }
@@ -124,7 +234,8 @@ const getRandomQuality = (): GrainQuality => {
 };
 
 export const ConveyorSystem: React.FC<ConveyorSystemProps> = ({ productionSpeed }) => {
-  const graphicsQuality = useMillStore((state: any) => state.graphics.quality);
+  const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
+  const incrementBagsProduced = useProductionStore((state) => state.incrementBagsProduced);
   const bagCount = graphicsQuality === 'low' ? 15 : graphicsQuality === 'medium' ? 30 : 60;
 
   const bags = useMemo(() => {
@@ -146,6 +257,12 @@ export const ConveyorSystem: React.FC<ConveyorSystemProps> = ({ productionSpeed 
 
   return (
     <group>
+      {/* Centralized audio manager - updates all conveyors in one pass */}
+      <ConveyorAudioManager productionSpeed={productionSpeed} />
+
+      {/* Centralized bag animation manager - updates all bags in ONE useFrame */}
+      <BagAnimationManager productionSpeed={productionSpeed} incrementBagsProduced={incrementBagsProduced} />
+
       {/* Main conveyor belt structure - moved to z=24 to align with packers at z=25 */}
       <MemoizedConveyorBelt position={[0, 0.5, 24]} length={55} productionSpeed={productionSpeed} />
 
@@ -159,7 +276,7 @@ export const ConveyorSystem: React.FC<ConveyorSystemProps> = ({ productionSpeed 
 
       {/* Flour bags */}
       {bags.map((bag) => (
-        <FlourBagMesh key={bag.id} data={bag} speedMulti={productionSpeed} />
+        <FlourBagMesh key={bag.id} data={bag} />
       ))}
 
       {/* Roller conveyor to packing with enhanced details - moved to z=21 */}
@@ -207,7 +324,7 @@ const SideRails: React.FC<{ position: [number, number, number]; length: number }
 
     return (
       <group position={position}>
-        {/* Front rail */}
+        {/* Front rail - main structure keeps shadow */}
         <mesh position={[0, 0, -1]} castShadow>
           <boxGeometry args={[length, 0.1, 0.15]} />
           <primitive object={METAL_MATERIALS.steelDark} attach="material" />
@@ -218,7 +335,7 @@ const SideRails: React.FC<{ position: [number, number, number]; length: number }
           <primitive object={METAL_MATERIALS.steelDark} attach="material" />
         </mesh>
 
-        {/* Instanced brackets - 22 brackets in 1 draw call */}
+        {/* Instanced brackets - 22 brackets in 1 draw call - NO SHADOWS for small parts */}
         <instancedMesh
           ref={bracketsRef}
           args={[SHARED_GEOMETRIES.bracketSmall, undefined, BRACKET_COUNT]}
@@ -267,13 +384,13 @@ const TensionMechanism: React.FC<{ position: [number, number, number] }> = React
   ({ position }) => {
     return (
       <group position={position}>
-        {/* Tension frame */}
+        {/* Tension frame - main structure keeps shadow */}
         <mesh castShadow>
           <boxGeometry args={[0.6, 0.4, 2.4]} />
           <primitive object={METAL_MATERIALS.paintedMediumGray} attach="material" />
         </mesh>
-        {/* End roller */}
-        <mesh position={[0, 0.05, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+        {/* End roller - NO SHADOW for small roller */}
+        <mesh position={[0, 0.05, 0]} rotation={[Math.PI / 2, 0, 0]}>
           <cylinderGeometry args={[0.2, 0.2, 2, 16]} />
           <primitive object={METAL_MATERIALS.steel} attach="material" />
         </mesh>
@@ -332,20 +449,32 @@ const ConveyorBelt: React.FC<{
   const posZ = position[2];
   const conveyorId = `conveyor-main-${posX}-${posZ}`;
   const beltTexture = useConveyorBeltTexture();
-  const graphics = useMillStore((state: any) => state.graphics);
-  const movementThrottle = graphics.quality === 'ultra' ? 1 : 2;
+  const quality = useGraphicsStore((state) => state.graphics.quality);
+  const enableProceduralTextures = useGraphicsStore(
+    (state) => state.graphics.enableProceduralTextures
+  );
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  // Throttle roller animation more aggressively on non-ultra to cut per-frame work
+  const movementThrottle = quality === 'ultra' ? 1 : 3;
 
-  // Start conveyor sound on mount
+  // Position vector for audio registry (reused, never recreated)
+  const positionVec = useMemo(() => new THREE.Vector3(posX, posY, posZ), [posX, posY, posZ]);
+
+  // Start conveyor sound and register for centralized audio updates
   useEffect(() => {
     audioManager.startConveyorSound(conveyorId, posX, posY, posZ);
+    registerConveyorAudio(conveyorId, positionVec, true);
     return () => {
       audioManager.stopConveyorSound(conveyorId);
+      unregisterConveyorAudio(conveyorId);
     };
-  }, [conveyorId, posX, posY, posZ]);
+  }, [conveyorId, posX, posY, posZ, positionVec]);
 
   useFrame((_, delta) => {
+    // PERFORMANCE: Skip animations when tab hidden or production stopped
+    if (!isTabVisible || productionSpeed === 0) return;
     // Skip animations on low graphics
-    if (graphics.quality === 'low') return;
+    if (quality === 'low') return;
     if (!shouldRunThisFrame(movementThrottle)) return;
 
     // Cap delta to prevent huge jumps when tab regains focus (max 100ms)
@@ -360,13 +489,10 @@ const ConveyorBelt: React.FC<{
       driveRollerRef.current.rotation.z =
         (driveRollerRef.current.rotation.z + cappedDelta * productionSpeed * 3) % (Math.PI * 2);
     }
-    // Update spatial audio volume based on camera distance
-    if (shouldRunThisFrame(2)) {
-      audioManager.updateConveyorSpatialVolume(conveyorId);
-    }
+    // Audio updates now handled by centralized ConveyorAudioManager
   });
 
-  const showDetails = graphics.enableProceduralTextures;
+  const showDetails = enableProceduralTextures;
 
   return (
     <group position={position}>
@@ -382,7 +508,7 @@ const ConveyorBelt: React.FC<{
         <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
       </mesh>
 
-      {/* Drive rollers at intervals (enhanced detail) - using shared geometry/material */}
+      {/* Drive rollers at intervals - NO SHADOWS for small rotating parts */}
       {showDetails &&
         DRIVE_ROLLER_INDICES.map((_, i) => {
           const x = -length / 2 + 2 + i * 4;
@@ -391,7 +517,6 @@ const ConveyorBelt: React.FC<{
               {/* Main roller */}
               <mesh
                 rotation={[Math.PI / 2, 0, 0]}
-                castShadow
                 geometry={DRIVE_ROLLER_MAIN_GEOMETRY}
                 material={DRIVE_ROLLER_MAIN_MATERIAL}
               />
@@ -399,27 +524,23 @@ const ConveyorBelt: React.FC<{
               <mesh
                 position={[0, 0, -1]}
                 rotation={[Math.PI / 2, 0, 0]}
-                castShadow
                 geometry={DRIVE_ROLLER_CAP_GEOMETRY}
                 material={DRIVE_ROLLER_CAP_MATERIAL}
               />
               <mesh
                 position={[0, 0, 1]}
                 rotation={[Math.PI / 2, 0, 0]}
-                castShadow
                 geometry={DRIVE_ROLLER_CAP_GEOMETRY}
                 material={DRIVE_ROLLER_CAP_MATERIAL}
               />
               {/* Bearing housings */}
               <mesh
                 position={[0, 0, -1.05]}
-                castShadow
                 geometry={DRIVE_ROLLER_BEARING_GEOMETRY}
                 material={DRIVE_ROLLER_BEARING_MATERIAL}
               />
               <mesh
                 position={[0, 0, 1.05]}
-                castShadow
                 geometry={DRIVE_ROLLER_BEARING_GEOMETRY}
                 material={DRIVE_ROLLER_BEARING_MATERIAL}
               />
@@ -434,8 +555,8 @@ const ConveyorBelt: React.FC<{
             <boxGeometry args={[0.8, 0.6, 0.5]} />
             <meshStandardMaterial color="#1e3a5f" metalness={0.7} roughness={0.3} />
           </mesh>
-          {/* Motor shaft */}
-          <mesh position={[0, 0.1, -0.3]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+          {/* Motor shaft - NO SHADOW for small part */}
+          <mesh position={[0, 0.1, -0.3]} rotation={[Math.PI / 2, 0, 0]}>
             <cylinderGeometry args={[0.08, 0.08, 0.3, 8]} />
             <meshStandardMaterial color="#64748b" metalness={0.9} roughness={0.1} />
           </mesh>
@@ -477,8 +598,15 @@ const RollerConveyor: React.FC<{ position: [number, number, number]; productionS
   const posY = position[1];
   const posZ = position[2];
   const conveyorId = `conveyor-roller-${posX}-${posZ}`;
-  const graphics = useMillStore((state: any) => state.graphics);
-  const movementThrottle = graphics.quality === 'ultra' ? 1 : 2;
+  const quality = useGraphicsStore((state) => state.graphics.quality);
+  const enableProceduralTextures = useGraphicsStore(
+    (state) => state.graphics.enableProceduralTextures
+  );
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const movementThrottle = quality === 'ultra' ? 1 : 3;
+
+  // Position vector for audio registry (reused, never recreated)
+  const positionVec = useMemo(() => new THREE.Vector3(posX, posY, posZ), [posX, posY, posZ]);
 
   // Store rotations per roller for animation
   const rotationsRef = useRef<Float32Array>(new Float32Array(ROLLER_COUNT));
@@ -505,7 +633,7 @@ const RollerConveyor: React.FC<{ position: [number, number, number]; productionS
 
   // Initialize axle positions on mount
   useEffect(() => {
-    if (!axlesRef.current || graphics.quality === 'low') return;
+    if (!axlesRef.current || quality === 'low') return;
 
     const baseRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
 
@@ -521,19 +649,23 @@ const RollerConveyor: React.FC<{ position: [number, number, number]; productionS
       axlesRef.current.setMatrixAt(i * 2 + 1, tempMatrix);
     }
     axlesRef.current.instanceMatrix.needsUpdate = true;
-  }, [tempMatrix, tempPosition, tempScale, graphics.quality]);
+  }, [tempMatrix, tempPosition, tempScale, quality]);
 
-  // Start roller conveyor sound on mount
+  // Start roller conveyor sound and register for centralized audio updates
   useEffect(() => {
     audioManager.startConveyorSound(conveyorId, posX, posY, posZ);
+    registerConveyorAudio(conveyorId, positionVec, true);
     return () => {
       audioManager.stopConveyorSound(conveyorId);
+      unregisterConveyorAudio(conveyorId);
     };
-  }, [conveyorId, posX, posY, posZ]);
+  }, [conveyorId, posX, posY, posZ, positionVec]);
 
   useFrame((_, delta) => {
+    // PERFORMANCE: Skip animations when tab hidden or production stopped
+    if (!isTabVisible || productionSpeed === 0) return;
     // Skip animations on low graphics
-    if (graphics.quality === 'low') return;
+    if (quality === 'low') return;
     if (!rollersRef.current) return;
     if (!shouldRunThisFrame(movementThrottle)) return;
 
@@ -556,13 +688,10 @@ const RollerConveyor: React.FC<{ position: [number, number, number]; productionS
     }
     rollersRef.current.instanceMatrix.needsUpdate = true;
 
-    // Update spatial audio volume based on camera distance
-    if (shouldRunThisFrame(2)) {
-      audioManager.updateConveyorSpatialVolume(conveyorId);
-    }
+    // Audio updates now handled by centralized ConveyorAudioManager
   });
 
-  const showDetails = graphics.enableProceduralTextures;
+  const showDetails = enableProceduralTextures;
 
   return (
     <group position={position}>
@@ -582,8 +711,8 @@ const RollerConveyor: React.FC<{ position: [number, number, number]; productionS
         <primitive object={METAL_MATERIALS.paintedSlate} attach="material" />
       </mesh>
 
-      {/* Instanced Rollers - 25 rollers in 1 draw call */}
-      <instancedMesh ref={rollersRef} args={[ROLLER_GEOMETRY, undefined, ROLLER_COUNT]} castShadow>
+      {/* Instanced Rollers - 25 rollers in 1 draw call - NO SHADOW for rotating parts */}
+      <instancedMesh ref={rollersRef} args={[ROLLER_GEOMETRY, undefined, ROLLER_COUNT]}>
         <meshStandardMaterial
           color={showDetails ? '#ffffff' : '#94a3b8'}
           metalness={0.8}
@@ -623,46 +752,33 @@ const RollerConveyor: React.FC<{ position: [number, number, number]; productionS
   );
 };
 
-const FlourBagMesh: React.FC<{ data: FlourBag; speedMulti: number }> = React.memo(
-  ({ data, speedMulti }) => {
+// FlourBagMesh - now uses centralized animation via BagAnimationManager (15-60 bags → 1 useFrame)
+const FlourBagMesh: React.FC<{ data: FlourBag }> = React.memo(
+  ({ data }) => {
     const ref = useRef<THREE.Group>(null);
     const [hovered, setHovered] = useState(false);
-    const graphics = useMillStore((state: any) => state.graphics);
-    const incrementBagsProduced = useMillStore((state: any) => state.incrementBagsProduced);
-    const crossedBoundaryRef = useRef(false);
+    const enableProceduralTextures = useGraphicsStore(
+      (state) => state.graphics.enableProceduralTextures
+    );
 
-    // Track current X position in a ref to avoid position prop interfering
-    const currentX = useRef(data.position[0]);
-
-    useFrame((_, delta) => {
+    // Register with centralized bag animation manager on mount
+    useEffect(() => {
       if (!ref.current) return;
 
-      const movementThrottle = graphics.quality === 'ultra' ? 1 : 2;
-      if (!shouldRunThisFrame(movementThrottle)) return;
+      // Register bag state with centralized manager
+      registerBagAnimation(data.id, {
+        ref: ref.current,
+        speed: data.speed,
+        currentX: data.position[0],
+        crossedBoundary: false,
+      });
 
-      // Cap delta to prevent huge jumps when tab regains focus (max 100ms)
-      const cappedDelta = Math.min(delta * movementThrottle, 0.1);
+      return () => {
+        unregisterBagAnimation(data.id);
+      };
+    }, [data.id, data.speed, data.position]);
 
-      currentX.current += data.speed * speedMulti * cappedDelta;
-
-      // Track when bag crosses the boundary (simulating packed bag)
-      if (currentX.current > BAG_BOUNDARY) {
-        // Preserve overflow to prevent stuttering/bunching
-        const overflow = currentX.current - BAG_BOUNDARY;
-        currentX.current = -BAG_BOUNDARY + overflow;
-        if (!crossedBoundaryRef.current) {
-          incrementBagsProduced(1);
-          crossedBoundaryRef.current = true;
-        }
-      } else {
-        crossedBoundaryRef.current = false;
-      }
-
-      // Apply position from ref (not from props)
-      ref.current.position.x = currentX.current;
-    });
-
-    const showDetails = graphics.enableProceduralTextures;
+    const showDetails = enableProceduralTextures;
     const qualityColor = QUALITY_COLORS[data.quality];
 
     // Extract position values for stable initial position (animated via ref after mount)
@@ -682,7 +798,7 @@ const FlourBagMesh: React.FC<{ data: FlourBag; speedMulti: number }> = React.mem
         onPointerOver={() => setHovered(true)}
         onPointerOut={() => setHovered(false)}
       >
-        {/* Bag body */}
+        {/* Bag body - main object keeps shadow */}
         <mesh castShadow position={[0, 0.25, 0]}>
           <boxGeometry args={[0.6, 0.5, 0.9]} />
           <meshStandardMaterial
@@ -727,7 +843,7 @@ const FlourBagMesh: React.FC<{ data: FlourBag; speedMulti: number }> = React.mem
           </Text>
         )}
 
-        {/* Bag stitching detail */}
+        {/* Bag stitching detail - NO SHADOWS for small details */}
         {showDetails && (
           <>
             <mesh position={[0, 0.51, 0]}>

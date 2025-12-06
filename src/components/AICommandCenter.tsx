@@ -31,7 +31,10 @@ import {
   ArrowDown,
 } from 'lucide-react';
 import { AIDecision } from '../types';
-import { useMillStore } from '../store';
+import { useProductionStore } from '../stores/productionStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
+import { useUIStore } from '../stores/uiStore';
+import { useShallow } from 'zustand/react/shallow';
 import {
   generateContextAwareDecision,
   applyDecisionEffects,
@@ -131,21 +134,32 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
   const decisionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const alertReactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const initialTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const predictionIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const metricsIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const masterIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastDecisionTime = useRef(0);
+  const lastPredictionTime = useRef(0);
+  const lastMetricsTime = useRef(0);
   const isGeneratingDecisionRef = useRef(false);
 
-  // Get state from store
-  const aiDecisions = useMillStore((state: any) => state.aiDecisions);
-  const alerts = useMillStore((state: any) => state.alerts);
-  const machines = useMillStore((state: any) => state.machines);
-  const metrics = useMillStore((state: any) => state.metrics);
-  const weather = useMillStore((state: any) => state.weather);
-  const currentShift = useMillStore((state: any) => state.currentShift);
-  const gameTime = useMillStore((state: any) => state.gameTime);
-  const workerSatisfaction = useMillStore((state: any) => state.workerSatisfaction);
-  const emergencyDrillMode = useMillStore((state: any) => state.emergencyDrillMode);
+  // Get state from stores using useShallow to prevent unnecessary re-renders
+  const { aiDecisions, machines, metrics, workerSatisfaction } = useProductionStore(
+    useShallow((state) => ({
+      aiDecisions: state.aiDecisions,
+      machines: state.machines,
+      metrics: state.metrics,
+      workerSatisfaction: state.workerSatisfaction,
+    }))
+  );
+
+  const alerts = useUIStore((state) => state.alerts);
+
+  const { weather, currentShift, gameTime, emergencyDrillMode } = useGameSimulationStore(
+    useShallow((state) => ({
+      weather: state.weather,
+      currentShift: state.currentShift,
+      gameTime: state.gameTime,
+      emergencyDrillMode: state.emergencyDrillMode,
+    }))
+  );
 
   // Generate context-aware decisions
   const generateDecision = useCallback(() => {
@@ -215,19 +229,80 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
     lastAlertCountRef.current = alerts.length;
   }, [alerts, isOpen]);
 
-  // Generate decisions periodically
+  // Master interval - consolidates all periodic tasks
   useEffect(() => {
     if (!isOpen) return;
 
+    // Initial decision generation after 2 seconds
     if (initialTimeoutRef.current) clearTimeout(initialTimeoutRef.current);
-    if (intervalRef.current) clearInterval(intervalRef.current);
-
     initialTimeoutRef.current = setTimeout(generateDecision, 2000);
-    intervalRef.current = setInterval(generateDecision, 6000);
+
+    // Initialize timestamps
+    lastDecisionTime.current = Date.now();
+    lastPredictionTime.current = Date.now();
+    lastMetricsTime.current = Date.now();
+
+    // Master interval runs every second and checks if each task is due
+    if (masterIntervalRef.current) clearInterval(masterIntervalRef.current);
+    masterIntervalRef.current = setInterval(() => {
+      const now = Date.now();
+
+      // Decision generation every 6 seconds
+      if (now - lastDecisionTime.current >= 6000) {
+        lastDecisionTime.current = now;
+        generateDecision();
+      }
+
+      // Predictions every 5 seconds
+      if (now - lastPredictionTime.current >= 5000) {
+        lastPredictionTime.current = now;
+        setPredictedEvents(getPredictedEvents());
+      }
+
+      // Metrics update every 1.5 seconds
+      if (now - lastMetricsTime.current >= 1500) {
+        lastMetricsTime.current = now;
+
+        // Calculate CPU based on actual work being done
+        const activeDecisions = aiDecisions.filter(
+          (d: AIDecision) => d.status === 'in_progress'
+        ).length;
+        const pendingDecisions = aiDecisions.filter(
+          (d: AIDecision) => d.status === 'pending'
+        ).length;
+        const alertLoad = alerts.filter(
+          (a: any) => a.type === 'critical' || a.type === 'warning'
+        ).length;
+
+        // Base CPU load + active work + pending queue + alert processing
+        const baseCpu = 12;
+        const activeLoad = activeDecisions * 8;
+        const queueLoad = Math.min(pendingDecisions * 2, 10);
+        const alertProcessing = alertLoad * 4;
+        const cpuUsage = Math.min(baseCpu + activeLoad + queueLoad + alertProcessing, 85);
+
+        // Memory based on stored decisions and history
+        const baseMemory = 30;
+        const decisionMemory = Math.min(aiDecisions.length * 0.5, 20);
+        const alertMemory = alerts.length * 1.5;
+        const memoryUsage = Math.min(baseMemory + decisionMemory + alertMemory, 80);
+
+        // Calculate real success rate
+        const { successful, total } = decisionOutcomesRef.current;
+        const successRate = total > 0 ? (successful / total) * 100 : 0;
+
+        setSystemStatus((prev) => ({
+          ...prev,
+          cpu: cpuUsage,
+          memory: memoryUsage,
+          successRate: successRate > 0 ? successRate : prev.successRate,
+        }));
+      }
+    }, 1000); // Check every second
 
     return () => {
       if (initialTimeoutRef.current) clearTimeout(initialTimeoutRef.current);
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (masterIntervalRef.current) clearInterval(masterIntervalRef.current);
       if (decisionTimeoutRef.current) clearTimeout(decisionTimeoutRef.current);
       if (alertReactionTimeoutRef.current) clearTimeout(alertReactionTimeoutRef.current);
       // Reset decision generation flag to prevent stuck state
@@ -235,21 +310,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
       // Reset decision outcomes tracking on cleanup
       decisionOutcomesRef.current = { successful: 0, total: 0 };
     };
-  }, [isOpen, generateDecision]);
-
-  // Update predictions periodically
-  useEffect(() => {
-    if (!isOpen) return;
-
-    if (predictionIntervalRef.current) clearInterval(predictionIntervalRef.current);
-    predictionIntervalRef.current = setInterval(() => {
-      setPredictedEvents(getPredictedEvents());
-    }, 5000);
-
-    return () => {
-      if (predictionIntervalRef.current) clearInterval(predictionIntervalRef.current);
-    };
-  }, [isOpen]);
+  }, [isOpen, generateDecision, aiDecisions, alerts]);
 
   // Calculate real success rate from actual decision outcomes
   useEffect(() => {
@@ -271,50 +332,6 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
       total: completedDecisions.length,
     };
   }, [aiDecisions]);
-
-  // Update system metrics based on actual workload
-  useEffect(() => {
-    if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
-
-    metricsIntervalRef.current = setInterval(() => {
-      // Calculate CPU based on actual work being done
-      const activeDecisions = aiDecisions.filter(
-        (d: AIDecision) => d.status === 'in_progress'
-      ).length;
-      const pendingDecisions = aiDecisions.filter((d: AIDecision) => d.status === 'pending').length;
-      const alertLoad = alerts.filter(
-        (a: any) => a.type === 'critical' || a.type === 'warning'
-      ).length;
-
-      // Base CPU load + active work + pending queue + alert processing
-      const baseCpu = 12;
-      const activeLoad = activeDecisions * 8;
-      const queueLoad = Math.min(pendingDecisions * 2, 10);
-      const alertProcessing = alertLoad * 4;
-      const cpuUsage = Math.min(baseCpu + activeLoad + queueLoad + alertProcessing, 85);
-
-      // Memory based on stored decisions and history
-      const baseMemory = 30;
-      const decisionMemory = Math.min(aiDecisions.length * 0.5, 20);
-      const alertMemory = alerts.length * 1.5;
-      const memoryUsage = Math.min(baseMemory + decisionMemory + alertMemory, 80);
-
-      // Calculate real success rate
-      const { successful, total } = decisionOutcomesRef.current;
-      const successRate = total > 0 ? (successful / total) * 100 : 0;
-
-      setSystemStatus((prev) => ({
-        ...prev,
-        cpu: cpuUsage,
-        memory: memoryUsage,
-        successRate: successRate > 0 ? successRate : prev.successRate,
-      }));
-    }, 1500);
-
-    return () => {
-      if (metricsIntervalRef.current) clearInterval(metricsIntervalRef.current);
-    };
-  }, [aiDecisions, alerts]);
 
   const getTypeIcon = (type: string) => {
     const iconClass = 'w-5 h-5';

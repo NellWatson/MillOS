@@ -13,6 +13,7 @@ import { useFrame } from '@react-three/fiber';
 import { Billboard, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { useWorkerMoodStore } from '../stores/workerMoodStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { FactoryPlant } from '../types';
 
 // =========================================================================
@@ -26,8 +27,10 @@ interface PlantProps {
 const PottedFern: React.FC<PlantProps> = React.memo(({ plant }) => {
   const groupRef = useRef<THREE.Group>(null);
   const leavesRef = useRef<THREE.Group>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (leavesRef.current) {
       // Gentle swaying
       leavesRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.5) * 0.05;
@@ -137,8 +140,10 @@ DeskSucculent.displayName = 'DeskSucculent';
 
 const TallPalm: React.FC<PlantProps> = React.memo(({ plant }) => {
   const leavesRef = useRef<THREE.Group>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (leavesRef.current) {
       leavesRef.current.rotation.y = Math.sin(state.clock.elapsedTime * 0.3) * 0.02;
     }
@@ -192,8 +197,10 @@ TallPalm.displayName = 'TallPalm';
 
 const HangingIvy: React.FC<PlantProps> = React.memo(({ plant }) => {
   const vinesRef = useRef<THREE.Group>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (vinesRef.current) {
       vinesRef.current.children.forEach((vine, i) => {
         vine.rotation.z = Math.sin(state.clock.elapsedTime * 0.5 + i * 0.5) * 0.1;
@@ -310,6 +317,7 @@ interface CoffeeMachineProps {
 const CoffeeMachine: React.FC<CoffeeMachineProps> = React.memo(({ position, status }) => {
   const steamRef = useRef<THREE.Points>(null);
   const lightRef = useRef<THREE.Mesh>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   const steamPositions = useMemo(() => {
     const arr = new Float32Array(20 * 3);
@@ -322,6 +330,8 @@ const CoffeeMachine: React.FC<CoffeeMachineProps> = React.memo(({ position, stat
   }, []);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
+
     if (steamRef.current && status === 'brewing') {
       const geo = steamRef.current.geometry;
       const pos = geo.attributes.position as THREE.BufferAttribute;

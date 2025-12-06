@@ -134,7 +134,7 @@ describe('ProductionStore - AI Decision Management', () => {
       expect(decisions[0].id).toBe('test-decision-59');
 
       // Oldest decisions should be removed
-      expect(decisions.find(d => d.id === 'test-decision-0')).toBeUndefined();
+      expect(decisions.find((d) => d.id === 'test-decision-0')).toBeUndefined();
     });
 
     it('should rebuild machine index when adding decisions with machineId', () => {
@@ -256,7 +256,7 @@ describe('ProductionStore - AI Decision Management', () => {
       updateDecisionStatus('decision-to-update', 'in_progress');
 
       const decisions = useProductionStore.getState().aiDecisions;
-      const updated = decisions.find(d => d.id === 'decision-to-update');
+      const updated = decisions.find((d) => d.id === 'decision-to-update');
 
       expect(updated).toBeDefined();
       expect(updated!.status).toBe('in_progress');
@@ -268,7 +268,7 @@ describe('ProductionStore - AI Decision Management', () => {
       updateDecisionStatus('decision-to-update', 'completed', 'Successfully completed maintenance');
 
       const decisions = useProductionStore.getState().aiDecisions;
-      const updated = decisions.find(d => d.id === 'decision-to-update');
+      const updated = decisions.find((d) => d.id === 'decision-to-update');
 
       expect(updated).toBeDefined();
       expect(updated!.status).toBe('completed');
@@ -285,7 +285,7 @@ describe('ProductionStore - AI Decision Management', () => {
       updateDecisionStatus('decision-to-update', 'completed');
 
       const decisions = useProductionStore.getState().aiDecisions;
-      const updated = decisions.find(d => d.id === 'decision-to-update');
+      const updated = decisions.find((d) => d.id === 'decision-to-update');
 
       expect(updated).toBeDefined();
       expect(updated!.outcome).toBe('In progress');
@@ -375,7 +375,9 @@ describe('ProductionStore - AI Decision Management', () => {
       const activeDecisions = getActiveDecisionsForMachine('RM-101');
 
       expect(activeDecisions).toHaveLength(2);
-      expect(activeDecisions.every(d => d.status === 'pending' || d.status === 'in_progress')).toBe(true);
+      expect(
+        activeDecisions.every((d) => d.status === 'pending' || d.status === 'in_progress')
+      ).toBe(true);
     });
 
     it('should return empty array for machine with no decisions', () => {
@@ -540,10 +542,10 @@ describe('ProductionStore - AI Decision Management', () => {
 
       const announcements = useProductionStore.getState().announcements;
       expect(announcements).toHaveLength(2);
-      expect(announcements.find(a => a.id === 'recent-1')).toBeDefined();
-      expect(announcements.find(a => a.id === 'recent-2')).toBeDefined();
-      expect(announcements.find(a => a.id === 'old-1')).toBeUndefined();
-      expect(announcements.find(a => a.id === 'old-2')).toBeUndefined();
+      expect(announcements.find((a) => a.id === 'recent-1')).toBeDefined();
+      expect(announcements.find((a) => a.id === 'recent-2')).toBeDefined();
+      expect(announcements.find((a) => a.id === 'old-1')).toBeUndefined();
+      expect(announcements.find((a) => a.id === 'old-2')).toBeUndefined();
     });
 
     it('should not update state if no announcements expired', () => {
@@ -710,8 +712,8 @@ describe('ProductionStore - AI Decision Management', () => {
       expect(machineDecisions.length).toBe(8);
 
       // Completed ones should not be in index
-      expect(machineDecisions.find(d => d.id === 'consistency-0')).toBeUndefined();
-      expect(machineDecisions.find(d => d.id === 'consistency-5')).toBeUndefined();
+      expect(machineDecisions.find((d) => d.id === 'consistency-0')).toBeUndefined();
+      expect(machineDecisions.find((d) => d.id === 'consistency-5')).toBeUndefined();
     });
 
     it('should handle decisions with both machineId and workerId', () => {

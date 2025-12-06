@@ -43,7 +43,13 @@ import {
 } from 'lucide-react';
 import { MachineData } from '../types';
 import { audioManager } from '../utils/audioManager';
-import { useMillStore, GraphicsQuality } from '../store';
+import { GraphicsQuality, GraphicsSettings } from '../stores/graphicsStore';
+import { useGraphicsStore } from '../stores/graphicsStore';
+import { useProductionStore } from '../stores/productionStore';
+import { useSafetyStore } from '../stores/safetyStore';
+import { useUIStore } from '../stores/uiStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
+import { useShallow } from 'zustand/react/shallow';
 import { FPSDisplay } from './FPSMonitor';
 import { SafetyScoreBadge } from './EmergencyOverlay';
 import { AboutModal } from './AboutModal';
@@ -56,7 +62,9 @@ import {
 } from './GameFeatures';
 
 // Lazy load ProductionMetrics to reduce initial bundle (Recharts is ~403KB)
-const ProductionMetrics = lazy(() => import('./ProductionMetrics').then(module => ({ default: module.ProductionMetrics })));
+const ProductionMetrics = lazy(() =>
+  import('./ProductionMetrics').then((module) => ({ default: module.ProductionMetrics }))
+);
 
 // Speed options: 0 = paused, 1 = 1x, 60 = 60x (1 sec = 1 min), 300 = 5 min/sec
 const SPEED_OPTIONS = [
@@ -207,8 +215,8 @@ function useAudioState() {
 
 // Safety Metrics Display Component
 const SafetyMetricsDisplay: React.FC = () => {
-  const safetyMetrics = useMillStore((state) => state.safetyMetrics);
-  const theme = useMillStore((state) => state.theme);
+  const safetyMetrics = useSafetyStore((state) => state.safetyMetrics);
+  const theme = useUIStore((state) => state.theme);
   const [prevMetrics, setPrevMetrics] = useState(safetyMetrics);
   const [flashStop, setFlashStop] = useState(false);
   const [flashEvasion, setFlashEvasion] = useState(false);
@@ -306,18 +314,38 @@ const SafetyMetricsDisplay: React.FC = () => {
 // Emergency & Environment Controls Panel
 const EmergencyEnvironmentPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
-  const emergencyActive = useMillStore((state) => state.emergencyActive);
-  const emergencyDrillMode = useMillStore((state) => state.emergencyDrillMode);
-  const startEmergencyDrill = useMillStore((state) => state.startEmergencyDrill);
-  const endEmergencyDrill = useMillStore((state) => state.endEmergencyDrill);
-  const shiftChangeActive = useMillStore((state) => state.shiftChangeActive);
-  const currentShift = useMillStore((state) => state.currentShift);
-  const triggerShiftChange = useMillStore((state) => state.triggerShiftChange);
-  const weather = useMillStore((state) => state.weather);
-  const setWeather = useMillStore((state) => state.setWeather);
-  const showHeatMap = useMillStore((state) => state.showHeatMap);
-  const setShowHeatMap = useMillStore((state) => state.setShowHeatMap);
-  const clearHeatMap = useMillStore((state) => state.clearHeatMap);
+
+  const {
+    emergencyActive,
+    emergencyDrillMode,
+    startEmergencyDrill,
+    endEmergencyDrill,
+    shiftChangeActive,
+    currentShift,
+    triggerShiftChange,
+    weather,
+    setWeather,
+  } = useGameSimulationStore(
+    useShallow((state) => ({
+      emergencyActive: state.emergencyActive,
+      emergencyDrillMode: state.emergencyDrillMode,
+      startEmergencyDrill: state.startEmergencyDrill,
+      endEmergencyDrill: state.endEmergencyDrill,
+      shiftChangeActive: state.shiftChangeActive,
+      currentShift: state.currentShift,
+      triggerShiftChange: state.triggerShiftChange,
+      weather: state.weather,
+      setWeather: state.setWeather,
+    }))
+  );
+
+  const { showHeatMap, setShowHeatMap, clearHeatMap } = useProductionStore(
+    useShallow((state) => ({
+      showHeatMap: state.showHeatMap,
+      setShowHeatMap: state.setShowHeatMap,
+      clearHeatMap: state.clearHeatMap,
+    }))
+  );
 
   const weatherOptions: Array<{
     value: 'clear' | 'cloudy' | 'rain' | 'storm';
@@ -348,7 +376,11 @@ const EmergencyEnvironmentPanel: React.FC = () => {
           <Shield className="w-4 h-4 text-orange-400" aria-hidden="true" />
           Emergency & Environment
         </span>
-        {expanded ? <ChevronUp className="w-4 h-4" aria-hidden="true" /> : <ChevronDown className="w-4 h-4" aria-hidden="true" />}
+        {expanded ? (
+          <ChevronUp className="w-4 h-4" aria-hidden="true" />
+        ) : (
+          <ChevronDown className="w-4 h-4" aria-hidden="true" />
+        )}
       </button>
 
       <AnimatePresence>
@@ -476,10 +508,10 @@ const EmergencyEnvironmentPanel: React.FC = () => {
 // Graphics Options Panel Component
 const GraphicsOptionsPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
-  const graphics = useMillStore((state) => state.graphics);
-  const setGraphicsQuality = useMillStore((state) => state.setGraphicsQuality);
-  const setGraphicsSetting = useMillStore((state) => state.setGraphicsSetting);
-  const theme = useMillStore((state) => state.theme);
+  const graphics = useGraphicsStore();
+  const setGraphicsQuality = useGraphicsStore((state) => state.setGraphicsQuality);
+  const setGraphicsSetting = useGraphicsStore((state) => state.setGraphicsSetting);
+  const theme = useUIStore((state) => state.theme);
 
   const qualityColors: Record<GraphicsQuality, string> = {
     low: 'text-slate-400',
@@ -489,7 +521,7 @@ const GraphicsOptionsPanel: React.FC = () => {
   };
 
   const toggleSettings: Array<{
-    key: keyof typeof graphics;
+    key: keyof GraphicsSettings;
     label: string;
     icon: React.ReactNode;
     category: string;
@@ -610,11 +642,17 @@ const GraphicsOptionsPanel: React.FC = () => {
         <span className="flex items-center gap-2">
           <Settings className="w-4 h-4 text-purple-400" aria-hidden="true" />
           Graphics Quality
-          <span className={`text-[10px] font-bold uppercase ${qualityColors[graphics.quality]}`}>
-            {graphics.quality}
+          <span
+            className={`text-[10px] font-bold uppercase ${qualityColors[graphics.graphics.quality]}`}
+          >
+            {graphics.graphics.quality}
           </span>
         </span>
-        {expanded ? <ChevronUp className="w-4 h-4" aria-hidden="true" /> : <ChevronDown className="w-4 h-4" aria-hidden="true" />}
+        {expanded ? (
+          <ChevronUp className="w-4 h-4" aria-hidden="true" />
+        ) : (
+          <ChevronDown className="w-4 h-4" aria-hidden="true" />
+        )}
       </button>
 
       <AnimatePresence>
@@ -633,7 +671,7 @@ const GraphicsOptionsPanel: React.FC = () => {
                   key={quality}
                   onClick={() => setGraphicsQuality(quality)}
                   className={`flex-1 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all ${
-                    graphics.quality === quality
+                    graphics.graphics.quality === quality
                       ? quality === 'low'
                         ? 'bg-slate-600 text-white'
                         : quality === 'medium'
@@ -666,14 +704,9 @@ const GraphicsOptionsPanel: React.FC = () => {
                       .map(({ key, label, icon }) => (
                         <button
                           key={key}
-                          onClick={() =>
-                            setGraphicsSetting(
-                              key as keyof typeof graphics,
-                              !graphics[key as keyof typeof graphics]
-                            )
-                          }
+                          onClick={() => setGraphicsSetting(key, !graphics.graphics[key])}
                           className={`w-full flex items-center gap-2 px-2 py-1 rounded text-xs transition-all ${
-                            graphics[key as keyof typeof graphics]
+                            graphics.graphics[key]
                               ? theme === 'light'
                                 ? 'bg-slate-200 text-slate-800'
                                 : 'bg-slate-700/50 text-white'
@@ -684,7 +717,7 @@ const GraphicsOptionsPanel: React.FC = () => {
                         >
                           <span
                             className={
-                              graphics[key as keyof typeof graphics]
+                              graphics.graphics[key]
                                 ? 'text-green-500'
                                 : theme === 'light'
                                   ? 'text-slate-400'
@@ -722,7 +755,7 @@ const GraphicsOptionsPanel: React.FC = () => {
                   Particle Count
                 </span>
                 <span className="text-cyan-500 font-mono font-bold">
-                  {graphics.dustParticleCount}
+                  {graphics.graphics.dustParticleCount}
                 </span>
               </div>
               <input
@@ -730,17 +763,17 @@ const GraphicsOptionsPanel: React.FC = () => {
                 min="0"
                 max="500"
                 step="25"
-                value={graphics.dustParticleCount}
+                value={graphics.graphics.dustParticleCount}
                 onChange={(e) => setGraphicsSetting('dustParticleCount', parseInt(e.target.value))}
-                disabled={!graphics.enableDustParticles}
+                disabled={!graphics.graphics.enableDustParticles}
                 aria-label="Dust particle count"
                 aria-valuemin={0}
                 aria-valuemax={500}
-                aria-valuenow={graphics.dustParticleCount}
-                aria-valuetext={`${graphics.dustParticleCount} particles`}
+                aria-valuenow={graphics.graphics.dustParticleCount}
+                aria-valuetext={`${graphics.graphics.dustParticleCount} particles`}
                 className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-cyan-500 ${
                   theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'
-                } ${!graphics.enableDustParticles ? 'opacity-50' : ''}`}
+                } ${!graphics.graphics.enableDustParticles ? 'opacity-50' : ''}`}
               />
               <div
                 className={`flex justify-between text-[9px] mt-0.5 ${theme === 'light' ? 'text-slate-400' : 'text-slate-600'}`}
@@ -950,9 +983,9 @@ const GraphicsOptionsPanel: React.FC = () => {
 
 // Emergency Stop Button Component
 const EmergencyStopButton: React.FC = () => {
-  const forkliftEmergencyStop = useMillStore((state) => state.forkliftEmergencyStop);
-  const setForkliftEmergencyStop = useMillStore((state) => state.setForkliftEmergencyStop);
-  const addSafetyIncident = useMillStore((state) => state.addSafetyIncident);
+  const forkliftEmergencyStop = useSafetyStore((state) => state.forkliftEmergencyStop);
+  const setForkliftEmergencyStop = useSafetyStore((state) => state.setForkliftEmergencyStop);
+  const addSafetyIncident = useSafetyStore((state) => state.addSafetyIncident);
 
   const handleEmergencyStop = () => {
     const newState = !forkliftEmergencyStop;
@@ -984,9 +1017,9 @@ const EmergencyStopButton: React.FC = () => {
 // Incident History Panel Component
 const IncidentHistoryPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
-  const safetyIncidents = useMillStore((state) => state.safetyIncidents);
-  const clearSafetyIncidents = useMillStore((state) => state.clearSafetyIncidents);
-  const theme = useMillStore((state) => state.theme);
+  const safetyIncidents = useSafetyStore((state) => state.safetyIncidents);
+  const clearSafetyIncidents = useSafetyStore((state) => state.clearSafetyIncidents);
+  const theme = useUIStore((state) => state.theme);
 
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -1050,7 +1083,11 @@ const IncidentHistoryPanel: React.FC = () => {
           <History className="w-4 h-4 text-blue-500" aria-hidden="true" />
           Incident Log ({safetyIncidents.length})
         </span>
-        {expanded ? <ChevronUp className="w-4 h-4" aria-hidden="true" /> : <ChevronDown className="w-4 h-4" aria-hidden="true" />}
+        {expanded ? (
+          <ChevronUp className="w-4 h-4" aria-hidden="true" />
+        ) : (
+          <ChevronDown className="w-4 h-4" aria-hidden="true" />
+        )}
       </button>
 
       <AnimatePresence>
@@ -1112,14 +1149,28 @@ const IncidentHistoryPanel: React.FC = () => {
 // Safety Analytics Panel Component
 const SafetyAnalyticsPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
-  const safetyIncidents = useMillStore((state) => state.safetyIncidents);
-  const forkliftMetrics = useMillStore((state) => state.forkliftMetrics);
-  const incidentHeatMap = useMillStore((state) => state.incidentHeatMap);
-  const showIncidentHeatMap = useMillStore((state) => state.showIncidentHeatMap);
-  const setShowIncidentHeatMap = useMillStore((state) => state.setShowIncidentHeatMap);
-  const clearIncidentHeatMap = useMillStore((state) => state.clearIncidentHeatMap);
-  const resetForkliftMetrics = useMillStore((state) => state.resetForkliftMetrics);
-  const theme = useMillStore((state) => state.theme);
+
+  const {
+    safetyIncidents,
+    forkliftMetrics,
+    incidentHeatMap,
+    showIncidentHeatMap,
+    setShowIncidentHeatMap,
+    clearIncidentHeatMap,
+    resetForkliftMetrics,
+  } = useSafetyStore(
+    useShallow((state) => ({
+      safetyIncidents: state.safetyIncidents,
+      forkliftMetrics: state.forkliftMetrics,
+      incidentHeatMap: state.incidentHeatMap,
+      showIncidentHeatMap: state.showIncidentHeatMap,
+      setShowIncidentHeatMap: state.setShowIncidentHeatMap,
+      clearIncidentHeatMap: state.clearIncidentHeatMap,
+      resetForkliftMetrics: state.resetForkliftMetrics,
+    }))
+  );
+
+  const theme = useUIStore((state) => state.theme);
 
   // Calculate stats
   const today = new Date();
@@ -1206,7 +1257,11 @@ const SafetyAnalyticsPanel: React.FC = () => {
           <TrendingUp className="w-4 h-4 text-cyan-500" aria-hidden="true" />
           Safety Analytics
         </span>
-        {expanded ? <ChevronUp className="w-4 h-4" aria-hidden="true" /> : <ChevronDown className="w-4 h-4" aria-hidden="true" />}
+        {expanded ? (
+          <ChevronUp className="w-4 h-4" aria-hidden="true" />
+        ) : (
+          <ChevronDown className="w-4 h-4" aria-hidden="true" />
+        )}
       </button>
 
       <AnimatePresence>
@@ -1389,10 +1444,16 @@ const ZoneCustomizationPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newZone, setNewZone] = useState({ name: '', x: 0, z: 0, radius: 4 });
-  const speedZones = useMillStore((state) => state.speedZones);
-  const addSpeedZone = useMillStore((state) => state.addSpeedZone);
-  const removeSpeedZone = useMillStore((state) => state.removeSpeedZone);
-  const theme = useMillStore((state) => state.theme);
+
+  const { speedZones, addSpeedZone, removeSpeedZone } = useSafetyStore(
+    useShallow((state) => ({
+      speedZones: state.speedZones,
+      addSpeedZone: state.addSpeedZone,
+      removeSpeedZone: state.removeSpeedZone,
+    }))
+  );
+
+  const theme = useUIStore((state) => state.theme);
 
   const handleAddZone = () => {
     if (newZone.name.trim()) {
@@ -1426,7 +1487,11 @@ const ZoneCustomizationPanel: React.FC = () => {
           <MapPin className="w-4 h-4 text-amber-500" aria-hidden="true" />
           Speed Zones ({speedZones.length})
         </span>
-        {expanded ? <ChevronUp className="w-4 h-4" aria-hidden="true" /> : <ChevronDown className="w-4 h-4" aria-hidden="true" />}
+        {expanded ? (
+          <ChevronUp className="w-4 h-4" aria-hidden="true" />
+        ) : (
+          <ChevronDown className="w-4 h-4" aria-hidden="true" />
+        )}
       </button>
 
       <AnimatePresence>
@@ -1591,9 +1656,9 @@ const ZoneCustomizationPanel: React.FC = () => {
 // Safety Configuration Panel Component
 const SafetyConfigPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
-  const safetyConfig = useMillStore((state) => state.safetyConfig);
-  const setSafetyConfig = useMillStore((state) => state.setSafetyConfig);
-  const theme = useMillStore((state) => state.theme);
+  const safetyConfig = useSafetyStore((state) => state.safetyConfig);
+  const setSafetyConfig = useSafetyStore((state) => state.setSafetyConfig);
+  const theme = useUIStore((state) => state.theme);
 
   return (
     <div
@@ -1750,7 +1815,7 @@ const KeyboardShortcutsModal: React.FC<{ isOpen: boolean; onClose: () => void }>
   isOpen,
   onClose,
 }) => {
-  const theme = useMillStore((state) => state.theme);
+  const theme = useUIStore((state) => state.theme);
 
   if (!isOpen) return null;
 
@@ -1915,11 +1980,17 @@ const KeyboardShortcutsModal: React.FC<{ isOpen: boolean; onClose: () => void }>
 const CollapsibleLegend: React.FC = () => {
   const [expanded, setExpanded] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
-  const legendPosition = useMillStore((state) => state.legendPosition);
-  const setLegendPosition = useMillStore((state) => state.setLegendPosition);
-  const theme = useMillStore((state) => state.theme);
-  const showGamificationBar = useMillStore((state) => state.showGamificationBar);
-  const setShowGamificationBar = useMillStore((state) => state.setShowGamificationBar);
+
+  const { legendPosition, setLegendPosition, theme, showGamificationBar, setShowGamificationBar } =
+    useUIStore(
+      useShallow((state) => ({
+        legendPosition: state.legendPosition,
+        setLegendPosition: state.setLegendPosition,
+        theme: state.theme,
+        showGamificationBar: state.showGamificationBar,
+        setShowGamificationBar: state.setShowGamificationBar,
+      }))
+    );
   const dragRef = useRef<HTMLDivElement>(null);
   const dragStartPos = useRef({ x: 0, y: 0 });
   const elementStartPos = useRef({ x: 0, y: 0 });
@@ -1988,11 +2059,7 @@ const CollapsibleLegend: React.FC = () => {
       className={`hidden md:flex flex-col gap-2 fixed pointer-events-auto ${isDragging ? 'cursor-grabbing' : ''}`}
     >
       {/* Daily Target Widget - compact version */}
-      <motion.div
-        initial={{ opacity: 0, x: 50 }}
-        animate={{ opacity: 1, x: 0 }}
-        className="w-44"
-      >
+      <motion.div initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} className="w-44">
         <ProductionTargetsWidget />
       </motion.div>
 
@@ -2006,111 +2073,111 @@ const CollapsibleLegend: React.FC = () => {
             : 'bg-slate-950/90 border-slate-700/50 text-white'
         }`}
       >
-      <div className="flex items-center">
-        {/* Drag Handle */}
-        <div
-          onMouseDown={handleMouseDown}
-          className={`px-1.5 py-2.5 cursor-grab transition-colors flex items-center ${
-            theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-slate-800/50'
-          }`}
-          title="Drag to move"
-        >
-          <GripVertical
-            className={`w-3.5 h-3.5 ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
-          />
-        </div>
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className={`flex-1 flex items-center justify-between p-2.5 pl-1 transition-colors ${
-            theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-slate-800/50'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <Layers className="w-3.5 h-3.5 text-cyan-500" />
-            <span
-              className={`font-medium text-xs ${theme === 'light' ? 'text-slate-600' : 'text-slate-300'}`}
-            >
-              Legend
-            </span>
-          </div>
-          {expanded ? (
-            <ChevronUp
-              className={`w-3.5 h-3.5 ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
-            />
-          ) : (
-            <ChevronDown
-              className={`w-3.5 h-3.5 ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
-            />
-          )}
-        </button>
-      </div>
-
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
+        <div className="flex items-center">
+          {/* Drag Handle */}
+          <div
+            onMouseDown={handleMouseDown}
+            className={`px-1.5 py-2.5 cursor-grab transition-colors flex items-center ${
+              theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-slate-800/50'
+            }`}
+            title="Drag to move"
           >
-            <div className="px-3 pb-3 space-y-2">
-              {/* Equipment */}
-              <div>
-                <h3
-                  className={`font-bold uppercase text-[9px] tracking-wider mb-1.5 ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
-                >
-                  Equipment
-                </h3>
-                <ul className="space-y-1 text-xs">
-                  <li className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded bg-gradient-to-br from-slate-300 to-slate-400" />
-                    <span className={theme === 'light' ? 'text-slate-500' : 'text-slate-400'}>
-                      Silos
-                    </span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded bg-gradient-to-br from-blue-400 to-blue-600" />
-                    <span className={theme === 'light' ? 'text-slate-500' : 'text-slate-400'}>
-                      Roller Mills
-                    </span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded bg-gradient-to-br from-slate-200 to-slate-300 border border-slate-300" />
-                    <span className={theme === 'light' ? 'text-slate-500' : 'text-slate-400'}>
-                      Plansifters
-                    </span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded bg-gradient-to-br from-orange-400 to-orange-600" />
-                    <span className={theme === 'light' ? 'text-slate-500' : 'text-slate-400'}>
-                      Packers
-                    </span>
-                  </li>
-                </ul>
-              </div>
-
-              {/* Controls */}
-              <div
-                className={`border-t pt-2 ${theme === 'light' ? 'border-slate-200' : 'border-slate-700/50'}`}
+            <GripVertical
+              className={`w-3.5 h-3.5 ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
+            />
+          </div>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className={`flex-1 flex items-center justify-between p-2.5 pl-1 transition-colors ${
+              theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-slate-800/50'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Layers className="w-3.5 h-3.5 text-cyan-500" />
+              <span
+                className={`font-medium text-xs ${theme === 'light' ? 'text-slate-600' : 'text-slate-300'}`}
               >
-                <h3
-                  className={`font-bold uppercase text-[9px] tracking-wider mb-1 ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
-                >
-                  Controls
-                </h3>
-                <ul
-                  className={`space-y-0.5 text-[10px] ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
-                >
-                  <li>Click machines to inspect</li>
-                  <li>Click workers for profiles</li>
-                  <li>Drag to rotate view</li>
-                </ul>
-              </div>
+                Legend
+              </span>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            {expanded ? (
+              <ChevronUp
+                className={`w-3.5 h-3.5 ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
+              />
+            ) : (
+              <ChevronDown
+                className={`w-3.5 h-3.5 ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
+              />
+            )}
+          </button>
+        </div>
+
+        <AnimatePresence>
+          {expanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className="px-3 pb-3 space-y-2">
+                {/* Equipment */}
+                <div>
+                  <h3
+                    className={`font-bold uppercase text-[9px] tracking-wider mb-1.5 ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
+                  >
+                    Equipment
+                  </h3>
+                  <ul className="space-y-1 text-xs">
+                    <li className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded bg-gradient-to-br from-slate-300 to-slate-400" />
+                      <span className={theme === 'light' ? 'text-slate-500' : 'text-slate-400'}>
+                        Silos
+                      </span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded bg-gradient-to-br from-blue-400 to-blue-600" />
+                      <span className={theme === 'light' ? 'text-slate-500' : 'text-slate-400'}>
+                        Roller Mills
+                      </span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded bg-gradient-to-br from-slate-200 to-slate-300 border border-slate-300" />
+                      <span className={theme === 'light' ? 'text-slate-500' : 'text-slate-400'}>
+                        Plansifters
+                      </span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded bg-gradient-to-br from-orange-400 to-orange-600" />
+                      <span className={theme === 'light' ? 'text-slate-500' : 'text-slate-400'}>
+                        Packers
+                      </span>
+                    </li>
+                  </ul>
+                </div>
+
+                {/* Controls */}
+                <div
+                  className={`border-t pt-2 ${theme === 'light' ? 'border-slate-200' : 'border-slate-700/50'}`}
+                >
+                  <h3
+                    className={`font-bold uppercase text-[9px] tracking-wider mb-1 ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
+                  >
+                    Controls
+                  </h3>
+                  <ul
+                    className={`space-y-0.5 text-[10px] ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
+                  >
+                    <li>Click machines to inspect</li>
+                    <li>Click workers for profiles</li>
+                    <li>Drag to rotate view</li>
+                  </ul>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
 
       {/* Quick Actions Zap Button - attached to Legend pane */}
@@ -2173,16 +2240,16 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const [showScrollIndicator, setShowScrollIndicator] = useState(false);
 
-  // Panel minimize state
-  const panelMinimized = useMillStore((state) => state.panelMinimized);
-  const setPanelMinimized = useMillStore((state) => state.setPanelMinimized);
-
-  // Theme state (always dark)
-  const theme = useMillStore((state) => state.theme);
-
-  // Keyboard shortcuts modal state (from store for global access)
-  const showShortcuts = useMillStore((state) => state.showShortcuts);
-  const setShowShortcuts = useMillStore((state) => state.setShowShortcuts);
+  // UI store state using useShallow
+  const { panelMinimized, setPanelMinimized, theme, showShortcuts, setShowShortcuts } = useUIStore(
+    useShallow((state) => ({
+      panelMinimized: state.panelMinimized,
+      setPanelMinimized: state.setPanelMinimized,
+      theme: state.theme,
+      showShortcuts: state.showShortcuts,
+      setShowShortcuts: state.setShowShortcuts,
+    }))
+  );
 
   // About modal state
   const [showAbout, setShowAbout] = useState(false);

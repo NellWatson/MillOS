@@ -90,7 +90,7 @@ export class HistoryStore {
       return;
     }
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve, _reject) => {
       const request = indexedDB.open(this.DB_NAME, this.DB_VERSION);
 
       request.onupgradeneeded = (event) => {

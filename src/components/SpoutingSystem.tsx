@@ -5,8 +5,10 @@ import { MachineData, MachineType } from '../types';
 import { audioManager } from '../utils/audioManager';
 import { PIPE_MATERIALS } from '../utils/sharedMaterials';
 import { shouldRunThisFrame } from '../utils/frameThrottle';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
 
 export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines }) => {
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   // Extract stable machine data to prevent unnecessary re-renders
   // Only recompute when machine IDs or positions actually change
   const machineKey = useMemo(() => {
@@ -71,6 +73,7 @@ export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines
 
   // Update spatial audio volumes each frame
   useFrame(() => {
+    if (!isTabVisible) return;
     // Spatial volume is fine at ~30fps; throttle to reduce per-frame audio work
     if (!shouldRunThisFrame(2)) return;
 

@@ -7,10 +7,7 @@ interface BulletinBoardProps {
   rotation?: [number, number, number];
 }
 
-export const BulletinBoard: React.FC<BulletinBoardProps> = ({
-  position,
-  rotation = [0, 0, 0],
-}) => {
+export const BulletinBoard: React.FC<BulletinBoardProps> = ({ position, rotation = [0, 0, 0] }) => {
   // Memoized cork texture
   const corkTexture = useMemo(() => {
     const canvas = document.createElement('canvas');

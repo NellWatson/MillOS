@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
-import { useMillStore } from '../../store';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
+import { useGraphicsStore } from '../../stores/graphicsStore';
 
 interface FactoryRoofProps {
   floorWidth: number;
@@ -9,7 +10,7 @@ interface FactoryRoofProps {
 
 // Volumetric fog layer for atmospheric depth
 const VolumetricFog: React.FC<{ density?: number }> = React.memo(({ density = 0.015 }) => {
-  const gameTime = useMillStore((state: any) => state.gameTime);
+  const gameTime = useGameSimulationStore((state) => state.gameTime);
 
   // Fog is denser in early morning and evening
   const timeBasedDensity = useMemo(() => {
@@ -144,7 +145,7 @@ const VentGrille: React.FC<{
 };
 
 export const FactoryRoof: React.FC<FactoryRoofProps> = () => {
-  const graphics = useMillStore((state: any) => state.graphics);
+  const graphics = useGraphicsStore((state) => state.graphics);
   const showVolumetricFog = graphics.enableVolumetricFog;
   const showVentilationDucts = graphics.enableVentilationDucts;
 

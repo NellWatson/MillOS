@@ -2,6 +2,7 @@ import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { shouldRunThisFrame } from '../../utils/frameThrottle';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 
 // Cobweb component for corners and rafters
 export const Cobweb: React.FC<{
@@ -10,6 +11,8 @@ export const Cobweb: React.FC<{
   scale?: number;
 }> = ({ position, rotation = [0, 0, 0], scale = 1 }) => {
   const meshRef = useRef<THREE.Mesh>(null);
+
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   // Create cobweb geometry with radial lines
   const geometry = useMemo(() => {
@@ -57,6 +60,7 @@ export const Cobweb: React.FC<{
 
   // Subtle swaying animation
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(3)) return;
     if (meshRef.current) {
       meshRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.3) * 0.02;
@@ -138,9 +142,11 @@ export const RustStain: React.FC<{
 // Dust bunny
 export const DustBunny: React.FC<{ position: [number, number, number] }> = ({ position }) => {
   const bunnyRef = useRef<THREE.Mesh>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   // Very occasional drift
   useFrame((state) => {
+    if (!isTabVisible) return;
     if (!shouldRunThisFrame(3)) return;
     if (!bunnyRef.current) return;
     if (Math.random() < 0.001) {

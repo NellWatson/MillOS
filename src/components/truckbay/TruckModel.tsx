@@ -22,6 +22,7 @@ import {
   GrainCoLogo,
   FlourExpressLogo,
 } from './TruckParts';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 
 interface TruckModelProps {
   color: string;
@@ -42,6 +43,7 @@ export const TruckModel: React.FC<TruckModelProps> = ({
   trailerAngle,
   getTruckState,
 }) => {
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const frontLeftWheelRef = useRef<THREE.Mesh>(null);
   const frontRightWheelRef = useRef<THREE.Mesh>(null);
   const rearWheelsRef = useRef<THREE.Group>(null);
@@ -57,6 +59,7 @@ export const TruckModel: React.FC<TruckModelProps> = ({
   const markerLightsRef = useRef<THREE.MeshStandardMaterial[]>([]);
 
   useFrame((state) => {
+    if (!isTabVisible) return;
     const truckState = getTruckState();
     const time = state.clock.elapsedTime;
 

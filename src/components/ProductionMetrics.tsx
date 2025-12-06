@@ -1,10 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  AreaChart,
-  Area,
-  ResponsiveContainer,
-} from 'recharts';
-import { useMillStore } from '../store';
+import { AreaChart, Area, ResponsiveContainer } from 'recharts';
+import { useProductionStore } from '../stores/productionStore';
+import { useSafetyStore } from '../stores/safetyStore';
 
 interface MetricsData {
   time: string;
@@ -16,11 +13,11 @@ interface MetricsData {
 export const ProductionMetrics: React.FC = () => {
   const [data, setData] = useState<MetricsData[]>([]);
 
-  // Get real metrics from the store
-  const storeMetrics = useMillStore((state) => state.metrics);
-  const productionSpeed = useMillStore((state) => state.productionSpeed);
-  const machines = useMillStore((state) => state.machines);
-  const safetyMetrics = useMillStore((state) => state.safetyMetrics);
+  // Get real metrics from the stores
+  const storeMetrics = useProductionStore((state) => state.metrics);
+  const productionSpeed = useProductionStore((state) => state.productionSpeed);
+  const machines = useProductionStore((state) => state.machines);
+  const safetyMetrics = useSafetyStore((state) => state.safetyMetrics);
 
   // Calculate real-time metrics based on actual store data
   const liveMetrics = React.useMemo(() => {
@@ -146,7 +143,11 @@ export const ProductionMetrics: React.FC = () => {
             Live
           </span>
         </div>
-        <div className="h-10" role="img" aria-label={`Production throughput chart showing current value of ${liveMetrics.throughput} tons per hour over the last 30 minutes`}>
+        <div
+          className="h-10"
+          role="img"
+          aria-label={`Production throughput chart showing current value of ${liveMetrics.throughput} tons per hour over the last 30 minutes`}
+        >
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data}>
               <defs>
