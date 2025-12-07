@@ -1662,7 +1662,17 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
               <div>
                 <h1 className={`text-lg font-bold tracking-tight leading-tight ${theme === 'light' ? 'text-slate-800' : ''}`}>
                   Mill<span className="text-orange-500">OS</span>
-                  <span className={`text-[10px] ml-1 ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}>v0.10</span>
+                  <select
+                    className={`text-[10px] ml-1 bg-transparent border-none cursor-pointer hover:text-orange-400 transition-colors ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
+                    value="v0.10"
+                    onChange={(e) => {
+                      window.location.href = `/${e.target.value}/`;
+                    }}
+                    title="Switch version"
+                  >
+                    <option value="v0.10">v0.10 (stable)</option>
+                    <option value="v0.20">v0.20 (alpha)</option>
+                  </select>
                 </h1>
                 <p className={`text-[9px] uppercase tracking-widest leading-tight ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}>
                   Digital Twin Operations
