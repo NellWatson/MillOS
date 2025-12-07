@@ -3392,19 +3392,49 @@ class AudioManager {
       const voices = window.speechSynthesis.getVoices();
       if (voices.length === 0) return;
 
-      // Use Google UK English Female for PA announcements
-      const preferredVoices = ['Google UK English Female'];
+      // Prefer British English female voices for PA announcements
+      // Priority order: Google UK Female > Other UK Female > Any British > Fallback
+      const preferredVoices = [
+        'Google UK English Female',
+        'Google UK English Male', // British male as backup
+        'Microsoft Hazel - English (United Kingdom)',
+        'Microsoft Susan - English (United Kingdom)',
+        'Karen', // macOS Australian (close to British)
+        'Daniel', // macOS British male
+        'Samantha', // macOS US female (last resort)
+      ];
 
-      // First pass: exact name matches only
+      // First pass: exact name matches in priority order
       for (const preferred of preferredVoices) {
-        const found = voices.find((v) => v.name === preferred || v.name.includes(preferred));
+        const found = voices.find((v) => v.name === preferred);
         if (found) {
           this._ttsVoice = found;
           break;
         }
       }
 
-      // Second pass: any English female voice
+      // Second pass: partial name matches
+      if (!this._ttsVoice) {
+        for (const preferred of preferredVoices) {
+          const found = voices.find((v) => v.name.includes(preferred));
+          if (found) {
+            this._ttsVoice = found;
+            break;
+          }
+        }
+      }
+
+      // Third pass: any UK/GB English voice
+      if (!this._ttsVoice) {
+        const britishVoice = voices.find(
+          (v) => v.lang === 'en-GB' || v.lang === 'en_GB'
+        );
+        if (britishVoice) {
+          this._ttsVoice = britishVoice;
+        }
+      }
+
+      // Fourth pass: any English female voice
       if (!this._ttsVoice) {
         const englishFemale = voices.find(
           (v) => v.lang.startsWith('en') && v.name.toLowerCase().includes('female')
@@ -3418,6 +3448,9 @@ class AudioManager {
       if (!this._ttsVoice) {
         this._ttsVoice = voices.find((v) => v.lang.startsWith('en')) || voices[0];
       }
+
+      // Log selected voice for debugging
+      console.log('[AudioManager] TTS voice selected:', this._ttsVoice?.name, this._ttsVoice?.lang);
 
       this._ttsVoiceLoaded = true;
     };
