@@ -53,11 +53,16 @@ export type WorkerVariant = keyof typeof WORKER_VARIANTS;
 
 export type ModelType = keyof typeof MODEL_PATHS;
 
-// Models with known issues (missing textures, broken dependencies, wrong asset)
-// These will be disabled until the model files are fixed
+// Models with known issues or not yet available
+// All models disabled - using procedural fallback geometry instead
+// This prevents 404 floods on GitHub Pages where models aren't deployed
 const DISABLED_MODELS: ModelType[] = [
-  'forklift', // 36MB model with incorrect scale/position - using procedural fallback
-  'rollerMill', // Wrong model (appears to be a building) - using procedural fallback
+  'forklift', // Using procedural fallback
+  'worker', // Using procedural fallback
+  'silo', // Using procedural fallback
+  'rollerMill', // Using procedural fallback
+  'plansifter', // Using procedural fallback
+  'packer', // Using procedural fallback
 ];
 
 // Track which models are available
