@@ -106,8 +106,8 @@ const GLTFForklift: React.FC<ForkliftModelProps> = ({
   );
 };
 
-// Preload the forklift model
-useGLTF.preload(MODEL_PATHS.forklift);
+// Forklift model preload disabled - using procedural fallback
+// useGLTF.preload(MODEL_PATHS.forklift);
 
 // Procedural fallback (improved from original)
 const ProceduralForklift: React.FC<ForkliftModelProps> = ({

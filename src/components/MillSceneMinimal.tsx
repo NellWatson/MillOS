@@ -16,6 +16,9 @@ import { ForkliftData } from './ForkliftSystem';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { trackRender } from '../utils/renderProfiler';
 
+// Import static assets so Vite handles base path correctly
+import warehouseHdrUrl from '/hdri/warehouse.hdr?url';
+
 interface MillSceneMinimalProps {
   productionSpeed: number;
   showZones: boolean;
@@ -62,7 +65,7 @@ export const MillSceneMinimal: React.FC<MillSceneMinimalProps> = ({
 
       {/* STEP 1: HDRI (skip on low) */}
       {!isLowGraphics && (
-        <Environment files="/hdri/warehouse.hdr" background={false} environmentIntensity={0.4} />
+        <Environment files={warehouseHdrUrl} background={false} environmentIntensity={0.4} />
       )}
 
       {/* STEP 1: Floor only */}

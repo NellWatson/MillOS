@@ -2,6 +2,9 @@ import React, { useMemo, useEffect, useRef, Suspense } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Environment, Text } from '@react-three/drei';
 import * as THREE from 'three';
+
+// Import static assets so Vite handles base path correctly
+import warehouseHdrUrl from '/hdri/warehouse.hdr?url';
 import { Machines } from './Machines';
 import { ConveyorSystem } from './ConveyorSystem';
 import { WorkerSystem } from './WorkerSystem';
@@ -521,7 +524,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
       {/* CRITICAL: Wrapped in its own Suspense to prevent blocking the entire scene during load */}
       {!isLowGraphics && (
         <Suspense fallback={null}>
-          <Environment files="/hdri/warehouse.hdr" background={false} environmentIntensity={0.4} />
+          <Environment files={warehouseHdrUrl} background={false} environmentIntensity={0.4} />
         </Suspense>
       )}
 

@@ -221,8 +221,8 @@ interface GraphicsStore {
 export const useGraphicsStore = create<GraphicsStore>()(
   persist(
     (set) => ({
-      // Graphics settings - default to low for stability, users can increase if system handles it
-      graphics: GRAPHICS_PRESETS.low,
+      // Graphics settings - default to medium for better visuals
+      graphics: GRAPHICS_PRESETS.medium,
 
       setGraphicsQuality: (quality) => set({ graphics: { ...GRAPHICS_PRESETS[quality] } }),
 
