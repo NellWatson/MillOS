@@ -26,10 +26,10 @@ module.exports = {
   },
   rules: {
     'react-hooks/rules-of-hooks': 'warn', // Demote to warning (needs refactoring)
-    'react-hooks/exhaustive-deps': 'warn',
+    'react-hooks/exhaustive-deps': 'off', // Disabled: React Three Fiber patterns use refs in effects
     'no-unused-vars': 'off', // TypeScript handles this
     'no-redeclare': 'off', // TypeScript handles this
     'no-case-declarations': 'warn', // Demote to warning
-    'no-undef': 'warn', // Demote to warning (TypeScript catches real issues)
+    'no-undef': 'off', // Disabled: TypeScript catches real issues, browser APIs flagged incorrectly
   },
 };
