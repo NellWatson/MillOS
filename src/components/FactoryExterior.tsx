@@ -20,9 +20,10 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
   const buildingFrontZ = 48; // Front wall Z (behind the z=42 front doors)
   const buildingBackZ = -48; // Back wall Z (behind the z=-45 back doors)
 
-  // Dock opening dimensions
-  const dockOpeningWidth = 24;
+  // Dock opening dimensions - THREE doors spaced apart for two truck lanes
+  const dockOpeningWidth = 10; // Width of each door
   const dockOpeningHeight = 10;
+  const doorSpacing = 16; // Space between door centers (doors at -16, 0, +16)
 
   // Colors
   const wallColor = '#475569';
@@ -32,34 +33,59 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
 
   return (
     <group>
-      {/* ========== FRONT WALL (Z+) with dock opening ========== */}
-      {/* Left section - FULL HEIGHT */}
+      {/* ========== FRONT WALL (Z+) with THREE dock openings spaced apart ========== */}
+      {/* Far left section - FULL HEIGHT */}
       <mesh
-        position={[-(buildingHalfWidth / 2 + dockOpeningWidth / 4), wallHeight / 2, buildingFrontZ]}
+        position={[-buildingHalfWidth / 2 - doorSpacing / 2, wallHeight / 2, buildingFrontZ]}
         castShadow
         receiveShadow
       >
-        <boxGeometry args={[buildingHalfWidth - dockOpeningWidth / 2, wallHeight, wallThickness]} />
+        <boxGeometry args={[buildingHalfWidth - doorSpacing - dockOpeningWidth, wallHeight, wallThickness]} />
         <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
       </mesh>
-      {/* Right section - FULL HEIGHT */}
+
+      {/* Wall section between left door and center door */}
       <mesh
-        position={[buildingHalfWidth / 2 + dockOpeningWidth / 4, wallHeight / 2, buildingFrontZ]}
+        position={[-doorSpacing / 2, wallHeight / 2, buildingFrontZ]}
         castShadow
         receiveShadow
       >
-        <boxGeometry args={[buildingHalfWidth - dockOpeningWidth / 2, wallHeight, wallThickness]} />
+        <boxGeometry args={[doorSpacing - dockOpeningWidth, wallHeight, wallThickness]} />
         <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
       </mesh>
-      {/* Section above dock opening - matches wall height */}
+
+      {/* Wall section between center door and right door */}
       <mesh
-        position={[0, wallHeight - (wallHeight - dockOpeningHeight) / 2, buildingFrontZ]}
+        position={[doorSpacing / 2, wallHeight / 2, buildingFrontZ]}
         castShadow
         receiveShadow
       >
-        <boxGeometry args={[dockOpeningWidth, wallHeight - dockOpeningHeight, wallThickness]} />
+        <boxGeometry args={[doorSpacing - dockOpeningWidth, wallHeight, wallThickness]} />
         <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
       </mesh>
+
+      {/* Far right section - FULL HEIGHT */}
+      <mesh
+        position={[buildingHalfWidth / 2 + doorSpacing / 2, wallHeight / 2, buildingFrontZ]}
+        castShadow
+        receiveShadow
+      >
+        <boxGeometry args={[buildingHalfWidth - doorSpacing - dockOpeningWidth, wallHeight, wallThickness]} />
+        <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
+      </mesh>
+
+      {/* Sections above each of the THREE dock openings */}
+      {[-doorSpacing, 0, doorSpacing].map((x, i) => (
+        <mesh
+          key={`door-top-${i}`}
+          position={[x, wallHeight - (wallHeight - dockOpeningHeight) / 2, buildingFrontZ]}
+          castShadow
+          receiveShadow
+        >
+          <boxGeometry args={[dockOpeningWidth, wallHeight - dockOpeningHeight, wallThickness]} />
+          <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
+        </mesh>
+      ))}
 
       {/* Front wall trim */}
       <mesh position={[0, wallHeight + 0.3, buildingFrontZ]}>
@@ -90,7 +116,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
           color="#ffffff"
           anchorX="center"
           anchorY="middle"
-          font="/fonts/Inter-Bold.woff"
+          fontWeight="bold"
           outlineWidth={0.04}
           outlineColor="#991b1b"
         >

@@ -23,15 +23,15 @@ export function trackRender(componentName: string) {
   if (times.length > 100) times.shift();
   renderTimes.set(componentName, times);
 
-  // Warn if component renders more than 60 times per second
-  if (times.length >= 10) {
-    const recentTimes = times.slice(-10);
-    const timeSpan = recentTimes[recentTimes.length - 1] - recentTimes[0];
-    if (timeSpan > 0 && timeSpan < 200) {
-      // 10 renders in 200ms = 50+ fps of renders
-      console.warn(`[RENDER STORM] ${componentName}: ${Math.round(10000 / timeSpan)} renders/sec`);
-    }
-  }
+  // DISABLED: This warning is too noisy for React Three Fiber apps where 60fps renders are expected
+  // To re-enable for debugging, uncomment the block below
+  // if (times.length >= 10) {
+  //   const recentTimes = times.slice(-10);
+  //   const timeSpan = recentTimes[recentTimes.length - 1] - recentTimes[0];
+  //   if (timeSpan > 0 && timeSpan < 200) {
+  //     console.warn(`[RENDER STORM] ${componentName}: ${Math.round(10000 / timeSpan)} renders/sec`);
+  //   }
+  // }
 }
 
 export function renderReport() {

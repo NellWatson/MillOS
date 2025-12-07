@@ -891,24 +891,24 @@ export const FactoryWalls: React.FC<FactoryWallsProps> = () => {
 
   return (
     <group matrixAutoUpdate={false}>
-      {/* Break Room Areas - positioned inside factory along side walls */}
+      {/* Break Room Areas - positioned inside factory along side walls, away from truck paths */}
       {/* PERF: Restored to MEDIUM+ with meshBasicMaterial optimization */}
       {!isLowGraphics && (
         <>
-          {/* Left break room (inside factory, near packing area) */}
+          {/* Left break room (inside factory, near back wall) */}
           <group rotation={[0, 0, 0]}>
-            <BreakRoom position={[-35, 0, 25]} />
+            <BreakRoom position={[-50, 0, -20]} />
           </group>
-          {/* Right break room (inside factory, near packing area) */}
+          {/* Right break room (inside factory, near back wall) */}
           <group rotation={[0, 0, 0]}>
-            <BreakRoom position={[35, 0, 25]} />
+            <BreakRoom position={[50, 0, -20]} />
           </group>
         </>
       )}
 
-      {/* Locker Room inside factory near front wall */}
+      {/* Locker Room inside factory - moved to back wall area, away from truck paths */}
       {/* PERF: Restored to MEDIUM+ with meshBasicMaterial optimization */}
-      {!isLowGraphics && <LockerRoom position={[-35, 0, 35]} />}
+      {!isLowGraphics && <LockerRoom position={[-50, 0, -35]} />}
 
       {/* Toilet Block inside factory (opposite locker room) */}
       {/* PERF: Restored to MEDIUM+ with meshBasicMaterial optimization */}

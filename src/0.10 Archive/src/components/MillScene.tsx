@@ -262,6 +262,17 @@ export const MillScene: React.FC<MillSceneProps> = ({
       {!isLowGraphics && <SpoutingSystem machines={displayMachines} />}
       <FactoryInfrastructure floorSize={FLOOR_SIZE} showZones={showZones} />
 
+      {/* MASSIVE exterior floor to cover all orange/tan areas outside factory */}
+      <mesh position={[-60, -0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <planeGeometry args={[120, 200]} />
+        <meshStandardMaterial color="#334155" roughness={0.9} />
+      </mesh>
+      {/* Same on the other side of the factory */}
+      <mesh position={[60, -0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <planeGeometry args={[120, 200]} />
+        <meshStandardMaterial color="#334155" roughness={0.9} />
+      </mesh>
+
       {/* Dynamic Elements */}
       <ConveyorSystem productionSpeed={productionSpeed} />
       <WorkerSystem onSelectWorker={onSelectWorker} />

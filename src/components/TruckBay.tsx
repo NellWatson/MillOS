@@ -2965,36 +2965,104 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
       <TruckAnimationManager />
       {/* ========== SHIPPING DOCK (Front of building, z=50) ========== */}
       <group position={[0, 0, 50]}>
+        {/* Dock platform - wider for two truck bays */}
         <mesh position={[0, 1, -3]} receiveShadow castShadow>
-          <boxGeometry args={[16, 2, 6]} />
+          <boxGeometry args={[32, 2, 6]} />
           <meshStandardMaterial color="#475569" roughness={0.8} />
         </mesh>
 
-        {[-5, -2.5, 0, 2.5, 5].map((x, i) => (
+        {/* Dock bumpers - spread across wider platform */}
+        {[-12, -8, -4, 4, 8, 12].map((x, i) => (
           <mesh key={i} position={[x, 0.8, 0.2]}>
             <boxGeometry args={[0.8, 1.2, 0.6]} />
             <meshStandardMaterial color="#1f2937" />
           </mesh>
         ))}
 
-        <DockLeveler position={[0, 2, -2]} isDeployed={shippingDockedRef.current} />
+        {/* ===== TRUCK GROOVES - Two sunken channels for truck positioning ===== */}
+        {/* Left truck groove */}
+        <group position={[-8, 0, 8]}>
+          {/* Sunken groove floor */}
+          <mesh position={[0, -0.3, 0]} receiveShadow>
+            <boxGeometry args={[4.5, 0.1, 18]} />
+            <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+          </mesh>
+          {/* Groove side walls */}
+          <mesh position={[-2.4, -0.15, 0]}>
+            <boxGeometry args={[0.3, 0.5, 18]} />
+            <meshStandardMaterial color="#374151" roughness={0.8} />
+          </mesh>
+          <mesh position={[2.4, -0.15, 0]}>
+            <boxGeometry args={[0.3, 0.5, 18]} />
+            <meshStandardMaterial color="#374151" roughness={0.8} />
+          </mesh>
+          {/* Yellow warning stripes on groove edges */}
+          <mesh position={[-2.1, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[0.3, 18]} />
+            <meshBasicMaterial color="#fbbf24" />
+          </mesh>
+          <mesh position={[2.1, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[0.3, 18]} />
+            <meshBasicMaterial color="#fbbf24" />
+          </mesh>
+        </group>
 
-        {/* Roll-up dock door */}
-        <RollUpDoor position={[0, 0, -1]} isOpen={shippingDockedRef.current} />
+        {/* Right truck groove */}
+        <group position={[8, 0, 8]}>
+          {/* Sunken groove floor */}
+          <mesh position={[0, -0.3, 0]} receiveShadow>
+            <boxGeometry args={[4.5, 0.1, 18]} />
+            <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+          </mesh>
+          {/* Groove side walls */}
+          <mesh position={[-2.4, -0.15, 0]}>
+            <boxGeometry args={[0.3, 0.5, 18]} />
+            <meshStandardMaterial color="#374151" roughness={0.8} />
+          </mesh>
+          <mesh position={[2.4, -0.15, 0]}>
+            <boxGeometry args={[0.3, 0.5, 18]} />
+            <meshStandardMaterial color="#374151" roughness={0.8} />
+          </mesh>
+          {/* Yellow warning stripes on groove edges */}
+          <mesh position={[-2.1, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[0.3, 18]} />
+            <meshBasicMaterial color="#fbbf24" />
+          </mesh>
+          <mesh position={[2.1, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[0.3, 18]} />
+            <meshBasicMaterial color="#fbbf24" />
+          </mesh>
+        </group>
 
-        {/* Dock shelter */}
-        <DockShelter position={[0, 0, 1]} isCompressed={shippingDockedRef.current} />
+        {/* Two dock levelers - spaced for two truck bays */}
+        <DockLeveler position={[-8, 2, -2]} isDeployed={shippingDockedRef.current} />
+        <DockLeveler position={[8, 2, -2]} isDeployed={false} />
 
-        <DockStatusLight position={[-7, 4, -1]} isOccupied={shippingDockedRef.current} />
-        <DockStatusLight position={[7, 4, -1]} isOccupied={shippingDockedRef.current} />
+        {/* Roll-up dock doors - two doors spaced apart */}
+        <RollUpDoor position={[-8, 0, -1]} isOpen={shippingDockedRef.current} />
+        <RollUpDoor position={[8, 0, -1]} isOpen={false} />
 
-        {/* Concrete bollards around dock */}
+        {/* Dock shelters - two shelters spaced apart */}
+        <DockShelter position={[-8, 0, 1]} isCompressed={shippingDockedRef.current} />
+        <DockShelter position={[8, 0, 1]} isCompressed={false} />
+
+        {/* Status lights for each bay */}
+        <DockStatusLight position={[-12, 4, -1]} isOccupied={shippingDockedRef.current} />
+        <DockStatusLight position={[-4, 4, -1]} isOccupied={shippingDockedRef.current} />
+        <DockStatusLight position={[4, 4, -1]} isOccupied={false} />
+        <DockStatusLight position={[12, 4, -1]} isOccupied={false} />
+
+        {/* Concrete bollards around dock - spread wider for two truck bays */}
         <OptimizedBollardInstances
           positions={[
-            [-8, 0, 2],
-            [8, 0, 2],
-            [-8, 0, 5],
-            [8, 0, 5],
+            [-16, 0, 2],
+            [-4, 0, 2],
+            [4, 0, 2],
+            [16, 0, 2],
+            [-16, 0, 5],
+            [-4, 0, 5],
+            [4, 0, 5],
+            [16, 0, 5],
           ]}
         />
 
@@ -3207,8 +3275,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Tire inspection area */}
         <TireInspectionArea position={[25, 0, 35]} rotation={Math.PI / 2} />
 
-        {/* Driver break room/lounge */}
-        <DriverBreakRoom position={[35, 0, 25]} rotation={-Math.PI / 2} />
+        {/* Driver break room/lounge - moved to side, out of truck paths */}
+        <DriverBreakRoom position={[55, 0, 40]} rotation={-Math.PI / 2} />
 
         {/* Employee parking lot */}
         <EmployeeParking position={[45, 0, 55]} rotation={0} />

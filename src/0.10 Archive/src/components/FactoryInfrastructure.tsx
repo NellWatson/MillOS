@@ -1172,20 +1172,15 @@ export const FactoryInfrastructure: React.FC<Props> = ({ floorSize, showZones })
         </group>
       )}
 
-      {/* Break Room Areas - positioned away from forklift paths, facing inward */}
+      {/* Break Room - single one on far side of factory, away from truck paths */}
       {!isLowGraphics && (
-        <>
-          <group rotation={[0, -Math.PI / 2, 0]}>
-            <BreakRoom position={[0, 0, -40]} />
-          </group>
-          <group rotation={[0, Math.PI / 2, 0]}>
-            <BreakRoom position={[0, 0, -40]} />
-          </group>
-        </>
+        <group rotation={[0, Math.PI / 2, 0]}>
+          <BreakRoom position={[-25, 0, -40]} />
+        </group>
       )}
 
-      {/* Locker Room near entrance - skip on low graphics */}
-      {!isLowGraphics && <LockerRoom position={[35, 0, 30]} />}
+      {/* Locker Room - moved to back of mill, away from truck paths */}
+      {!isLowGraphics && <LockerRoom position={[-40, 0, -35]} />}
 
       {/* Safety Stations around the factory - skip on low graphics */}
       {!isLowGraphics && (

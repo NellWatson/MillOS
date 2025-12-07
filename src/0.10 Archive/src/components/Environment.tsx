@@ -627,20 +627,35 @@ export const FactoryEnvironment: React.FC = () => {
             metalness={0.2}
           />
         </mesh>
-        {/* Large loading bay doors */}
-        {[-30, 0, 30].map((x, i) => (
-          <mesh key={i} position={[x, -5, 0.1]}>
-            <planeGeometry args={[15, 20]} />
-            <meshStandardMaterial color="#1e293b" metalness={0.6} roughness={0.4} />
-          </mesh>
-        ))}
+        {/* Large loading bay doors - outer doors widened towards walls */}
+        {/* Left door: widened leftward (center shifted left, width increased) */}
+        <mesh position={[-32.5, -5, 0.1]}>
+          <planeGeometry args={[23, 20]} />
+          <meshStandardMaterial color="#1e293b" metalness={0.6} roughness={0.4} />
+        </mesh>
+        {/* Center door */}
+        <mesh position={[0, -5, 0.1]}>
+          <planeGeometry args={[14, 20]} />
+          <meshStandardMaterial color="#1e293b" metalness={0.6} roughness={0.4} />
+        </mesh>
+        {/* Right door: widened rightward (center shifted right, width increased) */}
+        <mesh position={[32.5, -5, 0.1]}>
+          <planeGeometry args={[23, 20]} />
+          <meshStandardMaterial color="#1e293b" metalness={0.6} roughness={0.4} />
+        </mesh>
         {/* Door warning stripes */}
-        {[-30, 0, 30].map((x, i) => (
-          <mesh key={i} position={[x, -14, 0.15]}>
-            <planeGeometry args={[15, 2]} />
-            <meshStandardMaterial color="#eab308" emissive="#eab308" emissiveIntensity={0.2} />
-          </mesh>
-        ))}
+        <mesh position={[-32.5, -14, 0.15]}>
+          <planeGeometry args={[23, 2]} />
+          <meshStandardMaterial color="#eab308" emissive="#eab308" emissiveIntensity={0.2} />
+        </mesh>
+        <mesh position={[0, -14, 0.15]}>
+          <planeGeometry args={[14, 2]} />
+          <meshStandardMaterial color="#eab308" emissive="#eab308" emissiveIntensity={0.2} />
+        </mesh>
+        <mesh position={[32.5, -14, 0.15]}>
+          <planeGeometry args={[23, 2]} />
+          <meshStandardMaterial color="#eab308" emissive="#eab308" emissiveIntensity={0.2} />
+        </mesh>
       </group>
 
       {/* Left wall */}

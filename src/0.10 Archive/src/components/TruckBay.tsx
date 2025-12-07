@@ -103,33 +103,93 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
   return (
     <group position={[35, 0, 0]}>
-      {/* Loading dock platform */}
+      {/* Loading dock platform - split into 3 sections with channels through */}
+      {/* Left platform section */}
+      <mesh position={[-7.5, 1, -28]} receiveShadow castShadow>
+        <boxGeometry args={[3, 2, 8]} />
+        <meshStandardMaterial color="#475569" roughness={0.8} />
+      </mesh>
+      {/* Center platform section */}
       <mesh position={[0, 1, -28]} receiveShadow castShadow>
-        <boxGeometry args={[18, 2, 8]} />
+        <boxGeometry args={[4, 2, 8]} />
+        <meshStandardMaterial color="#475569" roughness={0.8} />
+      </mesh>
+      {/* Right platform section */}
+      <mesh position={[7.5, 1, -28]} receiveShadow castShadow>
+        <boxGeometry args={[3, 2, 8]} />
         <meshStandardMaterial color="#475569" roughness={0.8} />
       </mesh>
 
-      {/* Dock bumpers */}
-      {[-6, 0, 6].map((x, i) => (
+      {/* Dock bumpers - repositioned for split platform */}
+      {[-7.5, 0, 7.5].map((x, i) => (
         <mesh key={i} position={[x, 1, -24]} castShadow>
           <boxGeometry args={[1, 1.5, 0.5]} />
           <meshStandardMaterial color="#1f2937" />
         </mesh>
       ))}
 
-      {/* Dock floor */}
-      <mesh position={[0, 0.05, -35]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[25, 25]} />
-        <meshStandardMaterial color="#334155" roughness={0.9} />
-      </mesh>
+      {/* ===== TRUCK GROOVES - Two sunken channels for truck positioning ===== */}
+      {/* Left truck groove at x=-4 */}
+      <group position={[-4, 0, -35]}>
+        {/* Sunken groove floor - darker asphalt */}
+        <mesh position={[0, -0.15, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+          <planeGeometry args={[4, 25]} />
+          <meshStandardMaterial color="#1a1a1a" roughness={0.95} />
+        </mesh>
+        {/* Groove side walls - raised curbs */}
+        <mesh position={[-2.1, 0.1, 0]}>
+          <boxGeometry args={[0.2, 0.5, 25]} />
+          <meshStandardMaterial color="#4b5563" roughness={0.8} />
+        </mesh>
+        <mesh position={[2.1, 0.1, 0]}>
+          <boxGeometry args={[0.2, 0.5, 25]} />
+          <meshStandardMaterial color="#4b5563" roughness={0.8} />
+        </mesh>
+        {/* Yellow warning stripes on curb tops */}
+        <mesh position={[-2.1, 0.36, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.2, 25]} />
+          <meshBasicMaterial color="#fbbf24" />
+        </mesh>
+        <mesh position={[2.1, 0.36, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.2, 25]} />
+          <meshBasicMaterial color="#fbbf24" />
+        </mesh>
+      </group>
 
-      {/* Lane markings */}
-      <mesh position={[-4, 0.06, -40]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[0.2, 20]} />
+      {/* Right truck groove at x=4 */}
+      <group position={[4, 0, -35]}>
+        {/* Sunken groove floor - darker asphalt */}
+        <mesh position={[0, -0.15, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+          <planeGeometry args={[4, 25]} />
+          <meshStandardMaterial color="#1a1a1a" roughness={0.95} />
+        </mesh>
+        {/* Groove side walls - raised curbs */}
+        <mesh position={[-2.1, 0.1, 0]}>
+          <boxGeometry args={[0.2, 0.5, 25]} />
+          <meshStandardMaterial color="#4b5563" roughness={0.8} />
+        </mesh>
+        <mesh position={[2.1, 0.1, 0]}>
+          <boxGeometry args={[0.2, 0.5, 25]} />
+          <meshStandardMaterial color="#4b5563" roughness={0.8} />
+        </mesh>
+        {/* Yellow warning stripes on curb tops */}
+        <mesh position={[-2.1, 0.36, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.2, 25]} />
+          <meshBasicMaterial color="#fbbf24" />
+        </mesh>
+        <mesh position={[2.1, 0.36, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.2, 25]} />
+          <meshBasicMaterial color="#fbbf24" />
+        </mesh>
+      </group>
+
+      {/* Lane center lines */}
+      <mesh position={[-4, 0.07, -35]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[0.15, 20]} />
         <meshBasicMaterial color="#fef3c7" />
       </mesh>
-      <mesh position={[4, 0.06, -40]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[0.2, 20]} />
+      <mesh position={[4, 0.07, -35]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[0.15, 20]} />
         <meshBasicMaterial color="#fef3c7" />
       </mesh>
 

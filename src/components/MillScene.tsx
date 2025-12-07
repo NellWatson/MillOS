@@ -381,24 +381,25 @@ export const MillScene: React.FC<MillSceneProps> = ({
 
     // AMENITY BUILDINGS - Break rooms, toilet blocks, locker rooms
     // These are forklift-only obstacles (workers can enter/exit normally)
+    // Moved to back wall area, away from truck paths
 
-    // Left break room at [-35, 0, 25], floor 6x5
+    // Left break room at [-50, 0, -20], floor 6x5
     obs.push({
       id: 'break-room-left',
-      minX: -38,
-      maxX: -32,
-      minZ: 22.5,
-      maxZ: 27.5,
+      minX: -53,
+      maxX: -47,
+      minZ: -22.5,
+      maxZ: -17.5,
       forkliftOnly: true,
     });
 
-    // Right break room at [35, 0, 25], floor 6x5
+    // Right break room at [50, 0, -20], floor 6x5
     obs.push({
       id: 'break-room-right',
-      minX: 32,
-      maxX: 38,
-      minZ: 22.5,
-      maxZ: 27.5,
+      minX: 47,
+      maxX: 53,
+      minZ: -22.5,
+      maxZ: -17.5,
       forkliftOnly: true,
     });
 
@@ -412,13 +413,13 @@ export const MillScene: React.FC<MillSceneProps> = ({
       forkliftOnly: true,
     });
 
-    // Locker room at [-35, 0, 35], floor 8x6
+    // Locker room at [-50, 0, -35], floor 8x6 - moved to back wall area
     obs.push({
       id: 'locker-room',
-      minX: -39,
-      maxX: -31,
-      minZ: 32,
-      maxZ: 38,
+      minX: -54,
+      maxX: -46,
+      minZ: -38,
+      maxZ: -32,
       forkliftOnly: true,
     });
 
