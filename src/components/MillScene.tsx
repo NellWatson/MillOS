@@ -12,6 +12,7 @@ import { FactoryInfrastructure } from './FactoryInfrastructure';
 import { SpoutingSystem } from './SpoutingSystem';
 import { DustParticles, GrainFlow, MachineSteamVents, DustAnimationManager } from './DustParticles';
 import { TruckBay } from './TruckBay';
+import { FactoryExterior } from './FactoryExterior';
 import { ForkliftSystem, ForkliftData } from './ForkliftSystem';
 import { FactoryEnvironment } from './Environment';
 import { HolographicDisplays } from './HolographicDisplays';
@@ -569,6 +570,9 @@ export const MillScene: React.FC<MillSceneProps> = ({
           graphicsQuality === 'high' ||
           graphicsQuality === 'ultra') &&
         !perfDebug?.disableTruckBay && <TruckBay productionSpeed={productionSpeed} />}
+
+      {/* Factory exterior walls and signage - renders when camera is outside */}
+      {!isCameraInside && graphicsQuality !== 'low' && <FactoryExterior />}
 
       {/* Theme Hospital-inspired Mood & Chaos Systems */}
       {/* PERFORMANCE: Interior-only systems, ultra quality only */}
