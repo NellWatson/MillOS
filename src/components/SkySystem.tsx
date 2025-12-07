@@ -5,6 +5,9 @@ import { useTexture } from '@react-three/drei';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
 
+// Import static assets so Vite handles base path correctly
+import horizonSilhouetteUrl from '/assets/horizon_silhouette.png';
+
 // Vertex Shader for SkyDome - Ultrathink Sky System
 const skyVertexShader = `
 varying vec2 vUv;
@@ -464,7 +467,7 @@ const Stars: React.FC<{ visible: boolean }> = React.memo(({ visible }) => {
 });
 
 const HorizonRing: React.FC = () => {
-  const texture = useTexture('/assets/horizon_silhouette.png');
+  const texture = useTexture(horizonSilhouetteUrl);
 
   // Configure texture properly with useMemo to avoid re-running on each render
   useMemo(() => {
