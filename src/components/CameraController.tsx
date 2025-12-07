@@ -264,7 +264,7 @@ export const CameraController: React.FC<CameraControllerProps> = ({
 
 /**
  * Camera Bounds Tracker
- * 
+ *
  * Tracks whether the camera is inside or outside the factory bounds.
  * Used to conditionally render interior vs exterior components for performance.
  * Throttled to every 10 frames (~6 checks/second at 60fps) to minimize overhead.
@@ -333,8 +333,9 @@ export const CameraPresetIndicator: React.FC = () => {
         {CAMERA_PRESETS.map((_, i) => (
           <div
             key={i}
-            className={`w-4 h-4 rounded text-[9px] font-mono flex items-center justify-center transition-colors ${i === activePreset ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-500'
-              }`}
+            className={`w-4 h-4 rounded text-[9px] font-mono flex items-center justify-center transition-colors ${
+              i === activePreset ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-500'
+            }`}
           >
             {i + 1}
           </div>

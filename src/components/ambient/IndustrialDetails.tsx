@@ -116,8 +116,7 @@ function animateLoadingDockDoor(entry: LoadingDockDoorEntry, delta: number) {
       });
     }
 
-    const shouldBeActive =
-      entry.currentOpenRef.current > 0.1 && entry.currentOpenRef.current < 0.9;
+    const shouldBeActive = entry.currentOpenRef.current > 0.1 && entry.currentOpenRef.current < 0.9;
     if (shouldBeActive !== entry.warningLightsActiveRef.current) {
       entry.warningLightsActiveRef.current = shouldBeActive;
       entry.onWarningChange(shouldBeActive);
@@ -283,7 +282,10 @@ export const ElectricalPanel: React.FC<{
     if (context) return; // Manager handles animation
     if (!isTabVisible) return;
     if (!shouldRunThisFrame(3)) return;
-    animateElectricalPanel({ type: 'electricalPanel', sparkRef, sparkState }, state.clock.elapsedTime);
+    animateElectricalPanel(
+      { type: 'electricalPanel', sparkRef, sparkState },
+      state.clock.elapsedTime
+    );
   });
 
   return (
@@ -342,7 +344,12 @@ export const SwingingChain: React.FC<{ position: [number, number, number]; lengt
     if (!isTabVisible) return;
     if (!shouldRunThisFrame(3)) return;
     animateSwingingChain(
-      { type: 'swingingChain', chainRef, swingSpeed: swingSpeed.current, swingAmount: swingAmount.current },
+      {
+        type: 'swingingChain',
+        chainRef,
+        swingSpeed: swingSpeed.current,
+        swingAmount: swingAmount.current,
+      },
       state.clock.elapsedTime
     );
   });

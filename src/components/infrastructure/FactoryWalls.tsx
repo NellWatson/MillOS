@@ -9,30 +9,36 @@ interface FactoryWallsProps {
   floorDepth: number;
 }
 
-// Personnel door with frame, signage, and push bar
+// Personnel door with frame, signage, and push bar - 50% smaller, bottom at floor level
 const PersonnelDoor: React.FC<{
   position: [number, number, number];
   rotation?: number;
   label?: string;
   isEmergencyExit?: boolean;
 }> = ({ position, rotation = 0, label = 'ENTRANCE', isEmergencyExit = false }) => {
+  // Door dimensions - 50% of original (frame was 3 tall, now 1.5)
+  const frameHeight = 1.5;
+  const frameWidth = 0.9;
+  const doorHeight = 1.2;
+  const doorWidth = 0.5;
+
   return (
     <group position={position} rotation={[0, rotation, 0]}>
-      {/* Door frame - structural surround */}
-      <mesh position={[0, 1.5, 0]} castShadow>
-        <boxGeometry args={[1.8, 3, 0.3]} />
+      {/* Door frame - structural surround - bottom at y=0 */}
+      <mesh position={[0, frameHeight / 2, 0]} castShadow>
+        <boxGeometry args={[frameWidth, frameHeight, 0.15]} />
         <meshBasicMaterial color="#374151" />
       </mesh>
 
       {/* Door recess */}
-      <mesh position={[0, 1.4, 0.1]}>
-        <boxGeometry args={[1.2, 2.6, 0.2]} />
+      <mesh position={[0, doorHeight / 2, 0.05]}>
+        <boxGeometry args={[0.6, 1.3, 0.1]} />
         <meshBasicMaterial color="#1f2937" />
       </mesh>
 
-      {/* Door panel - keep standard for main door */}
-      <mesh position={[0, 1.4, 0.2]} castShadow>
-        <boxGeometry args={[1, 2.4, 0.08]} />
+      {/* Door panel - bottom at floor level */}
+      <mesh position={[0, doorHeight / 2, 0.1]} castShadow>
+        <boxGeometry args={[doorWidth, doorHeight, 0.04]} />
         <meshStandardMaterial
           color={isEmergencyExit ? '#dc2626' : '#475569'}
           roughness={0.5}
@@ -41,31 +47,31 @@ const PersonnelDoor: React.FC<{
       </mesh>
 
       {/* Door window (upper portion) */}
-      <mesh position={[0, 2.1, 0.25]}>
-        <boxGeometry args={[0.6, 0.8, 0.02]} />
+      <mesh position={[0, doorHeight * 0.75, 0.125]}>
+        <boxGeometry args={[0.3, 0.4, 0.01]} />
         <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
       </mesh>
 
       {/* Push bar (crash bar for emergency exits) */}
-      <mesh position={[0, 1.1, 0.28]}>
-        <boxGeometry args={[0.7, 0.08, 0.06]} />
+      <mesh position={[0, doorHeight * 0.4, 0.14]}>
+        <boxGeometry args={[0.35, 0.04, 0.03]} />
         <meshBasicMaterial color={isEmergencyExit ? '#fbbf24' : '#94a3b8'} />
       </mesh>
 
       {/* Door handle */}
-      <mesh position={[0.35, 1.3, 0.28]}>
-        <boxGeometry args={[0.08, 0.15, 0.06]} />
+      <mesh position={[0.18, doorHeight * 0.5, 0.14]}>
+        <boxGeometry args={[0.04, 0.08, 0.03]} />
         <meshBasicMaterial color="#64748b" />
       </mesh>
 
       {/* Sign above door */}
-      <mesh position={[0, 3.2, 0.16]}>
-        <boxGeometry args={[1.4, 0.35, 0.05]} />
+      <mesh position={[0, frameHeight + 0.12, 0.08]}>
+        <boxGeometry args={[0.7, 0.18, 0.025]} />
         <meshBasicMaterial color={isEmergencyExit ? '#dc2626' : '#1e40af'} />
       </mesh>
       <Text
-        position={[0, 3.2, 0.2]}
-        fontSize={0.15}
+        position={[0, frameHeight + 0.12, 0.1]}
+        fontSize={0.08}
         color="#ffffff"
         anchorX="center"
         anchorY="middle"
@@ -75,21 +81,21 @@ const PersonnelDoor: React.FC<{
 
       {/* Emergency exit light (if emergency exit) */}
       {isEmergencyExit && (
-        <mesh position={[0, 3.5, 0.1]}>
-          <boxGeometry args={[0.6, 0.2, 0.1]} />
+        <mesh position={[0, frameHeight + 0.25, 0.05]}>
+          <boxGeometry args={[0.3, 0.1, 0.05]} />
           <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.5} />
         </mesh>
       )}
 
       {/* Floor mat */}
-      <mesh position={[0, 0.02, 0.6]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[1.2, 0.8]} />
+      <mesh position={[0, 0.02, 0.3]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[0.6, 0.4]} />
         <meshBasicMaterial color="#1f2937" />
       </mesh>
 
       {/* Threshold */}
-      <mesh position={[0, 0.03, 0]}>
-        <boxGeometry args={[1.2, 0.06, 0.3]} />
+      <mesh position={[0, 0.015, 0]}>
+        <boxGeometry args={[0.6, 0.03, 0.15]} />
         <meshBasicMaterial color="#64748b" />
       </mesh>
     </group>
@@ -883,7 +889,6 @@ export const FactoryWalls: React.FC<FactoryWallsProps> = () => {
   // PERFORMANCE: Decorative rooms restored to MEDIUM+ with optimized materials
   // Changed from isHighGraphics to !isLowGraphics - now available on MEDIUM
 
-
   return (
     <group matrixAutoUpdate={false}>
       {/* Break Room Areas - positioned inside factory along side walls */}
@@ -913,40 +918,26 @@ export const FactoryWalls: React.FC<FactoryWallsProps> = () => {
       {/* PERF: Restored to MEDIUM+ with meshBasicMaterial optimization */}
       {!isLowGraphics && <ManagerOffice position={[-20, 0, 30]} />}
 
-      {/* Personnel doors for entry/exit */}
+      {/* Personnel doors for entry/exit - on both sides of front and back walls */}
       {/* PERF: Restored to MEDIUM+ with meshBasicMaterial optimization */}
       {!isLowGraphics && (
         <>
-          {/* Main entrance - front left (near locker room) */}
-          <PersonnelDoor position={[-45, 0, 42]} rotation={0} label="MAIN ENTRANCE" />
-          {/* Secondary entrance - front right (near toilet block) */}
+          {/* Front wall - left side */}
+          <PersonnelDoor position={[-45, 0, 42]} rotation={0} label="ENTRANCE" />
+          {/* Front wall - right side */}
           <PersonnelDoor position={[45, 0, 42]} rotation={0} label="ENTRANCE" />
-          {/* Emergency exit - left side wall */}
+          {/* Back wall - left side */}
           <PersonnelDoor
-            position={[-55, 0, 0]}
-            rotation={Math.PI / 2}
-            label="EMERGENCY EXIT"
-            isEmergencyExit
-          />
-          {/* Emergency exit - right side wall */}
-          <PersonnelDoor
-            position={[55, 0, 0]}
-            rotation={-Math.PI / 2}
-            label="EMERGENCY EXIT"
-            isEmergencyExit
-          />
-          {/* Emergency exit - back wall left */}
-          <PersonnelDoor
-            position={[-25, 0, -45]}
+            position={[-45, 0, -45]}
             rotation={Math.PI}
-            label="EMERGENCY EXIT"
+            label="EXIT"
             isEmergencyExit
           />
-          {/* Emergency exit - back wall right */}
+          {/* Back wall - right side */}
           <PersonnelDoor
-            position={[25, 0, -45]}
+            position={[45, 0, -45]}
             rotation={Math.PI}
-            label="EMERGENCY EXIT"
+            label="EXIT"
             isEmergencyExit
           />
         </>

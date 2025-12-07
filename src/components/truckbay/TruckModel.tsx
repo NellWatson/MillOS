@@ -68,13 +68,25 @@ export const TruckModel: React.FC<TruckModelProps> = ({
     // Apply Chassis Physics (Roll/Pitch)
     if (cabGroupRef.current) {
       // Smooth lerp for weight feeling
-      cabGroupRef.current.rotation.z = THREE.MathUtils.lerp(cabGroupRef.current.rotation.z, truckState.cabRoll, 0.1);
-      cabGroupRef.current.rotation.x = THREE.MathUtils.lerp(cabGroupRef.current.rotation.x, truckState.cabPitch, 0.1);
+      cabGroupRef.current.rotation.z = THREE.MathUtils.lerp(
+        cabGroupRef.current.rotation.z,
+        truckState.cabRoll,
+        0.1
+      );
+      cabGroupRef.current.rotation.x = THREE.MathUtils.lerp(
+        cabGroupRef.current.rotation.x,
+        truckState.cabPitch,
+        0.1
+      );
     }
 
     // Apply partial roll to trailer (stiffer suspension)
     if (trailerRef.current) {
-      trailerRef.current.rotation.z = THREE.MathUtils.lerp(trailerRef.current.rotation.z, truckState.cabRoll * 0.5, 0.1);
+      trailerRef.current.rotation.z = THREE.MathUtils.lerp(
+        trailerRef.current.rotation.z,
+        truckState.cabRoll * 0.5,
+        0.1
+      );
     }
 
     // Rotate wheels

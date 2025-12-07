@@ -27,28 +27,28 @@ interface ChaosRefs {
   duration: number;
   position: [number, number, number];
   // Common refs
-  groupRef?: React.RefObject<THREE.Group>;
-  particlesRef?: React.RefObject<THREE.InstancedMesh | THREE.Points>;
-  materialRef?: React.RefObject<THREE.MeshStandardMaterial>;
-  lightRef?: React.RefObject<THREE.PointLight>;
+  groupRef?: React.RefObject<THREE.Group | null>;
+  particlesRef?: React.RefObject<THREE.InstancedMesh | THREE.Points | null>;
+  materialRef?: React.RefObject<THREE.MeshStandardMaterial | null>;
+  lightRef?: React.RefObject<THREE.PointLight | null>;
   // Grain spill specific
   scaleRef?: React.MutableRefObject<number>;
   positions?: Array<{ x: number; z: number; delay: number; scale: number }>;
   dummy?: THREE.Object3D;
   // Rat specific
-  tailRef?: React.RefObject<THREE.Mesh>;
+  tailRef?: React.RefObject<THREE.Mesh | null>;
   angleRef?: React.MutableRefObject<number>;
   radiusRef?: React.MutableRefObject<number>;
   panicModeRef?: React.MutableRefObject<boolean>;
   // Pigeon specific
-  wingLeftRef?: React.RefObject<THREE.Mesh>;
-  wingRightRef?: React.RefObject<THREE.Mesh>;
-  headRef?: React.RefObject<THREE.Mesh>;
+  wingLeftRef?: React.RefObject<THREE.Mesh | null>;
+  wingRightRef?: React.RefObject<THREE.Mesh | null>;
+  headRef?: React.RefObject<THREE.Mesh | null>;
   isFlying?: React.MutableRefObject<boolean>;
   flyTargetRef?: React.MutableRefObject<{ x: number; y: number; z: number }>;
   flyTargetVecRef?: React.MutableRefObject<THREE.Vector3>;
   // Temperature spike specific
-  glowRef?: React.RefObject<THREE.Mesh>;
+  glowRef?: React.RefObject<THREE.Mesh | null>;
   steamPositions?: Float32Array;
   smokePositions?: Float32Array;
 }
@@ -129,7 +129,8 @@ function animateRat(refs: ChaosRefs, state: RootState): void {
 }
 
 function animatePigeon(refs: ChaosRefs, state: RootState): void {
-  if (!refs.groupRef?.current || !refs.isFlying || !refs.flyTargetRef || !refs.flyTargetVecRef) return;
+  if (!refs.groupRef?.current || !refs.isFlying || !refs.flyTargetRef || !refs.flyTargetVecRef)
+    return;
 
   const time = state.clock.elapsedTime;
 
@@ -300,9 +301,7 @@ const ChaosAnimationManager: React.FC<{ children: React.ReactNode }> = ({ childr
   const contextValue = useMemo(() => ({ register, unregister }), [register, unregister]);
 
   return (
-    <ChaosAnimationContext.Provider value={contextValue}>
-      {children}
-    </ChaosAnimationContext.Provider>
+    <ChaosAnimationContext.Provider value={contextValue}>{children}</ChaosAnimationContext.Provider>
   );
 };
 
@@ -341,7 +340,16 @@ const GrainSpill: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
       dummy,
     });
     return () => unregister(event.id);
-  }, [register, unregister, event.id, event.startTime, event.duration, event.position, positions, dummy]);
+  }, [
+    register,
+    unregister,
+    event.id,
+    event.startTime,
+    event.duration,
+    event.position,
+    positions,
+    dummy,
+  ]);
 
   return (
     <group ref={groupRef} position={[event.position[0], 0, event.position[2]]}>
@@ -734,7 +742,15 @@ const TemperatureSpike: React.FC<{ event: ChaosEvent }> = React.memo(({ event })
       steamPositions,
     });
     return () => unregister(event.id);
-  }, [register, unregister, event.id, event.startTime, event.duration, event.position, steamPositions]);
+  }, [
+    register,
+    unregister,
+    event.id,
+    event.startTime,
+    event.duration,
+    event.position,
+    steamPositions,
+  ]);
 
   return (
     <group position={event.position}>
@@ -825,7 +841,15 @@ const CoffeeMachineBroken: React.FC<{ event: ChaosEvent }> = React.memo(({ event
       smokePositions,
     });
     return () => unregister(event.id);
-  }, [register, unregister, event.id, event.startTime, event.duration, event.position, smokePositions]);
+  }, [
+    register,
+    unregister,
+    event.id,
+    event.startTime,
+    event.duration,
+    event.position,
+    smokePositions,
+  ]);
 
   return (
     <group position={event.position}>

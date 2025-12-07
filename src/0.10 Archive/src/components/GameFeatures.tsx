@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useMillStore } from '../store';
 import { positionRegistry } from '../utils/positionRegistry';
+import { audioManager } from '../utils/audioManager';
 
 // Context to share camera feed container refs between DOM and Canvas
 interface CameraFeedContextType {
@@ -65,6 +66,10 @@ export const PAAnnouncementSystem: React.FC = () => {
   const dismissAnnouncement = useMillStore(state => state.dismissAnnouncement);
   const clearOldAnnouncements = useMillStore(state => state.clearOldAnnouncements);
 
+  // Track last spoken announcement to avoid repeats
+  const lastSpokenRef = useRef<string>('');
+  const lastSpeakTimeRef = useRef<number>(0);
+
   // Schedule periodic announcements
   usePAScheduler();
 
@@ -73,6 +78,25 @@ export const PAAnnouncementSystem: React.FC = () => {
     const interval = setInterval(clearOldAnnouncements, 1000);
     return () => clearInterval(interval);
   }, [clearOldAnnouncements]);
+
+  // TTS: Speak new announcements
+  useEffect(() => {
+    if (announcements.length === 0) return;
+
+    const latestAnnouncement = announcements[0];
+    const now = Date.now();
+
+    // Speak if this is a new announcement and we have a cooldown (10s between TTS)
+    if (
+      latestAnnouncement.message !== lastSpokenRef.current &&
+      now - lastSpeakTimeRef.current > 10000 &&
+      !audioManager.isSpeaking()
+    ) {
+      lastSpokenRef.current = latestAnnouncement.message;
+      lastSpeakTimeRef.current = now;
+      audioManager.speakAnnouncement(latestAnnouncement.message);
+    }
+  }, [announcements]);
 
   if (announcements.length === 0) return null;
 

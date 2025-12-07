@@ -37,16 +37,16 @@
 
 export type TruckPathPhase =
   | 'offscreen'
-  | 'entering'       // Driving into lot from road
-  | 'swinging'       // Swinging wide before the arc
-  | 'arcing'         // Tight 180° arc turn
-  | 'settling'       // Brief pause, engaging reverse
-  | 'reversing'      // Backing straight toward dock
-  | 'docking'        // Final dock adjustment
-  | 'docked'         // Stationary at dock
-  | 'departing'      // Pulling forward from dock
-  | 'arcing_out'     // 180° arc toward exit
-  | 'exiting';       // Accelerating out of lot
+  | 'entering' // Driving into lot from road
+  | 'swinging' // Swinging wide before the arc
+  | 'arcing' // Tight 180° arc turn
+  | 'settling' // Brief pause, engaging reverse
+  | 'reversing' // Backing straight toward dock
+  | 'docking' // Final dock adjustment
+  | 'docked' // Stationary at dock
+  | 'departing' // Pulling forward from dock
+  | 'arcing_out' // 180° arc toward exit
+  | 'exiting'; // Accelerating out of lot
 
 export interface TruckPathState {
   phase: TruckPathPhase;
@@ -70,9 +70,9 @@ export interface TruckPathConfig {
   stageX: number;
   stageZ: number;
   // Arc geometry
-  arcCenterX: number;   // Center of the 180° arc
+  arcCenterX: number; // Center of the 180° arc
   arcCenterZ: number;
-  arcRadius: number;    // Radius of the turn
+  arcRadius: number; // Radius of the turn
   // Entry lane offset (which side truck enters from)
   entryOffsetX: number; // Positive = enters from right, negative = from left
   // Direction: 1 = dock at +Z side (shipping), -1 = dock at -Z side (receiving)
@@ -147,8 +147,7 @@ export const RECEIVING_DOCK_CONFIG: TruckPathConfig = {
 // EASING FUNCTIONS
 // =============================================================================
 
-const easeInOut = (t: number): number =>
-  t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+const easeInOut = (t: number): number => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 
 const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
 
@@ -224,13 +223,9 @@ const cubicBezierTangent = (
   const u = 1 - t;
   // Derivative of cubic bezier
   const dx =
-    3 * u * u * (p1[0] - p0[0]) +
-    6 * u * t * (p2[0] - p1[0]) +
-    3 * t * t * (p3[0] - p2[0]);
+    3 * u * u * (p1[0] - p0[0]) + 6 * u * t * (p2[0] - p1[0]) + 3 * t * t * (p3[0] - p2[0]);
   const dz =
-    3 * u * u * (p1[1] - p0[1]) +
-    6 * u * t * (p2[1] - p1[1]) +
-    3 * t * t * (p3[1] - p2[1]);
+    3 * u * u * (p1[1] - p0[1]) + 6 * u * t * (p2[1] - p1[1]) + 3 * t * t * (p3[1] - p2[1]);
   return Math.atan2(dx, dz);
 };
 
@@ -495,7 +490,7 @@ export function calculateTruckPath(
       config.arcCenterX,
       config.arcCenterZ,
       config.arcRadius,
-      arcEndAngle,   // Start where we ended
+      arcEndAngle, // Start where we ended
       arcStartAngle, // End where we started
       t
     );

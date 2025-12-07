@@ -27,7 +27,8 @@ export function trackRender(componentName: string) {
   if (times.length >= 10) {
     const recentTimes = times.slice(-10);
     const timeSpan = recentTimes[recentTimes.length - 1] - recentTimes[0];
-    if (timeSpan > 0 && timeSpan < 200) { // 10 renders in 200ms = 50+ fps of renders
+    if (timeSpan > 0 && timeSpan < 200) {
+      // 10 renders in 200ms = 50+ fps of renders
       console.warn(`[RENDER STORM] ${componentName}: ${Math.round(10000 / timeSpan)} renders/sec`);
     }
   }
@@ -67,5 +68,8 @@ export function resetRenderProfile() {
 if (typeof window !== 'undefined') {
   (window as any).renderReport = renderReport;
   (window as any).resetRenderProfile = resetRenderProfile;
-  console.log('%c[RenderProfiler] Ready. Use renderReport() to see render counts', 'color: #22c55e');
+  console.log(
+    '%c[RenderProfiler] Ready. Use renderReport() to see render counts',
+    'color: #22c55e'
+  );
 }

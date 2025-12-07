@@ -42,6 +42,10 @@ jobs:
       - name: Copy v0.10 to staging
         run: cp -r public/v0.10 staging/v0.10
 
+      # Copy music files to v0.10 staging for music backport
+      - name: Copy music files to v0.10
+        run: cp public/*.mp3 staging/v0.10/
+
       # Root redirects to v0.10 (stable)
       - name: Create root redirect
         run: |

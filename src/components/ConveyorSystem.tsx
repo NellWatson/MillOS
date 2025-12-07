@@ -167,7 +167,8 @@ const BagAnimationManager: React.FC<{
     if (bagAnimationRegistry.size === 0) return;
 
     // Throttle based on quality (ultra=1, high=2, medium=3, low=4)
-    const movementThrottle = quality === 'ultra' ? 1 : quality === 'high' ? 2 : quality === 'medium' ? 3 : 4;
+    const movementThrottle =
+      quality === 'ultra' ? 1 : quality === 'high' ? 2 : quality === 'medium' ? 3 : 4;
     if (!shouldRunThisFrame(movementThrottle)) return;
 
     // Cap delta to prevent huge jumps when tab regains focus (max 100ms)
@@ -261,7 +262,10 @@ export const ConveyorSystem: React.FC<ConveyorSystemProps> = ({ productionSpeed 
       <ConveyorAudioManager productionSpeed={productionSpeed} />
 
       {/* Centralized bag animation manager - updates all bags in ONE useFrame */}
-      <BagAnimationManager productionSpeed={productionSpeed} incrementBagsProduced={incrementBagsProduced} />
+      <BagAnimationManager
+        productionSpeed={productionSpeed}
+        incrementBagsProduced={incrementBagsProduced}
+      />
 
       {/* Main conveyor belt structure - moved to z=24 to align with packers at z=25 */}
       <MemoizedConveyorBelt position={[0, 0.5, 24]} length={55} productionSpeed={productionSpeed} />
@@ -753,132 +757,130 @@ const RollerConveyor: React.FC<{ position: [number, number, number]; productionS
 };
 
 // FlourBagMesh - now uses centralized animation via BagAnimationManager (15-60 bags → 1 useFrame)
-const FlourBagMesh: React.FC<{ data: FlourBag }> = React.memo(
-  ({ data }) => {
-    const ref = useRef<THREE.Group>(null);
-    const [hovered, setHovered] = useState(false);
-    const enableProceduralTextures = useGraphicsStore(
-      (state) => state.graphics.enableProceduralTextures
-    );
+const FlourBagMesh: React.FC<{ data: FlourBag }> = React.memo(({ data }) => {
+  const ref = useRef<THREE.Group>(null);
+  const [hovered, setHovered] = useState(false);
+  const enableProceduralTextures = useGraphicsStore(
+    (state) => state.graphics.enableProceduralTextures
+  );
 
-    // Register with centralized bag animation manager on mount
-    useEffect(() => {
-      if (!ref.current) return;
+  // Register with centralized bag animation manager on mount
+  useEffect(() => {
+    if (!ref.current) return;
 
-      // Register bag state with centralized manager
-      registerBagAnimation(data.id, {
-        ref: ref.current,
-        speed: data.speed,
-        currentX: data.position[0],
-        crossedBoundary: false,
-      });
+    // Register bag state with centralized manager
+    registerBagAnimation(data.id, {
+      ref: ref.current,
+      speed: data.speed,
+      currentX: data.position[0],
+      crossedBoundary: false,
+    });
 
-      return () => {
-        unregisterBagAnimation(data.id);
-      };
-    }, [data.id, data.speed, data.position]);
+    return () => {
+      unregisterBagAnimation(data.id);
+    };
+  }, [data.id, data.speed, data.position]);
 
-    const showDetails = enableProceduralTextures;
-    const qualityColor = QUALITY_COLORS[data.quality];
+  const showDetails = enableProceduralTextures;
+  const qualityColor = QUALITY_COLORS[data.quality];
 
-    // Extract position values for stable initial position (animated via ref after mount)
-    const initPosX = data.position[0];
-    const initPosY = data.position[1];
-    const initPosZ = data.position[2];
-    const initialPosition = useMemo<[number, number, number]>(
-      () => [initPosX, initPosY, initPosZ],
-      [initPosX, initPosY, initPosZ]
-    );
+  // Extract position values for stable initial position (animated via ref after mount)
+  const initPosX = data.position[0];
+  const initPosY = data.position[1];
+  const initPosZ = data.position[2];
+  const initialPosition = useMemo<[number, number, number]>(
+    () => [initPosX, initPosY, initPosZ],
+    [initPosX, initPosY, initPosZ]
+  );
 
-    return (
-      <group
-        ref={ref}
-        position={initialPosition}
-        rotation={[0, data.rotation, 0]}
-        onPointerOver={() => setHovered(true)}
-        onPointerOut={() => setHovered(false)}
-      >
-        {/* Bag body - main object keeps shadow */}
-        <mesh castShadow position={[0, 0.25, 0]}>
-          <boxGeometry args={[0.6, 0.5, 0.9]} />
-          <meshStandardMaterial
-            color={hovered ? '#fff7ed' : '#fef3c7'}
-            roughness={0.9}
-            emissive={hovered ? '#fbbf24' : '#000000'}
-            emissiveIntensity={hovered ? 0.1 : 0}
-          />
-        </mesh>
+  return (
+    <group
+      ref={ref}
+      position={initialPosition}
+      rotation={[0, data.rotation, 0]}
+      onPointerOver={() => setHovered(true)}
+      onPointerOut={() => setHovered(false)}
+    >
+      {/* Bag body - main object keeps shadow */}
+      <mesh castShadow position={[0, 0.25, 0]}>
+        <boxGeometry args={[0.6, 0.5, 0.9]} />
+        <meshStandardMaterial
+          color={hovered ? '#fff7ed' : '#fef3c7'}
+          roughness={0.9}
+          emissive={hovered ? '#fbbf24' : '#000000'}
+          emissiveIntensity={hovered ? 0.1 : 0}
+        />
+      </mesh>
 
-        {/* Quality-colored label stripe */}
-        <mesh position={[0, 0.25, 0.46]}>
-          <planeGeometry args={[0.5, 0.3]} />
-          <meshBasicMaterial color={qualityColor} />
-        </mesh>
+      {/* Quality-colored label stripe */}
+      <mesh position={[0, 0.25, 0.46]}>
+        <planeGeometry args={[0.5, 0.3]} />
+        <meshBasicMaterial color={qualityColor} />
+      </mesh>
 
-        {/* Batch number text on bag (3D text) */}
-        {showDetails && (
-          <Text
-            position={[0, 0.25, 0.47]}
-            fontSize={0.06}
-            color="white"
-            anchorX="center"
-            anchorY="middle"
-            font={undefined}
-          >
-            {data.batchNumber}
-          </Text>
-        )}
+      {/* Batch number text on bag (3D text) */}
+      {showDetails && (
+        <Text
+          position={[0, 0.25, 0.47]}
+          fontSize={0.06}
+          color="white"
+          anchorX="center"
+          anchorY="middle"
+          font={undefined}
+        >
+          {data.batchNumber}
+        </Text>
+      )}
 
-        {/* Weight indicator */}
-        {showDetails && (
-          <Text
-            position={[0, 0.15, 0.47]}
-            fontSize={0.04}
-            color="white"
-            anchorX="center"
-            anchorY="middle"
-            font={undefined}
-          >
-            {data.weight}kg
-          </Text>
-        )}
+      {/* Weight indicator */}
+      {showDetails && (
+        <Text
+          position={[0, 0.15, 0.47]}
+          fontSize={0.04}
+          color="white"
+          anchorX="center"
+          anchorY="middle"
+          font={undefined}
+        >
+          {data.weight}kg
+        </Text>
+      )}
 
-        {/* Bag stitching detail - NO SHADOWS for small details */}
-        {showDetails && (
-          <>
-            <mesh position={[0, 0.51, 0]}>
-              <boxGeometry args={[0.58, 0.02, 0.88]} />
-              <meshStandardMaterial color="#d4c4a8" roughness={1} />
-            </mesh>
-            {/* Top fold */}
-            <mesh position={[0, 0.52, 0.2]} rotation={[0.2, 0, 0]}>
-              <boxGeometry args={[0.5, 0.01, 0.2]} />
-              <meshStandardMaterial color="#f5f0e6" roughness={0.95} />
-            </mesh>
-          </>
-        )}
+      {/* Bag stitching detail - NO SHADOWS for small details */}
+      {showDetails && (
+        <>
+          <mesh position={[0, 0.51, 0]}>
+            <boxGeometry args={[0.58, 0.02, 0.88]} />
+            <meshStandardMaterial color="#d4c4a8" roughness={1} />
+          </mesh>
+          {/* Top fold */}
+          <mesh position={[0, 0.52, 0.2]} rotation={[0.2, 0, 0]}>
+            <boxGeometry args={[0.5, 0.01, 0.2]} />
+            <meshStandardMaterial color="#f5f0e6" roughness={0.95} />
+          </mesh>
+        </>
+      )}
 
-        {/* Hover tooltip with full batch info */}
-        {hovered && (
-          <Html position={[0, 0.8, 0]} center distanceFactor={10}>
-            <div className="bg-slate-900/95 backdrop-blur px-3 py-2 rounded-lg border border-slate-700 shadow-xl pointer-events-none min-w-[120px]">
-              <div className="text-xs font-mono text-white font-bold">{data.batchNumber}</div>
-              <div className="text-[10px] text-slate-400 mt-1">
-                <div className="flex justify-between">
-                  <span>Quality:</span>
-                  <span style={{ color: qualityColor }} className="font-medium capitalize">
-                    {data.quality}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Weight:</span>
-                  <span className="text-white">{data.weight} kg</span>
-                </div>
+      {/* Hover tooltip with full batch info */}
+      {hovered && (
+        <Html position={[0, 0.8, 0]} center distanceFactor={10}>
+          <div className="bg-slate-900/95 backdrop-blur px-3 py-2 rounded-lg border border-slate-700 shadow-xl pointer-events-none min-w-[120px]">
+            <div className="text-xs font-mono text-white font-bold">{data.batchNumber}</div>
+            <div className="text-[10px] text-slate-400 mt-1">
+              <div className="flex justify-between">
+                <span>Quality:</span>
+                <span style={{ color: qualityColor }} className="font-medium capitalize">
+                  {data.quality}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>Weight:</span>
+                <span className="text-white">{data.weight} kg</span>
               </div>
             </div>
-          </Html>
-        )}
-      </group>
-    );
-  }
-);
+          </div>
+        </Html>
+      )}
+    </group>
+  );
+});

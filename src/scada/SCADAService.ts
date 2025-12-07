@@ -765,9 +765,12 @@ export async function initializeSCADA(config?: Partial<SCADAConfig>): Promise<SC
       if (scadaServiceInstance) {
         await scadaServiceInstance.stop();
       }
-      scadaServiceInstance = new SCADAService(config);
-      await scadaServiceInstance.start();
-      return scadaServiceInstance;
+      // Store in local variable to avoid race condition where shutdownSCADA
+      // sets scadaServiceInstance = null while we're still initializing
+      const service = new SCADAService(config);
+      scadaServiceInstance = service;
+      await service.start();
+      return service; // Return local variable, not module-level (may be nulled by shutdown)
     } finally {
       initializationPromise = null;
     }

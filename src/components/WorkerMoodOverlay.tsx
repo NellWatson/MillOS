@@ -60,7 +60,9 @@ function animateSpeechBubble(entry: SpeechBubbleEntry, elapsedTime: number) {
 function animateMoodIndicator(entry: MoodIndicatorEntry, elapsedTime: number) {
   if (entry.groupRef.current) {
     const shouldPulse =
-      entry.moodState === 'tired' || entry.moodState === 'frustrated' || entry.moodState === 'hangry';
+      entry.moodState === 'tired' ||
+      entry.moodState === 'frustrated' ||
+      entry.moodState === 'hangry';
     if (shouldPulse) {
       entry.pulseRef.current = Math.sin(elapsedTime * 3) * 0.15 + 1;
       entry.groupRef.current.scale.setScalar(entry.pulseRef.current);
@@ -192,7 +194,10 @@ const SpeechBubble: React.FC<SpeechBubbleProps> = React.memo(({ text, position, 
     if (context) return; // Manager handles animation
     if (!isTabVisible) return;
     if (quality === 'low') return;
-    animateSpeechBubble({ type: 'speechBubble', groupRef, phase: phaseRef.current, baseY }, state.clock.elapsedTime);
+    animateSpeechBubble(
+      { type: 'speechBubble', groupRef, phase: phaseRef.current, baseY },
+      state.clock.elapsedTime
+    );
   });
 
   const bubbleColor = MOOD_COLORS[moodState];
@@ -460,7 +465,9 @@ export const useMoodSimulation = () => {
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   // Graphics store for quality and perfDebug checks
   const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
-  const disableWorkerMoods = useGraphicsStore((state) => state.graphics.perfDebug?.disableWorkerMoods);
+  const disableWorkerMoods = useGraphicsStore(
+    (state) => state.graphics.perfDebug?.disableWorkerMoods
+  );
 
   useFrame(() => {
     // PERFORMANCE: Skip mood simulation if disabled via perfDebug

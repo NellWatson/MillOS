@@ -180,17 +180,114 @@ const Truck: React.FC<{ color: string; company: string }> = ({ color, company })
         <meshStandardMaterial color="#e2e8f0" metalness={0.5} roughness={0.3} />
       </mesh>
 
-      {/* Company name on trailer */}
-      <Text
-        position={[1.76, 2.5, -4]}
-        rotation={[0, Math.PI / 2, 0]}
-        fontSize={0.4}
-        color={color}
-        anchorX="center"
-        anchorY="middle"
-      >
-        {company}
-      </Text>
+      {/* Company Logos on trailer sides */}
+      {company === 'GRAIN CO' ? (
+        <>
+          {/* Right side logo */}
+          <group position={[1.76, 2.5, -4]} rotation={[0, Math.PI / 2, 0]}>
+            <mesh position={[0, 0, 0.01]}>
+              <boxGeometry args={[8.5, 2.8, 0.05]} />
+              <meshStandardMaterial color="#991b1b" metalness={0.35} roughness={0.55} />
+            </mesh>
+            <Text
+              position={[0, 0.4, 0.06]}
+              fontSize={0.7}
+              color="#fbbf24"
+              anchorX="center"
+              anchorY="middle"
+            >
+              GRAIN CO
+            </Text>
+            <Text
+              position={[0, -0.35, 0.06]}
+              fontSize={0.3}
+              color="#fef3c7"
+              anchorX="center"
+              anchorY="middle"
+            >
+              Premium Grain Transport
+            </Text>
+          </group>
+          {/* Left side logo */}
+          <group position={[-1.76, 2.5, -4]} rotation={[0, -Math.PI / 2, 0]}>
+            <mesh position={[0, 0, 0.01]}>
+              <boxGeometry args={[8.5, 2.8, 0.05]} />
+              <meshStandardMaterial color="#991b1b" metalness={0.35} roughness={0.55} />
+            </mesh>
+            <Text
+              position={[0, 0.4, 0.06]}
+              fontSize={0.7}
+              color="#fbbf24"
+              anchorX="center"
+              anchorY="middle"
+            >
+              GRAIN CO
+            </Text>
+            <Text
+              position={[0, -0.35, 0.06]}
+              fontSize={0.3}
+              color="#fef3c7"
+              anchorX="center"
+              anchorY="middle"
+            >
+              Premium Grain Transport
+            </Text>
+          </group>
+        </>
+      ) : (
+        <>
+          {/* Right side logo - FLOUR EXPRESS */}
+          <group position={[1.76, 2.5, -4]} rotation={[0, Math.PI / 2, 0]}>
+            <mesh position={[0, 0, 0.01]}>
+              <boxGeometry args={[8.5, 2.8, 0.05]} />
+              <meshStandardMaterial color="#1e40af" metalness={0.35} roughness={0.55} />
+            </mesh>
+            <Text
+              position={[0, 0.4, 0.06]}
+              fontSize={0.6}
+              color="#fef3c7"
+              anchorX="center"
+              anchorY="middle"
+            >
+              FLOUR EXPRESS
+            </Text>
+            <Text
+              position={[0, -0.35, 0.06]}
+              fontSize={0.25}
+              color="#93c5fd"
+              anchorX="center"
+              anchorY="middle"
+            >
+              Fast & Fresh Delivery
+            </Text>
+          </group>
+          {/* Left side logo - FLOUR EXPRESS */}
+          <group position={[-1.76, 2.5, -4]} rotation={[0, -Math.PI / 2, 0]}>
+            <mesh position={[0, 0, 0.01]}>
+              <boxGeometry args={[8.5, 2.8, 0.05]} />
+              <meshStandardMaterial color="#1e40af" metalness={0.35} roughness={0.55} />
+            </mesh>
+            <Text
+              position={[0, 0.4, 0.06]}
+              fontSize={0.6}
+              color="#fef3c7"
+              anchorX="center"
+              anchorY="middle"
+            >
+              FLOUR EXPRESS
+            </Text>
+            <Text
+              position={[0, -0.35, 0.06]}
+              fontSize={0.25}
+              color="#93c5fd"
+              anchorX="center"
+              anchorY="middle"
+            >
+              Fast & Fresh Delivery
+            </Text>
+          </group>
+        </>
+      )}
 
       {/* Wheels - Front */}
       {[-1.3, 1.3].map((x, i) => (

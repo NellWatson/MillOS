@@ -6,15 +6,15 @@ export type GraphicsQuality = 'low' | 'medium' | 'high' | 'ultra';
 
 // Performance debug toggles - disable systems for A/B testing
 export interface PerfDebugSettings {
-  disableWorkerMoods: boolean;     // Disable useMoodSimulation hook
-  disableTruckBay: boolean;        // Disable TruckBay (28+ useFrame hooks)
-  disableWorkerSystem: boolean;    // Disable WorkerSystem (3+ useFrame hooks per worker)
-  disableForkliftSystem: boolean;  // Disable ForkliftSystem
-  disableConveyorSystem: boolean;  // Disable ConveyorSystem
-  disableMachines: boolean;        // Disable Machines (9 useFrame hooks)
-  disableEnvironment: boolean;     // Disable FactoryEnvironment
-  disableAllAnimations: boolean;   // Master toggle - disable all useFrame hooks
-  showPerfOverlay: boolean;        // Show performance metrics overlay
+  disableWorkerMoods: boolean; // Disable useMoodSimulation hook
+  disableTruckBay: boolean; // Disable TruckBay (28+ useFrame hooks)
+  disableWorkerSystem: boolean; // Disable WorkerSystem (3+ useFrame hooks per worker)
+  disableForkliftSystem: boolean; // Disable ForkliftSystem
+  disableConveyorSystem: boolean; // Disable ConveyorSystem
+  disableMachines: boolean; // Disable Machines (9 useFrame hooks)
+  disableEnvironment: boolean; // Disable FactoryEnvironment
+  disableAllAnimations: boolean; // Master toggle - disable all useFrame hooks
+  showPerfOverlay: boolean; // Show performance metrics overlay
 }
 
 export interface GraphicsSettings {

@@ -45,6 +45,49 @@ class AudioManager {
   // Sound source positions for spatial calculation
   private soundPositions: Map<string, { x: number; y: number; z: number }> = new Map();
 
+  // Background music
+  private musicAudio: HTMLAudioElement | null = null;
+  private _musicEnabled: boolean = true;
+  private _musicVolume: number = 0.3;
+  private _currentTrackIndex: number = 0;
+
+  // TTS (Text-to-Speech) for PA announcements
+  private _ttsEnabled: boolean = true; // On by default
+  private _ttsVoice: SpeechSynthesisVoice | null = null;
+  private _ttsVoiceLoaded: boolean = false;
+
+  // Available music tracks (shuffled on init)
+  // Music by Kevin MacLeod (incompetech.com) - Licensed under CC BY 3.0/4.0
+  // Note: Hardcoded /v0.10/ base path for this version
+  private readonly allMusicTracks = [
+    { id: 'the_builder', name: 'The Builder', file: '/v0.10/The Builder.mp3' },
+    { id: 'space_jazz', name: 'Space Jazz', file: '/v0.10/Space Jazz.mp3' },
+    { id: 'upbeat_forever', name: 'Upbeat Forever', file: '/v0.10/Upbeat Forever.mp3' },
+    { id: 'fuzzball_parade', name: 'Fuzzball Parade', file: '/v0.10/Fuzzball Parade.mp3' },
+    { id: 'i_got_a_stick', name: 'I Got a Stick', file: '/v0.10/I Got a Stick Feat James Gavins.mp3' },
+    { id: 'boogie_party', name: 'Boogie Party', file: '/v0.10/Boogie Party.mp3' },
+    { id: 'voxel_revolution', name: 'Voxel Revolution', file: '/v0.10/Voxel Revolution.mp3' },
+    { id: 'newer_wave', name: 'Newer Wave', file: '/v0.10/Newer Wave.mp3' },
+    { id: 'neon_laser_horizon', name: 'Neon Laser Horizon', file: '/v0.10/Neon Laser Horizon.mp3' },
+    { id: 'cloud_dancer', name: 'Cloud Dancer', file: '/v0.10/Cloud Dancer.mp3' },
+  ];
+
+  // Shuffled playlist (Fisher-Yates shuffle on init)
+  private musicTracks: { id: string; name: string; file: string }[];
+
+  constructor() {
+    // Shuffle tracks on initialization using Fisher-Yates algorithm
+    this.musicTracks = [...this.allMusicTracks];
+    this.shufflePlaylist();
+  }
+
+  private shufflePlaylist(): void {
+    for (let i = this.musicTracks.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.musicTracks[i], this.musicTracks[j]] = [this.musicTracks[j], this.musicTracks[i]];
+    }
+  }
+
   get muted(): boolean {
     return this._muted;
   }
@@ -52,6 +95,7 @@ class AudioManager {
   set muted(value: boolean) {
     this._muted = value;
     this.updateMasterVolume();
+    this.updateMusicVolume();
     this.notifyListeners();
   }
 
@@ -63,6 +107,100 @@ class AudioManager {
     this._volume = Math.max(0, Math.min(1, value));
     this.updateMasterVolume();
     this.notifyListeners();
+  }
+
+  get musicEnabled(): boolean {
+    return this._musicEnabled;
+  }
+
+  set musicEnabled(value: boolean) {
+    this._musicEnabled = value;
+    if (value) {
+      this.startMusic();
+    } else {
+      this.stopMusic();
+    }
+    this.notifyListeners();
+  }
+
+  get musicVolume(): number {
+    return this._musicVolume;
+  }
+
+  set musicVolume(value: number) {
+    this._musicVolume = Math.max(0, Math.min(1, value));
+    this.updateMusicVolume();
+    this.notifyListeners();
+  }
+
+  get currentTrack(): { id: string; name: string; file: string } {
+    return this.musicTracks[this._currentTrackIndex];
+  }
+
+  get trackCount(): number {
+    return this.musicTracks.length;
+  }
+
+  get trackIndex(): number {
+    return this._currentTrackIndex;
+  }
+
+  nextTrack(): void {
+    this._currentTrackIndex = this._currentTrackIndex + 1;
+    // Reshuffle playlist when we've played all tracks
+    if (this._currentTrackIndex >= this.musicTracks.length) {
+      this._currentTrackIndex = 0;
+      this.shufflePlaylist();
+    }
+    if (this._musicEnabled && this.musicAudio) {
+      this.musicAudio.src = this.currentTrack.file;
+      this.musicAudio.play().catch(() => {});
+    }
+    this.notifyListeners();
+  }
+
+  prevTrack(): void {
+    this._currentTrackIndex = (this._currentTrackIndex - 1 + this.musicTracks.length) % this.musicTracks.length;
+    if (this._musicEnabled && this.musicAudio) {
+      this.musicAudio.src = this.currentTrack.file;
+      this.musicAudio.play().catch(() => {});
+    }
+    this.notifyListeners();
+  }
+
+  private updateMusicVolume(): void {
+    if (this.musicAudio) {
+      // Music has its own independent volume control
+      this.musicAudio.volume = this._muted ? 0 : this._musicVolume;
+    }
+  }
+
+  startMusic(): void {
+    if (!this._musicEnabled) return;
+
+    if (!this.musicAudio) {
+      this.musicAudio = new Audio(this.currentTrack.file);
+      this.musicAudio.loop = false; // Don't loop single track - advance through playlist
+      this.updateMusicVolume();
+
+      // Auto-advance to next track when current ends
+      this.musicAudio.addEventListener('ended', () => {
+        this.nextTrack();
+      });
+    } else if (this.musicAudio.src !== window.location.origin + this.currentTrack.file) {
+      this.musicAudio.src = this.currentTrack.file;
+    }
+
+    this.musicAudio.play().catch(() => {
+      // Music playback failed (user interaction required)
+    });
+  }
+
+  stopMusic(): void {
+    if (this.musicAudio) {
+      this.musicAudio.pause();
+      this.musicAudio.currentTime = 0;
+    }
   }
 
   subscribe(listener: () => void): () => void {
@@ -3231,12 +3369,127 @@ class AudioManager {
     } catch { /* Audio API error - silent */ }
   }
 
+  // === TEXT-TO-SPEECH (TTS) FOR PA ANNOUNCEMENTS ===
+
+  // TTS enabled getter/setter
+  get ttsEnabled(): boolean {
+    return this._ttsEnabled;
+  }
+
+  set ttsEnabled(value: boolean) {
+    this._ttsEnabled = value;
+    if (!value) {
+      this.stopTTS();
+    }
+    this.notifyListeners();
+  }
+
+  // Initialize TTS voice - call after user interaction (browser requirement)
+  private initTTSVoice(): void {
+    if (this._ttsVoiceLoaded || !('speechSynthesis' in window)) return;
+
+    const loadVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length === 0) return;
+
+      // Use Google UK English Female for PA announcements
+      const preferredVoices = ['Google UK English Female'];
+
+      // First pass: exact name matches only
+      for (const preferred of preferredVoices) {
+        const found = voices.find((v) => v.name === preferred || v.name.includes(preferred));
+        if (found) {
+          this._ttsVoice = found;
+          break;
+        }
+      }
+
+      // Second pass: any English female voice
+      if (!this._ttsVoice) {
+        const englishFemale = voices.find(
+          (v) => v.lang.startsWith('en') && v.name.toLowerCase().includes('female')
+        );
+        if (englishFemale) {
+          this._ttsVoice = englishFemale;
+        }
+      }
+
+      // Fallback to first English voice
+      if (!this._ttsVoice) {
+        this._ttsVoice = voices.find((v) => v.lang.startsWith('en')) || voices[0];
+      }
+
+      this._ttsVoiceLoaded = true;
+    };
+
+    // Chrome loads voices asynchronously
+    if (window.speechSynthesis.getVoices().length) {
+      loadVoices();
+    } else {
+      window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+  }
+
+  // Speak a PA announcement using TTS
+  speakAnnouncement(text: string): void {
+    if (!this._ttsEnabled || this._muted || !('speechSynthesis' in window)) {
+      return;
+    }
+
+    // Ensure voice is loaded
+    if (!this._ttsVoiceLoaded) {
+      this.initTTSVoice();
+    }
+
+    // Cancel any current speech
+    this.stopTTS();
+
+    try {
+      const utterance = new SpeechSynthesisUtterance(text);
+
+      // Configure voice settings for PA-style delivery
+      if (this._ttsVoice) {
+        utterance.voice = this._ttsVoice;
+      }
+      utterance.rate = 0.9; // Slightly slower for clarity
+      utterance.pitch = 1.0;
+      utterance.volume = this._volume * 0.8; // Slightly quieter than effects
+
+      utterance.onerror = () => {
+        // TTS error - silent fail
+      };
+
+      // Play PA chime first, then speak after delay
+      this.playPAChime();
+      setTimeout(() => {
+        if (this._ttsEnabled && !this._muted) {
+          window.speechSynthesis.speak(utterance);
+        }
+      }, 1200); // Match existing PA chime timing
+    } catch {
+      // TTS playback failed - silent fail
+    }
+  }
+
+  // Stop TTS
+  stopTTS(): void {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  }
+
+  // Check if TTS is currently speaking
+  isSpeaking(): boolean {
+    return 'speechSynthesis' in window && window.speechSynthesis.speaking;
+  }
+
   // Stop all sounds
   stopAll() {
     this.stopAmbientSounds();
     this.stopOutdoorAmbient();
     this.stopRadioChatter();
     this.stopWorkerVoices();
+    this.stopTTS();
     this.stopNightAmbient();
     this.stopPASystem();
     this.stopRain();

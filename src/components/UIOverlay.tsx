@@ -122,21 +122,23 @@ const MillClockDisplay: React.FC<{ theme: 'dark' | 'light' }> = React.memo(({ th
 
   return (
     <div
-      className={`flex items-center justify-between rounded-lg px-2 py-1.5 mb-2 border ${theme === 'light' ? 'bg-slate-100 border-slate-200' : 'bg-slate-900/50 border-slate-800'
-        }`}
+      className={`flex items-center justify-between rounded-lg px-2 py-1.5 mb-2 border ${
+        theme === 'light' ? 'bg-slate-100 border-slate-200' : 'bg-slate-900/50 border-slate-800'
+      }`}
     >
       <div className="flex items-center gap-1.5">
         <shift.Icon className={`w-5 h-5 ${shift.color}`} />
         <div>
           <div
-            className={`text-lg font-mono font-bold tracking-wider leading-tight ${speed === 0
-              ? theme === 'light'
-                ? 'text-slate-400'
-                : 'text-slate-500'
-              : theme === 'light'
-                ? 'text-slate-800'
-                : 'text-white'
-              }`}
+            className={`text-lg font-mono font-bold tracking-wider leading-tight ${
+              speed === 0
+                ? theme === 'light'
+                  ? 'text-slate-400'
+                  : 'text-slate-500'
+                : theme === 'light'
+                  ? 'text-slate-800'
+                  : 'text-white'
+            }`}
           >
             {timeString}
           </div>
@@ -148,12 +150,13 @@ const MillClockDisplay: React.FC<{ theme: 'dark' | 'light' }> = React.memo(({ th
       <div className="flex items-center gap-1">
         <button
           onClick={togglePause}
-          className={`w-6 h-6 rounded flex items-center justify-center transition-all ${speed === 0
-            ? 'bg-cyan-500/20 text-cyan-400'
-            : theme === 'light'
-              ? 'bg-slate-200 text-slate-500 hover:bg-slate-300 hover:text-slate-700'
-              : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
-            }`}
+          className={`w-6 h-6 rounded flex items-center justify-center transition-all ${
+            speed === 0
+              ? 'bg-cyan-500/20 text-cyan-400'
+              : theme === 'light'
+                ? 'bg-slate-200 text-slate-500 hover:bg-slate-300 hover:text-slate-700'
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
+          }`}
           title={speed === 0 ? 'Resume' : 'Pause'}
         >
           {speed === 0 ? (
@@ -168,10 +171,11 @@ const MillClockDisplay: React.FC<{ theme: 'dark' | 'light' }> = React.memo(({ th
         </button>
         <button
           onClick={cycleSpeed}
-          className={`px-1.5 h-6 rounded text-[9px] font-mono font-bold transition-all min-w-[36px] ${theme === 'light'
-            ? 'bg-slate-200 text-slate-500 hover:bg-slate-300 hover:text-slate-700'
-            : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
-            }`}
+          className={`px-1.5 h-6 rounded text-[9px] font-mono font-bold transition-all min-w-[36px] ${
+            theme === 'light'
+              ? 'bg-slate-200 text-slate-500 hover:bg-slate-300 hover:text-slate-700'
+              : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
+          }`}
           title="Cycle speed"
         >
           {speedLabel}
@@ -249,14 +253,16 @@ const SafetyMetricsDisplay: React.FC = () => {
 
   return (
     <div
-      className={`rounded-lg p-2 mb-2 border ${theme === 'light' ? 'bg-slate-50 border-slate-200' : 'bg-slate-900/50 border-slate-800'
-        }`}
+      className={`rounded-lg p-2 mb-2 border ${
+        theme === 'light' ? 'bg-slate-50 border-slate-200' : 'bg-slate-900/50 border-slate-800'
+      }`}
     >
       <div className="flex items-center gap-1.5 mb-2">
         <Activity className="w-3.5 h-3.5 text-green-500" />
         <span
-          className={`text-[10px] font-bold uppercase tracking-wider ${theme === 'light' ? 'text-slate-500' : 'text-slate-400'
-            }`}
+          className={`text-[10px] font-bold uppercase tracking-wider ${
+            theme === 'light' ? 'text-slate-500' : 'text-slate-400'
+          }`}
         >
           Safety Stats
         </span>
@@ -351,11 +357,11 @@ const EmergencyEnvironmentPanel: React.FC = () => {
     label: string;
     icon: string;
   }> = [
-      { value: 'clear', label: 'Clear', icon: 'sun' },
-      { value: 'cloudy', label: 'Cloudy', icon: 'cloud' },
-      { value: 'rain', label: 'Rain', icon: 'rain' },
-      { value: 'storm', label: 'Storm', icon: 'bolt' },
-    ];
+    { value: 'clear', label: 'Clear', icon: 'sun' },
+    { value: 'cloudy', label: 'Cloudy', icon: 'cloud' },
+    { value: 'rain', label: 'Rain', icon: 'rain' },
+    { value: 'storm', label: 'Storm', icon: 'bolt' },
+  ];
 
   return (
     <div className="border-t border-slate-700/50 pt-2 mt-2">
@@ -398,12 +404,13 @@ const EmergencyEnvironmentPanel: React.FC = () => {
               </div>
               <button
                 onClick={() => (emergencyDrillMode ? endEmergencyDrill() : startEmergencyDrill())}
-                className={`w-full py-2 px-3 rounded-lg font-bold text-sm transition-all ${emergencyDrillMode
-                  ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse'
-                  : emergencyActive
-                    ? 'bg-orange-600 text-white cursor-not-allowed'
-                    : 'bg-orange-500 hover:bg-orange-600 text-white'
-                  }`}
+                className={`w-full py-2 px-3 rounded-lg font-bold text-sm transition-all ${
+                  emergencyDrillMode
+                    ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse'
+                    : emergencyActive
+                      ? 'bg-orange-600 text-white cursor-not-allowed'
+                      : 'bg-orange-500 hover:bg-orange-600 text-white'
+                }`}
                 disabled={emergencyActive && !emergencyDrillMode}
               >
                 {emergencyDrillMode
@@ -427,12 +434,13 @@ const EmergencyEnvironmentPanel: React.FC = () => {
               </div>
               <button
                 onClick={() => triggerShiftChange()}
-                className={`w-full py-2 px-3 rounded-lg font-bold text-sm transition-all ${shiftChangeActive
-                  ? 'bg-blue-600 text-white animate-pulse cursor-not-allowed'
-                  : emergencyActive
-                    ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
-                    : 'bg-blue-500 hover:bg-blue-600 text-white'
-                  }`}
+                className={`w-full py-2 px-3 rounded-lg font-bold text-sm transition-all ${
+                  shiftChangeActive
+                    ? 'bg-blue-600 text-white animate-pulse cursor-not-allowed'
+                    : emergencyActive
+                      ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
+                      : 'bg-blue-500 hover:bg-blue-600 text-white'
+                }`}
                 disabled={shiftChangeActive || emergencyActive}
               >
                 {shiftChangeActive ? 'SHIFT CHANGE IN PROGRESS...' : 'TRIGGER SHIFT CHANGE'}
@@ -454,10 +462,11 @@ const EmergencyEnvironmentPanel: React.FC = () => {
                   <button
                     key={opt.value}
                     onClick={() => setWeather(opt.value)}
-                    className={`py-1.5 px-2 rounded text-[10px] font-medium transition-all ${weather === opt.value
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                      }`}
+                    className={`py-1.5 px-2 rounded text-[10px] font-medium transition-all ${
+                      weather === opt.value
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    }`}
                   >
                     {opt.label}
                   </button>
@@ -477,10 +486,11 @@ const EmergencyEnvironmentPanel: React.FC = () => {
                 <div className="flex gap-1">
                   <button
                     onClick={() => setShowHeatMap(!showHeatMap)}
-                    className={`py-1 px-3 rounded text-[10px] font-medium transition-all ${showHeatMap
-                      ? 'bg-green-600 text-white'
-                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                      }`}
+                    className={`py-1 px-3 rounded text-[10px] font-medium transition-all ${
+                      showHeatMap
+                        ? 'bg-green-600 text-white'
+                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    }`}
                   >
                     {showHeatMap ? 'ON' : 'OFF'}
                   </button>
@@ -521,95 +531,95 @@ const GraphicsOptionsPanel: React.FC = () => {
     icon: React.ReactNode;
     category: string;
   }> = [
-      // Post-processing
-      {
-        key: 'enableSSAO',
-        label: 'Ambient Occlusion',
-        icon: <Eye className="w-3 h-3" />,
-        category: 'Post-Processing',
-      },
-      {
-        key: 'enableBloom',
-        label: 'Bloom Glow',
-        icon: <Sparkles className="w-3 h-3" />,
-        category: 'Post-Processing',
-      },
-      {
-        key: 'enableVignette',
-        label: 'Vignette',
-        icon: <Monitor className="w-3 h-3" />,
-        category: 'Post-Processing',
-      },
-      {
-        key: 'enableChromaticAberration',
-        label: 'Chromatic Aberration',
-        icon: <Layers className="w-3 h-3" />,
-        category: 'Post-Processing',
-      },
-      {
-        key: 'enableFilmGrain',
-        label: 'Film Grain',
-        icon: <Wind className="w-3 h-3" />,
-        category: 'Post-Processing',
-      },
-      // Scene effects
-      {
-        key: 'enableDustParticles',
-        label: 'Dust Particles',
-        icon: <Wind className="w-3 h-3" />,
-        category: 'Particles',
-      },
-      {
-        key: 'enableGrainFlow',
-        label: 'Grain Flow',
-        icon: <Wind className="w-3 h-3" />,
-        category: 'Particles',
-      },
-      {
-        key: 'enableAtmosphericHaze',
-        label: 'Atmospheric Haze',
-        icon: <Wind className="w-3 h-3" />,
-        category: 'Particles',
-      },
-      // Machine enhancements
-      {
-        key: 'enableMachineVibration',
-        label: 'Machine Vibration',
-        icon: <Activity className="w-3 h-3" />,
-        category: 'Machines',
-      },
-      {
-        key: 'enableProceduralTextures',
-        label: 'Detailed Textures',
-        icon: <Layers className="w-3 h-3" />,
-        category: 'Machines',
-      },
-      {
-        key: 'enableWeathering',
-        label: 'Weathering Effects',
-        icon: <Wind className="w-3 h-3" />,
-        category: 'Machines',
-      },
-      // Lighting & Shadows
-      {
-        key: 'enableLightShafts',
-        label: 'Light Shafts',
-        icon: <Sun className="w-3 h-3" />,
-        category: 'Lighting',
-      },
-      {
-        key: 'enableContactShadows',
-        label: 'Contact Shadows',
-        icon: <Layers className="w-3 h-3" />,
-        category: 'Lighting',
-      },
-      {
-        key: 'enableHighResShadows',
-        label: 'High-Res Shadows',
-        icon: <Eye className="w-3 h-3" />,
-        category: 'Lighting',
-      },
-    ];
+    // Post-processing
+    {
+      key: 'enableSSAO',
+      label: 'Ambient Occlusion',
+      icon: <Eye className="w-3 h-3" />,
+      category: 'Post-Processing',
+    },
+    {
+      key: 'enableBloom',
+      label: 'Bloom Glow',
+      icon: <Sparkles className="w-3 h-3" />,
+      category: 'Post-Processing',
+    },
+    {
+      key: 'enableVignette',
+      label: 'Vignette',
+      icon: <Monitor className="w-3 h-3" />,
+      category: 'Post-Processing',
+    },
+    {
+      key: 'enableChromaticAberration',
+      label: 'Chromatic Aberration',
+      icon: <Layers className="w-3 h-3" />,
+      category: 'Post-Processing',
+    },
+    {
+      key: 'enableFilmGrain',
+      label: 'Film Grain',
+      icon: <Wind className="w-3 h-3" />,
+      category: 'Post-Processing',
+    },
+    // Scene effects
+    {
+      key: 'enableDustParticles',
+      label: 'Dust Particles',
+      icon: <Wind className="w-3 h-3" />,
+      category: 'Particles',
+    },
+    {
+      key: 'enableGrainFlow',
+      label: 'Grain Flow',
+      icon: <Wind className="w-3 h-3" />,
+      category: 'Particles',
+    },
+    {
+      key: 'enableAtmosphericHaze',
+      label: 'Atmospheric Haze',
+      icon: <Wind className="w-3 h-3" />,
+      category: 'Particles',
+    },
+    // Machine enhancements
+    {
+      key: 'enableMachineVibration',
+      label: 'Machine Vibration',
+      icon: <Activity className="w-3 h-3" />,
+      category: 'Machines',
+    },
+    {
+      key: 'enableProceduralTextures',
+      label: 'Detailed Textures',
+      icon: <Layers className="w-3 h-3" />,
+      category: 'Machines',
+    },
+    {
+      key: 'enableWeathering',
+      label: 'Weathering Effects',
+      icon: <Wind className="w-3 h-3" />,
+      category: 'Machines',
+    },
+    // Lighting & Shadows
+    {
+      key: 'enableLightShafts',
+      label: 'Light Shafts',
+      icon: <Sun className="w-3 h-3" />,
+      category: 'Lighting',
+    },
+    {
+      key: 'enableContactShadows',
+      label: 'Contact Shadows',
+      icon: <Layers className="w-3 h-3" />,
+      category: 'Lighting',
+    },
+    {
+      key: 'enableHighResShadows',
+      label: 'High-Res Shadows',
+      icon: <Eye className="w-3 h-3" />,
+      category: 'Lighting',
+    },
+  ];
 
   // Group settings by category
   const categories = ['Post-Processing', 'Particles', 'Machines', 'Lighting'];
@@ -628,10 +638,11 @@ const GraphicsOptionsPanel: React.FC = () => {
         }}
         aria-expanded={expanded}
         aria-controls="graphics-options-panel"
-        className={`w-full flex items-center justify-between text-xs font-medium transition-colors py-1 ${theme === 'light'
-          ? 'text-slate-600 hover:text-slate-800'
-          : 'text-slate-300 hover:text-white'
-          }`}
+        className={`w-full flex items-center justify-between text-xs font-medium transition-colors py-1 ${
+          theme === 'light'
+            ? 'text-slate-600 hover:text-slate-800'
+            : 'text-slate-300 hover:text-white'
+        }`}
       >
         <span className="flex items-center gap-2">
           <Settings className="w-4 h-4 text-purple-400" aria-hidden="true" />
@@ -664,18 +675,19 @@ const GraphicsOptionsPanel: React.FC = () => {
                 <button
                   key={quality}
                   onClick={() => setGraphicsQuality(quality)}
-                  className={`flex-1 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all ${graphics.graphics.quality === quality
-                    ? quality === 'low'
-                      ? 'bg-slate-600 text-white'
-                      : quality === 'medium'
-                        ? 'bg-yellow-600 text-white'
-                        : quality === 'high'
-                          ? 'bg-cyan-600 text-white'
-                          : 'bg-purple-600 text-white'
-                    : theme === 'light'
-                      ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                      : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                    }`}
+                  className={`flex-1 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all ${
+                    graphics.graphics.quality === quality
+                      ? quality === 'low'
+                        ? 'bg-slate-600 text-white'
+                        : quality === 'medium'
+                          ? 'bg-yellow-600 text-white'
+                          : quality === 'high'
+                            ? 'bg-cyan-600 text-white'
+                            : 'bg-purple-600 text-white'
+                      : theme === 'light'
+                        ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                  }`}
                 >
                   {quality}
                 </button>
@@ -698,14 +710,15 @@ const GraphicsOptionsPanel: React.FC = () => {
                         <button
                           key={key}
                           onClick={() => setGraphicsSetting(key, !graphics.graphics[key])}
-                          className={`w-full flex items-center gap-2 px-2 py-1 rounded text-xs transition-all ${graphics.graphics[key]
-                            ? theme === 'light'
-                              ? 'bg-slate-200 text-slate-800'
-                              : 'bg-slate-700/50 text-white'
-                            : theme === 'light'
-                              ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                              : 'bg-slate-800/30 text-slate-500 hover:bg-slate-800/50'
-                            }`}
+                          className={`w-full flex items-center gap-2 px-2 py-1 rounded text-xs transition-all ${
+                            graphics.graphics[key]
+                              ? theme === 'light'
+                                ? 'bg-slate-200 text-slate-800'
+                                : 'bg-slate-700/50 text-white'
+                              : theme === 'light'
+                                ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                : 'bg-slate-800/30 text-slate-500 hover:bg-slate-800/50'
+                          }`}
                         >
                           <span
                             className={
@@ -720,12 +733,13 @@ const GraphicsOptionsPanel: React.FC = () => {
                           </span>
                           <span className="flex-1 text-left">{label}</span>
                           <span
-                            className={`w-2 h-2 rounded-full ${graphics[key as keyof typeof graphics]
-                              ? 'bg-green-500'
-                              : theme === 'light'
-                                ? 'bg-slate-300'
-                                : 'bg-slate-600'
-                              }`}
+                            className={`w-2 h-2 rounded-full ${
+                              graphics[key as keyof typeof graphics]
+                                ? 'bg-green-500'
+                                : theme === 'light'
+                                  ? 'bg-slate-300'
+                                  : 'bg-slate-600'
+                            }`}
                           />
                         </button>
                       ))}
@@ -762,8 +776,9 @@ const GraphicsOptionsPanel: React.FC = () => {
                 aria-valuemax={500}
                 aria-valuenow={graphics.graphics.dustParticleCount}
                 aria-valuetext={`${graphics.graphics.dustParticleCount} particles`}
-                className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-cyan-500 ${theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'
-                  } ${!graphics.graphics.enableDustParticles ? 'opacity-50' : ''}`}
+                className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-cyan-500 ${
+                  theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'
+                } ${!graphics.graphics.enableDustParticles ? 'opacity-50' : ''}`}
               />
               <div
                 className={`flex justify-between text-[9px] mt-0.5 ${theme === 'light' ? 'text-slate-400' : 'text-slate-600'}`}
@@ -955,10 +970,11 @@ const GraphicsOptionsPanel: React.FC = () => {
                 setGraphicsQuality('medium');
                 window.location.reload();
               }}
-              className={`w-full mt-2 py-1.5 rounded text-[10px] font-medium transition-all flex items-center justify-center gap-1 ${theme === 'light'
-                ? 'bg-red-100 text-red-600 hover:bg-red-200'
-                : 'bg-red-900/50 text-red-300 hover:bg-red-800/50'
-                }`}
+              className={`w-full mt-2 py-1.5 rounded text-[10px] font-medium transition-all flex items-center justify-center gap-1 ${
+                theme === 'light'
+                  ? 'bg-red-100 text-red-600 hover:bg-red-200'
+                  : 'bg-red-900/50 text-red-300 hover:bg-red-800/50'
+              }`}
             >
               <RotateCcw className="w-3 h-3" />
               Reset All Settings
@@ -991,10 +1007,11 @@ const EmergencyStopButton: React.FC = () => {
   return (
     <button
       onClick={handleEmergencyStop}
-      className={`w-full py-2.5 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 ${forkliftEmergencyStop
-        ? 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-500/30 animate-pulse'
-        : 'bg-slate-800 text-red-400 hover:bg-red-900/50 border border-red-800'
-        }`}
+      className={`w-full py-2.5 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 ${
+        forkliftEmergencyStop
+          ? 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-500/30 animate-pulse'
+          : 'bg-slate-800 text-red-400 hover:bg-red-900/50 border border-red-800'
+      }`}
     >
       <OctagonX className="w-5 h-5" />
       {forkliftEmergencyStop ? 'RELEASE E-STOP' : 'EMERGENCY STOP'}
@@ -1061,10 +1078,11 @@ const IncidentHistoryPanel: React.FC = () => {
         }}
         aria-expanded={expanded}
         aria-controls="incident-history-panel"
-        className={`w-full flex items-center justify-between text-xs font-medium transition-colors py-1 ${theme === 'light'
-          ? 'text-slate-600 hover:text-slate-800'
-          : 'text-slate-300 hover:text-white'
-          }`}
+        className={`w-full flex items-center justify-between text-xs font-medium transition-colors py-1 ${
+          theme === 'light'
+            ? 'text-slate-600 hover:text-slate-800'
+            : 'text-slate-300 hover:text-white'
+        }`}
       >
         <span className="flex items-center gap-2">
           <History className="w-4 h-4 text-blue-500" aria-hidden="true" />
@@ -1115,10 +1133,11 @@ const IncidentHistoryPanel: React.FC = () => {
                 {safetyIncidents.length > 0 && (
                   <button
                     onClick={clearSafetyIncidents}
-                    className={`w-full text-[10px] transition-colors py-1 ${theme === 'light'
-                      ? 'text-slate-400 hover:text-red-500'
-                      : 'text-slate-500 hover:text-red-400'
-                      }`}
+                    className={`w-full text-[10px] transition-colors py-1 ${
+                      theme === 'light'
+                        ? 'text-slate-400 hover:text-red-500'
+                        : 'text-slate-500 hover:text-red-400'
+                    }`}
                   >
                     Clear history
                   </button>
@@ -1233,10 +1252,11 @@ const SafetyAnalyticsPanel: React.FC = () => {
         }}
         aria-expanded={expanded}
         aria-controls="safety-analytics-panel"
-        className={`w-full flex items-center justify-between text-xs font-medium transition-colors py-1 ${theme === 'light'
-          ? 'text-slate-600 hover:text-slate-800'
-          : 'text-slate-300 hover:text-white'
-          }`}
+        className={`w-full flex items-center justify-between text-xs font-medium transition-colors py-1 ${
+          theme === 'light'
+            ? 'text-slate-600 hover:text-slate-800'
+            : 'text-slate-300 hover:text-white'
+        }`}
       >
         <span className="flex items-center gap-2">
           <TrendingUp className="w-4 h-4 text-cyan-500" aria-hidden="true" />
@@ -1312,21 +1332,23 @@ const SafetyAnalyticsPanel: React.FC = () => {
                 <div className="flex gap-1">
                   <button
                     onClick={() => setShowIncidentHeatMap(!showIncidentHeatMap)}
-                    className={`py-1 px-3 rounded text-[10px] font-medium transition-all ${showIncidentHeatMap
-                      ? 'bg-red-600 text-white'
-                      : theme === 'light'
-                        ? 'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                      }`}
+                    className={`py-1 px-3 rounded text-[10px] font-medium transition-all ${
+                      showIncidentHeatMap
+                        ? 'bg-red-600 text-white'
+                        : theme === 'light'
+                          ? 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                          : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    }`}
                   >
                     {showIncidentHeatMap ? 'ON' : 'OFF'}
                   </button>
                   <button
                     onClick={clearIncidentHeatMap}
-                    className={`py-1 px-2 rounded text-[10px] font-medium ${theme === 'light'
-                      ? 'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                      }`}
+                    className={`py-1 px-2 rounded text-[10px] font-medium ${
+                      theme === 'light'
+                        ? 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    }`}
                   >
                     Clear
                   </button>
@@ -1369,12 +1391,13 @@ const SafetyAnalyticsPanel: React.FC = () => {
                           {id.replace('forklift-', 'Forklift ')}
                         </span>
                         <span
-                          className={`font-bold ${efficiency >= 80
-                            ? 'text-green-500'
-                            : efficiency >= 60
-                              ? 'text-yellow-500'
-                              : 'text-red-500'
-                            }`}
+                          className={`font-bold ${
+                            efficiency >= 80
+                              ? 'text-green-500'
+                              : efficiency >= 60
+                                ? 'text-yellow-500'
+                                : 'text-red-500'
+                          }`}
                         >
                           {efficiency.toFixed(1)}%
                         </span>
@@ -1383,12 +1406,13 @@ const SafetyAnalyticsPanel: React.FC = () => {
                         className={`h-1.5 rounded-full overflow-hidden ${theme === 'light' ? 'bg-slate-200' : 'bg-slate-700'}`}
                       >
                         <div
-                          className={`h-full rounded-full transition-all ${efficiency >= 80
-                            ? 'bg-green-500'
-                            : efficiency >= 60
-                              ? 'bg-yellow-500'
-                              : 'bg-red-500'
-                            }`}
+                          className={`h-full rounded-full transition-all ${
+                            efficiency >= 80
+                              ? 'bg-green-500'
+                              : efficiency >= 60
+                                ? 'bg-yellow-500'
+                                : 'bg-red-500'
+                          }`}
                           style={{ width: `${efficiency}%` }}
                         />
                       </div>
@@ -1458,10 +1482,11 @@ const ZoneCustomizationPanel: React.FC = () => {
         }}
         aria-expanded={expanded}
         aria-controls="zone-customization-panel"
-        className={`w-full flex items-center justify-between text-xs font-medium transition-colors py-1 ${theme === 'light'
-          ? 'text-slate-600 hover:text-slate-800'
-          : 'text-slate-300 hover:text-white'
-          }`}
+        className={`w-full flex items-center justify-between text-xs font-medium transition-colors py-1 ${
+          theme === 'light'
+            ? 'text-slate-600 hover:text-slate-800'
+            : 'text-slate-300 hover:text-white'
+        }`}
       >
         <span className="flex items-center gap-2">
           <MapPin className="w-4 h-4 text-amber-500" aria-hidden="true" />
@@ -1488,8 +1513,9 @@ const ZoneCustomizationPanel: React.FC = () => {
               {speedZones.map((zone) => (
                 <div
                   key={zone.id}
-                  className={`flex items-center justify-between rounded px-2 py-1 text-xs group ${theme === 'light' ? 'bg-slate-100' : 'bg-slate-800/50'
-                    }`}
+                  className={`flex items-center justify-between rounded px-2 py-1 text-xs group ${
+                    theme === 'light' ? 'bg-slate-100' : 'bg-slate-800/50'
+                  }`}
                 >
                   <div className="flex-1 min-w-0">
                     <div
@@ -1505,10 +1531,11 @@ const ZoneCustomizationPanel: React.FC = () => {
                   </div>
                   <button
                     onClick={() => removeSpeedZone(zone.id)}
-                    className={`opacity-0 group-hover:opacity-100 p-1 transition-all ${theme === 'light'
-                      ? 'text-red-500 hover:text-red-600'
-                      : 'text-red-400 hover:text-red-300'
-                      }`}
+                    className={`opacity-0 group-hover:opacity-100 p-1 transition-all ${
+                      theme === 'light'
+                        ? 'text-red-500 hover:text-red-600'
+                        : 'text-red-400 hover:text-red-300'
+                    }`}
                     title="Remove zone"
                   >
                     <Trash2 className="w-3 h-3" />
@@ -1527,10 +1554,11 @@ const ZoneCustomizationPanel: React.FC = () => {
                   placeholder="Zone name"
                   value={newZone.name}
                   onChange={(e) => setNewZone({ ...newZone, name: e.target.value })}
-                  className={`w-full rounded px-2 py-1 text-xs border outline-none ${theme === 'light'
-                    ? 'bg-white text-slate-700 placeholder-slate-400 border-slate-300 focus:border-amber-500'
-                    : 'bg-slate-900 text-white placeholder-slate-500 border-slate-700 focus:border-amber-500'
-                    }`}
+                  className={`w-full rounded px-2 py-1 text-xs border outline-none ${
+                    theme === 'light'
+                      ? 'bg-white text-slate-700 placeholder-slate-400 border-slate-300 focus:border-amber-500'
+                      : 'bg-slate-900 text-white placeholder-slate-500 border-slate-700 focus:border-amber-500'
+                  }`}
                 />
                 <div className="grid grid-cols-3 gap-1">
                   <div>
@@ -1545,10 +1573,11 @@ const ZoneCustomizationPanel: React.FC = () => {
                       onChange={(e) =>
                         setNewZone({ ...newZone, x: parseFloat(e.target.value) || 0 })
                       }
-                      className={`w-full rounded px-1.5 py-0.5 text-xs border outline-none ${theme === 'light'
-                        ? 'bg-white text-slate-700 border-slate-300 focus:border-amber-500'
-                        : 'bg-slate-900 text-white border-slate-700 focus:border-amber-500'
-                        }`}
+                      className={`w-full rounded px-1.5 py-0.5 text-xs border outline-none ${
+                        theme === 'light'
+                          ? 'bg-white text-slate-700 border-slate-300 focus:border-amber-500'
+                          : 'bg-slate-900 text-white border-slate-700 focus:border-amber-500'
+                      }`}
                     />
                   </div>
                   <div>
@@ -1563,10 +1592,11 @@ const ZoneCustomizationPanel: React.FC = () => {
                       onChange={(e) =>
                         setNewZone({ ...newZone, z: parseFloat(e.target.value) || 0 })
                       }
-                      className={`w-full rounded px-1.5 py-0.5 text-xs border outline-none ${theme === 'light'
-                        ? 'bg-white text-slate-700 border-slate-300 focus:border-amber-500'
-                        : 'bg-slate-900 text-white border-slate-700 focus:border-amber-500'
-                        }`}
+                      className={`w-full rounded px-1.5 py-0.5 text-xs border outline-none ${
+                        theme === 'light'
+                          ? 'bg-white text-slate-700 border-slate-300 focus:border-amber-500'
+                          : 'bg-slate-900 text-white border-slate-700 focus:border-amber-500'
+                      }`}
                     />
                   </div>
                   <div>
@@ -1581,10 +1611,11 @@ const ZoneCustomizationPanel: React.FC = () => {
                       onChange={(e) =>
                         setNewZone({ ...newZone, radius: parseFloat(e.target.value) || 4 })
                       }
-                      className={`w-full rounded px-1.5 py-0.5 text-xs border outline-none ${theme === 'light'
-                        ? 'bg-white text-slate-700 border-slate-300 focus:border-amber-500'
-                        : 'bg-slate-900 text-white border-slate-700 focus:border-amber-500'
-                        }`}
+                      className={`w-full rounded px-1.5 py-0.5 text-xs border outline-none ${
+                        theme === 'light'
+                          ? 'bg-white text-slate-700 border-slate-300 focus:border-amber-500'
+                          : 'bg-slate-900 text-white border-slate-700 focus:border-amber-500'
+                      }`}
                     />
                   </div>
                 </div>
@@ -1597,10 +1628,11 @@ const ZoneCustomizationPanel: React.FC = () => {
                   </button>
                   <button
                     onClick={() => setShowAddForm(false)}
-                    className={`px-2 py-1 rounded text-xs transition-colors ${theme === 'light'
-                      ? 'bg-slate-200 hover:bg-slate-300 text-slate-700'
-                      : 'bg-slate-700 hover:bg-slate-600 text-white'
-                      }`}
+                    className={`px-2 py-1 rounded text-xs transition-colors ${
+                      theme === 'light'
+                        ? 'bg-slate-200 hover:bg-slate-300 text-slate-700'
+                        : 'bg-slate-700 hover:bg-slate-600 text-white'
+                    }`}
                   >
                     Cancel
                   </button>
@@ -1609,10 +1641,11 @@ const ZoneCustomizationPanel: React.FC = () => {
             ) : (
               <button
                 onClick={() => setShowAddForm(true)}
-                className={`w-full flex items-center justify-center gap-1 py-1.5 rounded text-xs transition-colors ${theme === 'light'
-                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                  }`}
+                className={`w-full flex items-center justify-center gap-1 py-1.5 rounded text-xs transition-colors ${
+                  theme === 'light'
+                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                }`}
               >
                 <Plus className="w-3 h-3" />
                 Add Speed Zone
@@ -1638,10 +1671,11 @@ const SafetyConfigPanel: React.FC = () => {
     >
       <button
         onClick={() => setExpanded(!expanded)}
-        className={`w-full flex items-center justify-between text-xs font-medium transition-colors py-1 ${theme === 'light'
-          ? 'text-slate-600 hover:text-slate-800'
-          : 'text-slate-300 hover:text-white'
-          }`}
+        className={`w-full flex items-center justify-between text-xs font-medium transition-colors py-1 ${
+          theme === 'light'
+            ? 'text-slate-600 hover:text-slate-800'
+            : 'text-slate-300 hover:text-white'
+        }`}
       >
         <span className="flex items-center gap-2">
           <Shield className="w-4 h-4 text-green-500" />
@@ -1676,8 +1710,9 @@ const SafetyConfigPanel: React.FC = () => {
               onChange={(e) =>
                 setSafetyConfig({ workerDetectionRadius: parseFloat(e.target.value) })
               }
-              className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-green-500 ${theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'
-                }`}
+              className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-green-500 ${
+                theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'
+              }`}
             />
           </div>
 
@@ -1700,8 +1735,9 @@ const SafetyConfigPanel: React.FC = () => {
               onChange={(e) =>
                 setSafetyConfig({ forkliftSafetyRadius: parseFloat(e.target.value) })
               }
-              className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-blue-500 ${theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'
-                }`}
+              className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-blue-500 ${
+                theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'
+              }`}
             />
           </div>
 
@@ -1722,8 +1758,9 @@ const SafetyConfigPanel: React.FC = () => {
               step="0.5"
               value={safetyConfig.pathCheckDistance}
               onChange={(e) => setSafetyConfig({ pathCheckDistance: parseFloat(e.target.value) })}
-              className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-purple-500 ${theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'
-                }`}
+              className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-purple-500 ${
+                theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'
+              }`}
             />
           </div>
 
@@ -1744,17 +1781,19 @@ const SafetyConfigPanel: React.FC = () => {
               step="0.1"
               value={safetyConfig.speedZoneSlowdown}
               onChange={(e) => setSafetyConfig({ speedZoneSlowdown: parseFloat(e.target.value) })}
-              className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-amber-500 ${theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'
-                }`}
+              className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-amber-500 ${
+                theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'
+              }`}
             />
           </div>
 
           {/* Descriptions */}
           <div
-            className={`text-[9px] space-y-1 pt-1 border-t ${theme === 'light'
-              ? 'text-slate-400 border-slate-200'
-              : 'text-slate-500 border-slate-800'
-              }`}
+            className={`text-[9px] space-y-1 pt-1 border-t ${
+              theme === 'light'
+                ? 'text-slate-400 border-slate-200'
+                : 'text-slate-500 border-slate-800'
+            }`}
           >
             <p>
               <span className="text-green-500">Worker Detection:</span> How close workers can be
@@ -1846,16 +1885,18 @@ const KeyboardShortcutsModal: React.FC<{ isOpen: boolean; onClose: () => void }>
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
-        className={`relative backdrop-blur-xl rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden ${theme === 'light'
-          ? 'bg-white/95 border border-slate-200'
-          : 'bg-slate-900/95 border border-slate-700/50'
-          }`}
+        className={`relative backdrop-blur-xl rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden ${
+          theme === 'light'
+            ? 'bg-white/95 border border-slate-200'
+            : 'bg-slate-900/95 border border-slate-700/50'
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div
-          className={`flex items-center justify-between p-4 border-b ${theme === 'light' ? 'border-slate-200' : 'border-slate-700/50'
-            }`}
+          className={`flex items-center justify-between p-4 border-b ${
+            theme === 'light' ? 'border-slate-200' : 'border-slate-700/50'
+          }`}
         >
           <div className="flex items-center gap-2">
             <Keyboard className="w-5 h-5 text-cyan-500" />
@@ -1867,10 +1908,11 @@ const KeyboardShortcutsModal: React.FC<{ isOpen: boolean; onClose: () => void }>
           </div>
           <button
             onClick={onClose}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${theme === 'light'
-              ? 'bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700'
-              : 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white'
-              }`}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+              theme === 'light'
+                ? 'bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white'
+            }`}
           >
             <X className="w-4 h-4" />
           </button>
@@ -1881,8 +1923,9 @@ const KeyboardShortcutsModal: React.FC<{ isOpen: boolean; onClose: () => void }>
           {shortcuts.map((section) => (
             <div key={section.category}>
               <h3
-                className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'
-                  }`}
+                className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${
+                  theme === 'light' ? 'text-slate-400' : 'text-slate-500'
+                }`}
               >
                 {section.category}
               </h3>
@@ -1890,8 +1933,9 @@ const KeyboardShortcutsModal: React.FC<{ isOpen: boolean; onClose: () => void }>
                 {section.items.map((item) => (
                   <div
                     key={item.key}
-                    className={`flex items-center justify-between py-1.5 px-2 rounded-lg ${theme === 'light' ? 'bg-slate-100' : 'bg-slate-800/50'
-                      }`}
+                    className={`flex items-center justify-between py-1.5 px-2 rounded-lg ${
+                      theme === 'light' ? 'bg-slate-100' : 'bg-slate-800/50'
+                    }`}
                   >
                     <span
                       className={`text-xs ${theme === 'light' ? 'text-slate-600' : 'text-slate-300'}`}
@@ -1899,10 +1943,11 @@ const KeyboardShortcutsModal: React.FC<{ isOpen: boolean; onClose: () => void }>
                       {item.description}
                     </span>
                     <kbd
-                      className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded border ${theme === 'light'
-                        ? 'bg-white text-slate-700 border-slate-300'
-                        : 'bg-slate-700 text-slate-200 border-slate-600'
-                        }`}
+                      className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded border ${
+                        theme === 'light'
+                          ? 'bg-white text-slate-700 border-slate-300'
+                          : 'bg-slate-700 text-slate-200 border-slate-600'
+                      }`}
                     >
                       {item.key}
                     </kbd>
@@ -1915,14 +1960,16 @@ const KeyboardShortcutsModal: React.FC<{ isOpen: boolean; onClose: () => void }>
 
         {/* Footer */}
         <div
-          className={`p-3 border-t text-center ${theme === 'light' ? 'border-slate-200' : 'border-slate-700/50'
-            }`}
+          className={`p-3 border-t text-center ${
+            theme === 'light' ? 'border-slate-200' : 'border-slate-700/50'
+          }`}
         >
           <p className={`text-[10px] ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}>
             Press{' '}
             <kbd
-              className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${theme === 'light' ? 'bg-slate-200 text-slate-600' : 'bg-slate-700 text-slate-300'
-                }`}
+              className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${
+                theme === 'light' ? 'bg-slate-200 text-slate-600' : 'bg-slate-700 text-slate-300'
+              }`}
             >
               ?
             </kbd>{' '}
@@ -2025,17 +2072,19 @@ const CollapsibleLegend: React.FC = () => {
       <motion.div
         initial={{ opacity: 0, x: 50 }}
         animate={{ opacity: 1, x: 0 }}
-        className={`backdrop-blur-xl rounded-xl border shadow-xl overflow-hidden ${theme === 'light'
-          ? 'bg-white/95 border-slate-200 text-slate-800'
-          : 'bg-slate-950/90 border-slate-700/50 text-white'
-          }`}
+        className={`backdrop-blur-xl rounded-xl border shadow-xl overflow-hidden ${
+          theme === 'light'
+            ? 'bg-white/95 border-slate-200 text-slate-800'
+            : 'bg-slate-950/90 border-slate-700/50 text-white'
+        }`}
       >
         <div className="flex items-center">
           {/* Drag Handle */}
           <div
             onMouseDown={handleMouseDown}
-            className={`px-1.5 py-2.5 cursor-grab transition-colors flex items-center ${theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-slate-800/50'
-              }`}
+            className={`px-1.5 py-2.5 cursor-grab transition-colors flex items-center ${
+              theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-slate-800/50'
+            }`}
             title="Drag to move"
           >
             <GripVertical
@@ -2044,8 +2093,9 @@ const CollapsibleLegend: React.FC = () => {
           </div>
           <button
             onClick={() => setExpanded(!expanded)}
-            className={`flex-1 flex items-center justify-between p-2.5 pl-1 transition-colors ${theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-slate-800/50'
-              }`}
+            className={`flex-1 flex items-center justify-between p-2.5 pl-1 transition-colors ${
+              theme === 'light' ? 'hover:bg-slate-100' : 'hover:bg-slate-800/50'
+            }`}
           >
             <div className="flex items-center gap-2">
               <Layers className="w-3.5 h-3.5 text-cyan-500" />
@@ -2141,10 +2191,11 @@ const CollapsibleLegend: React.FC = () => {
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           onClick={() => setShowGamificationBar(true)}
-          className={`w-full h-9 backdrop-blur-xl rounded-xl border flex items-center justify-center transition-colors ${theme === 'light'
-            ? 'bg-white/95 border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100'
-            : 'bg-slate-900/90 border-slate-700/50 text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
+          className={`w-full h-9 backdrop-blur-xl rounded-xl border flex items-center justify-center transition-colors ${
+            theme === 'light'
+              ? 'bg-white/95 border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100'
+              : 'bg-slate-900/90 border-slate-700/50 text-slate-400 hover:text-white hover:bg-slate-800'
+          }`}
           title="Show Quick Actions"
         >
           <Zap className="w-4 h-4" />
@@ -2263,10 +2314,11 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
         <motion.div
           initial={{ opacity: 0, x: -50 }}
           animate={{ opacity: 1, x: 0, width: panelMinimized ? 'auto' : 300 }}
-          className={`relative backdrop-blur-xl rounded-2xl text-white pointer-events-auto border shadow-2xl ${theme === 'light'
-            ? 'bg-white/95 border-slate-300/50 shadow-slate-300/20'
-            : 'bg-slate-950/95 border-cyan-500/20 shadow-cyan-500/10'
-            }`}
+          className={`relative backdrop-blur-xl rounded-2xl text-white pointer-events-auto border shadow-2xl ${
+            theme === 'light'
+              ? 'bg-white/95 border-slate-300/50 shadow-slate-300/20'
+              : 'bg-slate-950/95 border-cyan-500/20 shadow-cyan-500/10'
+          }`}
         >
           {/* Minimized Panel View */}
           {panelMinimized ? (
@@ -2279,44 +2331,48 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
               {/* Quick Action Icons */}
               <button
                 onClick={() => setPanelMinimized(false)}
-                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${theme === 'light'
-                  ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+                  theme === 'light'
+                    ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
                 title="Expand panel"
               >
                 <PanelLeft className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setShowAIPanel(!showAIPanel)}
-                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${showAIPanel
-                  ? 'bg-cyan-600 text-white'
-                  : theme === 'light'
-                    ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+                  showAIPanel
+                    ? 'bg-cyan-600 text-white'
+                    : theme === 'light'
+                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
                 title="AI Command Center"
               >
                 <Brain className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setShowZones(!showZones)}
-                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${showZones
-                  ? 'bg-orange-600 text-white'
-                  : theme === 'light'
-                    ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+                  showZones
+                    ? 'bg-orange-600 text-white'
+                    : theme === 'light'
+                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
                 title="Safety Zones"
               >
                 <Shield className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setShowShortcuts(true)}
-                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${theme === 'light'
-                  ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+                  theme === 'light'
+                    ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
                 title="Keyboard shortcuts"
               >
                 <HelpCircle className="w-4 h-4" />
@@ -2362,30 +2418,33 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => setShowShortcuts(true)}
-                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${theme === 'light'
-                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                      }`}
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                      theme === 'light'
+                        ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    }`}
                     title="Keyboard shortcuts (?)"
                   >
                     <HelpCircle className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={() => setShowAbout(true)}
-                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${theme === 'light'
-                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                      }`}
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                      theme === 'light'
+                        ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    }`}
                     title="About MillOS"
                   >
                     <Info className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={() => setPanelMinimized(true)}
-                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${theme === 'light'
-                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                      }`}
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                      theme === 'light'
+                        ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    }`}
                     title="Minimize panel (M)"
                   >
                     <PanelLeftClose className="w-3.5 h-3.5" />
@@ -2442,10 +2501,11 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                   <span className="text-xs font-medium text-slate-300">Safety Zones</span>
                   <button
                     onClick={() => setShowZones(!showZones)}
-                    className={`px-4 py-1.5 rounded-lg text-xs font-bold tracking-wider transition-all ${showZones
-                      ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30'
-                      : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                      }`}
+                    className={`px-4 py-1.5 rounded-lg text-xs font-bold tracking-wider transition-all ${
+                      showZones
+                        ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30'
+                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    }`}
                   >
                     {showZones ? 'VISIBLE' : 'HIDDEN'}
                   </button>
@@ -2478,10 +2538,11 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                       </span>
                       <button
                         onClick={() => setMuted(!muted)}
-                        className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${muted
-                          ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                          }`}
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                          muted
+                            ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        }`}
                         title={muted ? 'Unmute' : 'Mute'}
                       >
                         {muted ? (
@@ -2549,10 +2610,11 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                           setMusicEnabled(!musicEnabled);
                           if (!musicEnabled) startMusic();
                         }}
-                        className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${musicEnabled
-                          ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
-                          : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                          }`}
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                          musicEnabled
+                            ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                        }`}
                         title={musicEnabled ? 'Disable Music' : 'Enable Music'}
                       >
                         {musicEnabled ? (
@@ -2628,11 +2690,16 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                   </span>
                   <button
                     onClick={() => setTtsEnabled(!ttsEnabled)}
-                    className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all ${ttsEnabled
-                      ? 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30'
-                      : 'bg-slate-800 text-slate-500 hover:bg-slate-700'
-                      }`}
-                    title={ttsEnabled ? 'Disable PA voice announcements' : 'Enable PA voice announcements'}
+                    className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all ${
+                      ttsEnabled
+                        ? 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30'
+                        : 'bg-slate-800 text-slate-500 hover:bg-slate-700'
+                    }`}
+                    title={
+                      ttsEnabled
+                        ? 'Disable PA voice announcements'
+                        : 'Enable PA voice announcements'
+                    }
                   >
                     {ttsEnabled ? 'ON' : 'OFF'}
                   </button>
@@ -2640,10 +2707,11 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
                 <button
                   onClick={() => setShowAIPanel(!showAIPanel)}
-                  className={`w-full py-2 px-3 rounded-lg font-bold text-sm transition-all flex items-center justify-between ${showAIPanel
-                    ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-500/30'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    }`}
+                  className={`w-full py-2 px-3 rounded-lg font-bold text-sm transition-all flex items-center justify-between ${
+                    showAIPanel
+                      ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-500/30'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
                 >
                   <div className="flex items-center gap-2">
                     <Brain className="w-5 h-5" />
@@ -2692,10 +2760,11 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className={`absolute bottom-0 left-0 right-0 h-8 pointer-events-none rounded-b-2xl flex items-end justify-center pb-1 ${theme === 'light'
-                    ? 'bg-gradient-to-t from-white to-transparent'
-                    : 'bg-gradient-to-t from-slate-950 to-transparent'
-                    }`}
+                  className={`absolute bottom-0 left-0 right-0 h-8 pointer-events-none rounded-b-2xl flex items-end justify-center pb-1 ${
+                    theme === 'light'
+                      ? 'bg-gradient-to-t from-white to-transparent'
+                      : 'bg-gradient-to-t from-slate-950 to-transparent'
+                  }`}
                 >
                   <ChevronDown
                     className={`w-4 h-4 animate-bounce ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}

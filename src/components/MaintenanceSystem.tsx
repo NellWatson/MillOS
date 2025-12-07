@@ -36,15 +36,15 @@ interface MaintenanceRefs {
   type: MaintenanceRefType;
   id: string;
   // Sweeping refs
-  groupRef?: React.RefObject<THREE.Group>;
-  broomRef?: React.RefObject<THREE.Group>;
+  groupRef?: React.RefObject<THREE.Group | null>;
+  broomRef?: React.RefObject<THREE.Group | null>;
   sweepPhaseRef?: React.MutableRefObject<number>;
   positionRef?: React.MutableRefObject<THREE.Vector3>;
   targetRef?: React.MutableRefObject<THREE.Vector3>;
   directionRef?: React.MutableRefObject<THREE.Vector3>;
   // Watering refs
-  canRef?: React.RefObject<THREE.Group>;
-  waterRef?: React.RefObject<THREE.Points>;
+  canRef?: React.RefObject<THREE.Group | null>;
+  waterRef?: React.RefObject<THREE.Points | null>;
   pourPhaseRef?: React.MutableRefObject<number>;
   plantPosition?: [number, number, number];
   // Oiling refs
@@ -66,7 +66,10 @@ const MaintenanceAnimationContext = createContext<{
 } | null>(null);
 
 const useMaintenanceAnimation = () => {
-  return useContext(MaintenanceAnimationContext);
+  const ctx = useContext(MaintenanceAnimationContext);
+  if (!ctx)
+    throw new Error('useMaintenanceAnimation must be used within MaintenanceAnimationManager');
+  return ctx;
 };
 
 // =========================================================================
@@ -99,7 +102,9 @@ function animateWatering(refs: MaintenanceRefs, delta: number): void {
   if (!refs.directionRef || !refs.pourPhaseRef) return;
 
   // Face the plant
-  const dir = refs.directionRef.current.set(...refs.plantPosition).sub(refs.groupRef.current.position);
+  const dir = refs.directionRef.current
+    .set(...refs.plantPosition)
+    .sub(refs.groupRef.current.position);
   refs.groupRef.current.rotation.y = Math.atan2(dir.x, dir.z);
 
   // Tilt watering can
@@ -125,7 +130,9 @@ function animateOiling(refs: MaintenanceRefs, delta: number): void {
   if (!refs.directionRef || !refs.squeezePhaseRef) return;
 
   // Face the machine
-  const dir = refs.directionRef.current.set(...refs.machinePosition).sub(refs.groupRef.current.position);
+  const dir = refs.directionRef.current
+    .set(...refs.machinePosition)
+    .sub(refs.groupRef.current.position);
   refs.groupRef.current.rotation.y = Math.atan2(dir.x, dir.z);
 
   // Squeeze animation
@@ -243,66 +250,68 @@ interface SweepingWorkerProps {
   taskId: string;
 }
 
-const SweepingWorker: React.FC<SweepingWorkerProps> = React.memo(({ position, targetPosition, taskId }) => {
-  const { register, unregister } = useMaintenanceAnimation();
-  const groupRef = useRef<THREE.Group>(null);
-  const broomRef = useRef<THREE.Group>(null);
-  const sweepPhaseRef = useRef(0);
-  const positionRef = useRef(new THREE.Vector3(...position));
-  const targetRef = useRef(new THREE.Vector3(...targetPosition));
-  const directionRef = useRef(new THREE.Vector3());
+const SweepingWorker: React.FC<SweepingWorkerProps> = React.memo(
+  ({ position, targetPosition, taskId }) => {
+    const { register, unregister } = useMaintenanceAnimation();
+    const groupRef = useRef<THREE.Group>(null);
+    const broomRef = useRef<THREE.Group>(null);
+    const sweepPhaseRef = useRef(0);
+    const positionRef = useRef(new THREE.Vector3(...position));
+    const targetRef = useRef(new THREE.Vector3(...targetPosition));
+    const directionRef = useRef(new THREE.Vector3());
 
-  // Register with animation manager
-  useEffect(() => {
-    register({
-      type: 'sweeping',
-      id: `sweeping-${taskId}`,
-      groupRef,
-      broomRef,
-      sweepPhaseRef,
-      positionRef,
-      targetRef,
-      directionRef,
-    });
-    return () => unregister(`sweeping-${taskId}`);
-  }, [register, unregister, taskId]);
+    // Register with animation manager
+    useEffect(() => {
+      register({
+        type: 'sweeping',
+        id: `sweeping-${taskId}`,
+        groupRef,
+        broomRef,
+        sweepPhaseRef,
+        positionRef,
+        targetRef,
+        directionRef,
+      });
+      return () => unregister(`sweeping-${taskId}`);
+    }, [register, unregister, taskId]);
 
-  return (
-    <group ref={groupRef} position={position}>
-      {/* Simple maintenance worker body */}
-      <mesh position={[0, 0.9, 0]} castShadow>
-        <capsuleGeometry args={[0.15, 0.5, 4, 8]} />
-        <meshStandardMaterial color="#f97316" roughness={0.8} />
-      </mesh>
-
-      {/* Head */}
-      <mesh position={[0, 1.5, 0]} castShadow>
-        <sphereGeometry args={[0.12, 8, 8]} />
-        <meshStandardMaterial color="#d4a574" roughness={0.9} />
-      </mesh>
-
-      {/* Hard hat */}
-      <mesh position={[0, 1.62, 0]} castShadow>
-        <cylinderGeometry args={[0.14, 0.16, 0.08, 12]} />
-        <meshStandardMaterial color="#eab308" roughness={0.6} />
-      </mesh>
-
-      {/* Broom */}
-      <group ref={broomRef} position={[0.2, 0.6, 0.3]}>
-        {/* Handle */}
-        <mesh rotation={[0.3, 0, 0]}>
-          <cylinderGeometry args={[0.015, 0.015, 1.2, 8]} />
-          <meshStandardMaterial color="#8b4513" roughness={0.9} />
+    return (
+      <group ref={groupRef} position={position}>
+        {/* Simple maintenance worker body */}
+        <mesh position={[0, 0.9, 0]} castShadow>
+          <capsuleGeometry args={[0.15, 0.5, 4, 8]} />
+          <meshStandardMaterial color="#f97316" roughness={0.8} />
         </mesh>
-        {/* Bristles */}
-        <mesh position={[0, -0.5, 0.1]} rotation={[0.5, 0, 0]}>
-          <boxGeometry args={[0.15, 0.08, 0.12]} />
-          <meshStandardMaterial color="#d4a574" roughness={1} />
+
+        {/* Head */}
+        <mesh position={[0, 1.5, 0]} castShadow>
+          <sphereGeometry args={[0.12, 8, 8]} />
+          <meshStandardMaterial color="#d4a574" roughness={0.9} />
         </mesh>
+
+        {/* Hard hat */}
+        <mesh position={[0, 1.62, 0]} castShadow>
+          <cylinderGeometry args={[0.14, 0.16, 0.08, 12]} />
+          <meshStandardMaterial color="#eab308" roughness={0.6} />
+        </mesh>
+
+        {/* Broom */}
+        <group ref={broomRef} position={[0.2, 0.6, 0.3]}>
+          {/* Handle */}
+          <mesh rotation={[0.3, 0, 0]}>
+            <cylinderGeometry args={[0.015, 0.015, 1.2, 8]} />
+            <meshStandardMaterial color="#8b4513" roughness={0.9} />
+          </mesh>
+          {/* Bristles */}
+          <mesh position={[0, -0.5, 0.1]} rotation={[0.5, 0, 0]}>
+            <boxGeometry args={[0.15, 0.08, 0.12]} />
+            <meshStandardMaterial color="#d4a574" roughness={1} />
+          </mesh>
+        </group>
       </group>
-    </group>
-  );
-});
+    );
+  }
+);
 SweepingWorker.displayName = 'SweepingWorker';
 
 // =========================================================================
@@ -314,83 +323,85 @@ interface WateringWorkerProps {
   taskId: string;
 }
 
-const WateringWorker: React.FC<WateringWorkerProps> = React.memo(({ position, plantPosition, taskId }) => {
-  const { register, unregister } = useMaintenanceAnimation();
-  const groupRef = useRef<THREE.Group>(null);
-  const canRef = useRef<THREE.Group>(null);
-  const waterRef = useRef<THREE.Points>(null);
-  const pourPhaseRef = useRef(0);
-  const directionRef = useRef(new THREE.Vector3());
+const WateringWorker: React.FC<WateringWorkerProps> = React.memo(
+  ({ position, plantPosition, taskId }) => {
+    const { register, unregister } = useMaintenanceAnimation();
+    const groupRef = useRef<THREE.Group>(null);
+    const canRef = useRef<THREE.Group>(null);
+    const waterRef = useRef<THREE.Points>(null);
+    const pourPhaseRef = useRef(0);
+    const directionRef = useRef(new THREE.Vector3());
 
-  // Water droplet positions
-  const waterPositions = useMemo(() => {
-    const arr = new Float32Array(15 * 3);
-    for (let i = 0; i < 15; i++) {
-      arr[i * 3] = (Math.random() - 0.5) * 0.1;
-      arr[i * 3 + 1] = -Math.random() * 0.3;
-      arr[i * 3 + 2] = (Math.random() - 0.5) * 0.1;
-    }
-    return arr;
-  }, []);
+    // Water droplet positions
+    const waterPositions = useMemo(() => {
+      const arr = new Float32Array(15 * 3);
+      for (let i = 0; i < 15; i++) {
+        arr[i * 3] = (Math.random() - 0.5) * 0.1;
+        arr[i * 3 + 1] = -Math.random() * 0.3;
+        arr[i * 3 + 2] = (Math.random() - 0.5) * 0.1;
+      }
+      return arr;
+    }, []);
 
-  // Register with animation manager
-  useEffect(() => {
-    register({
-      type: 'watering',
-      id: `watering-${taskId}`,
-      groupRef,
-      canRef,
-      waterRef,
-      pourPhaseRef,
-      directionRef,
-      plantPosition,
-    });
-    return () => unregister(`watering-${taskId}`);
-  }, [register, unregister, taskId, plantPosition]);
+    // Register with animation manager
+    useEffect(() => {
+      register({
+        type: 'watering',
+        id: `watering-${taskId}`,
+        groupRef,
+        canRef,
+        waterRef,
+        pourPhaseRef,
+        directionRef,
+        plantPosition,
+      });
+      return () => unregister(`watering-${taskId}`);
+    }, [register, unregister, taskId, plantPosition]);
 
-  return (
-    <group ref={groupRef} position={position}>
-      {/* Worker body */}
-      <mesh position={[0, 0.9, 0]} castShadow>
-        <capsuleGeometry args={[0.15, 0.5, 4, 8]} />
-        <meshStandardMaterial color="#22c55e" roughness={0.8} />
-      </mesh>
-
-      {/* Head */}
-      <mesh position={[0, 1.5, 0]} castShadow>
-        <sphereGeometry args={[0.12, 8, 8]} />
-        <meshStandardMaterial color="#e0ac69" roughness={0.9} />
-      </mesh>
-
-      {/* Watering can */}
-      <group ref={canRef} position={[0.25, 1.0, 0.2]}>
-        {/* Can body */}
-        <mesh>
-          <cylinderGeometry args={[0.08, 0.1, 0.15, 12]} />
-          <meshStandardMaterial color="#22c55e" metalness={0.3} roughness={0.5} />
-        </mesh>
-        {/* Spout */}
-        <mesh position={[0.1, 0.02, 0]} rotation={[0, 0, -0.5]}>
-          <cylinderGeometry args={[0.015, 0.02, 0.12, 8]} />
-          <meshStandardMaterial color="#22c55e" metalness={0.3} />
-        </mesh>
-        {/* Handle */}
-        <mesh position={[-0.05, 0.1, 0]}>
-          <torusGeometry args={[0.04, 0.01, 8, 16, Math.PI]} />
-          <meshStandardMaterial color="#1a1a1a" />
+    return (
+      <group ref={groupRef} position={position}>
+        {/* Worker body */}
+        <mesh position={[0, 0.9, 0]} castShadow>
+          <capsuleGeometry args={[0.15, 0.5, 4, 8]} />
+          <meshStandardMaterial color="#22c55e" roughness={0.8} />
         </mesh>
 
-        {/* Water droplets */}
-        <points ref={waterRef} position={[0.15, -0.05, 0]}>
-          <bufferGeometry>
-            <bufferAttribute attach="attributes-position" args={[waterPositions, 3]} />
-          </bufferGeometry>
-          <pointsMaterial color="#3b82f6" size={0.02} transparent opacity={0.7} sizeAttenuation />
-        </points>
+        {/* Head */}
+        <mesh position={[0, 1.5, 0]} castShadow>
+          <sphereGeometry args={[0.12, 8, 8]} />
+          <meshStandardMaterial color="#e0ac69" roughness={0.9} />
+        </mesh>
+
+        {/* Watering can */}
+        <group ref={canRef} position={[0.25, 1.0, 0.2]}>
+          {/* Can body */}
+          <mesh>
+            <cylinderGeometry args={[0.08, 0.1, 0.15, 12]} />
+            <meshStandardMaterial color="#22c55e" metalness={0.3} roughness={0.5} />
+          </mesh>
+          {/* Spout */}
+          <mesh position={[0.1, 0.02, 0]} rotation={[0, 0, -0.5]}>
+            <cylinderGeometry args={[0.015, 0.02, 0.12, 8]} />
+            <meshStandardMaterial color="#22c55e" metalness={0.3} />
+          </mesh>
+          {/* Handle */}
+          <mesh position={[-0.05, 0.1, 0]}>
+            <torusGeometry args={[0.04, 0.01, 8, 16, Math.PI]} />
+            <meshStandardMaterial color="#1a1a1a" />
+          </mesh>
+
+          {/* Water droplets */}
+          <points ref={waterRef} position={[0.15, -0.05, 0]}>
+            <bufferGeometry>
+              <bufferAttribute attach="attributes-position" args={[waterPositions, 3]} />
+            </bufferGeometry>
+            <pointsMaterial color="#3b82f6" size={0.02} transparent opacity={0.7} sizeAttenuation />
+          </points>
+        </group>
       </group>
-    </group>
-  );
-});
+    );
+  }
+);
 WateringWorker.displayName = 'WateringWorker';
 
 // =========================================================================
@@ -402,68 +413,70 @@ interface OilingWorkerProps {
   taskId: string;
 }
 
-const OilingWorker: React.FC<OilingWorkerProps> = React.memo(({ position, machinePosition, taskId }) => {
-  const { register, unregister } = useMaintenanceAnimation();
-  const groupRef = useRef<THREE.Group>(null);
-  const canRef = useRef<THREE.Group>(null);
-  const squeezePhaseRef = useRef(0);
-  const directionRef = useRef(new THREE.Vector3());
+const OilingWorker: React.FC<OilingWorkerProps> = React.memo(
+  ({ position, machinePosition, taskId }) => {
+    const { register, unregister } = useMaintenanceAnimation();
+    const groupRef = useRef<THREE.Group>(null);
+    const canRef = useRef<THREE.Group>(null);
+    const squeezePhaseRef = useRef(0);
+    const directionRef = useRef(new THREE.Vector3());
 
-  // Register with animation manager
-  useEffect(() => {
-    register({
-      type: 'oiling',
-      id: `oiling-${taskId}`,
-      groupRef,
-      canRef,
-      squeezePhaseRef,
-      directionRef,
-      machinePosition,
-    });
-    return () => unregister(`oiling-${taskId}`);
-  }, [register, unregister, taskId, machinePosition]);
+    // Register with animation manager
+    useEffect(() => {
+      register({
+        type: 'oiling',
+        id: `oiling-${taskId}`,
+        groupRef,
+        canRef,
+        squeezePhaseRef,
+        directionRef,
+        machinePosition,
+      });
+      return () => unregister(`oiling-${taskId}`);
+    }, [register, unregister, taskId, machinePosition]);
 
-  return (
-    <group ref={groupRef} position={position}>
-      {/* Worker body - maintenance orange */}
-      <mesh position={[0, 0.9, 0]} castShadow>
-        <capsuleGeometry args={[0.15, 0.5, 4, 8]} />
-        <meshStandardMaterial color="#ea580c" roughness={0.8} />
-      </mesh>
-
-      {/* Head */}
-      <mesh position={[0, 1.5, 0]} castShadow>
-        <sphereGeometry args={[0.12, 8, 8]} />
-        <meshStandardMaterial color="#8d5524" roughness={0.9} />
-      </mesh>
-
-      {/* Safety glasses */}
-      <mesh position={[0, 1.52, 0.1]}>
-        <boxGeometry args={[0.18, 0.04, 0.02]} />
-        <meshStandardMaterial color="#1a1a1a" transparent opacity={0.8} />
-      </mesh>
-
-      {/* Oil can */}
-      <group ref={canRef} position={[0.2, 1.1, 0.25]} rotation={[0.3, 0, 0]}>
-        {/* Can body */}
-        <mesh>
-          <cylinderGeometry args={[0.04, 0.05, 0.12, 12]} />
-          <meshStandardMaterial color="#ef4444" roughness={0.4} />
+    return (
+      <group ref={groupRef} position={position}>
+        {/* Worker body - maintenance orange */}
+        <mesh position={[0, 0.9, 0]} castShadow>
+          <capsuleGeometry args={[0.15, 0.5, 4, 8]} />
+          <meshStandardMaterial color="#ea580c" roughness={0.8} />
         </mesh>
-        {/* Long spout */}
-        <mesh position={[0, 0.08, 0.06]} rotation={[-0.3, 0, 0]}>
-          <cylinderGeometry args={[0.008, 0.005, 0.15, 8]} />
-          <meshStandardMaterial color="#1a1a1a" metalness={0.8} />
+
+        {/* Head */}
+        <mesh position={[0, 1.5, 0]} castShadow>
+          <sphereGeometry args={[0.12, 8, 8]} />
+          <meshStandardMaterial color="#8d5524" roughness={0.9} />
         </mesh>
-        {/* Trigger */}
-        <mesh position={[0, 0.03, -0.03]}>
-          <boxGeometry args={[0.02, 0.04, 0.02]} />
-          <meshStandardMaterial color="#1a1a1a" />
+
+        {/* Safety glasses */}
+        <mesh position={[0, 1.52, 0.1]}>
+          <boxGeometry args={[0.18, 0.04, 0.02]} />
+          <meshStandardMaterial color="#1a1a1a" transparent opacity={0.8} />
         </mesh>
+
+        {/* Oil can */}
+        <group ref={canRef} position={[0.2, 1.1, 0.25]} rotation={[0.3, 0, 0]}>
+          {/* Can body */}
+          <mesh>
+            <cylinderGeometry args={[0.04, 0.05, 0.12, 12]} />
+            <meshStandardMaterial color="#ef4444" roughness={0.4} />
+          </mesh>
+          {/* Long spout */}
+          <mesh position={[0, 0.08, 0.06]} rotation={[-0.3, 0, 0]}>
+            <cylinderGeometry args={[0.008, 0.005, 0.15, 8]} />
+            <meshStandardMaterial color="#1a1a1a" metalness={0.8} />
+          </mesh>
+          {/* Trigger */}
+          <mesh position={[0, 0.03, -0.03]}>
+            <boxGeometry args={[0.02, 0.04, 0.02]} />
+            <meshStandardMaterial color="#1a1a1a" />
+          </mesh>
+        </group>
       </group>
-    </group>
-  );
-});
+    );
+  }
+);
 OilingWorker.displayName = 'OilingWorker';
 
 // =========================================================================

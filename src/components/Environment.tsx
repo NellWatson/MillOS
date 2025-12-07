@@ -513,7 +513,7 @@ const ConsolidatedLightingSystem: React.FC = () => {
 export const FactoryEnvironment: React.FC = () => {
   const wallTexture = useWallTexture();
   const wallRoughnessMap = useWallRoughnessMap();
-  const { quality, enableContactShadows, enableHighResShadows, shadowMapSize } = useGraphicsStore(
+  const { quality, enableContactShadows } = useGraphicsStore(
     useShallow((state) => ({
       quality: state.graphics.quality,
       enableContactShadows: state.graphics.enableContactShadows,
@@ -521,9 +521,6 @@ export const FactoryEnvironment: React.FC = () => {
       shadowMapSize: state.graphics.shadowMapSize,
     }))
   );
-
-  // Determine shadow map size based on graphics settings
-  const effectiveShadowMapSize = enableHighResShadows ? shadowMapSize : 2048;
 
   // Create lens flare refs for skylight positions
   const lensFlareRefs = useMemo(() => {
@@ -564,23 +561,9 @@ export const FactoryEnvironment: React.FC = () => {
       {/* Storm power flicker effect */}
       <StormPowerFlicker />
 
-      {/* Main ambient */}
-      <ambientLight intensity={0.15} color="#b4c6e7" />
+      {/* No global ambient light needed - SkySystem handles dynamic ambient */}
 
-      {/* Dramatic key light */}
-      <directionalLight
-        position={[30, 50, 20]}
-        intensity={1.5}
-        castShadow
-        shadow-mapSize={[effectiveShadowMapSize, effectiveShadowMapSize]}
-        shadow-camera-far={100}
-        shadow-camera-left={-50}
-        shadow-camera-right={50}
-        shadow-camera-top={50}
-        shadow-camera-bottom={-50}
-        shadow-bias={-0.001}
-        color="#fff5e6"
-      />
+      {/* No global directional light needed - SkySystem handles dynamic sun light */}
 
       {/* Fill light */}
       <directionalLight position={[-20, 30, -10]} intensity={0.4} color="#7dd3fc" />
@@ -618,7 +601,7 @@ export const FactoryEnvironment: React.FC = () => {
         <SkySystem />
       </React.Suspense>
 
-      {/* Factory walls - planes facing inward (only visible from inside) */}
+      {/* Factory walls - planes visible from both inside and outside */}
       {/* Back wall - with receiving dock opening */}
       <group position={[0, 15, -50]}>
         <mesh receiveShadow>
@@ -628,6 +611,7 @@ export const FactoryEnvironment: React.FC = () => {
             roughnessMap={wallRoughnessMap}
             roughness={0.7}
             metalness={0.2}
+            side={THREE.DoubleSide}
           />
         </mesh>
         {/* Industrial windows - daylight responsive */}
@@ -651,6 +635,31 @@ export const FactoryEnvironment: React.FC = () => {
             <meshStandardMaterial color="#64748b" metalness={0.5} roughness={0.5} />
           </mesh>
         ))}
+        {/* Personnel doors - back wall */}
+        {[-40, 40].map((x, i) => (
+          <group key={`door-back-${i}`} position={[x, -8, 0]}>
+            {/* Door frame - both sides */}
+            <mesh position={[0, 0, 0.05]}>
+              <planeGeometry args={[4.5, 9.5]} />
+              <meshStandardMaterial color="#1e293b" metalness={0.4} roughness={0.6} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Door panel */}
+            <mesh position={[0, 0, 0.1]}>
+              <planeGeometry args={[3.5, 8.5]} />
+              <meshStandardMaterial color="#475569" metalness={0.3} roughness={0.7} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Door window */}
+            <mesh position={[0, 2, 0.15]}>
+              <planeGeometry args={[1.5, 2]} />
+              <meshStandardMaterial color="#94a3b8" metalness={0.8} roughness={0.2} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Handle */}
+            <mesh position={[1.2, -1, 0.2]}>
+              <boxGeometry args={[0.3, 0.8, 0.15]} />
+              <meshStandardMaterial color="#64748b" metalness={0.9} roughness={0.2} />
+            </mesh>
+          </group>
+        ))}
       </group>
 
       {/* Front wall - with shipping dock opening */}
@@ -662,6 +671,7 @@ export const FactoryEnvironment: React.FC = () => {
             roughnessMap={wallRoughnessMap}
             roughness={0.7}
             metalness={0.2}
+            side={THREE.DoubleSide}
           />
         </mesh>
         {/* Large shipping dock door - center of front wall */}
@@ -674,12 +684,30 @@ export const FactoryEnvironment: React.FC = () => {
           <planeGeometry args={[20, 2]} />
           <meshStandardMaterial color="#eab308" emissive="#eab308" emissiveIntensity={0.2} />
         </mesh>
-        {/* Personnel doors on sides */}
+        {/* Personnel doors - front wall */}
         {[-40, 40].map((x, i) => (
-          <mesh key={i} position={[x, -8, 0.1]}>
-            <planeGeometry args={[6, 14]} />
-            <meshStandardMaterial color="#374151" metalness={0.5} roughness={0.5} />
-          </mesh>
+          <group key={`door-front-${i}`} position={[x, -8, 0]}>
+            {/* Door frame - both sides */}
+            <mesh position={[0, 0, 0.05]}>
+              <planeGeometry args={[4.5, 9.5]} />
+              <meshStandardMaterial color="#1e293b" metalness={0.4} roughness={0.6} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Door panel */}
+            <mesh position={[0, 0, 0.1]}>
+              <planeGeometry args={[3.5, 8.5]} />
+              <meshStandardMaterial color="#475569" metalness={0.3} roughness={0.7} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Door window */}
+            <mesh position={[0, 2, 0.15]}>
+              <planeGeometry args={[1.5, 2]} />
+              <meshStandardMaterial color="#94a3b8" metalness={0.8} roughness={0.2} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Handle */}
+            <mesh position={[1.2, -1, 0.2]}>
+              <boxGeometry args={[0.3, 0.8, 0.15]} />
+              <meshStandardMaterial color="#64748b" metalness={0.9} roughness={0.2} />
+            </mesh>
+          </group>
         ))}
       </group>
 
@@ -692,6 +720,7 @@ export const FactoryEnvironment: React.FC = () => {
             roughnessMap={wallRoughnessMap}
             roughness={0.7}
             metalness={0.2}
+            side={THREE.DoubleSide}
           />
         </mesh>
         {/* Windows - daylight responsive */}
@@ -709,6 +738,7 @@ export const FactoryEnvironment: React.FC = () => {
             roughnessMap={wallRoughnessMap}
             roughness={0.7}
             metalness={0.2}
+            side={THREE.DoubleSide}
           />
         </mesh>
         {/* Windows - daylight responsive */}
@@ -717,10 +747,88 @@ export const FactoryEnvironment: React.FC = () => {
         ))}
       </group>
 
-      {/* Ceiling - plane facing down (only visible from below) */}
+      {/* Corner posts to seal wall intersections */}
+      {[
+        [-60, -50], // Back-left
+        [60, -50], // Back-right
+        [-60, 50], // Front-left
+        [60, 50], // Front-right
+      ].map(([x, z], i) => (
+        <group key={`corner-${i}`} position={[x, 0, z]}>
+          {/* Main corner column - larger to seal gaps */}
+          <mesh position={[0, 17.5, 0]} castShadow receiveShadow>
+            <boxGeometry args={[3, 35, 3]} />
+            <meshStandardMaterial
+              color="#374151"
+              roughness={0.6}
+              metalness={0.3}
+            />
+          </mesh>
+          {/* Top trim band */}
+          <mesh position={[0, 34.5, 0]} castShadow>
+            <boxGeometry args={[3.5, 1, 3.5]} />
+            <meshStandardMaterial color="#1e293b" roughness={0.5} metalness={0.4} />
+          </mesh>
+          {/* Base trim band */}
+          <mesh position={[0, 0.5, 0]} castShadow>
+            <boxGeometry args={[3.5, 1, 3.5]} />
+            <meshStandardMaterial color="#1e293b" roughness={0.5} metalness={0.4} />
+          </mesh>
+          {/* Mid trim band */}
+          <mesh position={[0, 17.5, 0]} castShadow>
+            <boxGeometry args={[3.3, 0.5, 3.3]} />
+            <meshStandardMaterial color="#1e293b" roughness={0.5} metalness={0.4} />
+          </mesh>
+          {/* Diagonal brace - angled support */}
+          <mesh
+            position={[
+              x > 0 ? -1.5 : 1.5,
+              8,
+              z > 0 ? -2 : 2,
+            ]}
+            rotation={[
+              z > 0 ? -Math.PI / 4 : Math.PI / 4,
+              0,
+              x > 0 ? Math.PI / 6 : -Math.PI / 6,
+            ]}
+            castShadow
+          >
+            <boxGeometry args={[0.3, 8, 0.3]} />
+            <meshStandardMaterial color="#475569" metalness={0.7} roughness={0.3} />
+          </mesh>
+          {/* Second diagonal brace - crossing */}
+          <mesh
+            position={[
+              x > 0 ? -2 : 2,
+              18,
+              z > 0 ? -1.5 : 1.5,
+            ]}
+            rotation={[
+              z > 0 ? -Math.PI / 5 : Math.PI / 5,
+              0,
+              x > 0 ? Math.PI / 5 : -Math.PI / 5,
+            ]}
+            castShadow
+          >
+            <boxGeometry args={[0.3, 10, 0.3]} />
+            <meshStandardMaterial color="#475569" metalness={0.7} roughness={0.3} />
+          </mesh>
+          {/* Horizontal brace at top */}
+          <mesh position={[x > 0 ? -2 : 2, 30, 0]} castShadow>
+            <boxGeometry args={[0.25, 0.25, 4]} />
+            <meshStandardMaterial color="#475569" metalness={0.7} roughness={0.3} />
+          </mesh>
+          <mesh position={[0, 30, z > 0 ? -2 : 2]} castShadow>
+            <boxGeometry args={[4, 0.25, 0.25]} />
+            <meshStandardMaterial color="#475569" metalness={0.7} roughness={0.3} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Ceiling - plane visible from both sides */}
       <mesh position={[0, 32, 0]} rotation={[Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[120, 100]} />
-        <meshStandardMaterial color="#1e293b" />
+        <meshStandardMaterial color="#1e293b" side={THREE.DoubleSide} />
       </mesh>
 
       {/* Skylights with physical glass, light shafts, and lens flares */}

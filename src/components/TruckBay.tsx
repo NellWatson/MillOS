@@ -11,9 +11,12 @@ import {
   OptimizedTrafficConeInstances,
   OptimizedBollardInstances,
   OptimizedSpeedBumpInstances,
-  OptimizedStripeInstances
+  OptimizedStripeInstances,
 } from './TruckBayInstances';
-import { calculateShippingTruckState as calcShipping, calculateReceivingTruckState as calcReceiving } from './truckbay/useTruckPhysics';
+import {
+  calculateShippingTruckState as calcShipping,
+  calculateReceivingTruckState as calcReceiving,
+} from './truckbay/useTruckPhysics';
 // --- Animation Registries ---
 type AnimationType = 'rotation' | 'pulse' | 'lerp' | 'oscillation' | 'custom';
 
@@ -22,7 +25,12 @@ interface AnimationState {
   mesh: THREE.Object3D | THREE.Material | null;
   data: any;
   // For 'custom' type: a callback function that receives (time, delta, mesh)
-  callback?: (time: number, delta: number, mesh: THREE.Object3D | THREE.Material | null, data: any) => void;
+  callback?: (
+    time: number,
+    delta: number,
+    mesh: THREE.Object3D | THREE.Material | null,
+    data: any
+  ) => void;
 }
 
 const animationRegistry = new Map<string, AnimationState>();
@@ -32,7 +40,12 @@ export const registerAnimation = (
   type: AnimationType,
   mesh: THREE.Object3D | THREE.Material | null,
   data: any,
-  callback?: (time: number, delta: number, mesh: THREE.Object3D | THREE.Material | null, data: any) => void
+  callback?: (
+    time: number,
+    delta: number,
+    mesh: THREE.Object3D | THREE.Material | null,
+    data: any
+  ) => void
 ) => {
   animationRegistry.set(id, { type, mesh, data, callback });
 };
@@ -51,7 +64,8 @@ const TruckAnimationManager: React.FC = () => {
 
     // Throttle based on quality
     // Ultra: 1 (60fps), High: 2 (30fps), Medium: 3 (20fps), Low: 4 (15fps)
-    const throttle = quality === 'ultra' ? 1 : quality === 'high' ? 2 : quality === 'medium' ? 3 : 4;
+    const throttle =
+      quality === 'ultra' ? 1 : quality === 'high' ? 2 : quality === 'medium' ? 3 : 4;
 
     if (!shouldRunThisFrame(throttle)) return;
 
@@ -85,7 +99,7 @@ const TruckAnimationManager: React.FC = () => {
           target,
           speed = 0.1,
           property = 'position', // position, rotation, scale
-          axis = 'x'
+          axis = 'x',
         } = anim.data;
 
         if (mesh) {
@@ -163,7 +177,6 @@ interface TruckAnimState {
   cabRoll: number;
   cabPitch: number;
 }
-
 
 // Calculate truck state for SHIPPING dock (front of building, z=50)
 const calculateShippingTruckState = (cycle: number, time: number): TruckAnimState => {
@@ -258,7 +271,6 @@ const ExhaustSmoke: React.FC<{
   );
 };
 
-
 // Wheel chock component - placed behind wheels when truck is docked
 const WheelChock: React.FC<{
   position: [number, number, number];
@@ -278,7 +290,7 @@ const WheelChock: React.FC<{
       axis: 'x',
       speed: 0.08,
       autoHide: true,
-      hideThreshold: 0.1
+      hideThreshold: 0.1,
     });
 
     return () => unregisterAnimation(id);
@@ -426,12 +438,12 @@ const DOTMarkerLights: React.FC<{ side: 'left' | 'right' }> = ({ side }) => {
           speed: 2,
           min: 0.2,
           max: 0.4,
-          offset: i * 0.5
+          offset: i * 0.5,
         });
         ids.push(id);
       }
     });
-    return () => ids.forEach(id => unregisterAnimation(id));
+    return () => ids.forEach((id) => unregisterAnimation(id));
   }, []);
 
   return (
@@ -1545,35 +1557,29 @@ const DockSpotter: React.FC<{
 
   useEffect(() => {
     const id = animId.current;
-    registerAnimation(
-      id,
-      'custom',
-      null,
-      {},
-      (time) => {
-        if (isGuidingRef.current) {
-          // Wave arms to guide truck back
-          if (leftArmRef.current) {
-            leftArmRef.current.rotation.x = -0.5 + Math.sin(time * 4) * 0.4;
-          }
-          if (rightArmRef.current) {
-            rightArmRef.current.rotation.x = -0.5 + Math.sin(time * 4 + Math.PI) * 0.4;
-          }
-          // Bob wands
-          if (wandRef.current) {
-            wandRef.current.rotation.z = Math.sin(time * 4) * 0.3;
-          }
-        } else {
-          // Idle pose
-          if (leftArmRef.current) {
-            leftArmRef.current.rotation.x = 0;
-          }
-          if (rightArmRef.current) {
-            rightArmRef.current.rotation.x = 0;
-          }
+    registerAnimation(id, 'custom', null, {}, (time) => {
+      if (isGuidingRef.current) {
+        // Wave arms to guide truck back
+        if (leftArmRef.current) {
+          leftArmRef.current.rotation.x = -0.5 + Math.sin(time * 4) * 0.4;
+        }
+        if (rightArmRef.current) {
+          rightArmRef.current.rotation.x = -0.5 + Math.sin(time * 4 + Math.PI) * 0.4;
+        }
+        // Bob wands
+        if (wandRef.current) {
+          wandRef.current.rotation.z = Math.sin(time * 4) * 0.3;
+        }
+      } else {
+        // Idle pose
+        if (leftArmRef.current) {
+          leftArmRef.current.rotation.x = 0;
+        }
+        if (rightArmRef.current) {
+          rightArmRef.current.rotation.x = 0;
         }
       }
-    );
+    });
     return () => unregisterAnimation(id);
   }, []);
 
@@ -1898,18 +1904,12 @@ const YardJockey: React.FC<{ position: [number, number, number]; rotation?: numb
 
   useEffect(() => {
     const id = animId.current;
-    registerAnimation(
-      id,
-      'custom',
-      null,
-      { rotation },
-      (time, _delta, _mesh, data) => {
-        if (jockeyRef.current) {
-          jockeyRef.current.position.x = Math.sin(time * 0.15) * 8;
-          jockeyRef.current.rotation.y = Math.cos(time * 0.15) * 0.3 + data.rotation;
-        }
+    registerAnimation(id, 'custom', null, { rotation }, (time, _delta, _mesh, data) => {
+      if (jockeyRef.current) {
+        jockeyRef.current.position.x = Math.sin(time * 0.15) * 8;
+        jockeyRef.current.rotation.y = Math.cos(time * 0.15) * 0.3 + data.rotation;
       }
-    );
+    });
     return () => unregisterAnimation(id);
   }, [rotation]);
 
@@ -2100,23 +2100,17 @@ const GuardShack: React.FC<{ position: [number, number, number]; rotation?: numb
 
   useEffect(() => {
     const id = animId.current;
-    registerAnimation(
-      id,
-      'custom',
-      null,
-      {},
-      (time) => {
-        const shouldOpen = Math.sin(time * 0.3) > 0.5;
-        gateOpenRef.current = shouldOpen;
-        if (gateRef.current) {
-          gateRef.current.rotation.y = THREE.MathUtils.lerp(
-            gateRef.current.rotation.y,
-            shouldOpen ? -Math.PI / 2 : 0,
-            0.05
-          );
-        }
+    registerAnimation(id, 'custom', null, {}, (time) => {
+      const shouldOpen = Math.sin(time * 0.3) > 0.5;
+      gateOpenRef.current = shouldOpen;
+      if (gateRef.current) {
+        gateRef.current.rotation.y = THREE.MathUtils.lerp(
+          gateRef.current.rotation.y,
+          shouldOpen ? -Math.PI / 2 : 0,
+          0.05
+        );
       }
-    );
+    });
     return () => unregisterAnimation(id);
   }, []);
   return (
@@ -2311,7 +2305,7 @@ const RollUpDoor: React.FC<{
       target: isOpen ? 4.5 : 2,
       property: 'position',
       axis: 'y',
-      speed: 0.05
+      speed: 0.05,
     });
 
     // Lerp Scale Y
@@ -2319,7 +2313,7 @@ const RollUpDoor: React.FC<{
       target: isOpen ? 0.2 : 1,
       property: 'scale',
       axis: 'y',
-      speed: 0.05
+      speed: 0.05,
     });
 
     return () => {
@@ -2375,21 +2369,36 @@ const DockShelter: React.FC<{
 
     if (topRef.current) {
       const id = `shelter-top-${Math.random()}`;
-      registerAnimation(id, 'lerp', topRef.current, { target: targetZ, property: 'position', axis: 'z', speed });
+      registerAnimation(id, 'lerp', topRef.current, {
+        target: targetZ,
+        property: 'position',
+        axis: 'z',
+        speed,
+      });
       ids.push(id);
     }
     if (leftRef.current) {
       const id = `shelter-left-${Math.random()}`;
-      registerAnimation(id, 'lerp', leftRef.current, { target: targetZ, property: 'position', axis: 'z', speed });
+      registerAnimation(id, 'lerp', leftRef.current, {
+        target: targetZ,
+        property: 'position',
+        axis: 'z',
+        speed,
+      });
       ids.push(id);
     }
     if (rightRef.current) {
       const id = `shelter-right-${Math.random()}`;
-      registerAnimation(id, 'lerp', rightRef.current, { target: targetZ, property: 'position', axis: 'z', speed });
+      registerAnimation(id, 'lerp', rightRef.current, {
+        target: targetZ,
+        property: 'position',
+        axis: 'z',
+        speed,
+      });
       ids.push(id);
     }
 
-    return () => ids.forEach(id => unregisterAnimation(id));
+    return () => ids.forEach((id) => unregisterAnimation(id));
   }, [isCompressed]);
 
   return (
@@ -2519,49 +2528,43 @@ const DockForklift: React.FC<{
 
   useEffect(() => {
     const id = animId.current;
-    registerAnimation(
-      id,
-      'custom',
-      null,
-      { cycleOffset },
-      (time, _delta, _mesh, data) => {
-        if (!forkliftRef.current || !forkRef.current) return;
+    registerAnimation(id, 'custom', null, { cycleOffset }, (time, _delta, _mesh, data) => {
+      if (!forkliftRef.current || !forkRef.current) return;
 
-        if (isActiveRef.current) {
-          const adjTime = time + data.cycleOffset;
-          const loadCycle = (adjTime * 0.3) % 1;
-          let zPos: number;
-          let forkHeight: number;
+      if (isActiveRef.current) {
+        const adjTime = time + data.cycleOffset;
+        const loadCycle = (adjTime * 0.3) % 1;
+        let zPos: number;
+        let forkHeight: number;
 
-          if (loadCycle < 0.3) {
-            const t = loadCycle / 0.3;
-            zPos = THREE.MathUtils.lerp(-8, 2, t);
-            forkHeight = 0;
-          } else if (loadCycle < 0.4) {
-            const t = (loadCycle - 0.3) / 0.1;
-            zPos = 2;
-            forkHeight = t * 0.8;
-          } else if (loadCycle < 0.7) {
-            const t = (loadCycle - 0.4) / 0.3;
-            zPos = THREE.MathUtils.lerp(2, -8, t);
-            forkHeight = 0.8;
-          } else if (loadCycle < 0.8) {
-            const t = (loadCycle - 0.7) / 0.1;
-            zPos = -8;
-            forkHeight = (1 - t) * 0.8;
-          } else {
-            zPos = -8;
-            forkHeight = 0;
-          }
-
-          forkliftRef.current.position.z = zPos;
-          forkRef.current.position.y = forkHeight;
+        if (loadCycle < 0.3) {
+          const t = loadCycle / 0.3;
+          zPos = THREE.MathUtils.lerp(-8, 2, t);
+          forkHeight = 0;
+        } else if (loadCycle < 0.4) {
+          const t = (loadCycle - 0.3) / 0.1;
+          zPos = 2;
+          forkHeight = t * 0.8;
+        } else if (loadCycle < 0.7) {
+          const t = (loadCycle - 0.4) / 0.3;
+          zPos = THREE.MathUtils.lerp(2, -8, t);
+          forkHeight = 0.8;
+        } else if (loadCycle < 0.8) {
+          const t = (loadCycle - 0.7) / 0.1;
+          zPos = -8;
+          forkHeight = (1 - t) * 0.8;
         } else {
-          forkliftRef.current.position.z = -10;
-          forkRef.current.position.y = 0;
+          zPos = -8;
+          forkHeight = 0;
         }
+
+        forkliftRef.current.position.z = zPos;
+        forkRef.current.position.y = forkHeight;
+      } else {
+        forkliftRef.current.position.z = -10;
+        forkRef.current.position.y = 0;
       }
-    );
+    });
     return () => unregisterAnimation(id);
   }, [cycleOffset]);
 
@@ -2707,7 +2710,7 @@ const DockLeveler: React.FC<{
       target: targetRotation,
       property: 'rotation',
       axis: 'x',
-      speed: 0.05
+      speed: 0.05,
     });
 
     return () => unregisterAnimation(id);
@@ -3064,13 +3067,9 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           <meshStandardMaterial color="#374151" roughness={0.85} />
         </mesh>
 
-        <OptimizedStripeInstances
-          positions={[0, 10, 20, 30, 40].map(z => [18, 0.05, z])}
-        />
+        <OptimizedStripeInstances positions={[0, 10, 20, 30, 40].map((z) => [18, 0.05, z])} />
 
-        <OptimizedStripeInstances
-          positions={[0, 10, 20, 30, 40].map(z => [-18, 0.05, z])}
-        />
+        <OptimizedStripeInstances positions={[0, 10, 20, 30, 40].map((z) => [-18, 0.05, z])} />
 
         <mesh position={[0, 0.05, 10]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.15, 20]} />
@@ -3091,12 +3090,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         </mesh>
 
         {/* Speed bumps */}
-        <OptimizedSpeedBumpInstances
-          bumps={[
-            { position: [0, 0, 25] },
-            { position: [0, 0, 45] }
-          ]}
-        />
+        <OptimizedSpeedBumpInstances bumps={[{ position: [0, 0, 25] }, { position: [0, 0, 45] }]} />
 
         {/* Traffic cones - turn guidance */}
         <OptimizedTrafficConeInstances
@@ -3196,10 +3190,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             <OverheadCrane position={[75, 5.5, 20]} spanWidth={10} />
 
             {/* Stretch wrap machine */}
-            <StretchWrapMachine
-              position={[-15, 0, 0]}
-              isActive={shippingDoorsOpenRef.current}
-            />
+            <StretchWrapMachine position={[-15, 0, 0]} isActive={shippingDoorsOpenRef.current} />
 
             {/* Pallet jack charging station */}
             <PalletJackChargingStation position={[-12, 0, -8]} rotation={0} />
@@ -3391,13 +3382,9 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           <meshStandardMaterial color="#374151" roughness={0.85} />
         </mesh>
 
-        <OptimizedStripeInstances
-          positions={[0, -10, -20, -30, -40].map(z => [-18, 0.05, z])}
-        />
+        <OptimizedStripeInstances positions={[0, -10, -20, -30, -40].map((z) => [-18, 0.05, z])} />
 
-        <OptimizedStripeInstances
-          positions={[0, -10, -20, -30, -40].map(z => [18, 0.05, z])}
-        />
+        <OptimizedStripeInstances positions={[0, -10, -20, -30, -40].map((z) => [18, 0.05, z])} />
 
         <mesh position={[0, 0.05, -10]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.15, 20]} />
@@ -3419,10 +3406,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
         {/* Speed bumps */}
         <OptimizedSpeedBumpInstances
-          bumps={[
-            { position: [0, 0, -25] },
-            { position: [0, 0, -45] }
-          ]}
+          bumps={[{ position: [0, 0, -25] }, { position: [0, 0, -45] }]}
         />
 
         {/* Traffic cones - turn guidance */}
@@ -3672,16 +3656,32 @@ const RealisticTruck: React.FC<{
     if (cabBodyRef.current) {
       // Apply roll and pitch to the cab body
       // Damping could be applied here if not in calculations, but useTruckPhysics handles easing
-      cabBodyRef.current.rotation.z = THREE.MathUtils.lerp(cabBodyRef.current.rotation.z, truckState.cabRoll, 0.1);
-      cabBodyRef.current.rotation.x = THREE.MathUtils.lerp(cabBodyRef.current.rotation.x, truckState.cabPitch, 0.1);
+      cabBodyRef.current.rotation.z = THREE.MathUtils.lerp(
+        cabBodyRef.current.rotation.z,
+        truckState.cabRoll,
+        0.1
+      );
+      cabBodyRef.current.rotation.x = THREE.MathUtils.lerp(
+        cabBodyRef.current.rotation.x,
+        truckState.cabPitch,
+        0.1
+      );
     }
 
     // Apply Steering
     if (steerLeftRef.current) {
-      steerLeftRef.current.rotation.y = THREE.MathUtils.lerp(steerLeftRef.current.rotation.y, truckState.steeringAngle, 0.2);
+      steerLeftRef.current.rotation.y = THREE.MathUtils.lerp(
+        steerLeftRef.current.rotation.y,
+        truckState.steeringAngle,
+        0.2
+      );
     }
     if (steerRightRef.current) {
-      steerRightRef.current.rotation.y = THREE.MathUtils.lerp(steerRightRef.current.rotation.y, truckState.steeringAngle, 0.2);
+      steerRightRef.current.rotation.y = THREE.MathUtils.lerp(
+        steerRightRef.current.rotation.y,
+        truckState.steeringAngle,
+        0.2
+      );
     }
   });
 
@@ -3856,8 +3856,16 @@ const RealisticTruck: React.FC<{
         {/* Headlight beams - only on high/ultra quality */}
         {showMinorDetails && (
           <>
-            <HeadlightBeam position={[-0.9, 1.4, 2.1]} rotation={[-0.1, 0, 0]} isOn={isEngineRunning} />
-            <HeadlightBeam position={[0.9, 1.4, 2.1]} rotation={[-0.1, 0, 0]} isOn={isEngineRunning} />
+            <HeadlightBeam
+              position={[-0.9, 1.4, 2.1]}
+              rotation={[-0.1, 0, 0]}
+              isOn={isEngineRunning}
+            />
+            <HeadlightBeam
+              position={[0.9, 1.4, 2.1]}
+              rotation={[-0.1, 0, 0]}
+              isOn={isEngineRunning}
+            />
           </>
         )}
 
@@ -4066,11 +4074,7 @@ const RealisticTruck: React.FC<{
 
       {/* === FRONT WHEELS === */}
       <group ref={steerLeftRef} position={[-1.4, 0.55, 2.5]}>
-        <mesh
-          ref={frontLeftWheelRef}
-          rotation={[0, 0, Math.PI / 2]}
-          castShadow
-        >
+        <mesh ref={frontLeftWheelRef} rotation={[0, 0, Math.PI / 2]} castShadow>
           <cylinderGeometry args={[0.55, 0.55, 0.35, 12]} />
           <meshStandardMaterial color="#1f2937" roughness={0.7} />
         </mesh>
@@ -4082,11 +4086,7 @@ const RealisticTruck: React.FC<{
       </group>
 
       <group ref={steerRightRef} position={[1.4, 0.55, 2.5]}>
-        <mesh
-          ref={frontRightWheelRef}
-          rotation={[0, 0, Math.PI / 2]}
-          castShadow
-        >
+        <mesh ref={frontRightWheelRef} rotation={[0, 0, Math.PI / 2]} castShadow>
           <cylinderGeometry args={[0.55, 0.55, 0.35, 12]} />
           <meshStandardMaterial color="#1f2937" roughness={0.7} />
         </mesh>
@@ -4718,17 +4718,11 @@ const AirHoseStation: React.FC<{ position: [number, number, number]; rotation?: 
 
   useEffect(() => {
     const id = animId.current;
-    registerAnimation(
-      id,
-      'custom',
-      null,
-      {},
-      (time) => {
-        if (hoseRef.current) {
-          hoseRef.current.rotation.z = Math.sin(time * 0.5) * 0.02;
-        }
+    registerAnimation(id, 'custom', null, {}, (time) => {
+      if (hoseRef.current) {
+        hoseRef.current.rotation.z = Math.sin(time * 0.5) * 0.02;
       }
-    );
+    });
     return () => unregisterAnimation(id);
   }, []);
 
@@ -4787,17 +4781,11 @@ const ScaleTicketKiosk: React.FC<{ position: [number, number, number]; rotation?
 
   useEffect(() => {
     const id = animId.current;
-    registerAnimation(
-      id,
-      'custom',
-      null,
-      {},
-      (time) => {
-        if (displayRef.current) {
-          displayRef.current.emissiveIntensity = 0.6 + Math.sin(time * 2) * 0.1;
-        }
+    registerAnimation(id, 'custom', null, {}, (time) => {
+      if (displayRef.current) {
+        displayRef.current.emissiveIntensity = 0.6 + Math.sin(time * 2) * 0.1;
       }
-    );
+    });
     return () => unregisterAnimation(id);
   }, []);
 
@@ -5042,19 +5030,13 @@ const StretchWrapMachine: React.FC<{
 
   useEffect(() => {
     const id = animId.current;
-    registerAnimation(
-      id,
-      'custom',
-      null,
-      {},
-      (_time, delta) => {
-        if (isActiveRef.current) {
-          if (turntableRef.current) turntableRef.current.rotation.y += delta * 2;
-          if (armRef.current) armRef.current.rotation.y -= delta * 2;
-          if (wrapRollRef.current) wrapRollRef.current.rotation.x += delta * 8;
-        }
+    registerAnimation(id, 'custom', null, {}, (_time, delta) => {
+      if (isActiveRef.current) {
+        if (turntableRef.current) turntableRef.current.rotation.y += delta * 2;
+        if (armRef.current) armRef.current.rotation.y -= delta * 2;
+        if (wrapRollRef.current) wrapRollRef.current.rotation.x += delta * 8;
       }
-    );
+    });
     return () => unregisterAnimation(id);
   }, []);
 
@@ -5318,21 +5300,15 @@ const TruckAlignmentGuides: React.FC<{ position: [number, number, number] }> = (
 
   useEffect(() => {
     const id = animId.current;
-    registerAnimation(
-      id,
-      'custom',
-      null,
-      {},
-      (time) => {
-        const intensity = 0.5 + Math.sin(time * 4) * 0.3;
-        if (laserRef1.current) {
-          (laserRef1.current.material as THREE.MeshStandardMaterial).emissiveIntensity = intensity;
-        }
-        if (laserRef2.current) {
-          (laserRef2.current.material as THREE.MeshStandardMaterial).emissiveIntensity = intensity;
-        }
+    registerAnimation(id, 'custom', null, {}, (time) => {
+      const intensity = 0.5 + Math.sin(time * 4) * 0.3;
+      if (laserRef1.current) {
+        (laserRef1.current.material as THREE.MeshStandardMaterial).emissiveIntensity = intensity;
       }
-    );
+      if (laserRef2.current) {
+        (laserRef2.current.material as THREE.MeshStandardMaterial).emissiveIntensity = intensity;
+      }
+    });
     return () => unregisterAnimation(id);
   }, []);
 
@@ -5407,19 +5383,13 @@ const PalletJackChargingStation: React.FC<{
 
   useEffect(() => {
     const id = animId.current;
-    registerAnimation(
-      id,
-      'custom',
-      null,
-      {},
-      (time) => {
-        if (chargeIndicatorRef.current) {
-          const blink = Math.sin(time * 2) > 0;
-          (chargeIndicatorRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity =
-            blink ? 0.8 : 0.2;
-        }
+    registerAnimation(id, 'custom', null, {}, (time) => {
+      if (chargeIndicatorRef.current) {
+        const blink = Math.sin(time * 2) > 0;
+        (chargeIndicatorRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity =
+          blink ? 0.8 : 0.2;
       }
-    );
+    });
     return () => unregisterAnimation(id);
   }, []);
 
@@ -5567,20 +5537,14 @@ const OverheadCrane: React.FC<{ position: [number, number, number]; spanWidth?: 
 
   useEffect(() => {
     const id = animId.current;
-    registerAnimation(
-      id,
-      'custom',
-      null,
-      { spanWidth },
-      (time, _delta, _mesh, data) => {
-        if (trolleyRef.current) {
-          trolleyRef.current.position.x = Math.sin(time * 0.2) * (data.spanWidth / 2 - 1);
-        }
-        if (hookRef.current) {
-          hookRef.current.rotation.z = Math.sin(time * 0.5) * 0.05;
-        }
+    registerAnimation(id, 'custom', null, { spanWidth }, (time, _delta, _mesh, data) => {
+      if (trolleyRef.current) {
+        trolleyRef.current.position.x = Math.sin(time * 0.2) * (data.spanWidth / 2 - 1);
       }
-    );
+      if (hookRef.current) {
+        hookRef.current.rotation.z = Math.sin(time * 0.5) * 0.05;
+      }
+    });
     return () => unregisterAnimation(id);
   }, [spanWidth]);
 
@@ -5673,23 +5637,17 @@ const CardboardCompactor: React.FC<{ position: [number, number, number]; rotatio
 
   useEffect(() => {
     const id = animId.current;
-    registerAnimation(
-      id,
-      'custom',
-      null,
-      {},
-      (time) => {
-        if (ramRef.current) {
-          const cycle = Math.floor(time / 8) % 2;
-          const t = (time % 8) / 8;
-          if (cycle === 0 && t < 0.5) {
-            ramRef.current.position.y = 1.8 - t * 1.2;
-          } else if (cycle === 0) {
-            ramRef.current.position.y = 1.2 + (t - 0.5) * 1.2;
-          }
+    registerAnimation(id, 'custom', null, {}, (time) => {
+      if (ramRef.current) {
+        const cycle = Math.floor(time / 8) % 2;
+        const t = (time % 8) / 8;
+        if (cycle === 0 && t < 0.5) {
+          ramRef.current.position.y = 1.8 - t * 1.2;
+        } else if (cycle === 0) {
+          ramRef.current.position.y = 1.2 + (t - 0.5) * 1.2;
         }
       }
-    );
+    });
     return () => unregisterAnimation(id);
   }, []);
 
@@ -5781,20 +5739,14 @@ const IntercomCallBox: React.FC<{ position: [number, number, number]; rotation?:
 
   useEffect(() => {
     const id = animId.current;
-    registerAnimation(
-      id,
-      'custom',
-      null,
-      {},
-      (time) => {
-        if (speakerRef.current) {
-          const active = Math.sin(time * 0.5) > 0.8;
-          (speakerRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity = active
-            ? 0.8
-            : 0.1;
-        }
+    registerAnimation(id, 'custom', null, {}, (time) => {
+      if (speakerRef.current) {
+        const active = Math.sin(time * 0.5) > 0.8;
+        (speakerRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity = active
+          ? 0.8
+          : 0.1;
       }
-    );
+    });
     return () => unregisterAnimation(id);
   }, []);
 

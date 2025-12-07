@@ -562,7 +562,9 @@ export const MillScene: React.FC<MillSceneProps> = ({
       )}
       {/* PERFORMANCE: TruckBay renders only when camera is OUTSIDE (exterior view) */}
       {!isCameraInside &&
-        (graphicsQuality === 'medium' || graphicsQuality === 'high' || graphicsQuality === 'ultra') &&
+        (graphicsQuality === 'medium' ||
+          graphicsQuality === 'high' ||
+          graphicsQuality === 'ultra') &&
         !perfDebug?.disableTruckBay && <TruckBay productionSpeed={productionSpeed} />}
 
       {/* Theme Hospital-inspired Mood & Chaos Systems */}
@@ -587,7 +589,9 @@ export const MillScene: React.FC<MillSceneProps> = ({
       )}
 
       {/* Holographic Displays - interior only, high/ultra */}
-      {isCameraInside && (graphicsQuality === 'high' || graphicsQuality === 'ultra') && <HolographicDisplays />}
+      {isCameraInside && (graphicsQuality === 'high' || graphicsQuality === 'ultra') && (
+        <HolographicDisplays />
+      )}
 
       {/* Ambient Details - interior only, ultra */}
       {isCameraInside && graphicsQuality === 'ultra' && <AmbientDetailsGroup />}

@@ -30,7 +30,11 @@ interface LightingRefs {
   // Flickering light refs
   lightRef?: React.RefObject<THREE.PointLight | null>;
   tubeRef?: React.RefObject<THREE.Mesh | null>;
-  flickerState?: React.MutableRefObject<{ nextFlicker: number; isFlickering: boolean; flickerEnd: number }>;
+  flickerState?: React.MutableRefObject<{
+    nextFlicker: number;
+    isFlickering: boolean;
+    flickerEnd: number;
+  }>;
   // God rays refs
   particlesRef?: React.RefObject<THREE.Points | null>;
   particleCount?: number;

@@ -55,7 +55,10 @@ export function perfFrameEnd() {
 }
 
 export function perfReport() {
-  const report: Record<string, { avg: number; max: number; min: number; total: number; samples: number }> = {};
+  const report: Record<
+    string,
+    { avg: number; max: number; min: number; total: number; samples: number }
+  > = {};
 
   timings.forEach((samples, label) => {
     if (samples.length === 0) return;
@@ -106,7 +109,9 @@ export function perfWarn(label: string, thresholdMs: number = 1) {
         performance.measure(`${label}-warn`, `${label}-warn-start`, `${label}-warn-end`);
         const measure = performance.getEntriesByName(`${label}-warn`).pop();
         if (measure && measure.duration > thresholdMs) {
-          console.warn(`[SLOW] ${label}: ${measure.duration.toFixed(2)}ms (threshold: ${thresholdMs}ms)`);
+          console.warn(
+            `[SLOW] ${label}: ${measure.duration.toFixed(2)}ms (threshold: ${thresholdMs}ms)`
+          );
         }
         performance.clearMarks(`${label}-warn-start`);
         performance.clearMarks(`${label}-warn-end`);
@@ -153,7 +158,10 @@ export function startAutoReport(intervalMs: number = 10000) {
     perfReport();
     perfCountReport();
   }, intervalMs);
-  console.log(`%cAuto-report started (every ${intervalMs / 1000}s). Call perfReport() manually anytime.`, 'color: #95e1d3');
+  console.log(
+    `%cAuto-report started (every ${intervalMs / 1000}s). Call perfReport() manually anytime.`,
+    'color: #95e1d3'
+  );
 }
 
 export function stopAutoReport() {
@@ -168,5 +176,8 @@ if (typeof window !== 'undefined' && import.meta.env?.DEV) {
   // Don't auto-start, let user control it
   (window as any).startAutoReport = startAutoReport;
   (window as any).stopAutoReport = stopAutoReport;
-  console.log('%c[PerfMonitor] Ready. Use perfReport(), startAutoReport(), stopAutoReport()', 'color: #95e1d3');
+  console.log(
+    '%c[PerfMonitor] Ready. Use perfReport(), startAutoReport(), stopAutoReport()',
+    'color: #95e1d3'
+  );
 }

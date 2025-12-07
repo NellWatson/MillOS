@@ -177,12 +177,6 @@ export const calculateShippingTruckState = (cycle: number, time: number): TruckA
   const turnP2: [number, number] = [-5, 60]; // Cut across
   const turnP3: [number, number] = [ALIGN_X, ALIGN_Z]; // End aligned at Z=78
 
-  // Path Points for Exit (Driving Straight Out)
-  const exitStart: [number, number] = [0, DOCK_Z];
-  const exitP1: [number, number] = [0, 80];
-  const exitP2: [number, number] = [ENTRY_X, 100];
-  const exitEnd: [number, number] = [ENTRY_X, ROAD_Z];
-
   const signalBlink = Math.sin(time * 8) > 0;
 
   if (cycle < 5) {
@@ -208,16 +202,24 @@ export const calculateShippingTruckState = (cycle: number, time: number): TruckA
   } else if (cycle < 10) {
     // 2. Drive Deep & Swing Wide (Positioning)
     const t = easeInOutCubic((cycle - 5) / 5);
-    const [x, z] = cubicBezierPoint(approachP0, approachP1, approachP2, approachP3, t);
+    const [curveX, curveZ] = cubicBezierPoint(approachP0, approachP1, approachP2, approachP3, t);
     const angle = cubicBezierTangentAngle(approachP0, approachP1, approachP2, approachP3, t);
 
     // Trailer logic
-    const trailerLag = calculateTrailerAngleOnCurve(approachP0, approachP1, approachP2, approachP3, t, angle, 0.15);
+    const trailerLag = calculateTrailerAngleOnCurve(
+      approachP0,
+      approachP1,
+      approachP2,
+      approachP3,
+      t,
+      angle,
+      0.15
+    );
 
     return {
       phase: 'positioning',
-      x,
-      z,
+      x: curveX,
+      z: curveZ,
       rotation: angle + Math.PI, // Forward motion
       speed: 0.6,
       steeringAngle: (angle + Math.PI - Math.PI) * 2, // steer into curve
@@ -442,13 +444,6 @@ export const calculateShippingTruckState = (cycle: number, time: number): TruckA
     // 13. Exit to Road (S-Turn away)
     const t = easeInOutCubic((cycle - 55) / 5);
 
-    // Using exit path points defined earlier
-    const [x, z] = cubicBezierPoint(exitStart, exitP1, exitP2, exitEnd, t);
-    const angle = cubicBezierTangentAngle(exitStart, exitP1, exitP2, exitEnd, t);
-
-    // Trailer Physics
-    const trailerLag = calculateTrailerAngleOnCurve(exitStart, exitP1, exitP2, exitEnd, t, angle, 0.15);
-
     return {
       phase: 'turning_out',
       x: THREE.MathUtils.lerp(0, ENTRY_X, t), // Simplified linear blend for now
@@ -514,12 +509,6 @@ export const calculateReceivingTruckState = (cycle: number, time: number): Truck
   const turnP2: [number, number] = [5, -60]; // Cut across
   const turnP3: [number, number] = [ALIGN_X, ALIGN_Z];
 
-  // Path Points for Exit
-  const exitStart: [number, number] = [0, DOCK_Z];
-  const exitP1: [number, number] = [0, -80];
-  const exitP2: [number, number] = [ENTRY_X, -100];
-  const exitEnd: [number, number] = [ENTRY_X, ROAD_Z];
-
   const signalBlink = Math.sin(time * 8) > 0;
 
   if (cycle < 5) {
@@ -546,7 +535,15 @@ export const calculateReceivingTruckState = (cycle: number, time: number): Truck
     const t = easeInOutCubic((cycle - 5) / 5);
     const [x, z] = cubicBezierPoint(approachP0, approachP1, approachP2, approachP3, t);
     const angle = cubicBezierTangentAngle(approachP0, approachP1, approachP2, approachP3, t);
-    const trailerLag = calculateTrailerAngleOnCurve(approachP0, approachP1, approachP2, approachP3, t, angle, 0.15);
+    const trailerLag = calculateTrailerAngleOnCurve(
+      approachP0,
+      approachP1,
+      approachP2,
+      approachP3,
+      t,
+      angle,
+      0.15
+    );
 
     return {
       phase: 'positioning',
@@ -554,7 +551,7 @@ export const calculateReceivingTruckState = (cycle: number, time: number): Truck
       z,
       rotation: angle, // Moving in +Z direction generally
       speed: 0.6,
-      steeringAngle: (angle) * 2,
+      steeringAngle: angle * 2,
       brakeLights: false,
       reverseLights: false,
       leftSignal: false,
@@ -768,17 +765,6 @@ export const calculateReceivingTruckState = (cycle: number, time: number): Truck
   } else if (cycle < 60) {
     // 13.
     const t = easeInOutCubic((cycle - 55) / 5);
-    const [x, z] = cubicBezierPoint(exitStart, exitP1, exitP2, exitEnd, t);
-    const angle = cubicBezierTangentAngle(exitStart, exitP1, exitP2, exitEnd, t);
-
-    // NOTE: angle returned is in direction of travel (-Z is PI)
-    // We want to offset it by PI? No, tangentAngle returns angle in world space.
-    // If moving -Z, it should be PI or -PI.
-
-    // For manual rotation control:
-    // This calc needs testing. Assuming tangentAngle is correct direction of motion.
-
-    const trailerLag = calculateTrailerAngleOnCurve(exitStart, exitP1, exitP2, exitEnd, t, angle, 0.15);
 
     return {
       phase: 'turning_out',

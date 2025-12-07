@@ -32,8 +32,8 @@
       .loading-bar::after { content: ''; display: block; width: 50%; height: 100%; background: linear-gradient(90deg, #f97316, #3b82f6); animation: loading 1.5s ease-in-out infinite; }
       @keyframes loading { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
     </style>
-    <script type="module" crossorigin src="/v0.10/assets/index-DY2_2gE0.js"></script>
-    <link rel="stylesheet" crossorigin href="/v0.10/assets/index-DPkIpCKx.css">
+    <script type="module" crossorigin src="/v0.10/assets/index-BCI4NjFX.js"></script>
+    <link rel="stylesheet" crossorigin href="/v0.10/assets/index-1pvm4sEb.css">
   </head>
   <body>
     <div id="root">
@@ -43,27 +43,5 @@
         <div class="loading-bar"></div>
       </div>
     </div>
-    <script>
-      // Version switcher injection for v0.10
-      (function() {
-        const observer = new MutationObserver(function(mutations, obs) {
-          const header = document.querySelector('h1');
-          if (header && header.textContent.includes('MillOS')) {
-            const versionSpan = header.querySelector('span:last-child');
-            if (versionSpan && versionSpan.textContent.includes('v0.10')) {
-              const select = document.createElement('select');
-              select.className = versionSpan.className;
-              select.style.cssText = 'background:transparent;border:none;cursor:pointer;';
-              select.innerHTML = '<option value="v0.10">v0.10 (stable)</option><option value="v0.20">v0.20 (alpha)</option>';
-              select.value = 'v0.10';
-              select.onchange = function() { window.location.href = '/' + this.value + '/'; };
-              versionSpan.replaceWith(select);
-              obs.disconnect();
-            }
-          }
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
-      })();
-    </script>
   </body>
 </html>

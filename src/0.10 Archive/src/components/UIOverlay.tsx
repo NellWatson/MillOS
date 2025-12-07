@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Sun, Sunset, Moon, Shield, ChevronDown, ChevronUp, Activity, AlertTriangle, Users, Plus, Trash2, MapPin, Settings, Monitor, Sparkles, Wind, Eye, Layers, OctagonX, Clock, History, RotateCcw, Gauge, Keyboard, HelpCircle, PanelLeftClose, PanelLeft, GripVertical, X, SunMedium, MoonStar, FileText, Download, TrendingUp, Truck } from 'lucide-react';
+import { Brain, Sun, Sunset, Moon, Shield, ChevronDown, ChevronUp, Activity, AlertTriangle, Users, Plus, Trash2, MapPin, Settings, Monitor, Sparkles, Wind, Eye, Layers, OctagonX, Clock, History, RotateCcw, Gauge, Keyboard, HelpCircle, PanelLeftClose, PanelLeft, GripVertical, X, SunMedium, MoonStar, FileText, Download, TrendingUp, Truck, Music, SkipBack, SkipForward, Volume2 } from 'lucide-react';
 import { MachineData, WorkerData } from '../types';
 import { ProductionMetrics } from './ProductionMetrics';
 import { audioManager } from '../utils/audioManager';
@@ -128,7 +128,17 @@ function useAudioState() {
     muted: audioManager.muted,
     volume: audioManager.volume,
     setMuted: (v: boolean) => { audioManager.muted = v; },
-    setVolume: (v: number) => { audioManager.volume = v; }
+    setVolume: (v: number) => { audioManager.volume = v; },
+    musicEnabled: audioManager.musicEnabled,
+    musicVolume: audioManager.musicVolume,
+    currentTrack: audioManager.currentTrack,
+    setMusicEnabled: (v: boolean) => { audioManager.musicEnabled = v; },
+    setMusicVolume: (v: number) => { audioManager.musicVolume = v; },
+    nextTrack: () => audioManager.nextTrack(),
+    prevTrack: () => audioManager.prevTrack(),
+    startMusic: () => audioManager.startMusic(),
+    ttsEnabled: audioManager.ttsEnabled,
+    setTTSEnabled: (v: boolean) => { audioManager.ttsEnabled = v; },
   };
 }
 
@@ -1506,7 +1516,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   selectedMachine,
   onCloseSelection
 }) => {
-  const { muted, volume, setMuted, setVolume } = useAudioState();
+  const { muted, volume, setMuted, setVolume, musicEnabled, musicVolume, currentTrack, setMusicEnabled, setMusicVolume, nextTrack, prevTrack, startMusic, ttsEnabled, setTTSEnabled } = useAudioState();
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const [showScrollIndicator, setShowScrollIndicator] = useState(false);
 
@@ -1789,6 +1799,96 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                 disabled={muted}
                 className={`w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500 ${muted ? 'opacity-50' : ''}`}
               />
+            </div>
+
+            <div>
+              <div className="flex justify-between items-center text-xs mb-1">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <Music className="w-3.5 h-3.5" />
+                  Music
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-emerald-400 font-mono font-bold">
+                    {!musicEnabled ? 'OFF' : `${(musicVolume * 100).toFixed(0)}%`}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setMusicEnabled(!musicEnabled);
+                      if (!musicEnabled) startMusic();
+                    }}
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                      musicEnabled
+                        ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    }`}
+                    title={musicEnabled ? 'Disable Music' : 'Enable Music'}
+                  >
+                    {musicEnabled ? (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={musicVolume}
+                onChange={(e) => setMusicVolume(parseFloat(e.target.value))}
+                disabled={!musicEnabled}
+                className={`w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 ${!musicEnabled ? 'opacity-50' : ''}`}
+              />
+              {musicEnabled && (
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-700/30">
+                  <button
+                    onClick={prevTrack}
+                    className="w-6 h-6 rounded flex items-center justify-center bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-emerald-400 transition-all"
+                    title="Previous Track"
+                  >
+                    <SkipBack className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-xs text-emerald-400 font-medium truncate px-2">
+                    {currentTrack.name}
+                  </span>
+                  <button
+                    onClick={nextTrack}
+                    className="w-6 h-6 rounded flex items-center justify-center bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-emerald-400 transition-all"
+                    title="Next Track"
+                  >
+                    <SkipForward className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* PA Voice Announcements Toggle */}
+            <div className="flex items-center justify-between py-2 px-1">
+              <span className="text-xs text-slate-400 flex items-center gap-1.5">
+                <Volume2 className="w-3.5 h-3.5" />
+                PA Voice
+              </span>
+              <button
+                onClick={() => setTTSEnabled(!ttsEnabled)}
+                className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${
+                  ttsEnabled
+                    ? 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30'
+                    : 'bg-slate-800 text-slate-500 hover:bg-slate-700'
+                }`}
+                title={
+                  ttsEnabled
+                    ? 'Disable PA voice announcements'
+                    : 'Enable PA voice announcements'
+                }
+              >
+                {ttsEnabled ? 'ON' : 'OFF'}
+              </button>
             </div>
 
             <button

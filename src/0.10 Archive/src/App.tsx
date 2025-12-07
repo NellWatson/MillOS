@@ -54,6 +54,7 @@ const App: React.FC = () => {
         audioManager.startPASystem();         // PA announcements and shift bells
         audioManager.startCompressorCycling(); // Industrial air compressor cycling
         audioManager.startMetalClanks();       // Random metal clanks from factory floor
+        audioManager.startMusic();             // Background music
         setAudioInitialized(true);
       });
     }

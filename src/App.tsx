@@ -27,7 +27,12 @@ import { AlertTriangle, RotateCcw } from 'lucide-react';
 
 // Expose stores to window for performance debugging (dev mode only)
 if (import.meta.env.DEV) {
-  (window as unknown as { useGraphicsStore: typeof useGraphicsStore; useFPSStore: typeof useFPSStore }).useGraphicsStore = useGraphicsStore;
+  (
+    window as unknown as {
+      useGraphicsStore: typeof useGraphicsStore;
+      useFPSStore: typeof useFPSStore;
+    }
+  ).useGraphicsStore = useGraphicsStore;
   (window as unknown as { useFPSStore: typeof useFPSStore }).useFPSStore = useFPSStore;
 }
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -374,7 +379,7 @@ const App: React.FC = () => {
           // CRITICAL: Use canvasQuality (stable) instead of currentQuality (reactive)
           // WebGL context props cannot change at runtime without breaking the canvas
           shadows={canvasQuality !== 'low' ? { type: THREE.PCFShadowMap } : false}
-          camera={{ position: [70, 40, 70], fov: 65, near: 0.5, far: 300 }}
+          camera={{ position: [70, 40, 70], fov: 65, near: 0.5, far: 450 }}
           gl={{
             antialias: canvasQuality !== 'low',
             alpha: false,
@@ -506,20 +511,21 @@ const App: React.FC = () => {
             className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none"
           >
             <div
-              className={`px-6 py-4 rounded-xl backdrop-blur-xl border shadow-2xl ${qualityNotification === 'EMERGENCY STOP'
-                ? 'bg-red-900/95 border-red-500 text-red-100 animate-pulse'
-                : qualityNotification === 'E-STOP RELEASED'
-                  ? 'bg-green-900/90 border-green-600 text-green-300'
-                  : qualityNotification === 'low'
-                    ? 'bg-slate-800/90 border-slate-600 text-slate-300'
-                    : qualityNotification === 'medium'
-                      ? 'bg-yellow-900/90 border-yellow-600 text-yellow-300'
-                      : qualityNotification === 'high'
-                        ? 'bg-cyan-900/90 border-cyan-600 text-cyan-300'
-                        : qualityNotification === 'ultra'
-                          ? 'bg-purple-900/90 border-purple-600 text-purple-300'
-                          : 'bg-slate-800/90 border-slate-600 text-slate-300'
-                }`}
+              className={`px-6 py-4 rounded-xl backdrop-blur-xl border shadow-2xl ${
+                qualityNotification === 'EMERGENCY STOP'
+                  ? 'bg-red-900/95 border-red-500 text-red-100 animate-pulse'
+                  : qualityNotification === 'E-STOP RELEASED'
+                    ? 'bg-green-900/90 border-green-600 text-green-300'
+                    : qualityNotification === 'low'
+                      ? 'bg-slate-800/90 border-slate-600 text-slate-300'
+                      : qualityNotification === 'medium'
+                        ? 'bg-yellow-900/90 border-yellow-600 text-yellow-300'
+                        : qualityNotification === 'high'
+                          ? 'bg-cyan-900/90 border-cyan-600 text-cyan-300'
+                          : qualityNotification === 'ultra'
+                            ? 'bg-purple-900/90 border-purple-600 text-purple-300'
+                            : 'bg-slate-800/90 border-slate-600 text-slate-300'
+              }`}
             >
               <div className="text-center">
                 <div className="text-3xl font-bold uppercase tracking-wider">
@@ -527,7 +533,7 @@ const App: React.FC = () => {
                 </div>
                 <div className="text-xs opacity-70 mt-1">
                   {qualityNotification.includes('EMERGENCY') ||
-                    qualityNotification.includes('E-STOP')
+                  qualityNotification.includes('E-STOP')
                     ? 'Safety System'
                     : ['low', 'medium', 'high', 'ultra'].includes(qualityNotification)
                       ? 'Graphics Quality'

@@ -92,8 +92,6 @@ const MachineAnimationManager: React.FC = () => {
         critical: ['#ef4444', '#ef4444', '#1e293b', '#1e293b'],
       };
 
-
-
       panelRegistry.forEach((data) => {
         const status = data.status;
         const colors = ledColors[status];
@@ -156,7 +154,6 @@ const GRAIN_TYPES = ['Wheat', 'Corn', 'Barley', 'Oats', 'Rye'];
 const UNIT_CYLINDER = new THREE.CylinderGeometry(1, 1, 1, 32);
 const UNIT_CYLINDER_LOW = new THREE.CylinderGeometry(1, 1, 1, 16);
 
-
 // Fill level indicator for silos
 const SiloFillIndicator: React.FC<{
   fillLevel: number;
@@ -171,7 +168,7 @@ const SiloFillIndicator: React.FC<{
 
   // Calculate scales
   const cylinderRadius = radius - 0.15;
-  // Position calculation: 
+  // Position calculation:
   // Base is at -height/2 + 0.5.
   // We want the visual center of the cylinder to be at base + fillHeight/2.
   // Original: position={[0, -height / 2 + fillHeight / 2 + 0.5, 0]} with height=fillHeight
@@ -272,12 +269,13 @@ const MaintenanceCountdown: React.FC<{
   return (
     <Html position={position} center distanceFactor={12}>
       <div
-        className={`bg-slate-900/90 backdrop-blur px-2 py-1 rounded border ${isCritical
-          ? 'border-red-500/50 animate-pulse'
-          : isUrgent
-            ? 'border-amber-500/50'
-            : 'border-slate-700'
-          }`}
+        className={`bg-slate-900/90 backdrop-blur px-2 py-1 rounded border ${
+          isCritical
+            ? 'border-red-500/50 animate-pulse'
+            : isUrgent
+              ? 'border-amber-500/50'
+              : 'border-slate-700'
+        }`}
       >
         <div className="text-[8px] text-slate-500 uppercase tracking-wider">Maintenance</div>
         <div className="text-xs font-mono font-bold flex items-center gap-1" style={{ color }}>
@@ -326,7 +324,7 @@ const useProceduralMetalTexture = (enabled: boolean, seed: number = 0) => {
     if (textureCache.has(cacheKey)) {
       texturesRef.current = textureCache.get(cacheKey)!;
       // Don't dispose cached textures on cleanup - they're shared
-      return () => { };
+      return () => {};
     }
 
     const random = (s: number) => Math.abs(Math.sin(s * 12.9898 + 78.233) * 43758.5453) % 1;
@@ -752,12 +750,17 @@ const ControlPanel: React.FC<{
 
   // Initialize material refs array
   if (ledMaterials.current.length === 0) {
-    ledMaterials.current = Array(4).fill(null).map(() => new THREE.MeshStandardMaterial({
-      color: '#1e293b',
-      emissive: '#1e293b',
-      emissiveIntensity: 0,
-      toneMapped: false
-    })); // Create unique materials for this panel instance
+    ledMaterials.current = Array(4)
+      .fill(null)
+      .map(
+        () =>
+          new THREE.MeshStandardMaterial({
+            color: '#1e293b',
+            emissive: '#1e293b',
+            emissiveIntensity: 0,
+            toneMapped: false,
+          })
+      ); // Create unique materials for this panel instance
   }
 
   // Register with manager
@@ -770,7 +773,7 @@ const ControlPanel: React.FC<{
       registerPanel(id, {
         status,
         ledMaterials: ledMaterials.current,
-        screenMaterial: screenMaterial.current
+        screenMaterial: screenMaterial.current,
       });
     }
 
@@ -819,7 +822,12 @@ const ControlPanel: React.FC<{
         [0.04, -0.08],
         [0.12, -0.08],
       ].map(([x, y], i) => (
-        <mesh key={i} position={[x, y, 0.026]} geometry={ledGeometry} material={ledMaterials.current[i]} />
+        <mesh
+          key={i}
+          position={[x, y, 0.026]}
+          geometry={ledGeometry}
+          material={ledMaterials.current[i]}
+        />
       ))}
 
       {/* Buttons */}
@@ -1435,12 +1443,7 @@ export const Machines: React.FC<MachinesProps> = ({ machines, onSelect }) => {
 
       // Register machine position for spatial audio (throttled)
       if (status === 'running' && frameCountRef.current % 10 === 0) {
-        audioManager.registerSoundPosition(
-          machineId,
-          position[0],
-          position[1] + 1,
-          position[2]
-        );
+        audioManager.registerSoundPosition(machineId, position[0], position[1] + 1, position[2]);
         audioManager.updateMachineSpatialVolume(machineId);
       }
     });
