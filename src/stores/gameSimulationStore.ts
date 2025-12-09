@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { safeJSONStorage } from './storage';
 
 export type CelebrationType = 'milestone' | 'zero_incident' | 'target_met' | 'shift_complete';
 
@@ -575,6 +576,7 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
     }),
     {
       name: 'millos-game-simulation',
+      storage: safeJSONStorage,
       partialize: (state) => ({
         gameTime: state.gameTime,
         gameSpeed: state.gameSpeed,

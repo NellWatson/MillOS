@@ -361,11 +361,11 @@ export const MillScene: React.FC<MillSceneProps> = ({
     });
 
     // LOADING DOCK PLATFORMS - Forklifts must not drive onto elevated docks
-    // Shipping dock (front, z=50): platform at [0, 1, 47], size 16x6
+    // Shipping dock (front, z=50): platform at [0, 1, 47], size 32x6 (expanded for 2 bays)
     obs.push({
       id: 'shipping-dock-platform',
-      minX: -10,
-      maxX: 10,
+      minX: -18,
+      maxX: 18,
       minZ: 44,
       maxZ: 54,
     });

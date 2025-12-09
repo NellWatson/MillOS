@@ -21,6 +21,7 @@ import type {
   AlarmSuppression,
 } from './types';
 import { MILL_TAGS } from './tagDatabase';
+import { useGraphicsStore } from '../stores/graphicsStore';
 
 // ============================================================================
 // Shared SCADA State - Single subscription for all hook instances
@@ -131,7 +132,7 @@ async function initializeSharedSCADA(): Promise<void> {
 
   initializationPromise = (async () => {
     try {
-      const service = await initializeSCADA({ mode: 'simulation' });
+      const service = await initializeSCADA();
 
       // Subscribe to value updates with granular notifications
       service.subscribeToValues((newValues) => {
@@ -165,7 +166,8 @@ async function initializeSharedSCADA(): Promise<void> {
         notifyListeners(); // Global listeners
       });
 
-      sharedState = { ...sharedState, isConnected: true, mode: 'simulation' };
+      const state = service.getState();
+      sharedState = { ...sharedState, isConnected: true, mode: state.mode };
       console.log('[useSCADA] Service initialized with granular subscriptions');
     } catch (err) {
       initializationPromise = null; // Reset on failure to allow retry
@@ -240,6 +242,8 @@ export interface UseSCADAReturn {
  * All hook instances share a single subscription to the SCADA service
  */
 export function useSCADA(): UseSCADAReturn {
+  const enableSCADA = useGraphicsStore((state) => state.graphics.enableSCADA);
+
   // Use shared state via useSyncExternalStore for efficient updates
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
@@ -250,6 +254,10 @@ export function useSCADA(): UseSCADAReturn {
 
   // Initialize shared SCADA service with reference counting
   useEffect(() => {
+    if (!enableSCADA) {
+      return undefined;
+    }
+
     // Increment reference count
     scadaRefCount++;
 
@@ -264,7 +272,7 @@ export function useSCADA(): UseSCADAReturn {
         shutdownSharedSCADA();
       }
     };
-  }, []);
+  }, [enableSCADA]);
 
   // Sync machine states to SCADA simulation
   useEffect(() => {

@@ -31,8 +31,7 @@ const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
 };
 
 /** Check if we're in development mode */
-const isDevelopment =
-  (import.meta as any).env?.MODE === 'development' || (import.meta as any).env?.DEV === true;
+const isDevelopment = import.meta.env?.MODE === 'development' || import.meta.env?.DEV === true;
 
 /**
  * Creates a logger instance with the given configuration

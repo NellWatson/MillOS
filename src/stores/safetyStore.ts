@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { safeJSONStorage } from './storage';
 
 interface IncidentHeatMapIndex {
   incidentHeatMapIndex: Map<string, { x: number; z: number; intensity: number; type: string }>;
@@ -278,6 +279,7 @@ export const useSafetyStore = create<SafetyStore>()(
     }),
     {
       name: 'millos-safety',
+      storage: safeJSONStorage,
       partialize: (state) => ({
         safetyConfig: state.safetyConfig,
         speedZones: state.speedZones,

@@ -41,7 +41,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { useSCADAAlarms } from '../scada';
+import { useSCADA, useSCADAAlarms, getSCADAService } from '../scada';
 import type { Alarm, AlarmState, AlarmPriority, AlarmSuppression } from '../scada/types';
 
 interface ComplianceDashboardProps {
@@ -73,6 +73,7 @@ const PRIORITY_BG_COLORS: Record<AlarmPriority, string> = {
 
 export const ComplianceDashboard: React.FC<ComplianceDashboardProps> = ({ isOpen, onClose }) => {
   const { alarms, summary, acknowledge, hasCritical, suppressed, unsuppress } = useSCADAAlarms();
+  const { isConnected } = useSCADA();
   const [activeTab, setActiveTab] = useState<'overview' | 'lifecycle' | 'rationalization'>(
     'overview'
   );
@@ -85,12 +86,38 @@ export const ComplianceDashboard: React.FC<ComplianceDashboardProps> = ({ isOpen
   const [alarmHistory, setAlarmHistory] = useState<Alarm[]>([]);
 
   useEffect(() => {
-    if (isOpen) {
-      // For now, use the current active alarms as history
-      // TODO: Implement proper alarm history tracking in AlarmManager or SCADAService
-      setAlarmHistory(alarms);
-    }
-  }, [isOpen, alarms]);
+    if (!isOpen) return;
+
+    let cancelled = false;
+
+    const loadHistory = async () => {
+      if (!isConnected) {
+        setAlarmHistory([]);
+        return;
+      }
+
+      try {
+        const service = getSCADAService();
+        const endTime = Date.now();
+        const startTime = endTime - 24 * 60 * 60 * 1000; // last 24 hours
+        const history = await service.getAlarmHistory(startTime, endTime, 500);
+        if (!cancelled) {
+          setAlarmHistory(history);
+        }
+      } catch (err) {
+        console.error('[ComplianceDashboard] Failed to load alarm history', err);
+        if (!cancelled) {
+          // Fallback to current alarms to avoid empty UI
+          setAlarmHistory(alarms);
+        }
+      }
+    };
+
+    loadHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, isConnected, alarms]);
 
   // Calculate compliance metrics
   const complianceMetrics = useMemo(() => {
@@ -446,7 +473,7 @@ export const ComplianceDashboard: React.FC<ComplianceDashboardProps> = ({ isOpen
                 <div className="flex gap-2">
                   <select
                     value={priorityFilter}
-                    onChange={(e) => setPriorityFilter(e.target.value as any)}
+                    onChange={(e) => setPriorityFilter(e.target.value as AlarmPriority | 'ALL')}
                     className="flex-1 px-2 py-1 bg-slate-800/50 border border-slate-700/50 rounded text-xs text-white focus:outline-none focus:border-purple-500/50"
                   >
                     <option value="ALL">All Priorities</option>
@@ -457,7 +484,7 @@ export const ComplianceDashboard: React.FC<ComplianceDashboardProps> = ({ isOpen
                   </select>
                   <select
                     value={stateFilter}
-                    onChange={(e) => setStateFilter(e.target.value as any)}
+                    onChange={(e) => setStateFilter(e.target.value as AlarmState | 'ALL')}
                     className="flex-1 px-2 py-1 bg-slate-800/50 border border-slate-700/50 rounded text-xs text-white focus:outline-none focus:border-purple-500/50"
                   >
                     <option value="ALL">All States</option>

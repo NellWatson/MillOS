@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { safeJSONStorage } from './storage';
 import { AlertData } from '../types';
 
 interface AlertIndices {
@@ -179,6 +180,7 @@ export const useUIStore = create<UIStore>()(
     }),
     {
       name: 'millos-ui',
+      storage: safeJSONStorage,
       partialize: (state) => ({
         showZones: state.showZones,
         showAIPanel: state.showAIPanel,

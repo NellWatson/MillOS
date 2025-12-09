@@ -408,8 +408,8 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
   const frameCountRef = useRef(0); // Frame counter for throttling
   const lastCollisionCheckRef = useRef({
     pathClear: true,
-    workersNearby: [] as any[],
-    forkliftsNearby: [] as any[],
+    workersNearby: [] as THREE.Vector3[],
+    forkliftsNearby: [] as THREE.Vector3[],
   });
   const crossingTimerRef = useRef(0); // Time spent waiting at crossing
   const operationTimerRef = useRef(0); // Time spent on current loading/unloading operation

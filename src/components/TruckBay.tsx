@@ -76,9 +76,8 @@ const TruckAnimationManager: React.FC = () => {
       // 1. Rotation Animation
       if (anim.type === 'rotation') {
         const mesh = anim.mesh as THREE.Object3D;
-        const { axis = 'y', speed = 1 } = anim.data;
+        const { axis = 'y', speed = 1 } = anim.data as { axis?: 'x' | 'y' | 'z'; speed?: number };
         if (mesh) {
-          // @ts-ignore
           mesh.rotation[axis] += speed * adjustDelta;
         }
       }
@@ -98,16 +97,21 @@ const TruckAnimationManager: React.FC = () => {
         const {
           target,
           speed = 0.1,
-          property = 'position', // position, rotation, scale
+          property = 'position',
           axis = 'x',
-        } = anim.data;
+        } = anim.data as {
+          target: number;
+          speed?: number;
+          property?: 'position' | 'rotation' | 'scale';
+          axis?: 'x' | 'y' | 'z';
+          autoHide?: boolean;
+          hideThreshold?: number;
+        };
 
         if (mesh) {
-          // @ts-ignore
           const currVal = mesh[property][axis];
           if (Math.abs(currVal - target) > 0.001) {
             const newVal = THREE.MathUtils.lerp(currVal, target, speed * (60 * adjustDelta)); // normalizing speed to 60fps base
-            // @ts-ignore
             mesh[property][axis] = newVal;
 
             // Optional visibility toggle for "slide out" effects
@@ -121,9 +125,14 @@ const TruckAnimationManager: React.FC = () => {
       // 4. Oscillation
       else if (anim.type === 'oscillation') {
         const mesh = anim.mesh as THREE.Object3D;
-        const { axis = 'x', speed = 1, amplitude = 1, offset = 0, base = 0 } = anim.data;
+        const { axis = 'x', speed = 1, amplitude = 1, offset = 0, base = 0 } = anim.data as {
+          axis?: 'x' | 'y' | 'z';
+          speed?: number;
+          amplitude?: number;
+          offset?: number;
+          base?: number;
+        };
         if (mesh) {
-          // @ts-ignore
           mesh.position[axis] = base + Math.sin(time * speed + offset) * amplitude;
         }
       }
@@ -3088,9 +3097,9 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           DOCK 1 - OUTBOUND
         </Text>
 
-        {/* Dock forklift */}
+        {/* Dock forklift - positioned at bay 1 */}
         <DockForklift
-          dockPosition={[0, 0, 2]}
+          dockPosition={[-8, 0, 2]}
           isActive={shippingDoorsOpenRef.current}
           cycleOffset={0}
         />
@@ -3098,18 +3107,31 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Pallet staging area */}
         <PalletStaging position={[-12, 0, -3]} />
 
-        {/* Wheel chocks - deployed when truck is docked */}
-        <WheelChock position={[-1.5, 0, 10]} rotation={0} isDeployed={shippingDockedRef.current} />
-        <WheelChock position={[1.5, 0, 10]} rotation={0} isDeployed={shippingDockedRef.current} />
+        {/* Wheel chocks - deployed when truck is docked (Bay 1 at X=-8) */}
+        <WheelChock position={[-9.5, 0, 10]} rotation={0} isDeployed={shippingDockedRef.current} />
+        <WheelChock position={[-6.5, 0, 10]} rotation={0} isDeployed={shippingDockedRef.current} />
         <WheelChock
-          position={[-1.5, 0, 11]}
+          position={[-9.5, 0, 11]}
           rotation={Math.PI}
           isDeployed={shippingDockedRef.current}
         />
         <WheelChock
-          position={[1.5, 0, 11]}
+          position={[-6.5, 0, 11]}
           rotation={Math.PI}
           isDeployed={shippingDockedRef.current}
+        />
+        {/* Wheel chocks for Bay 2 at X=+8 */}
+        <WheelChock position={[6.5, 0, 10]} rotation={0} isDeployed={false} />
+        <WheelChock position={[9.5, 0, 10]} rotation={0} isDeployed={false} />
+        <WheelChock
+          position={[6.5, 0, 11]}
+          rotation={Math.PI}
+          isDeployed={false}
+        />
+        <WheelChock
+          position={[9.5, 0, 11]}
+          rotation={Math.PI}
+          isDeployed={false}
         />
 
         {/* Dock spotter - guides truck while backing */}
@@ -3238,11 +3260,11 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             {/* Cardboard compactor/baler for recycling */}
             <CardboardCompactor position={[-40, 0, 15]} rotation={Math.PI / 2} />
 
-            {/* Warehouse workers with pallet jacks */}
+            {/* Warehouse workers with pallet jacks - expanded work area for wider dock */}
             <WarehouseWorkerWithPalletJack
               position={[-10, 0, 5]}
               isActive={shippingDoorsOpenRef.current}
-              workAreaBounds={{ minX: -8, maxX: 8, minZ: -5, maxZ: 8 }}
+              workAreaBounds={{ minX: -14, maxX: 14, minZ: -5, maxZ: 8 }}
             />
 
             {/* Time clock station */}
@@ -3287,11 +3309,13 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Dumpster area */}
         <DumpsterArea position={[-35, 0, 15]} rotation={Math.PI / 2} />
 
-        {/* Manifest holder at dock */}
+        {/* Manifest holders at dock - one per bay */}
         <ManifestHolder position={[-8, 3, -1]} rotation={0} />
+        <ManifestHolder position={[8, 3, -1]} rotation={0} />
 
-        {/* Dock plate - needed for dock functionality */}
-        <DockPlate position={[0, 2, 1]} isDeployed={shippingDockedRef.current} />
+        {/* Dock plates - one per bay */}
+        <DockPlate position={[-8, 2, 1]} isDeployed={shippingDockedRef.current} />
+        <DockPlate position={[8, 2, 1]} isDeployed={false} />
 
         {/* Driver restroom/showers */}
         <DriverRestroom position={[40, 0, 45]} rotation={-Math.PI / 2} />
@@ -3302,12 +3326,15 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Maintenance bay */}
         <MaintenanceBay position={[70, 0, 20]} rotation={-Math.PI / 2} />
 
-        {/* Dock bumpers with wear indicators */}
-        <DockBumperWithWear position={[-3, 1.2, -1]} wearLevel={0.3} />
-        <DockBumperWithWear position={[3, 1.2, -1]} wearLevel={0.6} />
+        {/* Dock bumpers with wear indicators - positioned at each bay */}
+        <DockBumperWithWear position={[-10, 1.2, -1]} wearLevel={0.3} />
+        <DockBumperWithWear position={[-6, 1.2, -1]} wearLevel={0.4} />
+        <DockBumperWithWear position={[6, 1.2, -1]} wearLevel={0.5} />
+        <DockBumperWithWear position={[10, 1.2, -1]} wearLevel={0.6} />
 
-        {/* Floor markings */}
-        <DockFloorMarkings position={[0, 0, 3]} />
+        {/* Floor markings - one per bay */}
+        <DockFloorMarkings position={[-8, 0, 3]} />
+        <DockFloorMarkings position={[8, 0, 3]} />
 
         {/* Safety mirrors */}
         <SafetyMirror position={[-8, 3, 5]} rotation={Math.PI / 4} />

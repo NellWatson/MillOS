@@ -72,11 +72,12 @@ export class SCADAService {
   constructor(config?: Partial<SCADAConfig>) {
     this.config = {
       mode: config?.mode ?? 'simulation',
-      connection: config?.connection ?? { type: 'simulation' },
+      connection: config?.connection ?? lastConnectionConfig ?? { type: 'simulation' },
       historyRetention: config?.historyRetention ?? 24 * 60 * 60 * 1000,
       historySampleRate: config?.historySampleRate ?? 1000,
       alarmsEnabled: config?.alarmsEnabled ?? true,
     };
+    lastConnectionConfig = this.config.connection;
 
     this.historySampleInterval = this.config.historySampleRate!;
     this.tagRegistry = new Map(MILL_TAGS.map((t) => [t.id, t]));
@@ -267,6 +268,7 @@ export class SCADAService {
     }
 
     this.config.connection = config;
+    lastConnectionConfig = config;
 
     // Update mode based on connection type
     if (config.type === 'simulation') {
@@ -730,6 +732,7 @@ export class SCADAService {
 
 let scadaServiceInstance: SCADAService | null = null;
 let initializationPromise: Promise<SCADAService> | null = null;
+let lastConnectionConfig: ConnectionConfig | undefined;
 
 /**
  * Get the global SCADA service instance
@@ -765,9 +768,13 @@ export async function initializeSCADA(config?: Partial<SCADAConfig>): Promise<SC
       if (scadaServiceInstance) {
         await scadaServiceInstance.stop();
       }
+      const mergedConfig: Partial<SCADAConfig> = {
+        ...config,
+        connection: config?.connection ?? lastConnectionConfig,
+      };
       // Store in local variable to avoid race condition where shutdownSCADA
       // sets scadaServiceInstance = null while we're still initializing
-      const service = new SCADAService(config);
+      const service = new SCADAService(mergedConfig);
       scadaServiceInstance = service;
       await service.start();
       return service; // Return local variable, not module-level (may be nulled by shutdown)

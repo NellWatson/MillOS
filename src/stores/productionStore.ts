@@ -62,6 +62,12 @@ function rebuildMachineIndex(machines: MachineData[]): Map<string, MachineData> 
   return index;
 }
 
+function rebuildWorkerIndex(workers: WorkerData[]): Map<string, WorkerData> {
+  const index = new Map<string, WorkerData>();
+  workers.forEach((worker) => index.set(worker.id, worker));
+  return index;
+}
+
 function getGridKey(x: number, z: number, threshold: number): string {
   return `${Math.round(x / threshold)}_${Math.round(z / threshold)}`;
 }
@@ -78,6 +84,7 @@ interface ProductionStore {
   workers: WorkerData[];
   selectedWorker: WorkerData | null;
   setSelectedWorker: (worker: WorkerData | null) => void;
+  setWorkers: (workers: WorkerData[]) => void;
   updateWorkerTask: (workerId: string, task: string, targetMachine?: string) => void;
 
   // Machines
@@ -203,6 +210,14 @@ export const useProductionStore = create<ProductionStore>()(
     workers: [],
     selectedWorker: null,
     setSelectedWorker: (worker) => set({ selectedWorker: worker }),
+    setWorkers: (workers) =>
+      set((state) => ({
+        workers,
+        _indices: {
+          ...state._indices,
+          workersById: rebuildWorkerIndex(workers),
+        },
+      })),
     updateWorkerTask: (workerId, task, targetMachine) =>
       set((state) => {
         const updatedWorkers = state.workers.map((w) =>

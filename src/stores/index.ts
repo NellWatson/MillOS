@@ -28,13 +28,24 @@ export { useSafetyStore };
 export { useUIStore };
 export { useWorkerMoodStore };
 
+// Extend Window interface for store globals (dev mode only)
+declare global {
+  interface Window {
+    useGraphicsStore?: typeof useGraphicsStore;
+    useProductionStore?: typeof useProductionStore;
+    useGameSimulationStore?: typeof useGameSimulationStore;
+    useSafetyStore?: typeof useSafetyStore;
+    useUIStore?: typeof useUIStore;
+  }
+}
+
 // Expose stores to window for performance testing (dev mode only)
 if (typeof window !== 'undefined' && import.meta.env?.DEV) {
-  (window as unknown as Record<string, unknown>).useGraphicsStore = useGraphicsStore;
-  (window as unknown as Record<string, unknown>).useProductionStore = useProductionStore;
-  (window as unknown as Record<string, unknown>).useGameSimulationStore = useGameSimulationStore;
-  (window as unknown as Record<string, unknown>).useSafetyStore = useSafetyStore;
-  (window as unknown as Record<string, unknown>).useUIStore = useUIStore;
+  window.useGraphicsStore = useGraphicsStore;
+  window.useProductionStore = useProductionStore;
+  window.useGameSimulationStore = useGameSimulationStore;
+  window.useSafetyStore = useSafetyStore;
+  window.useUIStore = useUIStore;
 }
 
 // Re-export types

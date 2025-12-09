@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { safeJSONStorage } from './storage';
 
 // Graphics quality presets
 export type GraphicsQuality = 'low' | 'medium' | 'high' | 'ultra';
@@ -73,7 +74,7 @@ const DEFAULT_PERF_DEBUG: PerfDebugSettings = {
 const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
   low: {
     quality: 'low',
-    enableSCADA: true, // SCADA enabled by default
+    enableSCADA: false, // SCADA disabled by default for performance
     perfDebug: { ...DEFAULT_PERF_DEBUG },
     enableSSAO: false,
     enableBloom: false,
@@ -106,7 +107,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
   },
   medium: {
     quality: 'medium',
-    enableSCADA: true, // SCADA enabled by default
+    enableSCADA: false, // SCADA disabled by default for performance
     perfDebug: { ...DEFAULT_PERF_DEBUG },
     enableSSAO: false,
     enableBloom: false,
@@ -139,7 +140,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
   },
   high: {
     quality: 'high',
-    enableSCADA: true, // SCADA enabled by default
+    enableSCADA: true, // SCADA enabled on higher presets for full telemetry
     perfDebug: { ...DEFAULT_PERF_DEBUG },
     enableSSAO: true,
     enableBloom: true,
@@ -172,7 +173,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
   },
   ultra: {
     quality: 'ultra',
-    enableSCADA: true, // Only enable SCADA on ultra quality
+    enableSCADA: true, // SCADA enabled on ultra for maximum fidelity
     perfDebug: { ...DEFAULT_PERF_DEBUG },
     enableSSAO: true,
     enableBloom: true,
@@ -212,6 +213,7 @@ interface GraphicsStore {
     key: K,
     value: GraphicsSettings[K]
   ) => void;
+  setSCADAEnabled: (enabled: boolean) => void;
   resetGraphicsToPreset: (quality: GraphicsQuality) => void;
   // Performance debug actions
   setPerfDebug: <K extends keyof PerfDebugSettings>(key: K, value: PerfDebugSettings[K]) => void;
@@ -231,7 +233,13 @@ export const useGraphicsStore = create<GraphicsStore>()(
           graphics: {
             ...state.graphics,
             [key]: value,
-            quality: 'high' as GraphicsQuality, // Mark as custom
+          },
+        })),
+      setSCADAEnabled: (enabled) =>
+        set((state) => ({
+          graphics: {
+            ...state.graphics,
+            enableSCADA: enabled,
           },
         })),
 
@@ -259,6 +267,7 @@ export const useGraphicsStore = create<GraphicsStore>()(
     }),
     {
       name: 'millos-graphics',
+      storage: safeJSONStorage,
       partialize: (state) => ({
         graphics: state.graphics,
       }),

@@ -57,25 +57,13 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
   // Update ALL refs when values change - this prevents event listener recreation
   useEffect(() => {
     productionSpeedRef.current = productionSpeed;
-  }, [productionSpeed]);
-  useEffect(() => {
     showZonesRef.current = showZones;
-  }, [showZones]);
-  useEffect(() => {
     autoRotateRef.current = autoRotate;
-  }, [autoRotate]);
-  useEffect(() => {
     showAIPanelRef.current = showAIPanel;
-  }, [showAIPanel]);
-  useEffect(() => {
     showSCAPanelRef.current = showSCADAPanel;
-  }, [showSCADAPanel]);
-  useEffect(() => {
     selectedMachineRef.current = selectedMachine;
-  }, [selectedMachine]);
-  useEffect(() => {
     selectedWorkerRef.current = selectedWorker;
-  }, [selectedWorker]);
+  }, [productionSpeed, showZones, autoRotate, showAIPanel, showSCADAPanel, selectedMachine, selectedWorker]);
 
   // Graphics quality shortcuts
   const setGraphicsQuality = useGraphicsStore((state) => state.setGraphicsQuality);

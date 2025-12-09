@@ -8,7 +8,13 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
-    exclude: ['node_modules', 'dist', 'scada-proxy'],
+    exclude: [
+      'node_modules',
+      'dist',
+      'scada-proxy',
+      'src/0.10 Archive/**',
+      'src/**/node_modules/**',
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],

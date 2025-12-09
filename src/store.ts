@@ -58,7 +58,7 @@ export function initializeSCADASync(): () => void {
   let initCancelled = false;
 
   // Initialize SCADA service asynchronously
-  const initPromise = initializeSCADA({ mode: 'simulation' })
+  const initPromise = initializeSCADA()
     .then(async (service) => {
       // Component unmounted before init finished
       if (initCancelled) {

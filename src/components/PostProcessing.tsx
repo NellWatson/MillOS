@@ -10,7 +10,11 @@ import {
   DepthOfField,
 } from '@react-three/postprocessing';
 import { BlendFunction, ToneMappingMode } from 'postprocessing';
+import { Color } from 'three';
 import { useGraphicsStore } from '../stores/graphicsStore';
+
+// SSAO color constant (dark blue-gray for contact shadows)
+const SSAO_COLOR = new Color(0x1a1a2e);
 
 export const PostProcessing: React.FC = () => {
   const graphics = useGraphicsStore((state) => state.graphics);
@@ -40,7 +44,7 @@ export const PostProcessing: React.FC = () => {
             radius={0.15}
             intensity={1.5}
             luminanceInfluence={0.5}
-            color={'#1a1a2e' as any}
+            color={SSAO_COLOR}
             worldDistanceThreshold={50}
             worldDistanceFalloff={8}
             worldProximityThreshold={0.5}

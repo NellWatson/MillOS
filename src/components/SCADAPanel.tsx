@@ -51,6 +51,7 @@ import {
 } from 'recharts';
 import { useSCADA, useSCADAAlarms, getSCADAService } from '../scada';
 import type { TagValue, TagDefinition, TagGroup, ConnectionConfig } from '../scada/types';
+import { useGraphicsStore } from '../stores/graphicsStore';
 
 interface SCADAPanelProps {
   isOpen: boolean;
@@ -107,6 +108,8 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
   } = useSCADA();
 
   const { alarms, summary, acknowledge, acknowledgeAll, hasCritical } = useSCADAAlarms();
+  const scadaEnabled = useGraphicsStore((state) => state.graphics.enableSCADA);
+  const setSCADAEnabled = useGraphicsStore((state) => state.setSCADAEnabled);
 
   const [activeTab, setActiveTab] = useState<'tags' | 'alarms' | 'trends' | 'faults' | 'settings'>(
     'tags'
@@ -117,14 +120,14 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
 
   // Trend chart state
   const [selectedTrendTags, setSelectedTrendTags] = useState<string[]>([]);
-  const [trendDuration, setTrendDuration] = useState<number>(5 * 60 * 1000); // 5 minutes default
-  const [trendData, setTrendData] = useState<Array<{ timestamp: number; [key: string]: number }>>(
-    []
-  );
-  const [trendPaused, setTrendPaused] = useState(false);
-  const [trendTagSearch, setTrendTagSearch] = useState('');
+const [trendDuration, setTrendDuration] = useState<number>(5 * 60 * 1000); // 5 minutes default
+const [trendData, setTrendData] = useState<Array<{ timestamp: number; [key: string]: number }>>(
+  []
+);
+const [trendPaused, setTrendPaused] = useState(false);
+const [trendTagSearch, setTrendTagSearch] = useState('');
 
-  // Connection settings state
+// Connection settings state
   // SECURITY NOTE: Default URLs use HTTP/WS for localhost development convenience.
   // In production deployments, these should be configured to use HTTPS/WSS with valid TLS certificates.
   // Localhost connections do not require HTTPS as traffic never leaves the machine,
@@ -133,13 +136,20 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
   const [restUrl, setRestUrl] = useState('http://localhost:3001');
   const [restPollInterval, setRestPollInterval] = useState(1000);
   const [mqttBrokerUrl, setMqttBrokerUrl] = useState('ws://localhost:8883');
-  const [mqttTopicPrefix, setMqttTopicPrefix] = useState('scada');
-  const [proxyUrl, setProxyUrl] = useState('http://localhost:3001');
-  const [isApplyingSettings, setIsApplyingSettings] = useState(false);
+const [mqttTopicPrefix, setMqttTopicPrefix] = useState('scada');
+const [proxyUrl, setProxyUrl] = useState('http://localhost:3001');
+const [isApplyingSettings, setIsApplyingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<{
     type: 'success' | 'error';
     text: string;
   } | null>(null);
+  const handleToggleSCADA = useCallback(() => {
+    setSCADAEnabled(!scadaEnabled);
+    setSettingsMessage({
+      type: 'success',
+      text: !scadaEnabled ? 'SCADA runtime enabled' : 'SCADA runtime disabled',
+    });
+  }, [scadaEnabled, setSCADAEnabled]);
 
   // Chart line colors
   const TREND_COLORS = ['#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
@@ -218,6 +228,23 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
         tag.id.toLowerCase().includes(trendTagSearch.toLowerCase())
     );
   }, [tags, trendTagSearch]);
+
+  // Sync form state with current SCADA connection config when opening settings
+  useEffect(() => {
+    if (!isOpen) return;
+
+    try {
+      const config = getSCADAService().getConnectionConfig();
+      setConnectionType(config.type ?? 'simulation');
+      if (config.baseUrl) setRestUrl(config.baseUrl);
+      if (config.pollInterval) setRestPollInterval(config.pollInterval);
+      if (config.brokerUrl) setMqttBrokerUrl(config.brokerUrl);
+      if (config.topicPrefix) setMqttTopicPrefix(config.topicPrefix);
+      if (config.proxyUrl) setProxyUrl(config.proxyUrl);
+    } catch (err) {
+      console.error('[SCADAPanel] Failed to load SCADA connection config', err);
+    }
+  }, [isOpen]);
 
   // Load trend data when selected tags or duration change
   const loadTrendData = useCallback(async () => {
@@ -900,13 +927,13 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
               </div>
 
               <div className="space-y-3">
-                {['sensor_fail', 'spike', 'drift', 'stuck', 'noise'].map((faultType) => (
+                {(['sensor_fail', 'spike', 'drift', 'stuck', 'noise'] as const).map((faultType) => (
                   <button
                     key={faultType}
                     onClick={() =>
                       injectFault({
                         tagId: 'RM101.TT001.PV',
-                        faultType: faultType as any,
+                        faultType,
                         duration: 10000,
                         severity: 1.5,
                       })
@@ -973,6 +1000,24 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
                   <div className="text-xs text-slate-400">
                     Current mode: <span className="text-cyan-400">{mode}</span>
                   </div>
+                  <div className="flex items-center justify-between mt-3">
+                    <div className="text-xs text-slate-400">SCADA runtime</div>
+                    <button
+                      onClick={handleToggleSCADA}
+                      className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                        scadaEnabled
+                          ? 'bg-green-500/20 text-green-300 border border-green-500/40'
+                          : 'bg-slate-700/50 text-slate-200 border border-slate-600/60'
+                      }`}
+                    >
+                      {scadaEnabled ? 'Enabled' : 'Disabled'}
+                    </button>
+                  </div>
+                  {!scadaEnabled && (
+                    <div className="mt-2 text-[11px] text-amber-300">
+                      Enable to start SCADA simulation and live telemetry.
+                    </div>
+                  )}
                 </div>
 
                 {/* Connection Type Selector */}

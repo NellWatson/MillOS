@@ -139,13 +139,26 @@ export function resetFrameBudget() {
   frameBudget = { useFrame: 0, render: 0, store: 0, idle: 0 };
 }
 
+// Extend Window interface for perf monitor globals
+declare global {
+  interface Window {
+    perfReport?: typeof perfReport;
+    perfCountReport?: typeof perfCountReport;
+    perfReset?: typeof perfReset;
+    perfTimings?: typeof timings;
+    perfCounts?: typeof frameCounts;
+    startAutoReport?: typeof startAutoReport;
+    stopAutoReport?: typeof stopAutoReport;
+  }
+}
+
 // Expose globally for console access
 if (typeof window !== 'undefined') {
-  (window as any).perfReport = perfReport;
-  (window as any).perfCountReport = perfCountReport;
-  (window as any).perfReset = perfReset;
-  (window as any).perfTimings = timings;
-  (window as any).perfCounts = frameCounts;
+  window.perfReport = perfReport;
+  window.perfCountReport = perfCountReport;
+  window.perfReset = perfReset;
+  window.perfTimings = timings;
+  window.perfCounts = frameCounts;
 }
 
 // Auto-report every 10 seconds in development
@@ -174,8 +187,8 @@ export function stopAutoReport() {
 // Start auto-report in dev mode
 if (typeof window !== 'undefined' && import.meta.env?.DEV) {
   // Don't auto-start, let user control it
-  (window as any).startAutoReport = startAutoReport;
-  (window as any).stopAutoReport = stopAutoReport;
+  window.startAutoReport = startAutoReport;
+  window.stopAutoReport = stopAutoReport;
   console.log(
     '%c[PerfMonitor] Ready. Use perfReport(), startAutoReport(), stopAutoReport()',
     'color: #95e1d3'

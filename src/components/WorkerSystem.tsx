@@ -87,6 +87,8 @@ const getSafeSpawnZ = (preferredZ: number): number => {
 };
 
 export const WorkerSystem: React.FC<WorkerSystemProps> = ({ onSelectWorker }) => {
+  const setWorkers = useProductionStore((state) => state.setWorkers);
+
   const workers = useMemo(() => {
     return WORKER_ROSTER.map((roster, i) => {
       // Pick a safe aisle
@@ -104,6 +106,14 @@ export const WorkerSystem: React.FC<WorkerSystemProps> = ({ onSelectWorker }) =>
       };
     });
   }, []);
+
+  useEffect(() => {
+    setWorkers(workers);
+    return () => {
+      setWorkers([]);
+      workers.forEach((worker) => positionRegistry.unregister(worker.id));
+    };
+  }, [setWorkers, workers]);
 
   // Memoize callbacks for each worker to prevent re-renders
   const workerCallbacks = useMemo(

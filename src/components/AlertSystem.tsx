@@ -136,6 +136,11 @@ export const AlertSystem: React.FC = () => {
   }, [safetyMetrics.safetyStops, scheduleAutoDismiss]);
 
   useEffect(() => {
+    if (!import.meta.env.DEV) {
+      isInitialMount.current = false;
+      return;
+    }
+
     // Add initial alerts (no sound on mount)
     const sampleAlerts = getSampleAlerts();
     const initial = sampleAlerts.slice(0, 2).map((a, i) => ({
@@ -148,7 +153,7 @@ export const AlertSystem: React.FC = () => {
     setTotalAlertCount(2);
     initial.forEach((a) => scheduleAutoDismiss(a));
 
-    // Periodically add new alerts
+    // Periodically add new alerts (dev/demo only)
     const interval = setInterval(() => {
       const alerts = getSampleAlerts();
       const template = alerts[Math.floor(Math.random() * alerts.length)];
