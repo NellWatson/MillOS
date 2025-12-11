@@ -7,7 +7,8 @@ import * as THREE from 'three';
 import warehouseHdrUrl from '/hdri/warehouse.hdr?url';
 import { Machines } from './Machines';
 import { ConveyorSystem } from './ConveyorSystem';
-import { WorkerSystem } from './WorkerSystem';
+// Using new optimized worker system with centralized animation manager
+import { WorkerSystemNew as WorkerSystem } from './WorkerSystemNew';
 import { FactoryInfrastructure } from './FactoryInfrastructure';
 import { SpoutingSystem } from './SpoutingSystem';
 import { DustParticles, GrainFlow, MachineSteamVents, DustAnimationManager } from './DustParticles';
@@ -17,8 +18,10 @@ import { FactoryEnvironment } from './Environment';
 import { HolographicDisplays } from './HolographicDisplays';
 
 // Lazy load heavy 3D components to reduce initial bundle
-const TruckBay = React.lazy(() => import('./TruckBay').then(m => ({ default: m.TruckBay })));
-const AmbientDetailsGroup = React.lazy(() => import('./AmbientDetails').then(m => ({ default: m.AmbientDetailsGroup })));
+const TruckBay = React.lazy(() => import('./TruckBay').then((m) => ({ default: m.TruckBay })));
+const AmbientDetailsGroup = React.lazy(() =>
+  import('./AmbientDetails').then((m) => ({ default: m.AmbientDetailsGroup }))
+);
 import { VisibleChaos } from './VisibleChaos';
 import { FactoryEnvironmentSystem } from './FactoryEnvironment';
 import { MaintenanceSystem } from './MaintenanceSystem';
@@ -27,6 +30,7 @@ import { MachineData, MachineType, WorkerData } from '../types';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useProductionStore } from '../stores/productionStore';
 import { useSafetyStore } from '../stores/safetyStore';
+import { useGameSimulationStore, FIRE_DRILL_EXITS } from '../stores/gameSimulationStore';
 import { positionRegistry, Obstacle } from '../utils/positionRegistry';
 import { useShallow } from 'zustand/react/shallow';
 import { trackRender } from '../utils/renderProfiler';
@@ -95,8 +99,8 @@ const HeatMapPoint = React.memo<{
           opacity={0.3 * intensity}
         />
       </mesh>
-      {/* Outer ring */}
-      <mesh rotation={floorRotation}>
+      {/* Outer ring - raised 0.01 to prevent z-fighting with circle */}
+      <mesh rotation={floorRotation} position={[0, 0.01, 0]}>
         <ringGeometry args={[radius - 0.1, radius, 32]} />
         <meshBasicMaterial ref={ringMaterialRef} color={color} transparent opacity={0.6} />
       </mesh>
@@ -136,6 +140,80 @@ const IncidentHeatMap: React.FC = () => {
     <group>
       {incidentHeatMap.map((point, i) => (
         <HeatMapPoint key={i} point={point} />
+      ))}
+    </group>
+  );
+};
+
+// Fire Drill Exit Markers - glowing green markers at each exit point
+const FireDrillExitMarkers: React.FC = () => {
+  const emergencyDrillMode = useGameSimulationStore((state) => state.emergencyDrillMode);
+  const drillMetrics = useGameSimulationStore((state) => state.drillMetrics);
+  const materialRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
+
+  // Pulsing animation for exit markers
+  useFrame((state) => {
+    if (!emergencyDrillMode) return;
+    const pulse = Math.sin(state.clock.elapsedTime * 4) * 0.3 + 0.7;
+    materialRefs.current.forEach((mat) => {
+      if (mat) {
+        mat.emissiveIntensity = pulse * 2;
+        mat.opacity = 0.6 + pulse * 0.4;
+      }
+    });
+  });
+
+  // Only show during active fire drill
+  if (!emergencyDrillMode || !drillMetrics.active) return null;
+
+  return (
+    <group>
+      {FIRE_DRILL_EXITS.map((exit, i) => (
+        <group key={exit.id} position={[exit.position.x, 0.1, exit.position.z]}>
+          {/* Glowing circle on floor */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[2, 3.5, 32]} />
+            <meshStandardMaterial
+              ref={(el) => {
+                materialRefs.current[i] = el;
+              }}
+              color="#22c55e"
+              emissive="#22c55e"
+              emissiveIntensity={1.5}
+              transparent
+              opacity={0.8}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+          {/* Inner solid circle */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+            <circleGeometry args={[2, 32]} />
+            <meshStandardMaterial
+              color="#22c55e"
+              emissive="#22c55e"
+              emissiveIntensity={0.5}
+              transparent
+              opacity={0.4}
+            />
+          </mesh>
+          {/* Exit label */}
+          <Text
+            position={[0, 2, 0]}
+            fontSize={1.2}
+            color="#22c55e"
+            anchorX="center"
+            anchorY="middle"
+            outlineWidth={0.05}
+            outlineColor="#000000"
+          >
+            {exit.label.toUpperCase()}
+          </Text>
+          {/* Pointing arrow above */}
+          <mesh position={[0, 3.5, 0]} rotation={[0, 0, Math.PI]}>
+            <coneGeometry args={[0.5, 1, 8]} />
+            <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={1} />
+          </mesh>
+        </group>
       ))}
     </group>
   );
@@ -514,13 +592,6 @@ export const MillScene: React.FC<MillSceneProps> = ({
   // Camera-based visibility culling - hide interior when outside, hide exterior when inside
   const isCameraInside = useCameraPositionStore((state) => state.isCameraInside);
 
-  // Performance debug - log when toggles change
-  useEffect(() => {
-    if (perfDebug?.showPerfOverlay) {
-      console.log('[PerfDebug] Active toggles:', perfDebug);
-    }
-  }, [perfDebug]);
-
   return (
     <group>
       {/* HDRI Environment for realistic reflections - disable on low */}
@@ -589,6 +660,9 @@ export const MillScene: React.FC<MillSceneProps> = ({
 
       {/* Incident Heat Map Visualization */}
       <IncidentHeatMap />
+
+      {/* Fire Drill Exit Markers - shown during active drill */}
+      <FireDrillExitMarkers />
 
       {/* Atmospheric Effects - heavily reduced for performance */}
       {/* PERFORMANCE: Interior-only particle effects */}

@@ -26,6 +26,9 @@ import {
   SkipForward,
   Info,
   Volume2,
+  Pause,
+  Play,
+  FastForward,
 } from 'lucide-react';
 import { MachineData } from '../types';
 import { audioManager } from '../utils/audioManager';
@@ -97,10 +100,12 @@ function useAudioState() {
 // Emergency & Environment Controls Panel
 const EmergencyEnvironmentPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
+  const [, setTick] = useState(0); // Force re-render for timer
 
   const {
     emergencyActive,
     emergencyDrillMode,
+    drillMetrics,
     startEmergencyDrill,
     endEmergencyDrill,
     shiftChangeActive,
@@ -112,6 +117,7 @@ const EmergencyEnvironmentPanel: React.FC = () => {
     useShallow((state) => ({
       emergencyActive: state.emergencyActive,
       emergencyDrillMode: state.emergencyDrillMode,
+      drillMetrics: state.drillMetrics,
       startEmergencyDrill: state.startEmergencyDrill,
       endEmergencyDrill: state.endEmergencyDrill,
       shiftChangeActive: state.shiftChangeActive,
@@ -122,13 +128,21 @@ const EmergencyEnvironmentPanel: React.FC = () => {
     }))
   );
 
-  const { showHeatMap, setShowHeatMap, clearHeatMap } = useProductionStore(
+  const { showHeatMap, setShowHeatMap, clearHeatMap, workerCount } = useProductionStore(
     useShallow((state) => ({
       showHeatMap: state.showHeatMap,
       setShowHeatMap: state.setShowHeatMap,
       clearHeatMap: state.clearHeatMap,
+      workerCount: state.workers.length,
     }))
   );
+
+  // Auto-update timer during drill
+  useEffect(() => {
+    if (!emergencyDrillMode || !drillMetrics.active || drillMetrics.evacuationComplete) return;
+    const interval = setInterval(() => setTick((t) => t + 1), 100); // Update every 100ms
+    return () => clearInterval(interval);
+  }, [emergencyDrillMode, drillMetrics.active, drillMetrics.evacuationComplete]);
 
   const weatherOptions: Array<{
     value: 'clear' | 'cloudy' | 'rain' | 'storm';
@@ -181,7 +195,9 @@ const EmergencyEnvironmentPanel: React.FC = () => {
                 Emergency Drill
               </div>
               <button
-                onClick={() => (emergencyDrillMode ? endEmergencyDrill() : startEmergencyDrill())}
+                onClick={() =>
+                  emergencyDrillMode ? endEmergencyDrill() : startEmergencyDrill(workerCount)
+                }
                 className={`w-full py-2 px-3 rounded-lg font-bold text-sm transition-all ${
                   emergencyDrillMode
                     ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse'
@@ -202,6 +218,49 @@ const EmergencyEnvironmentPanel: React.FC = () => {
                   ? 'Workers responding to drill...'
                   : 'Test emergency response procedures'}
               </p>
+
+              {/* Evacuation Progress - shown during active drill */}
+              {emergencyDrillMode && drillMetrics.active && (
+                <div className="mt-3 bg-slate-900/50 rounded-lg p-2 border border-red-500/30">
+                  {/* Timer */}
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-[10px] text-slate-400">Evacuation Time</span>
+                    <span className="text-sm font-mono text-red-400">
+                      {drillMetrics.finalTimeSeconds !== null
+                        ? `${drillMetrics.finalTimeSeconds.toFixed(1)}s`
+                        : `${((Date.now() - drillMetrics.startTime) / 1000).toFixed(1)}s`}
+                    </span>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="mb-2">
+                    <div className="flex justify-between text-[9px] text-slate-500 mb-1">
+                      <span>Evacuated</span>
+                      <span>
+                        {drillMetrics.evacuatedWorkerIds.length}/{drillMetrics.totalWorkers}
+                      </span>
+                    </div>
+                    <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-green-500 transition-all duration-300"
+                        style={{
+                          width: `${drillMetrics.totalWorkers > 0 ? (drillMetrics.evacuatedWorkerIds.length / drillMetrics.totalWorkers) * 100 : 0}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* All Clear indicator */}
+                  {drillMetrics.evacuationComplete && (
+                    <div className="flex items-center justify-center gap-2 py-1 bg-green-600/20 rounded border border-green-500/50">
+                      <span className="text-green-400 font-bold text-xs">ALL CLEAR</span>
+                      <span className="text-green-300 text-[10px]">
+                        {drillMetrics.finalTimeSeconds?.toFixed(1)}s
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Shift Change Button */}
@@ -295,6 +354,9 @@ const GraphicsOptionsPanel: React.FC = () => {
   const setGraphicsQuality = useGraphicsStore((state) => state.setGraphicsQuality);
   const setGraphicsSetting = useGraphicsStore((state) => state.setGraphicsSetting);
   const theme = useUIStore((state) => state.theme);
+  const showFPSCounter = useUIStore((state) => state.showFPSCounter);
+  const toggleFPSCounter = useUIStore((state) => state.toggleFPSCounter);
+  const clearPersistedState = useGameSimulationStore((state) => state.clearPersistedState);
 
   const qualityColors: Record<GraphicsQuality, string> = {
     low: 'text-slate-400',
@@ -571,13 +633,28 @@ const GraphicsOptionsPanel: React.FC = () => {
             <div
               className={`border-t pt-2 ${theme === 'light' ? 'border-slate-200' : 'border-slate-800'}`}
             >
-              <div className="flex items-center gap-2 mb-2">
-                <Gauge className="w-3.5 h-3.5 text-green-500" />
-                <span
-                  className={`text-[9px] uppercase tracking-wider ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Gauge className="w-3.5 h-3.5 text-green-500" />
+                  <span
+                    className={`text-[9px] uppercase tracking-wider ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
+                  >
+                    Performance
+                  </span>
+                </div>
+                <button
+                  onClick={() => toggleFPSCounter()}
+                  className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all ${
+                    showFPSCounter
+                      ? 'bg-green-600 text-white'
+                      : theme === 'light'
+                        ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
+                        : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                  }`}
+                  title="Toggle FPS counter overlay"
                 >
-                  Performance
-                </span>
+                  {showFPSCounter ? 'OVERLAY ON' : 'OVERLAY OFF'}
+                </button>
               </div>
               <FPSDisplay showDetailed={true} />
             </div>
@@ -741,22 +818,46 @@ const GraphicsOptionsPanel: React.FC = () => {
               </p>
             </div>
 
-            {/* Reset Settings Button */}
-            <button
-              onClick={() => {
-                localStorage.removeItem('millos-settings');
-                setGraphicsQuality('medium');
-                window.location.reload();
-              }}
-              className={`w-full mt-2 py-1.5 rounded text-[10px] font-medium transition-all flex items-center justify-center gap-1 ${
-                theme === 'light'
-                  ? 'bg-red-100 text-red-600 hover:bg-red-200'
-                  : 'bg-red-900/50 text-red-300 hover:bg-red-800/50'
-              }`}
+            {/* Simulation Reset Section */}
+            <div
+              className={`border-t pt-3 mt-2 ${theme === 'light' ? 'border-slate-200' : 'border-slate-700'}`}
             >
-              <RotateCcw className="w-3 h-3" />
-              Reset All Settings
-            </button>
+              <div className="flex items-center gap-2 mb-2">
+                <RotateCcw className="w-3.5 h-3.5 text-amber-500" />
+                <span
+                  className={`text-[9px] uppercase tracking-wider ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
+                >
+                  Simulation
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={clearPersistedState}
+                  className={`flex-1 py-1.5 rounded text-[10px] font-medium transition-all flex items-center justify-center gap-1 ${
+                    theme === 'light'
+                      ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                      : 'bg-amber-900/50 text-amber-300 hover:bg-amber-800/50'
+                  }`}
+                >
+                  Reset to 10am
+                </button>
+                <button
+                  onClick={() => {
+                    localStorage.removeItem('millos-settings');
+                    localStorage.removeItem('millos-game-simulation');
+                    setGraphicsQuality('medium');
+                    window.location.reload();
+                  }}
+                  className={`flex-1 py-1.5 rounded text-[10px] font-medium transition-all flex items-center justify-center gap-1 ${
+                    theme === 'light'
+                      ? 'bg-red-100 text-red-600 hover:bg-red-200'
+                      : 'bg-red-900/50 text-red-300 hover:bg-red-800/50'
+                  }`}
+                >
+                  Reset Simulation
+                </button>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1030,13 +1131,25 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   const [showScrollIndicator, setShowScrollIndicator] = useState(false);
 
   // UI store state using useShallow
-  const { panelMinimized, setPanelMinimized, theme, showShortcuts, setShowShortcuts } = useUIStore(
+  const {
+    panelMinimized,
+    setPanelMinimized,
+    theme,
+    showShortcuts,
+    setShowShortcuts,
+    showFPSCounter,
+    fpsMode,
+    toggleFpsMode,
+  } = useUIStore(
     useShallow((state) => ({
       panelMinimized: state.panelMinimized,
       setPanelMinimized: state.setPanelMinimized,
       theme: state.theme,
       showShortcuts: state.showShortcuts,
       setShowShortcuts: state.setShowShortcuts,
+      showFPSCounter: state.showFPSCounter,
+      fpsMode: state.fpsMode,
+      toggleFpsMode: state.toggleFpsMode,
     }))
   );
 
@@ -1139,6 +1252,19 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                 <Brain className="w-4 h-4" />
               </button>
               <button
+                onClick={() => toggleFpsMode()}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+                  fpsMode
+                    ? 'bg-violet-600 text-white'
+                    : theme === 'light'
+                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+                title="First Person Mode (V)"
+              >
+                <Eye className="w-4 h-4" />
+              </button>
+              <button
                 onClick={() => setShowZones(!showZones)}
                 className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
                   showZones
@@ -1201,6 +1327,19 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
                 {/* Quick Action Buttons */}
                 <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => toggleFpsMode()}
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                      fpsMode
+                        ? 'bg-violet-600 text-white'
+                        : theme === 'light'
+                          ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    }`}
+                    title="First Person Mode (V)"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                  </button>
                   <button
                     onClick={() => setShowShortcuts(true)}
                     className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
@@ -1302,6 +1441,63 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                     <span className="text-orange-400 font-mono font-bold">
                       {(productionSpeed * 100).toFixed(0)}%
                     </span>
+                  </div>
+                  {/* Fast Forward Buttons */}
+                  <div className="flex gap-1 mb-2">
+                    <button
+                      onClick={() => setProductionSpeed(0)}
+                      className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 ${
+                        productionSpeed === 0
+                          ? 'bg-orange-600 text-white'
+                          : theme === 'light'
+                            ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                      }`}
+                      title="Pause"
+                    >
+                      <Pause className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => setProductionSpeed(0.5)}
+                      className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                        productionSpeed === 0.5
+                          ? 'bg-orange-600 text-white'
+                          : theme === 'light'
+                            ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                      }`}
+                      title="Half speed"
+                    >
+                      0.5x
+                    </button>
+                    <button
+                      onClick={() => setProductionSpeed(1)}
+                      className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 ${
+                        productionSpeed === 1
+                          ? 'bg-orange-600 text-white'
+                          : theme === 'light'
+                            ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                      }`}
+                      title="Normal speed"
+                    >
+                      <Play className="w-3 h-3" />
+                      1x
+                    </button>
+                    <button
+                      onClick={() => setProductionSpeed(2)}
+                      className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 ${
+                        productionSpeed === 2
+                          ? 'bg-orange-600 text-white'
+                          : theme === 'light'
+                            ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                      }`}
+                      title="Double speed"
+                    >
+                      <FastForward className="w-3 h-3" />
+                      2x
+                    </button>
                   </div>
                   <input
                     type="range"
@@ -1505,6 +1701,25 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                   </div>
                   {showAIPanel && <span className="text-xs opacity-70">ESC to close</span>}
                 </button>
+
+                <button
+                  onClick={() => toggleFpsMode()}
+                  className={`w-full py-2 px-3 rounded-lg font-bold text-sm transition-all flex items-center justify-between ${
+                    fpsMode
+                      ? 'bg-gradient-to-r from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-500/30'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Eye className="w-5 h-5" />
+                    <span>First Person Mode</span>
+                  </div>
+                  {fpsMode ? (
+                    <span className="text-xs opacity-70">ESC to exit</span>
+                  ) : (
+                    <span className="text-xs opacity-50">V</span>
+                  )}
+                </button>
               </div>
 
               {/* Safety Metrics Display */}
@@ -1583,6 +1798,21 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
       {/* Incident Replay Controls - bottom center when in replay mode */}
       <IncidentReplayControls />
+
+      {/* FPS Counter Overlay - top left corner when enabled */}
+      {showFPSCounter && (
+        <div className="fixed top-20 left-4 z-50 pointer-events-auto">
+          <div
+            className={`rounded-lg border shadow-lg ${
+              theme === 'light'
+                ? 'bg-white/90 border-slate-200'
+                : 'bg-slate-900/90 border-slate-700'
+            }`}
+          >
+            <FPSDisplay showDetailed={false} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

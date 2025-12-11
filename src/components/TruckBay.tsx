@@ -722,10 +722,10 @@ const TruckWashStation: React.FC<{ position: [number, number, number]; rotation?
 };
 
 // Driver break room/lounge building
-const DriverBreakRoom: React.FC<{ position: [number, number, number]; rotation?: number }> = ({
-  position,
-  rotation = 0,
-}) => (
+export const DriverBreakRoom: React.FC<{
+  position: [number, number, number];
+  rotation?: number;
+}> = ({ position, rotation = 0 }) => (
   <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     {/* Main building */}
     <mesh position={[0, 2, 0]} castShadow>
@@ -737,23 +737,34 @@ const DriverBreakRoom: React.FC<{ position: [number, number, number]; rotation?:
       <boxGeometry args={[8.5, 0.3, 6.5]} />
       <meshStandardMaterial color="#57534e" roughness={0.7} />
     </mesh>
-    {/* Front door */}
-    <mesh position={[0, 1.3, 3.01]}>
+    {/* Front door - positioned so bottom sits at floor level */}
+    <mesh position={[0, 1.2, 3.01]}>
       <boxGeometry args={[1.2, 2.4, 0.1]} />
       <meshStandardMaterial color="#44403c" roughness={0.6} />
     </mesh>
     {/* Door handle */}
-    <mesh position={[0.4, 1.3, 3.08]}>
+    <mesh position={[0.4, 1.2, 3.08]}>
       <boxGeometry args={[0.08, 0.2, 0.05]} />
       <meshStandardMaterial color="#a8a29e" metalness={0.7} roughness={0.3} />
     </mesh>
-    {/* Windows */}
+    {/* Door window */}
+    <mesh position={[0, 1.9, 3.06]}>
+      <planeGeometry args={[0.5, 0.6]} />
+      <meshStandardMaterial
+        color="#1e3a5f"
+        metalness={0.9}
+        roughness={0.1}
+        transparent
+        opacity={0.8}
+      />
+    </mesh>
+    {/* Windows - properly scaled */}
     {[
-      [-2.5, 2],
-      [2.5, 2],
+      [-2.5, 2.2],
+      [2.5, 2.2],
     ].map(([x, y], i) => (
       <mesh key={i} position={[x, y, 3.01]}>
-        <planeGeometry args={[1.5, 1.2]} />
+        <planeGeometry args={[1.2, 1.0]} />
         <meshStandardMaterial
           color="#1e3a5f"
           metalness={0.9}
@@ -821,10 +832,10 @@ const DriverBreakRoom: React.FC<{ position: [number, number, number]; rotation?:
 );
 
 // Employee parking lot with striped spaces
-const EmployeeParking: React.FC<{ position: [number, number, number]; rotation?: number }> = ({
-  position,
-  rotation = 0,
-}) => (
+export const EmployeeParking: React.FC<{
+  position: [number, number, number];
+  rotation?: number;
+}> = ({ position, rotation = 0 }) => (
   <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     {/* Parking lot surface */}
     <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
@@ -945,10 +956,10 @@ const EmployeeParking: React.FC<{ position: [number, number, number]; rotation?:
 );
 
 // Propane tank cage
-const PropaneTankCage: React.FC<{ position: [number, number, number]; rotation?: number }> = ({
-  position,
-  rotation = 0,
-}) => (
+export const PropaneTankCage: React.FC<{
+  position: [number, number, number];
+  rotation?: number;
+}> = ({ position, rotation = 0 }) => (
   <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     {/* Concrete pad */}
     <mesh position={[0, 0.05, 0]}>
@@ -2252,13 +2263,109 @@ const NoIdlingSign: React.FC<{ position: [number, number, number]; rotation?: nu
   </group>
 );
 
+// Road tunnel - clean mountain tunnel for trucks to disappear into
+const RoadTunnel: React.FC<{
+  position: [number, number, number];
+  rotation?: number;
+  roadWidth?: number;
+}> = ({ position, rotation = 0, roadWidth = 10 }) => {
+  const tunnelWidth = roadWidth + 2;
+  const tunnelHeight = 7;
+  const tunnelDepth = 50;
+
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      {/* ========== MOUNTAIN/HILLSIDE ========== */}
+      {/* Sloped hillside - left */}
+      <mesh position={[-tunnelWidth / 2 - 6, 4, -tunnelDepth / 2]} rotation={[0, 0, 0.3]}>
+        <boxGeometry args={[12, 10, tunnelDepth + 10]} />
+        <meshStandardMaterial color="#5a6a4a" roughness={0.95} />
+      </mesh>
+      {/* Sloped hillside - right */}
+      <mesh position={[tunnelWidth / 2 + 6, 4, -tunnelDepth / 2]} rotation={[0, 0, -0.3]}>
+        <boxGeometry args={[12, 10, tunnelDepth + 10]} />
+        <meshStandardMaterial color="#5a6a4a" roughness={0.95} />
+      </mesh>
+      {/* Mountain top */}
+      <mesh position={[0, 12, -tunnelDepth / 2]}>
+        <boxGeometry args={[tunnelWidth + 24, 6, tunnelDepth + 10]} />
+        <meshStandardMaterial color="#6a7a5a" roughness={0.95} />
+      </mesh>
+
+      {/* ========== TUNNEL PORTAL ========== */}
+      {/* Concrete portal frame - left */}
+      <mesh position={[-tunnelWidth / 2 - 0.5, tunnelHeight / 2, 0]}>
+        <boxGeometry args={[1, tunnelHeight, 2]} />
+        <meshStandardMaterial color="#4b5563" roughness={0.8} />
+      </mesh>
+      {/* Concrete portal frame - right */}
+      <mesh position={[tunnelWidth / 2 + 0.5, tunnelHeight / 2, 0]}>
+        <boxGeometry args={[1, tunnelHeight, 2]} />
+        <meshStandardMaterial color="#4b5563" roughness={0.8} />
+      </mesh>
+      {/* Concrete portal top */}
+      <mesh position={[0, tunnelHeight + 0.5, 0]}>
+        <boxGeometry args={[tunnelWidth + 2, 1, 2]} />
+        <meshStandardMaterial color="#4b5563" roughness={0.8} />
+      </mesh>
+
+      {/* ========== TUNNEL INTERIOR ========== */}
+      {/* Ceiling */}
+      <mesh position={[0, tunnelHeight, -tunnelDepth / 2]}>
+        <boxGeometry args={[tunnelWidth, 0.3, tunnelDepth]} />
+        <meshStandardMaterial color="#111111" roughness={1} />
+      </mesh>
+      {/* Left wall */}
+      <mesh position={[-tunnelWidth / 2, tunnelHeight / 2, -tunnelDepth / 2]}>
+        <boxGeometry args={[0.3, tunnelHeight, tunnelDepth]} />
+        <meshStandardMaterial color="#151515" roughness={1} />
+      </mesh>
+      {/* Right wall */}
+      <mesh position={[tunnelWidth / 2, tunnelHeight / 2, -tunnelDepth / 2]}>
+        <boxGeometry args={[0.3, tunnelHeight, tunnelDepth]} />
+        <meshStandardMaterial color="#151515" roughness={1} />
+      </mesh>
+      {/* Back wall - pure black void */}
+      <mesh position={[0, tunnelHeight / 2, -tunnelDepth]}>
+        <planeGeometry args={[tunnelWidth, tunnelHeight]} />
+        <meshBasicMaterial color="#000000" />
+      </mesh>
+
+      {/* ========== ROAD SURFACE ========== */}
+      {/* Road into tunnel */}
+      <mesh position={[0, 0.05, -tunnelDepth / 2]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[roadWidth, tunnelDepth]} />
+        <meshStandardMaterial color="#1a1a1a" roughness={0.95} />
+      </mesh>
+      {/* Road approach */}
+      <mesh position={[0, 0.06, 10]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[roadWidth, 20]} />
+        <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+      </mesh>
+
+      {/* Center line marking */}
+      <mesh position={[0, 0.07, 5]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[0.15, 10]} />
+        <meshBasicMaterial color="#fbbf24" />
+      </mesh>
+    </group>
+  );
+};
+
 // Pallet staging area with stacked pallets
 const PalletStaging: React.FC<{ position: [number, number, number] }> = ({ position }) => (
   <group position={position}>
-    {/* Ground marking */}
-    <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+    {/* Ground marking - raised and with polygon offset to prevent z-fighting */}
+    <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
       <planeGeometry args={[4, 6]} />
-      <meshStandardMaterial color="#fbbf24" transparent opacity={0.3} />
+      <meshStandardMaterial
+        color="#fbbf24"
+        transparent
+        opacity={0.3}
+        polygonOffset
+        polygonOffsetFactor={-10}
+        depthWrite={false}
+      />
     </mesh>
     {/* Stacked pallets */}
     {[
@@ -2339,28 +2446,28 @@ const RollUpDoor: React.FC<{
 
   return (
     <group position={position}>
-      {/* Door frame */}
-      <mesh position={[-5.2, 2.5, 0]}>
+      {/* Door frame - narrowed to fit 10-unit dock opening */}
+      <mesh position={[-4.7, 2.5, 0]}>
         <boxGeometry args={[0.3, 5, 0.2]} />
         <meshStandardMaterial color="#374151" metalness={0.5} roughness={0.5} />
       </mesh>
-      <mesh position={[5.2, 2.5, 0]}>
+      <mesh position={[4.7, 2.5, 0]}>
         <boxGeometry args={[0.3, 5, 0.2]} />
         <meshStandardMaterial color="#374151" metalness={0.5} roughness={0.5} />
       </mesh>
       <mesh position={[0, 5.1, 0]}>
-        <boxGeometry args={[10.7, 0.3, 0.2]} />
+        <boxGeometry args={[9.7, 0.3, 0.2]} />
         <meshStandardMaterial color="#374151" metalness={0.5} roughness={0.5} />
       </mesh>
       {/* Roll-up door */}
       <mesh ref={doorRef} position={[0, 2, 0.1]}>
-        <boxGeometry args={[10, 4, 0.15]} />
+        <boxGeometry args={[9, 4, 0.15]} />
         <meshStandardMaterial color="#64748b" metalness={0.6} roughness={0.4} />
       </mesh>
       {/* Door panels (grooves) */}
       {[-1.5, -0.5, 0.5, 1.5].map((y, i) => (
         <mesh key={i} position={[0, y + 2, 0.18]}>
-          <boxGeometry args={[9.8, 0.05, 0.01]} />
+          <boxGeometry args={[8.8, 0.05, 0.01]} />
           <meshStandardMaterial color="#475569" />
         </mesh>
       ))}
@@ -2979,24 +3086,24 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
     <group>
       <TruckAnimationManager />
       {/* ========== SHIPPING DOCK (Front of building, z=50) ========== */}
+      {/* Wall is at z=48, so dock elements must be at z>=48 to not clip */}
       <group position={[0, 0, 50]}>
-        {/* Dock platform - wider for two truck bays */}
-        <mesh position={[0, 1, -3]} receiveShadow castShadow>
-          <boxGeometry args={[32, 2, 6]} />
+        {/* Dock platform - single truck bay (moved forward to not clip into wall at z=48) */}
+        <mesh position={[0, 1, 1.2]} receiveShadow castShadow>
+          <boxGeometry args={[9, 2, 5.8]} />
           <meshStandardMaterial color="#475569" roughness={0.8} />
         </mesh>
 
-        {/* Dock bumpers - spread across wider platform */}
-        {[-12, -8, -4, 4, 8, 12].map((x, i) => (
+        {/* Dock bumpers - centered for single bay (narrower to fit platform) */}
+        {[-3.5, -1.75, 0, 1.75, 3.5].map((x, i) => (
           <mesh key={i} position={[x, 0.8, 0.2]}>
             <boxGeometry args={[0.8, 1.2, 0.6]} />
             <meshStandardMaterial color="#1f2937" />
           </mesh>
         ))}
 
-        {/* ===== TRUCK GROOVES - Two sunken channels for truck positioning ===== */}
-        {/* Left truck groove */}
-        <group position={[-8, 0, 8]}>
+        {/* ===== TRUCK GROOVE - Single centered channel for truck positioning ===== */}
+        <group position={[0, 0, 8]}>
           {/* Sunken groove floor */}
           <mesh position={[0, -0.3, 0]} receiveShadow>
             <boxGeometry args={[4.5, 0.1, 18]} />
@@ -3011,78 +3118,42 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             <boxGeometry args={[0.3, 0.5, 18]} />
             <meshStandardMaterial color="#374151" roughness={0.8} />
           </mesh>
-          {/* Yellow warning stripes on groove edges */}
-          <mesh position={[-2.1, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          {/* Yellow warning stripes on groove edges - raised to prevent z-fighting */}
+          <mesh position={[-2.1, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <planeGeometry args={[0.3, 18]} />
             <meshBasicMaterial color="#fbbf24" />
           </mesh>
-          <mesh position={[2.1, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <planeGeometry args={[0.3, 18]} />
-            <meshBasicMaterial color="#fbbf24" />
-          </mesh>
-        </group>
-
-        {/* Right truck groove */}
-        <group position={[8, 0, 8]}>
-          {/* Sunken groove floor */}
-          <mesh position={[0, -0.3, 0]} receiveShadow>
-            <boxGeometry args={[4.5, 0.1, 18]} />
-            <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
-          </mesh>
-          {/* Groove side walls */}
-          <mesh position={[-2.4, -0.15, 0]}>
-            <boxGeometry args={[0.3, 0.5, 18]} />
-            <meshStandardMaterial color="#374151" roughness={0.8} />
-          </mesh>
-          <mesh position={[2.4, -0.15, 0]}>
-            <boxGeometry args={[0.3, 0.5, 18]} />
-            <meshStandardMaterial color="#374151" roughness={0.8} />
-          </mesh>
-          {/* Yellow warning stripes on groove edges */}
-          <mesh position={[-2.1, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <planeGeometry args={[0.3, 18]} />
-            <meshBasicMaterial color="#fbbf24" />
-          </mesh>
-          <mesh position={[2.1, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <mesh position={[2.1, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <planeGeometry args={[0.3, 18]} />
             <meshBasicMaterial color="#fbbf24" />
           </mesh>
         </group>
 
-        {/* Two dock levelers - spaced for two truck bays */}
-        <DockLeveler position={[-8, 2, -2]} isDeployed={shippingDockedRef.current} />
-        <DockLeveler position={[8, 2, -2]} isDeployed={false} />
+        {/* Single dock leveler - centered (at wall opening) */}
+        <DockLeveler position={[0, 2, -1.5]} isDeployed={shippingDockedRef.current} />
 
-        {/* Roll-up dock doors - two doors spaced apart */}
-        <RollUpDoor position={[-8, 0, -1]} isOpen={shippingDockedRef.current} />
-        <RollUpDoor position={[8, 0, -1]} isOpen={false} />
+        {/* Roll-up dock door - at wall opening */}
+        <RollUpDoor position={[0, 0, -1.8]} isOpen={shippingDockedRef.current} />
 
-        {/* Dock shelters - two shelters spaced apart */}
-        <DockShelter position={[-8, 0, 1]} isCompressed={shippingDockedRef.current} />
-        <DockShelter position={[8, 0, 1]} isCompressed={false} />
+        {/* Dock shelter - centered (in front of wall) */}
+        <DockShelter position={[0, 0, 1]} isCompressed={shippingDockedRef.current} />
 
-        {/* Status lights for each bay */}
-        <DockStatusLight position={[-12, 4, -1]} isOccupied={shippingDockedRef.current} />
-        <DockStatusLight position={[-4, 4, -1]} isOccupied={shippingDockedRef.current} />
-        <DockStatusLight position={[4, 4, -1]} isOccupied={false} />
-        <DockStatusLight position={[12, 4, -1]} isOccupied={false} />
+        {/* Status lights for single bay */}
+        <DockStatusLight position={[-5, 4, -1.8]} isOccupied={shippingDockedRef.current} />
+        <DockStatusLight position={[5, 4, -1.8]} isOccupied={shippingDockedRef.current} />
 
-        {/* Concrete bollards around dock - spread wider for two truck bays */}
+        {/* Concrete bollards around dock - single bay */}
         <OptimizedBollardInstances
           positions={[
-            [-16, 0, 2],
-            [-4, 0, 2],
-            [4, 0, 2],
-            [16, 0, 2],
-            [-16, 0, 5],
-            [-4, 0, 5],
-            [4, 0, 5],
-            [16, 0, 5],
+            [-5.5, 0, 2],
+            [5.5, 0, 2],
+            [-5.5, 0, 5],
+            [5.5, 0, 5],
           ]}
         />
 
         <Text
-          position={[0, 6, -2]}
+          position={[0, 6, -1.5]}
           fontSize={1.2}
           color="#ffffff"
           anchorX="center"
@@ -3094,7 +3165,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         </Text>
 
         <Text
-          position={[0, 4.5, -2]}
+          position={[0, 4.5, -1.5]}
           fontSize={0.5}
           color="#22c55e"
           anchorX="center"
@@ -3103,38 +3174,33 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           DOCK 1 - OUTBOUND
         </Text>
 
-        {/* Dock forklift - positioned at bay 1 */}
+        {/* Dock forklift - centered */}
         <DockForklift
-          dockPosition={[-8, 0, 2]}
+          dockPosition={[0, 0, 2]}
           isActive={shippingDoorsOpenRef.current}
           cycleOffset={0}
         />
 
-        {/* Pallet staging area */}
-        <PalletStaging position={[-12, 0, -3]} />
+        {/* Pallet staging area - moved outside dock to avoid wall clipping */}
+        <PalletStaging position={[12, 0, 5]} />
 
-        {/* Wheel chocks - deployed when truck is docked (Bay 1 at X=-8) */}
-        <WheelChock position={[-9.5, 0, 10]} rotation={0} isDeployed={shippingDockedRef.current} />
-        <WheelChock position={[-6.5, 0, 10]} rotation={0} isDeployed={shippingDockedRef.current} />
+        {/* Wheel chocks - deployed when truck is docked (centered bay) */}
+        <WheelChock position={[-1.5, 0, 10]} rotation={0} isDeployed={shippingDockedRef.current} />
+        <WheelChock position={[1.5, 0, 10]} rotation={0} isDeployed={shippingDockedRef.current} />
         <WheelChock
-          position={[-9.5, 0, 11]}
+          position={[-1.5, 0, 11]}
           rotation={Math.PI}
           isDeployed={shippingDockedRef.current}
         />
         <WheelChock
-          position={[-6.5, 0, 11]}
+          position={[1.5, 0, 11]}
           rotation={Math.PI}
           isDeployed={shippingDockedRef.current}
         />
-        {/* Wheel chocks for Bay 2 at X=+8 */}
-        <WheelChock position={[6.5, 0, 10]} rotation={0} isDeployed={false} />
-        <WheelChock position={[9.5, 0, 10]} rotation={0} isDeployed={false} />
-        <WheelChock position={[6.5, 0, 11]} rotation={Math.PI} isDeployed={false} />
-        <WheelChock position={[9.5, 0, 11]} rotation={Math.PI} isDeployed={false} />
 
         {/* Dock spotter - guides truck while backing */}
         <DockSpotter
-          position={[5, 0, 8]}
+          position={[-5, 0, 8]}
           isGuiding={
             shippingStateRef.current === 'backing' ||
             shippingStateRef.current === 'final_adjustment'
@@ -3145,36 +3211,63 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
       {/* ========== FRONT TRUCK YARD ========== */}
       <group position={[0, 0, 50]}>
-        <mesh position={[0, 0.02, 30]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        {/* Main truck yard asphalt - raised to y=0.08 to prevent z-fighting with main asphalt at y=-0.05 */}
+        <mesh position={[0, 0.08, 30]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[60, 60]} />
           <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
         </mesh>
 
-        <mesh position={[0, 0.03, 8]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        {/* Dock apron - raised to y=0.12 to be above truck yard asphalt */}
+        <mesh position={[0, 0.12, 8]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[20, 16]} />
           <meshStandardMaterial color="#374151" roughness={0.85} />
         </mesh>
 
-        <OptimizedStripeInstances positions={[0, 10, 20, 30, 40].map((z) => [18, 0.05, z])} />
+        {/* Road markings - raised to y=0.16 to be above dock apron at y=0.12 */}
+        <OptimizedStripeInstances positions={[0, 10, 20, 30, 40].map((z) => [18, 0.16, z])} />
 
-        <OptimizedStripeInstances positions={[0, 10, 20, 30, 40].map((z) => [-18, 0.05, z])} />
+        <OptimizedStripeInstances positions={[0, 10, 20, 30, 40].map((z) => [-18, 0.16, z])} />
 
-        <mesh position={[0, 0.05, 10]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[0, 0.16, 10]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
           <planeGeometry args={[0.15, 20]} />
-          <meshBasicMaterial color="#3b82f6" />
+          <meshBasicMaterial
+            color="#3b82f6"
+            polygonOffset
+            polygonOffsetFactor={-10}
+            depthWrite={false}
+          />
         </mesh>
-        <mesh position={[-4, 0.05, 10]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[-4, 0.16, 10]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
           <planeGeometry args={[0.1, 20]} />
-          <meshBasicMaterial color="#3b82f6" transparent opacity={0.5} />
+          <meshBasicMaterial
+            color="#3b82f6"
+            transparent
+            opacity={0.5}
+            polygonOffset
+            polygonOffsetFactor={-10}
+            depthWrite={false}
+          />
         </mesh>
-        <mesh position={[4, 0.05, 10]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[4, 0.16, 10]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
           <planeGeometry args={[0.1, 20]} />
-          <meshBasicMaterial color="#3b82f6" transparent opacity={0.5} />
+          <meshBasicMaterial
+            color="#3b82f6"
+            transparent
+            opacity={0.5}
+            polygonOffset
+            polygonOffsetFactor={-10}
+            depthWrite={false}
+          />
         </mesh>
 
-        <mesh position={[0, 0.05, 2]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[0, 0.16, 2]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
           <planeGeometry args={[14, 0.4]} />
-          <meshBasicMaterial color="#ef4444" />
+          <meshBasicMaterial
+            color="#ef4444"
+            polygonOffset
+            polygonOffsetFactor={-10}
+            depthWrite={false}
+          />
         </mesh>
 
         {/* Speed bumps */}
@@ -3236,6 +3329,21 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           TRUCK STAGING
         </Text>
 
+        {/* Road tunnel - trucks enter and disappear into mountains */}
+        {/* Positioned so truck at z=250 is inside the 50-unit deep tunnel */}
+        <RoadTunnel position={[20, 0, 170]} rotation={Math.PI} roadWidth={10} />
+
+        {/* Road extension connecting truck yard to tunnel */}
+        <mesh position={[20, 0.07, 115]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[10, 120]} />
+          <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+        </mesh>
+        {/* Road center line */}
+        <mesh position={[20, 0.09, 115]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.15, 120]} />
+          <meshBasicMaterial color="#fbbf24" />
+        </mesh>
+
         {/* PERFORMANCE: Animated decorative components - only on ultra quality */}
         {/* These components have useFrame hooks that add significant overhead */}
         {showDecorativeAnimations && (
@@ -3250,7 +3358,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             <IntercomCallBox position={[20, 0, 55]} rotation={-Math.PI / 2} />
 
             {/* Yard jockey patrolling */}
-            <YardJockey position={[-15, 0, 25]} rotation={0} />
+            <YardJockey position={[-35, 0, 40]} rotation={0} />
 
             {/* Truck wash station */}
             <TruckWashStation position={[-30, 0, 55]} rotation={0} />
@@ -3258,15 +3366,15 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             {/* Cardboard compactor/baler for recycling */}
             <CardboardCompactor position={[-40, 0, 15]} rotation={Math.PI / 2} />
 
-            {/* Warehouse workers with pallet jacks - expanded work area for wider dock */}
+            {/* Warehouse worker with pallet jack - centered dock */}
             <WarehouseWorkerWithPalletJack
-              position={[-10, 0, 5]}
+              position={[10, 0, 5]}
               isActive={shippingDoorsOpenRef.current}
-              workAreaBounds={{ minX: -14, maxX: 14, minZ: -5, maxZ: 8 }}
+              workAreaBounds={{ minX: -8, maxX: 8, minZ: -5, maxZ: 8 }}
             />
 
             {/* Time clock station */}
-            <TimeClockStation position={[-9, 0, -4]} rotation={Math.PI / 2} />
+            <TimeClockStation position={[18, 0, 50]} rotation={Math.PI / 2} />
 
             {/* Air hose station */}
             <AirHoseStation position={[30, 0, 20]} rotation={-Math.PI / 2} />
@@ -3275,13 +3383,13 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             <ScaleTicketKiosk position={[3, 0, 52]} rotation={0} />
 
             {/* Overhead crane in maintenance bay */}
-            <OverheadCrane position={[75, 5.5, 20]} spanWidth={10} />
+            <OverheadCrane position={[90, 5.5, 30]} spanWidth={10} />
 
-            {/* Stretch wrap machine */}
-            <StretchWrapMachine position={[-15, 0, 0]} isActive={shippingDoorsOpenRef.current} />
+            {/* Stretch wrap machine - moved out of dock apron to staging side */}
+            <StretchWrapMachine position={[-28, 0, 24]} isActive={shippingDoorsOpenRef.current} />
 
-            {/* Pallet jack charging station */}
-            <PalletJackChargingStation position={[-12, 0, -8]} rotation={0} />
+            {/* Pallet jack charging station - relocated to opposite staging lane */}
+            <PalletJackChargingStation position={[26, 0, 24]} rotation={0} />
 
             {/* Truck alignment guides */}
             <TruckAlignmentGuides position={[0, 0, 4]} />
@@ -3289,61 +3397,57 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         )}
 
         {/* Static decorative components (no useFrame) - always render */}
-        {/* Fuel island */}
-        <FuelIsland position={[-25, 0, 35]} rotation={Math.PI / 2} />
+        {/* Fuel island - TESTING */}
+        {/* <FuelIsland position={[-25, 0, 35]} rotation={Math.PI / 2} /> */}
 
-        {/* Tire inspection area */}
-        <TireInspectionArea position={[25, 0, 35]} rotation={Math.PI / 2} />
+        {/* Tire inspection area - TESTING */}
+        {/* <TireInspectionArea position={[25, 0, 35]} rotation={Math.PI / 2} /> */}
 
-        {/* Driver break room/lounge - moved to side, out of truck paths */}
-        <DriverBreakRoom position={[55, 0, 40]} rotation={-Math.PI / 2} />
+        {/* Driver break room - DISABLED pending relocation */}
+        {/* <DriverBreakRoom position={[65, 0, 65]} rotation={-Math.PI / 2} /> */}
 
-        {/* Employee parking lot */}
-        <EmployeeParking position={[45, 0, 55]} rotation={0} />
+        {/* Employee parking lot - TESTING */}
+        {/* <EmployeeParking position={[45, 0, 55]} rotation={0} /> */}
 
-        {/* Propane tank cage */}
-        <PropaneTankCage position={[38, 0, 10]} rotation={0} />
+        {/* Propane tank cage - TESTING */}
+        {/* <PropaneTankCage position={[38, 0, 10]} rotation={0} /> */}
 
-        {/* Dumpster area */}
-        <DumpsterArea position={[-35, 0, 15]} rotation={Math.PI / 2} />
+        {/* Dumpster area - TESTING */}
+        {/* <DumpsterArea position={[-35, 0, 15]} rotation={Math.PI / 2} /> */}
 
-        {/* Manifest holders at dock - one per bay */}
-        <ManifestHolder position={[-8, 3, -1]} rotation={0} />
-        <ManifestHolder position={[8, 3, -1]} rotation={0} />
+        {/* Manifest holder at dock - centered */}
+        <ManifestHolder position={[5.5, 3, -1]} rotation={0} />
 
-        {/* Dock plates - one per bay */}
-        <DockPlate position={[-8, 2, 1]} isDeployed={shippingDockedRef.current} />
-        <DockPlate position={[8, 2, 1]} isDeployed={false} />
+        {/* Dock plate - centered */}
+        <DockPlate position={[0, 2, 1]} isDeployed={shippingDockedRef.current} />
 
-        {/* Driver restroom/showers */}
-        <DriverRestroom position={[40, 0, 45]} rotation={-Math.PI / 2} />
+        {/* Driver restroom - DISABLED pending relocation */}
+        {/* <DriverRestroom position={[70, 0, 65]} rotation={-Math.PI / 2} /> */}
 
-        {/* Trailer drop yard */}
-        <TrailerDropYard position={[-45, 0, 35]} rotation={0} />
+        {/* Dock bumpers with wear indicators - moved forward to avoid wall */}
+        <DockBumperWithWear position={[-2, 1.2, 0]} wearLevel={0.3} />
+        <DockBumperWithWear position={[2, 1.2, 0]} wearLevel={0.4} />
 
-        {/* Maintenance bay */}
-        <MaintenanceBay position={[70, 0, 20]} rotation={-Math.PI / 2} />
-
-        {/* Dock bumpers with wear indicators - positioned at each bay */}
-        <DockBumperWithWear position={[-10, 1.2, -1]} wearLevel={0.3} />
-        <DockBumperWithWear position={[-6, 1.2, -1]} wearLevel={0.4} />
-        <DockBumperWithWear position={[6, 1.2, -1]} wearLevel={0.5} />
-        <DockBumperWithWear position={[10, 1.2, -1]} wearLevel={0.6} />
-
-        {/* Floor markings - one per bay */}
-        <DockFloorMarkings position={[-8, 0, 3]} />
-        <DockFloorMarkings position={[8, 0, 3]} />
+        {/* Floor markings - centered */}
+        <DockFloorMarkings position={[0, 0, 3]} />
 
         {/* Safety mirrors */}
-        <SafetyMirror position={[-8, 3, 5]} rotation={Math.PI / 4} />
-        <SafetyMirror position={[8, 3, 5]} rotation={-Math.PI / 4} />
+        <SafetyMirror position={[-6, 3, 5]} rotation={Math.PI / 4} />
+        <SafetyMirror position={[6, 3, 5]} rotation={-Math.PI / 4} />
 
         {/* Fire extinguisher stations */}
-        <FireExtinguisherStation position={[-9, 0, 0]} rotation={Math.PI / 2} />
-        <FireExtinguisherStation position={[9, 0, 0]} rotation={-Math.PI / 2} />
+        <FireExtinguisherStation position={[-5.5, 0, 0]} rotation={Math.PI / 2} />
+        <FireExtinguisherStation position={[5.5, 0, 0]} rotation={-Math.PI / 2} />
 
         {/* PERFORMANCE: TruckAlignmentGuides and PalletJackChargingStation moved to showDecorativeAnimations block */}
       </group>
+
+      {/* ========== AMENITY BUILDINGS (Outside FRONT TRUCK YARD to avoid z=50 offset) ========== */}
+      {/* Maintenance bay - positioned at actual world coordinates */}
+      <MaintenanceBay position={[85, 0, 30]} rotation={-Math.PI / 2} />
+
+      {/* Trailer drop yard - positioned away from dock */}
+      <TrailerDropYard position={[-60, 0, 35]} rotation={0} />
 
       {/* Shipping truck */}
       <group ref={shippingTruckRef} position={[20, 0, 160]}>
@@ -3359,42 +3463,72 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
       </group>
 
       {/* ========== RECEIVING DOCK (Back of building, z=-50) ========== */}
+      {/* Wall is at z=-48, dock rotated 180deg so local -z = world +z */}
       <group position={[0, 0, -50]} rotation={[0, Math.PI, 0]}>
-        <mesh position={[0, 1, -3]} receiveShadow>
-          <boxGeometry args={[16, 2, 6]} />
+        {/* Dock platform - single truck bay (moved forward to not clip into wall) */}
+        <mesh position={[0, 1, 1.2]} receiveShadow>
+          <boxGeometry args={[9, 2, 5.8]} />
           <meshStandardMaterial color="#475569" roughness={0.8} />
         </mesh>
 
-        {[-5, -2.5, 0, 2.5, 5].map((x, i) => (
-          <mesh key={i} position={[x, 0.8, 0.2]}>
+        {/* Dock bumpers - centered for single bay */}
+        {[-3.5, -1.75, 0, 1.75, 3.5].map((x, i) => (
+          <mesh key={i} position={[x, 0.8, -1.5]}>
             <boxGeometry args={[0.8, 1.2, 0.6]} />
             <meshStandardMaterial color="#1f2937" />
           </mesh>
         ))}
 
-        <DockLeveler position={[0, 2, -2]} isDeployed={receivingDockedRef.current} />
+        {/* ===== TRUCK GROOVE - Single centered channel for truck positioning ===== */}
+        <group position={[0, 0, 8]}>
+          {/* Sunken groove floor */}
+          <mesh position={[0, -0.3, 0]} receiveShadow>
+            <boxGeometry args={[4.5, 0.1, 18]} />
+            <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+          </mesh>
+          {/* Groove side walls */}
+          <mesh position={[-2.4, -0.15, 0]}>
+            <boxGeometry args={[0.3, 0.5, 18]} />
+            <meshStandardMaterial color="#374151" roughness={0.8} />
+          </mesh>
+          <mesh position={[2.4, -0.15, 0]}>
+            <boxGeometry args={[0.3, 0.5, 18]} />
+            <meshStandardMaterial color="#374151" roughness={0.8} />
+          </mesh>
+          {/* Yellow warning stripes on groove edges - raised to prevent z-fighting */}
+          <mesh position={[-2.1, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[0.3, 18]} />
+            <meshBasicMaterial color="#fbbf24" />
+          </mesh>
+          <mesh position={[2.1, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[0.3, 18]} />
+            <meshBasicMaterial color="#fbbf24" />
+          </mesh>
+        </group>
 
-        {/* Roll-up dock door */}
-        <RollUpDoor position={[0, 0, -1]} isOpen={receivingDockedRef.current} />
+        <DockLeveler position={[0, 2, -1.5]} isDeployed={receivingDockedRef.current} />
+
+        {/* Roll-up dock door - at wall opening */}
+        <RollUpDoor position={[0, 0, -1.8]} isOpen={receivingDockedRef.current} />
 
         {/* Dock shelter */}
         <DockShelter position={[0, 0, 1]} isCompressed={receivingDockedRef.current} />
 
-        <DockStatusLight position={[-7, 4, -1]} isOccupied={receivingDockedRef.current} />
-        <DockStatusLight position={[7, 4, -1]} isOccupied={receivingDockedRef.current} />
+        <DockStatusLight position={[-5, 4, -1.8]} isOccupied={receivingDockedRef.current} />
+        <DockStatusLight position={[5, 4, -1.8]} isOccupied={receivingDockedRef.current} />
 
         {/* Concrete bollards around dock */}
         <OptimizedBollardInstances
           positions={[
-            [-8, 0, 2],
-            [8, 0, 2],
-            [-8, 0, 5],
-            [8, 0, 5],
+            [-5.5, 0, 2],
+            [5.5, 0, 2],
+            [-5.5, 0, 5],
+            [5.5, 0, 5],
           ]}
         />
 
         <Text
-          position={[0, 6, -2]}
+          position={[0, 6, -1.5]}
           fontSize={1.2}
           color="#ffffff"
           anchorX="center"
@@ -3406,7 +3540,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         </Text>
 
         <Text
-          position={[0, 4.5, -2]}
+          position={[0, 4.5, -1.5]}
           fontSize={0.5}
           color="#f97316"
           anchorX="center"
@@ -3422,8 +3556,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           cycleOffset={Math.PI}
         />
 
-        {/* Pallet staging area */}
-        <PalletStaging position={[12, 0, -3]} />
+        {/* Pallet staging area - moved outside dock to avoid wall clipping */}
+        <PalletStaging position={[12, 0, 5]} />
 
         {/* Wheel chocks - deployed when truck is docked */}
         <WheelChock position={[-1.5, 0, 10]} rotation={0} isDeployed={receivingDockedRef.current} />
@@ -3450,7 +3584,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         />
 
         {/* Manifest holder at dock */}
-        <ManifestHolder position={[8, 3, -1]} rotation={0} />
+        <ManifestHolder position={[5.5, 3, -1]} rotation={0} />
 
         {/* Dock plate */}
         <DockPlate position={[0, 2, 1]} isDeployed={receivingDockedRef.current} />
@@ -3465,36 +3599,63 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
       {/* ========== BACK TRUCK YARD ========== */}
       <group position={[0, 0, -50]}>
-        <mesh position={[0, 0.02, -30]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        {/* Main truck yard asphalt - raised to y=0.08 to prevent z-fighting with main asphalt at y=-0.05 */}
+        <mesh position={[0, 0.08, -30]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[60, 60]} />
           <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
         </mesh>
 
-        <mesh position={[0, 0.03, -8]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        {/* Dock apron - raised to y=0.12 to be above truck yard asphalt */}
+        <mesh position={[0, 0.12, -8]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[20, 16]} />
           <meshStandardMaterial color="#374151" roughness={0.85} />
         </mesh>
 
-        <OptimizedStripeInstances positions={[0, -10, -20, -30, -40].map((z) => [-18, 0.05, z])} />
+        {/* Road markings - raised to y=0.16 to be above dock apron at y=0.12 */}
+        <OptimizedStripeInstances positions={[0, -10, -20, -30, -40].map((z) => [-18, 0.16, z])} />
 
-        <OptimizedStripeInstances positions={[0, -10, -20, -30, -40].map((z) => [18, 0.05, z])} />
+        <OptimizedStripeInstances positions={[0, -10, -20, -30, -40].map((z) => [18, 0.16, z])} />
 
-        <mesh position={[0, 0.05, -10]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[0, 0.16, -10]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
           <planeGeometry args={[0.15, 20]} />
-          <meshBasicMaterial color="#3b82f6" />
+          <meshBasicMaterial
+            color="#3b82f6"
+            polygonOffset
+            polygonOffsetFactor={-10}
+            depthWrite={false}
+          />
         </mesh>
-        <mesh position={[-4, 0.05, -10]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[-4, 0.16, -10]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
           <planeGeometry args={[0.1, 20]} />
-          <meshBasicMaterial color="#3b82f6" transparent opacity={0.5} />
+          <meshBasicMaterial
+            color="#3b82f6"
+            transparent
+            opacity={0.5}
+            polygonOffset
+            polygonOffsetFactor={-10}
+            depthWrite={false}
+          />
         </mesh>
-        <mesh position={[4, 0.05, -10]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[4, 0.16, -10]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
           <planeGeometry args={[0.1, 20]} />
-          <meshBasicMaterial color="#3b82f6" transparent opacity={0.5} />
+          <meshBasicMaterial
+            color="#3b82f6"
+            transparent
+            opacity={0.5}
+            polygonOffset
+            polygonOffsetFactor={-10}
+            depthWrite={false}
+          />
         </mesh>
 
-        <mesh position={[0, 0.05, -2]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[0, 0.16, -2]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
           <planeGeometry args={[14, 0.4]} />
-          <meshBasicMaterial color="#ef4444" />
+          <meshBasicMaterial
+            color="#ef4444"
+            polygonOffset
+            polygonOffsetFactor={-10}
+            depthWrite={false}
+          />
         </mesh>
 
         {/* Speed bumps */}
@@ -3558,6 +3719,21 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           TRUCK STAGING
         </Text>
 
+        {/* Road tunnel - trucks enter and disappear into mountains */}
+        {/* Positioned so truck at z=-250 is inside the 50-unit deep tunnel */}
+        <RoadTunnel position={[-20, 0, -170]} rotation={0} roadWidth={10} />
+
+        {/* Road extension connecting truck yard to tunnel */}
+        <mesh position={[-20, 0.07, -115]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[10, 120]} />
+          <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+        </mesh>
+        {/* Road center line */}
+        <mesh position={[-20, 0.09, -115]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.15, 120]} />
+          <meshBasicMaterial color="#fbbf24" />
+        </mesh>
+
         {/* Weight scale at yard entrance */}
         <WeightScale position={[0, 0, -52]} rotation={Math.PI} />
 
@@ -3583,7 +3759,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         <CardboardCompactor position={[40, 0, -15]} rotation={-Math.PI / 2} />
 
         {/* Time clock station for receiving area - moved to yard */}
-        <TimeClockStation position={[9, 0, -8]} rotation={-Math.PI / 2} />
+        <TimeClockStation position={[-18, 0, -52]} rotation={-Math.PI / 2} />
 
         {/* Air hose station */}
         <AirHoseStation position={[-30, 0, -20]} rotation={Math.PI / 2} />
@@ -3593,21 +3769,21 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
         {/* Stretch wrap machine - moved to yard */}
         <StretchWrapMachine
-          position={[15, 0, -10]}
+          position={[28, 0, -24]}
           rotation={Math.PI}
           isActive={receivingDoorsOpenRef.current}
         />
 
-        {/* Dock bumpers with wear indicators - moved closer to dock building wall */}
-        <DockBumperWithWear position={[-3, 1.2, -2]} wearLevel={0.5} />
-        <DockBumperWithWear position={[3, 1.2, -2]} wearLevel={0.2} />
+        {/* Dock bumpers with wear indicators - moved forward to avoid wall */}
+        <DockBumperWithWear position={[-3, 1.2, 0]} wearLevel={0.5} />
+        <DockBumperWithWear position={[3, 1.2, 0]} wearLevel={0.2} />
 
         {/* Floor markings */}
         <DockFloorMarkings position={[0, 0, -3]} />
 
         {/* Safety mirrors */}
-        <SafetyMirror position={[-8, 3, -5]} rotation={Math.PI + Math.PI / 4} />
-        <SafetyMirror position={[8, 3, -5]} rotation={Math.PI - Math.PI / 4} />
+        <SafetyMirror position={[-5.5, 3, -5]} rotation={Math.PI + Math.PI / 4} />
+        <SafetyMirror position={[5.5, 3, -5]} rotation={Math.PI - Math.PI / 4} />
 
         {/* Fire extinguisher stations - moved alongside dock */}
         <FireExtinguisherStation position={[-9, 0, -4]} rotation={Math.PI / 2} />
@@ -3617,7 +3793,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         <TruckAlignmentGuides position={[0, 0, -8]} />
 
         {/* Pallet jack charging station */}
-        <PalletJackChargingStation position={[-12, 0, -5]} rotation={Math.PI / 2} />
+        <PalletJackChargingStation position={[-26, 0, -24]} rotation={Math.PI / 2} />
       </group>
 
       {/* Receiving truck */}
@@ -4931,10 +5107,10 @@ const ScaleTicketKiosk: React.FC<{ position: [number, number, number]; rotation?
 };
 
 // Driver shower/restroom building
-const DriverRestroom: React.FC<{ position: [number, number, number]; rotation?: number }> = ({
-  position,
-  rotation = 0,
-}) => (
+export const DriverRestroom: React.FC<{
+  position: [number, number, number];
+  rotation?: number;
+}> = ({ position, rotation = 0 }) => (
   <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
     <mesh position={[0, 1.5, 0]} castShadow>
       <boxGeometry args={[6, 3, 4]} />
@@ -4944,8 +5120,9 @@ const DriverRestroom: React.FC<{ position: [number, number, number]; rotation?: 
       <boxGeometry args={[6.4, 0.2, 4.4]} />
       <meshStandardMaterial color="#44403c" roughness={0.7} />
     </mesh>
+    {/* Doors - positioned so bottom sits at floor level */}
     {[-1.5, 0, 1.5].map((x, i) => (
-      <group key={i} position={[x, 1.2, 2.01]}>
+      <group key={i} position={[x, 1.1, 2.01]}>
         <mesh>
           <boxGeometry args={[1, 2.2, 0.1]} />
           <meshStandardMaterial color="#374151" roughness={0.6} />
@@ -4965,7 +5142,8 @@ const DriverRestroom: React.FC<{ position: [number, number, number]; rotation?: 
     <Text position={[1.5, 2.6, 2.01]} fontSize={0.12} color="#1f2937" anchorX="center">
       SHOWERS
     </Text>
-    <mesh position={[-2.5, 1.2, 2.01]}>
+    {/* Vending machine - positioned so bottom sits at floor level */}
+    <mesh position={[-2.5, 1.0, 2.01]}>
       <boxGeometry args={[0.8, 2, 0.6]} />
       <meshStandardMaterial color="#dc2626" roughness={0.5} />
     </mesh>
@@ -5196,20 +5374,24 @@ const DockBumperWithWear: React.FC<{ position: [number, number, number]; wearLev
 
   return (
     <group position={position}>
+      {/* Main bumper body */}
       <mesh>
         <boxGeometry args={[0.8, 0.4, 0.3 - wearLevel * 0.1]} />
         <meshStandardMaterial color="#1f2937" roughness={0.95} />
       </mesh>
-      <mesh position={[0, 0, -0.18]}>
+      {/* Backing plate - offset further back to prevent z-fighting */}
+      <mesh position={[0, 0, -0.22]}>
         <boxGeometry args={[0.9, 0.5, 0.04]} />
         <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
       </mesh>
-      <mesh position={[0, 0.22, 0.1]}>
+      {/* Wear indicator strip */}
+      <mesh position={[0, 0.22, 0.16]}>
         <boxGeometry args={[0.7, 0.03, 0.05]} />
         <meshStandardMaterial color={wearColor} emissive={wearColor} emissiveIntensity={0.2} />
       </mesh>
+      {/* Status LEDs */}
       {[0, 1, 2, 3, 4].map((_: unknown, i: number) => (
-        <mesh key={i} position={[-0.3 + i * 0.15, -0.22, 0.16]}>
+        <mesh key={i} position={[-0.3 + i * 0.15, -0.22, 0.18]}>
           <boxGeometry args={[0.08, 0.02, 0.01]} />
           <meshStandardMaterial color={i / 4 <= 1 - wearLevel ? '#22c55e' : '#374151'} />
         </mesh>
@@ -5408,7 +5590,12 @@ const TruckAlignmentGuides: React.FC<{ position: [number, number, number] }> = (
   return (
     <group position={position}>
       {/* Center guide line */}
-      <mesh ref={laserRef1} position={[0, 0.02, 5]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh
+        ref={laserRef1}
+        position={[0, 0.08, 5]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        renderOrder={10}
+      >
         <planeGeometry args={[0.05, 15]} />
         <meshStandardMaterial
           color="#22c55e"
@@ -5416,11 +5603,19 @@ const TruckAlignmentGuides: React.FC<{ position: [number, number, number] }> = (
           emissiveIntensity={0.5}
           transparent
           opacity={0.8}
+          polygonOffset
+          polygonOffsetFactor={-10}
+          depthWrite={false}
         />
       </mesh>
 
       {/* Left wheel guide */}
-      <mesh ref={laserRef2} position={[-1.2, 0.02, 5]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh
+        ref={laserRef2}
+        position={[-1.2, 0.08, 5]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        renderOrder={10}
+      >
         <planeGeometry args={[0.03, 15]} />
         <meshStandardMaterial
           color="#22c55e"
@@ -5428,11 +5623,14 @@ const TruckAlignmentGuides: React.FC<{ position: [number, number, number] }> = (
           emissiveIntensity={0.5}
           transparent
           opacity={0.6}
+          polygonOffset
+          polygonOffsetFactor={-10}
+          depthWrite={false}
         />
       </mesh>
 
       {/* Right wheel guide */}
-      <mesh position={[1.2, 0.02, 5]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[1.2, 0.08, 5]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
         <planeGeometry args={[0.03, 15]} />
         <meshStandardMaterial
           color="#22c55e"
@@ -5440,13 +5638,23 @@ const TruckAlignmentGuides: React.FC<{ position: [number, number, number] }> = (
           emissiveIntensity={0.5}
           transparent
           opacity={0.6}
+          polygonOffset
+          polygonOffsetFactor={-10}
+          depthWrite={false}
         />
       </mesh>
 
       {/* Stop line */}
-      <mesh position={[0, 0.02, -1]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0.08, -1]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
         <planeGeometry args={[4, 0.15]} />
-        <meshStandardMaterial color="#ef4444" emissive="#ef4444" emissiveIntensity={0.4} />
+        <meshStandardMaterial
+          color="#ef4444"
+          emissive="#ef4444"
+          emissiveIntensity={0.4}
+          polygonOffset
+          polygonOffsetFactor={-10}
+          depthWrite={false}
+        />
       </mesh>
 
       {/* Laser projector units */}
@@ -5728,6 +5936,13 @@ const CardboardCompactor: React.FC<{ position: [number, number, number]; rotatio
   const ramRef = useRef<THREE.Mesh>(null);
   const animId = useRef(`compactor-${Math.random().toString(36).substr(2, 9)}`);
 
+  // Memoize random cardboard scrap dimensions to prevent NaN errors from Math.random() in geometry args
+  const cardboardScraps = useMemo(() => [
+    { x: 0.8, z: 1.5, width: 0.3 + Math.random() * 0.2, height: 0.4 + Math.random() * 0.2, rot: Math.random() * Math.PI },
+    { x: -0.5, z: 1.8, width: 0.3 + Math.random() * 0.2, height: 0.4 + Math.random() * 0.2, rot: Math.random() * Math.PI },
+    { x: 1.2, z: 1.2, width: 0.3 + Math.random() * 0.2, height: 0.4 + Math.random() * 0.2, rot: Math.random() * Math.PI },
+  ], []);
+
   useEffect(() => {
     const id = animId.current;
     registerAnimation(id, 'custom', null, {}, (time) => {
@@ -5789,17 +6004,13 @@ const CardboardCompactor: React.FC<{ position: [number, number, number]; rotatio
       ))}
 
       {/* Cardboard scraps near compactor */}
-      {[
-        [0.8, 0, 1.5],
-        [-0.5, 0, 1.8],
-        [1.2, 0, 1.2],
-      ].map(([x, , z], i) => (
+      {cardboardScraps.map((scrap, i) => (
         <mesh
           key={i}
-          position={[x, 0.02 + i * 0.02, z]}
-          rotation={[-Math.PI / 2, 0, Math.random() * Math.PI]}
+          position={[scrap.x, 0.02 + i * 0.02, scrap.z]}
+          rotation={[-Math.PI / 2, 0, scrap.rot]}
         >
-          <planeGeometry args={[0.3 + Math.random() * 0.2, 0.4 + Math.random() * 0.2]} />
+          <planeGeometry args={[scrap.width, scrap.height]} />
           <meshStandardMaterial color="#a16207" roughness={0.95} side={THREE.DoubleSide} />
         </mesh>
       ))}

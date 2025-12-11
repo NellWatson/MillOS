@@ -192,6 +192,9 @@ const RustStain: React.FC<{
   rotation?: [number, number, number];
   size?: number;
 }> = ({ position, rotation = [0, 0, 0], size = 0.5 }) => {
+  // Guard against NaN/invalid size
+  const safeSize = Number.isFinite(size) && size > 0 ? size : 0.5;
+
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 128;
@@ -247,7 +250,7 @@ const RustStain: React.FC<{
 
   return (
     <mesh position={position} rotation={rotation}>
-      <planeGeometry args={[size, size]} />
+      <planeGeometry args={[safeSize, safeSize]} />
       <meshBasicMaterial map={texture} transparent depthWrite={false} side={THREE.DoubleSide} />
     </mesh>
   );
@@ -1986,6 +1989,9 @@ const ScorchMark: React.FC<{
   rotation?: [number, number, number];
   size?: number;
 }> = ({ position, rotation = [0, 0, 0], size = 0.5 }) => {
+  // Guard against NaN/invalid size
+  const safeSize = Number.isFinite(size) && size > 0 ? size : 0.5;
+
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 128;
@@ -2037,7 +2043,7 @@ const ScorchMark: React.FC<{
 
   return (
     <mesh position={position} rotation={rotation}>
-      <planeGeometry args={[size, size]} />
+      <planeGeometry args={[safeSize, safeSize]} />
       <meshBasicMaterial map={texture} transparent depthWrite={false} side={THREE.DoubleSide} />
     </mesh>
   );
@@ -4074,7 +4080,7 @@ const RoofLeakPuddle: React.FC<{ position: [number, number, number]; size?: numb
   useAmbientAnimation(animationId, (_time, delta) => {
     // Falling drop
     setDropY((prev) => {
-      let newY = prev - delta * 4;
+      const newY = prev - delta * 4;
       if (newY < 0) {
         return 3 + Math.random() * 2; // Reset with variation
       }
@@ -4183,6 +4189,9 @@ const CeilingWaterStain: React.FC<{ position: [number, number, number]; size?: n
   position,
   size = 1.5,
 }) => {
+  // Guard against NaN/invalid size
+  const safeSize = Number.isFinite(size) && size > 0 ? size : 1.5;
+
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 128;
@@ -4228,7 +4237,7 @@ const CeilingWaterStain: React.FC<{ position: [number, number, number]; size?: n
 
   return (
     <mesh position={position} rotation={[Math.PI / 2, 0, 0]}>
-      <planeGeometry args={[size, size]} />
+      <planeGeometry args={[safeSize, safeSize]} />
       <meshBasicMaterial map={texture} transparent depthWrite={false} />
     </mesh>
   );

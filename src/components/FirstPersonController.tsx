@@ -6,11 +6,12 @@ import { useUIStore } from '../stores/uiStore';
 
 // Movement configuration
 const MOVE_SPEED = 12; // Units per second (walking speed)
-const SPRINT_MULTIPLIER = 1.8; // Speed multiplier when sprinting
+const SPRINT_MULTIPLIER = 3.6; // Speed multiplier when sprinting (doubled for fast gameplay)
 const PLAYER_HEIGHT = 1.7; // Camera height from ground (eye level)
 const PLAYER_RADIUS = 0.4; // Collision radius
-const FPS_FOV = 90; // Wide FOV for immersive first-person view
+const FPS_FOV = 105; // Wide FOV for immersive first-person view
 const ORBIT_FOV = 65; // Default FOV for orbit mode
+const MOUSE_SENSITIVITY = 1.5; // Mouse look speed multiplier
 
 // Factory bounds (based on 120x160 floor from MillScene)
 const FACTORY_BOUNDS = {
@@ -230,7 +231,14 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
     useUIStore.getState().setFpsMode(false);
   }, [onLockChange]);
 
-  return <PointerLockControls ref={controlsRef} onLock={handleLock} onUnlock={handleUnlock} />;
+  return (
+    <PointerLockControls
+      ref={controlsRef}
+      pointerSpeed={MOUSE_SENSITIVITY}
+      onLock={handleLock}
+      onUnlock={handleUnlock}
+    />
+  );
 };
 
 // Crosshair overlay for FPS mode

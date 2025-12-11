@@ -90,6 +90,18 @@ export default defineConfig(({ mode }) => {
       optimizeDeps: {
         // Pre-bundle heavy dependencies for faster dev startup
         include: ['three', '@react-three/fiber', '@react-three/drei', 'framer-motion'],
+        // Exclude troika to prevent ES6 class transpilation issues
+        exclude: ['troika-three-text'],
+        esbuildOptions: {
+          target: 'esnext',
+          supported: {
+            'top-level-await': true,
+          },
+        },
+      },
+      esbuild: {
+        // Preserve ES6 classes in all files
+        target: 'esnext',
       },
     };
 });

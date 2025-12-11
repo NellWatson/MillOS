@@ -1956,11 +1956,107 @@ export const SAFETY_INCIDENT_ANNOUNCEMENTS: EventAnnouncementConfig[] = [
   },
 ];
 
+// ==========================================================================
+// FIRE DRILL ANNOUNCEMENTS - When the alarm sounds and chaos ensues
+// ==========================================================================
+export const FIRE_DRILL_ANNOUNCEMENTS: EventAnnouncementConfig[] = [
+  {
+    message:
+      'Attention all personnel. This is a fire drill. Please proceed to the nearest exit in an orderly fashion. Yes, Dave, that means you too.',
+    type: 'emergency',
+    priority: 'critical',
+    duration: 20,
+  },
+  {
+    message:
+      'Fire drill initiated. Remember, this is practice for if flour becomes sentient and combustible. Stranger things have happened.',
+    type: 'emergency',
+    priority: 'critical',
+    duration: 20,
+  },
+  {
+    message:
+      'Emergency evacuation drill in progress. The last person out does NOT win a prize. Please move with purpose.',
+    type: 'emergency',
+    priority: 'critical',
+    duration: 20,
+  },
+  {
+    message:
+      'Fire drill. Please leave your workstations immediately. The flour will be fine. It has survived worse than your absence.',
+    type: 'emergency',
+    priority: 'critical',
+    duration: 20,
+  },
+  {
+    message:
+      'This is a drill. Repeat, this is a drill. If this were an actual emergency, you would already be running. Take notes.',
+    type: 'emergency',
+    priority: 'critical',
+    duration: 20,
+  },
+  {
+    message:
+      'Evacuation drill commencing. Fun fact: the average worker can exit the building in ninety seconds. Let us see if we can beat that.',
+    type: 'emergency',
+    priority: 'critical',
+    duration: 22,
+  },
+];
+
+// ==========================================================================
+// EMERGENCY STOP ANNOUNCEMENTS - When someone hits the big red button
+// ==========================================================================
+export const EMERGENCY_STOP_ANNOUNCEMENTS: EventAnnouncementConfig[] = [
+  {
+    message:
+      'Emergency stop activated. All forklift operations have ceased. Please remain calm while we figure out what prompted this.',
+    type: 'emergency',
+    priority: 'critical',
+    duration: 20,
+  },
+  {
+    message:
+      'E-stop engaged. Forklifts are now stationary. If you pressed this by accident, we understand. The button is very tempting.',
+    type: 'emergency',
+    priority: 'critical',
+    duration: 20,
+  },
+  {
+    message:
+      'All forklift movement halted. Whoever pressed the emergency stop, please report to the control room. Bring snacks. This might take a while.',
+    type: 'emergency',
+    priority: 'critical',
+    duration: 22,
+  },
+  {
+    message:
+      'Emergency stop triggered. Do not worry, the forklifts were probably going to stop eventually anyway. We have just accelerated the process.',
+    type: 'emergency',
+    priority: 'critical',
+    duration: 22,
+  },
+  {
+    message:
+      'E-stop active. Operations paused. Remember, the big red button is for emergencies only. Not for winning arguments with forklifts.',
+    type: 'emergency',
+    priority: 'critical',
+    duration: 22,
+  },
+  {
+    message:
+      'Forklift emergency stop engaged. All mobile equipment is now doing its best impression of furniture. Please stand by.',
+    type: 'emergency',
+    priority: 'critical',
+    duration: 20,
+  },
+];
+
 // Track previous milestone for detecting achievements
 let lastMilestoneReached = 0;
-let lastMachineStatuses: Record<string, string> = {};
+const lastMachineStatuses: Record<string, string> = {};
 // Cooldown tracking for machine status announcements (prevents duplicate alerts)
-let lastMachineStatusAnnouncementTime: Record<string, number> = {};
+const lastMachineStatusAnnouncementTime: Record<string, number> = {};
 const MACHINE_STATUS_COOLDOWN_MS = 30000; // 30 second cooldown between same-type announcements
 
 // Check for and generate event-triggered announcements
@@ -2266,6 +2362,16 @@ export const PAAnnouncementSystem: React.FC = () => {
   const lastSpokenRef = useRef<string>('');
   const lastSpeakTimeRef = useRef<number>(0);
 
+  // Suppress PA announcements for first 10 seconds to let speech synthesis initialize
+  const [isStartupSuppressed, setIsStartupSuppressed] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsStartupSuppressed(false);
+    }, 10000); // 10 second startup suppression
+    return () => clearTimeout(timer);
+  }, []);
+
   // Schedule periodic announcements
   usePAScheduler();
 
@@ -2280,6 +2386,8 @@ export const PAAnnouncementSystem: React.FC = () => {
 
   // TTS: Speak new announcements
   useEffect(() => {
+    // Skip during startup suppression period
+    if (isStartupSuppressed) return;
     if (announcements.length === 0) return;
 
     const latestAnnouncement = announcements[0];
@@ -2295,8 +2403,10 @@ export const PAAnnouncementSystem: React.FC = () => {
       lastSpeakTimeRef.current = now;
       audioManager.speakAnnouncement(latestAnnouncement.message);
     }
-  }, [announcements]);
+  }, [announcements, isStartupSuppressed]);
 
+  // Suppress display during startup period to let speech synthesis initialize
+  if (isStartupSuppressed) return null;
   if (announcements.length === 0) return null;
 
   const getPriorityStyles = (priority: string) => {

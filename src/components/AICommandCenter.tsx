@@ -50,6 +50,7 @@ import { audioManager } from '../utils/audioManager';
 interface AICommandCenterProps {
   isOpen: boolean;
   onClose: () => void;
+  embedded?: boolean;
 }
 
 // Sparkline component for trend visualization
@@ -111,7 +112,11 @@ const ConfidenceIndicator: React.FC<{ type: AIDecision['type']; confidence: numb
   );
 };
 
-export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClose }) => {
+export const AICommandCenter: React.FC<AICommandCenterProps> = ({
+  isOpen,
+  onClose,
+  embedded = false,
+}) => {
   const [isThinking, setIsThinking] = useState(false);
   const [activeTab, setActiveTab] = useState<'decisions' | 'predictions'>('decisions');
   const [predictedEvents, setPredictedEvents] = useState<ReturnType<typeof getPredictedEvents>>([]);
@@ -422,6 +427,180 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
 
   if (!isOpen) return null;
 
+  // Embedded mode: render content without fixed wrapper for use inside ContextSidebar
+  if (embedded) {
+    return (
+      <div className="h-full flex flex-col bg-transparent">
+        {/* Compact Header for embedded mode */}
+        <div className="p-3 border-b border-cyan-500/20">
+          <div className="flex items-center gap-2 text-cyan-400 mb-2">
+            <Brain className="w-5 h-5" />
+            <span className="font-bold text-sm">AI Engine</span>
+            {/* Fixed width container prevents layout jitter */}
+            <span className={`text-xs ml-1 w-16 ${isThinking ? 'animate-pulse' : 'invisible'}`}>
+              analyzing...
+            </span>
+          </div>
+          {/* System Status - compact */}
+          <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+            <div className="bg-slate-800/50 rounded px-2 py-1">
+              <span className="text-slate-500">CPU</span>
+              <span className="text-cyan-400 ml-1">{systemStatus.cpu.toFixed(0)}%</span>
+            </div>
+            <div className="bg-slate-800/50 rounded px-2 py-1">
+              <span className="text-slate-500">MEM</span>
+              <span className="text-green-400 ml-1">{systemStatus.memory.toFixed(0)}%</span>
+            </div>
+            <div className="bg-slate-800/50 rounded px-2 py-1">
+              <span className="text-slate-500">DEC</span>
+              <span className="text-purple-400 ml-1">{systemStatus.decisions}</span>
+            </div>
+            <div className="bg-slate-800/50 rounded px-2 py-1">
+              <span className="text-slate-500">OK</span>
+              <span className="text-emerald-400 ml-1">{systemStatus.successRate.toFixed(0)}%</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Tab Switcher */}
+        <div className="px-3 py-2 border-b border-slate-800 flex gap-2">
+          <button
+            onClick={() => setActiveTab('decisions')}
+            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeTab === 'decisions'
+                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800'
+            }`}
+          >
+            <Activity className="w-3 h-3 inline mr-1" />
+            Decisions ({aiDecisions.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('predictions')}
+            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeTab === 'predictions'
+                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800'
+            }`}
+          >
+            <Eye className="w-3 h-3 inline mr-1" />
+            Predictions ({predictedEvents.length})
+          </button>
+        </div>
+
+        {/* Content Area */}
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {activeTab === 'decisions' ? (
+            <>
+              {aiDecisions.slice(0, 15).map((decision: AIDecision) => (
+                <div
+                  key={decision.id}
+                  className={`bg-slate-800/50 rounded-lg border p-2 ${
+                    decision.status === 'completed'
+                      ? 'border-green-500/20'
+                      : decision.status === 'in_progress'
+                        ? 'border-blue-500/30'
+                        : 'border-slate-700/50'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <div className={`p-1 rounded bg-gradient-to-br ${getTypeColor(decision.type)}`}>
+                      {getTypeIcon(decision.type)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-slate-700 text-slate-400 uppercase">
+                          {decision.type}
+                        </span>
+                        <span
+                          className={`text-[9px] px-1 py-0.5 rounded border ${getPriorityBadge(decision.priority)}`}
+                        >
+                          {decision.priority}
+                        </span>
+                        <div className="flex items-center gap-1 ml-auto">
+                          {getStatusIcon(decision.status)}
+                        </div>
+                      </div>
+                      <p className="text-xs text-white font-medium">{decision.action}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">{decision.reasoning}</p>
+                      <div className="flex items-center gap-2 text-[9px] text-green-400 mt-1">
+                        <TrendingUp className="w-2.5 h-2.5" />
+                        <span>{decision.impact}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {aiDecisions.length === 0 && (
+                <div className="text-center py-6 text-slate-500">
+                  <Bot className="w-6 h-6 mx-auto mb-2" />
+                  <p className="text-xs">AI analyzing factory state...</p>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {predictedEvents.map((event) => (
+                <div
+                  key={event.id}
+                  className="bg-slate-800/50 rounded-lg border border-slate-700/50 p-2"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`p-1 rounded ${
+                          event.type === 'maintenance'
+                            ? 'bg-yellow-500/20'
+                            : event.type === 'shift_change'
+                              ? 'bg-blue-500/20'
+                              : event.type === 'weather'
+                                ? 'bg-purple-500/20'
+                                : event.type === 'fatigue'
+                                  ? 'bg-orange-500/20'
+                                  : 'bg-green-500/20'
+                        }`}
+                      >
+                        {event.type === 'maintenance' && (
+                          <Wrench className="w-3 h-3 text-yellow-400" />
+                        )}
+                        {event.type === 'shift_change' && (
+                          <Users className="w-3 h-3 text-blue-400" />
+                        )}
+                        {event.type === 'weather' && <Cloud className="w-3 h-3 text-purple-400" />}
+                        {event.type === 'fatigue' && <Gauge className="w-3 h-3 text-orange-400" />}
+                        {event.type === 'optimization' && (
+                          <Zap className="w-3 h-3 text-green-400" />
+                        )}
+                      </div>
+                      <div>
+                        <div className="text-xs text-white font-medium">{event.description}</div>
+                        <div className="text-[9px] text-slate-500 capitalize">
+                          {event.type.replace('_', ' ')}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs font-mono text-cyan-400">
+                        {formatTimeUntil(event.predictedTime)}
+                      </div>
+                      <div className="text-[9px] text-slate-500">{event.confidence}%</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {predictedEvents.length === 0 && (
+                <div className="text-center py-6 text-slate-500">
+                  <Calendar className="w-6 h-6 mx-auto mb-2" />
+                  <p className="text-xs">No upcoming predictions</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, x: 400 }}
@@ -464,7 +643,9 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
               <Cpu className="w-3 h-3 text-slate-400" />
               <span className="text-[10px] text-slate-400 uppercase">CPU</span>
             </div>
-            <div className="text-sm font-mono text-cyan-400" data-testid="ai-cpu-value">{systemStatus.cpu.toFixed(1)}%</div>
+            <div className="text-sm font-mono text-cyan-400" data-testid="ai-cpu-value">
+              {systemStatus.cpu.toFixed(1)}%
+            </div>
             <div className="h-1 bg-slate-800 rounded-full mt-1 overflow-hidden">
               <div
                 className="h-full bg-cyan-500 transition-all duration-500"
@@ -492,7 +673,9 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
               <Activity className="w-3 h-3 text-slate-400" />
               <span className="text-[10px] text-slate-400 uppercase">Decisions</span>
             </div>
-            <div className="text-sm font-mono text-purple-400" data-testid="ai-decisions-count">{systemStatus.decisions}</div>
+            <div className="text-sm font-mono text-purple-400" data-testid="ai-decisions-count">
+              {systemStatus.decisions}
+            </div>
             <div className="text-[10px] text-slate-600">this session</div>
           </div>
           <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50">

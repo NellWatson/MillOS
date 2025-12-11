@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState, useEffect } from 'react';
+import React, { useRef, useMemo, useState, useEffect, useCallback } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html, Billboard, Text } from '@react-three/drei';
 import { Briefcase, FlaskConical, HardHat, Shield, User, Wrench as WrenchIcon } from 'lucide-react';
@@ -6,6 +6,7 @@ import { WorkerData, WORKER_ROSTER } from '../types';
 import { positionRegistry, type EntityPosition } from '../utils/positionRegistry';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
+import { PhysicsWorker } from './physics/PhysicsWorker';
 import { useSafetyStore } from '../stores/safetyStore';
 import { useUIStore } from '../stores/uiStore';
 import { useProductionStore } from '../stores/productionStore';
@@ -1369,7 +1370,7 @@ const HumanModel: React.FC<{
     });
 
     return (
-      <group scale={[0.85, 0.85, 0.85]}>
+      <group scale={[0.85, 0.85, 0.85]} position={[0, 0.22, 0]}>
         {/* === TORSO === */}
         <group ref={torsoRef} position={[0, 1.15, 0]}>
           {/* Upper torso / chest */}
@@ -1394,15 +1395,15 @@ const HumanModel: React.FC<{
             <meshStandardMaterial color={uniformColor} roughness={0.8} />
           </mesh>
 
-          {/* Safety vest overlay */}
+          {/* Safety vest overlay - pushed forward to z=0.03 to prevent z-fighting with chest */}
           {hasVest && (
             <>
-              <mesh castShadow position={[0, 0.15, 0.005]}>
-                <boxGeometry args={[0.5, 0.52, 0.25]} />
+              <mesh castShadow position={[0, 0.15, 0.03]}>
+                <boxGeometry args={[0.5, 0.52, 0.22]} />
                 <meshStandardMaterial color="#f97316" roughness={0.6} />
               </mesh>
-              {/* Reflective stripes */}
-              <mesh position={[0, 0.32, 0.13]}>
+              {/* Reflective stripes - raised above vest surface */}
+              <mesh position={[0, 0.32, 0.145]}>
                 <boxGeometry args={[0.51, 0.035, 0.01]} />
                 <meshStandardMaterial
                   color="#e5e5e5"
@@ -1412,7 +1413,7 @@ const HumanModel: React.FC<{
                   roughness={0.1}
                 />
               </mesh>
-              <mesh position={[0, 0.12, 0.13]}>
+              <mesh position={[0, 0.12, 0.145]}>
                 <boxGeometry args={[0.51, 0.035, 0.01]} />
                 <meshStandardMaterial
                   color="#e5e5e5"
@@ -1422,7 +1423,7 @@ const HumanModel: React.FC<{
                   roughness={0.1}
                 />
               </mesh>
-              <mesh position={[0, -0.08, 0.13]}>
+              <mesh position={[0, -0.08, 0.145]}>
                 <boxGeometry args={[0.51, 0.035, 0.01]} />
                 <meshStandardMaterial
                   color="#e5e5e5"
@@ -1753,7 +1754,7 @@ const SimplifiedWorker: React.FC<{
   });
 
   return (
-    <group>
+    <group position={[0, 0.05, 0]}>
       {/* Torso - combined chest and hips */}
       <mesh position={[0, 1.1, 0]} castShadow>
         <boxGeometry args={[0.5, 0.9, 0.25]} />
@@ -1820,7 +1821,7 @@ const WorkerBillboard: React.FC<{
   hatColor: string;
 }> = React.memo(({ uniformColor, hasVest, hatColor }) => {
   return (
-    <group scale={[0.85, 0.85, 0.85]}>
+    <group scale={[0.85, 0.85, 0.85]} position={[0, -0.34, 0]}>
       {/* Simple body - single box */}
       <mesh position={[0, 1.0, 0]} castShadow>
         <boxGeometry args={[0.4, 1.2, 0.25]} />
@@ -1881,11 +1882,32 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
     const recordWorkerEvasion = useSafetyStore((state) => state.recordWorkerEvasion);
     const alerts = useUIStore((state) => state.alerts);
     const productionEfficiency = useProductionStore((state) => state.metrics.efficiency);
+    const recordHeatMapPoint = useProductionStore((state) => state.recordHeatMapPoint);
 
     // Cache graphics settings (updated every ~1 second instead of every frame)
     const cachedThrottleLevelRef = useRef(2);
     const workerSettingsCacheFrameRef = useRef(0);
     const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+    const shiftChangeActive = useGameSimulationStore((state) => state.shiftChangeActive);
+    const shiftChangePhase = useGameSimulationStore((state) => state.shiftChangePhase);
+    // Fire drill evacuation
+    const emergencyDrillMode = useGameSimulationStore((state) => state.emergencyDrillMode);
+    const drillMetrics = useGameSimulationStore((state) => state.drillMetrics);
+    const markWorkerEvacuated = useGameSimulationStore((state) => state.markWorkerEvacuated);
+    const getNearestExit = useGameSimulationStore((state) => state.getNearestExit);
+
+    // Physics system toggle
+    const enablePhysics = useGraphicsStore((state) => state.graphics.enablePhysics);
+
+    // Track if this worker has been marked as evacuated (to prevent multiple calls)
+    const hasEvacuatedRef = useRef(false);
+
+    // Reset evacuation status when drill ends
+    useEffect(() => {
+      if (!emergencyDrillMode) {
+        hasEvacuatedRef.current = false;
+      }
+    }, [emergencyDrillMode]);
 
     // Obstacle avoidance state
     const isAvoidingObstacleRef = useRef(false);
@@ -1937,9 +1959,125 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
       [data.role, data.color, data.id]
     );
 
+    // Callback for physics worker to update position (keeps ref in sync for animations)
+    const handlePhysicsPositionUpdate = useCallback((x: number, z: number) => {
+      if (ref.current) {
+        ref.current.position.x = x;
+        ref.current.position.z = z;
+      }
+    }, []);
+
+    // Callback for physics worker to update direction (syncs rotation with velocity)
+    const handlePhysicsDirectionUpdate = useCallback((direction: number) => {
+      directionRef.current = direction > 0 ? 1 : -1;
+      if (ref.current) {
+        ref.current.rotation.y = direction > 0 ? 0 : Math.PI;
+      }
+    }, []);
+
     useFrame((state, delta) => {
       // PERFORMANCE: Skip all worker logic when tab hidden
       if (!ref.current || !isTabVisible) return;
+
+      // When physics is enabled, skip all movement code - physics handles position
+      // But still update animations and visuals
+      if (enablePhysics) {
+        // Just update walk cycle animation
+        const cappedDelta = Math.min(delta, 0.1);
+        walkCycleRef.current += cappedDelta * 5.5;
+        ref.current.position.y = Math.abs(Math.sin(walkCycleRef.current)) * 0.025;
+
+        // Update LOD based on camera distance
+        cameraDistanceRef.current = state.camera.position.distanceTo(ref.current.position);
+        const dist = cameraDistanceRef.current;
+        let newLod = lodRef.current;
+        if (lodRef.current === 'high' && dist > 30) newLod = 'medium';
+        else if (lodRef.current === 'medium' && dist < 25) newLod = 'high';
+        else if (lodRef.current === 'medium' && dist > 55) newLod = 'low';
+        else if (lodRef.current === 'low' && dist < 45) newLod = 'medium';
+        if (newLod !== lodRef.current) {
+          lodRef.current = newLod;
+          setLod(newLod);
+        }
+
+        // Update rotation based on direction ref
+        ref.current.rotation.y = directionRef.current > 0 ? 0 : Math.PI;
+        return; // Skip all legacy movement code
+      }
+
+      // === SHIFT CHANGE BEHAVIOR ===
+      // When shift change is active, workers walk toward exit
+      if (shiftChangeActive && shiftChangePhase === 'leaving') {
+        const cappedDelta = Math.min(delta, 0.1);
+        const exitZ = -50; // Exit toward receiving dock
+        const exitSpeed = 3.0; // Faster walk to exit
+
+        // Walk toward exit
+        if (ref.current.position.z > exitZ) {
+          ref.current.position.z -= exitSpeed * cappedDelta;
+          directionRef.current = -1; // Face exit direction
+          ref.current.rotation.y = Math.PI;
+          walkCycleRef.current += cappedDelta * 6;
+          ref.current.position.y = Math.abs(Math.sin(walkCycleRef.current)) * 0.025;
+        }
+
+        // Update position registry even during shift change
+        positionRegistry.register(
+          data.id,
+          ref.current.position.x,
+          ref.current.position.z,
+          'worker'
+        );
+        return; // Skip normal behavior during shift change
+      }
+
+      // === FIRE DRILL EVACUATION BEHAVIOR ===
+      // When fire drill is active, workers run to nearest exit
+      if (emergencyDrillMode && drillMetrics.active && !hasEvacuatedRef.current) {
+        const cappedDelta = Math.min(delta, 0.1);
+        const EVACUATION_SPEED = 6.0; // Running speed
+        const EVACUATION_THRESHOLD = 3.0; // Distance to exit to be considered evacuated
+
+        // Get nearest exit for this worker
+        const nearestExit = getNearestExit(ref.current.position.x, ref.current.position.z);
+        const targetX = nearestExit.position.x;
+        const targetZ = nearestExit.position.z;
+
+        // Calculate direction to exit
+        const dx = targetX - ref.current.position.x;
+        const dz = targetZ - ref.current.position.z;
+        const distanceToExit = Math.sqrt(dx * dx + dz * dz);
+
+        if (distanceToExit > EVACUATION_THRESHOLD) {
+          // Normalize direction and move toward exit
+          const dirX = dx / distanceToExit;
+          const dirZ = dz / distanceToExit;
+
+          ref.current.position.x += dirX * EVACUATION_SPEED * cappedDelta;
+          ref.current.position.z += dirZ * EVACUATION_SPEED * cappedDelta;
+
+          // Face direction of movement
+          ref.current.rotation.y = Math.atan2(dirX, dirZ);
+
+          // Running animation (faster walk cycle)
+          walkCycleRef.current += cappedDelta * 10;
+          ref.current.position.y = Math.abs(Math.sin(walkCycleRef.current)) * 0.04; // Higher bounce for running
+        } else {
+          // Worker has reached exit - mark as evacuated
+          hasEvacuatedRef.current = true;
+          markWorkerEvacuated(data.id);
+          ref.current.position.y = 0;
+        }
+
+        // Update position registry during evacuation
+        positionRegistry.register(
+          data.id,
+          ref.current.position.x,
+          ref.current.position.z,
+          'worker'
+        );
+        return; // Skip normal behavior during evacuation
+      }
 
       // Update cached settings every 60 frames (~1 second at 60fps)
       if (workerSettingsCacheFrameRef.current % 60 === 0) {
@@ -2354,6 +2492,11 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
       // Register position for collision avoidance
       positionRegistry.register(data.id, ref.current.position.x, ref.current.position.z, 'worker');
 
+      // Record heat map point (throttled to every 60 frames ~1sec to avoid performance issues)
+      if (frameCountRef.current % 60 === 0) {
+        recordHeatMapPoint(ref.current.position.x, ref.current.position.z);
+      }
+
       // Enforce exclusion zones - push workers away from truck yards
       if (isInExclusionZone(ref.current.position.x, ref.current.position.z)) {
         // Push worker back to safe z position
@@ -2412,7 +2555,8 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
       }
     };
 
-    return (
+    // Visual content for the worker
+    const workerContent = (
       <group
         ref={ref}
         onPointerOver={(e) => {
@@ -2568,6 +2712,22 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
         <WorkerReactionOverlay workerId={data.id} position={[0, 0, 0]} />
       </group>
     );
+
+    // When physics is enabled, wrap in PhysicsWorker for collision/movement
+    if (enablePhysics) {
+      return (
+        <PhysicsWorker
+          data={data}
+          onPositionUpdate={handlePhysicsPositionUpdate}
+          onDirectionUpdate={handlePhysicsDirectionUpdate}
+        >
+          {workerContent}
+        </PhysicsWorker>
+      );
+    }
+
+    // Legacy mode - no physics wrapper
+    return workerContent;
   },
   (prevProps, nextProps) => {
     // Custom comparison: only re-render if worker ID or status changed

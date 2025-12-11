@@ -143,6 +143,26 @@ class AudioManager {
   private _ttsVoice: SpeechSynthesisVoice | null = null;
   private _ttsVoiceLoaded: boolean = false;
 
+  // PA tannoy reverb/echo effect chain
+  private paReverbChain: {
+    inputGain: GainNode;
+    delay1: DelayNode;
+    delay2: DelayNode;
+    feedback: GainNode;
+    lowpass: BiquadFilterNode;
+    highpass: BiquadFilterNode;
+    wetGain: GainNode;
+    dryGain: GainNode;
+    output: GainNode;
+  } | null = null;
+
+  // Speech reverb simulation (plays during TTS to simulate voice bouncing in factory)
+  private speechReverbNodes: {
+    source: AudioBufferSourceNode;
+    gain: GainNode;
+  } | null = null;
+  private speechReverbPulseInterval: NodeJS.Timeout | number | null = null;
+
   constructor() {
     // Shuffle tracks on initialization using Fisher-Yates algorithm
     this.musicTracks = [...this.allMusicTracks];
@@ -404,6 +424,98 @@ class AudioManager {
       const targetVolume = this._muted ? 0 : this._volume;
       this.masterGain.gain.setTargetAtTime(targetVolume, this.audioContext?.currentTime || 0, 0.1);
     }
+  }
+
+  // Get or create the PA tannoy reverb/echo effect chain
+  // Creates a classic tannoy sound with heavy delay echo, bandpass filtering, and long reverb tail
+  private getPAReverbChain(): typeof this.paReverbChain {
+    const ctx = this.getContext();
+    const masterGain = this.getMasterGain();
+    if (!ctx || !masterGain) return null;
+
+    if (!this.paReverbChain) {
+      // Input gain for the effect chain
+      const inputGain = ctx.createGain();
+      inputGain.gain.value = 1.0;
+
+      // Primary delay (short slapback echo - ~80ms for that "room" feel)
+      const delay1 = ctx.createDelay(1.0);
+      delay1.delayTime.value = 0.08;
+
+      // Secondary delay (longer echo - ~200ms for hall reverb)
+      const delay2 = ctx.createDelay(1.0);
+      delay2.delayTime.value = 0.2;
+
+      // Feedback gain for echo repeats - higher value = more repeating echoes
+      const feedback = ctx.createGain();
+      feedback.gain.value = 0.55; // Strong feedback for pronounced echo trail
+
+      // Additional feedback path filter - each echo gets more muffled (realistic)
+      const feedbackFilter = ctx.createBiquadFilter();
+      feedbackFilter.type = 'lowpass';
+      feedbackFilter.frequency.value = 2000; // Each repeat loses high frequencies
+      feedbackFilter.Q.value = 0.5;
+
+      // Lowpass filter - simulates speaker frequency response (cuts harsh highs)
+      const lowpass = ctx.createBiquadFilter();
+      lowpass.type = 'lowpass';
+      lowpass.frequency.value = 3200; // Tannoy speakers cut off around 3kHz
+      lowpass.Q.value = 0.8;
+
+      // Highpass filter - removes rumble, adds "tinny" PA quality
+      const highpass = ctx.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = 350; // Cuts low bass for that telephone quality
+      highpass.Q.value = 0.8;
+
+      // Wet (processed) gain - echo/reverb level
+      const wetGain = ctx.createGain();
+      wetGain.gain.value = 0.9; // Heavy reverb presence
+
+      // Dry (original) gain - lower to let reverb dominate
+      const dryGain = ctx.createGain();
+      dryGain.gain.value = 0.5; // Reduced dry signal
+
+      // Output gain
+      const output = ctx.createGain();
+      output.gain.value = 1.0;
+
+      // Build the effect chain:
+      // Input -> Highpass -> Lowpass -> (Dry path + Wet/delay path) -> Output
+
+      // Dry path: input -> filters -> dryGain -> output
+      inputGain.connect(highpass);
+      highpass.connect(lowpass);
+      lowpass.connect(dryGain);
+      dryGain.connect(output);
+
+      // Wet path with echo: cascading delays with filtered feedback loop
+      lowpass.connect(delay1);
+      delay1.connect(delay2);
+      delay2.connect(feedbackFilter);
+      feedbackFilter.connect(feedback);
+      feedback.connect(delay1); // Feedback loop creates repeating echoes
+      delay1.connect(wetGain);
+      delay2.connect(wetGain); // Both delays contribute to wet signal
+      wetGain.connect(output);
+
+      // Connect output to master
+      output.connect(masterGain);
+
+      this.paReverbChain = {
+        inputGain,
+        delay1,
+        delay2,
+        feedback,
+        lowpass,
+        highpass,
+        wetGain,
+        dryGain,
+        output,
+      };
+    }
+
+    return this.paReverbChain;
   }
 
   // Reduce audio load when tab is hidden (keep user volume intact)
@@ -2855,6 +2967,11 @@ class AudioManager {
   // === EMERGENCY STOP SOUNDS ===
 
   private emergencyAlarmNode: { source: OscillatorNode; gain: GainNode } | null = null;
+  private emergencyStopAlarmNode: {
+    source: OscillatorNode;
+    gain: GainNode;
+    lfo: OscillatorNode;
+  } | null = null;
 
   // Start loud emergency alarm
   startEmergencyAlarm() {
@@ -2945,6 +3062,61 @@ class AudioManager {
     }
   }
 
+  // Start continuous emergency stop alarm (different from fire drill)
+  // Fire drill: sawtooth 800Hz, 2Hz square LFO = alternating two-tone siren
+  // Emergency stop: square 400Hz, 4Hz square LFO = rapid pulsing klaxon
+  startEmergencyStopAlarm() {
+    if (this.emergencyStopAlarmNode) return;
+    if (this.getEffectiveVolume() === 0) return;
+
+    try {
+      const ctx = this.getContext();
+      const masterGain = this.getMasterGain();
+      if (!ctx || !masterGain) return;
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const lfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+
+      // Harsh klaxon - square wave at lower pitch
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(400, ctx.currentTime);
+
+      // Faster pulsing (4Hz vs fire drill's 2Hz)
+      lfo.type = 'square';
+      lfo.frequency.setValueAtTime(4, ctx.currentTime);
+      lfoGain.gain.setValueAtTime(100, ctx.currentTime); // Frequency deviation
+
+      lfo.connect(lfoGain);
+      lfoGain.connect(osc.frequency);
+
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+
+      osc.connect(gain);
+      gain.connect(masterGain);
+
+      osc.start();
+      lfo.start();
+
+      this.emergencyStopAlarmNode = { source: osc, gain, lfo };
+    } catch (e) {
+      audioLog.warn('Emergency stop alarm start failed', e);
+    }
+  }
+
+  stopEmergencyStopAlarm() {
+    if (this.emergencyStopAlarmNode) {
+      try {
+        this.emergencyStopAlarmNode.source.stop();
+        this.emergencyStopAlarmNode.lfo.stop();
+      } catch (e) {
+        audioLog.warn('Failed to stop emergency stop alarm', e);
+      }
+      this.emergencyStopAlarmNode = null;
+    }
+  }
+
   // === FORKLIFT-TO-FORKLIFT ACKNOWLEDGMENT ===
 
   // Quick double-honk for forklift acknowledgment
@@ -2995,10 +3167,11 @@ class AudioManager {
 
       // Skip playback when tab hidden but keep scheduling to resume when visible
       if (this._isTabVisible) {
+        // Only play ambient factory sounds (shift bells and PA tones)
+        // The PA chime is reserved for speakAnnouncement() which plays chime + actual TTS text
+        // Playing chime here without text causes confusing "ghost chimes"
         const announcementType = Math.random();
-        if (announcementType < 0.4) {
-          this.playPAChime();
-        } else if (announcementType < 0.7) {
+        if (announcementType < 0.5) {
           this.playShiftBell();
         } else {
           this.playPATone();
@@ -3026,11 +3199,11 @@ class AudioManager {
 
     try {
       const ctx = this.getContext();
-      const masterGain = this.getMasterGain();
-      if (!ctx || !masterGain) return;
+      const paReverb = this.getPAReverbChain();
+      if (!ctx || !paReverb) return;
       const currentTime = ctx.currentTime;
 
-      // Classic three-tone chime
+      // Classic three-tone chime - routed through tannoy reverb for echo effect
       const notes = [523, 659, 784]; // C5, E5, G5
       notes.forEach((freq, i) => {
         const osc = ctx.createOscillator();
@@ -3041,15 +3214,16 @@ class AudioManager {
         osc.frequency.setValueAtTime(freq, startTime);
 
         gain.gain.setValueAtTime(0, startTime);
-        gain.gain.linearRampToValueAtTime(0.04, startTime + 0.02);
-        gain.gain.setValueAtTime(0.04, startTime + 0.2);
-        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.5);
+        gain.gain.linearRampToValueAtTime(0.05, startTime + 0.02);
+        gain.gain.setValueAtTime(0.05, startTime + 0.2);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.6);
 
         osc.connect(gain);
-        gain.connect(masterGain);
+        // Route through PA reverb chain for tannoy echo effect
+        gain.connect(paReverb.inputGain);
 
         osc.start(startTime);
-        osc.stop(startTime + 0.55);
+        osc.stop(startTime + 0.65);
       });
 
       // Follow with muffled speech-like sound
@@ -3064,8 +3238,8 @@ class AudioManager {
 
     try {
       const ctx = this.getContext();
-      const masterGain = this.getMasterGain();
-      if (!ctx || !masterGain) return;
+      const paReverb = this.getPAReverbChain();
+      if (!ctx || !paReverb) return;
       const currentTime = ctx.currentTime;
 
       const duration = 2 + Math.random() * 2;
@@ -3085,14 +3259,15 @@ class AudioManager {
       const syllables = Math.floor(duration * 3);
       for (let i = 0; i < syllables; i++) {
         const t = currentTime + (i / syllables) * duration;
-        gain.gain.linearRampToValueAtTime(0.008 + Math.random() * 0.004, t);
-        gain.gain.linearRampToValueAtTime(0.003, t + 0.1);
+        gain.gain.linearRampToValueAtTime(0.012 + Math.random() * 0.006, t);
+        gain.gain.linearRampToValueAtTime(0.004, t + 0.1);
       }
       gain.gain.exponentialRampToValueAtTime(0.001, currentTime + duration);
 
       source.connect(filter);
       filter.connect(gain);
-      gain.connect(masterGain);
+      // Route through PA reverb chain for tannoy echo effect
+      gain.connect(paReverb.inputGain);
 
       source.start(currentTime);
       source.stop(currentTime + duration + 0.2);
@@ -3106,8 +3281,8 @@ class AudioManager {
 
     try {
       const ctx = this.getContext();
-      const masterGain = this.getMasterGain();
-      if (!ctx || !masterGain) return;
+      const paReverb = this.getPAReverbChain();
+      if (!ctx || !paReverb) return;
       const currentTime = ctx.currentTime;
 
       for (let ring = 0; ring < 3; ring++) {
@@ -3121,20 +3296,21 @@ class AudioManager {
           osc.type = 'sine';
           osc.frequency.setValueAtTime(freq, startTime);
 
-          const volume = 0.025 / (i + 1);
+          const volume = 0.035 / (i + 1);
           gain.gain.setValueAtTime(0, startTime);
           gain.gain.linearRampToValueAtTime(volume, startTime + 0.005);
-          gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.6);
+          gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.7);
 
           osc.connect(gain);
-          gain.connect(masterGain);
+          // Route through PA reverb chain for tannoy echo effect
+          gain.connect(paReverb.inputGain);
 
           osc.start(startTime);
-          osc.stop(startTime + 0.65);
+          osc.stop(startTime + 0.75);
         });
       }
     } catch (e) {
-      audioLog.warn('Failed to stop PA system', e);
+      audioLog.warn('Shift bell playback failed', e);
     }
   }
 
@@ -3143,8 +3319,8 @@ class AudioManager {
 
     try {
       const ctx = this.getContext();
-      const masterGain = this.getMasterGain();
-      if (!ctx || !masterGain) return;
+      const paReverb = this.getPAReverbChain();
+      if (!ctx || !paReverb) return;
       const currentTime = ctx.currentTime;
 
       const osc = ctx.createOscillator();
@@ -3155,15 +3331,16 @@ class AudioManager {
       osc.frequency.setValueAtTime(660, currentTime + 0.3);
 
       gain.gain.setValueAtTime(0, currentTime);
-      gain.gain.linearRampToValueAtTime(0.03, currentTime + 0.02);
-      gain.gain.setValueAtTime(0.03, currentTime + 0.5);
-      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + 0.7);
+      gain.gain.linearRampToValueAtTime(0.04, currentTime + 0.02);
+      gain.gain.setValueAtTime(0.04, currentTime + 0.5);
+      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + 0.8);
 
       osc.connect(gain);
-      gain.connect(masterGain);
+      // Route through PA reverb chain for tannoy echo effect
+      gain.connect(paReverb.inputGain);
 
       osc.start(currentTime);
-      osc.stop(currentTime + 0.75);
+      osc.stop(currentTime + 0.85);
     } catch (e) {
       audioLog.warn('Audio playback failed', e);
     }
@@ -4440,36 +4617,47 @@ class AudioManager {
       const voices = window.speechSynthesis.getVoices();
       if (voices.length === 0) return;
 
-      // Use Google UK English Female for PA announcements
-      const preferredVoices = ['Google UK English Female'];
+      // Use British voices ONLY for PA announcements - never American
+      const preferredBritishVoices = [
+        'Google UK English Female',
+        'Google UK English Male',
+        'Microsoft Hazel - English (United Kingdom)',
+        'Microsoft George - English (United Kingdom)',
+        'Daniel (United Kingdom)',
+        'Kate',
+        'Serena',
+        'Daniel',
+      ];
 
-      // First pass: exact name matches only
-      for (const preferred of preferredVoices) {
+      // First pass: exact preferred British voice matches
+      for (const preferred of preferredBritishVoices) {
         const found = voices.find((v) => v.name === preferred || v.name.includes(preferred));
         if (found) {
           this._ttsVoice = found;
-          audioLog.info(`TTS voice selected: ${found.name}`);
+          audioLog.info(`TTS voice selected (British): ${found.name}`);
           break;
         }
       }
 
-      // Second pass: any English female voice
+      // Second pass: any voice with UK/British in name or en-GB locale
       if (!this._ttsVoice) {
-        const englishFemale = voices.find(
-          (v) => v.lang.startsWith('en') && v.name.toLowerCase().includes('female')
+        const britishVoice = voices.find(
+          (v) =>
+            v.lang === 'en-GB' ||
+            v.lang === 'en_GB' ||
+            v.name.toLowerCase().includes('uk') ||
+            v.name.toLowerCase().includes('british') ||
+            v.name.toLowerCase().includes('united kingdom')
         );
-        if (englishFemale) {
-          this._ttsVoice = englishFemale;
-          audioLog.info(`TTS voice selected (English female): ${englishFemale.name}`);
+        if (britishVoice) {
+          this._ttsVoice = britishVoice;
+          audioLog.info(`TTS voice selected (British fallback): ${britishVoice.name}`);
         }
       }
 
-      // Fallback to first English voice
+      // NO FALLBACK to American voices - if no British voice found, TTS stays disabled
       if (!this._ttsVoice) {
-        this._ttsVoice = voices.find((v) => v.lang.startsWith('en')) || voices[0];
-        if (this._ttsVoice) {
-          audioLog.info(`TTS fallback voice: ${this._ttsVoice.name}`);
-        }
+        audioLog.warn('No British voice found - PA announcements will be silent (refusing American voice)');
       }
 
       this._ttsVoiceLoaded = true;
@@ -4483,7 +4671,7 @@ class AudioManager {
     }
   }
 
-  // Speak a PA announcement using TTS
+  // Speak a PA announcement using TTS with tannoy echo effect
   speakAnnouncement(text: string): void {
     if (!this._ttsEnabled || this._muted || !('speechSynthesis' in window)) {
       return;
@@ -4494,22 +4682,36 @@ class AudioManager {
       this.initTTSVoice();
     }
 
+    // CRITICAL: Only speak if we have a British voice - NEVER use American default
+    if (!this._ttsVoice) {
+      audioLog.warn('Blocking announcement - no British voice available');
+      return;
+    }
+
     // Cancel any current speech
     this.stopTTS();
 
     try {
       const utterance = new SpeechSynthesisUtterance(text);
 
-      // Configure voice settings for PA-style delivery
-      if (this._ttsVoice) {
-        utterance.voice = this._ttsVoice;
-      }
-      utterance.rate = 0.9; // Slightly slower for clarity
-      utterance.pitch = 1.0;
-      utterance.volume = this._volume * 0.8; // Slightly quieter than effects
+      // Configure voice settings for PA-style delivery (British voice guaranteed)
+      utterance.voice = this._ttsVoice;
+      utterance.rate = 0.85; // Slightly slower for PA clarity
+      utterance.pitch = 0.95; // Slightly lower for authoritative PA tone
+      utterance.volume = this._volume * 0.75; // Slightly quieter to blend with reverb
 
-      utterance.onend = () => {};
+      // When speech starts, begin continuous reverb simulation
+      utterance.onstart = () => {
+        this.startSpeechReverb();
+      };
+
+      // When speech ends, stop reverb and play reverberant echo tail
+      utterance.onend = () => {
+        this.stopSpeechReverb();
+        this.playPAReverbTail();
+      };
       utterance.onerror = (e) => {
+        this.stopSpeechReverb();
         audioLog.warn('TTS error', e);
       };
 
@@ -4525,8 +4727,171 @@ class AudioManager {
     }
   }
 
+  // Start continuous reverb simulation during TTS speech
+  // This creates filtered noise routed through the PA reverb chain to simulate
+  // voice bouncing around the factory space while speaking
+  private startSpeechReverb(): void {
+    if (this.getEffectiveVolume() === 0) return;
+    this.stopSpeechReverb(); // Clean up any existing
+
+    try {
+      const ctx = this.getContext();
+      const paReverb = this.getPAReverbChain();
+      if (!ctx || !paReverb) return;
+
+      // Create a long looping noise buffer for continuous reverb
+      const duration = 4;
+      const buffer = this.createNoiseBuffer(duration, 'pink');
+      if (!buffer) return;
+
+      const source = ctx.createBufferSource();
+      const gain = ctx.createGain();
+      const bandpass = ctx.createBiquadFilter();
+
+      source.buffer = buffer;
+      source.loop = true;
+
+      // Bandpass filter to match speech frequencies (vowel formants ~300-3000Hz)
+      bandpass.type = 'bandpass';
+      bandpass.frequency.value = 800;
+      bandpass.Q.value = 0.8;
+
+      // Subtle continuous reverb presence
+      gain.gain.value = 0.015;
+
+      source.connect(bandpass);
+      bandpass.connect(gain);
+      gain.connect(paReverb.inputGain);
+
+      source.start();
+
+      this.speechReverbNodes = { source, gain };
+
+      // Set up interval to pulse additional reverb bursts (simulates word echoes)
+      this.speechReverbPulseInterval = setInterval(() => {
+        this.pulseSpeechReverb();
+      }, 400); // Pulse every ~400ms to sync roughly with speech cadence
+    } catch (e) {
+      audioLog.warn('Failed to start speech reverb', e);
+    }
+  }
+
+  // Create a single reverb pulse during speech (simulates a word echoing)
+  private pulseSpeechReverb(): void {
+    if (this.getEffectiveVolume() === 0) return;
+
+    try {
+      const ctx = this.getContext();
+      const paReverb = this.getPAReverbChain();
+      if (!ctx || !paReverb) return;
+      const currentTime = ctx.currentTime;
+
+      // Short burst of filtered noise that decays quickly
+      const duration = 0.3;
+      const buffer = this.createNoiseBuffer(duration, 'pink');
+      if (!buffer) return;
+
+      const source = ctx.createBufferSource();
+      const gain = ctx.createGain();
+      const bandpass = ctx.createBiquadFilter();
+
+      source.buffer = buffer;
+
+      // Match speech frequencies
+      bandpass.type = 'bandpass';
+      bandpass.frequency.value = 700 + Math.random() * 400; // Vary slightly for natural feel
+      bandpass.Q.value = 1.0;
+
+      // Quick attack, fast decay
+      gain.gain.setValueAtTime(0.02, currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + duration);
+
+      source.connect(bandpass);
+      bandpass.connect(gain);
+      gain.connect(paReverb.inputGain);
+
+      source.start(currentTime);
+      source.stop(currentTime + duration + 0.1);
+    } catch (e) {
+      // Ignore pulse errors
+    }
+  }
+
+  // Stop the continuous speech reverb effect
+  private stopSpeechReverb(): void {
+    if (this.speechReverbPulseInterval) {
+      clearInterval(this.speechReverbPulseInterval as NodeJS.Timeout);
+      this.speechReverbPulseInterval = null;
+    }
+
+    if (this.speechReverbNodes) {
+      try {
+        const ctx = this.getContext();
+        if (ctx) {
+          const currentTime = ctx.currentTime;
+          // Fade out over 200ms before stopping
+          this.speechReverbNodes.gain.gain.setValueAtTime(
+            this.speechReverbNodes.gain.gain.value,
+            currentTime
+          );
+          this.speechReverbNodes.gain.gain.exponentialRampToValueAtTime(0.0001, currentTime + 0.2);
+          this.speechReverbNodes.source.stop(currentTime + 0.25);
+        } else {
+          this.speechReverbNodes.source.stop();
+        }
+      } catch (e) {
+        // Source may already be stopped
+      }
+      this.speechReverbNodes = null;
+    }
+  }
+
+  // Play a reverberant tail after TTS announcements to simulate echo in the factory space
+  private playPAReverbTail(): void {
+    if (this.getEffectiveVolume() === 0) return;
+
+    try {
+      const ctx = this.getContext();
+      const paReverb = this.getPAReverbChain();
+      if (!ctx || !paReverb) return;
+      const currentTime = ctx.currentTime;
+
+      // Create a longer filtered noise burst that fades out like factory hall reverb
+      const duration = 1.8;
+      const buffer = this.createNoiseBuffer(duration, 'pink');
+      if (!buffer) return;
+
+      const source = ctx.createBufferSource();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+
+      source.buffer = buffer;
+
+      // Bandpass to match speech frequencies - slightly wider for more presence
+      filter.type = 'bandpass';
+      filter.frequency.value = 600;
+      filter.Q.value = 1.2;
+
+      // Longer decay for pronounced reverb tail effect
+      gain.gain.setValueAtTime(0.025, currentTime);
+      gain.gain.setValueAtTime(0.022, currentTime + 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + duration);
+
+      source.connect(filter);
+      filter.connect(gain);
+      // Route through PA reverb for cascading echo effect
+      gain.connect(paReverb.inputGain);
+
+      source.start(currentTime);
+      source.stop(currentTime + duration + 0.5);
+    } catch (e) {
+      audioLog.warn('PA reverb tail failed', e);
+    }
+  }
+
   // Stop current TTS playback
   stopTTS(): void {
+    this.stopSpeechReverb();
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
@@ -4548,6 +4913,7 @@ class AudioManager {
     this.stopPASystem();
     this.stopRain();
     this.stopEmergencyAlarm();
+    this.stopEmergencyStopAlarm();
     this.stopCompressorCycling();
     this.stopMetalClanks();
     this.stopVentilationFanSound();

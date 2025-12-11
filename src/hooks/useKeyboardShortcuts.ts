@@ -7,6 +7,7 @@ import { useUIStore } from '../stores/uiStore';
 import { audioManager } from '../utils/audioManager';
 import { useCameraStore, CAMERA_PRESETS } from '../components/CameraController';
 import { MachineData, WorkerData } from '../types';
+import { EMERGENCY_STOP_ANNOUNCEMENTS } from '../components/GameFeatures';
 
 interface KeyboardShortcutsConfig {
   showAIPanel: boolean;
@@ -84,6 +85,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
   }, [forkliftEmergencyStop]);
   const setForkliftEmergencyStop = useSafetyStore((state) => state.setForkliftEmergencyStop);
   const addSafetyIncident = useSafetyStore((state) => state.addSafetyIncident);
+  const addAnnouncement = useProductionStore((state) => state.addAnnouncement);
 
   // Camera presets
   const setCameraPreset = useCameraStore((state) => state.setPreset);
@@ -109,6 +111,17 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         setForkliftEmergencyStop(newState);
         if (newState) {
           audioManager.playEmergencyStop();
+          // Queue random emergency stop PA announcement
+          const announcement =
+            EMERGENCY_STOP_ANNOUNCEMENTS[
+              Math.floor(Math.random() * EMERGENCY_STOP_ANNOUNCEMENTS.length)
+            ];
+          addAnnouncement({
+            type: 'emergency',
+            message: announcement.message,
+            duration: announcement.duration,
+            priority: 'critical',
+          });
           addSafetyIncident({
             type: 'emergency',
             description: 'Emergency stop activated via keyboard (Spacebar)',
@@ -334,6 +347,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
     setQualityNotification,
     setForkliftEmergencyStop,
     addSafetyIncident,
+    addAnnouncement,
     setCameraPreset,
   ]);
 }

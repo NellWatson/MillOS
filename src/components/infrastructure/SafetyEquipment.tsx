@@ -551,8 +551,9 @@ export const SafetyEquipment: React.FC<SafetyEquipmentProps> = () => {
           <WarningSign position={[-30, 1.5, -18]} type="danger" />
           <WarningSign position={[30, 1.5, -18]} type="danger" />
 
-          {/* Exit signs - near shipping dock (front) and sides */}
+          {/* Exit signs - near shipping dock (front), back, and sides */}
           <WallSign position={[0, 4, 48]} rotation={[0, Math.PI, 0]} text="EXIT" color="#22c55e" />
+          <WallSign position={[0, 4, -48]} rotation={[0, 0, 0]} text="EXIT" color="#22c55e" />
           <WallSign
             position={[-58, 4, 0]}
             rotation={[0, Math.PI / 2, 0]}
@@ -566,23 +567,33 @@ export const SafetyEquipment: React.FC<SafetyEquipmentProps> = () => {
             color="#22c55e"
           />
 
-          {/* Zone signs */}
+          {/* Zone signs - positioned near actual zone locations */}
+          {/* Zone 1: Silos at z=-22 */}
           <WallSign
-            position={[0, 4, -42]}
+            position={[0, 4, -25]}
             rotation={[0, 0, 0]}
             text="ZONE 1 - STORAGE"
             color="#3b82f6"
           />
+          {/* Zone 2: Milling at z=-6 */}
           <WallSign
             position={[0, 4, -10]}
             rotation={[0, 0, 0]}
             text="ZONE 2 - MILLING"
             color="#f97316"
           />
+          {/* Zone 3: Sifting at z=6 */}
           <WallSign
-            position={[0, 4, 25]}
+            position={[0, 4, 8]}
+            rotation={[0, 0, 0]}
+            text="ZONE 3 - SIFTING"
+            color="#a855f7"
+          />
+          {/* Zone 4: Packing at z=25 */}
+          <WallSign
+            position={[0, 4, 28]}
             rotation={[0, Math.PI, 0]}
-            text="ZONE 3 - PACKING"
+            text="ZONE 4 - PACKING"
             color="#8b5cf6"
           />
 

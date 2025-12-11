@@ -257,9 +257,10 @@ export function calculateMachineVisuals(
     const criticalMax = tempDef?.alarmHiHi ?? 75;
 
     props.temperatureColor = temperatureToColor(temp, 20, normalMax, criticalMax);
-    props.temperatureGlow = criticalMax > normalMax
-      ? Math.max(0, (temp - normalMax) / (criticalMax - normalMax)) * 0.5
-      : 0;
+    props.temperatureGlow =
+      criticalMax > normalMax
+        ? Math.max(0, (temp - normalMax) / (criticalMax - normalMax)) * 0.5
+        : 0;
   }
 
   // Vibration processing

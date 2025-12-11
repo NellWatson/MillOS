@@ -11,6 +11,9 @@ const pressedKeys = new Set<string>();
 // Movement configuration
 const MOVE_SPEED = 20; // Units per second
 const VERTICAL_SPEED = 15; // Units per second for up/down
+const SPRINT_MULTIPLIER = 3.6; // Speed multiplier when holding Shift
+const MIN_CAMERA_HEIGHT = 2.0; // Minimum camera Y to prevent ground clipping
+const MIN_TARGET_HEIGHT = 0.5; // Minimum orbit target Y (above floor level)
 
 // Camera preset definitions based on MillOS factory zones
 export interface CameraPreset {
@@ -125,11 +128,21 @@ export const CameraController: React.FC<CameraControllerProps> = ({
       }
 
       const key = e.key.toLowerCase();
-      // Track movement keys
+      // Track movement keys and shift for sprint
       if (
-        ['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'q', 'e'].includes(
-          key
-        )
+        [
+          'w',
+          'a',
+          's',
+          'd',
+          'arrowup',
+          'arrowdown',
+          'arrowleft',
+          'arrowright',
+          'q',
+          'e',
+          'shift',
+        ].includes(key)
       ) {
         pressedKeys.add(key);
       }
@@ -196,21 +209,32 @@ export const CameraController: React.FC<CameraControllerProps> = ({
 
       // Apply movement if there's any
       if (moveDirection.current.length() > 0) {
+        // Apply sprint multiplier if shift is held
+        const speedMultiplier = pressedKeys.has('shift') ? SPRINT_MULTIPLIER : 1;
+
         // Normalize horizontal movement but keep vertical separate
         const verticalMove = moveDirection.current.y;
         moveDirection.current.y = 0;
 
         if (moveDirection.current.length() > 0) {
           moveDirection.current.normalize();
-          moveDirection.current.multiplyScalar(MOVE_SPEED * delta);
+          moveDirection.current.multiplyScalar(MOVE_SPEED * speedMultiplier * delta);
         }
 
         // Add vertical movement
-        moveDirection.current.y = verticalMove * VERTICAL_SPEED * delta;
+        moveDirection.current.y = verticalMove * VERTICAL_SPEED * speedMultiplier * delta;
 
         // Move both camera and orbit target together
         camera.position.add(moveDirection.current);
         orbitControlsRef.current.target.add(moveDirection.current);
+
+        // Clamp camera and target height to prevent ground clipping
+        if (camera.position.y < MIN_CAMERA_HEIGHT) {
+          camera.position.y = MIN_CAMERA_HEIGHT;
+        }
+        if (orbitControlsRef.current.target.y < MIN_TARGET_HEIGHT) {
+          orbitControlsRef.current.target.y = MIN_TARGET_HEIGHT;
+        }
       }
     }
     // Frame-rate independent exponential smoothing for perfectly smooth rotation
@@ -240,12 +264,27 @@ export const CameraController: React.FC<CameraControllerProps> = ({
       orbitControlsRef.current.target.lerp(targetLookAt, easeT * 0.1);
     }
 
+    // Clamp heights during animation to prevent ground clipping
+    if (camera.position.y < MIN_CAMERA_HEIGHT) {
+      camera.position.y = MIN_CAMERA_HEIGHT;
+    }
+    if (orbitControlsRef?.current && orbitControlsRef.current.target.y < MIN_TARGET_HEIGHT) {
+      orbitControlsRef.current.target.y = MIN_TARGET_HEIGHT;
+    }
+
     // Check if animation is complete
     const distanceToTarget = camera.position.distanceTo(targetPosition);
     if (distanceToTarget < 0.5 || t >= 1) {
       camera.position.copy(targetPosition);
+      // Ensure final position respects height limits
+      if (camera.position.y < MIN_CAMERA_HEIGHT) {
+        camera.position.y = MIN_CAMERA_HEIGHT;
+      }
       if (orbitControlsRef?.current) {
         orbitControlsRef.current.target.copy(targetLookAt);
+        if (orbitControlsRef.current.target.y < MIN_TARGET_HEIGHT) {
+          orbitControlsRef.current.target.y = MIN_TARGET_HEIGHT;
+        }
       }
       animationProgress.current = 0;
       clearAnimation();

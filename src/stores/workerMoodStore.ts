@@ -203,7 +203,10 @@ export const useWorkerMoodStore = create<WorkerMoodStore>((set, get) => ({
         get().setWorkerSpeaking(workerId, phrase);
 
         // Store timeout for cleanup
-        const timeoutId = setTimeout(() => get().clearWorkerSpeech(workerId), 2500 + Math.random() * 1500);
+        const timeoutId = setTimeout(
+          () => get().clearWorkerSpeech(workerId),
+          2500 + Math.random() * 1500
+        );
         storeTimeout(`speech-${workerId}`, timeoutId);
       }
       return;

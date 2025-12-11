@@ -151,7 +151,7 @@ const calculateTrailerAngleOnCurve = (
 
 // Calculate truck state for SHIPPING dock (front of building, z=50)
 export const calculateShippingTruckState = (cycle: number, time: number): TruckAnimState => {
-  const ROAD_Z = 120; // Start further back
+  const ROAD_Z = 250; // Extended distance - trucks travel far down the road
   const YARD_ENTRY_Z = 85; // Initial entry point
   const TURN_START_Z = 65; // Where to start the U-turn (go past dock)
   const ALIGN_Z = 78; // Setup point for backing (further out)
@@ -485,7 +485,7 @@ export const calculateShippingTruckState = (cycle: number, time: number): TruckA
 
 // Calculate truck state for RECEIVING dock (back of building, z=-50)
 export const calculateReceivingTruckState = (cycle: number, time: number): TruckAnimState => {
-  const ROAD_Z = -120;
+  const ROAD_Z = -250; // Extended distance - trucks travel far down the road
   const YARD_ENTRY_Z = -85;
   const TURN_START_Z = -65;
   const ALIGN_Z = -78;

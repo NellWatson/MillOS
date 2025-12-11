@@ -122,15 +122,15 @@ const createWallTexture = (): THREE.CanvasTexture => {
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
 
-  // Base wall color
-  ctx.fillStyle = '#475569';
+  // Base wall color - Darker industrial slate
+  ctx.fillStyle = '#1e293b';
   ctx.fillRect(0, 0, size, size);
 
   // Add noise for wall texture (use deterministic noise for consistency)
   const imageData = ctx.getImageData(0, 0, size, size);
   for (let i = 0; i < imageData.data.length; i += 4) {
-    // Use deterministic noise based on pixel index
-    const noise = Math.sin(i * 0.1) * 0.5 * 15;
+    // Use deterministic noise based on pixel index - increased intensity for grunge
+    const noise = Math.sin(i * 0.1) * 0.5 * 25;
     imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
     imageData.data[i + 1] = Math.max(0, Math.min(255, imageData.data[i + 1] + noise));
     imageData.data[i + 2] = Math.max(0, Math.min(255, imageData.data[i + 2] + noise));
@@ -138,7 +138,7 @@ const createWallTexture = (): THREE.CanvasTexture => {
   ctx.putImageData(imageData, 0, 0);
 
   // Add horizontal panel lines
-  ctx.strokeStyle = 'rgba(30, 41, 59, 0.4)';
+  ctx.strokeStyle = 'rgba(15, 23, 42, 0.6)';
   ctx.lineWidth = 2;
   for (let y = 0; y < size; y += 64) {
     ctx.beginPath();
@@ -262,16 +262,22 @@ const DaylightWindow: React.FC<{ position: [number, number, number]; size: [numb
     const gameTime = useGameSimulationStore((state) => state.gameTime);
     const { color, intensity } = getDaylightProperties(gameTime);
 
+    // Guard against NaN/invalid dimensions
+    const safeW = Number.isFinite(size[0]) && size[0] > 0 ? size[0] : 1;
+    const safeH = Number.isFinite(size[1]) && size[1] > 0 ? size[1] : 1;
+    const innerW = Math.max(0.1, safeW - 0.2);
+    const innerH = Math.max(0.1, safeH - 0.2);
+
     return (
       <group position={position}>
         {/* Window frame */}
         <mesh position={[0, 0, -0.05]}>
-          <planeGeometry args={[size[0] + 0.4, size[1] + 0.4]} />
+          <planeGeometry args={[safeW + 0.4, safeH + 0.4]} />
           <meshStandardMaterial color="#1e293b" metalness={0.7} roughness={0.3} />
         </mesh>
         {/* Glass pane - using standard material for performance */}
         <mesh>
-          <planeGeometry args={size} />
+          <planeGeometry args={[safeW, safeH]} />
           <meshStandardMaterial
             color="#a5d8ff"
             metalness={0.1}
@@ -282,7 +288,7 @@ const DaylightWindow: React.FC<{ position: [number, number, number]; size: [numb
         </mesh>
         {/* Daylight glow behind glass */}
         <mesh position={[0, 0, -0.1]}>
-          <planeGeometry args={[size[0] - 0.2, size[1] - 0.2]} />
+          <planeGeometry args={[innerW, innerH]} />
           <meshBasicMaterial color={color} transparent opacity={intensity * 0.6} />
         </mesh>
       </group>
@@ -628,19 +634,12 @@ export const FactoryEnvironment: React.FC = () => {
           <planeGeometry args={[20, 2]} />
           <meshStandardMaterial color="#eab308" emissive="#eab308" emissiveIntensity={0.2} />
         </mesh>
-        {/* Wall panels */}
-        {[-55, -35, 35, 55].map((x, i) => (
-          <mesh key={i} position={[x, -5, 0.05]}>
-            <planeGeometry args={[6, 8]} />
-            <meshStandardMaterial color="#64748b" metalness={0.5} roughness={0.5} />
-          </mesh>
-        ))}
-        {/* Personnel doors - back wall */}
+        {/* Personnel doors - back wall - realistic scale */}
         {[-40, 40].map((x, i) => (
-          <group key={`door-back-${i}`} position={[x, -8, 0]}>
-            {/* Door frame - both sides */}
+          <group key={`door-back-${i}`} position={[x, -13.8, 0]}>
+            {/* Door frame */}
             <mesh position={[0, 0, 0.05]}>
-              <planeGeometry args={[4.5, 9.5]} />
+              <planeGeometry args={[1.4, 2.6]} />
               <meshStandardMaterial
                 color="#1e293b"
                 metalness={0.4}
@@ -650,7 +649,7 @@ export const FactoryEnvironment: React.FC = () => {
             </mesh>
             {/* Door panel */}
             <mesh position={[0, 0, 0.1]}>
-              <planeGeometry args={[3.5, 8.5]} />
+              <planeGeometry args={[1.1, 2.3]} />
               <meshStandardMaterial
                 color="#475569"
                 metalness={0.3}
@@ -659,8 +658,8 @@ export const FactoryEnvironment: React.FC = () => {
               />
             </mesh>
             {/* Door window */}
-            <mesh position={[0, 2, 0.15]}>
-              <planeGeometry args={[1.5, 2]} />
+            <mesh position={[0, 0.6, 0.15]}>
+              <planeGeometry args={[0.5, 0.6]} />
               <meshStandardMaterial
                 color="#94a3b8"
                 metalness={0.8}
@@ -669,8 +668,8 @@ export const FactoryEnvironment: React.FC = () => {
               />
             </mesh>
             {/* Handle */}
-            <mesh position={[1.2, -1, 0.2]}>
-              <boxGeometry args={[0.3, 0.8, 0.15]} />
+            <mesh position={[0.4, -0.3, 0.2]}>
+              <boxGeometry args={[0.08, 0.2, 0.05]} />
               <meshStandardMaterial color="#64748b" metalness={0.9} roughness={0.2} />
             </mesh>
           </group>
@@ -699,12 +698,12 @@ export const FactoryEnvironment: React.FC = () => {
           <planeGeometry args={[20, 2]} />
           <meshStandardMaterial color="#eab308" emissive="#eab308" emissiveIntensity={0.2} />
         </mesh>
-        {/* Personnel doors - front wall */}
+        {/* Personnel doors - front wall - realistic scale */}
         {[-40, 40].map((x, i) => (
-          <group key={`door-front-${i}`} position={[x, -8, 0]}>
-            {/* Door frame - both sides */}
+          <group key={`door-front-${i}`} position={[x, -13.8, 0]}>
+            {/* Door frame */}
             <mesh position={[0, 0, 0.05]}>
-              <planeGeometry args={[4.5, 9.5]} />
+              <planeGeometry args={[1.4, 2.6]} />
               <meshStandardMaterial
                 color="#1e293b"
                 metalness={0.4}
@@ -714,7 +713,7 @@ export const FactoryEnvironment: React.FC = () => {
             </mesh>
             {/* Door panel */}
             <mesh position={[0, 0, 0.1]}>
-              <planeGeometry args={[3.5, 8.5]} />
+              <planeGeometry args={[1.1, 2.3]} />
               <meshStandardMaterial
                 color="#475569"
                 metalness={0.3}
@@ -723,8 +722,8 @@ export const FactoryEnvironment: React.FC = () => {
               />
             </mesh>
             {/* Door window */}
-            <mesh position={[0, 2, 0.15]}>
-              <planeGeometry args={[1.5, 2]} />
+            <mesh position={[0, 0.6, 0.15]}>
+              <planeGeometry args={[0.5, 0.6]} />
               <meshStandardMaterial
                 color="#94a3b8"
                 metalness={0.8}
@@ -733,8 +732,8 @@ export const FactoryEnvironment: React.FC = () => {
               />
             </mesh>
             {/* Handle */}
-            <mesh position={[1.2, -1, 0.2]}>
-              <boxGeometry args={[0.3, 0.8, 0.15]} />
+            <mesh position={[0.4, -0.3, 0.2]}>
+              <boxGeometry args={[0.08, 0.2, 0.05]} />
               <meshStandardMaterial color="#64748b" metalness={0.9} roughness={0.2} />
             </mesh>
           </group>
@@ -889,9 +888,6 @@ export const FactoryEnvironment: React.FC = () => {
           </mesh>
         ))}
 
-      {/* Ventilation fans - skip on low graphics */}
-      {quality !== 'low' && <VentilationFans />}
-
       {/* Weather effects visible through skylights */}
       <WeatherEffects />
 
@@ -900,91 +896,6 @@ export const FactoryEnvironment: React.FC = () => {
 
       {/* Heat map visualization */}
       <HeatMapVisualization />
-    </group>
-  );
-};
-
-// Ventilation fan component with animation - memoized to prevent unnecessary re-renders
-const VentilationFan: React.FC<{
-  position: [number, number, number];
-  rotation?: number;
-  size?: number;
-}> = memo(({ position, rotation = 0, size = 1.5 }) => {
-  const bladeRef = useRef<THREE.Group>(null);
-  const [speed] = useState(2 + Math.random() * 2);
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
-
-  // Start fan sound on mount
-  useEffect(() => {
-    const fanId = `fan-${position.join('-')}`;
-    audioManager.registerSoundPosition(fanId, position[0], position[1], position[2]);
-  }, [position]);
-
-  useFrame((_, delta) => {
-    // PERFORMANCE: Skip when tab hidden
-    if (!isTabVisible) return;
-    if (bladeRef.current) {
-      bladeRef.current.rotation.z += delta * speed * 2;
-    }
-  });
-
-  return (
-    <group position={position} rotation={[Math.PI / 2, 0, rotation]}>
-      {/* Fan housing */}
-      <mesh>
-        <cylinderGeometry args={[size + 0.2, size + 0.2, 0.3, 32]} />
-        <meshStandardMaterial color="#374151" metalness={0.7} roughness={0.3} />
-      </mesh>
-      {/* Protective grill - front */}
-      <mesh position={[0, 0.2, 0]}>
-        <cylinderGeometry args={[size, size, 0.05, 32]} />
-        <meshStandardMaterial color="#1f2937" metalness={0.6} roughness={0.4} wireframe />
-      </mesh>
-      {/* Protective grill - back */}
-      <mesh position={[0, -0.2, 0]}>
-        <cylinderGeometry args={[size, size, 0.05, 32]} />
-        <meshStandardMaterial color="#1f2937" metalness={0.6} roughness={0.4} wireframe />
-      </mesh>
-      {/* Fan blades */}
-      <group ref={bladeRef}>
-        {[0, 1, 2, 3, 4].map((_: unknown, i: number) => (
-          <mesh key={i} rotation={[0, 0, (i / 5) * Math.PI * 2]}>
-            <boxGeometry args={[0.15, size * 0.8, 0.05]} />
-            <meshStandardMaterial color="#64748b" metalness={0.5} roughness={0.5} />
-          </mesh>
-        ))}
-        {/* Center hub */}
-        <mesh>
-          <cylinderGeometry args={[0.2, 0.2, 0.15, 16]} />
-          <meshStandardMaterial color="#1f2937" metalness={0.8} roughness={0.2} />
-        </mesh>
-      </group>
-    </group>
-  );
-});
-
-// Collection of ventilation fans around the factory
-const VentilationFans: React.FC = () => {
-  const fanSoundStarted = useRef(false);
-
-  // Start ventilation fan ambient sound
-  useEffect(() => {
-    if (!fanSoundStarted.current) {
-      fanSoundStarted.current = true;
-      audioManager.startVentilationFanSound();
-    }
-    return () => {
-      audioManager.stopVentilationFanSound();
-    };
-  }, []);
-
-  return (
-    <group>
-      {/* Ceiling exhaust vents (smaller, faster) */}
-      <VentilationFan position={[-30, 31.5, -20]} size={1.2} />
-      <VentilationFan position={[30, 31.5, -20]} size={1.2} />
-      <VentilationFan position={[-30, 31.5, 20]} size={1.2} />
-      <VentilationFan position={[30, 31.5, 20]} size={1.2} />
     </group>
   );
 };
@@ -1010,7 +921,7 @@ const RippleMesh: React.FC<{ data: { x: number; z: number; scale: number; opacit
     });
 
     return (
-      <mesh ref={meshRef} position={[data.x, 0.03, data.z]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh ref={meshRef} position={[data.x, 0.04, data.z]} rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.3, 0.35, 32]} />
         <meshBasicMaterial
           ref={materialRef}
@@ -1309,8 +1220,8 @@ const TireTrackSystem: React.FC<{ puddlePositions: { x: number; z: number; size:
           trackDataRef.current.set(trackId, {
             id: trackId,
             points: [
-              [forklift.x - offsetX, 0.015, forklift.z - offsetZ],
-              [forklift.x + offsetX, 0.015, forklift.z + offsetZ],
+              [forklift.x - offsetX, 0.02, forklift.z - offsetZ],
+              [forklift.x + offsetX, 0.02, forklift.z + offsetZ],
             ],
             opacity: 0.4,
             width: 0.15 + Math.random() * 0.1,

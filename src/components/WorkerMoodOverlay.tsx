@@ -283,6 +283,10 @@ const MoodIndicator: React.FC<MoodIndicatorProps> = React.memo(
     const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
     const quality = useGraphicsStore((state) => state.graphics.quality);
 
+    // Guard against NaN/invalid energy values - prevents zero-width PlaneGeometry
+    const safeEnergy = Number.isFinite(energy) && energy >= 0 ? energy : 50;
+    const energyRatio = Math.max(0.01, safeEnergy / 100); // Ensure minimum 1% to avoid zero width
+
     // Register with manager if available - re-register when moodState changes
     useEffect(() => {
       if (context) {
@@ -350,10 +354,10 @@ const MoodIndicator: React.FC<MoodIndicatorProps> = React.memo(
               <meshBasicMaterial color="#374151" transparent opacity={0.5} />
             </mesh>
             {/* Energy fill */}
-            <mesh position={[(energy / 100 - 1) * 0.15, 0, 0.01]}>
-              <planeGeometry args={[0.3 * (energy / 100), 0.03]} />
+            <mesh position={[(energyRatio - 1) * 0.15, 0, 0.01]}>
+              <planeGeometry args={[0.3 * energyRatio, 0.03]} />
               <meshBasicMaterial
-                color={energy > 50 ? '#22c55e' : energy > 25 ? '#eab308' : '#ef4444'}
+                color={safeEnergy > 50 ? '#22c55e' : safeEnergy > 25 ? '#eab308' : '#ef4444'}
                 transparent
                 opacity={0.8}
               />

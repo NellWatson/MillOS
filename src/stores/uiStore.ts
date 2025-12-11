@@ -38,6 +38,8 @@ interface UIStore {
   alerts: AlertData[];
   addAlert: (alert: AlertData) => void;
   dismissAlert: (alertId: string) => void;
+  acknowledgeAlert: (alertId: string) => void;
+  removeAlert: (alertId: string) => void;
   getAlertsByPriority: (priority: 'info' | 'warning' | 'critical') => AlertData[];
 
   // UI visibility toggles
@@ -85,6 +87,11 @@ interface UIStore {
   showComplianceDashboard: boolean;
   setShowComplianceDashboard: (show: boolean) => void;
   toggleComplianceDashboard: () => void;
+
+  // FPS Counter
+  showFPSCounter: boolean;
+  setShowFPSCounter: (show: boolean) => void;
+  toggleFPSCounter: () => void;
 }
 
 export const useUIStore = create<UIStore>()(
@@ -118,6 +125,28 @@ export const useUIStore = create<UIStore>()(
           };
         }),
       dismissAlert: (alertId) =>
+        set((state) => {
+          const updatedAlerts = state.alerts.filter((a) => a.id !== alertId);
+          return {
+            alerts: updatedAlerts,
+            _alertIndices: {
+              alertsByPriority: rebuildAlertIndex(updatedAlerts),
+            },
+          };
+        }),
+      acknowledgeAlert: (alertId) =>
+        set((state) => {
+          const updatedAlerts = state.alerts.map((a) =>
+            a.id === alertId ? { ...a, acknowledged: true } : a
+          );
+          return {
+            alerts: updatedAlerts,
+            _alertIndices: {
+              alertsByPriority: rebuildAlertIndex(updatedAlerts),
+            },
+          };
+        }),
+      removeAlert: (alertId) =>
         set((state) => {
           const updatedAlerts = state.alerts.filter((a) => a.id !== alertId);
           return {
@@ -177,6 +206,11 @@ export const useUIStore = create<UIStore>()(
       setShowComplianceDashboard: (show: boolean) => set({ showComplianceDashboard: show }),
       toggleComplianceDashboard: () =>
         set((state) => ({ showComplianceDashboard: !state.showComplianceDashboard })),
+
+      // FPS Counter
+      showFPSCounter: false,
+      setShowFPSCounter: (show: boolean) => set({ showFPSCounter: show }),
+      toggleFPSCounter: () => set((state) => ({ showFPSCounter: !state.showFPSCounter })),
     }),
     {
       name: 'millos-ui',
@@ -191,6 +225,7 @@ export const useUIStore = create<UIStore>()(
         fpsMode: state.fpsMode,
         showSPCCharts: state.showSPCCharts,
         showComplianceDashboard: state.showComplianceDashboard,
+        showFPSCounter: state.showFPSCounter,
       }),
       onRehydrateStorage: () => (state, error) => {
         if (error) {

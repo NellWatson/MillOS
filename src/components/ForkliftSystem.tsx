@@ -1,12 +1,14 @@
-import React, { useRef, useMemo, useState, useEffect } from 'react';
+import React, { useRef, useMemo, useState, useEffect, useCallback } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Text, Line } from '@react-three/drei';
-import { positionRegistry } from '../utils/positionRegistry';
+import { positionRegistry, EntityPosition } from '../utils/positionRegistry';
 import { audioManager } from '../utils/audioManager';
 import { useSafetyStore } from '../stores/safetyStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
+import { useGraphicsStore } from '../stores/graphicsStore';
 import { getForkliftWarningColor } from '../utils/statusColors';
 import { ForkliftModel } from './models';
+import { PhysicsForklift } from './physics/PhysicsForklift';
 import { shouldRunThisFrame } from '../utils/frameThrottle';
 import * as THREE from 'three';
 
@@ -211,21 +213,26 @@ const isInCrossingZone = (x: number, z: number): CrossingZone | null => {
 const CrossingZoneMarkers: React.FC = () => {
   return (
     <group>
-      {CROSSING_ZONES.map((zone) => (
+      {CROSSING_ZONES.map((zone) => {
+        // Guard against NaN/invalid dimensions
+        const xWidth = Math.max(0.1, Math.abs(zone.xMax - zone.xMin));
+        const zHeight = Math.max(0.1, Math.abs(zone.zMax - zone.zMin));
+
+        return (
         <group key={zone.id}>
           {/* Hazard stripe markings on floor */}
           <mesh
             position={[(zone.xMin + zone.xMax) / 2, 0.02, zone.zMin]}
             rotation={[-Math.PI / 2, 0, 0]}
           >
-            <planeGeometry args={[zone.xMax - zone.xMin, 0.3]} />
+            <planeGeometry args={[xWidth, 0.3]} />
             <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
           </mesh>
           <mesh
             position={[(zone.xMin + zone.xMax) / 2, 0.02, zone.zMax]}
             rotation={[-Math.PI / 2, 0, 0]}
           >
-            <planeGeometry args={[zone.xMax - zone.xMin, 0.3]} />
+            <planeGeometry args={[xWidth, 0.3]} />
             <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
           </mesh>
           {/* Side markers */}
@@ -233,14 +240,14 @@ const CrossingZoneMarkers: React.FC = () => {
             position={[zone.xMin, 0.02, (zone.zMin + zone.zMax) / 2]}
             rotation={[-Math.PI / 2, 0, 0]}
           >
-            <planeGeometry args={[0.3, zone.zMax - zone.zMin]} />
+            <planeGeometry args={[0.3, zHeight]} />
             <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
           </mesh>
           <mesh
             position={[zone.xMax, 0.02, (zone.zMin + zone.zMax) / 2]}
             rotation={[-Math.PI / 2, 0, 0]}
           >
-            <planeGeometry args={[0.3, zone.zMax - zone.zMin]} />
+            <planeGeometry args={[0.3, zHeight]} />
             <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
           </mesh>
           {/* Warning text */}
@@ -265,7 +272,8 @@ const CrossingZoneMarkers: React.FC = () => {
             YIELD
           </Text>
         </group>
-      ))}
+        );
+      })}
     </group>
   );
 };
@@ -408,8 +416,8 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
   const frameCountRef = useRef(0); // Frame counter for throttling
   const lastCollisionCheckRef = useRef({
     pathClear: true,
-    workersNearby: [] as THREE.Vector3[],
-    forkliftsNearby: [] as THREE.Vector3[],
+    workersNearby: [] as EntityPosition[],
+    forkliftsNearby: [] as EntityPosition[],
   });
   const crossingTimerRef = useRef(0); // Time spent waiting at crossing
   const operationTimerRef = useRef(0); // Time spent on current loading/unloading operation
@@ -420,7 +428,32 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
   const CROSSING_APPROACH_DISTANCE = 3; // Distance to start slowing for crossing
   const FORK_LIFT_HEIGHT = 1.2; // Max height forks raise during load/unload
   const recordSafetyStop = useSafetyStore((state) => state.recordSafetyStop);
+  const forkliftEmergencyStop = useSafetyStore((state) => state.forkliftEmergencyStop);
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const emergencyDrillMode = useGameSimulationStore((state) => state.emergencyDrillMode);
+
+  // Physics system toggle
+  const enablePhysics = useGraphicsStore((state) => state.graphics.enablePhysics);
+
+  // Callback for physics forklift position updates
+  const handlePhysicsPositionUpdate = useCallback((x: number, z: number, rotation: number) => {
+    if (ref.current) {
+      ref.current.position.x = x;
+      ref.current.position.z = z;
+      ref.current.rotation.y = rotation;
+    }
+  }, []);
+
+  // Callbacks for physics forklift state updates
+  const handleCargoChange = useCallback((cargo: boolean) => {
+    setHasCargo(cargo);
+    hasCargoRef.current = cargo;
+  }, []);
+
+  const handleOperationChange = useCallback((op: ForkliftOperation) => {
+    setCurrentOperation(op);
+    operationRef.current = op;
+  }, []);
 
   // Play horn when stopping for safety
   useEffect(() => {
@@ -443,6 +476,20 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
   useFrame((state, delta) => {
     // PERFORMANCE: Skip all forklift logic when tab hidden
     if (!ref.current || !isTabVisible) return;
+
+    // When physics is enabled, skip all movement - physics handles position
+    // But still update LOD and wheel animations
+    if (enablePhysics) {
+      cameraDistanceRef.current = state.camera.position.distanceTo(ref.current.position);
+      const FAR_THRESHOLD = 50;
+      const CLOSE_THRESHOLD = 40;
+      if (distanceTier === 'close' && cameraDistanceRef.current > FAR_THRESHOLD) {
+        setDistanceTier('far');
+      } else if (distanceTier === 'far' && cameraDistanceRef.current < CLOSE_THRESHOLD) {
+        setDistanceTier('close');
+      }
+      return; // Skip all legacy movement code
+    }
 
     // Update camera distance for LOD (with hysteresis to prevent flickering)
     cameraDistanceRef.current = state.camera.position.distanceTo(ref.current.position);
@@ -486,8 +533,8 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
     const shouldCheckCollisions = frameCountRef.current % 3 === 0;
 
     let pathClear: boolean;
-    let workersNearby: any[];
-    let forkliftsNearby: any[];
+    let workersNearby: EntityPosition[];
+    let forkliftsNearby: EntityPosition[];
 
     if (shouldCheckCollisions) {
       // Check path is clear of workers, other forklifts, and static obstacles
@@ -553,8 +600,15 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       crossingTimerRef.current = 0; // Reset when not near crossing
     }
 
+    // Check emergency stop states (forklift E-stop or fire drill in progress)
+    const emergencyStopActive = forkliftEmergencyStop || emergencyDrillMode;
+
     const isSafeToMove =
-      pathClear && workersNearby.length === 0 && forkliftsNearby.length === 0 && crossingClear;
+      !emergencyStopActive &&
+      pathClear &&
+      workersNearby.length === 0 &&
+      forkliftsNearby.length === 0 &&
+      crossingClear;
     const newIsStopped = !isSafeToMove;
 
     // Register position with CURRENT frame's stopped state (not delayed React state)
@@ -683,7 +737,8 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
     }
   };
 
-  return (
+  // Visual content for the forklift
+  const forkliftContent = (
     <group
       ref={ref}
       onClick={handleClick}
@@ -739,4 +794,31 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       )}
     </group>
   );
+
+  // When physics is enabled, wrap in PhysicsForklift for collision/movement
+  if (enablePhysics) {
+    return (
+      <PhysicsForklift
+        data={{
+          id: data.id,
+          position: data.position,
+          rotation: data.rotation,
+          speed: data.speed,
+          path: data.path,
+          pathActions: data.pathActions,
+          pathIndex: data.pathIndex,
+          cargo: data.cargo,
+          operatorName: data.operatorName,
+        }}
+        onPositionUpdate={handlePhysicsPositionUpdate}
+        onCargoChange={handleCargoChange}
+        onOperationChange={handleOperationChange}
+      >
+        {forkliftContent}
+      </PhysicsForklift>
+    );
+  }
+
+  // Legacy mode - no physics wrapper
+  return forkliftContent;
 };

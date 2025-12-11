@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { useGraphicsStore } from '../../stores/graphicsStore';
+import { ReflectiveFloor } from './ReflectiveFloor';
 
 interface FactoryFloorProps {
   floorSize: number; // Legacy: used as fallback
@@ -161,9 +162,15 @@ const SafetyZone: React.FC<{
 }> = ({ position, size, type, rotation = 0 }) => {
   const texture = useHazardStripeTexture(type);
 
+  // CRITICAL: Guard against NaN/invalid dimensions
+  const safeWidth = Number.isFinite(size[0]) && size[0] > 0 ? size[0] : 1;
+  const safeHeight = Number.isFinite(size[1]) && size[1] > 0 ? size[1] : 1;
+  const innerWidth = Math.max(0.1, safeWidth - 0.6);
+  const innerHeight = Math.max(0.1, safeHeight - 0.6);
+
   // Calculate texture repeat based on size for consistent stripe width
-  const repeatX = size[0] / 4;
-  const repeatY = size[1] / 4;
+  const repeatX = safeWidth / 4;
+  const repeatY = safeHeight / 4;
 
   const clonedTexture = useMemo(() => {
     const t = texture.clone();
@@ -176,13 +183,13 @@ const SafetyZone: React.FC<{
     <group position={position} rotation={[-Math.PI / 2, 0, rotation]}>
       {/* Hazard stripe border */}
       <mesh position={[0, 0, 0.01]}>
-        <planeGeometry args={size} />
+        <planeGeometry args={[safeWidth, safeHeight]} />
         <meshBasicMaterial map={clonedTexture} transparent opacity={0.85} depthWrite={false} />
       </mesh>
 
       {/* Subtle inner fill */}
       <mesh position={[0, 0, 0]}>
-        <planeGeometry args={[size[0] - 0.6, size[1] - 0.6]} />
+        <planeGeometry args={[innerWidth, innerHeight]} />
         <meshBasicMaterial
           color={type === 'danger' ? '#7f1d1d' : '#422006'}
           transparent
@@ -304,6 +311,8 @@ const WornFootpath: React.FC<{
   }, []);
 
   // Create path segments
+  // CRITICAL: Filter out zero-length segments to prevent NaN in PlaneGeometry
+  // "computeBoundingSphere(): Computed radius is NaN" errors
   const segments = useMemo(() => {
     const segs: Array<{
       position: [number, number, number];
@@ -311,12 +320,20 @@ const WornFootpath: React.FC<{
       length: number;
     }> = [];
 
+    const MIN_SEGMENT_LENGTH = 0.01; // Minimum length to prevent NaN geometry
+
     for (let i = 0; i < path.length - 1; i++) {
       const start = path[i];
       const end = path[i + 1];
       const dx = end[0] - start[0];
       const dz = end[2] - start[2];
       const length = Math.sqrt(dx * dx + dz * dz);
+
+      // Skip segments that are too short (would cause NaN in geometry)
+      if (!Number.isFinite(length) || length < MIN_SEGMENT_LENGTH) {
+        continue;
+      }
+
       const rotation = Math.atan2(dx, dz);
 
       segs.push({
@@ -336,14 +353,21 @@ const WornFootpath: React.FC<{
     return t;
   }, [texture]);
 
+  // Defensive guard for width prop
+  const safeWidth = Number.isFinite(width) && width > 0 ? width : 2;
+
   return (
     <group>
-      {segments.map((seg, i) => (
-        <mesh key={i} position={seg.position} rotation={[-Math.PI / 2, 0, seg.rotation]}>
-          <planeGeometry args={[width, seg.length]} />
-          <meshBasicMaterial map={clonedTexture} transparent opacity={0.5} depthWrite={false} />
-        </mesh>
-      ))}
+      {segments.map((seg, i) => {
+        // Double-guard: ensure geometry dimensions are valid
+        const safeLength = Number.isFinite(seg.length) && seg.length > 0 ? seg.length : 0.01;
+        return (
+          <mesh key={i} position={seg.position} rotation={[-Math.PI / 2, 0, seg.rotation]}>
+            <planeGeometry args={[safeWidth, safeLength]} />
+            <meshBasicMaterial map={clonedTexture} transparent opacity={0.5} depthWrite={false} />
+          </mesh>
+        );
+      })}
     </group>
   );
 };
@@ -360,8 +384,12 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
   const isLowGraphics = graphicsQuality === 'low';
 
   // Use new dimensions if provided, otherwise fall back to legacy square
-  const actualWidth = floorWidth ?? floorSize;
-  const actualDepth = floorDepth ?? floorSize;
+  // CRITICAL: Guard against NaN/undefined/zero dimensions which cause
+  // "computeBoundingSphere(): Computed radius is NaN" errors in THREE.js
+  const rawWidth = floorWidth ?? floorSize;
+  const rawDepth = floorDepth ?? floorSize;
+  const actualWidth = Number.isFinite(rawWidth) && rawWidth > 0 ? rawWidth : 120;
+  const actualDepth = Number.isFinite(rawDepth) && rawDepth > 0 ? rawDepth : 160;
 
   // Feature flags from graphics settings
   const showPuddles = graphics.enableFloorPuddles;
@@ -407,27 +435,21 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
 
   return (
     <group matrixAutoUpdate={false}>
-      {/* Main floor - standard material on low/medium, reflector only on high/ultra */}
-      <mesh
-        rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, 0, 0]}
-        receiveShadow={graphicsQuality === 'high' || graphicsQuality === 'ultra'}
-      >
-        <planeGeometry args={[actualWidth, actualDepth]} />
-        {/* CRITICAL FIX: MeshReflectorMaterial breaks scene when quality switches at runtime.
-            Using meshStandardMaterial for all non-low quality until reflector issue is resolved.
-            TODO: Investigate if reflector can be preloaded or if a stable ref approach works. */}
-        {isLowGraphics ? (
-          <meshBasicMaterial color="#1e293b" />
-        ) : (
+      {/* Main floor - standard material on low/medium, reflector on high/ultra */}
+      {graphicsQuality === 'high' || graphicsQuality === 'ultra' ? (
+        <ReflectiveFloor width={actualWidth} depth={actualDepth} />
+      ) : (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow={false}>
+          <planeGeometry args={[actualWidth, actualDepth]} />
           <meshStandardMaterial color="#1e293b" roughness={0.85} metalness={0.15} />
-        )}
-      </mesh>
+        </mesh>
+      )}
 
       {/* Floor grid lines - OPTIMIZED: Single textured mesh replaces 58 individual meshes */}
       {/* RESTORED: Now shows on MEDIUM+ (!isLowGraphics) instead of HIGH+ only */}
+      {/* Raised to y=0.035 to prevent z-fighting with SafetyZone stripes at y=0.03 */}
       {!isLowGraphics && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, 0]}>
           <planeGeometry args={[actualWidth, actualDepth]} />
           <meshBasicMaterial map={gridTexture} transparent depthWrite={false} />
         </mesh>

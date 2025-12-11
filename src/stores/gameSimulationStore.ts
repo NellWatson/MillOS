@@ -46,6 +46,30 @@ export interface ShiftData {
 export type CrisisType = 'fire' | 'power_outage' | 'supply_emergency' | 'inspection' | 'weather';
 export type CrisisSeverity = 'low' | 'medium' | 'high' | 'critical';
 
+// Fire drill metrics
+export interface DrillMetrics {
+  active: boolean;
+  startTime: number;
+  evacuatedWorkerIds: string[];
+  totalWorkers: number;
+  evacuationComplete: boolean;
+  finalTimeSeconds: number | null;
+}
+
+// Exit points for fire drill evacuation
+// Positions align with personnel door locations in FactoryExterior.tsx:
+// - Front/Back: through dock openings at z=±48, assembly point just outside
+// - West/East: through personnel doors at x=±58 (z=0), assembly point just outside
+export const FIRE_DRILL_EXITS = [
+  { id: 'front', position: { x: 0, z: 52 }, label: 'Front Exit' },
+  { id: 'back', position: { x: 0, z: -52 }, label: 'Back Exit' },
+  { id: 'west', position: { x: -62, z: 0 }, label: 'West Exit' },
+  { id: 'east', position: { x: 62, z: 0 }, label: 'East Exit' },
+] as const;
+
+// Exit type for fire drill (declared here so interface can use it)
+export type FireDrillExit = (typeof FIRE_DRILL_EXITS)[number];
+
 export interface CrisisState {
   active: boolean;
   type: CrisisType | null;
@@ -66,7 +90,8 @@ interface GameSimulationStore {
   setGameTime: (time: number) => void;
   setGameSpeed: (speed: number) => void;
   tickGameTime: (deltaSeconds: number) => void; // deltaSeconds = real time elapsed
-  resetGameState: () => void; // Reset time to 6am, speed to 60x
+  resetGameState: () => void; // Reset time to 10am, speed to 60x
+  clearPersistedState: () => void; // Clear localStorage and reset to defaults
 
   // Weather system
   weather: 'clear' | 'cloudy' | 'rain' | 'storm';
@@ -101,8 +126,13 @@ interface GameSimulationStore {
   emergencyDrillMode: boolean;
   triggerEmergency: (machineId: string) => void;
   resolveEmergency: () => void;
-  startEmergencyDrill: () => void;
+  startEmergencyDrill: (totalWorkers: number) => void;
   endEmergencyDrill: () => void;
+
+  // Fire drill metrics
+  drillMetrics: DrillMetrics;
+  markWorkerEvacuated: (workerId: string) => void;
+  getNearestExit: (x: number, z: number) => FireDrillExit;
 
   // Crisis system
   crisisState: CrisisState;
@@ -141,7 +171,9 @@ const SUPERVISORS = [
 const getSupervisorForShift = (shift: 'morning' | 'afternoon' | 'night', offset = 0): string => {
   const shiftIndex = shift === 'morning' ? 0 : shift === 'afternoon' ? 1 : 2;
   // Handle negative offset with proper modulo wrapping: ((value % length) + length) % length
-  return SUPERVISORS[((shiftIndex + offset) % SUPERVISORS.length + SUPERVISORS.length) % SUPERVISORS.length];
+  return SUPERVISORS[
+    (((shiftIndex + offset) % SUPERVISORS.length) + SUPERVISORS.length) % SUPERVISORS.length
+  ];
 };
 
 // Get shift-specific challenges/priorities
@@ -204,6 +236,34 @@ const createDefaultCrisisState = (): CrisisState => ({
   metadata: {},
 });
 
+// Default drill metrics
+const createDefaultDrillMetrics = (): DrillMetrics => ({
+  active: false,
+  startTime: 0,
+  evacuatedWorkerIds: [],
+  totalWorkers: 0,
+  evacuationComplete: false,
+  finalTimeSeconds: null,
+});
+
+// Helper to find nearest exit
+const findNearestExit = (x: number, z: number): FireDrillExit => {
+  let nearestExit: FireDrillExit = FIRE_DRILL_EXITS[0];
+  let minDistance = Infinity;
+
+  for (const exit of FIRE_DRILL_EXITS) {
+    const dx = exit.position.x - x;
+    const dz = exit.position.z - z;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    if (distance < minDistance) {
+      minDistance = distance;
+      nearestExit = exit;
+    }
+  }
+
+  return nearestExit;
+};
+
 // Throttling for tickGameTime - update every 100ms instead of every frame
 let lastTickTime = 0;
 let accumulatedDelta = 0;
@@ -216,9 +276,9 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
       isTabVisible: true,
       setTabVisible: (visible) => set({ isTabVisible: visible }),
 
-      // Game time starts at 6am (Day shift start)
+      // Game time starts at 10am (mid-morning, bright daylight)
       // gameSpeed: seconds of game time per real second (60 = 1 min/sec, 600 = 10 min/sec)
-      gameTime: 6,
+      gameTime: 10,
       gameSpeed: 60, // Default: 1 real second = 1 game minute
 
       setGameTime: (time) => set({ gameTime: ((time % 24) + 24) % 24 }), // Handle negative wrap
@@ -246,7 +306,7 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
           const hoursElapsed = (totalDelta * state.gameSpeed) / 3600;
           // Handle modulo edge case: ensure time stays in [0, 24) range with proper negative wrapping
           // Use ((value % 24) + 24) % 24 to handle negative values correctly
-          let newTime = ((state.gameTime + hoursElapsed) % 24 + 24) % 24;
+          let newTime = (((state.gameTime + hoursElapsed) % 24) + 24) % 24;
           // Guard against floating-point precision issues at midnight boundary
           if (newTime >= 24) newTime = 0;
           if (Object.is(newTime, -0)) newTime = 0;
@@ -266,13 +326,36 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
 
       resetGameState: () =>
         set({
-          gameTime: 6,
+          gameTime: 10,
           gameSpeed: 60,
           shiftData: createDefaultShiftData(),
           currentShift: 'morning',
           shiftStartTime: Date.now(),
           crisisState: createDefaultCrisisState(),
         }),
+
+      clearPersistedState: () => {
+        // Clear localStorage for this store
+        localStorage.removeItem('millos-game-simulation');
+        // Reset to defaults
+        set({
+          gameTime: 10,
+          gameSpeed: 60,
+          weather: 'clear',
+          shiftData: createDefaultShiftData(),
+          currentShift: 'morning',
+          shiftStartTime: Date.now(),
+          celebrations: {
+            lastMilestone: 0,
+            milestoneQueue: [],
+            zeroIncidentStreak: 0,
+            celebrationActive: false,
+            packerBellEnabled: true,
+          },
+          crisisState: createDefaultCrisisState(),
+        });
+        console.log('[GameSimulation] Persisted state cleared, reset to 10am');
+      },
 
       // Weather system
       weather: 'clear' as const,
@@ -486,19 +569,87 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
           emergencyDrillMode: false,
         }),
 
-      startEmergencyDrill: () =>
+      // Fire drill with full evacuation
+      drillMetrics: createDefaultDrillMetrics(),
+
+      startEmergencyDrill: (totalWorkers: number) => {
+        // Start alarm sound and queue funny PA announcement
+        import('../utils/audioManager').then(({ audioManager }) => {
+          audioManager.startEmergencyAlarm();
+        });
+        // Add fire drill announcement to PA system
+        import('../components/GameFeatures').then(({ FIRE_DRILL_ANNOUNCEMENTS }) => {
+          import('./productionStore').then(({ useProductionStore }) => {
+            const announcement =
+              FIRE_DRILL_ANNOUNCEMENTS[Math.floor(Math.random() * FIRE_DRILL_ANNOUNCEMENTS.length)];
+            useProductionStore.getState().addAnnouncement({
+              type: 'emergency',
+              message: announcement.message,
+              duration: announcement.duration,
+              priority: 'critical',
+            });
+          });
+        });
+
         set({
           emergencyActive: true,
           emergencyMachineId: 'DRILL',
           emergencyDrillMode: true,
-        }),
+          drillMetrics: {
+            active: true,
+            startTime: Date.now(),
+            evacuatedWorkerIds: [],
+            totalWorkers,
+            evacuationComplete: false,
+            finalTimeSeconds: null,
+          },
+        });
+      },
 
-      endEmergencyDrill: () =>
+      endEmergencyDrill: () => {
+        // Stop alarm sound
+        import('../utils/audioManager').then(({ audioManager }) => {
+          audioManager.stopEmergencyAlarm();
+        });
+
         set({
           emergencyActive: false,
           emergencyMachineId: null,
           emergencyDrillMode: false,
+          drillMetrics: createDefaultDrillMetrics(),
+        });
+      },
+
+      markWorkerEvacuated: (workerId: string) =>
+        set((state) => {
+          // Skip if already evacuated or drill not active
+          if (!state.drillMetrics.active) return {};
+          if (state.drillMetrics.evacuatedWorkerIds.includes(workerId)) return {};
+
+          const newEvacuatedIds = [...state.drillMetrics.evacuatedWorkerIds, workerId];
+          const evacuationComplete = newEvacuatedIds.length >= state.drillMetrics.totalWorkers;
+          const finalTimeSeconds = evacuationComplete
+            ? (Date.now() - state.drillMetrics.startTime) / 1000
+            : null;
+
+          // Stop alarm when evacuation complete
+          if (evacuationComplete) {
+            import('../utils/audioManager').then(({ audioManager }) => {
+              audioManager.stopEmergencyAlarm();
+            });
+          }
+
+          return {
+            drillMetrics: {
+              ...state.drillMetrics,
+              evacuatedWorkerIds: newEvacuatedIds,
+              evacuationComplete,
+              finalTimeSeconds,
+            },
+          };
         }),
+
+      getNearestExit: (x: number, z: number) => findNearestExit(x, z),
 
       // Crisis system
       crisisState: createDefaultCrisisState(),

@@ -164,6 +164,72 @@ The app uses both React local state (App.tsx) and Zustand global state (store.ts
 - Local: `productionSpeed`, `showZones`, `showAIPanel`, selection states
 - Global: workers, machines, alerts, AI decisions, metrics
 
+## Fire Drill System
+
+The fire drill is a fully functional evacuation simulation accessible from the Emergency & Environment Controls panel in the UI.
+
+### How It Works
+
+When triggered via "START DRILL" button:
+
+1. **Alarm Sounds** - Emergency siren plays continuously
+2. **Workers Evacuate** - All workers run (6 units/sec) to their nearest exit
+3. **Forklifts Stop** - All forklift movement halts immediately
+4. **Exit Markers Appear** - Glowing green circles with labels at each exit
+5. **Progress Tracked** - Live timer and evacuation count displayed
+
+### Exit Points
+
+| Exit | Position | Workers Assigned |
+|------|----------|------------------|
+| Front Exit | z=50 | Workers with z > 0 |
+| Back Exit | z=-50 | Workers with z < -15 |
+| West Exit | x=-55 | Workers with x < -20 |
+| East Exit | x=55 | Workers with x > 20 |
+
+Workers are assigned to the geometrically nearest exit.
+
+### Key Files
+
+| File | Responsibility |
+|------|----------------|
+| `src/stores/gameSimulationStore.ts` | Drill state, metrics, `FIRE_DRILL_EXITS`, `markWorkerEvacuated()` |
+| `src/components/WorkerSystem.tsx` | Evacuation movement behavior (lines ~1983-2024) |
+| `src/components/ForkliftSystem.tsx` | Emergency stop enforcement (line ~559) |
+| `src/components/MillScene.tsx` | `FireDrillExitMarkers` component |
+| `src/components/UIOverlay.tsx` | `EmergencyEnvironmentPanel` with progress UI |
+
+### Drill Metrics Interface
+
+```typescript
+interface DrillMetrics {
+  active: boolean;
+  startTime: number;
+  evacuatedWorkerIds: string[];
+  totalWorkers: number;
+  evacuationComplete: boolean;
+  finalTimeSeconds: number | null;
+}
+```
+
+### Store Functions
+
+- `startEmergencyDrill(totalWorkers)` - Begins drill, starts alarm, initializes metrics
+- `endEmergencyDrill()` - Ends drill, stops alarm, resets metrics
+- `markWorkerEvacuated(workerId)` - Called when worker reaches exit
+- `getNearestExit(x, z)` - Returns closest exit point for a position
+
+### UI Behavior
+
+During active drill, the Emergency Drill section shows:
+- Live evacuation timer (updates every 100ms)
+- Progress bar with "Evacuated: X/Y" count
+- "ALL CLEAR" banner when all workers reach exits (with final time)
+
+The alarm automatically stops when either:
+- All workers are evacuated (evacuation complete)
+- User clicks "END DRILL" button
+
 ### Path Aliases
 
 `@/*` maps to project root (configured in tsconfig.json and vite.config.ts)

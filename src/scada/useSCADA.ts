@@ -17,9 +17,19 @@ import type {
   Alarm,
   SCADAMode,
   FaultInjection,
+  FaultType,
   TagHistoryPoint,
   AlarmSuppression,
 } from './types';
+
+// Active fault info returned by getActiveFaults
+interface ActiveFault {
+  tagId: string;
+  faultType: FaultType;
+  startTime: number;
+  duration: number;
+  severity: number;
+}
 import { MILL_TAGS } from './tagDatabase';
 import { useGraphicsStore } from '../stores/graphicsStore';
 
@@ -226,7 +236,7 @@ export interface UseSCADAReturn {
   injectFault: (fault: FaultInjection) => void;
   clearFault: (tagId: string) => void;
   clearAllFaults: () => void;
-  activeFaults: any[];
+  activeFaults: ActiveFault[];
 
   // Tag definitions
   tags: TagDefinition[];
@@ -247,7 +257,7 @@ export function useSCADA(): UseSCADAReturn {
   // Use shared state via useSyncExternalStore for efficient updates
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
-  const [activeFaults, setActiveFaults] = useState<any[]>([]);
+  const [activeFaults, setActiveFaults] = useState<ActiveFault[]>([]);
 
   // Get machines from store for sync
   const machines = useProductionStore((state) => state.machines);

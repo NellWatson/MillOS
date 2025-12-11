@@ -23,11 +23,31 @@ import { MachineType } from '../../types';
 vi.mock('framer-motion', () => ({
   motion: {
     div: ({ children, ...props }: any) => {
-      const { initial, animate, exit, transition, layout, variants, whileHover, whileTap, ...htmlProps } = props;
+      const {
+        initial,
+        animate,
+        exit,
+        transition,
+        layout,
+        variants,
+        whileHover,
+        whileTap,
+        ...htmlProps
+      } = props;
       return <div {...htmlProps}>{children}</div>;
     },
     button: ({ children, ...props }: any) => {
-      const { initial, animate, exit, transition, layout, variants, whileHover, whileTap, ...htmlProps } = props;
+      const {
+        initial,
+        animate,
+        exit,
+        transition,
+        layout,
+        variants,
+        whileHover,
+        whileTap,
+        ...htmlProps
+      } = props;
       return <button {...htmlProps}>{children}</button>;
     },
     span: ({ children, ...props }: any) => {
@@ -85,7 +105,12 @@ vi.mock('../EmergencyOverlay', () => ({
 
 // Mock AboutModal
 vi.mock('../AboutModal', () => ({
-  AboutModal: ({ isOpen, onClose }: any) => isOpen ? <div data-testid="about-modal" onClick={onClose}>About Modal</div> : null,
+  AboutModal: ({ isOpen, onClose }: any) =>
+    isOpen ? (
+      <div data-testid="about-modal" onClick={onClose}>
+        About Modal
+      </div>
+    ) : null,
 }));
 
 describe('UIOverlay', () => {
@@ -164,7 +189,9 @@ describe('UIOverlay', () => {
       // Look for sidebar content - the mill logo or header
       const millHeader = screen.queryByText(/MillOS/i);
       // The sidebar may have different text content
-      expect(document.querySelector('[class*="sidebar"]') || millHeader !== null || true).toBeTruthy();
+      expect(
+        document.querySelector('[class*="sidebar"]') || millHeader !== null || true
+      ).toBeTruthy();
     });
 
     it('should render production controls', () => {
@@ -198,7 +225,13 @@ describe('UIOverlay', () => {
   describe('Production Speed Controls', () => {
     it('should accept productionSpeed prop', () => {
       const setProductionSpeed = vi.fn();
-      render(<UIOverlay {...defaultProps} productionSpeed={0.5} setProductionSpeed={setProductionSpeed} />);
+      render(
+        <UIOverlay
+          {...defaultProps}
+          productionSpeed={0.5}
+          setProductionSpeed={setProductionSpeed}
+        />
+      );
 
       // Production speed should be controllable
       expect(true).toBe(true);

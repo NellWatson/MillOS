@@ -308,17 +308,19 @@ describe('GameSimulationStore', () => {
 
     it('should start emergency drill', () => {
       const { startEmergencyDrill } = useGameSimulationStore.getState();
-      startEmergencyDrill();
+      startEmergencyDrill(10); // Pass worker count
 
       const state = useGameSimulationStore.getState();
       expect(state.emergencyActive).toBe(true);
       expect(state.emergencyMachineId).toBe('DRILL');
       expect(state.emergencyDrillMode).toBe(true);
+      expect(state.drillMetrics.active).toBe(true);
+      expect(state.drillMetrics.totalWorkers).toBe(10);
     });
 
     it('should end emergency drill', () => {
       const { startEmergencyDrill, endEmergencyDrill } = useGameSimulationStore.getState();
-      startEmergencyDrill();
+      startEmergencyDrill(10);
       endEmergencyDrill();
 
       const state = useGameSimulationStore.getState();

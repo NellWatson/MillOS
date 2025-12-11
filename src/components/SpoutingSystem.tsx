@@ -83,7 +83,7 @@ export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines
 
   const pipeData = useMemo(() => {
     const pipeElements: React.ReactNode[] = [];
-    const geometries: THREE.TubeGeometry[] = [];
+    const geometries: THREE.BufferGeometry[] = [];
     const materials: THREE.MeshStandardMaterial[] = [];
     const tubeRadius = 0.18;
 
@@ -111,10 +111,62 @@ export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines
         roughness: 0.15,
       });
 
+      // Generate Flanges (Industrial detail)
+      const flangeElements: React.ReactNode[] = [];
+      const length = curve.getLength();
+      // Flange every 6 units
+      const flangeCount = Math.floor(length / 6);
+
+      if (flangeCount > 0) {
+        // Reuse geometry/material for this pipe's flanges
+        const flangeGeo = new THREE.CylinderGeometry(
+          tubeRadius + 0.06,
+          tubeRadius + 0.06,
+          0.12,
+          12
+        );
+        const flangeMat = new THREE.MeshStandardMaterial({
+          color: '#64748b',
+          metalness: 0.9,
+          roughness: 0.3,
+        });
+
+        geometries.push(flangeGeo);
+        materials.push(flangeMat);
+
+        const dummy = new THREE.Object3D();
+
+        for (let f = 1; f < flangeCount; f++) {
+          const t = f / flangeCount;
+          const pt = curve.getPointAt(t);
+          const tan = curve.getTangentAt(t);
+
+          dummy.position.copy(pt);
+          dummy.lookAt(pt.clone().add(tan));
+          dummy.rotateX(Math.PI / 2);
+
+          flangeElements.push(
+            <mesh
+              key={`${key}-flange-${f}`}
+              position={[pt.x, pt.y, pt.z]}
+              quaternion={dummy.quaternion}
+              geometry={flangeGeo}
+              material={flangeMat}
+              castShadow
+            />
+          );
+        }
+      }
+
       geometries.push(geometry);
       materials.push(material);
 
-      return <mesh key={key} geometry={geometry} material={material} castShadow />;
+      return (
+        <group key={key}>
+          <mesh geometry={geometry} material={material} castShadow />
+          {flangeElements}
+        </group>
+      );
     };
 
     // Silos to Mills (grain flow)

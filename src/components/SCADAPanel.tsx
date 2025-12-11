@@ -56,6 +56,7 @@ import { useGraphicsStore } from '../stores/graphicsStore';
 interface SCADAPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  embedded?: boolean;
 }
 
 // Tag group icons
@@ -92,7 +93,7 @@ const ALARM_PRIORITY_COLORS: Record<string, string> = {
   LOW: 'bg-blue-500 text-white',
 };
 
-export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
+export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose, embedded = false }) => {
   const {
     isConnected,
     mode,
@@ -323,6 +324,176 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
   };
 
   if (!isOpen) return null;
+
+  // Embedded mode: render content without fixed wrapper for use inside ContextSidebar
+  if (embedded) {
+    // Get first 8 machines with their tags for compact display
+    const machineEntries = Array.from(tagsByMachine.entries()).slice(0, 8);
+
+    // If SCADA is disabled, show enable prompt
+    if (!scadaEnabled) {
+      return (
+        <div className="p-4 space-y-4">
+          <div className="text-center py-6">
+            <Database className="w-12 h-12 mx-auto mb-3 text-slate-600" />
+            <h3 className="text-sm font-bold text-white mb-2">SCADA Disabled</h3>
+            <p className="text-xs text-slate-400 mb-4">
+              SCADA telemetry is disabled on Low/Medium graphics for performance.
+            </p>
+            <button
+              onClick={handleToggleSCADA}
+              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-lg transition-colors"
+            >
+              Enable SCADA
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="p-3 space-y-3 overflow-y-auto h-full">
+        {/* Status Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div
+              className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}
+            />
+            <span className="text-xs font-bold text-white">SCADA Live</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-cyan-400">{tags.length} tags</span>
+            <button
+              onClick={handleToggleSCADA}
+              className="text-[9px] text-slate-500 hover:text-red-400 transition-colors"
+              title="Disable SCADA"
+            >
+              OFF
+            </button>
+          </div>
+        </div>
+
+        {/* Critical Alarms Banner */}
+        {hasCritical && (
+          <div className="flex items-center gap-2 p-2 bg-red-500/20 border border-red-500/50 rounded-lg">
+            <AlertTriangle className="w-4 h-4 text-red-400" />
+            <span className="text-xs text-red-400 font-medium">Critical alarms active!</span>
+          </div>
+        )}
+
+        {/* Compact Tabs */}
+        <div className="flex gap-1">
+          {(['tags', 'alarms'] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`flex-1 px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
+                activeTab === tab
+                  ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                  : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50'
+              }`}
+            >
+              {tab === 'tags' ? (
+                <>
+                  <Database className="w-3 h-3 inline mr-1" />
+                  Tags ({tags.length})
+                </>
+              ) : (
+                <>
+                  <Bell className="w-3 h-3 inline mr-1" />
+                  Alarms ({alarms.length})
+                </>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Tags View */}
+        {activeTab === 'tags' && (
+          <div className="space-y-2">
+            {machineEntries.length === 0 ? (
+              <div className="text-center text-slate-500 py-6">
+                <Database className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p className="text-xs">No SCADA tags configured</p>
+              </div>
+            ) : (
+              machineEntries.map(([machineId, machineTags]) => (
+                <div
+                  key={machineId}
+                  className="bg-slate-800/40 rounded-lg p-2 border border-slate-700/30"
+                >
+                  <div className="text-[10px] font-bold text-cyan-400 uppercase mb-1.5 tracking-wide">
+                    {machineId}
+                  </div>
+                  <div className="space-y-1">
+                    {machineTags.slice(0, 4).map((tag) => {
+                      const value = values.get(tag.id);
+                      const displayValue = value ? formatValue(value, tag) : '---';
+                      const isStale = value && Date.now() - value.timestamp > 5000;
+                      return (
+                        <div key={tag.id} className="flex items-center justify-between text-[10px]">
+                          <span className="text-slate-400 truncate flex-1 mr-2">{tag.name}</span>
+                          <span
+                            className={`font-mono tabular-nums ${isStale ? 'text-yellow-500' : 'text-green-400'}`}
+                          >
+                            {displayValue}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Alarms View */}
+        {activeTab === 'alarms' && (
+          <div className="space-y-2">
+            {alarms.length === 0 ? (
+              <div className="text-center text-slate-500 py-6">
+                <Check className="w-8 h-8 mx-auto mb-2 text-green-500/50" />
+                <p className="text-xs">All systems nominal</p>
+                <p className="text-[10px] text-slate-600 mt-1">No active alarms</p>
+              </div>
+            ) : (
+              alarms.slice(0, 10).map((alarm) => (
+                <div
+                  key={alarm.id}
+                  className={`p-2 rounded-lg border ${
+                    alarm.state === 'UNACK'
+                      ? 'border-red-500/50 bg-red-500/10'
+                      : 'border-slate-700/50 bg-slate-800/30'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${ALARM_PRIORITY_COLORS[alarm.priority]}`}
+                    >
+                      {alarm.priority}
+                    </span>
+                    {alarm.state === 'UNACK' && (
+                      <button
+                        onClick={() => acknowledge(alarm.id)}
+                        className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-[9px] rounded hover:bg-cyan-500/30"
+                      >
+                        ACK
+                      </button>
+                    )}
+                  </div>
+                  <div className="text-xs text-white font-medium">{alarm.tagName}</div>
+                  <div className="text-[10px] text-slate-400">
+                    Value: <span className="text-red-400">{alarm.value.toFixed(1)}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <AnimatePresence>

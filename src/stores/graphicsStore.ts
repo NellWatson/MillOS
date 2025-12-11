@@ -49,6 +49,8 @@ export interface GraphicsSettings {
   enableSignage: boolean;
   enableVentilationDucts: boolean;
   enableAnisotropicReflections: boolean;
+  // Physics system toggle - experimental Rapier physics for workers/forklifts/player
+  enablePhysics: boolean;
   // Performance sliders
   dustParticleCount: number;
   shadowMapSize: 1024 | 2048 | 4096;
@@ -100,6 +102,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     enableSignage: false,
     enableVentilationDucts: false,
     enableAnisotropicReflections: false,
+    enablePhysics: true, // Physics enabled by default
     dustParticleCount: 0,
     shadowMapSize: 1024,
     ssaoSamples: 8,
@@ -133,6 +136,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     enableSignage: false,
     enableVentilationDucts: false,
     enableAnisotropicReflections: false,
+    enablePhysics: true, // Physics enabled by default
     dustParticleCount: 40,
     shadowMapSize: 2048,
     ssaoSamples: 12,
@@ -166,6 +170,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     enableSignage: true,
     enableVentilationDucts: true,
     enableAnisotropicReflections: true,
+    enablePhysics: true, // Physics enabled by default
     dustParticleCount: 400,
     shadowMapSize: 2048,
     ssaoSamples: 16,
@@ -199,6 +204,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     enableSignage: true,
     enableVentilationDucts: true,
     enableAnisotropicReflections: true,
+    enablePhysics: true, // Physics enabled by default
     dustParticleCount: 500,
     shadowMapSize: 4096,
     ssaoSamples: 21,

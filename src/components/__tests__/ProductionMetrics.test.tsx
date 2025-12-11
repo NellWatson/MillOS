@@ -19,9 +19,15 @@ import { MachineType } from '../../types';
 
 // Mock Recharts - it's a heavy dependency
 vi.mock('recharts', () => ({
-  AreaChart: ({ children }: any) => <div data-testid="area-chart">{children}</div>,
-  Area: () => <div data-testid="area" />,
-  ResponsiveContainer: ({ children }: any) => <div data-testid="responsive-container">{children}</div>,
+  AreaChart: ({ children }: any) => (
+    <svg data-testid="area-chart" role="img" xmlns="http://www.w3.org/2000/svg">
+      {children}
+    </svg>
+  ),
+  Area: () => <g data-testid="area" />,
+  ResponsiveContainer: ({ children }: any) => (
+    <div data-testid="responsive-container">{children}</div>
+  ),
 }));
 
 describe('ProductionMetrics', () => {
@@ -365,7 +371,9 @@ describe('ProductionMetrics', () => {
 
       // Trend indicator should be present (+ or -)
       // Initial trend might be +0.0%
-      const trendElement = document.querySelector('[class*="text-green-500"], [class*="text-red-500"]');
+      const trendElement = document.querySelector(
+        '[class*="text-green-500"], [class*="text-red-500"]'
+      );
       expect(trendElement || true).toBeTruthy(); // Trend may or may not be visible
     });
   });

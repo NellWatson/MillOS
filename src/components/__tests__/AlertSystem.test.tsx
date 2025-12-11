@@ -2,11 +2,12 @@
  * Tests for AlertSystem Component
  *
  * Tests cover:
- * - Alert rendering and display
- * - Alert priority ordering
- * - Alert dismissal
- * - Auto-dismiss functionality
+ * - Alert generation and uiStore integration
  * - Safety alert integration with safety store
+ * - Screen reader accessibility
+ *
+ * Note: AlertSystem no longer renders visible alerts directly.
+ * Alerts are pushed to uiStore and displayed via StatusHUD.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -14,26 +15,7 @@ import { render, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { AlertSystem } from '../AlertSystem';
 import { useSafetyStore } from '../../stores/safetyStore';
-
-// Mock Framer Motion
-vi.mock('framer-motion', () => ({
-  motion: {
-    div: ({ children, ...props }: any) => {
-      // Filter out motion-specific props
-      const { initial, animate, exit, transition, layout, onMouseEnter, onMouseLeave, ...htmlProps } = props;
-      return (
-        <div
-          {...htmlProps}
-          onMouseEnter={onMouseEnter}
-          onMouseLeave={onMouseLeave}
-        >
-          {children}
-        </div>
-      );
-    },
-  },
-  AnimatePresence: ({ children }: any) => <>{children}</>,
-}));
+import { useUIStore } from '../../stores/uiStore';
 
 // Mock audio manager
 vi.mock('../../utils/audioManager', () => ({
@@ -55,6 +37,10 @@ describe('AlertSystem', () => {
         daysSinceIncident: 127,
       },
     });
+    // Reset UI store alerts
+    useUIStore.setState({
+      alerts: [],
+    });
   });
 
   afterEach(() => {
@@ -63,10 +49,9 @@ describe('AlertSystem', () => {
   });
 
   describe('Rendering', () => {
-    it('should render the alert container', () => {
+    it('should render the screen reader status container', () => {
       render(<AlertSystem />);
 
-      // Check for screen reader announcements container
       const statusContainer = document.querySelector('[role="status"]');
       expect(statusContainer).toBeInTheDocument();
     });
@@ -78,35 +63,47 @@ describe('AlertSystem', () => {
       expect(liveRegion).toBeInTheDocument();
       expect(liveRegion).toHaveClass('sr-only');
     });
-  });
 
-  describe('Alert Display', () => {
-    it('should display alerts with correct structure', async () => {
+    it('should not render any visible alert UI', () => {
       render(<AlertSystem />);
 
-      // In dev mode, initial alerts are added
+      // AlertSystem now only renders sr-only screen reader region
+      const alertElements = document.querySelectorAll('[role="alert"]');
+      expect(alertElements.length).toBe(0);
+    });
+  });
+
+  describe('uiStore Integration', () => {
+    it('should push alerts to uiStore in dev mode', async () => {
+      render(<AlertSystem />);
+
       // Wait for initial alerts to be set up
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
       });
 
-      // Check for alert elements
-      const alertElements = document.querySelectorAll('[role="alert"]');
-      // Initial alerts may or may not be present depending on env
-      expect(alertElements).toBeDefined();
+      // Check that alerts were added to uiStore
+      const alerts = useUIStore.getState().alerts;
+      expect(alerts.length).toBeGreaterThan(0);
     });
 
-    it('should limit displayed alerts to 3', async () => {
+    it('should generate periodic alerts in dev mode', async () => {
       render(<AlertSystem />);
 
-      // Wait for alerts to be set up
+      // Wait for initial alerts
       await act(async () => {
         await vi.advanceTimersByTimeAsync(100);
       });
 
-      const alertElements = document.querySelectorAll('[role="alert"]');
-      // Max 3 visible alerts
-      expect(alertElements.length).toBeLessThanOrEqual(3);
+      const initialCount = useUIStore.getState().alerts.length;
+
+      // Wait for periodic alert (8000ms interval)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(8000);
+      });
+
+      const newCount = useUIStore.getState().alerts.length;
+      expect(newCount).toBeGreaterThan(initialCount);
     });
   });
 
@@ -119,6 +116,8 @@ describe('AlertSystem', () => {
         await vi.advanceTimersByTimeAsync(100);
       });
 
+      const initialAlertCount = useUIStore.getState().alerts.length;
+
       // Trigger a safety stop
       const { recordSafetyStop } = useSafetyStore.getState();
 
@@ -127,10 +126,13 @@ describe('AlertSystem', () => {
         await vi.advanceTimersByTimeAsync(100);
       });
 
-      // Check for safety alert (may be displayed)
-      // The alert system watches safetyMetrics.safetyStops
-      const safetyMetrics = useSafetyStore.getState().safetyMetrics;
-      expect(safetyMetrics.safetyStops).toBe(1);
+      // Check that a safety alert was added
+      const alerts = useUIStore.getState().alerts;
+      const safetyAlerts = alerts.filter((a) => a.type === 'safety');
+
+      // Safety alert should be added
+      expect(alerts.length).toBeGreaterThan(initialAlertCount);
+      expect(safetyAlerts.length).toBeGreaterThan(0);
     });
 
     it('should increment safety stops correctly', () => {
@@ -146,17 +148,13 @@ describe('AlertSystem', () => {
   });
 
   describe('Accessibility', () => {
-    it('should have proper role attributes on alerts', async () => {
+    it('should update live region for critical alerts', async () => {
       render(<AlertSystem />);
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
-      });
-
-      const alerts = document.querySelectorAll('[role="alert"]');
-      alerts.forEach((alert) => {
-        expect(alert).toHaveAttribute('role', 'alert');
-      });
+      // The component should have an aria-live region
+      const liveRegion = document.querySelector('[aria-live="assertive"]');
+      expect(liveRegion).toBeInTheDocument();
+      expect(liveRegion).toHaveAttribute('aria-atomic', 'true');
     });
   });
 });

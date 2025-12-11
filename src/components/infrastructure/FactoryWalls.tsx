@@ -1291,10 +1291,10 @@ export const FactoryWalls: React.FC<FactoryWallsProps> = () => {
             </group>
           ))}
 
-          {/* First Aid station signs */}
+          {/* First Aid station signs - positioned at same z as First Aid Station (z=35) */}
           {[
-            [-35, 2, 30],
-            [35, 2, 30],
+            [-35, 2, 35],
+            [35, 2, 35],
           ].map((pos, i) => (
             <group key={`firstaid-${i}`} position={pos as [number, number, number]}>
               <mesh>
@@ -1313,8 +1313,8 @@ export const FactoryWalls: React.FC<FactoryWallsProps> = () => {
             </group>
           ))}
 
-          {/* Assembly Point sign - outside near entrance */}
-          <group position={[-48, 2.5, 48]} rotation={[0, Math.PI / 4, 0]}>
+          {/* Assembly Point sign - positioned flat against wall to prevent protrusion */}
+          <group position={[-48, 2.5, 47.5]} rotation={[0, 0, 0]}>
             <mesh>
               <boxGeometry args={[2, 0.6, 0.05]} />
               <meshBasicMaterial color="#22c55e" />

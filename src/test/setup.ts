@@ -184,7 +184,31 @@ if (typeof structuredClone === 'undefined') {
 // Suppress console.log in tests unless DEBUG is set
 if (!process.env.DEBUG) {
   vi.spyOn(console, 'log').mockImplementation(() => {});
+
+  const originalWarn = console.warn;
+  const suppressedWarnings = [
+    'Cannot write to read-only tag',
+    'IndexedDB not available; running without persistence',
+  ];
+
+  vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+    const message = args.map(String).join(' ');
+    if (suppressedWarnings.some((pattern) => message.includes(pattern))) {
+      return;
+    }
+    originalWarn(...args);
+  });
 }
+
+// Filter noisy Node warnings from Vitest workers (e.g., missing --localstorage-file path)
+const originalEmitWarning = process.emitWarning.bind(process);
+process.emitWarning = ((warning: any, ...args: any[]) => {
+  const message = typeof warning === 'string' ? warning : warning?.message;
+  if (typeof message === 'string' && message.includes('--localstorage-file')) {
+    return;
+  }
+  return originalEmitWarning(warning as any, ...(args as [any]));
+}) as typeof process.emitWarning;
 
 // Clean up after each test
 afterEach(() => {

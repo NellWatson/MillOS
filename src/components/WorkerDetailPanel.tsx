@@ -22,6 +22,7 @@ import { useFocusTrap } from '../hooks/useFocusTrap';
 interface WorkerDetailPanelProps {
   worker: WorkerData;
   onClose: () => void;
+  embedded?: boolean;
 }
 
 // Promotion level configuration
@@ -255,11 +256,15 @@ const getWorkerIcon = (role: WorkerData['role']) => {
   }
 };
 
-export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({ worker, onClose }) => {
+export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
+  worker,
+  onClose,
+  embedded = false,
+}) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'skills' | 'reviews'>('overview');
   const panelRef = useRef<HTMLDivElement | null>(null);
 
-  useFocusTrap(panelRef as React.RefObject<HTMLElement>, true, onClose);
+  useFocusTrap(panelRef as React.RefObject<HTMLElement>, !embedded, onClose);
 
   // Derive promotion level from experience
   const promotionLevel = useMemo(() => {
@@ -317,27 +322,41 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({ worker, on
     }
   };
 
+  const containerClasses = embedded
+    ? 'w-full h-full flex flex-col bg-slate-900/50'
+    : 'absolute bottom-6 left-6 w-96 z-20 max-h-[85vh] flex flex-col';
+
+  const animationProps = embedded
+    ? {}
+    : {
+        initial: { opacity: 0, y: 20, scale: 0.95 },
+        animate: { opacity: 1, y: 0, scale: 1 },
+        exit: { opacity: 0, y: 20, scale: 0.95 },
+      };
+
   return (
     <motion.div
       ref={panelRef}
       role="dialog"
-      aria-modal="true"
+      aria-modal={!embedded}
       aria-labelledby="worker-detail-title"
-      initial={{ opacity: 0, y: 20, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 20, scale: 0.95 }}
-      className="absolute bottom-6 left-6 w-96 z-20 max-h-[85vh] flex flex-col"
+      className={containerClasses}
+      {...animationProps}
     >
-      <div className="bg-slate-900/95 backdrop-blur-xl rounded-xl border border-slate-600 shadow-2xl overflow-hidden flex flex-col">
+      <div
+        className={`rounded-xl overflow-hidden flex flex-col ${embedded ? 'h-full bg-transparent' : 'bg-slate-900/95 backdrop-blur-xl border border-slate-600 shadow-2xl'}`}
+      >
         {/* Header with gradient */}
         <div className={`bg-gradient-to-r ${getRoleColor()} p-4 relative flex-shrink-0`}>
-          <button
-            onClick={onClose}
-            aria-label={`Close ${worker.name} details`}
-            className="absolute top-2 right-2 w-6 h-6 bg-white/20 rounded-full flex items-center justify-center text-white hover:bg-white/30 transition-colors focus:outline-none focus:ring-2 focus:ring-white"
-          >
-            ×
-          </button>
+          {!embedded && (
+            <button
+              onClick={onClose}
+              aria-label={`Close ${worker.name} details`}
+              className="absolute top-2 right-2 w-6 h-6 bg-white/20 rounded-full flex items-center justify-center text-white hover:bg-white/30 transition-colors focus:outline-none focus:ring-2 focus:ring-white"
+            >
+              ×
+            </button>
+          )}
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center relative">
               {getWorkerIcon(worker.role)}
@@ -369,7 +388,10 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({ worker, on
         </div>
 
         {/* Tab Navigation */}
-        <div role="tablist" className="flex border-b border-slate-700/50 flex-shrink-0">
+        <div
+          role="tablist"
+          className="flex border-b border-slate-700/50 flex-shrink-0 bg-slate-900/50"
+        >
           {[
             { id: 'overview', label: 'Overview', icon: User },
             { id: 'skills', label: 'Skills', icon: TrendingUp },
@@ -394,7 +416,7 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({ worker, on
         </div>
 
         {/* Scrollable Content Area */}
-        <div className="flex-1 overflow-y-auto max-h-[400px]">
+        <div className="flex-1 overflow-y-auto min-h-0 bg-slate-900/30">
           <AnimatePresence mode="wait">
             {/* Overview Tab */}
             {activeTab === 'overview' && (

@@ -32,7 +32,7 @@ export function useDisposable<T extends { dispose: () => void }>(
         ref.current = null;
       }
     };
-  }, deps); // eslint-disable-line react-hooks/exhaustive-deps
+  }, deps);
 
   return ref.current;
 }
@@ -71,7 +71,7 @@ export function useDisposableArray<T extends { dispose: () => void }>(
       });
       ref.current = [];
     };
-  }, deps); // eslint-disable-line react-hooks/exhaustive-deps
+  }, deps);
 
   return ref.current;
 }

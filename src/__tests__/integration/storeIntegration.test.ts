@@ -405,10 +405,11 @@ describe('Store Integration Tests', () => {
     it('should toggle emergency drill mode', () => {
       const { startEmergencyDrill, endEmergencyDrill } = useGameSimulationStore.getState();
 
-      // Enable drill mode
-      startEmergencyDrill();
+      // Enable drill mode with 10 workers
+      startEmergencyDrill(10);
       expect(useGameSimulationStore.getState().emergencyDrillMode).toBe(true);
       expect(useGameSimulationStore.getState().emergencyActive).toBe(true);
+      expect(useGameSimulationStore.getState().drillMetrics.totalWorkers).toBe(10);
 
       // Disable drill mode
       endEmergencyDrill();

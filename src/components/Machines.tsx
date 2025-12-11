@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect, useMemo, Suspense } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { MachineData, MachineType, GrainQuality } from '../types';
 import * as THREE from 'three';
-import { Html, useGLTF } from '@react-three/drei';
+import { Html, useGLTF, Text } from '@react-three/drei';
 import { audioManager } from '../utils/audioManager';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { getStatusColor } from '../utils/statusColors';
@@ -30,8 +30,18 @@ interface PanelAnimationState {
 }
 const panelRegistry = new Map<string, PanelAnimationState>();
 
+// Shader uniform value can be number, vector, color, texture, etc.
+type ShaderUniformValue =
+  | number
+  | THREE.Vector2
+  | THREE.Vector3
+  | THREE.Vector4
+  | THREE.Color
+  | THREE.Texture
+  | null;
+
 interface ShaderAnimationState {
-  uniforms: { [key: string]: { value: any } };
+  uniforms: { [key: string]: { value: ShaderUniformValue } };
 }
 const shaderRegistry = new Map<string, ShaderAnimationState>();
 
@@ -506,10 +516,15 @@ const WeatheringLayer: React.FC<{
 }> = ({ size, yOffset = 0, enabled }) => {
   if (!enabled) return null;
 
+  // Guard against NaN/invalid dimensions
+  const safeW = Number.isFinite(size[0]) && size[0] > 0 ? size[0] : 1;
+  const safeH = Number.isFinite(size[1]) && size[1] > 0 ? size[1] : 1;
+  const safeD = Number.isFinite(size[2]) && size[2] > 0 ? size[2] : 1;
+
   return (
     <group position={[0, yOffset, 0]}>
-      <mesh position={[0, size[1] / 2 + 0.003, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[size[0] * 0.95, size[2] * 0.95]} />
+      <mesh position={[0, safeH / 2 + 0.003, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[safeW * 0.95, safeD * 0.95]} />
         <meshStandardMaterial
           color="#e8dcc8"
           transparent
@@ -518,8 +533,8 @@ const WeatheringLayer: React.FC<{
           depthWrite={false}
         />
       </mesh>
-      <mesh position={[0, -size[1] / 2 + 0.15, size[2] / 2 + 0.003]}>
-        <planeGeometry args={[size[0], 0.3]} />
+      <mesh position={[0, -safeH / 2 + 0.15, safeD / 2 + 0.003]}>
+        <planeGeometry args={[safeW, 0.3]} />
         <meshStandardMaterial
           color="#8b7355"
           transparent
@@ -560,6 +575,10 @@ const HeatShimmer: React.FC<{
 }> = React.memo(({ position, temperature, size }) => {
   const graphicsQuality = useGraphicsStore.getState().graphics.quality;
   const isLowQuality = graphicsQuality === 'low';
+
+  // Guard against NaN/invalid dimensions
+  const safeW = Number.isFinite(size[0]) && size[0] > 0 ? size[0] : 1;
+  const safeH = Number.isFinite(size[1]) && size[1] > 0 ? size[1] : 1;
 
   const meshRef = useRef<THREE.Mesh>(null);
   const materialRef = useRef<THREE.ShaderMaterial | null>(null);
@@ -636,10 +655,10 @@ const HeatShimmer: React.FC<{
   return (
     <mesh
       ref={meshRef}
-      position={[position[0], position[1] + size[1] + 1.5, position[2]]}
+      position={[position[0], position[1] + safeH + 1.5, position[2]]}
       material={materialRef.current}
     >
-      <planeGeometry args={[size[0] * 1.5, 4]} />
+      <planeGeometry args={[safeW * 1.5, 4]} />
     </mesh>
   );
 });
@@ -1288,6 +1307,25 @@ const GLTFSiloBase: React.FC<{
   );
 });
 
+// Industrial cable with CatmullRomCurve3
+const IndustrialCable: React.FC<{
+  points: THREE.Vector3[];
+  radius?: number;
+  color?: string;
+}> = React.memo(({ points, radius = 0.03, color = '#1e293b' }) => {
+  const path = useMemo(() => new THREE.CatmullRomCurve3(points), [points]);
+  const geometry = useMemo(
+    () => new THREE.TubeGeometry(path, 20, radius, 8, false),
+    [path, radius]
+  );
+
+  return (
+    <mesh geometry={geometry}>
+      <meshStandardMaterial color={color} roughness={0.7} />
+    </mesh>
+  );
+});
+
 interface MachinesProps {
   machines: MachineData[];
   onSelect: (data: MachineData) => void;
@@ -1471,7 +1509,13 @@ interface MachineMeshProps {
 }
 
 const MachineMesh: React.FC<MachineMeshProps> = ({ data, onClick, onStateUpdate }) => {
-  const { type, position, size, rotation, status } = data;
+  const { type, position, rotation, status } = data;
+  // Guard against NaN/invalid dimensions - critical for preventing PlaneGeometry NaN errors
+  const size: [number, number, number] = [
+    Number.isFinite(data.size[0]) && data.size[0] > 0 ? data.size[0] : 3,
+    Number.isFinite(data.size[1]) && data.size[1] > 0 ? data.size[1] : 5,
+    Number.isFinite(data.size[2]) && data.size[2] > 0 ? data.size[2] : 3,
+  ];
   const groupRef = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
 
@@ -1684,11 +1728,40 @@ const MachineMesh: React.FC<MachineMeshProps> = ({ data, onClick, onStateUpdate 
                 </mesh>
               ))
             )}
-            {/* Access ladder - using shared materials */}
-            <mesh position={[size[0] / 2 + 0.2, 0, 0]}>
-              <boxGeometry args={[0.1, size[1], 0.4]} />
-              <primitive object={METAL_MATERIALS.steelDark} attach="material" />
-            </mesh>
+            {/* Access ladder with safety cage */}
+            <group position={[size[0] / 2 + 0.2, 0, 0]}>
+              {/* Main ladder rails */}
+              <mesh position={[0, 0, -0.2]}>
+                <boxGeometry args={[0.1, size[1], 0.05]} />
+                <primitive object={METAL_MATERIALS.steelDark} attach="material" />
+              </mesh>
+              <mesh position={[0, 0, 0.2]}>
+                <boxGeometry args={[0.1, size[1], 0.05]} />
+                <primitive object={METAL_MATERIALS.steelDark} attach="material" />
+              </mesh>
+
+              {/* Safety Cage (Hoops and Rails) - starts 2.5m from bottom */}
+              <group position={[0.4, 1.25, 0]}>
+                {/* Vertical straps */}
+                {[0, -0.3, 0.3].map((z, i) => (
+                  <mesh key={`strap-${i}`} position={[0.4, size[1] / 2 - 1.25, z]}>
+                    <boxGeometry args={[0.03, size[1] - 2.5, 0.03]} />
+                    <meshStandardMaterial color="#94a3b8" />
+                  </mesh>
+                ))}
+                {/* Hoops every 1.5 units */}
+                {Array.from({ length: Math.floor((size[1] - 2.5) / 1.5) }).map((_, i) => (
+                  <mesh
+                    key={`hoop-${i}`}
+                    position={[0, -size[1] / 2 + 2.5 + i * 1.5, 0]}
+                    rotation={[Math.PI / 2, 0, 0]}
+                  >
+                    <torusGeometry args={[0.4, 0.02, 8, 16, Math.PI * 1.2]} />
+                    <meshStandardMaterial color="#94a3b8" side={THREE.DoubleSide} />
+                  </mesh>
+                ))}
+              </group>
+            </group>
 
             {/* Maintenance countdown - skip on low graphics */}
             {quality !== 'low' && (
@@ -1703,9 +1776,22 @@ const MachineMesh: React.FC<MachineMeshProps> = ({ data, onClick, onStateUpdate 
 
       case MachineType.ROLLER_MILL: {
         // Detailed industrial roller mill - Bühler-style grain processing machine
-        const w = size[0],
-          h = size[1],
-          d = size[2];
+        // Guard against NaN/invalid dimensions
+        const w = Number.isFinite(size[0]) && size[0] > 0 ? size[0] : 3.5;
+        const h = Number.isFinite(size[1]) && size[1] > 0 ? size[1] : 5;
+        const d = Number.isFinite(size[2]) && size[2] > 0 ? size[2] : 3.5;
+
+        // Cable path for motor power
+        const motorCablePoints = useMemo(
+          () => [
+            new THREE.Vector3(-w * 0.5 - 0.4, -h * 0.1, 0), // Motor
+            new THREE.Vector3(-w * 0.5 - 0.4, -h * 0.4, 0), // Down
+            new THREE.Vector3(-w * 0.3, -h * 0.45, 0), // In
+            new THREE.Vector3(0, -h * 0.45, 0), // Center
+          ],
+          [w, h]
+        );
+
         return (
           <group position={[0, size[1] / 2, 0]}>
             {/* === MAIN HOUSING === */}
@@ -1714,14 +1800,34 @@ const MachineMesh: React.FC<MachineMeshProps> = ({ data, onClick, onStateUpdate 
               <boxGeometry args={[w, h * 0.7, d]} />
               <meshPhysicalMaterial
                 color="#2563eb"
-                metalness={0.4}
-                roughness={0.35}
+                metalness={0.6}
+                roughness={0.2}
                 roughnessMap={roughnessMap}
-                clearcoat={0.6}
-                clearcoatRoughness={0.3}
+                clearcoat={1.0}
+                clearcoatRoughness={0.1}
                 {...matProps}
               />
             </mesh>
+
+            {/* Machine Label */}
+            <group position={[0, h * 0.25, d * 0.51]}>
+              <mesh>
+                <planeGeometry args={[w * 0.4, 0.15]} />
+                <meshStandardMaterial color="#0f172a" />
+              </mesh>
+              <Text
+                position={[0, 0, 0.01]}
+                fontSize={0.08}
+                color="#ffffff"
+                anchorX="center"
+                anchorY="middle"
+              >
+                {data.name.toUpperCase()}
+              </Text>
+            </group>
+
+            {/* Power Cables */}
+            <IndustrialCable points={motorCablePoints} radius={0.04} color="#1e293b" />
 
             {/* Upper feed section - lighter color */}
             <mesh receiveShadow position={[0, h * 0.35, 0]}>
@@ -2001,13 +2107,12 @@ const MachineMesh: React.FC<MachineMeshProps> = ({ data, onClick, onStateUpdate 
       case MachineType.PLANSIFTER: {
         // Realistic industrial plansifter - dual-compartment square nest design
         // Based on Bühler MPAG / Imas Multiplexa industrial sifter architecture
-        const sw = size[0],
-          sh = size[1],
-          sd = size[2];
+        // Guard against NaN/invalid dimensions
+        const sw = Number.isFinite(size[0]) && size[0] > 0 ? size[0] : 7;
+        const sh = Number.isFinite(size[1]) && size[1] > 0 ? size[1] : 7;
+        const sd = Number.isFinite(size[2]) && size[2] > 0 ? size[2] : 7;
         const compartmentWidth = sw * 0.42; // Width of each lateral sifting cabin
         const centralWidth = sw * 0.16; // Central drive chassis width
-        const numSieveDecks = 8; // Number of sieve drawer layers
-        const deckSpacing = (sh * 0.75) / numSieveDecks;
 
         return (
           <group position={[0, size[1] / 2, 0]}>
@@ -2067,11 +2172,18 @@ const MachineMesh: React.FC<MachineMeshProps> = ({ data, onClick, onStateUpdate 
                   <boxGeometry args={[0.08, 0.06, 0.08]} />
                   <meshStandardMaterial color="#374151" metalness={0.8} roughness={0.2} />
                 </mesh>
-                {/* Flexible cane rod (long thin metal rod) */}
-                <mesh>
-                  <cylinderGeometry args={[0.018, 0.018, sh * 0.58, 8]} />
-                  <meshStandardMaterial color="#9ca3af" metalness={0.95} roughness={0.1} />
-                </mesh>
+
+                {/* Flexible cane rod (High fidelity cable) */}
+                <IndustrialCable
+                  points={[
+                    new THREE.Vector3(0, sh * 0.3, 0),
+                    new THREE.Vector3(0.01 * (i % 2 === 0 ? 1 : -1), 0, 0.01), // Slight imperfection
+                    new THREE.Vector3(0, -sh * 0.28, 0),
+                  ]}
+                  radius={0.015}
+                  color="#9ca3af"
+                />
+
                 {/* Lower clevis bracket on sifter body */}
                 <mesh position={[0, -sh * 0.28, 0]}>
                   <boxGeometry args={[0.1, 0.08, 0.1]} />
@@ -2119,42 +2231,108 @@ const MachineMesh: React.FC<MachineMeshProps> = ({ data, onClick, onStateUpdate 
                   </mesh>
                 ))}
 
-                {/* === SIEVE DRAWER CHANNELS (visible on front face) === */}
-                {Array.from({ length: numSieveDecks }).map((_, di) => {
-                  const deckY = sh * 0.32 - di * deckSpacing;
-                  return (
-                    <group key={di} position={[0, deckY, sd * 0.47]}>
-                      {/* Drawer channel frame */}
+                {/* === INDUSTRIAL FRONT PANEL WITH ACCESS HATCHES === */}
+                {/* Horizontal reinforcement ribs across front face */}
+                {[-0.25, 0, 0.25].map((yRatio, ri) => (
+                  <mesh key={ri} position={[0, sh * yRatio, sd * 0.465]}>
+                    <boxGeometry args={[compartmentWidth * 0.95, 0.04, 0.02]} />
+                    <meshStandardMaterial color="#a8a29e" metalness={0.6} roughness={0.3} />
+                  </mesh>
+                ))}
+
+                {/* Large access hatch - upper section */}
+                <group position={[0, sh * 0.15, sd * 0.47]}>
+                  {/* Hatch frame */}
+                  <mesh>
+                    <boxGeometry args={[compartmentWidth * 0.7, sh * 0.35, 0.03]} />
+                    <meshStandardMaterial color="#d4d4d8" metalness={0.4} roughness={0.35} />
+                  </mesh>
+                  {/* Hatch recessed panel */}
+                  <mesh position={[0, 0, 0.02]}>
+                    <boxGeometry args={[compartmentWidth * 0.6, sh * 0.28, 0.015]} />
+                    <meshStandardMaterial color="#e7e5e4" metalness={0.35} roughness={0.4} />
+                  </mesh>
+                  {/* Heavy-duty swing handle */}
+                  <group position={[compartmentWidth * 0.25, 0, 0.04]}>
+                    <mesh rotation={[0, 0, Math.PI / 2]}>
+                      <cylinderGeometry args={[0.025, 0.025, 0.18, 8]} />
+                      <meshStandardMaterial color="#52525b" metalness={0.8} roughness={0.2} />
+                    </mesh>
+                    {/* Handle mounts */}
+                    {[-0.08, 0.08].map((y, hi) => (
+                      <mesh key={hi} position={[0, y, -0.02]}>
+                        <boxGeometry args={[0.05, 0.04, 0.04]} />
+                        <meshStandardMaterial color="#3f3f46" metalness={0.75} roughness={0.25} />
+                      </mesh>
+                    ))}
+                  </group>
+                  {/* Gasket seal line */}
+                  <mesh position={[0, 0, 0.016]}>
+                    <boxGeometry args={[compartmentWidth * 0.65, sh * 0.32, 0.003]} />
+                    <meshStandardMaterial color="#1c1917" metalness={0.1} roughness={0.8} />
+                  </mesh>
+                </group>
+
+                {/* Lower access hatch - smaller */}
+                <group position={[0, -sh * 0.22, sd * 0.47]}>
+                  <mesh>
+                    <boxGeometry args={[compartmentWidth * 0.55, sh * 0.2, 0.025]} />
+                    <meshStandardMaterial color="#d4d4d8" metalness={0.4} roughness={0.35} />
+                  </mesh>
+                  {/* Quick-release latches (2) */}
+                  {[-0.15, 0.15].map((xOff, li) => (
+                    <group key={li} position={[compartmentWidth * xOff, sh * 0.06, 0.03]}>
                       <mesh>
-                        <boxGeometry args={[compartmentWidth * 0.85, deckSpacing * 0.75, 0.04]} />
-                        <meshStandardMaterial color="#d4d4d8" metalness={0.5} roughness={0.35} />
+                        <boxGeometry args={[0.06, 0.04, 0.025]} />
+                        <meshStandardMaterial color="#71717a" metalness={0.75} roughness={0.2} />
                       </mesh>
-                      {/* Drawer pull handle */}
-                      <mesh position={[0, 0, 0.04]}>
-                        <boxGeometry args={[0.25, 0.06, 0.03]} />
-                        <meshStandardMaterial color="#71717a" metalness={0.8} roughness={0.2} />
-                      </mesh>
-                      {/* Channel guide rails */}
-                      {[-1, 1].map((rail) => (
-                        <mesh key={rail} position={[rail * (compartmentWidth * 0.4), 0, -0.02]}>
-                          <boxGeometry args={[0.03, deckSpacing * 0.8, 0.08]} />
-                          <meshStandardMaterial color="#a1a1aa" metalness={0.7} roughness={0.25} />
-                        </mesh>
-                      ))}
-                      {/* Sieve mesh visible through slot (subtle) */}
-                      <mesh position={[0, 0, -0.01]}>
-                        <planeGeometry args={[compartmentWidth * 0.75, deckSpacing * 0.5]} />
-                        <meshStandardMaterial
-                          color="#e5e5e5"
-                          metalness={0.3}
-                          roughness={0.6}
-                          transparent
-                          opacity={0.7}
-                        />
+                      <mesh position={[0, -0.025, 0.01]} rotation={[0.4, 0, 0]}>
+                        <boxGeometry args={[0.035, 0.04, 0.01]} />
+                        <meshStandardMaterial color="#52525b" metalness={0.8} roughness={0.15} />
                       </mesh>
                     </group>
-                  );
-                })}
+                  ))}
+                </group>
+
+                {/* Ventilation grille - bottom */}
+                <group position={[0, -sh * 0.38, sd * 0.465]}>
+                  <mesh>
+                    <boxGeometry args={[compartmentWidth * 0.4, sh * 0.08, 0.015]} />
+                    <meshStandardMaterial color="#52525b" metalness={0.6} roughness={0.35} />
+                  </mesh>
+                  {/* Grille slats */}
+                  {Array.from({ length: 5 }).map((_, gi) => (
+                    <mesh key={gi} position={[compartmentWidth * (-0.15 + gi * 0.075), 0, 0.01]}>
+                      <boxGeometry args={[0.02, sh * 0.06, 0.01]} />
+                      <meshStandardMaterial color="#27272a" metalness={0.7} roughness={0.3} />
+                    </mesh>
+                  ))}
+                </group>
+
+                {/* Corner bolt clusters - industrial detail */}
+                {[
+                  [-1, 1],
+                  [1, 1],
+                  [-1, -1],
+                  [1, -1],
+                ].map(([cx, cy], bi) => (
+                  <group
+                    key={bi}
+                    position={[cx * compartmentWidth * 0.4, cy * sh * 0.35, sd * 0.47]}
+                  >
+                    {[
+                      [0.03, 0.03],
+                      [-0.03, 0.03],
+                      [0.03, -0.03],
+                      [-0.03, -0.03],
+                    ].map(([bx, by], si) => (
+                      <mesh key={si} position={[bx, by, 0]}>
+                        <cylinderGeometry args={[0.012, 0.012, 0.02, 6]} />
+                        <meshStandardMaterial color="#3f3f46" metalness={0.85} roughness={0.15} />
+                      </mesh>
+                    ))}
+                  </group>
+                ))}
 
                 {/* === SIDE ACCESS PANEL (hinged door with cam latches) === */}
                 <group position={[side * (compartmentWidth / 2 + 0.02), -sh * 0.05, 0]}>

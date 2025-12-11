@@ -512,6 +512,15 @@ const SlipEffect: React.FC<{ workerId: string }> = React.memo(({ workerId }) => 
   const frameCountRef = useRef(0);
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
+  // Memoize motion line heights to prevent NaN errors from Math.random() in geometry args
+  const motionLineHeights = useMemo(() => [
+    0.15 + Math.random() * 0.1,
+    0.15 + Math.random() * 0.1,
+    0.15 + Math.random() * 0.1,
+    0.15 + Math.random() * 0.1,
+    0.15 + Math.random() * 0.1,
+  ], []);
+
   // Register with animation manager if available
   useEffect(() => {
     if (ctx) {
@@ -543,7 +552,7 @@ const SlipEffect: React.FC<{ workerId: string }> = React.memo(({ workerId }) => 
       {/* Motion lines */}
       {[-0.3, -0.15, 0, 0.15, 0.3].map((offset, i) => (
         <mesh key={i} position={[offset, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
-          <planeGeometry args={[0.02, 0.15 + Math.random() * 0.1]} />
+          <planeGeometry args={[0.02, motionLineHeights[i]]} />
           <meshBasicMaterial color="#fbbf24" transparent opacity={0.8 - i * 0.15} />
         </mesh>
       ))}

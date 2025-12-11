@@ -27,7 +27,9 @@ export const GraphicsSettingsPanel: React.FC = () => {
   const setGraphicsQuality = useGraphicsStore((state) => state.setGraphicsQuality);
   const setGraphicsSetting = useGraphicsStore((state) => state.setGraphicsSetting);
   const theme = useUIStore((state) => state.theme);
-  const resetGameState = useGameSimulationStore((state) => state.resetGameState);
+  const showFPSCounter = useUIStore((state) => state.showFPSCounter);
+  const toggleFPSCounter = useUIStore((state) => state.toggleFPSCounter);
+  const clearPersistedState = useGameSimulationStore((state) => state.clearPersistedState);
 
   const qualityColors: Record<GraphicsQuality, string> = {
     low: 'text-slate-400',
@@ -345,13 +347,28 @@ export const GraphicsSettingsPanel: React.FC = () => {
             <div
               className={`border-t pt-2 ${theme === 'light' ? 'border-slate-200' : 'border-slate-800'}`}
             >
-              <div className="flex items-center gap-2 mb-2">
-                <Gauge className="w-3.5 h-3.5 text-green-500" />
-                <span
-                  className={`text-[9px] uppercase tracking-wider ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Gauge className="w-3.5 h-3.5 text-green-500" />
+                  <span
+                    className={`text-[9px] uppercase tracking-wider ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
+                  >
+                    Performance
+                  </span>
+                </div>
+                <button
+                  onClick={() => toggleFPSCounter()}
+                  className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all ${
+                    showFPSCounter
+                      ? 'bg-green-600 text-white'
+                      : theme === 'light'
+                        ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
+                        : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                  }`}
+                  title="Toggle FPS counter overlay"
                 >
-                  Performance
-                </span>
+                  {showFPSCounter ? 'OVERLAY ON' : 'OVERLAY OFF'}
+                </button>
               </div>
               <FPSDisplay showDetailed={true} />
             </div>
@@ -515,35 +532,46 @@ export const GraphicsSettingsPanel: React.FC = () => {
               </p>
             </div>
 
-            {/* Reset Game Time Button */}
-            <button
-              onClick={resetGameState}
-              className={`w-full mt-2 py-1.5 rounded text-[10px] font-medium transition-all flex items-center justify-center gap-1 ${
-                theme === 'light'
-                  ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                  : 'bg-amber-900/50 text-amber-300 hover:bg-amber-800/50'
-              }`}
+            {/* Simulation Reset Section */}
+            <div
+              className={`border-t pt-3 mt-2 ${theme === 'light' ? 'border-slate-200' : 'border-slate-700'}`}
             >
-              <RotateCcw className="w-3 h-3" />
-              Reset Simulation
-            </button>
-
-            {/* Reset All Settings Button */}
-            <button
-              onClick={() => {
-                localStorage.removeItem('millos-settings');
-                setGraphicsQuality('medium');
-                window.location.reload();
-              }}
-              className={`w-full mt-1 py-1.5 rounded text-[10px] font-medium transition-all flex items-center justify-center gap-1 ${
-                theme === 'light'
-                  ? 'bg-red-100 text-red-600 hover:bg-red-200'
-                  : 'bg-red-900/50 text-red-300 hover:bg-red-800/50'
-              }`}
-            >
-              <RotateCcw className="w-3 h-3" />
-              Reset All Settings
-            </button>
+              <div className="flex items-center gap-2 mb-2">
+                <RotateCcw className="w-3.5 h-3.5 text-amber-500" />
+                <span
+                  className={`text-[9px] uppercase tracking-wider ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
+                >
+                  Simulation
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={clearPersistedState}
+                  className={`flex-1 py-1.5 rounded text-[10px] font-medium transition-all flex items-center justify-center gap-1 ${
+                    theme === 'light'
+                      ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                      : 'bg-amber-900/50 text-amber-300 hover:bg-amber-800/50'
+                  }`}
+                >
+                  Reset to 10am
+                </button>
+                <button
+                  onClick={() => {
+                    localStorage.removeItem('millos-settings');
+                    localStorage.removeItem('millos-game-simulation');
+                    setGraphicsQuality('medium');
+                    window.location.reload();
+                  }}
+                  className={`flex-1 py-1.5 rounded text-[10px] font-medium transition-all flex items-center justify-center gap-1 ${
+                    theme === 'light'
+                      ? 'bg-red-100 text-red-600 hover:bg-red-200'
+                      : 'bg-red-900/50 text-red-300 hover:bg-red-800/50'
+                  }`}
+                >
+                  Reset Simulation
+                </button>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

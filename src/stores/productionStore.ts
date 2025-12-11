@@ -419,7 +419,10 @@ export const useProductionStore = create<ProductionStore>()(
         const energyScore = newSatisfaction.averageEnergy * 0.4;
         const socialScore = Math.min(100, newSatisfaction.conversationCount * 2) * 0.3;
         const breakScore = Math.min(100, newSatisfaction.breakCount * 5) * 0.3;
-        newSatisfaction.overallScore = Math.min(100, Math.round(energyScore + socialScore + breakScore));
+        newSatisfaction.overallScore = Math.min(
+          100,
+          Math.round(energyScore + socialScore + breakScore)
+        );
         // Productivity bonus scales with satisfaction
         newSatisfaction.productivityBonus = Math.round((newSatisfaction.overallScore - 50) / 5);
         return { workerSatisfaction: newSatisfaction };
@@ -435,7 +438,10 @@ export const useProductionStore = create<ProductionStore>()(
         const energyScore = newSatisfaction.averageEnergy * 0.4;
         const socialScore = Math.min(100, newSatisfaction.conversationCount * 2) * 0.3;
         const breakScore = Math.min(100, newSatisfaction.breakCount * 5) * 0.3;
-        newSatisfaction.overallScore = Math.min(100, Math.round(energyScore + socialScore + breakScore));
+        newSatisfaction.overallScore = Math.min(
+          100,
+          Math.round(energyScore + socialScore + breakScore)
+        );
         newSatisfaction.productivityBonus = Math.round((newSatisfaction.overallScore - 50) / 5);
         return { workerSatisfaction: newSatisfaction };
       }),
@@ -450,7 +456,10 @@ export const useProductionStore = create<ProductionStore>()(
         const energyScore = newSatisfaction.averageEnergy * 0.4;
         const socialScore = Math.min(100, newSatisfaction.conversationCount * 2) * 0.3;
         const breakScore = Math.min(100, newSatisfaction.breakCount * 5) * 0.3;
-        newSatisfaction.overallScore = Math.min(100, Math.round(energyScore + socialScore + breakScore));
+        newSatisfaction.overallScore = Math.min(
+          100,
+          Math.round(energyScore + socialScore + breakScore)
+        );
         newSatisfaction.productivityBonus = Math.round((newSatisfaction.overallScore - 50) / 5);
         return { workerSatisfaction: newSatisfaction };
       }),
@@ -573,12 +582,20 @@ export const useProductionStore = create<ProductionStore>()(
     announcements: [],
     addAnnouncement: (announcement: Omit<PAnnouncement, 'id' | 'timestamp'>) =>
       set((state) => {
-        // Deduplicate: don't add if same message exists within last 10 seconds
         const now = Date.now();
+
+        // Deduplicate: don't add if same message exists within last 10 seconds
         const isDuplicate = state.announcements.some(
           (a) => a.message === announcement.message && now - a.timestamp < 10000
         );
         if (isDuplicate) return state;
+
+        // Global cooldown: don't add ANY announcement within 15 seconds of the last one
+        // This ensures PA messages are spaced out and don't overlap visually or via TTS
+        const mostRecentAnnouncement = state.announcements[0];
+        if (mostRecentAnnouncement && now - mostRecentAnnouncement.timestamp < 15000) {
+          return state;
+        }
 
         return {
           announcements: [

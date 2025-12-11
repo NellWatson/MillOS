@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, ChevronDown, ChevronUp } from 'lucide-react';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
+import { useProductionStore } from '../../stores/productionStore';
 import { useUIStore } from '../../stores/uiStore';
 
 export const EmergencyControlPanel: React.FC = () => {
@@ -13,6 +14,7 @@ export const EmergencyControlPanel: React.FC = () => {
   const shiftChangeActive = useGameSimulationStore((state) => state.shiftChangeActive);
   const currentShift = useGameSimulationStore((state) => state.currentShift);
   const triggerShiftChange = useGameSimulationStore((state) => state.triggerShiftChange);
+  const workerCount = useProductionStore((state) => state.workers.length);
   const theme = useUIStore((state) => state.theme);
 
   return (
@@ -54,7 +56,9 @@ export const EmergencyControlPanel: React.FC = () => {
                 Emergency Drill
               </div>
               <button
-                onClick={() => (emergencyDrillMode ? endEmergencyDrill() : startEmergencyDrill())}
+                onClick={() =>
+                  emergencyDrillMode ? endEmergencyDrill() : startEmergencyDrill(workerCount)
+                }
                 className={`w-full py-2 px-3 rounded-lg font-bold text-sm transition-all ${
                   emergencyDrillMode
                     ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse'

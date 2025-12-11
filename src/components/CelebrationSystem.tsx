@@ -5,6 +5,7 @@ import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useProductionStore } from '../stores/productionStore';
 import { useSafetyStore } from '../stores/safetyStore';
 import { ConfettiBurst } from './ConfettiBurst';
+import { audioManager } from '../utils/audioManager';
 
 // Production milestone thresholds
 const MILESTONES = [100, 500, 1000, 5000, 10000, 25000, 50000, 100000];
@@ -23,6 +24,17 @@ export const CelebrationSystem: React.FC = () => {
   const productionTarget = useProductionStore((state) => state.productionTarget);
   const safetyMetrics = useSafetyStore((state) => state.safetyMetrics);
   const addAnnouncement = useProductionStore((state) => state.addAnnouncement);
+  const playCelebrationSound = useCallback((type: 'milestone' | 'safety' | 'target') => {
+    if (type === 'milestone') {
+      audioManager.playAISuccess();
+      return;
+    }
+    if (type === 'safety') {
+      audioManager.playShiftBell();
+      return;
+    }
+    audioManager.playVictoryFanfare();
+  }, []);
 
   // Track previous values to detect changes
   const [prevBagsProduced, setPrevBagsProduced] = useState(0);
@@ -53,8 +65,8 @@ export const CelebrationSystem: React.FC = () => {
       // Show milestone display
       setMilestoneDisplay({ value: crossedMilestone, show: true });
 
-      // Play celebration sound - placeholder for future audio integration
-      // audioManager.playCelebration('milestone');
+      // Play celebration sound
+      playCelebrationSound('milestone');
 
       // Spawn confetti at packer area
       const confettiId = `confetti-${Date.now()}`;
@@ -92,6 +104,7 @@ export const CelebrationSystem: React.FC = () => {
     triggerCelebration,
     clearCelebration,
     addAnnouncement,
+    playCelebrationSound,
   ]);
 
   // Check for zero-incident milestones
@@ -110,8 +123,8 @@ export const CelebrationSystem: React.FC = () => {
         message: `${crossedSafetyMilestone} days incident-free!`,
       });
 
-      // Play celebration sound - placeholder for future audio integration
-      // audioManager.playCelebration('safety');
+      // Play celebration sound
+      playCelebrationSound('safety');
 
       // Spawn confetti
       const confettiId = `confetti-${Date.now()}`;
@@ -140,6 +153,7 @@ export const CelebrationSystem: React.FC = () => {
     triggerCelebration,
     clearCelebration,
     addAnnouncement,
+    playCelebrationSound,
   ]);
 
   // Check for daily target completion
@@ -156,8 +170,8 @@ export const CelebrationSystem: React.FC = () => {
           message: 'Daily target achieved!',
         });
 
-        // Play celebration sound - placeholder for future audio integration
-        // audioManager.playCelebration('target');
+        // Play celebration sound
+        playCelebrationSound('target');
 
         // Spawn confetti
         const confettiId = `confetti-${Date.now()}`;
@@ -174,7 +188,13 @@ export const CelebrationSystem: React.FC = () => {
         setTimeout(() => clearCelebration(), 4000);
       }
     }
-  }, [productionTarget, triggerCelebration, clearCelebration, addAnnouncement]);
+  }, [
+    productionTarget,
+    triggerCelebration,
+    clearCelebration,
+    addAnnouncement,
+    playCelebrationSound,
+  ]);
 
   // Remove confetti after animation
   const handleConfettiComplete = useCallback((id: string) => {

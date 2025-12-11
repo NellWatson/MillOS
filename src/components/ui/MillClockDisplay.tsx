@@ -1,14 +1,6 @@
 import React, { useMemo } from 'react';
-import { Sun, Sunset, Moon } from 'lucide-react';
+import { Sun, Sunset, Moon, Pause, Play, FastForward } from 'lucide-react';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
-
-// Speed options: 0 = paused, 1 = 1x, 60 = 60x (1 sec = 1 min), 300 = 5 min/sec
-const SPEED_OPTIONS = [
-  { value: 0, label: 'Paused', display: 'II' },
-  { value: 1, label: '1x', display: '1x' },
-  { value: 60, label: '60x', display: '60x' },
-  { value: 300, label: '300x', display: '5m/s' },
-];
 
 // Isolated Mill Clock component - uses store's gameTime for unified time across app
 export const MillClockDisplay: React.FC<{ theme: 'dark' | 'light' }> = React.memo(({ theme }) => {
@@ -16,12 +8,6 @@ export const MillClockDisplay: React.FC<{ theme: 'dark' | 'light' }> = React.mem
   const gameTime = useGameSimulationStore((state) => state.gameTime);
   const gameSpeed = useGameSimulationStore((state) => state.gameSpeed);
   const setGameSpeed = useGameSimulationStore((state) => state.setGameSpeed);
-
-  // Find current speed index for display
-  const speedIndex = useMemo(() => {
-    const idx = SPEED_OPTIONS.findIndex((opt) => opt.value === gameSpeed);
-    return idx >= 0 ? idx : 2; // Default to 60x if not found
-  }, [gameSpeed]);
 
   const hours = Math.floor(gameTime);
   const minutes = Math.floor((gameTime % 1) * 60);
@@ -35,73 +21,105 @@ export const MillClockDisplay: React.FC<{ theme: 'dark' | 'light' }> = React.mem
 
   const timeString = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
 
-  const togglePause = () => setGameSpeed(gameSpeed === 0 ? 60 : 0);
-  const cycleSpeed = () => {
-    const nextIndex = (speedIndex + 1) % SPEED_OPTIONS.length;
-    // Skip paused when cycling, go to 1x instead
-    setGameSpeed(SPEED_OPTIONS[nextIndex === 0 ? 1 : nextIndex].value);
-  };
-  const speedLabel = SPEED_OPTIONS[speedIndex].label;
-
   return (
     <div
-      className={`flex items-center justify-between rounded-lg px-2 py-1.5 mb-2 border ${
+      className={`rounded-lg px-2 py-1.5 mb-2 border ${
         theme === 'light' ? 'bg-slate-100 border-slate-200' : 'bg-slate-900/50 border-slate-800'
       }`}
     >
-      <div className="flex items-center gap-1.5">
-        <shift.Icon className={`w-5 h-5 ${shift.color}`} />
-        <div>
-          <div
-            className={`text-lg font-mono font-bold tracking-wider leading-tight ${
-              gameSpeed === 0
-                ? theme === 'light'
-                  ? 'text-slate-400'
-                  : 'text-slate-500'
-                : theme === 'light'
-                  ? 'text-slate-800'
-                  : 'text-white'
-            }`}
-          >
-            {timeString}
-          </div>
-          <div className={`text-[9px] font-medium uppercase tracking-wider ${shift.color}`}>
-            {shift.name}
+      {/* Clock and Shift Display */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5">
+          <shift.Icon className={`w-5 h-5 ${shift.color}`} />
+          <div>
+            <div
+              className={`text-lg font-mono font-bold tracking-wider leading-tight ${
+                gameSpeed === 0
+                  ? theme === 'light'
+                    ? 'text-slate-400'
+                    : 'text-slate-500'
+                  : theme === 'light'
+                    ? 'text-slate-800'
+                    : 'text-white'
+              }`}
+            >
+              {timeString}
+            </div>
+            <div className={`text-[9px] font-medium uppercase tracking-wider ${shift.color}`}>
+              {shift.name}
+            </div>
           </div>
         </div>
-      </div>
-      <div className="flex items-center gap-1">
-        <button
-          onClick={togglePause}
-          className={`w-6 h-6 rounded flex items-center justify-center transition-all ${
+        {/* Current speed indicator */}
+        <div
+          className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
             gameSpeed === 0
-              ? 'bg-cyan-500/20 text-cyan-400'
-              : theme === 'light'
-                ? 'bg-slate-200 text-slate-500 hover:bg-slate-300 hover:text-slate-700'
-                : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
+              ? 'bg-red-500/20 text-red-400'
+              : gameSpeed >= 60
+                ? 'bg-orange-500/20 text-orange-400'
+                : 'bg-green-500/20 text-green-400'
           }`}
-          title={gameSpeed === 0 ? 'Resume' : 'Pause'}
         >
-          {gameSpeed === 0 ? (
-            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          ) : (
-            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M6 4h4v16H6zm8 0h4v16h-4z" />
-            </svg>
-          )}
+          {gameSpeed === 0 ? 'PAUSED' : gameSpeed === 1 ? '1x' : gameSpeed === 60 ? '60x' : '3000x'}
+        </div>
+      </div>
+
+      {/* Fast Forward Buttons */}
+      <div className="flex gap-1">
+        <button
+          onClick={() => setGameSpeed(0)}
+          className={`flex-1 py-1.5 rounded text-[10px] font-bold transition-all flex items-center justify-center gap-0.5 ${
+            gameSpeed === 0
+              ? 'bg-orange-600 text-white'
+              : theme === 'light'
+                ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+          }`}
+          title="Pause"
+        >
+          <Pause className="w-3 h-3" />
         </button>
         <button
-          onClick={cycleSpeed}
-          className={`px-1.5 h-6 rounded text-[9px] font-mono font-bold transition-all min-w-[36px] ${
-            theme === 'light'
-              ? 'bg-slate-200 text-slate-500 hover:bg-slate-300 hover:text-slate-700'
-              : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
+          onClick={() => setGameSpeed(1)}
+          className={`flex-1 py-1.5 rounded text-[10px] font-bold transition-all flex items-center justify-center gap-0.5 ${
+            gameSpeed === 1
+              ? 'bg-orange-600 text-white'
+              : theme === 'light'
+                ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
           }`}
-          title="Cycle speed"
+          title="Normal speed (1x)"
         >
-          {speedLabel}
+          <Play className="w-3 h-3" />
+          1x
+        </button>
+        <button
+          onClick={() => setGameSpeed(60)}
+          className={`flex-1 py-1.5 rounded text-[10px] font-bold transition-all flex items-center justify-center gap-0.5 ${
+            gameSpeed === 60
+              ? 'bg-orange-600 text-white'
+              : theme === 'light'
+                ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+          }`}
+          title="Fast (60x - 1 min/sec)"
+        >
+          <FastForward className="w-3 h-3" />
+          60x
+        </button>
+        <button
+          onClick={() => setGameSpeed(3000)}
+          className={`flex-1 py-1.5 rounded text-[10px] font-bold transition-all flex items-center justify-center gap-0.5 ${
+            gameSpeed === 3000
+              ? 'bg-orange-600 text-white'
+              : theme === 'light'
+                ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+          }`}
+          title="Ultra fast (3000x - 50 min/sec)"
+        >
+          <FastForward className="w-3 h-3" />
+          <FastForward className="w-3 h-3 -ml-1.5" />
         </button>
       </div>
     </div>

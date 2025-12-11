@@ -1,22 +1,41 @@
 import React from 'react';
 import { OctagonX } from 'lucide-react';
 import { useSafetyStore } from '../../stores/safetyStore';
+import { useProductionStore } from '../../stores/productionStore';
 import { audioManager } from '../../utils/audioManager';
+import { EMERGENCY_STOP_ANNOUNCEMENTS } from '../GameFeatures';
 
 export const EmergencyStopButton: React.FC = () => {
   const forkliftEmergencyStop = useSafetyStore((state) => state.forkliftEmergencyStop);
   const setForkliftEmergencyStop = useSafetyStore((state) => state.setForkliftEmergencyStop);
   const addSafetyIncident = useSafetyStore((state) => state.addSafetyIncident);
+  const addAnnouncement = useProductionStore((state) => state.addAnnouncement);
 
   const handleEmergencyStop = () => {
     const newState = !forkliftEmergencyStop;
     setForkliftEmergencyStop(newState);
     if (newState) {
+      // Play one-shot sound and start continuous alarm
       audioManager.playEmergencyStop();
+      audioManager.startEmergencyStopAlarm();
+      // Queue random emergency stop PA announcement
+      const announcement =
+        EMERGENCY_STOP_ANNOUNCEMENTS[
+          Math.floor(Math.random() * EMERGENCY_STOP_ANNOUNCEMENTS.length)
+        ];
+      addAnnouncement({
+        type: 'emergency',
+        message: announcement.message,
+        duration: announcement.duration,
+        priority: 'critical',
+      });
       addSafetyIncident({
         type: 'emergency',
         description: 'Emergency stop activated - all forklifts halted',
       });
+    } else {
+      // Stop continuous alarm when released
+      audioManager.stopEmergencyStopAlarm();
     }
   };
 

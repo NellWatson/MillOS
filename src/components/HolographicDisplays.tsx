@@ -174,9 +174,13 @@ const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue,
   const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
+  // Guard against NaN/invalid dimensions
+  const safeW = Number.isFinite(size[0]) && size[0] > 0 ? size[0] : 2;
+  const safeH = Number.isFinite(size[1]) && size[1] > 0 ? size[1] : 1.5;
+
   // Memoize computed positions to prevent array recreation on each render
-  const topBorderPos = useMemo(() => [0, size[1] / 2 - 0.1, 0.03] as const, [size]);
-  const titlePos = useMemo(() => [0, size[1] / 2 - 0.35, 0.04] as const, [size]);
+  const topBorderPos = useMemo(() => [0, safeH / 2 - 0.1, 0.03] as const, [safeH]);
+  const titlePos = useMemo(() => [0, safeH / 2 - 0.35, 0.04] as const, [safeH]);
   const valuePos = useMemo(() => [0, subValue ? 0.1 : 0, 0.04] as const, [subValue]);
   const cornerPositions = useMemo(
     () =>
@@ -185,8 +189,8 @@ const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue,
         [1, 1],
         [-1, -1],
         [1, -1],
-      ].map(([x, y]) => [x * (size[0] / 2 - 0.15), y * (size[1] / 2 - 0.15), 0.03] as const),
-    [size]
+      ].map(([x, y]) => [x * (safeW / 2 - 0.15), y * (safeH / 2 - 0.15), 0.03] as const),
+    [safeW, safeH]
   );
 
   useFrame((state) => {
@@ -210,12 +214,12 @@ const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue,
       <Billboard>
         {/* Glow background */}
         <mesh ref={glowRef} position={[0, 0, -0.1]}>
-          <planeGeometry args={[size[0] + 1, size[1] + 0.5]} />
+          <planeGeometry args={[safeW + 1, safeH + 0.5]} />
           <meshBasicMaterial color={color} transparent opacity={0.1} />
         </mesh>
 
         {/* Main panel */}
-        <RoundedBox args={[size[0], size[1], 0.05]} radius={0.1} smoothness={4}>
+        <RoundedBox args={[safeW, safeH, 0.05]} radius={0.1} smoothness={4}>
           <meshStandardMaterial
             color="#0f172a"
             transparent
@@ -227,13 +231,13 @@ const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue,
 
         {/* Border glow */}
         <mesh position={[0, 0, 0.03]}>
-          <planeGeometry args={[size[0] - 0.1, size[1] - 0.1]} />
+          <planeGeometry args={[safeW - 0.1, safeH - 0.1]} />
           <meshBasicMaterial color={color} transparent opacity={0.05} />
         </mesh>
 
         {/* Top border accent */}
         <mesh position={topBorderPos}>
-          <planeGeometry args={[size[0] - 0.2, 0.05]} />
+          <planeGeometry args={[safeW - 0.2, 0.05]} />
           <meshBasicMaterial color={color} />
         </mesh>
 
