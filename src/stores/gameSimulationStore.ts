@@ -140,7 +140,8 @@ const SUPERVISORS = [
 // Get shift-appropriate supervisor (deterministic based on shift)
 const getSupervisorForShift = (shift: 'morning' | 'afternoon' | 'night', offset = 0): string => {
   const shiftIndex = shift === 'morning' ? 0 : shift === 'afternoon' ? 1 : 2;
-  return SUPERVISORS[(shiftIndex + offset) % SUPERVISORS.length];
+  // Handle negative offset with proper modulo wrapping: ((value % length) + length) % length
+  return SUPERVISORS[((shiftIndex + offset) % SUPERVISORS.length + SUPERVISORS.length) % SUPERVISORS.length];
 };
 
 // Get shift-specific challenges/priorities
@@ -243,7 +244,12 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
           // Convert: deltaSeconds * gameSpeed = game seconds elapsed
           // Then convert to hours: / 3600
           const hoursElapsed = (totalDelta * state.gameSpeed) / 3600;
-          const newTime = (state.gameTime + hoursElapsed) % 24;
+          // Handle modulo edge case: ensure time stays in [0, 24) range with proper negative wrapping
+          // Use ((value % 24) + 24) % 24 to handle negative values correctly
+          let newTime = ((state.gameTime + hoursElapsed) % 24 + 24) % 24;
+          // Guard against floating-point precision issues at midnight boundary
+          if (newTime >= 24) newTime = 0;
+          if (Object.is(newTime, -0)) newTime = 0;
 
           // Calculate expected shift based on new time (handles midnight crossover correctly)
           const expectedShift = getShiftForHour(newTime);
@@ -441,16 +447,21 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
         })),
 
       updateShiftProduction: (actual) =>
-        set((state) => ({
-          shiftData: {
-            ...state.shiftData,
-            shiftProduction: {
-              ...state.shiftData.shiftProduction,
-              actual,
-              efficiency: (actual / state.shiftData.shiftProduction.target) * 100,
+        set((state) => {
+          const target = state.shiftData.shiftProduction.target;
+          // Guard against division by zero - default to 0% efficiency if target is 0
+          const efficiency = target > 0 ? (actual / target) * 100 : 0;
+          return {
+            shiftData: {
+              ...state.shiftData,
+              shiftProduction: {
+                ...state.shiftData.shiftProduction,
+                actual,
+                efficiency,
+              },
             },
-          },
-        })),
+          };
+        }),
 
       addShiftPriority: (priority) =>
         set((state) => ({

@@ -419,7 +419,7 @@ export const useProductionStore = create<ProductionStore>()(
         const energyScore = newSatisfaction.averageEnergy * 0.4;
         const socialScore = Math.min(100, newSatisfaction.conversationCount * 2) * 0.3;
         const breakScore = Math.min(100, newSatisfaction.breakCount * 5) * 0.3;
-        newSatisfaction.overallScore = Math.round(energyScore + socialScore + breakScore);
+        newSatisfaction.overallScore = Math.min(100, Math.round(energyScore + socialScore + breakScore));
         // Productivity bonus scales with satisfaction
         newSatisfaction.productivityBonus = Math.round((newSatisfaction.overallScore - 50) / 5);
         return { workerSatisfaction: newSatisfaction };
@@ -435,7 +435,7 @@ export const useProductionStore = create<ProductionStore>()(
         const energyScore = newSatisfaction.averageEnergy * 0.4;
         const socialScore = Math.min(100, newSatisfaction.conversationCount * 2) * 0.3;
         const breakScore = Math.min(100, newSatisfaction.breakCount * 5) * 0.3;
-        newSatisfaction.overallScore = Math.round(energyScore + socialScore + breakScore);
+        newSatisfaction.overallScore = Math.min(100, Math.round(energyScore + socialScore + breakScore));
         newSatisfaction.productivityBonus = Math.round((newSatisfaction.overallScore - 50) / 5);
         return { workerSatisfaction: newSatisfaction };
       }),
@@ -450,7 +450,7 @@ export const useProductionStore = create<ProductionStore>()(
         const energyScore = newSatisfaction.averageEnergy * 0.4;
         const socialScore = Math.min(100, newSatisfaction.conversationCount * 2) * 0.3;
         const breakScore = Math.min(100, newSatisfaction.breakCount * 5) * 0.3;
-        newSatisfaction.overallScore = Math.round(energyScore + socialScore + breakScore);
+        newSatisfaction.overallScore = Math.min(100, Math.round(energyScore + socialScore + breakScore));
         newSatisfaction.productivityBonus = Math.round((newSatisfaction.overallScore - 50) / 5);
         return { workerSatisfaction: newSatisfaction };
       }),

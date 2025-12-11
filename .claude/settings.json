@@ -1,0 +1,22 @@
+{
+  "agents": {
+    "descriptions": {
+      "typescript-cascade-preventer": "Prevents cascading TypeScript errors by mapping impact zones before type changes",
+      "geoffrey-pattern-validator": "Enforces the Geoffrey Pattern workflow with deterministic validation",
+      "react-three-fiber-specialist": "R3F expert for 3D components, performance, and Three.js patterns",
+      "graphics-debugger": "Diagnoses and fixes visual artifacts, flickering, and rendering issues",
+      "millos-architecture-guard": "Ensures architectural consistency and pattern compliance",
+      "ai-integration-specialist": "Handles Gemini API integration and AI decision systems"
+    }
+  },
+  "commands": {
+    "validate": "Run full Geoffrey Pattern validation suite",
+    "check-types": "Quick TypeScript-only validation",
+    "find-usages": "Find all usages of a symbol before modifying",
+    "zone-audit": "Audit machine positions against zone layout",
+    "graphics-check": "Check for flickering-prone patterns",
+    "review-change": "Review recent changes against quality standards",
+    "dev": "Start development server",
+    "cascade-check": "Assess cascade risk before type changes"
+  }
+}

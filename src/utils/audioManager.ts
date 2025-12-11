@@ -77,6 +77,8 @@ class AudioManager {
   private _musicEnabled: boolean = true;
   private _musicVolume: number = 0.3;
   private _currentTrackIndex: number = 0;
+  // Store bound event listener reference to properly remove it on cleanup
+  private musicEndedHandler: (() => void) | null = null;
 
   // Available music tracks (shuffled on init, excludes victory fanfare)
   // Music by Kevin MacLeod (incompetech.com) - Licensed under CC BY 3.0/4.0
@@ -441,9 +443,11 @@ class AudioManager {
       this.updateMusicVolume();
 
       // Auto-advance to next track when current ends
-      this.musicAudio.addEventListener('ended', () => {
+      // Store bound reference to allow proper cleanup and prevent memory leak
+      this.musicEndedHandler = () => {
         this.nextTrack();
-      });
+      };
+      this.musicAudio.addEventListener('ended', this.musicEndedHandler);
     } else if (this.musicAudio.src !== window.location.origin + this.currentTrack.file) {
       this.musicAudio.src = this.currentTrack.file;
     }
@@ -455,6 +459,11 @@ class AudioManager {
 
   stopMusic(): void {
     if (this.musicAudio) {
+      // Remove event listener to prevent memory leak
+      if (this.musicEndedHandler) {
+        this.musicAudio.removeEventListener('ended', this.musicEndedHandler);
+        this.musicEndedHandler = null;
+      }
       this.musicAudio.pause();
       this.musicAudio.currentTime = 0;
     }

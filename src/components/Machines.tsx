@@ -1046,7 +1046,7 @@ const RotatingFan: React.FC<{ position: [number, number, number]; speed: number;
         </mesh>
         {/* Rotating blades - using shared materials */}
         <group ref={fanRef} position={[0, 0.06, 0]}>
-          {[0, 1, 2, 3].map((i: any) => (
+          {[0, 1, 2, 3].map((_: unknown, i: number) => (
             <mesh
               key={i}
               rotation={[0, 0, (i * Math.PI) / 2]}

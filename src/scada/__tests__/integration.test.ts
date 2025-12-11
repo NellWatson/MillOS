@@ -34,10 +34,9 @@ describe('SCADA Integration', () => {
       expect(state.mode).toBe('simulation');
     });
 
-    // Skip: Timing-dependent test that's flaky in CI
-    it.skip('should report correct tag count', async () => {
-      // Wait for first simulation tick to populate values
-      await new Promise((resolve) => setTimeout(resolve, 150));
+    it('should report correct tag count', async () => {
+      // Wait for simulation tick interval (1000ms)
+      await new Promise((resolve) => setTimeout(resolve, 1100));
       const state = service.getState();
       expect(state.tagCount).toBeGreaterThan(0);
     });
@@ -50,10 +49,9 @@ describe('SCADA Integration', () => {
   });
 
   describe('Tag Value Flow', () => {
-    // Skip: Timing-dependent tests that are flaky in CI
-    it.skip('should receive values from simulation', async () => {
-      // Wait for simulation to produce values
-      await new Promise((resolve) => setTimeout(resolve, 200));
+    it('should receive values from simulation', async () => {
+      // Wait for simulation tick interval (1000ms)
+      await new Promise((resolve) => setTimeout(resolve, 1100));
 
       const value = service.getValue('RM101.TT001.PV');
       expect(value).toBeDefined();
@@ -61,8 +59,9 @@ describe('SCADA Integration', () => {
       expect(typeof value?.value).toBe('number');
     });
 
-    it.skip('should get all values', async () => {
-      await new Promise((resolve) => setTimeout(resolve, 200));
+    it('should get all values', async () => {
+      // Wait for simulation tick interval (1000ms)
+      await new Promise((resolve) => setTimeout(resolve, 1100));
 
       const allValues = service.getAllValues();
       expect(allValues.length).toBeGreaterThan(0);
@@ -82,10 +81,9 @@ describe('SCADA Integration', () => {
   });
 
   describe('Subscription System', () => {
-    // Skip: Timing-dependent test that's flaky in CI
-    it.skip('should notify subscribers on value updates', async () => {
+    it('should notify subscribers on value updates', async () => {
       // Wait for first simulation tick to populate initial values
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 1100));
 
       const callback = vi.fn();
       const unsubscribe = service.subscribeToValues(callback);
@@ -94,7 +92,7 @@ describe('SCADA Integration', () => {
       expect(callback).toHaveBeenCalled();
 
       // Wait for more updates
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 1100));
 
       expect(callback.mock.calls.length).toBeGreaterThan(1);
       unsubscribe();
@@ -104,11 +102,11 @@ describe('SCADA Integration', () => {
       const callback = vi.fn();
       const unsubscribe = service.subscribeToValues(callback);
 
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 1100));
       const callCount = callback.mock.calls.length;
       unsubscribe();
 
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 1100));
       expect(callback.mock.calls.length).toBeLessThanOrEqual(callCount + 2);
     });
   });
@@ -122,8 +120,8 @@ describe('SCADA Integration', () => {
         severity: 1.0,
       });
 
-      // Wait for alarm evaluation
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Wait for simulation tick interval for alarm evaluation
+      await new Promise((resolve) => setTimeout(resolve, 1100));
 
       const alarms = service.getActiveAlarms();
       // Should have at least one alarm (may have more depending on timing)
@@ -139,7 +137,8 @@ describe('SCADA Integration', () => {
         faultType: 'sensor_fail',
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Wait for simulation tick interval for alarm evaluation
+      await new Promise((resolve) => setTimeout(resolve, 1100));
 
       const alarms = service.getActiveAlarms();
       if (alarms.length > 0) {
@@ -170,8 +169,8 @@ describe('SCADA Integration', () => {
 
   describe('History Integration', () => {
     it('should store history data', async () => {
-      // Wait for simulation to generate data and history to accumulate
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Wait for simulation tick to generate data
+      await new Promise((resolve) => setTimeout(resolve, 1100));
 
       // In test environment with mocked IndexedDB, verify the API works
       // The mock returns empty array but doesn't throw
@@ -180,7 +179,8 @@ describe('SCADA Integration', () => {
     });
 
     it('should get multiple tag history', async () => {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Wait for simulation tick to generate data
+      await new Promise((resolve) => setTimeout(resolve, 1100));
 
       const history = await service.getMultipleHistory(
         ['RM101.TT001.PV', 'RM101.VT001.PV'],
@@ -193,12 +193,12 @@ describe('SCADA Integration', () => {
   });
 
   describe('Write Operations', () => {
-    // Skip: Timing-dependent test that's flaky in CI
-    it.skip('should write to setpoint tags', async () => {
+    it('should write to setpoint tags', async () => {
       const success = await service.writeSetpoint('RM101.ST001.SP', 1500);
       expect(success).toBe(true);
 
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Wait for simulation tick interval (1000ms)
+      await new Promise((resolve) => setTimeout(resolve, 1100));
 
       const value = service.getValue('RM101.ST001.SP');
       expect(value?.value).toBe(1500);
@@ -251,8 +251,8 @@ describe('SCADA Integration', () => {
         },
       ]);
 
-      // Values should reflect machine state
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      // Wait for simulation tick to reflect machine state
+      await new Promise((resolve) => setTimeout(resolve, 1100));
 
       const rm101Speed = service.getValue('RM101.ST001.PV');
 

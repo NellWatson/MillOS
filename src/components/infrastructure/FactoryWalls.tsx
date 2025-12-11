@@ -927,19 +927,9 @@ export const FactoryWalls: React.FC<FactoryWallsProps> = () => {
           {/* Front wall - right side */}
           <PersonnelDoor position={[45, 0, 42]} rotation={0} label="ENTRANCE" />
           {/* Back wall - left side */}
-          <PersonnelDoor
-            position={[-45, 0, -45]}
-            rotation={Math.PI}
-            label="EXIT"
-            isEmergencyExit
-          />
+          <PersonnelDoor position={[-45, 0, -45]} rotation={Math.PI} label="EXIT" isEmergencyExit />
           {/* Back wall - right side */}
-          <PersonnelDoor
-            position={[45, 0, -45]}
-            rotation={Math.PI}
-            label="EXIT"
-            isEmergencyExit
-          />
+          <PersonnelDoor position={[45, 0, -45]} rotation={Math.PI} label="EXIT" isEmergencyExit />
         </>
       )}
 

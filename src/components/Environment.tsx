@@ -641,17 +641,32 @@ export const FactoryEnvironment: React.FC = () => {
             {/* Door frame - both sides */}
             <mesh position={[0, 0, 0.05]}>
               <planeGeometry args={[4.5, 9.5]} />
-              <meshStandardMaterial color="#1e293b" metalness={0.4} roughness={0.6} side={THREE.DoubleSide} />
+              <meshStandardMaterial
+                color="#1e293b"
+                metalness={0.4}
+                roughness={0.6}
+                side={THREE.DoubleSide}
+              />
             </mesh>
             {/* Door panel */}
             <mesh position={[0, 0, 0.1]}>
               <planeGeometry args={[3.5, 8.5]} />
-              <meshStandardMaterial color="#475569" metalness={0.3} roughness={0.7} side={THREE.DoubleSide} />
+              <meshStandardMaterial
+                color="#475569"
+                metalness={0.3}
+                roughness={0.7}
+                side={THREE.DoubleSide}
+              />
             </mesh>
             {/* Door window */}
             <mesh position={[0, 2, 0.15]}>
               <planeGeometry args={[1.5, 2]} />
-              <meshStandardMaterial color="#94a3b8" metalness={0.8} roughness={0.2} side={THREE.DoubleSide} />
+              <meshStandardMaterial
+                color="#94a3b8"
+                metalness={0.8}
+                roughness={0.2}
+                side={THREE.DoubleSide}
+              />
             </mesh>
             {/* Handle */}
             <mesh position={[1.2, -1, 0.2]}>
@@ -690,17 +705,32 @@ export const FactoryEnvironment: React.FC = () => {
             {/* Door frame - both sides */}
             <mesh position={[0, 0, 0.05]}>
               <planeGeometry args={[4.5, 9.5]} />
-              <meshStandardMaterial color="#1e293b" metalness={0.4} roughness={0.6} side={THREE.DoubleSide} />
+              <meshStandardMaterial
+                color="#1e293b"
+                metalness={0.4}
+                roughness={0.6}
+                side={THREE.DoubleSide}
+              />
             </mesh>
             {/* Door panel */}
             <mesh position={[0, 0, 0.1]}>
               <planeGeometry args={[3.5, 8.5]} />
-              <meshStandardMaterial color="#475569" metalness={0.3} roughness={0.7} side={THREE.DoubleSide} />
+              <meshStandardMaterial
+                color="#475569"
+                metalness={0.3}
+                roughness={0.7}
+                side={THREE.DoubleSide}
+              />
             </mesh>
             {/* Door window */}
             <mesh position={[0, 2, 0.15]}>
               <planeGeometry args={[1.5, 2]} />
-              <meshStandardMaterial color="#94a3b8" metalness={0.8} roughness={0.2} side={THREE.DoubleSide} />
+              <meshStandardMaterial
+                color="#94a3b8"
+                metalness={0.8}
+                roughness={0.2}
+                side={THREE.DoubleSide}
+              />
             </mesh>
             {/* Handle */}
             <mesh position={[1.2, -1, 0.2]}>
@@ -758,11 +788,7 @@ export const FactoryEnvironment: React.FC = () => {
           {/* Main corner column - larger to seal gaps */}
           <mesh position={[0, 17.5, 0]} castShadow receiveShadow>
             <boxGeometry args={[3, 35, 3]} />
-            <meshStandardMaterial
-              color="#374151"
-              roughness={0.6}
-              metalness={0.3}
-            />
+            <meshStandardMaterial color="#374151" roughness={0.6} metalness={0.3} />
           </mesh>
           {/* Top trim band */}
           <mesh position={[0, 34.5, 0]} castShadow>
@@ -781,16 +807,8 @@ export const FactoryEnvironment: React.FC = () => {
           </mesh>
           {/* Diagonal brace - angled support */}
           <mesh
-            position={[
-              x > 0 ? -1.5 : 1.5,
-              8,
-              z > 0 ? -2 : 2,
-            ]}
-            rotation={[
-              z > 0 ? -Math.PI / 4 : Math.PI / 4,
-              0,
-              x > 0 ? Math.PI / 6 : -Math.PI / 6,
-            ]}
+            position={[x > 0 ? -1.5 : 1.5, 8, z > 0 ? -2 : 2]}
+            rotation={[z > 0 ? -Math.PI / 4 : Math.PI / 4, 0, x > 0 ? Math.PI / 6 : -Math.PI / 6]}
             castShadow
           >
             <boxGeometry args={[0.3, 8, 0.3]} />
@@ -798,16 +816,8 @@ export const FactoryEnvironment: React.FC = () => {
           </mesh>
           {/* Second diagonal brace - crossing */}
           <mesh
-            position={[
-              x > 0 ? -2 : 2,
-              18,
-              z > 0 ? -1.5 : 1.5,
-            ]}
-            rotation={[
-              z > 0 ? -Math.PI / 5 : Math.PI / 5,
-              0,
-              x > 0 ? Math.PI / 5 : -Math.PI / 5,
-            ]}
+            position={[x > 0 ? -2 : 2, 18, z > 0 ? -1.5 : 1.5]}
+            rotation={[z > 0 ? -Math.PI / 5 : Math.PI / 5, 0, x > 0 ? Math.PI / 5 : -Math.PI / 5]}
             castShadow
           >
             <boxGeometry args={[0.3, 10, 0.3]} />
@@ -937,7 +947,7 @@ const VentilationFan: React.FC<{
       </mesh>
       {/* Fan blades */}
       <group ref={bladeRef}>
-        {[0, 1, 2, 3, 4].map((i: any) => (
+        {[0, 1, 2, 3, 4].map((_: unknown, i: number) => (
           <mesh key={i} rotation={[0, 0, (i / 5) * Math.PI * 2]}>
             <boxGeometry args={[0.15, size * 0.8, 0.05]} />
             <meshStandardMaterial color="#64748b" metalness={0.5} roughness={0.5} />

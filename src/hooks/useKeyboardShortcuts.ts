@@ -63,7 +63,15 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
     showSCAPanelRef.current = showSCADAPanel;
     selectedMachineRef.current = selectedMachine;
     selectedWorkerRef.current = selectedWorker;
-  }, [productionSpeed, showZones, autoRotate, showAIPanel, showSCADAPanel, selectedMachine, selectedWorker]);
+  }, [
+    productionSpeed,
+    showZones,
+    autoRotate,
+    showAIPanel,
+    showSCADAPanel,
+    selectedMachine,
+    selectedWorker,
+  ]);
 
   // Graphics quality shortcuts
   const setGraphicsQuality = useGraphicsStore((state) => state.setGraphicsQuality);

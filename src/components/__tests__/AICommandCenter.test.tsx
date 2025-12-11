@@ -100,11 +100,7 @@ describe('AICommandCenter', () => {
   };
 
   // Helper to setup all store mocks
-  const setupStoreMocks = (
-    productionOverrides = {},
-    uiOverrides = {},
-    gameOverrides = {}
-  ) => {
+  const setupStoreMocks = (productionOverrides = {}, uiOverrides = {}, gameOverrides = {}) => {
     const productionState = { ...mockProductionState, ...productionOverrides };
     const uiState = { ...mockUIState, ...uiOverrides };
     const gameState = { ...mockGameState, ...gameOverrides };
@@ -433,14 +429,14 @@ describe('AICommandCenter', () => {
       expect(screen.getByText('Live Decision Feed')).toBeInTheDocument();
 
       // Click predictions tab
-      const predictionsTab = screen.getByRole('button', { name: /Predictions/i });
+      const predictionsTab = screen.getByRole('tab', { name: /predictive schedule/i });
       fireEvent.click(predictionsTab);
 
       // Should show predictions content
       expect(screen.getByText('Predictive Schedule')).toBeInTheDocument();
 
       // Click back to decisions tab
-      const decisionsTab = screen.getByRole('button', { name: /Live Decisions/i });
+      const decisionsTab = screen.getByRole('tab', { name: /live AI decisions/i });
       fireEvent.click(decisionsTab);
 
       // Should show decisions content again
@@ -674,7 +670,19 @@ describe('AICommandCenter', () => {
   });
 
   describe('System Status Calculations', () => {
-    // Skip: These tests depend on internal timing that's fragile with fake timers
+    /**
+     * Skip: These tests are skipped because they test internal implementation details:
+     * - The systemStatus state updates are based on internal refs (decisionOutcomesRef)
+     * - These refs are populated by useEffect hooks that track outcomes over time
+     * - The mock store doesn't trigger the same outcome tracking that happens in production
+     * - The tests would need to simulate actual decision outcomes being recorded,
+     *   which requires the component to process decisions through its internal flow
+     *
+     * The actual success rate and CPU calculations work correctly in production.
+     * These scenarios are covered by e2e tests in: e2e/ai-command-center.spec.ts
+     *
+     * Run e2e tests with: npm run test:e2e
+     */
     it.skip('should calculate success rate from completed decisions', async () => {
       const mockDecisions: AIDecision[] = [
         {
@@ -845,7 +853,7 @@ describe('AICommandCenter', () => {
       });
 
       // Switch to predictions tab
-      const predictionsTab = screen.getByRole('button', { name: /Predictions/i });
+      const predictionsTab = screen.getByRole('tab', { name: /predictive schedule/i });
       fireEvent.click(predictionsTab);
 
       // Should show predictions

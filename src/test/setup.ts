@@ -4,7 +4,11 @@
  * Global configuration for all tests.
  */
 
-import { vi, afterEach } from 'vitest';
+import { vi, afterEach, expect } from 'vitest';
+import * as matchers from '@testing-library/jest-dom/matchers';
+
+// Extend vitest's expect with jest-dom matchers
+expect.extend(matchers);
 
 // Mock window.indexedDB for history storage tests
 // Create a proper mock that triggers callbacks asynchronously
@@ -21,7 +25,7 @@ function createMockObjectStore() {
       setTimeout(() => request.onsuccess?.(), 0);
       return request;
     }),
-    get: vi.fn((key) => {
+    get: vi.fn((key: string) => {
       const request = {
         result: store[key],
         onsuccess: null as (() => void) | null,
@@ -143,15 +147,15 @@ Object.defineProperty(global, 'indexedDB', {
 
 // Mock IDBKeyRange for IndexedDB queries
 const mockIDBKeyRange = {
-  bound: vi.fn((lower, upper, lowerOpen?: boolean, upperOpen?: boolean) => ({
+  bound: vi.fn((lower: unknown, upper: unknown, lowerOpen?: boolean, upperOpen?: boolean) => ({
     lower,
     upper,
     lowerOpen: lowerOpen ?? false,
     upperOpen: upperOpen ?? false,
   })),
-  only: vi.fn((value) => ({ lower: value, upper: value })),
-  lowerBound: vi.fn((lower, open?: boolean) => ({ lower, lowerOpen: open ?? false })),
-  upperBound: vi.fn((upper, open?: boolean) => ({ upper, upperOpen: open ?? false })),
+  only: vi.fn((value: unknown) => ({ lower: value, upper: value })),
+  lowerBound: vi.fn((lower: unknown, open?: boolean) => ({ lower, lowerOpen: open ?? false })),
+  upperBound: vi.fn((upper: unknown, open?: boolean) => ({ upper, upperOpen: open ?? false })),
 };
 
 Object.defineProperty(global, 'IDBKeyRange', {

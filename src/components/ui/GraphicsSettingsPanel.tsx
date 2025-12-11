@@ -171,7 +171,7 @@ export const GraphicsSettingsPanel: React.FC = () => {
                 <button
                   key={quality}
                   onClick={() => setGraphicsQuality(quality)}
-                  className={`flex-1 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all ${
+                  className={`flex-1 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/50 ${
                     graphics.quality === quality
                       ? quality === 'low'
                         ? 'bg-slate-600 text-white'
@@ -184,6 +184,8 @@ export const GraphicsSettingsPanel: React.FC = () => {
                         ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                         : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
                   }`}
+                  aria-label={`Set graphics quality to ${quality}`}
+                  aria-pressed={graphics.quality === quality}
                 >
                   {quality}
                 </button>
@@ -211,7 +213,7 @@ export const GraphicsSettingsPanel: React.FC = () => {
                               !graphics[key as keyof typeof graphics]
                             )
                           }
-                          className={`w-full flex items-center gap-2 px-2 py-1 rounded text-xs transition-all ${
+                          className={`w-full flex items-center gap-2 px-2 py-1 rounded text-xs transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/50 ${
                             graphics[key as keyof typeof graphics]
                               ? theme === 'light'
                                 ? 'bg-slate-200 text-slate-800'
@@ -220,6 +222,9 @@ export const GraphicsSettingsPanel: React.FC = () => {
                                 ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                                 : 'bg-slate-800/30 text-slate-500 hover:bg-slate-800/50'
                           }`}
+                          role="switch"
+                          aria-checked={Boolean(graphics[key as keyof typeof graphics])}
+                          aria-label={`${label}: ${graphics[key as keyof typeof graphics] ? 'enabled' : 'disabled'}`}
                         >
                           <span
                             className={
@@ -229,6 +234,7 @@ export const GraphicsSettingsPanel: React.FC = () => {
                                   ? 'text-slate-400'
                                   : 'text-slate-600'
                             }
+                            aria-hidden="true"
                           >
                             {icon}
                           </span>
@@ -241,6 +247,7 @@ export const GraphicsSettingsPanel: React.FC = () => {
                                   ? 'bg-slate-300'
                                   : 'bg-slate-600'
                             }`}
+                            aria-hidden="true"
                           />
                         </button>
                       ))}
@@ -254,17 +261,19 @@ export const GraphicsSettingsPanel: React.FC = () => {
               className={`border-t pt-2 ${theme === 'light' ? 'border-slate-200' : 'border-slate-800'}`}
             >
               <div className="flex justify-between text-xs mb-1">
-                <span
+                <label
+                  htmlFor="dust-particle-count"
                   className={`flex items-center gap-1 ${theme === 'light' ? 'text-slate-500' : 'text-slate-400'}`}
                 >
-                  <Wind className="w-3 h-3" />
+                  <Wind className="w-3 h-3" aria-hidden="true" />
                   Particle Count
-                </span>
+                </label>
                 <span className="text-cyan-500 font-mono font-bold">
                   {graphics.dustParticleCount}
                 </span>
               </div>
               <input
+                id="dust-particle-count"
                 type="range"
                 min="0"
                 max="500"
@@ -272,7 +281,12 @@ export const GraphicsSettingsPanel: React.FC = () => {
                 value={graphics.dustParticleCount}
                 onChange={(e) => setGraphicsSetting('dustParticleCount', parseInt(e.target.value))}
                 disabled={!graphics.enableDustParticles}
-                className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-cyan-500 ${
+                aria-label="Dust particle count"
+                aria-valuemin={0}
+                aria-valuemax={500}
+                aria-valuenow={graphics.dustParticleCount}
+                aria-valuetext={`${graphics.dustParticleCount} particles`}
+                className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 ${
                   theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'
                 } ${!graphics.enableDustParticles ? 'opacity-50' : ''}`}
               />
@@ -290,24 +304,31 @@ export const GraphicsSettingsPanel: React.FC = () => {
               className={`border-t pt-2 ${theme === 'light' ? 'border-slate-200' : 'border-slate-800'}`}
             >
               <div className="flex justify-between text-xs mb-1">
-                <span
+                <label
+                  htmlFor="worker-lod-distance"
                   className={`flex items-center gap-1 ${theme === 'light' ? 'text-slate-500' : 'text-slate-400'}`}
                 >
-                  <User className="w-3 h-3" />
+                  <User className="w-3 h-3" aria-hidden="true" />
                   Worker LOD Distance
-                </span>
+                </label>
                 <span className="text-cyan-500 font-mono font-bold">
                   {graphics.workerLodDistance}m
                 </span>
               </div>
               <input
+                id="worker-lod-distance"
                 type="range"
                 min="10"
                 max="100"
                 step="5"
                 value={graphics.workerLodDistance}
                 onChange={(e) => setGraphicsSetting('workerLodDistance', parseInt(e.target.value))}
-                className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-cyan-500 ${
+                aria-label="Worker level of detail distance"
+                aria-valuemin={10}
+                aria-valuemax={100}
+                aria-valuenow={graphics.workerLodDistance}
+                aria-valuetext={`${graphics.workerLodDistance} meters`}
+                className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 ${
                   theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'
                 }`}
               />

@@ -84,7 +84,7 @@ describe('Tag Value Processing', () => {
       timestamp: Date.now(),
       quality: 'GOOD',
     };
-    value.quality === 'GOOD';
+    void (value.quality === 'GOOD');
   });
 
   bench('value range validation', () => {

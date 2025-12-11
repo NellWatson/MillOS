@@ -427,7 +427,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
       initial={{ opacity: 0, x: 400 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 400 }}
-      className="fixed right-0 top-0 h-full w-[440px] bg-slate-950/98 backdrop-blur-xl border-l border-cyan-500/30 shadow-2xl z-50 flex flex-col"
+      className="fixed right-0 top-0 h-full w-full sm:w-[440px] max-w-full bg-slate-950/98 backdrop-blur-xl border-l border-cyan-500/30 shadow-2xl z-50 flex flex-col"
     >
       {/* Header */}
       <div className="p-4 border-b border-cyan-500/20 bg-gradient-to-r from-cyan-950/50 to-slate-950">
@@ -443,12 +443,16 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 AI Command Center
                 {isThinking && (
-                  <span className="text-xs text-white/70 animate-pulse">analyzing...</span>
+                  <span className="text-xs text-white/90 animate-pulse">analyzing...</span>
                 )}
               </h2>
             </div>
           </div>
-          <button onClick={onClose} className="text-white/70 hover:text-white text-sm font-medium">
+          <button
+            onClick={onClose}
+            className="text-white/70 hover:text-white text-sm font-medium focus:outline-none focus:ring-2 focus:ring-cyan-500"
+            aria-label="Close AI Command Center"
+          >
             ESC to close
           </button>
         </div>
@@ -457,10 +461,10 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
         <div className="grid grid-cols-4 gap-2 mt-4">
           <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50">
             <div className="flex items-center gap-1">
-              <Cpu className="w-3 h-3 text-slate-500" />
-              <span className="text-[10px] text-slate-500 uppercase">CPU</span>
+              <Cpu className="w-3 h-3 text-slate-400" />
+              <span className="text-[10px] text-slate-400 uppercase">CPU</span>
             </div>
-            <div className="text-sm font-mono text-cyan-400">{systemStatus.cpu.toFixed(1)}%</div>
+            <div className="text-sm font-mono text-cyan-400" data-testid="ai-cpu-value">{systemStatus.cpu.toFixed(1)}%</div>
             <div className="h-1 bg-slate-800 rounded-full mt-1 overflow-hidden">
               <div
                 className="h-full bg-cyan-500 transition-all duration-500"
@@ -470,8 +474,8 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
           </div>
           <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50">
             <div className="flex items-center gap-1">
-              <HardDrive className="w-3 h-3 text-slate-500" />
-              <span className="text-[10px] text-slate-500 uppercase">Memory</span>
+              <HardDrive className="w-3 h-3 text-slate-400" />
+              <span className="text-[10px] text-slate-400 uppercase">Memory</span>
             </div>
             <div className="text-sm font-mono text-green-400">
               {systemStatus.memory.toFixed(1)}%
@@ -485,18 +489,18 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
           </div>
           <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50">
             <div className="flex items-center gap-1">
-              <Activity className="w-3 h-3 text-slate-500" />
-              <span className="text-[10px] text-slate-500 uppercase">Decisions</span>
+              <Activity className="w-3 h-3 text-slate-400" />
+              <span className="text-[10px] text-slate-400 uppercase">Decisions</span>
             </div>
-            <div className="text-sm font-mono text-purple-400">{systemStatus.decisions}</div>
+            <div className="text-sm font-mono text-purple-400" data-testid="ai-decisions-count">{systemStatus.decisions}</div>
             <div className="text-[10px] text-slate-600">this session</div>
           </div>
           <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-700/50">
             <div className="flex items-center gap-1">
-              <TrendingUp className="w-3 h-3 text-slate-500" />
-              <span className="text-[10px] text-slate-500 uppercase">Success</span>
+              <TrendingUp className="w-3 h-3 text-slate-400" />
+              <span className="text-[10px] text-slate-400 uppercase">Success</span>
             </div>
-            <div className="text-sm font-mono text-emerald-400">
+            <div className="text-sm font-mono text-emerald-400" data-testid="ai-success-rate">
               {systemStatus.successRate.toFixed(1)}%
             </div>
             <div className="text-[10px] text-slate-600">accuracy</div>
@@ -512,7 +516,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
                 <span className="text-slate-400 capitalize">{weather}</span>
               </div>
               <div className="flex items-center gap-2">
-                <Clock className="w-3 h-3 text-slate-500" />
+                <Clock className="w-3 h-3 text-slate-400" />
                 <span className="text-cyan-400 font-mono">{formatGameTime(gameTime)}</span>
               </div>
             </div>
@@ -520,11 +524,11 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
           <div className="px-2 py-1.5 bg-slate-900/30 rounded-lg border border-slate-700/30">
             <div className="flex items-center justify-between text-[10px]">
               <div className="flex items-center gap-2">
-                <Users className="w-3 h-3 text-slate-500" />
+                <Users className="w-3 h-3 text-slate-400" />
                 <span className="text-slate-400 capitalize">{currentShift} shift</span>
               </div>
               <div className="flex items-center gap-2">
-                <Gauge className="w-3 h-3 text-slate-500" />
+                <Gauge className="w-3 h-3 text-slate-400" />
                 <span
                   className={`${workerSatisfaction.averageEnergy > 50 ? 'text-green-400' : 'text-orange-400'}`}
                 >
@@ -548,7 +552,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
         {/* Monitoring Summary */}
         <div className="mt-2 px-2 py-1.5 bg-slate-900/30 rounded-lg border border-slate-700/30">
           <div className="flex items-center justify-between text-[10px]">
-            <span className="text-slate-500">Monitoring:</span>
+            <span className="text-slate-400">Monitoring:</span>
             <span className="text-cyan-400">
               {machines.length} machines | {alerts.length} alerts | Eff:{' '}
               {metrics.efficiency.toFixed(1)}%
@@ -561,24 +565,30 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({ isOpen, onClos
       <div className="px-4 py-2 border-b border-slate-800 flex gap-2">
         <button
           onClick={() => setActiveTab('decisions')}
-          className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
+          className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500 ${
             activeTab === 'decisions'
               ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
               : 'bg-slate-800/50 text-slate-400 border border-slate-700/30 hover:bg-slate-800'
           }`}
+          role="tab"
+          aria-selected={activeTab === 'decisions'}
+          aria-label="Show live AI decisions"
         >
-          <Activity className="w-3 h-3 inline mr-1" />
+          <Activity className="w-3 h-3 inline mr-1" aria-hidden="true" />
           Live Decisions ({aiDecisions.length})
         </button>
         <button
           onClick={() => setActiveTab('predictions')}
-          className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
+          className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500 ${
             activeTab === 'predictions'
               ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
               : 'bg-slate-800/50 text-slate-400 border border-slate-700/30 hover:bg-slate-800'
           }`}
+          role="tab"
+          aria-selected={activeTab === 'predictions'}
+          aria-label="Show predictive schedule"
         >
-          <Calendar className="w-3 h-3 inline mr-1" />
+          <Calendar className="w-3 h-3 inline mr-1" aria-hidden="true" />
           Predictions ({predictedEvents.length})
         </button>
       </div>

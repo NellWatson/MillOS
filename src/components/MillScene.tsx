@@ -11,12 +11,14 @@ import { WorkerSystem } from './WorkerSystem';
 import { FactoryInfrastructure } from './FactoryInfrastructure';
 import { SpoutingSystem } from './SpoutingSystem';
 import { DustParticles, GrainFlow, MachineSteamVents, DustAnimationManager } from './DustParticles';
-import { TruckBay } from './TruckBay';
 import { FactoryExterior } from './FactoryExterior';
 import { ForkliftSystem, ForkliftData } from './ForkliftSystem';
 import { FactoryEnvironment } from './Environment';
 import { HolographicDisplays } from './HolographicDisplays';
-import { AmbientDetailsGroup } from './AmbientDetails';
+
+// Lazy load heavy 3D components to reduce initial bundle
+const TruckBay = React.lazy(() => import('./TruckBay').then(m => ({ default: m.TruckBay })));
+const AmbientDetailsGroup = React.lazy(() => import('./AmbientDetails').then(m => ({ default: m.AmbientDetailsGroup })));
 import { VisibleChaos } from './VisibleChaos';
 import { FactoryEnvironmentSystem } from './FactoryEnvironment';
 import { MaintenanceSystem } from './MaintenanceSystem';
@@ -570,10 +572,14 @@ export const MillScene: React.FC<MillSceneProps> = ({
         (graphicsQuality === 'medium' ||
           graphicsQuality === 'high' ||
           graphicsQuality === 'ultra') &&
-        !perfDebug?.disableTruckBay && <TruckBay productionSpeed={productionSpeed} />}
+        !perfDebug?.disableTruckBay && (
+          <Suspense fallback={null}>
+            <TruckBay productionSpeed={productionSpeed} />
+          </Suspense>
+        )}
 
-      {/* Factory exterior walls and signage - renders when camera is outside */}
-      {!isCameraInside && graphicsQuality !== 'low' && <FactoryExterior />}
+      {/* Factory exterior walls and signage - renders when camera is outside (all quality levels) */}
+      {!isCameraInside && <FactoryExterior />}
 
       {/* Theme Hospital-inspired Mood & Chaos Systems */}
       {/* PERFORMANCE: Interior-only systems, ultra quality only */}
@@ -602,7 +608,11 @@ export const MillScene: React.FC<MillSceneProps> = ({
       )}
 
       {/* Ambient Details - interior only, ultra */}
-      {isCameraInside && graphicsQuality === 'ultra' && <AmbientDetailsGroup />}
+      {isCameraInside && graphicsQuality === 'ultra' && (
+        <Suspense fallback={null}>
+          <AmbientDetailsGroup />
+        </Suspense>
+      )}
     </group>
   );
 };

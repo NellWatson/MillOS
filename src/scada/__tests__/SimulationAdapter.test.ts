@@ -69,11 +69,13 @@ describe('SimulationAdapter', () => {
   let adapter: SimulationAdapter;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     adapter = new SimulationAdapter(sampleTags);
   });
 
   afterEach(async () => {
     await adapter.disconnect();
+    vi.useRealTimers();
   });
 
   describe('Lifecycle', () => {
@@ -157,13 +159,12 @@ describe('SimulationAdapter', () => {
       await adapter.connect();
     });
 
-    // Skip: Timing-dependent test that's flaky in CI
-    it.skip('should notify subscribers on value updates', async () => {
+    it('should notify subscribers on value updates', async () => {
       const callback = vi.fn();
       const unsubscribe = adapter.subscribe(['TEST.TT001.PV'], callback);
 
-      // Wait for at least one simulation tick
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Advance fake timers past simulation tick interval (1000ms)
+      await vi.advanceTimersByTimeAsync(1100);
 
       expect(callback).toHaveBeenCalled();
       unsubscribe();
@@ -173,11 +174,14 @@ describe('SimulationAdapter', () => {
       const callback = vi.fn();
       const unsubscribe = adapter.subscribe(['TEST.TT001.PV'], callback);
 
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Advance to trigger first tick
+      await vi.advanceTimersByTimeAsync(1100);
       const callCount = callback.mock.calls.length;
 
       unsubscribe();
-      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      // Advance to trigger another tick
+      await vi.advanceTimersByTimeAsync(1100);
 
       // Should not have received significantly more calls
       expect(callback.mock.calls.length).toBeLessThanOrEqual(callCount + 1);
@@ -217,8 +221,7 @@ describe('SimulationAdapter', () => {
       await adapter.connect();
     });
 
-    // Skip: Timing-dependent test that's flaky in CI
-    it.skip('should inject sensor failure fault', async () => {
+    it('should inject sensor failure fault', async () => {
       adapter.injectFault({
         tagId: 'TEST.TT001.PV',
         faultType: 'sensor_fail',
@@ -228,8 +231,8 @@ describe('SimulationAdapter', () => {
       expect(faults).toHaveLength(1);
       expect(faults[0].faultType).toBe('sensor_fail');
 
-      // Wait for simulation tick
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Advance fake timers past simulation tick interval (1000ms)
+      await vi.advanceTimersByTimeAsync(1100);
 
       const value = await adapter.readTag('TEST.TT001.PV');
       expect(value.quality).toBe('BAD');
@@ -257,18 +260,17 @@ describe('SimulationAdapter', () => {
       expect(adapter.getActiveFaults()).toHaveLength(0);
     });
 
-    // Skip: Timing-dependent test that's flaky in CI
-    it.skip('should expire timed faults', async () => {
+    it('should expire timed faults', async () => {
       adapter.injectFault({
         tagId: 'TEST.TT001.PV',
         faultType: 'spike',
-        duration: 100,
+        duration: 500,
       });
 
       expect(adapter.getActiveFaults()).toHaveLength(1);
 
-      // Wait for fault to expire
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      // Advance past fault duration AND past a simulation tick to trigger expiration check
+      await vi.advanceTimersByTimeAsync(1100);
 
       expect(adapter.getActiveFaults()).toHaveLength(0);
     });

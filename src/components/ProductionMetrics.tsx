@@ -83,7 +83,6 @@ export const ProductionMetrics: React.FC = () => {
       });
     }
     setData(initialData);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run once on mount - uses initial values to seed historical data
 
   // Update chart data with real metrics
@@ -108,29 +107,29 @@ export const ProductionMetrics: React.FC = () => {
       {/* Live KPIs */}
       <div className="grid grid-cols-3 gap-1">
         <div className="bg-slate-800/50 rounded p-1.5 border border-slate-700/50">
-          <div className="text-[8px] text-slate-500 uppercase">Throughput</div>
+          <div className="text-[10px] text-slate-400 uppercase">Throughput</div>
           <div className="text-base font-bold text-white font-mono leading-tight">
             {liveMetrics.throughput}
           </div>
-          <div className="text-[8px] text-slate-500">t/hr</div>
+          <div className="text-[10px] text-slate-400">t/hr</div>
         </div>
         <div className="bg-slate-800/50 rounded p-1.5 border border-slate-700/50">
-          <div className="text-[8px] text-slate-500 uppercase">Efficiency</div>
+          <div className="text-[10px] text-slate-400 uppercase">Efficiency</div>
           <div className="text-base font-bold text-green-400 font-mono leading-tight">
             {liveMetrics.efficiency}%
           </div>
           <div
-            className={`text-[8px] ${efficiencyTrend.startsWith('+') ? 'text-green-500/50' : 'text-red-500/50'}`}
+            className={`text-[10px] ${efficiencyTrend.startsWith('+') ? 'text-green-500/50' : 'text-red-500/50'}`}
           >
             {efficiencyTrend}
           </div>
         </div>
         <div className="bg-slate-800/50 rounded p-1.5 border border-slate-700/50">
-          <div className="text-[8px] text-slate-500 uppercase">Quality</div>
+          <div className="text-[10px] text-slate-400 uppercase">Quality</div>
           <div className="text-base font-bold text-purple-400 font-mono leading-tight">
             {liveMetrics.quality}%
           </div>
-          <div className="text-[8px] text-purple-500/50">Grade A</div>
+          <div className="text-[10px] text-purple-500/50">Grade A</div>
         </div>
       </div>
 
@@ -196,19 +195,19 @@ export const ProductionMetrics: React.FC = () => {
           <div className="text-sm font-bold text-orange-400 font-mono leading-tight">
             {liveMetrics.bagsPerMinute}
           </div>
-          <div className="text-[7px] text-slate-500">bags/min</div>
+          <div className="text-[10px] text-slate-400">bags/min</div>
         </div>
         <div className="bg-slate-800/30 rounded p-1">
           <div className="text-sm font-bold text-blue-400 font-mono leading-tight">
             {liveMetrics.uptime}%
           </div>
-          <div className="text-[7px] text-slate-500">uptime</div>
+          <div className="text-[10px] text-slate-400">uptime</div>
         </div>
         <div className="bg-slate-800/30 rounded p-1">
           <div className="text-sm font-bold text-yellow-400 font-mono leading-tight">
             {liveMetrics.energyUsage}
           </div>
-          <div className="text-[7px] text-slate-500">kWh</div>
+          <div className="text-[10px] text-slate-400">kWh</div>
         </div>
       </div>
 
@@ -235,19 +234,19 @@ export const ProductionMetrics: React.FC = () => {
             <div className="text-sm font-bold text-green-400 font-mono leading-tight">
               {safetyMetrics.safetyStops}
             </div>
-            <div className="text-[7px] text-slate-500">stops</div>
+            <div className="text-[10px] text-slate-400">stops</div>
           </div>
           <div className="bg-slate-900/50 rounded p-1">
             <div className="text-sm font-bold text-emerald-400 font-mono leading-tight">
               {safetyMetrics.workerEvasions}
             </div>
-            <div className="text-[7px] text-slate-500">evasions</div>
+            <div className="text-[10px] text-slate-400">evasions</div>
           </div>
           <div className="bg-slate-900/50 rounded p-1 min-w-[60px]">
             <div className="text-[10px] font-bold text-teal-400 font-mono leading-tight whitespace-nowrap h-4 flex items-center justify-center">
               {getTimeSinceIncident()}
             </div>
-            <div className="text-[7px] text-slate-500">elapsed</div>
+            <div className="text-[10px] text-slate-400">elapsed</div>
           </div>
         </div>
         {safetyMetrics.safetyStops === 0 && (

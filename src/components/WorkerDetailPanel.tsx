@@ -135,7 +135,7 @@ const SkillBar: React.FC<{ name: string; level: SkillLevel }> = ({ name, level }
   <div className="flex items-center gap-2">
     <div className="w-24 text-xs text-slate-400 truncate">{name}</div>
     <div className="flex-1 flex gap-0.5">
-      {[1, 2, 3, 4, 5].map((i: any) => (
+      {[1, 2, 3, 4, 5].map((i: number) => (
         <div
           key={i}
           className={`h-2 flex-1 rounded-sm ${i <= level ? 'bg-cyan-500' : 'bg-slate-700'}`}

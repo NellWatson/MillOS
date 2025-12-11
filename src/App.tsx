@@ -193,11 +193,13 @@ const App: React.FC = () => {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [setTabVisible]);
 
+  // Cleanup WebGL context listeners on unmount
+  // Note: Event listeners are attached in Canvas onCreated callback below
   useEffect(() => {
     return () => {
       const gl = glRef.current;
       const handlers = webglHandlersRef.current;
-      if (gl && handlers) {
+      if (gl?.domElement && handlers) {
         gl.domElement.removeEventListener('webglcontextlost', handlers.lost);
         gl.domElement.removeEventListener('webglcontextrestored', handlers.restored);
       }
@@ -287,6 +289,14 @@ const App: React.FC = () => {
 
   return (
     <div className="relative w-full h-full bg-slate-950">
+      {/* Skip to main content link for keyboard navigation */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-cyan-600 focus:text-white focus:rounded-lg focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-cyan-400"
+      >
+        Skip to main content
+      </a>
+
       {/* UI Layer */}
       <UIOverlay
         productionSpeed={productionSpeed}
@@ -373,8 +383,9 @@ const App: React.FC = () => {
       </AnimatePresence>
 
       {/* 3D Canvas with Error Boundary */}
-      <ErrorBoundary fallback={WebGLErrorFallback}>
-        <Canvas
+      <main id="main-content" className="absolute inset-0" aria-label="3D factory visualization">
+        <ErrorBoundary fallback={WebGLErrorFallback}>
+          <Canvas
           // PERFORMANCE FIX: Removed frameloop="demand" which was capping FPS at 30
           // CRITICAL: Use canvasQuality (stable) instead of currentQuality (reactive)
           // WebGL context props cannot change at runtime without breaking the canvas
@@ -391,8 +402,10 @@ const App: React.FC = () => {
           }}
           dpr={canvasQuality === 'low' ? 1 : Math.min(window.devicePixelRatio, 1.5)}
           onCreated={({ gl }) => {
+            // Store GL instance for cleanup
             glRef.current = gl;
 
+            // Create event handlers that will be referenced during cleanup
             const handleContextLost = (event: Event) => {
               event.preventDefault();
               console.error(
@@ -405,12 +418,15 @@ const App: React.FC = () => {
               window.location.reload();
             };
 
+            // Store handlers in ref BEFORE adding listeners
+            // This ensures cleanup effect has access to the same handler references
             webglHandlersRef.current = {
               lost: handleContextLost,
               restored: handleContextRestored,
             };
 
-            // Handle WebGL context loss gracefully
+            // Add event listeners using the stored handlers
+            // These will be removed in the cleanup effect on unmount
             gl.domElement.addEventListener('webglcontextlost', handleContextLost);
             gl.domElement.addEventListener('webglcontextrestored', handleContextRestored);
 
@@ -488,6 +504,7 @@ const App: React.FC = () => {
           </Suspense>
         </Canvas>
       </ErrorBoundary>
+      </main>
 
       {/* Loading overlay */}
       <div className="fixed bottom-4 left-4 text-slate-600 text-xs pointer-events-none">

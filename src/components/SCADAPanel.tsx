@@ -120,14 +120,14 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({ isOpen, onClose }) => {
 
   // Trend chart state
   const [selectedTrendTags, setSelectedTrendTags] = useState<string[]>([]);
-const [trendDuration, setTrendDuration] = useState<number>(5 * 60 * 1000); // 5 minutes default
-const [trendData, setTrendData] = useState<Array<{ timestamp: number; [key: string]: number }>>(
-  []
-);
-const [trendPaused, setTrendPaused] = useState(false);
-const [trendTagSearch, setTrendTagSearch] = useState('');
+  const [trendDuration, setTrendDuration] = useState<number>(5 * 60 * 1000); // 5 minutes default
+  const [trendData, setTrendData] = useState<Array<{ timestamp: number; [key: string]: number }>>(
+    []
+  );
+  const [trendPaused, setTrendPaused] = useState(false);
+  const [trendTagSearch, setTrendTagSearch] = useState('');
 
-// Connection settings state
+  // Connection settings state
   // SECURITY NOTE: Default URLs use HTTP/WS for localhost development convenience.
   // In production deployments, these should be configured to use HTTPS/WSS with valid TLS certificates.
   // Localhost connections do not require HTTPS as traffic never leaves the machine,
@@ -136,9 +136,9 @@ const [trendTagSearch, setTrendTagSearch] = useState('');
   const [restUrl, setRestUrl] = useState('http://localhost:3001');
   const [restPollInterval, setRestPollInterval] = useState(1000);
   const [mqttBrokerUrl, setMqttBrokerUrl] = useState('ws://localhost:8883');
-const [mqttTopicPrefix, setMqttTopicPrefix] = useState('scada');
-const [proxyUrl, setProxyUrl] = useState('http://localhost:3001');
-const [isApplyingSettings, setIsApplyingSettings] = useState(false);
+  const [mqttTopicPrefix, setMqttTopicPrefix] = useState('scada');
+  const [proxyUrl, setProxyUrl] = useState('http://localhost:3001');
+  const [isApplyingSettings, setIsApplyingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<{
     type: 'success' | 'error';
     text: string;
@@ -330,7 +330,7 @@ const [isApplyingSettings, setIsApplyingSettings] = useState(false);
         initial={{ opacity: 0, x: 400 }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: 400 }}
-        className="fixed right-0 top-0 bottom-0 w-[450px] bg-slate-900/95 backdrop-blur-xl border-l border-cyan-500/30 shadow-2xl z-50 flex flex-col"
+        className="fixed right-0 top-0 bottom-0 w-full sm:w-[450px] max-w-full bg-slate-900/95 backdrop-blur-xl border-l border-cyan-500/30 shadow-2xl z-50 flex flex-col"
       >
         {/* Header */}
         <div className="p-4 border-b border-slate-700/50">
@@ -472,13 +472,20 @@ const [isApplyingSettings, setIsApplyingSettings] = useState(false);
               {/* Search and filter */}
               <div className="p-3 space-y-2 border-b border-slate-700/50">
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                  <label htmlFor="scada-tag-search" className="sr-only">
+                    Search tags
+                  </label>
+                  <Search
+                    className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500"
+                    aria-hidden="true"
+                  />
                   <input
+                    id="scada-tag-search"
                     type="text"
                     placeholder="Search tags..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
+                    className="w-full pl-10 pr-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/30"
                   />
                 </div>
                 <div className="flex gap-2 overflow-x-auto pb-1">
@@ -843,13 +850,20 @@ const [isApplyingSettings, setIsApplyingSettings] = useState(false);
               <div className="border-t border-slate-700/50 max-h-[200px] flex flex-col">
                 <div className="p-2 border-b border-slate-700/50">
                   <div className="relative">
-                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500" />
+                    <label htmlFor="trend-tag-search" className="sr-only">
+                      Search tags to add to trend
+                    </label>
+                    <Search
+                      className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500"
+                      aria-hidden="true"
+                    />
                     <input
+                      id="trend-tag-search"
                       type="text"
                       placeholder="Search tags to add..."
                       value={trendTagSearch}
                       onChange={(e) => setTrendTagSearch(e.target.value)}
-                      className="w-full pl-7 pr-2 py-1 bg-slate-800/50 border border-slate-700/50 rounded text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
+                      className="w-full pl-7 pr-2 py-1 bg-slate-800/50 border border-slate-700/50 rounded text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/30"
                     />
                   </div>
                 </div>
@@ -1091,7 +1105,7 @@ const [isApplyingSettings, setIsApplyingSettings] = useState(false);
                           value={restUrl}
                           onChange={(e) => setRestUrl(e.target.value)}
                           placeholder="http://localhost:3001"
-                          className="mt-1 w-full px-3 py-2 bg-slate-900/50 border border-slate-700/50 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
+                          className="mt-1 w-full px-3 py-2 bg-slate-900/50 border border-slate-700/50 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/30"
                         />
                       </label>
                       <label className="block">
@@ -1104,7 +1118,10 @@ const [isApplyingSettings, setIsApplyingSettings] = useState(false);
                           }
                           min={100}
                           max={60000}
-                          className="mt-1 w-full px-3 py-2 bg-slate-900/50 border border-slate-700/50 rounded text-sm text-white focus:outline-none focus:border-cyan-500/50"
+                          aria-valuemin={100}
+                          aria-valuemax={60000}
+                          aria-valuenow={restPollInterval}
+                          className="mt-1 w-full px-3 py-2 bg-slate-900/50 border border-slate-700/50 rounded text-sm text-white focus:outline-none focus:border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/30"
                         />
                       </label>
                     </div>
@@ -1126,7 +1143,7 @@ const [isApplyingSettings, setIsApplyingSettings] = useState(false);
                           value={mqttBrokerUrl}
                           onChange={(e) => setMqttBrokerUrl(e.target.value)}
                           placeholder="ws://localhost:8883"
-                          className="mt-1 w-full px-3 py-2 bg-slate-900/50 border border-slate-700/50 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
+                          className="mt-1 w-full px-3 py-2 bg-slate-900/50 border border-slate-700/50 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/30"
                         />
                       </label>
                       <label className="block">
@@ -1136,7 +1153,7 @@ const [isApplyingSettings, setIsApplyingSettings] = useState(false);
                           value={mqttTopicPrefix}
                           onChange={(e) => setMqttTopicPrefix(e.target.value)}
                           placeholder="scada"
-                          className="mt-1 w-full px-3 py-2 bg-slate-900/50 border border-slate-700/50 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
+                          className="mt-1 w-full px-3 py-2 bg-slate-900/50 border border-slate-700/50 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/30"
                         />
                       </label>
                     </div>
@@ -1157,7 +1174,7 @@ const [isApplyingSettings, setIsApplyingSettings] = useState(false);
                         value={proxyUrl}
                         onChange={(e) => setProxyUrl(e.target.value)}
                         placeholder="ws://localhost:3001/ws"
-                        className="mt-1 w-full px-3 py-2 bg-slate-900/50 border border-slate-700/50 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
+                        className="mt-1 w-full px-3 py-2 bg-slate-900/50 border border-slate-700/50 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/30"
                       />
                     </label>
                   </div>
@@ -1180,7 +1197,7 @@ const [isApplyingSettings, setIsApplyingSettings] = useState(false);
                         value={proxyUrl}
                         onChange={(e) => setProxyUrl(e.target.value)}
                         placeholder="http://localhost:3001"
-                        className="mt-1 w-full px-3 py-2 bg-slate-900/50 border border-slate-700/50 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
+                        className="mt-1 w-full px-3 py-2 bg-slate-900/50 border border-slate-700/50 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/30"
                       />
                     </label>
                   </div>

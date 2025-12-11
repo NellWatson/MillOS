@@ -259,7 +259,7 @@ export const ComplianceDashboard: React.FC<ComplianceDashboardProps> = ({ isOpen
         initial={{ opacity: 0, x: 400 }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: 400 }}
-        className="fixed right-0 top-0 bottom-0 w-[500px] bg-slate-900/95 backdrop-blur-xl border-l border-purple-500/30 shadow-2xl z-50 flex flex-col"
+        className="fixed right-0 top-0 bottom-0 w-full sm:w-[500px] max-w-full bg-slate-900/95 backdrop-blur-xl border-l border-purple-500/30 shadow-2xl z-50 flex flex-col"
       >
         {/* Header */}
         <div className="p-4 border-b border-slate-700/50">

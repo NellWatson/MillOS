@@ -40,26 +40,20 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
         castShadow
         receiveShadow
       >
-        <boxGeometry args={[buildingHalfWidth - doorSpacing - dockOpeningWidth, wallHeight, wallThickness]} />
+        <boxGeometry
+          args={[buildingHalfWidth - doorSpacing - dockOpeningWidth, wallHeight, wallThickness]}
+        />
         <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
       </mesh>
 
       {/* Wall section between left door and center door */}
-      <mesh
-        position={[-doorSpacing / 2, wallHeight / 2, buildingFrontZ]}
-        castShadow
-        receiveShadow
-      >
+      <mesh position={[-doorSpacing / 2, wallHeight / 2, buildingFrontZ]} castShadow receiveShadow>
         <boxGeometry args={[doorSpacing - dockOpeningWidth, wallHeight, wallThickness]} />
         <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
       </mesh>
 
       {/* Wall section between center door and right door */}
-      <mesh
-        position={[doorSpacing / 2, wallHeight / 2, buildingFrontZ]}
-        castShadow
-        receiveShadow
-      >
+      <mesh position={[doorSpacing / 2, wallHeight / 2, buildingFrontZ]} castShadow receiveShadow>
         <boxGeometry args={[doorSpacing - dockOpeningWidth, wallHeight, wallThickness]} />
         <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
       </mesh>
@@ -70,7 +64,9 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
         castShadow
         receiveShadow
       >
-        <boxGeometry args={[buildingHalfWidth - doorSpacing - dockOpeningWidth, wallHeight, wallThickness]} />
+        <boxGeometry
+          args={[buildingHalfWidth - doorSpacing - dockOpeningWidth, wallHeight, wallThickness]}
+        />
         <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
       </mesh>
 
@@ -83,7 +79,12 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
           receiveShadow
         >
           <boxGeometry args={[dockOpeningWidth, wallHeight - dockOpeningHeight, wallThickness]} />
-          <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
+          <meshStandardMaterial
+            color={wallColor}
+            roughness={0.8}
+            metalness={0.2}
+            side={DoubleSide}
+          />
         </mesh>
       ))}
 
@@ -94,62 +95,44 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       </mesh>
 
       {/* ========== FRONT SIGN - Large Red Sign (similar to truck signage) ========== */}
-      <group position={[0, wallHeight - 3, buildingFrontZ + 0.3]}>
+      <group position={[0, wallHeight / 2 + 2, buildingFrontZ + 1.5]}>
         {/* Main sign background - Red like the truck signs */}
-        <mesh>
-          <boxGeometry args={[32, 5, 0.4]} />
-          <meshStandardMaterial color="#dc2626" roughness={0.3} metalness={0.6} side={DoubleSide} />
+        <mesh frustumCulled={false}>
+          <boxGeometry args={[80, 10, 0.5]} />
+          <meshBasicMaterial color="#dc2626" />
         </mesh>
         {/* Gold trim border */}
-        <mesh position={[0, 0, 0.21]}>
-          <boxGeometry args={[33, 5.4, 0.05]} />
-          <meshStandardMaterial color="#fbbf24" roughness={0.2} metalness={0.8} side={DoubleSide} />
+        <mesh position={[0, 0, 0.3]} frustumCulled={false}>
+          <boxGeometry args={[82, 10.6, 0.15]} />
+          <meshBasicMaterial color="#fbbf24" />
         </mesh>
-        <mesh position={[0, 0, 0.18]}>
-          <boxGeometry args={[32.6, 5.2, 0.08]} />
-          <meshStandardMaterial color="#dc2626" roughness={0.3} metalness={0.6} side={DoubleSide} />
+        {/* Inner red panel */}
+        <mesh position={[0, 0, 0.4]} frustumCulled={false}>
+          <boxGeometry args={[79, 9.5, 0.1]} />
+          <meshBasicMaterial color="#b91c1c" />
         </mesh>
         {/* Company name */}
         <Text
-          position={[0, 0.8, 0.25]}
-          fontSize={2.2}
+          position={[0, 1.5, 0.6]}
+          fontSize={5}
           color="#ffffff"
           anchorX="center"
           anchorY="middle"
           fontWeight="bold"
-          outlineWidth={0.04}
-          outlineColor="#991b1b"
+          outlineWidth={0.1}
+          outlineColor="#7f1d1d"
         >
           MILLOS GRAIN MILL
         </Text>
         {/* Tagline */}
         <Text
-          position={[0, -1.3, 0.25]}
-          fontSize={0.7}
+          position={[0, -2.5, 0.6]}
+          fontSize={1.8}
           color="#fef3c7"
           anchorX="center"
           anchorY="middle"
         >
           EST. 1952 • QUALITY FLOUR PRODUCTS
-        </Text>
-        {/* Decorative wheat sheaf icons (text-based) */}
-        <Text
-          position={[-14, 0, 0.25]}
-          fontSize={1.5}
-          color="#fbbf24"
-          anchorX="center"
-          anchorY="middle"
-        >
-          ⌂
-        </Text>
-        <Text
-          position={[14, 0, 0.25]}
-          fontSize={1.5}
-          color="#fbbf24"
-          anchorX="center"
-          anchorY="middle"
-        >
-          ⌂
         </Text>
       </group>
 
@@ -188,39 +171,45 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
         <meshStandardMaterial color={trimColor} roughness={0.6} metalness={0.4} side={DoubleSide} />
       </mesh>
 
-      {/* ========== BACK SIGN ========== */}
-      <group position={[0, wallHeight - 2, buildingBackZ - 0.3]} rotation={[0, Math.PI, 0]}>
-        <mesh>
-          <boxGeometry args={[28, 4, 0.3]} />
-          <meshStandardMaterial color={signBackgroundColor} roughness={0.4} metalness={0.5} side={DoubleSide} />
+      {/* ========== BACK SIGN - Large Red Sign (matching front sign) ========== */}
+      <group position={[0, wallHeight / 2 + 2, buildingBackZ - 1.5]} rotation={[0, Math.PI, 0]}>
+        {/* Main sign background - Red like the truck signs */}
+        <mesh frustumCulled={false}>
+          <boxGeometry args={[80, 10, 0.5]} />
+          <meshBasicMaterial color="#dc2626" />
         </mesh>
-        <mesh position={[0, 0, 0.16]}>
-          <boxGeometry args={[29, 4.3, 0.05]} />
-          <meshStandardMaterial color={signTextColor} roughness={0.3} metalness={0.7} side={DoubleSide} />
+        {/* Gold trim border */}
+        <mesh position={[0, 0, 0.3]} frustumCulled={false}>
+          <boxGeometry args={[82, 10.6, 0.15]} />
+          <meshBasicMaterial color="#fbbf24" />
         </mesh>
-        <mesh position={[0, 0, 0.12]}>
-          <boxGeometry args={[28.6, 4.1, 0.08]} />
-          <meshStandardMaterial color={signBackgroundColor} roughness={0.4} metalness={0.5} side={DoubleSide} />
+        {/* Inner red panel */}
+        <mesh position={[0, 0, 0.4]} frustumCulled={false}>
+          <boxGeometry args={[79, 9.5, 0.1]} />
+          <meshBasicMaterial color="#b91c1c" />
         </mesh>
+        {/* Company name */}
         <Text
-          position={[0, 0.5, 0.2]}
-          fontSize={1.8}
-          color={signTextColor}
+          position={[0, 1.5, 0.6]}
+          fontSize={5}
+          color="#ffffff"
           anchorX="center"
           anchorY="middle"
-          outlineWidth={0.02}
-          outlineColor="#000"
+          fontWeight="bold"
+          outlineWidth={0.1}
+          outlineColor="#7f1d1d"
         >
           MILLOS GRAIN MILL
         </Text>
+        {/* Tagline */}
         <Text
-          position={[0, -1.2, 0.2]}
-          fontSize={0.6}
-          color="#94a3b8"
+          position={[0, -2.5, 0.6]}
+          fontSize={1.8}
+          color="#fef3c7"
           anchorX="center"
           anchorY="middle"
         >
-          RECEIVING • AUTHORIZED VEHICLES ONLY
+          EST. 1952 • QUALITY FLOUR PRODUCTS
         </Text>
       </group>
 
@@ -253,7 +242,12 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       ].map(([x, z], i) => (
         <mesh key={`corner-${i}`} position={[x, wallHeight / 2 + 0.5, z]} castShadow>
           <boxGeometry args={[1.2, wallHeight + 1, 1.2]} />
-          <meshStandardMaterial color={trimColor} roughness={0.6} metalness={0.4} side={DoubleSide} />
+          <meshStandardMaterial
+            color={trimColor}
+            roughness={0.6}
+            metalness={0.4}
+            side={DoubleSide}
+          />
         </mesh>
       ))}
     </group>

@@ -55,7 +55,6 @@ export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines
     });
 
     return positions;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineKey]); // Use stable key instead of full machines array
 
   // Start spouting sounds on mount
@@ -168,7 +167,6 @@ export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines
     });
 
     return { pipeElements, geometries, materials };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineKey]); // Use stable key instead of full machines array
 
   // Dispose geometries and materials on unmount or when dependencies change

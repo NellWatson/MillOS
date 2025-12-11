@@ -672,7 +672,8 @@ const SAFETY_HUMOR_ANNOUNCEMENTS: AnnouncementConfig[] = [
 // ==========================================================================
 const MAINTENANCE_ANNOUNCEMENTS: AnnouncementConfig[] = [
   {
-    message: 'Maintenance crew to Roller Mill R.M.-103. Bring your optimism. Leave your skepticism.',
+    message:
+      'Maintenance crew to Roller Mill R.M.-103. Bring your optimism. Leave your skepticism.',
     type: 'general',
     category: 'equipment',
     chaosWeight: 0.5,
@@ -2989,13 +2990,22 @@ export const IncidentReplayControls: React.FC = () => {
 
           {/* Timeline */}
           <div className="flex-1 min-w-[150px]">
+            <label htmlFor="replay-timeline" className="sr-only">
+              Replay timeline
+            </label>
             <input
+              id="replay-timeline"
               type="range"
               min={0}
               max={replayFrames.length - 1}
               value={currentReplayIndex}
               onChange={handleSliderChange}
-              className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-red-500"
+              aria-label="Incident replay timeline"
+              aria-valuemin={0}
+              aria-valuemax={replayFrames.length - 1}
+              aria-valuenow={currentReplayIndex}
+              aria-valuetext={`Frame ${currentReplayIndex + 1} of ${replayFrames.length}`}
+              className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/50"
             />
             <div className="flex justify-between text-[10px] text-slate-500 mt-0.5">
               <span>Frame {currentReplayIndex + 1}</span>

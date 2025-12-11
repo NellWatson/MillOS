@@ -125,7 +125,13 @@ const TruckAnimationManager: React.FC = () => {
       // 4. Oscillation
       else if (anim.type === 'oscillation') {
         const mesh = anim.mesh as THREE.Object3D;
-        const { axis = 'x', speed = 1, amplitude = 1, offset = 0, base = 0 } = anim.data as {
+        const {
+          axis = 'x',
+          speed = 1,
+          amplitude = 1,
+          offset = 0,
+          base = 0,
+        } = anim.data as {
           axis?: 'x' | 'y' | 'z';
           speed?: number;
           amplitude?: number;
@@ -385,7 +391,7 @@ const GladHands: React.FC<{ position: [number, number, number] }> = ({ position 
         <meshStandardMaterial color="#2563eb" roughness={0.7} />
       </mesh>
       {/* Coiled hose section */}
-      {[0, 1, 2, 3].map((i: any) => (
+      {[0, 1, 2, 3].map((_: unknown, i: number) => (
         <mesh
           key={i}
           position={[-0.25 - i * 0.08, 0.25 + Math.sin(i * 0.8) * 0.05, 0]}
@@ -414,7 +420,7 @@ const GladHands: React.FC<{ position: [number, number, number] }> = ({ position 
         <meshStandardMaterial color="#dc2626" roughness={0.7} />
       </mesh>
       {/* Coiled hose section */}
-      {[0, 1, 2, 3].map((i: any) => (
+      {[0, 1, 2, 3].map((_: unknown, i: number) => (
         <mesh
           key={i}
           position={[-0.25 - i * 0.08, 0.25 + Math.sin(i * 0.8 + 0.5) * 0.05, 0]}
@@ -826,7 +832,7 @@ const EmployeeParking: React.FC<{ position: [number, number, number]; rotation?:
       <meshStandardMaterial color="#2d2d2d" roughness={0.9} />
     </mesh>
     {/* Parking stripes - 8 spaces */}
-    {[0, 1, 2, 3, 4, 5, 6, 7].map((i: any) => (
+    {[0, 1, 2, 3, 4, 5, 6, 7].map((_: unknown, i: number) => (
       <group key={i} position={[-10 + i * 3, 0, 0]}>
         {/* Vertical stripe */}
         <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -841,7 +847,7 @@ const EmployeeParking: React.FC<{ position: [number, number, number]; rotation?:
       </group>
     ))}
     {/* Handicap spaces - 2 at end */}
-    {[0, 1].map((i: any) => (
+    {[0, 1].map((_: unknown, i: number) => (
       <group key={i} position={[10 + i * 3.5, 0, 0]}>
         <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.15, 5]} />
@@ -1357,7 +1363,7 @@ const TimeClockStation: React.FC<{ position: [number, number, number]; rotation?
         <meshStandardMaterial color="#78716c" roughness={0.7} />
       </mesh>
       {/* Time cards in rack */}
-      {[0, 1, 2, 3, 4].map((i: any) => (
+      {[0, 1, 2, 3, 4].map((_: unknown, i: number) => (
         <mesh key={i} position={[0.5, 1.5 - i * 0.12, 0.06]}>
           <boxGeometry args={[0.2, 0.08, 0.02]} />
           <meshStandardMaterial color="#fefce8" roughness={0.8} />
@@ -3123,16 +3129,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Wheel chocks for Bay 2 at X=+8 */}
         <WheelChock position={[6.5, 0, 10]} rotation={0} isDeployed={false} />
         <WheelChock position={[9.5, 0, 10]} rotation={0} isDeployed={false} />
-        <WheelChock
-          position={[6.5, 0, 11]}
-          rotation={Math.PI}
-          isDeployed={false}
-        />
-        <WheelChock
-          position={[9.5, 0, 11]}
-          rotation={Math.PI}
-          isDeployed={false}
-        />
+        <WheelChock position={[6.5, 0, 11]} rotation={Math.PI} isDeployed={false} />
+        <WheelChock position={[9.5, 0, 11]} rotation={Math.PI} isDeployed={false} />
 
         {/* Dock spotter - guides truck while backing */}
         <DockSpotter
@@ -4515,7 +4513,7 @@ const FlourExpressLogo: React.FC<{ side: 'left' | 'right' }> = ({ side }) => {
         </mesh>
 
         {/* Clock face marks */}
-        {[0, 1, 2, 3].map((i: any) => (
+        {[0, 1, 2, 3].map((_: unknown, i: number) => (
           <mesh
             key={i}
             position={[
@@ -4719,7 +4717,7 @@ const ReeferUnit: React.FC<{
         <meshStandardMaterial color="#1f2937" metalness={0.3} roughness={0.7} />
       </mesh>
       <group ref={fanRef} position={[0, 2, 0.2]}>
-        {[0, 1, 2, 3].map((i: any) => (
+        {[0, 1, 2, 3].map((_: unknown, i: number) => (
           <mesh key={i} rotation={[0, 0, (i * Math.PI) / 2]}>
             <boxGeometry args={[0.6, 0.12, 0.02]} />
             <meshStandardMaterial color="#64748b" />
@@ -4844,7 +4842,7 @@ const AirHoseStation: React.FC<{ position: [number, number, number]; rotation?: 
         <meshStandardMaterial color="#f97316" roughness={0.6} />
       </mesh>
       <group ref={hoseRef} position={[0.2, 1.5, 0.2]}>
-        {[0, 1, 2, 3, 4].map((i: any) => (
+        {[0, 1, 2, 3, 4].map((_: unknown, i: number) => (
           <mesh key={i} position={[0, -i * 0.15, 0]}>
             <torusGeometry args={[0.08 + i * 0.01, 0.015, 8, 16, Math.PI * 1.5]} />
             <meshStandardMaterial color="#1f2937" roughness={0.8} />
@@ -5210,7 +5208,7 @@ const DockBumperWithWear: React.FC<{ position: [number, number, number]; wearLev
         <boxGeometry args={[0.7, 0.03, 0.05]} />
         <meshStandardMaterial color={wearColor} emissive={wearColor} emissiveIntensity={0.2} />
       </mesh>
-      {[0, 1, 2, 3, 4].map((i: any) => (
+      {[0, 1, 2, 3, 4].map((_: unknown, i: number) => (
         <mesh key={i} position={[-0.3 + i * 0.15, -0.22, 0.16]}>
           <boxGeometry args={[0.08, 0.02, 0.01]} />
           <meshStandardMaterial color={i / 4 <= 1 - wearLevel ? '#22c55e' : '#374151'} />

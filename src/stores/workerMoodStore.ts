@@ -28,6 +28,40 @@ const randomFrom = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length
 let lastMoodTickTime = 0;
 let accumulatedDeltaMinutes = 0;
 
+// Timeout tracking for cleanup
+const activeTimeouts = new Map<string, NodeJS.Timeout>();
+
+/**
+ * Store a timeout ID for later cleanup
+ */
+const storeTimeout = (key: string, timeoutId: NodeJS.Timeout): void => {
+  // Clear any existing timeout for this key
+  const existing = activeTimeouts.get(key);
+  if (existing) {
+    clearTimeout(existing);
+  }
+  activeTimeouts.set(key, timeoutId);
+};
+
+/**
+ * Clear and remove a stored timeout
+ */
+const clearStoredTimeout = (key: string): void => {
+  const timeoutId = activeTimeouts.get(key);
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+    activeTimeouts.delete(key);
+  }
+};
+
+/**
+ * Clear all stored timeouts (for cleanup on unmount)
+ */
+export const clearAllWorkerTimeouts = (): void => {
+  activeTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
+  activeTimeouts.clear();
+};
+
 // Worker reaction types for chaos events
 export type WorkerReaction = 'none' | 'slipping' | 'coughing' | 'startled';
 
@@ -140,7 +174,10 @@ export const useWorkerMoodStore = create<WorkerMoodStore>((set, get) => ({
       },
     })),
 
-  clearWorkerSpeech: (workerId) =>
+  clearWorkerSpeech: (workerId) => {
+    // Clear any pending speech timeout for this worker
+    clearStoredTimeout(`speech-${workerId}`);
+
     set((state) => ({
       workerMoods: {
         ...state.workerMoods,
@@ -150,7 +187,8 @@ export const useWorkerMoodStore = create<WorkerMoodStore>((set, get) => ({
           currentPhrase: undefined,
         },
       },
-    })),
+    }));
+  },
 
   triggerRandomGrumble: (workerId) => {
     const mood = get().workerMoods[workerId];
@@ -163,7 +201,10 @@ export const useWorkerMoodStore = create<WorkerMoodStore>((set, get) => ({
         const phrases = GRUMBLE_PHRASES[mood.state];
         const phrase = randomFrom(phrases);
         get().setWorkerSpeaking(workerId, phrase);
-        setTimeout(() => get().clearWorkerSpeech(workerId), 2500 + Math.random() * 1500);
+
+        // Store timeout for cleanup
+        const timeoutId = setTimeout(() => get().clearWorkerSpeech(workerId), 2500 + Math.random() * 1500);
+        storeTimeout(`speech-${workerId}`, timeoutId);
       }
       return;
     }
@@ -172,13 +213,14 @@ export const useWorkerMoodStore = create<WorkerMoodStore>((set, get) => ({
     const phrase = randomFrom(phrases);
     get().setWorkerSpeaking(workerId, phrase);
 
-    // Clear speech after 3-5 seconds
-    setTimeout(
+    // Clear speech after 3-5 seconds - store timeout for cleanup
+    const timeoutId = setTimeout(
       () => {
         get().clearWorkerSpeech(workerId);
       },
       3000 + Math.random() * 2000
     );
+    storeTimeout(`speech-${workerId}`, timeoutId);
   },
 
   // Worker reactions (slipping, coughing, etc.)
@@ -216,20 +258,25 @@ export const useWorkerMoodStore = create<WorkerMoodStore>((set, get) => ({
       get().setWorkerSpeaking(workerId, randomFrom(coughPhrases));
     }
 
-    // Clear reaction after duration
-    setTimeout(() => {
+    // Clear reaction after duration - store timeout for cleanup
+    const timeoutId = setTimeout(() => {
       get().clearWorkerReaction(workerId);
       get().clearWorkerSpeech(workerId);
     }, duration);
+    storeTimeout(`reaction-${workerId}`, timeoutId);
   },
 
-  clearWorkerReaction: (workerId) =>
+  clearWorkerReaction: (workerId) => {
+    // Clear any pending reaction timeout for this worker
+    clearStoredTimeout(`reaction-${workerId}`);
+
     set((state) => ({
       workerReactions: {
         ...state.workerReactions,
         [workerId]: { reaction: 'none', startTime: 0, duration: 0 },
       },
-    })),
+    }));
+  },
 
   // Chaos events
   chaosEvents: [],
@@ -291,7 +338,10 @@ export const useWorkerMoodStore = create<WorkerMoodStore>((set, get) => ({
     affectedWorkerIds.forEach((id) => {
       const reaction = randomFrom(config.workerReactions);
       get().setWorkerSpeaking(id, reaction);
-      setTimeout(() => get().clearWorkerSpeech(id), 4000 + Math.random() * 2000);
+
+      // Store timeout for cleanup
+      const timeoutId = setTimeout(() => get().clearWorkerSpeech(id), 4000 + Math.random() * 2000);
+      storeTimeout(`speech-${id}`, timeoutId);
     });
   },
 

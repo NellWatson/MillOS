@@ -326,6 +326,26 @@ export class RESTAdapter implements IProtocolAdapter {
   // Helpers
   // =========================================================================
 
+  private async fetchWithTimeout(
+    url: string,
+    options: RequestInit = {},
+    timeoutMs = 10000
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error(`Request timeout after ${timeoutMs}ms`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   private async fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
     // Validate URL format
     try {
@@ -340,7 +360,7 @@ export class RESTAdapter implements IProtocolAdapter {
       headers.set('Authorization', `Bearer ${this.config.apiKey}`);
     }
 
-    return fetch(url, { ...options, headers });
+    return this.fetchWithTimeout(url, { ...options, headers });
   }
 
   private parseTagResponse(data: RESTTagResponse): TagValue {
