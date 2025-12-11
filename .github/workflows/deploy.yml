@@ -29,16 +29,16 @@ jobs:
       - name: Install dependencies
         run: npm ci --force
 
-      # Build v0.20 alpha to /v0.20/ subdirectory
-      - name: Build v0.20 alpha
+      # Build v0.20 stable to /v0.20/ subdirectory
+      - name: Build v0.20 stable
         run: VERSION=v0.20 npm run build
 
-      - name: Setup staging with v0.20 alpha
+      - name: Setup staging with v0.20 stable
         run: |
           mkdir -p staging/v0.20
           cp -r dist/* staging/v0.20/
 
-      # v0.10 is pre-built in public/v0.10/ - copy to staging
+      # v0.10 is pre-built in public/v0.10/ - copy to staging (legacy/alpha)
       - name: Copy v0.10 to staging
         run: cp -r public/v0.10 staging/v0.10
 
@@ -46,7 +46,7 @@ jobs:
       - name: Copy music files to v0.10
         run: cp public/*.mp3 staging/v0.10/
 
-      # Root redirects to v0.10 (stable)
+      # Root redirects to v0.20 (stable)
       - name: Create root redirect
         run: |
           cat > staging/index.html << 'EOF'
@@ -54,11 +54,11 @@ jobs:
           <html>
           <head>
             <meta charset="UTF-8">
-            <meta http-equiv="refresh" content="0;url=/v0.10/">
+            <meta http-equiv="refresh" content="0;url=/v0.20/">
             <title>Redirecting to MillOS</title>
           </head>
           <body>
-            <p>Redirecting to <a href="/v0.10/">MillOS v0.10</a>...</p>
+            <p>Redirecting to <a href="/v0.20/">MillOS v0.20</a>...</p>
           </body>
           </html>
           EOF

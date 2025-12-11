@@ -630,11 +630,23 @@ const Lake: React.FC<{
   size: [number, number];
   depth?: number;
 }> = ({ position, size, depth = 0.5 }) => {
+  // CRITICAL: Guard against NaN/undefined/zero dimensions which cause
+  // "computeBoundingSphere(): Computed radius is NaN" errors in THREE.js
+  const safeW = Number.isFinite(size?.[0]) && size[0] > 0 ? size[0] : 20;
+  const safeH = Number.isFinite(size?.[1]) && size[1] > 0 ? size[1] : 20;
+  const maxDim = Math.max(safeW, safeH);
+
+  // Ensure all radii are positive and finite
+  const mainRadius = Math.max(0.1, maxDim / 2 - 1);
+  const deepRadius = Math.max(0.1, maxDim / 3);
+  const shoreRadius = Math.max(0.1, maxDim / 2 + 2);
+  const grassRadius = Math.max(0.1, maxDim / 2 + 6);
+
   return (
     <group position={position}>
       {/* Main water surface */}
       <mesh position={[0, -depth / 2, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <circleGeometry args={[Math.max(size[0], size[1]) / 2 - 1, 32]} />
+        <circleGeometry args={[mainRadius, 32]} />
         <meshStandardMaterial
           color={WATER_COLORS.shallow}
           metalness={0.7}
@@ -645,24 +657,24 @@ const Lake: React.FC<{
       </mesh>
       {/* Deep center */}
       <mesh position={[0, -depth, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[Math.max(size[0], size[1]) / 3, 24]} />
+        <circleGeometry args={[deepRadius, 24]} />
         <meshBasicMaterial color={WATER_COLORS.deep} transparent opacity={0.9} />
       </mesh>
       {/* Sandy shoreline */}
       <mesh position={[0, -0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <circleGeometry args={[Math.max(size[0], size[1]) / 2 + 2, 32]} />
+        <circleGeometry args={[shoreRadius, 32]} />
         <meshStandardMaterial color="#c9b896" roughness={0.95} />
       </mesh>
       {/* Grass around lake */}
       <mesh position={[0, -0.10, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <circleGeometry args={[Math.max(size[0], size[1]) / 2 + 6, 32]} />
+        <circleGeometry args={[grassRadius, 32]} />
         <meshStandardMaterial color={GRASS_COLORS.park} roughness={0.95} />
       </mesh>
       {/* Reeds/vegetation patches */}
       {[
-        [-size[0] / 3, size[1] / 4],
-        [size[0] / 4, -size[1] / 3],
-        [-size[0] / 4, -size[1] / 4],
+        [-safeW / 3, safeH / 4],
+        [safeW / 4, -safeH / 3],
+        [-safeW / 4, -safeH / 4],
       ].map(([x, z], i) => (
         <group key={`reeds-${i}`} position={[x, 0, z]}>
           {[0, 0.3, -0.3, 0.15, -0.15].map((offset, j) => (
@@ -674,10 +686,10 @@ const Lake: React.FC<{
         </group>
       ))}
       {/* Willow trees by lake */}
-      <SimpleTree position={[-size[0] / 2 - 3, 0, 0]} scale={1.3} />
-      <SimpleTree position={[size[0] / 3, 0, size[1] / 2 + 2]} scale={1.1} />
+      <SimpleTree position={[-safeW / 2 - 3, 0, 0]} scale={1.3} />
+      <SimpleTree position={[safeW / 3, 0, safeH / 2 + 2]} scale={1.1} />
       {/* Park bench overlooking lake */}
-      <ParkBench position={[size[0] / 2 + 4, 0, 0]} rotation={-Math.PI / 2} />
+      <ParkBench position={[safeW / 2 + 4, 0, 0]} rotation={-Math.PI / 2} />
     </group>
   );
 };
