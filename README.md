@@ -204,7 +204,7 @@ Full industrial SCADA system with real-time process monitoring:
 | 4 | 3 Packers (Lines 1-3) | 12 |
 | - | Utility/Ambient Systems | 10 |
 
-See [SCADA_PLAN.md](SCADA_PLAN.md) for complete API documentation.
+See [SCADA_PLAN.md](docs/SCADA_PLAN.md) for complete API documentation.
 
 ---
 
@@ -370,6 +370,9 @@ src/
 ├── hooks/                      # Reusable React Hooks
 │   ├── useKeyboardShortcuts.ts # Keyboard navigation (F1-F4, Z, I, H, etc.)
 │   ├── useProceduralTextures.ts # Metal, concrete, wall textures
+│   ├── useAdaptiveQuality.ts   # Dynamic graphics quality adjustment
+│   ├── useMobileDetection.ts   # Mobile device & orientation detection
+│   ├── useGPUResource.ts       # GPU memory tracking & management
 │   └── useDisposable.ts        # Three.js resource cleanup
 │
 └── test/                       # Test suite
@@ -462,6 +465,11 @@ A custom **PositionRegistry** singleton enables inter-entity awareness:
 - [x] Factory exterior with branded signage
 - [x] End-to-end testing with Playwright
 - [x] WebRTC peer-to-peer multiplayer with host migration
+- [x] Mobile touch controls with gesture support
+- [x] GPU resource management with adaptive quality
+- [x] Compressed texture support (KTX2/Basis Universal)
+- [x] Service worker for offline caching
+- [x] Shared geometry/material optimization for memory efficiency
 
 ### Planned
 
@@ -469,7 +477,6 @@ A custom **PositionRegistry** singleton enables inter-entity awareness:
 - [ ] VR mode with WebXR controls
 - [ ] Historical playback and time-travel debugging
 - [ ] Custom scenario editor
-- [ ] Mobile touch controls
 - [ ] Integration with real SCADA historians (OSIsoft PI, Wonderware)
 
 ---
