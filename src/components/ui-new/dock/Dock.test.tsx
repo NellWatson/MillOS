@@ -11,16 +11,18 @@ vi.mock('lucide-react', () => ({
   Shield: () => <span data-testid="icon-shield" />,
   Settings: () => <span data-testid="icon-settings" />,
   Eye: () => <span data-testid="icon-eye" />,
+  Radio: () => <span data-testid="icon-radio" />,
 }));
 
 describe('Dock Component', () => {
-  it('renders all 6 primary navigation items', () => {
+  it('renders all 7 primary navigation items', () => {
     render(<Dock activeMode="overview" onModeChange={() => {}} />);
 
     expect(screen.getByLabelText('Overview')).toBeInTheDocument();
     expect(screen.getByLabelText('AI Command')).toBeInTheDocument();
     expect(screen.getByLabelText('SCADA System')).toBeInTheDocument();
     expect(screen.getByLabelText('Workforce')).toBeInTheDocument();
+    expect(screen.getByLabelText('Multiplayer')).toBeInTheDocument();
     expect(screen.getByLabelText('Safety & Emergency')).toBeInTheDocument();
     expect(screen.getByLabelText('Settings')).toBeInTheDocument();
   });

@@ -423,7 +423,9 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
   const operationTimerRef = useRef(0); // Time spent on current loading/unloading operation
   const operationDurationRef = useRef(0); // Target duration for current operation
   const wheelRefsRef = useRef<THREE.Mesh[]>([]); // Cached wheel references
+  const safetyStopTimerRef = useRef(0); // Time since safety stop started (for resume delay)
   const HYSTERESIS_TIME = 0.15; // 150ms before state can change
+  const SAFETY_RESUME_DELAY = 2.5; // Wait 2.5s after safety stop before resuming (prevents worker thrash)
   const CROSSING_WAIT_TIME = 1.5; // Wait 1.5s before entering crossing zone
   const CROSSING_APPROACH_DISTANCE = 3; // Distance to start slowing for crossing
   const FORK_LIFT_HEIGHT = 1.2; // Max height forks raise during load/unload
@@ -610,12 +612,29 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
     // Check emergency stop states (forklift E-stop or fire drill in progress)
     const emergencyStopActive = forkliftEmergencyStop || emergencyDrillMode;
 
-    const isSafeToMove =
+    // Basic safety conditions (path clear, no nearby entities)
+    const basicSafetyMet =
       !emergencyStopActive &&
       pathClear &&
       workersNearby.length === 0 &&
       forkliftsNearby.length === 0 &&
       crossingClear;
+
+    // Track safety stop timer - prevents thrash by requiring delay before resume
+    // When stopped for safety, increment timer; when basic safety met, check if delay passed
+    if (!basicSafetyMet) {
+      // Currently unsafe - increment or maintain safety stop timer
+      safetyStopTimerRef.current += delta;
+    } else if (safetyStopTimerRef.current > 0) {
+      // Basic safety met but we were recently stopped - check resume delay
+      safetyStopTimerRef.current += delta;
+      if (safetyStopTimerRef.current >= SAFETY_RESUME_DELAY) {
+        safetyStopTimerRef.current = 0; // Reset timer, allow resume
+      }
+    }
+
+    // Only safe to move if basic safety met AND resume delay has passed (timer is 0)
+    const isSafeToMove = basicSafetyMet && safetyStopTimerRef.current === 0;
     const newIsStopped = !isSafeToMove;
 
     // Register position with CURRENT frame's stopped state (not delayed React state)
