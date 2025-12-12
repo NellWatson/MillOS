@@ -8,7 +8,7 @@ interface FactoryRoofProps {
 
 export const FactoryRoof: React.FC<FactoryRoofProps> = ({
   floorWidth = 120,
-  floorDepth = 100,
+  floorDepth: _floorDepth = 100,
 }) => {
   const graphics = useGraphicsStore((state) => state.graphics);
   const isLowGraphics = graphics.quality === 'low';

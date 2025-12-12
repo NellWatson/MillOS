@@ -58,6 +58,7 @@ import { SafetyAnalyticsPanel } from './ui/SafetyAnalyticsPanel';
 import { ZoneCustomizationPanel } from './ui/ZoneCustomizationPanel';
 import { SafetyConfigPanel } from './ui/SafetyConfigPanel';
 import { KeyboardShortcutsModal } from './ui/KeyboardShortcutsModal';
+import { MultiplayerLobby } from './multiplayer';
 
 // Lazy load ProductionMetrics to reduce initial bundle (Recharts is ~403KB)
 const ProductionMetrics = lazy(() =>
@@ -1730,6 +1731,9 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
               {/* Emergency & Environment Controls */}
               <EmergencyEnvironmentPanel />
+
+              {/* Multiplayer Controls */}
+              <MultiplayerLobby />
 
               {/* Graphics Options Panel */}
               <GraphicsOptionsPanel />

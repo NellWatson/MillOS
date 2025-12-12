@@ -20,12 +20,17 @@ import { useGraphicsStore, GraphicsQuality } from '../../stores/graphicsStore';
 import { useUIStore } from '../../stores/uiStore';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { FPSDisplay } from '../FPSMonitor';
+import { useShallow } from 'zustand/react/shallow';
 
 export const GraphicsSettingsPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
-  const graphics = useGraphicsStore((state) => state.graphics);
-  const setGraphicsQuality = useGraphicsStore((state) => state.setGraphicsQuality);
-  const setGraphicsSetting = useGraphicsStore((state) => state.setGraphicsSetting);
+  const { graphics, setGraphicsQuality, setGraphicsSetting } = useGraphicsStore(
+    useShallow((state) => ({
+      graphics: state.graphics,
+      setGraphicsQuality: state.setGraphicsQuality,
+      setGraphicsSetting: state.setGraphicsSetting,
+    }))
+  );
   const theme = useUIStore((state) => state.theme);
   const showFPSCounter = useUIStore((state) => state.showFPSCounter);
   const toggleFPSCounter = useUIStore((state) => state.toggleFPSCounter);

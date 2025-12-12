@@ -9,6 +9,7 @@ import React, { useRef, useMemo, createContext, useContext, useCallback, useEffe
 import { useFrame } from '@react-three/fiber';
 import { Html, Billboard, Text } from '@react-three/drei';
 import * as THREE from 'three';
+import { useShallow } from 'zustand/react/shallow';
 import { useWorkerMoodStore } from '../stores/workerMoodStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
@@ -468,9 +469,11 @@ export const useMoodSimulation = () => {
   const lastTickRef = useRef(Date.now());
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   // Graphics store for quality and perfDebug checks
-  const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
-  const disableWorkerMoods = useGraphicsStore(
-    (state) => state.graphics.perfDebug?.disableWorkerMoods
+  const { graphicsQuality, disableWorkerMoods } = useGraphicsStore(
+    useShallow((state) => ({
+      graphicsQuality: state.graphics.quality,
+      disableWorkerMoods: state.graphics.perfDebug?.disableWorkerMoods,
+    }))
   );
 
   useFrame(() => {

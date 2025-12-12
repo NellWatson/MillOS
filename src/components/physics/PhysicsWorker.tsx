@@ -26,10 +26,7 @@ interface PhysicsWorkerProps {
 }
 
 // Helper to clamp velocity magnitude
-function clampVelocity(
-  rb: RapierRigidBody,
-  maxSpeed: number
-): void {
+function clampVelocity(rb: RapierRigidBody, maxSpeed: number): void {
   const vel = rb.linvel();
   const speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
   if (speed > maxSpeed) {
@@ -78,10 +75,7 @@ export const PhysicsWorker: React.FC<PhysicsWorkerProps> = ({
   // Collision groups
   const collisionGroups = useMemo(
     () =>
-      createCollisionGroups(
-        COLLISION_FILTERS.worker.memberships,
-        COLLISION_FILTERS.worker.filter
-      ),
+      createCollisionGroups(COLLISION_FILTERS.worker.memberships, COLLISION_FILTERS.worker.filter),
     []
   );
 
@@ -173,17 +167,13 @@ export const PhysicsWorker: React.FC<PhysicsWorkerProps> = ({
     }
 
     // === FORKLIFT EVASION ===
-    if (
-      nearestForklift &&
-      positionRegistry.isForkliftApproaching(pos.x, pos.z, nearestForklift)
-    ) {
+    if (nearestForklift && positionRegistry.isForkliftApproaching(pos.x, pos.z, nearestForklift)) {
       if (!isEvadingRef.current) {
         // Calculate evasion direction using cross product
         const toWorkerX = pos.x - nearestForklift.x;
         const toWorkerZ = pos.z - nearestForklift.z;
         const crossProduct =
-          (nearestForklift.dirX ?? 0) * toWorkerZ -
-          (nearestForklift.dirZ ?? 0) * toWorkerX;
+          (nearestForklift.dirX ?? 0) * toWorkerZ - (nearestForklift.dirZ ?? 0) * toWorkerX;
         evadeDirectionRef.current = crossProduct > 0 ? 1 : -1;
         isEvadingRef.current = true;
       }
@@ -210,11 +200,9 @@ export const PhysicsWorker: React.FC<PhysicsWorkerProps> = ({
     // Throttled check for nearby workers (every 5 frames for performance)
     const shouldCheckWorkers = frameCountRef.current % 5 === 0;
     if (shouldCheckWorkers) {
-      nearbyWorkersRef.current = positionRegistry.getWorkersNearby(
-        pos.x,
-        pos.z,
-        PHYSICS_CONFIG.worker.avoidanceRadius
-      ).filter(w => w.id !== data.id);
+      nearbyWorkersRef.current = positionRegistry
+        .getWorkersNearby(pos.x, pos.z, PHYSICS_CONFIG.worker.avoidanceRadius)
+        .filter((w) => w.id !== data.id);
     }
 
     // Apply separation force from nearby workers
@@ -232,7 +220,7 @@ export const PhysicsWorker: React.FC<PhysicsWorkerProps> = ({
         // Only apply separation if within personal space
         if (dist < PHYSICS_CONFIG.worker.personalSpace && dist > 0.01) {
           // Stronger separation for closer workers (inverse square falloff)
-          const strength = 1 - (dist / PHYSICS_CONFIG.worker.personalSpace);
+          const strength = 1 - dist / PHYSICS_CONFIG.worker.personalSpace;
           separationX += (dx / dist) * strength;
           separationZ += (dz / dist) * strength;
         }
@@ -260,7 +248,7 @@ export const PhysicsWorker: React.FC<PhysicsWorkerProps> = ({
         pos.z,
         directionRef.current,
         2.0, // Check 2 units ahead
-        0.8,  // 0.8 unit padding
+        0.8, // 0.8 unit padding
         false // Not a forklift
       );
 
@@ -381,7 +369,11 @@ export const PhysicsWorker: React.FC<PhysicsWorkerProps> = ({
     >
       <CapsuleCollider
         args={[PHYSICS_CONFIG.player.capsuleHalfHeight, PHYSICS_CONFIG.player.capsuleRadius]}
-        position={[0, PHYSICS_CONFIG.player.capsuleHalfHeight + PHYSICS_CONFIG.player.capsuleRadius, 0]}
+        position={[
+          0,
+          PHYSICS_CONFIG.player.capsuleHalfHeight + PHYSICS_CONFIG.player.capsuleRadius,
+          0,
+        ]}
       />
       {children}
     </RigidBody>

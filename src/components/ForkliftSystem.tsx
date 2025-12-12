@@ -219,59 +219,59 @@ const CrossingZoneMarkers: React.FC = () => {
         const zHeight = Math.max(0.1, Math.abs(zone.zMax - zone.zMin));
 
         return (
-        <group key={zone.id}>
-          {/* Hazard stripe markings on floor */}
-          <mesh
-            position={[(zone.xMin + zone.xMax) / 2, 0.02, zone.zMin]}
-            rotation={[-Math.PI / 2, 0, 0]}
-          >
-            <planeGeometry args={[xWidth, 0.3]} />
-            <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
-          </mesh>
-          <mesh
-            position={[(zone.xMin + zone.xMax) / 2, 0.02, zone.zMax]}
-            rotation={[-Math.PI / 2, 0, 0]}
-          >
-            <planeGeometry args={[xWidth, 0.3]} />
-            <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
-          </mesh>
-          {/* Side markers */}
-          <mesh
-            position={[zone.xMin, 0.02, (zone.zMin + zone.zMax) / 2]}
-            rotation={[-Math.PI / 2, 0, 0]}
-          >
-            <planeGeometry args={[0.3, zHeight]} />
-            <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
-          </mesh>
-          <mesh
-            position={[zone.xMax, 0.02, (zone.zMin + zone.zMax) / 2]}
-            rotation={[-Math.PI / 2, 0, 0]}
-          >
-            <planeGeometry args={[0.3, zHeight]} />
-            <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
-          </mesh>
-          {/* Warning text */}
-          <Text
-            position={[zone.xMin + 3, 0.03, (zone.zMin + zone.zMax) / 2]}
-            rotation={[-Math.PI / 2, 0, 0]}
-            fontSize={0.5}
-            color="#fbbf24"
-            anchorX="center"
-            anchorY="middle"
-          >
-            YIELD
-          </Text>
-          <Text
-            position={[zone.xMax - 3, 0.03, (zone.zMin + zone.zMax) / 2]}
-            rotation={[-Math.PI / 2, 0, 0]}
-            fontSize={0.5}
-            color="#fbbf24"
-            anchorX="center"
-            anchorY="middle"
-          >
-            YIELD
-          </Text>
-        </group>
+          <group key={zone.id}>
+            {/* Hazard stripe markings on floor */}
+            <mesh
+              position={[(zone.xMin + zone.xMax) / 2, 0.02, zone.zMin]}
+              rotation={[-Math.PI / 2, 0, 0]}
+            >
+              <planeGeometry args={[xWidth, 0.3]} />
+              <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
+            </mesh>
+            <mesh
+              position={[(zone.xMin + zone.xMax) / 2, 0.02, zone.zMax]}
+              rotation={[-Math.PI / 2, 0, 0]}
+            >
+              <planeGeometry args={[xWidth, 0.3]} />
+              <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
+            </mesh>
+            {/* Side markers */}
+            <mesh
+              position={[zone.xMin, 0.02, (zone.zMin + zone.zMax) / 2]}
+              rotation={[-Math.PI / 2, 0, 0]}
+            >
+              <planeGeometry args={[0.3, zHeight]} />
+              <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
+            </mesh>
+            <mesh
+              position={[zone.xMax, 0.02, (zone.zMin + zone.zMax) / 2]}
+              rotation={[-Math.PI / 2, 0, 0]}
+            >
+              <planeGeometry args={[0.3, zHeight]} />
+              <meshBasicMaterial color="#fbbf24" transparent opacity={0.6} />
+            </mesh>
+            {/* Warning text */}
+            <Text
+              position={[zone.xMin + 3, 0.03, (zone.zMin + zone.zMax) / 2]}
+              rotation={[-Math.PI / 2, 0, 0]}
+              fontSize={0.5}
+              color="#fbbf24"
+              anchorX="center"
+              anchorY="middle"
+            >
+              YIELD
+            </Text>
+            <Text
+              position={[zone.xMax - 3, 0.03, (zone.zMin + zone.zMax) / 2]}
+              rotation={[-Math.PI / 2, 0, 0]}
+              fontSize={0.5}
+              color="#fbbf24"
+              anchorX="center"
+              anchorY="middle"
+            >
+              YIELD
+            </Text>
+          </group>
         );
       })}
     </group>
@@ -472,6 +472,13 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       initializedRef.current = true;
     }
   }, [data.position]);
+
+  // Cleanup: unregister from position registry on unmount
+  useEffect(() => {
+    return () => {
+      positionRegistry.unregister(data.id);
+    };
+  }, [data.id]);
 
   useFrame((state, delta) => {
     // PERFORMANCE: Skip all forklift logic when tab hidden

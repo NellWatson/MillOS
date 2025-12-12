@@ -109,6 +109,13 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
     onCargoChange?.(hasCargo);
   }, [hasCargo, onCargoChange]);
 
+  // Cleanup: unregister from position registry on unmount
+  useEffect(() => {
+    return () => {
+      positionRegistry.unregister(data.id);
+    };
+  }, [data.id]);
+
   // Position update callback
   const updatePosition = useCallback(
     (rotation: number) => {
@@ -116,16 +123,12 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
       const pos = rigidBodyRef.current.translation();
       const dir = directionRef.current;
 
+      // isStopped should include emergency drill mode AND loading/unloading operations
+      // This ensures workers treat halted forklifts (during operations) correctly
+      const isStopped = emergencyDrillMode || operationRef.current !== 'traveling';
+
       // Register with position registry for collision avoidance
-      positionRegistry.register(
-        data.id,
-        pos.x,
-        pos.z,
-        'forklift',
-        dir.x,
-        dir.z,
-        emergencyDrillMode // isStopped
-      );
+      positionRegistry.register(data.id, pos.x, pos.z, 'forklift', dir.x, dir.z, isStopped);
 
       // Notify parent of position update
       onPositionUpdate?.(pos.x, pos.z, rotation);

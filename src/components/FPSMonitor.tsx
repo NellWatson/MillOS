@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 import { GraphicsQuality } from '../store';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { ChevronUp, ChevronDown, X } from 'lucide-react';
@@ -130,18 +131,36 @@ export const FPSTracker: React.FC = () => {
   const frameCount = useRef(0);
   const frameAccumulator = useRef(0);
   const { gl } = useThree();
-  const setFPS = useFPSStore((state) => state.setFPS);
-  const setRendererStats = useFPSStore((state) => state.setRendererStats);
-  const setProfileData = useFPSStore((state) => state.setProfileData);
-  const profilingEnabled = useFPSStore((state) => state.profilingEnabled);
-  const qualitySuggestionsEnabled = useFPSStore((state) => state.qualitySuggestionsEnabled);
-  const pendingSuggestion = useFPSStore((state) => state.pendingSuggestion);
-  const suggestionDismissedAt = useFPSStore((state) => state.suggestionDismissedAt);
-  const lowFpsStartTime = useFPSStore((state) => state.lowFpsStartTime);
-  const highFpsStartTime = useFPSStore((state) => state.highFpsStartTime);
-  const setPendingSuggestion = useFPSStore((state) => state.setPendingSuggestion);
-  const setLowFpsStartTime = useFPSStore((state) => state.setLowFpsStartTime);
-  const setHighFpsStartTime = useFPSStore((state) => state.setHighFpsStartTime);
+
+  const {
+    setFPS,
+    setRendererStats,
+    setProfileData,
+    profilingEnabled,
+    qualitySuggestionsEnabled,
+    pendingSuggestion,
+    suggestionDismissedAt,
+    lowFpsStartTime,
+    highFpsStartTime,
+    setPendingSuggestion,
+    setLowFpsStartTime,
+    setHighFpsStartTime,
+  } = useFPSStore(
+    useShallow((state) => ({
+      setFPS: state.setFPS,
+      setRendererStats: state.setRendererStats,
+      setProfileData: state.setProfileData,
+      profilingEnabled: state.profilingEnabled,
+      qualitySuggestionsEnabled: state.qualitySuggestionsEnabled,
+      pendingSuggestion: state.pendingSuggestion,
+      suggestionDismissedAt: state.suggestionDismissedAt,
+      lowFpsStartTime: state.lowFpsStartTime,
+      highFpsStartTime: state.highFpsStartTime,
+      setPendingSuggestion: state.setPendingSuggestion,
+      setLowFpsStartTime: state.setLowFpsStartTime,
+      setHighFpsStartTime: state.setHighFpsStartTime,
+    }))
+  );
 
   const currentQuality = useGraphicsStore((state) => state.graphics.quality);
 
@@ -329,11 +348,15 @@ const ProfileBar: React.FC<{ label: string; value: number; max: number; color: s
 
 // Quality suggestion popup component
 const QualitySuggestion: React.FC = () => {
-  const pendingSuggestion = useFPSStore((state) => state.pendingSuggestion);
-  const setPendingSuggestion = useFPSStore((state) => state.setPendingSuggestion);
-  const setSuggestionDismissedAt = useFPSStore((state) => state.setSuggestionDismissedAt);
+  const { pendingSuggestion, setPendingSuggestion, setSuggestionDismissedAt, fps } = useFPSStore(
+    useShallow((state) => ({
+      pendingSuggestion: state.pendingSuggestion,
+      setPendingSuggestion: state.setPendingSuggestion,
+      setSuggestionDismissedAt: state.setSuggestionDismissedAt,
+      fps: state.fps,
+    }))
+  );
   const setGraphicsQuality = useGraphicsStore((state) => state.setGraphicsQuality);
-  const fps = useFPSStore((state) => state.fps);
 
   if (!pendingSuggestion) return null;
 

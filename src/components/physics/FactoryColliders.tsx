@@ -7,11 +7,13 @@
 
 import { RigidBody, CuboidCollider } from '@react-three/rapier';
 import { useMemo } from 'react';
-import {
-  FACTORY_BOUNDS,
-  COLLISION_FILTERS,
-  createCollisionGroups,
-} from '../../physics/PhysicsConfig';
+import { COLLISION_FILTERS, createCollisionGroups } from '../../physics/PhysicsConfig';
+
+// Circular world boundary - matches mountains at radius 260
+const WORLD_RADIUS = 255;
+const BOUNDARY_SEGMENTS = 32; // Number of wall segments forming the circle
+const BOUNDARY_HEIGHT = 35;
+const BOUNDARY_THICKNESS = 2;
 
 // Obstacle definition matching MillScene.tsx structure
 interface ObstacleData {
@@ -192,7 +194,71 @@ function generateObstacles(): ObstacleData[] {
     forkliftOnly: true,
   });
 
+  // ========== BRIDGES (walkable surfaces) ==========
+
+  // FootBridge over canal at [-145, 0, -50] with rotation PI/2
+  // Original: width=2.5, length=14, deck at y=1.2
+  // After PI/2 rotation: X span becomes length (14), Z span becomes width (2.5)
+  obstacles.push({
+    id: 'footbridge-canal',
+    minX: -145 - 7, // half of length
+    maxX: -145 + 7,
+    minZ: -50 - 1.25, // half of width
+    maxZ: -50 + 1.25,
+    minY: 1.0, // slightly below deck surface for step-up
+    maxY: 1.4, // deck surface + small buffer
+  });
+
+  // River Stone Bridge at [0, -145] (inside River component)
+  // Deck at y=1.5, dimensions [18, 0.8, river_width+4] where river_width=20
+  obstacles.push({
+    id: 'stone-bridge-river',
+    minX: -9, // half of 18
+    maxX: 9,
+    minZ: -145 - 12, // half of 24
+    maxZ: -145 + 12,
+    minY: 1.1, // below deck for step-up
+    maxY: 1.9, // deck top
+  });
+
+  // LockGate walkway at [-145, 50], width=10
+  // Walkway at y=3, dimensions [11.5, 0.15, 1]
+  obstacles.push({
+    id: 'lockgate-walkway',
+    minX: -145 - 5.75,
+    maxX: -145 + 5.75,
+    minZ: 50 - 0.5,
+    maxZ: 50 + 0.5,
+    minY: 2.8, // below walkway for step-up
+    maxY: 3.15, // walkway surface
+  });
+
   return obstacles;
+}
+
+// Generate circular boundary wall segments
+function generateBoundarySegments(): Array<{
+  x: number;
+  z: number;
+  rotation: number;
+  width: number;
+}> {
+  const segments: Array<{ x: number; z: number; rotation: number; width: number }> = [];
+  const angleStep = (Math.PI * 2) / BOUNDARY_SEGMENTS;
+  // Calculate chord length for each segment
+  const chordLength = 2 * WORLD_RADIUS * Math.sin(angleStep / 2);
+
+  for (let i = 0; i < BOUNDARY_SEGMENTS; i++) {
+    const angle = i * angleStep + angleStep / 2; // Center of segment
+    segments.push({
+      x: Math.cos(angle) * WORLD_RADIUS,
+      z: Math.sin(angle) * WORLD_RADIUS,
+      rotation: angle + Math.PI / 2, // Perpendicular to radius
+      width: chordLength / 2 + 1, // Half-width for CuboidCollider args + overlap
+    });
+  }
+
+  return segments;
 }
 
 /**
@@ -200,47 +266,43 @@ function generateObstacles(): ObstacleData[] {
  */
 export const FactoryColliders: React.FC = () => {
   const obstacles = useMemo(() => generateObstacles(), []);
-  const collisionGroups = useMemo(
+  const boundarySegments = useMemo(() => generateBoundarySegments(), []);
+
+  // Static objects (machines, floor) - collide with player, workers, forklifts
+  const staticCollisionGroups = useMemo(
+    () =>
+      createCollisionGroups(COLLISION_FILTERS.static.memberships, COLLISION_FILTERS.static.filter),
+    []
+  );
+
+  // Boundary walls - no collision (player can walk through)
+  const boundaryCollisionGroups = useMemo(
     () =>
       createCollisionGroups(
-        COLLISION_FILTERS.static.memberships,
-        COLLISION_FILTERS.static.filter
+        COLLISION_FILTERS.boundary.memberships,
+        COLLISION_FILTERS.boundary.filter
       ),
     []
   );
 
   return (
     <>
-      {/* Factory boundary walls - invisible physics walls */}
-      <RigidBody type="fixed" collisionGroups={collisionGroups}>
-        {/* Back wall (z = -80) */}
-        <CuboidCollider
-          args={[FACTORY_BOUNDS.maxX, FACTORY_BOUNDS.height / 2, 1]}
-          position={[0, FACTORY_BOUNDS.height / 2, FACTORY_BOUNDS.minZ]}
-        />
-        {/* Front wall (z = 80) */}
-        <CuboidCollider
-          args={[FACTORY_BOUNDS.maxX, FACTORY_BOUNDS.height / 2, 1]}
-          position={[0, FACTORY_BOUNDS.height / 2, FACTORY_BOUNDS.maxZ]}
-        />
-        {/* Left wall (x = -60) */}
-        <CuboidCollider
-          args={[1, FACTORY_BOUNDS.height / 2, FACTORY_BOUNDS.maxZ]}
-          position={[FACTORY_BOUNDS.minX, FACTORY_BOUNDS.height / 2, 0]}
-        />
-        {/* Right wall (x = 60) */}
-        <CuboidCollider
-          args={[1, FACTORY_BOUNDS.height / 2, FACTORY_BOUNDS.maxZ]}
-          position={[FACTORY_BOUNDS.maxX, FACTORY_BOUNDS.height / 2, 0]}
-        />
-      </RigidBody>
+      {/* Circular boundary walls - ring of segments at mountain base (no collision) */}
+      {boundarySegments.map((seg, i) => (
+        <RigidBody
+          key={`boundary-${i}`}
+          type="fixed"
+          position={[seg.x, BOUNDARY_HEIGHT / 2, seg.z]}
+          rotation={[0, seg.rotation, 0]}
+          collisionGroups={boundaryCollisionGroups}
+        >
+          <CuboidCollider args={[seg.width, BOUNDARY_HEIGHT / 2, BOUNDARY_THICKNESS / 2]} />
+        </RigidBody>
+      ))}
 
-      {/* Floor - prevents falling through */}
-      <RigidBody type="fixed" collisionGroups={collisionGroups}>
-        <CuboidCollider
-          args={[FACTORY_BOUNDS.maxX, 0.5, FACTORY_BOUNDS.maxZ]}
-          position={[0, -0.5, 0]}
-        />
+      {/* Floor - large circular area up to mountains */}
+      <RigidBody type="fixed" collisionGroups={staticCollisionGroups}>
+        <CuboidCollider args={[WORLD_RADIUS, 0.5, WORLD_RADIUS]} position={[0, -0.5, 0]} />
       </RigidBody>
 
       {/* Machine and obstacle colliders */}
@@ -256,13 +318,10 @@ export const FactoryColliders: React.FC = () => {
           <RigidBody
             key={obs.id}
             type="fixed"
-            collisionGroups={collisionGroups}
+            collisionGroups={staticCollisionGroups}
             userData={{ obstacleId: obs.id, forkliftOnly: obs.forkliftOnly }}
           >
-            <CuboidCollider
-              args={[width, height, depth]}
-              position={[centerX, centerY, centerZ]}
-            />
+            <CuboidCollider args={[width, height, depth]} position={[centerX, centerY, centerZ]} />
           </RigidBody>
         );
       })}

@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { shouldRunThisFrame, getThrottleLevel } from '../utils/frameThrottle';
+import { useShallow } from 'zustand/react/shallow';
 
 // ============================================================
 // Dust Animation Manager - Centralized useFrame for all particle systems
@@ -350,9 +351,13 @@ export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
   const context = useDustAnimation();
   const gameTime = useGameSimulationStore((state) => state.gameTime);
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
-  const dustParticleCount = useGraphicsStore((state) => state.graphics.dustParticleCount);
-  const enableDustParticles = useGraphicsStore((state) => state.graphics.enableDustParticles);
-  const quality = useGraphicsStore((state) => state.graphics.quality);
+  const { dustParticleCount, enableDustParticles, quality } = useGraphicsStore(
+    useShallow((state) => ({
+      dustParticleCount: state.graphics.dustParticleCount,
+      enableDustParticles: state.graphics.enableDustParticles,
+      quality: state.graphics.quality,
+    }))
+  );
 
   // Use graphics setting for particle count
   const effectiveCount = Math.min(count, dustParticleCount);
@@ -454,8 +459,12 @@ export const GrainFlow: React.FC = () => {
   const particlesRef = useRef<THREE.Points>(null);
   const idRef = useRef(`grainFlow-${Math.random().toString(36).slice(2, 9)}`);
   const context = useDustAnimation();
-  const enableGrainFlow = useGraphicsStore((state) => state.graphics.enableGrainFlow);
-  const quality = useGraphicsStore((state) => state.graphics.quality);
+  const { enableGrainFlow, quality } = useGraphicsStore(
+    useShallow((state) => ({
+      enableGrainFlow: state.graphics.enableGrainFlow,
+      quality: state.graphics.quality,
+    }))
+  );
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const isEnabled = enableGrainFlow;
 

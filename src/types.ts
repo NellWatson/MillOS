@@ -514,7 +514,7 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
   },
   {
     id: 'w4',
-    name: 'Emily Watson',
+    name: 'Emily Ronson',
     gender: 'female',
     role: 'Quality Control',
     icon: 'quality',

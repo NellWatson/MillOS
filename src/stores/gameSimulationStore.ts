@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { safeJSONStorage } from './storage';
+import { audioManager } from '../utils/audioManager';
+import { useProductionStore } from './productionStore';
 
 export type CelebrationType = 'milestone' | 'zero_incident' | 'target_met' | 'shift_complete';
 
@@ -245,6 +247,51 @@ const createDefaultDrillMetrics = (): DrillMetrics => ({
   evacuationComplete: false,
   finalTimeSeconds: null,
 });
+
+const FIRE_DRILL_ANNOUNCEMENTS = [
+  {
+    message:
+      'Attention all personnel. This is a fire drill. Please proceed to the nearest exit in an orderly fashion. Yes, Dave, that means you too.',
+    type: 'emergency' as const,
+    priority: 'critical' as const,
+    duration: 20,
+  },
+  {
+    message:
+      'Fire drill initiated. Remember, this is practice for if flour becomes sentient and combustible. Stranger things have happened.',
+    type: 'emergency' as const,
+    priority: 'critical' as const,
+    duration: 20,
+  },
+  {
+    message:
+      'Emergency evacuation drill in progress. The last person out does NOT win a prize. Please move with purpose.',
+    type: 'emergency' as const,
+    priority: 'critical' as const,
+    duration: 20,
+  },
+  {
+    message:
+      'Fire drill. Please leave your workstations immediately. The flour will be fine. It has survived worse than your absence.',
+    type: 'emergency' as const,
+    priority: 'critical' as const,
+    duration: 20,
+  },
+  {
+    message:
+      'This is a drill. Repeat, this is a drill. If this were an actual emergency, you would already be running. Take notes.',
+    type: 'emergency' as const,
+    priority: 'critical' as const,
+    duration: 20,
+  },
+  {
+    message:
+      'Evacuation drill commencing. Fun fact: the average worker can exit the building in ninety seconds. Let us see if we can beat that.',
+    type: 'emergency' as const,
+    priority: 'critical' as const,
+    duration: 22,
+  },
+];
 
 // Helper to find nearest exit
 const findNearestExit = (x: number, z: number): FireDrillExit => {
@@ -574,21 +621,15 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
 
       startEmergencyDrill: (totalWorkers: number) => {
         // Start alarm sound and queue funny PA announcement
-        import('../utils/audioManager').then(({ audioManager }) => {
-          audioManager.startEmergencyAlarm();
-        });
+        audioManager.startEmergencyAlarm();
         // Add fire drill announcement to PA system
-        import('../components/GameFeatures').then(({ FIRE_DRILL_ANNOUNCEMENTS }) => {
-          import('./productionStore').then(({ useProductionStore }) => {
-            const announcement =
-              FIRE_DRILL_ANNOUNCEMENTS[Math.floor(Math.random() * FIRE_DRILL_ANNOUNCEMENTS.length)];
-            useProductionStore.getState().addAnnouncement({
-              type: 'emergency',
-              message: announcement.message,
-              duration: announcement.duration,
-              priority: 'critical',
-            });
-          });
+        const announcement =
+          FIRE_DRILL_ANNOUNCEMENTS[Math.floor(Math.random() * FIRE_DRILL_ANNOUNCEMENTS.length)];
+        useProductionStore.getState().addAnnouncement({
+          type: announcement.type,
+          message: announcement.message,
+          duration: announcement.duration,
+          priority: announcement.priority,
         });
 
         set({
@@ -608,9 +649,7 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
 
       endEmergencyDrill: () => {
         // Stop alarm sound
-        import('../utils/audioManager').then(({ audioManager }) => {
-          audioManager.stopEmergencyAlarm();
-        });
+        audioManager.stopEmergencyAlarm();
 
         set({
           emergencyActive: false,
@@ -634,9 +673,7 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
 
           // Stop alarm when evacuation complete
           if (evacuationComplete) {
-            import('../utils/audioManager').then(({ audioManager }) => {
-              audioManager.stopEmergencyAlarm();
-            });
+            audioManager.stopEmergencyAlarm();
           }
 
           return {

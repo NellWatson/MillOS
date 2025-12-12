@@ -13,7 +13,7 @@ export const MissionControl: React.FC = () => {
     <motion.div
       initial={{ x: -50, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
-      className="fixed top-4 left-4 bottom-24 w-64 flex flex-col gap-3 pointer-events-none"
+      className="fixed top-4 left-4 bottom-24 w-64 flex flex-col gap-3 pointer-events-none z-40"
     >
       {/* Brand / Clock Widget */}
       <div className="bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-xl p-4 shadow-lg pointer-events-auto">

@@ -427,7 +427,7 @@ const MACHINE_PERSONALITY_ANNOUNCEMENTS: AnnouncementConfig[] = [
   },
   {
     message:
-      "The sign on Roller Mill R.M.-103 reading 'Percussive Maintenance Zone' has been removed. Again.",
+      "The sign on Roller Mill R.M. 103 reading 'Percussive Maintenance Zone' has been removed. Again.",
     type: 'general',
     category: 'equipment',
     chaosWeight: 0.4,
@@ -441,7 +441,7 @@ const MACHINE_PERSONALITY_ANNOUNCEMENTS: AnnouncementConfig[] = [
   },
   {
     message:
-      'Roller Mill R.M.-104 is making the noise again. The noise that sounds like disappointment. Please investigate.',
+      'Roller Mill R.M. 104 is making the noise again. The noise that sounds like disappointment. Please investigate.',
     type: 'general',
     category: 'equipment',
     chaosWeight: 0.5,
@@ -673,7 +673,7 @@ const SAFETY_HUMOR_ANNOUNCEMENTS: AnnouncementConfig[] = [
 const MAINTENANCE_ANNOUNCEMENTS: AnnouncementConfig[] = [
   {
     message:
-      'Maintenance crew to Roller Mill R.M.-103. Bring your optimism. Leave your skepticism.',
+      'Maintenance crew to Roller Mill R.M. 103. Bring your optimism. Leave your skepticism.',
     type: 'general',
     category: 'equipment',
     chaosWeight: 0.5,
@@ -1237,7 +1237,7 @@ const CALM_ANNOUNCEMENTS: AnnouncementConfig[] = [
   },
   {
     message:
-      'The only sound is the sound of progress. And that weird click from R.M.-104. But mostly progress.',
+      'The only sound is the sound of progress. And that weird click from R.M. 104. But mostly progress.',
     type: 'production',
     category: 'calm',
     chaosWeight: 0.15,
@@ -1366,7 +1366,7 @@ const WORKERS: WorkerInfo[] = [
   { name: 'Marcus Chen', gender: 'male' },
   { name: 'Sarah Mitchell', gender: 'female' },
   { name: 'James Rodriguez', gender: 'male' },
-  { name: 'Emily Watson', gender: 'female' },
+  { name: 'Emily Ronson', gender: 'female' },
   { name: 'David Kim', gender: 'male' },
   { name: 'Lisa Thompson', gender: 'female' },
   { name: 'Robert Garcia', gender: 'male' },
@@ -1378,7 +1378,7 @@ const WORKERS: WorkerInfo[] = [
 // Machine IDs and names for dynamic injection
 const MACHINE_IDS = {
   silos: ['Silo Alpha', 'Silo Beta', 'Silo Gamma', 'Silo Delta', 'Silo Epsilon'],
-  mills: ['RM-101', 'RM-102', 'RM-103', 'RM-104', 'RM-105', 'RM-106'],
+  mills: ['R.M. 101', 'R.M. 102', 'R.M. 103', 'R.M. 104', 'R.M. 105', 'R.M. 106'],
   sifters: ['Sifter A', 'Sifter B', 'Sifter C'],
   packers: ['Packer Line 1', 'Packer Line 2', 'Packer Line 3'],
 };
@@ -2229,21 +2229,21 @@ const getShiftAnnouncement = (
   // Day shift ends at 14:00 - announce between 13:30-14:00
   if (hour === 13 && minutes >= 30) {
     return {
-      message: `${timeStr} - Day shift ending at 14:00. Evening crew, please report to stations.`,
+      message: `${timeStr} — Day shift ending at 14:00. Evening crew, please report to stations.`,
       type: 'shift_change',
     };
   }
   // Evening shift ends at 22:00 - announce between 21:30-22:00
   if (hour === 21 && minutes >= 30) {
     return {
-      message: `${timeStr} - Evening shift ending at 22:00. Night crew, please report to stations.`,
+      message: `${timeStr} — Evening shift ending at 22:00. Night crew, please report to stations.`,
       type: 'shift_change',
     };
   }
   // Night shift ends at 6:00 - announce between 5:30-6:00
   if (hour === 5 && minutes >= 30) {
     return {
-      message: `${timeStr} - Night shift ending at 06:00. Day crew, please report to stations.`,
+      message: `${timeStr} — Night shift ending at 06:00. Day crew, please report to stations.`,
       type: 'shift_change',
     };
   }
@@ -2254,7 +2254,7 @@ const getShiftAnnouncement = (
     (hour === 5 && minutes >= 25 && minutes < 30)
   ) {
     return {
-      message: `${timeStr} - Shift change in 5 minutes. Please complete current tasks.`,
+      message: `${timeStr} — Shift change in 5 minutes. Please complete current tasks.`,
       type: 'shift_change',
     };
   }

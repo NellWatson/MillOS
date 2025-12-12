@@ -513,13 +513,16 @@ const SlipEffect: React.FC<{ workerId: string }> = React.memo(({ workerId }) => 
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
   // Memoize motion line heights to prevent NaN errors from Math.random() in geometry args
-  const motionLineHeights = useMemo(() => [
-    0.15 + Math.random() * 0.1,
-    0.15 + Math.random() * 0.1,
-    0.15 + Math.random() * 0.1,
-    0.15 + Math.random() * 0.1,
-    0.15 + Math.random() * 0.1,
-  ], []);
+  const motionLineHeights = useMemo(
+    () => [
+      0.15 + Math.random() * 0.1,
+      0.15 + Math.random() * 0.1,
+      0.15 + Math.random() * 0.1,
+      0.15 + Math.random() * 0.1,
+      0.15 + Math.random() * 0.1,
+    ],
+    []
+  );
 
   // Register with animation manager if available
   useEffect(() => {

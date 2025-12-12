@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { Html, useGLTF, Text } from '@react-three/drei';
 import { audioManager } from '../utils/audioManager';
 import { useGraphicsStore } from '../stores/graphicsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { getStatusColor } from '../utils/statusColors';
 import { useSCADAMachineVisuals, useSCADAAlarmVisuals } from '../scada';
 import { useModelAvailable, MODEL_PATHS } from '../utils/modelLoader';
@@ -1519,15 +1520,24 @@ const MachineMesh: React.FC<MachineMeshProps> = ({ data, onClick, onStateUpdate 
   const groupRef = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
 
-  // Graphics settings
-  const enableVibration = useGraphicsStore((state) => state.graphics.enableMachineVibration);
-  const enableTextures = useGraphicsStore((state) => state.graphics.enableProceduralTextures);
-  const enableWeathering = useGraphicsStore((state) => state.graphics.enableWeathering);
-  const enableControlPanels = useGraphicsStore((state) => state.graphics.enableControlPanels);
-  const enableAnisotropicReflections = useGraphicsStore(
-    (state) => state.graphics.enableAnisotropicReflections
+  // PERFORMANCE: Consolidated graphics store subscriptions to prevent unnecessary re-renders
+  const {
+    enableVibration,
+    enableTextures,
+    enableWeathering,
+    enableControlPanels,
+    enableAnisotropicReflections,
+    quality,
+  } = useGraphicsStore(
+    useShallow((state) => ({
+      enableVibration: state.graphics.enableMachineVibration,
+      enableTextures: state.graphics.enableProceduralTextures,
+      enableWeathering: state.graphics.enableWeathering,
+      enableControlPanels: state.graphics.enableControlPanels,
+      enableAnisotropicReflections: state.graphics.enableAnisotropicReflections,
+      quality: state.graphics.quality,
+    }))
   );
-  const quality = useGraphicsStore((state) => state.graphics.quality);
   // PERFORMANCE: Skip animated sub-components on LOW quality
   const isLowQuality = quality === 'low';
 

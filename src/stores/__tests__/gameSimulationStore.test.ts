@@ -21,9 +21,9 @@ describe('GameSimulationStore', () => {
   });
 
   describe('Game Time', () => {
-    it('should initialize with game time at 6am', () => {
+    it('should initialize with game time at 10am', () => {
       const { gameTime } = useGameSimulationStore.getState();
-      expect(gameTime).toBe(6);
+      expect(gameTime).toBe(10);
     });
 
     it('should initialize with default game speed of 60', () => {
@@ -63,7 +63,7 @@ describe('GameSimulationStore', () => {
       vi.advanceTimersByTime(200);
       tickGameTime(1);
 
-      expect(useGameSimulationStore.getState().gameTime).toBe(6); // Unchanged
+      expect(useGameSimulationStore.getState().gameTime).toBe(10); // Unchanged (10am default)
     });
 
     it('should advance time based on delta and speed', () => {
@@ -88,7 +88,7 @@ describe('GameSimulationStore', () => {
       // Time calculation: At 3600x speed, 1 real second = 1 game hour
       // With accumulated 1 second of real time, we should advance ~1 hour
       // But due to throttling, actual change may be less
-      expect(gameTime).toBeGreaterThanOrEqual(6);
+      expect(gameTime).toBeGreaterThanOrEqual(10);
     });
   });
 
@@ -468,7 +468,7 @@ describe('GameSimulationStore', () => {
       resetGameState();
 
       const state = useGameSimulationStore.getState();
-      expect(state.gameTime).toBe(6);
+      expect(state.gameTime).toBe(10); // 10am default
       expect(state.gameSpeed).toBe(60);
       expect(state.currentShift).toBe('morning');
       expect(state.crisisState.active).toBe(false);

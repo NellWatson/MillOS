@@ -26,6 +26,7 @@ import { VisibleChaos } from './VisibleChaos';
 import { FactoryEnvironmentSystem } from './FactoryEnvironment';
 import { MaintenanceSystem } from './MaintenanceSystem';
 import { useMoodSimulation } from './WorkerMoodOverlay';
+import { RemotePlayersGroup } from './multiplayer';
 import { MachineData, MachineType, WorkerData } from '../types';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useProductionStore } from '../stores/productionStore';
@@ -138,8 +139,9 @@ const IncidentHeatMap: React.FC = () => {
 
   return (
     <group>
-      {incidentHeatMap.map((point, i) => (
-        <HeatMapPoint key={i} point={point} />
+      {incidentHeatMap.map((point) => (
+        // PERFORMANCE: Use stable position-based key instead of array index to prevent unnecessary re-renders
+        <HeatMapPoint key={`${point.x}-${point.z}`} point={point} />
       ))}
     </group>
   );
@@ -585,8 +587,13 @@ export const MillScene: React.FC<MillSceneProps> = ({
 
   // Use store machines if available, otherwise use local machines
   const displayMachines = storeMachines.length > 0 ? storeMachines : machines;
-  const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
-  const perfDebug = useGraphicsStore((state) => state.graphics.perfDebug);
+  // PERFORMANCE: Consolidated store subscriptions with useShallow to prevent unnecessary re-renders
+  const { graphicsQuality, perfDebug } = useGraphicsStore(
+    useShallow((state) => ({
+      graphicsQuality: state.graphics.quality,
+      perfDebug: state.graphics.perfDebug,
+    }))
+  );
   const isLowGraphics = graphicsQuality === 'low';
 
   // Camera-based visibility culling - hide interior when outside, hide exterior when inside
@@ -635,6 +642,8 @@ export const MillScene: React.FC<MillSceneProps> = ({
       {isCameraInside && !perfDebug?.disableWorkerSystem && (
         <WorkerSystem onSelectWorker={onSelectWorker} />
       )}
+      {/* Remote multiplayer players */}
+      <RemotePlayersGroup />
       {isCameraInside && !perfDebug?.disableForkliftSystem && (
         <ForkliftSystem showSpeedZones={showZones} onSelectForklift={onSelectForklift} />
       )}

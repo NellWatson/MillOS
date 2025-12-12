@@ -15,14 +15,26 @@ import {
   FPSCrosshair,
   FPSInstructions,
 } from './components/FirstPersonController';
-import { FactoryColliders, ExitZoneSensors, PhysicsFirstPersonController, PhysicsDebug } from './components/physics';
+import {
+  FactoryColliders,
+  ExitZoneSensors,
+  PhysicsFirstPersonController,
+  PhysicsDebug,
+} from './components/physics';
 import ErrorBoundary from './components/ErrorBoundary';
 import { MachineData, WorkerData } from './types';
 import { ForkliftData } from './components/ForkliftSystem';
 import { AnimatePresence, motion } from 'framer-motion';
 import { audioManager } from './utils/audioManager';
 import { initializeAIEngine } from './utils/aiEngine';
-import { useGraphicsStore, useUIStore, initializeSCADASync, useGameSimulationStore } from './store';
+import {
+  useGraphicsStore,
+  useUIStore,
+  initializeSCADASync,
+  useGameSimulationStore,
+  useProductionStore,
+} from './store';
+import { useShallow } from 'zustand/react/shallow';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 
 // Expose stores to window for performance debugging (dev mode only)
@@ -36,24 +48,37 @@ if (import.meta.env.DEV) {
   (window as unknown as { useFPSStore: typeof useFPSStore }).useFPSStore = useFPSStore;
 }
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useMultiplayerSync } from './multiplayer';
+import { MultiplayerChat, AIDecisionVotingPanel } from './components/multiplayer';
 
 const App: React.FC = () => {
   // PERF DEBUG: Track App re-renders
   trackRender('App');
 
-  const [productionSpeed, setProductionSpeed] = useState(0.8);
+  const [productionSpeed, setProductionSpeedLocal] = useState(0.8);
   const [showZones, setShowZones] = useState(true);
+
+  // Sync local production speed to store (HolographicDisplays reads from store)
+  const setStoreProductionSpeed = useProductionStore((state) => state.setProductionSpeed);
+  const setProductionSpeed = useCallback(
+    (speed: number) => {
+      setProductionSpeedLocal(speed);
+      setStoreProductionSpeed(speed);
+    },
+    [setStoreProductionSpeed]
+  );
+
+  // Initialize store with local state on mount
+  useEffect(() => {
+    setStoreProductionSpeed(productionSpeed);
+  }, []);
 
   // New UI handles panels via Dock/Sidebar, but we still need some state for selection
   const [selectedMachine, setSelectedMachine] = useState<MachineData | null>(null);
   const [selectedWorker, setSelectedWorker] = useState<WorkerData | null>(null);
   const [selectedForklift, setSelectedForklift] = useState<ForkliftData | null>(null);
 
-  // NOTE: showAIPanel and showSCADAPanel are now managed by GameInterface's internal activeMode state
-  // But we might need to expose them if keyboard shortcuts trigger them.
-  // For now, let's keep the shortcuts working by passing these setters if needed,
-  // or refactor useKeyboardShortcuts.
-  // Let's keep the state here to support legacy shortcuts for now, even if GameInterface has its own logic.
+  // AI/SCADA panel state - synced bidirectionally with GameInterface via props
   const [showAIPanel, setShowAIPanel] = useState(false);
   const [showSCADAPanel, setShowSCADAPanel] = useState(false);
 
@@ -61,10 +86,15 @@ const App: React.FC = () => {
   const [qualityNotification, setQualityNotification] = useState<string | null>(null);
   const [autoRotate, setAutoRotate] = useState(true);
 
-  const currentQuality = useGraphicsStore((state) => state.graphics.quality);
-  const enablePhysics = useGraphicsStore((state) => state.graphics.enablePhysics);
-  const initialQualityRef = useRef(currentQuality);
-  const canvasQuality = initialQualityRef.current;
+  // PERFORMANCE: Consolidated store subscriptions with useShallow to prevent unnecessary re-renders
+  const { currentQuality, enablePhysics } = useGraphicsStore(
+    useShallow((state) => ({
+      currentQuality: state.graphics.quality,
+      enablePhysics: state.graphics.enablePhysics,
+    }))
+  );
+  // Use currentQuality directly - Canvas key forces remount when quality changes
+  const canvasQuality = currentQuality;
   const fpsMode = useUIStore((state) => state.fpsMode);
   const [showFpsInstructions, setShowFpsInstructions] = useState(false);
   const hasShownFpsInstructions = useRef(false);
@@ -125,6 +155,9 @@ const App: React.FC = () => {
     setAutoRotate,
     setQualityNotification,
   });
+
+  // Initialize multiplayer state synchronization
+  useMultiplayerSync();
 
   // Initialize audio on first user interaction (required by Web Audio API)
   const initializeAudio = useCallback(() => {
@@ -198,7 +231,7 @@ const App: React.FC = () => {
     return cleanup;
   }, []);
 
-  // Initialize SCADA system
+  // Initialize SCADA system - uses same consolidated subscription
   const enableSCADA = useGraphicsStore((state) => state.graphics.enableSCADA);
   useEffect(() => {
     if (!enableSCADA) {
@@ -259,6 +292,10 @@ const App: React.FC = () => {
         selectedMachine={selectedMachine}
         selectedWorker={selectedWorker}
         onCloseSelection={handleCloseSelection}
+        showAIPanel={showAIPanel}
+        showSCADAPanel={showSCADAPanel}
+        onAIPanelChange={setShowAIPanel}
+        onSCADAPanelChange={setShowSCADAPanel}
       />
 
       {/* Forklift Info Panel (Keep as legacy simple overlay for now, or move to sidebar later) */}
@@ -311,6 +348,7 @@ const App: React.FC = () => {
       >
         <ErrorBoundary fallback={WebGLErrorFallback}>
           <Canvas
+            key={`canvas-${canvasQuality}`} // Force remount when quality changes
             shadows={canvasQuality !== 'low' ? { type: THREE.PCFShadowMap } : false}
             camera={{ position: [70, 40, 70], fov: 65, near: 0.5, far: 600 }}
             gl={{
@@ -457,6 +495,10 @@ const App: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Multiplayer UI Components */}
+      <MultiplayerChat />
+      <AIDecisionVotingPanel />
     </div>
   );
 };

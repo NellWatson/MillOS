@@ -1,8 +1,9 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
+import { shouldRunThisFrame } from '../utils/frameThrottle';
 
 // Vertex Shader for SkyDome - Ultrathink Sky System
 const skyVertexShader = `
@@ -115,6 +116,203 @@ void main() {
     gl_FragColor = vec4(finalColor, 1.0);
 }
 `;
+
+// =============================================================================
+// CENTRALIZED SKY ANIMATION MANAGER
+// =============================================================================
+
+// Registries to track animated objects without React re-renders
+interface SkyDomeAnimationState {
+  material: THREE.ShaderMaterial;
+  skyColors: {
+    top: string;
+    bottom: string;
+    horizon: string;
+    ground: string;
+  };
+  cloudDensity: number;
+  sunAngle: number;
+}
+const skyDomeRegistry = new Map<string, SkyDomeAnimationState>();
+
+interface StarsAnimationState {
+  starsRef: THREE.Points;
+  brightStarsRef: THREE.Points;
+  visible: boolean;
+}
+const starsRegistry = new Map<string, StarsAnimationState>();
+
+interface BuildingShaderAnimationState {
+  material: THREE.ShaderMaterial;
+  buildingColor: string;
+  windowLightColor: string;
+  isNight: boolean;
+}
+const buildingShaderRegistry = new Map<string, BuildingShaderAnimationState>();
+
+interface CityLightsAnimationState {
+  lightsRef: THREE.Points;
+  isNight: boolean;
+}
+const cityLightsRegistry = new Map<string, CityLightsAnimationState>();
+
+interface MountainShaderAnimationState {
+  material: THREE.ShaderMaterial;
+  rockColor: string;
+  treeColor: string;
+  snowColor: string;
+  atmosphereColor: string;
+  atmosphereStrength: number;
+  opacity: number;
+}
+const mountainShaderRegistry = new Map<string, MountainShaderAnimationState>();
+
+interface LayerColorAnimationState {
+  material: THREE.ShaderMaterial;
+  layerColor: string;
+  opacity: number;
+}
+const layerColorRegistry = new Map<string, LayerColorAnimationState>();
+
+interface WaterAnimationState {
+  material: THREE.ShaderMaterial;
+}
+const waterRegistry = new Map<string, WaterAnimationState>();
+
+export const registerSkyDome = (id: string, state: SkyDomeAnimationState) => {
+  skyDomeRegistry.set(id, state);
+};
+export const unregisterSkyDome = (id: string) => {
+  skyDomeRegistry.delete(id);
+};
+
+export const registerStars = (id: string, state: StarsAnimationState) => {
+  starsRegistry.set(id, state);
+};
+export const unregisterStars = (id: string) => {
+  starsRegistry.delete(id);
+};
+
+export const registerBuildingShader = (id: string, state: BuildingShaderAnimationState) => {
+  buildingShaderRegistry.set(id, state);
+};
+export const unregisterBuildingShader = (id: string) => {
+  buildingShaderRegistry.delete(id);
+};
+
+export const registerCityLights = (id: string, state: CityLightsAnimationState) => {
+  cityLightsRegistry.set(id, state);
+};
+export const unregisterCityLights = (id: string) => {
+  cityLightsRegistry.delete(id);
+};
+
+export const registerMountainShader = (id: string, state: MountainShaderAnimationState) => {
+  mountainShaderRegistry.set(id, state);
+};
+export const unregisterMountainShader = (id: string) => {
+  mountainShaderRegistry.delete(id);
+};
+
+export const registerLayerColor = (id: string, state: LayerColorAnimationState) => {
+  layerColorRegistry.set(id, state);
+};
+export const unregisterLayerColor = (id: string) => {
+  layerColorRegistry.delete(id);
+};
+
+export const registerWater = (id: string, state: WaterAnimationState) => {
+  waterRegistry.set(id, state);
+};
+export const unregisterWater = (id: string) => {
+  waterRegistry.delete(id);
+};
+
+// Manager component to handle all sky animations in a single consolidated loop
+const SkyAnimationManager: React.FC = () => {
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+
+  useFrame((state) => {
+    // Skip if tab not visible
+    if (!isTabVisible) return;
+
+    const time = state.clock.getElapsedTime();
+
+    // 1. Update Sky Dome shader (needs 60fps for smooth cloud movement)
+    if (skyDomeRegistry.size > 0) {
+      skyDomeRegistry.forEach((data) => {
+        data.material.uniforms.time.value = time;
+        data.material.uniforms.topColor.value.set(data.skyColors.top);
+        data.material.uniforms.bottomColor.value.set(data.skyColors.bottom);
+        data.material.uniforms.horizonColor.value.set(data.skyColors.horizon);
+        data.material.uniforms.groundColor.value.set(data.skyColors.ground);
+        data.material.uniforms.cloudDensity.value = data.cloudDensity;
+        data.material.uniforms.sunAngle.value = data.sunAngle;
+      });
+    }
+
+    // 2. Update Stars twinkling (30fps is enough)
+    if (starsRegistry.size > 0 && shouldRunThisFrame(2)) {
+      starsRegistry.forEach((data) => {
+        if (!data.visible) return;
+
+        const material = data.starsRef.material as THREE.PointsMaterial;
+        material.opacity = 0.75 + Math.sin(time * 0.3) * 0.15;
+
+        const brightMaterial = data.brightStarsRef.material as THREE.PointsMaterial;
+        brightMaterial.opacity = 0.8 + Math.sin(time * 1.5) * 0.2;
+      });
+    }
+
+    // 3. Update Building shaders (15fps for color updates)
+    if (buildingShaderRegistry.size > 0 && shouldRunThisFrame(4)) {
+      buildingShaderRegistry.forEach((data) => {
+        data.material.uniforms.buildingColor.value.set(data.buildingColor);
+        data.material.uniforms.windowLightColor.value.set(data.windowLightColor);
+        data.material.uniforms.isNight.value = data.isNight ? 1.0 : 0.0;
+        data.material.uniforms.time.value = time;
+      });
+    }
+
+    // 4. Update City lights twinkling (30fps)
+    if (cityLightsRegistry.size > 0 && shouldRunThisFrame(2)) {
+      cityLightsRegistry.forEach((data) => {
+        if (!data.isNight) return;
+        const material = data.lightsRef.material as THREE.PointsMaterial;
+        material.opacity = 0.7 + Math.sin(time * 2) * 0.2;
+      });
+    }
+
+    // 5. Update Mountain shader colors (15fps for color updates)
+    if (mountainShaderRegistry.size > 0 && shouldRunThisFrame(4)) {
+      mountainShaderRegistry.forEach((data) => {
+        data.material.uniforms.rockColor.value.set(data.rockColor);
+        data.material.uniforms.treeColor.value.set(data.treeColor);
+        data.material.uniforms.snowColor.value.set(data.snowColor);
+        data.material.uniforms.atmosphereColor.value.set(data.atmosphereColor);
+        data.material.uniforms.atmosphereStrength.value = data.atmosphereStrength;
+        data.material.uniforms.opacity.value = data.opacity;
+      });
+    }
+
+    // 6. Update Layer colors (15fps)
+    if (layerColorRegistry.size > 0 && shouldRunThisFrame(4)) {
+      layerColorRegistry.forEach((data) => {
+        data.material.uniforms.layerColor.value.set(data.layerColor);
+        data.material.uniforms.opacity.value = data.opacity;
+      });
+    }
+
+    // 7. Update Water animation (needs 60fps for smooth waves)
+    if (waterRegistry.size > 0) {
+      waterRegistry.forEach((data) => {
+        data.material.uniforms.time.value = time;
+      });
+    }
+  });
+
+  return null;
+};
 
 export const SkySystem: React.FC = () => {
   const gameTime = useGameSimulationStore((state) => state.gameTime);
@@ -284,19 +482,22 @@ export const SkySystem: React.FC = () => {
     return 0.3; // Dim moonlight
   }, [moonVisible]);
 
-  useFrame((state) => {
+  // Register sky dome with animation manager
+  useEffect(() => {
     if (meshRef.current) {
       const material = meshRef.current.material as THREE.ShaderMaterial;
-      material.uniforms.time.value = state.clock.getElapsedTime();
-      material.uniforms.topColor.value.set(skyColors.top);
-      material.uniforms.bottomColor.value.set(skyColors.bottom);
-      material.uniforms.horizonColor.value.set(skyColors.horizon);
-      material.uniforms.groundColor.value.set(skyColors.ground);
-      material.uniforms.cloudDensity.value = cloudDensity;
-      material.uniforms.sunAngle.value = sunAngle;
+      registerSkyDome('main', {
+        material,
+        skyColors,
+        cloudDensity,
+        sunAngle,
+      });
+      return () => unregisterSkyDome('main');
     }
+  }, [skyColors, cloudDensity, sunAngle]);
 
-    // Update lights
+  // Update lights using useFrame (lights need direct updates every frame)
+  useFrame(() => {
     if (sunLightRef.current) {
       sunLightRef.current.position.copy(sunPosition);
       sunLightRef.current.intensity = sunIntensity;
@@ -316,6 +517,9 @@ export const SkySystem: React.FC = () => {
 
   return (
     <group>
+      {/* Centralized Animation Manager */}
+      <SkyAnimationManager />
+
       {/* Dynamic Lighting */}
       <ambientLight ref={ambientLightRef} intensity={0.4} />
 
@@ -398,7 +602,12 @@ export const SkySystem: React.FC = () => {
           {/* Moon surface - fog={false} prevents dark artifacts at far distances */}
           <mesh>
             <sphereGeometry args={[15, 32, 32]} />
-            <meshStandardMaterial color="#e2e8f0" emissive="#94a3b8" emissiveIntensity={0.3} fog={false} />
+            <meshStandardMaterial
+              color="#e2e8f0"
+              emissive="#94a3b8"
+              emissiveIntensity={0.3}
+              fog={false}
+            />
           </mesh>
           {/* Moon glow */}
           <mesh>
@@ -433,11 +642,11 @@ const Stars: React.FC<{ visible: boolean }> = React.memo(({ visible }) => {
 
     // Star color palette - slightly warm and cool tints
     const starTints = [
-      [1.0, 1.0, 1.0],     // Pure white
-      [1.0, 0.95, 0.9],    // Warm white
-      [0.9, 0.95, 1.0],    // Cool white
-      [1.0, 0.9, 0.8],     // Yellow-ish
-      [0.85, 0.9, 1.0],    // Blue-ish
+      [1.0, 1.0, 1.0], // Pure white
+      [1.0, 0.95, 0.9], // Warm white
+      [0.9, 0.95, 1.0], // Cool white
+      [1.0, 0.9, 0.8], // Yellow-ish
+      [0.85, 0.9, 1.0], // Blue-ish
     ];
 
     for (let i = 0; i < STAR_COUNT; i++) {
@@ -496,21 +705,17 @@ const Stars: React.FC<{ visible: boolean }> = React.memo(({ visible }) => {
     }
   }, []);
 
-  // Twinkling animation with individual star phases
-  useFrame((state) => {
-    if (!visible) return;
-
-    if (starsRef.current) {
-      const material = starsRef.current.material as THREE.PointsMaterial;
-      material.opacity = 0.75 + Math.sin(state.clock.elapsedTime * 0.3) * 0.15;
+  // Register stars with animation manager
+  useEffect(() => {
+    if (starsRef.current && brightStarsRef.current) {
+      registerStars('main', {
+        starsRef: starsRef.current,
+        brightStarsRef: brightStarsRef.current,
+        visible,
+      });
+      return () => unregisterStars('main');
     }
-
-    if (brightStarsRef.current) {
-      const material = brightStarsRef.current.material as THREE.PointsMaterial;
-      // Bright stars twinkle more noticeably
-      material.opacity = 0.8 + Math.sin(state.clock.elapsedTime * 1.5) * 0.2;
-    }
-  });
+  }, [visible]);
 
   if (!visible) return null;
 
@@ -551,7 +756,39 @@ const Stars: React.FC<{ visible: boolean }> = React.memo(({ visible }) => {
   );
 });
 
-// Generate smooth mountain/hill profile using noise
+// Hash function for 2D noise
+const hash2D = (x: number, y: number): number => {
+  const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return n - Math.floor(n);
+};
+
+// Smooth noise interpolation
+const smoothNoise = (x: number, seed: number): number => {
+  const i = Math.floor(x);
+  const f = x - i;
+  // Smooth interpolation (cubic Hermite)
+  const u = f * f * (3.0 - 2.0 * f);
+  return (1 - u) * hash2D(i, seed) + u * hash2D(i + 1, seed);
+};
+
+// FBM (Fractal Brownian Motion) - the key to realistic mountains
+// Based on Inigo Quilez's techniques: G=0.5 for natural mountain profiles
+const fbm = (x: number, seed: number, octaves: number = 6): number => {
+  let value = 0;
+  let amplitude = 1.0;
+  let frequency = 1.0;
+  const gain = 0.5; // G=0.5 gives -9dB/octave, matching real mountain frequency profiles
+  const lacunarity = 2.02; // Slightly detuned to avoid pattern alignment
+
+  for (let i = 0; i < octaves; i++) {
+    value += amplitude * smoothNoise(x * frequency, seed + i * 100);
+    frequency *= lacunarity;
+    amplitude *= gain;
+  }
+  return value;
+};
+
+// Generate realistic mountain profile using FBM with sharp ridges
 const generateMountainProfile = (
   width: number,
   segments: number,
@@ -561,131 +798,317 @@ const generateMountainProfile = (
   seed: number
 ): number[] => {
   const heights: number[] = [];
+
   for (let i = 0; i <= segments; i++) {
     const x = (i / segments) * width;
-    let h = baseHeight;
-    // Multiple octaves of sine waves for organic look
-    h += Math.sin((x * frequency + seed) * 0.01) * amplitude;
-    h += Math.sin((x * frequency + seed * 2) * 0.025) * amplitude * 0.5;
-    h += Math.sin((x * frequency + seed * 3) * 0.05) * amplitude * 0.25;
-    h += Math.sin((x * frequency + seed * 0.5) * 0.003) * amplitude * 1.5;
-    heights.push(Math.max(0, h));
+
+    // Base terrain using FBM
+    let h = fbm(x * frequency * 0.01, seed, 6) * amplitude;
+
+    // Add sharp ridgelines using absolute value trick (creates peaks)
+    // This is the "ridged multifractal" technique
+    const ridge = 1.0 - Math.abs(fbm(x * frequency * 0.02, seed + 500, 4) * 2 - 1);
+    h += ridge * ridge * amplitude * 0.6;
+
+    // Add occasional dramatic peaks
+    const peakNoise = fbm(x * frequency * 0.005, seed + 1000, 3);
+    if (peakNoise > 0.6) {
+      const peakIntensity = (peakNoise - 0.6) * 2.5;
+      h += peakIntensity * amplitude * 0.8;
+    }
+
+    heights.push(Math.max(2, baseHeight + h));
   }
   return heights;
 };
 
-// Generate city skyline profile with buildings
+// Building type definitions for varied skyline
+interface BuildingDef {
+  width: number;
+  height: number;
+  hasSpire: boolean;
+  stepBack: boolean; // Art deco style step-back
+}
+
+// Generate city skyline with realistic building variety
 const generateCitySkyline = (
   segments: number,
   baseHeight: number,
   maxBuildingHeight: number,
   density: number,
   seed: number
-): number[] => {
+): { heights: number[]; buildings: BuildingDef[] } => {
   const heights: number[] = [];
-  let inBuilding = false;
-  let buildingWidth = 0;
-  let currentBuildingHeight = baseHeight;
+  const buildings: BuildingDef[] = [];
+  let i = 0;
 
-  const seededRandom = (i: number) => {
-    const x = Math.sin(seed * 12.9898 + i * 78.233) * 43758.5453;
+  const rand = (offset: number) => {
+    const x = Math.sin(seed * 12.9898 + offset * 78.233) * 43758.5453;
     return x - Math.floor(x);
   };
 
-  for (let i = 0; i <= segments; i++) {
-    const rand = seededRandom(i);
+  while (i <= segments) {
+    const r = rand(i);
 
-    if (!inBuilding && rand < density) {
-      // Start a new building
-      inBuilding = true;
-      buildingWidth = Math.floor(seededRandom(i + 1000) * 4) + 2;
-      currentBuildingHeight = baseHeight + seededRandom(i + 2000) * maxBuildingHeight;
-      // Occasionally add a tall skyscraper
-      if (seededRandom(i + 3000) > 0.85) {
-        currentBuildingHeight *= 1.5;
+    if (r < density) {
+      // Create a building
+      const buildingWidth = Math.floor(rand(i + 1000) * 5) + 2;
+      let buildingHeight = baseHeight + rand(i + 2000) * maxBuildingHeight;
+
+      // Building type variety
+      const typeRand = rand(i + 3000);
+      const hasSpire = typeRand > 0.9;
+      const stepBack = typeRand > 0.7 && typeRand <= 0.9;
+
+      // Occasional landmark skyscraper
+      if (rand(i + 4000) > 0.92) {
+        buildingHeight *= 1.8;
       }
-    }
+      // Medium tall buildings
+      else if (rand(i + 4500) > 0.7) {
+        buildingHeight *= 1.3;
+      }
 
-    if (inBuilding) {
-      heights.push(currentBuildingHeight);
-      buildingWidth--;
-      if (buildingWidth <= 0) {
-        inBuilding = false;
-        // Gap between buildings
-        const gap = Math.floor(seededRandom(i + 4000) * 3) + 1;
-        for (let g = 0; g < gap && i + g <= segments; g++) {
-          heights.push(baseHeight);
-          i++;
+      buildings.push({ width: buildingWidth, height: buildingHeight, hasSpire, stepBack });
+
+      // Add building profile with optional step-back effect
+      for (let w = 0; w < buildingWidth && i + w <= segments; w++) {
+        let h = buildingHeight;
+
+        // Step-back effect (art deco style) - building gets narrower at top
+        if (stepBack && buildingWidth > 3) {
+          const progress = w / buildingWidth;
+          const stepFactor = Math.sin(progress * Math.PI); // Wider in middle
+          h = buildingHeight * (0.7 + 0.3 * stepFactor);
         }
-        i--; // Adjust for outer loop increment
+
+        // Spire at center
+        if (hasSpire && w === Math.floor(buildingWidth / 2)) {
+          h = buildingHeight * 1.25;
+        }
+
+        heights.push(h);
+      }
+      i += buildingWidth;
+
+      // Gap between buildings (varied)
+      const gap = Math.floor(rand(i + 5000) * 2) + 1;
+      for (let g = 0; g < gap && i <= segments; g++) {
+        heights.push(baseHeight * 0.3); // Low base between buildings
+        i++;
       }
     } else {
-      heights.push(baseHeight);
+      // Empty space or very small structure
+      heights.push(baseHeight * (0.2 + rand(i + 6000) * 0.3));
+      i++;
     }
   }
 
   // Ensure correct length
-  while (heights.length <= segments) heights.push(baseHeight);
-  return heights.slice(0, segments + 1);
+  while (heights.length <= segments) heights.push(baseHeight * 0.2);
+  return { heights: heights.slice(0, segments + 1), buildings };
 };
 
-// City skyline layer - renders buildings in a specific arc
+// City skyline layer with procedural lit windows
+// Based on Shamus Young's technique: buildings as dark silhouettes with lit windows
 const CitySkylineLayer: React.FC<{
   startAngle: number;
   endAngle: number;
   radius: number;
   baseY: number;
   heights: number[];
-  color: string;
+  buildingColor: string;
+  windowLightColor: string;
+  isNight: boolean;
+  time: number;
   renderOrder?: number;
-}> = React.memo(({ startAngle, endAngle, radius, baseY, heights, color, renderOrder = -700 }) => {
-  const geometry = useMemo(() => {
-    const segments = heights.length - 1;
-    const geo = new THREE.BufferGeometry();
-    const positions: number[] = [];
-    const indices: number[] = [];
-    const angleSpan = endAngle - startAngle;
+}> = React.memo(
+  ({
+    startAngle,
+    endAngle,
+    radius,
+    baseY,
+    heights,
+    buildingColor,
+    windowLightColor,
+    isNight,
+    time: _time,
+    renderOrder = -700,
+  }) => {
+    const materialRef = useRef<THREE.ShaderMaterial>(null);
 
-    for (let i = 0; i <= segments; i++) {
-      const t = i / segments;
-      const angle = startAngle + t * angleSpan;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
+    // Register building shader with animation manager
+    useEffect(() => {
+      if (materialRef.current) {
+        registerBuildingShader(`city-${startAngle}`, {
+          material: materialRef.current,
+          buildingColor,
+          windowLightColor,
+          isNight,
+        });
+        return () => unregisterBuildingShader(`city-${startAngle}`);
+      }
+    }, [buildingColor, windowLightColor, isNight, startAngle]);
 
-      // Bottom vertex
-      positions.push(x, baseY, z);
-      // Top vertex (building height)
-      positions.push(x, baseY + heights[i], z);
-    }
+    const geometry = useMemo(() => {
+      const segments = heights.length - 1;
+      const geo = new THREE.BufferGeometry();
+      const positions: number[] = [];
+      const uvs: number[] = [];
+      const indices: number[] = [];
+      const angleSpan = endAngle - startAngle;
+      const maxHeight = Math.max(...heights);
 
-    // Create faces (facing inward)
-    for (let i = 0; i < segments; i++) {
-      const bl = i * 2;
-      const br = (i + 1) * 2;
-      const tl = i * 2 + 1;
-      const tr = (i + 1) * 2 + 1;
+      for (let i = 0; i <= segments; i++) {
+        const t = i / segments;
+        const angle = startAngle + t * angleSpan;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        const h = heights[i];
 
-      indices.push(bl, tl, br);
-      indices.push(br, tl, tr);
-    }
+        // Bottom vertex
+        positions.push(x, baseY, z);
+        uvs.push(t * 20.0, 0); // Scaled UV for window grid
+        // Top vertex (building height)
+        positions.push(x, baseY + h, z);
+        uvs.push(t * 20.0, (h / maxHeight) * 8.0); // Scaled for window rows
+      }
 
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geo.setIndex(indices);
-    geo.computeVertexNormals();
+      // Create faces (facing inward)
+      for (let i = 0; i < segments; i++) {
+        const bl = i * 2;
+        const br = (i + 1) * 2;
+        const tl = i * 2 + 1;
+        const tr = (i + 1) * 2 + 1;
 
-    return geo;
-  }, [startAngle, endAngle, radius, baseY, heights]);
+        indices.push(bl, tl, br);
+        indices.push(br, tl, tr);
+      }
 
-  return (
-    <mesh geometry={geometry} frustumCulled={false} renderOrder={renderOrder}>
-      <meshBasicMaterial
-        color={color}
-        side={THREE.DoubleSide}
-        depthWrite={false}
-      />
-    </mesh>
-  );
-});
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+      geo.setIndex(indices);
+      geo.computeVertexNormals();
+
+      return geo;
+    }, [startAngle, endAngle, radius, baseY, heights]);
+
+    const shaderMaterial = useMemo(
+      () => ({
+        uniforms: {
+          buildingColor: { value: new THREE.Color(buildingColor) },
+          windowLightColor: { value: new THREE.Color(windowLightColor) },
+          isNight: { value: isNight ? 1.0 : 0.0 },
+          time: { value: 0.0 },
+        },
+        vertexShader: `
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+      void main() {
+        vUv = uv;
+        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+        fragmentShader: `
+      uniform vec3 buildingColor;
+      uniform vec3 windowLightColor;
+      uniform float isNight;
+      uniform float time;
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+
+      // Hash function for procedural randomness
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      }
+
+      // Create window grid pattern
+      float windowPattern(vec2 uv, float seed) {
+        // Window grid dimensions
+        vec2 windowSize = vec2(0.8, 0.6); // Window aspect ratio
+        vec2 gridSize = vec2(1.2, 1.0); // Grid cell size
+
+        // Get grid cell
+        vec2 gridPos = floor(uv / gridSize);
+        vec2 cellUV = fract(uv / gridSize);
+
+        // Random per-window: is this window lit?
+        float windowSeed = hash(gridPos + seed);
+
+        // Window probability varies by floor (lower floors more lit)
+        float floorFactor = 1.0 - smoothstep(0.0, 8.0, uv.y) * 0.3;
+        float litProbability = 0.4 * floorFactor;
+
+        // Some windows are always dark (structure, corners)
+        if (cellUV.x < 0.1 || cellUV.x > 0.9) return 0.0; // Column gaps
+        if (cellUV.y < 0.15 || cellUV.y > 0.85) return 0.0; // Floor gaps
+
+        // Occasional fully lit floor (office late night)
+        float floorHash = hash(vec2(gridPos.y, seed));
+        if (floorHash > 0.92) litProbability = 0.9;
+
+        // Is this window lit?
+        float isLit = windowSeed < litProbability ? 1.0 : 0.0;
+
+        // Add slight flicker to some windows
+        if (isLit > 0.5 && hash(gridPos + seed + 100.0) > 0.8) {
+          isLit *= 0.7 + 0.3 * sin(time * 3.0 + windowSeed * 10.0);
+        }
+
+        return isLit;
+      }
+
+      void main() {
+        vec3 color = buildingColor;
+
+        // Only show windows at night or dusk
+        if (isNight > 0.3) {
+          // Get window pattern
+          float window = windowPattern(vUv, floor(vUv.x) * 7.77);
+
+          // Window light color with warm variation
+          vec3 warmLight = windowLightColor;
+          float warmth = hash(floor(vUv)) * 0.3;
+          warmLight.r += warmth * 0.2;
+          warmLight.g += warmth * 0.1;
+
+          // Mix window light with building color
+          float windowIntensity = window * isNight * 0.9;
+          color = mix(buildingColor, warmLight, windowIntensity);
+
+          // Add slight glow around lit windows
+          if (windowIntensity > 0.3) {
+            color += warmLight * 0.05;
+          }
+        }
+
+        // Smooth fade at building tops
+        float peakFade = 1.0 - smoothstep(0.85, 1.0, vUv.y / 8.0);
+
+        // Base fade
+        float baseFade = smoothstep(0.0, 0.1, vUv.y / 8.0);
+
+        gl_FragColor = vec4(color, peakFade * baseFade);
+      }
+    `,
+      }),
+      [buildingColor, windowLightColor, isNight]
+    );
+
+    return (
+      <mesh geometry={geometry} frustumCulled={false} renderOrder={renderOrder}>
+        <shaderMaterial
+          ref={materialRef}
+          {...shaderMaterial}
+          transparent
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
+    );
+  }
+);
 
 // City lights component for nighttime
 const CityLights: React.FC<{
@@ -715,11 +1138,11 @@ const CityLights: React.FC<{
   const lightColors = useMemo(() => {
     const colors: number[] = [];
     const colorOptions = [
-      [1.0, 0.95, 0.7],   // Warm yellow
-      [1.0, 1.0, 1.0],    // White
-      [1.0, 0.85, 0.6],   // Orange-ish
-      [0.9, 0.95, 1.0],   // Cool white
-      [1.0, 0.4, 0.3],    // Red (aircraft warning)
+      [1.0, 0.95, 0.7], // Warm yellow
+      [1.0, 1.0, 1.0], // White
+      [1.0, 0.85, 0.6], // Orange-ish
+      [0.9, 0.95, 1.0], // Cool white
+      [1.0, 0.4, 0.3], // Red (aircraft warning)
     ];
 
     for (let i = 0; i < 80; i++) {
@@ -729,12 +1152,16 @@ const CityLights: React.FC<{
     return new Float32Array(colors);
   }, []);
 
-  // Animate city lights twinkling
-  useFrame((state) => {
-    if (!isNight || !lightsRef.current) return;
-    const material = lightsRef.current.material as THREE.PointsMaterial;
-    material.opacity = 0.7 + Math.sin(state.clock.elapsedTime * 2) * 0.2;
-  });
+  // Register city lights with animation manager
+  useEffect(() => {
+    if (lightsRef.current) {
+      registerCityLights(`lights-${startAngle}`, {
+        lightsRef: lightsRef.current,
+        isNight,
+      });
+      return () => unregisterCityLights(`lights-${startAngle}`);
+    }
+  }, [isNight, startAngle]);
 
   if (!isNight) return null;
 
@@ -756,7 +1183,8 @@ const CityLights: React.FC<{
   );
 });
 
-// Snow-capped mountain layer with height-based coloring
+// Snow-capped mountain layer with atmospheric perspective
+// Based on techniques from Inigo Quilez and atmospheric scattering research
 const SnowCappedMountainLayer: React.FC<{
   radius: number;
   baseY: number;
@@ -766,122 +1194,200 @@ const SnowCappedMountainLayer: React.FC<{
   rockColor: string;
   treeColor: string;
   snowColor: string;
+  atmosphereColor: string; // Color to fade toward (blue for day, dark for night)
+  atmosphereStrength: number; // 0-1, how much atmospheric haze
   opacity: number;
   renderOrder?: number;
-}> = React.memo(({ radius, baseY, heights, snowLineHeight, treeLineHeight, rockColor, treeColor, snowColor, opacity, renderOrder = -900 }) => {
-  const materialRef = useRef<THREE.ShaderMaterial>(null);
+}> = React.memo(
+  ({
+    radius,
+    baseY,
+    heights,
+    snowLineHeight,
+    treeLineHeight,
+    rockColor,
+    treeColor,
+    snowColor,
+    atmosphereColor,
+    atmosphereStrength,
+    opacity,
+    renderOrder = -900,
+  }) => {
+    const materialRef = useRef<THREE.ShaderMaterial>(null);
 
-  // Update uniforms when colors change (similar to SkySystem)
-  useFrame(() => {
-    if (materialRef.current) {
-      materialRef.current.uniforms.rockColor.value.set(rockColor);
-      materialRef.current.uniforms.treeColor.value.set(treeColor);
-      materialRef.current.uniforms.snowColor.value.set(snowColor);
-      materialRef.current.uniforms.opacity.value = opacity;
-    }
-  });
+    // Register mountain shader with animation manager
+    useEffect(() => {
+      if (materialRef.current) {
+        registerMountainShader(`mountain-${radius}`, {
+          material: materialRef.current,
+          rockColor,
+          treeColor,
+          snowColor,
+          atmosphereColor,
+          atmosphereStrength,
+          opacity,
+        });
+        return () => unregisterMountainShader(`mountain-${radius}`);
+      }
+    }, [radius, rockColor, treeColor, snowColor, atmosphereColor, atmosphereStrength, opacity]);
 
-  const geometry = useMemo(() => {
-    const segments = heights.length - 1;
-    const geo = new THREE.BufferGeometry();
-    const positions: number[] = [];
-    const uvs: number[] = [];
-    const indices: number[] = [];
+    const geometry = useMemo(() => {
+      const segments = heights.length - 1;
+      const geo = new THREE.BufferGeometry();
+      const positions: number[] = [];
+      const uvs: number[] = [];
+      const indices: number[] = [];
 
-    const maxHeight = Math.max(...heights);
+      const maxHeight = Math.max(...heights);
 
-    for (let i = 0; i <= segments; i++) {
-      const angle = (i / segments) * Math.PI * 2;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      const h = heights[i % heights.length];
+      for (let i = 0; i <= segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        const h = heights[i % heights.length];
 
-      // Bottom vertex
-      positions.push(x, baseY, z);
-      uvs.push(i / segments, 0);
-      // Top vertex
-      positions.push(x, baseY + h, z);
-      uvs.push(i / segments, h / maxHeight); // UV.y = normalized height
-    }
+        // Bottom vertex
+        positions.push(x, baseY, z);
+        uvs.push(i / segments, 0);
+        // Top vertex
+        positions.push(x, baseY + h, z);
+        uvs.push(i / segments, h / maxHeight); // UV.y = normalized height
+      }
 
-    for (let i = 0; i < segments; i++) {
-      const bl = i * 2;
-      const br = (i + 1) * 2;
-      const tl = i * 2 + 1;
-      const tr = (i + 1) * 2 + 1;
-      indices.push(bl, tl, br);
-      indices.push(br, tl, tr);
-    }
+      for (let i = 0; i < segments; i++) {
+        const bl = i * 2;
+        const br = (i + 1) * 2;
+        const tl = i * 2 + 1;
+        const tr = (i + 1) * 2 + 1;
+        indices.push(bl, tl, br);
+        indices.push(br, tl, tr);
+      }
 
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    geo.setIndex(indices);
-    geo.computeVertexNormals();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+      geo.setIndex(indices);
+      geo.computeVertexNormals();
 
-    return geo;
-  }, [radius, baseY, heights]);
+      return geo;
+    }, [radius, baseY, heights]);
 
-  const shaderMaterial = useMemo(() => ({
-    uniforms: {
-      rockColor: { value: new THREE.Color(rockColor) },
-      treeColor: { value: new THREE.Color(treeColor) },
-      snowColor: { value: new THREE.Color(snowColor) },
-      snowLineHeight: { value: snowLineHeight },
-      treeLineHeight: { value: treeLineHeight },
-      opacity: { value: opacity },
-    },
-    vertexShader: `
+    const shaderMaterial = useMemo(
+      () => ({
+        uniforms: {
+          rockColor: { value: new THREE.Color(rockColor) },
+          treeColor: { value: new THREE.Color(treeColor) },
+          snowColor: { value: new THREE.Color(snowColor) },
+          atmosphereColor: { value: new THREE.Color(atmosphereColor) },
+          atmosphereStrength: { value: atmosphereStrength },
+          snowLineHeight: { value: snowLineHeight },
+          treeLineHeight: { value: treeLineHeight },
+          opacity: { value: opacity },
+        },
+        vertexShader: `
       varying vec2 vUv;
+      varying vec3 vWorldPos;
       void main() {
         vUv = uv;
+        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
-    fragmentShader: `
+        fragmentShader: `
       uniform vec3 rockColor;
       uniform vec3 treeColor;
       uniform vec3 snowColor;
+      uniform vec3 atmosphereColor;
+      uniform float atmosphereStrength;
       uniform float snowLineHeight;
       uniform float treeLineHeight;
       uniform float opacity;
       varying vec2 vUv;
+      varying vec3 vWorldPos;
+
+      // Simple noise for texture variation
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      }
 
       void main() {
         float h = vUv.y; // Normalized height 0-1
         vec3 color;
 
-        if (h > snowLineHeight) {
-          // Snow cap - blend from rock to snow
-          float snowBlend = smoothstep(snowLineHeight, snowLineHeight + 0.15, h);
-          color = mix(rockColor, snowColor, snowBlend);
-        } else if (h > treeLineHeight) {
-          // Rocky area - blend from trees to rock
-          float rockBlend = smoothstep(treeLineHeight, treeLineHeight + 0.1, h);
-          color = mix(treeColor, rockColor, rockBlend);
+        // Add subtle noise variation to break up uniform bands
+        float noiseVal = hash(vUv * 50.0) * 0.08;
+
+        // Height thresholds with noise perturbation
+        float snowLine = snowLineHeight + noiseVal;
+        float treeLine = treeLineHeight + noiseVal * 0.5;
+
+        if (h > snowLine) {
+          // Snow cap with gradient
+          float snowBlend = smoothstep(snowLine, snowLine + 0.12, h);
+          // Add slight blue tint to shadowed snow areas
+          vec3 shadowedSnow = mix(snowColor, snowColor * vec3(0.9, 0.95, 1.0), 0.3);
+          color = mix(rockColor, mix(shadowedSnow, snowColor, snowBlend), snowBlend);
+        } else if (h > treeLine) {
+          // Rocky area with variation
+          float rockBlend = smoothstep(treeLine, treeLine + 0.08, h);
+          // Add some variation to rock color
+          vec3 variedRock = rockColor * (0.9 + hash(vUv * 30.0) * 0.2);
+          color = mix(treeColor, variedRock, rockBlend);
         } else {
-          // Tree line at base
-          color = treeColor;
+          // Tree line at base with variation
+          color = treeColor * (0.85 + hash(vUv * 20.0) * 0.3);
         }
 
-        gl_FragColor = vec4(color, opacity);
+        // ATMOSPHERIC PERSPECTIVE (Rayleigh scattering simulation)
+        // Distant objects shift toward atmosphere color (blue during day)
+        // Multi-channel fog: red fades fastest, blue slowest
+        vec3 atmosphereMix = mix(color, atmosphereColor, atmosphereStrength);
+
+        // Apply different fog rates per channel (warm colors fade first)
+        float redFog = atmosphereStrength * 1.2;
+        float greenFog = atmosphereStrength * 1.0;
+        float blueFog = atmosphereStrength * 0.8;
+
+        color.r = mix(color.r, atmosphereColor.r, clamp(redFog, 0.0, 1.0));
+        color.g = mix(color.g, atmosphereColor.g, clamp(greenFog, 0.0, 1.0));
+        color.b = mix(color.b, atmosphereColor.b, clamp(blueFog, 0.0, 1.0));
+
+        // Smooth gradient fade at peaks (natural horizon blend)
+        float peakFade = 1.0 - smoothstep(0.7, 0.95, h);
+
+        // Also fade at very bottom to blend with ground
+        float baseFade = smoothstep(0.0, 0.08, h);
+
+        gl_FragColor = vec4(color, opacity * peakFade * baseFade);
       }
     `,
-  }), [rockColor, treeColor, snowColor, snowLineHeight, treeLineHeight, opacity]);
+      }),
+      [
+        rockColor,
+        treeColor,
+        snowColor,
+        atmosphereColor,
+        atmosphereStrength,
+        snowLineHeight,
+        treeLineHeight,
+        opacity,
+      ]
+    );
 
-  return (
-    <mesh geometry={geometry} frustumCulled={false} renderOrder={renderOrder}>
-      <shaderMaterial
-        ref={materialRef}
-        {...shaderMaterial}
-        transparent
-        side={THREE.DoubleSide}
-        depthWrite={false}
-      />
-    </mesh>
-  );
-});
+    return (
+      <mesh geometry={geometry} frustumCulled={false} renderOrder={renderOrder}>
+        <shaderMaterial
+          ref={materialRef}
+          {...shaderMaterial}
+          transparent
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
+    );
+  }
+);
 
-// Create a single horizon layer mesh
+// Create a single horizon layer mesh with smooth top fade
 const HorizonLayer: React.FC<{
   radius: number;
   baseY: number;
@@ -890,22 +1396,41 @@ const HorizonLayer: React.FC<{
   opacity: number;
   renderOrder?: number;
 }> = React.memo(({ radius, baseY, heights, color, opacity, renderOrder = -900 }) => {
+  const materialRef = useRef<THREE.ShaderMaterial>(null);
+
+  // Register layer color with animation manager
+  useEffect(() => {
+    if (materialRef.current) {
+      registerLayerColor(`layer-${radius}`, {
+        material: materialRef.current,
+        layerColor: color,
+        opacity,
+      });
+      return () => unregisterLayerColor(`layer-${radius}`);
+    }
+  }, [radius, color, opacity]);
+
   const geometry = useMemo(() => {
     const segments = heights.length - 1;
     const geo = new THREE.BufferGeometry();
     const positions: number[] = [];
+    const uvs: number[] = [];
     const indices: number[] = [];
+    const maxHeight = Math.max(...heights);
 
     // Create vertices for the silhouette ring
     for (let i = 0; i <= segments; i++) {
       const angle = (i / segments) * Math.PI * 2;
       const x = Math.cos(angle) * radius;
       const z = Math.sin(angle) * radius;
+      const h = heights[i % heights.length];
 
       // Bottom vertex (at base)
       positions.push(x, baseY, z);
+      uvs.push(i / segments, 0);
       // Top vertex (at height)
-      positions.push(x, baseY + heights[i % heights.length], z);
+      positions.push(x, baseY + h, z);
+      uvs.push(i / segments, h / maxHeight);
     }
 
     // Create faces
@@ -921,18 +1446,46 @@ const HorizonLayer: React.FC<{
     }
 
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     geo.setIndex(indices);
     geo.computeVertexNormals();
 
     return geo;
   }, [radius, baseY, heights]);
 
+  const shaderMaterial = useMemo(
+    () => ({
+      uniforms: {
+        layerColor: { value: new THREE.Color(color) },
+        opacity: { value: opacity },
+      },
+      vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+      fragmentShader: `
+      uniform vec3 layerColor;
+      uniform float opacity;
+      varying vec2 vUv;
+      void main() {
+        // Smooth fade at the peaks to blend into sky
+        float peakFade = 1.0 - smoothstep(0.6, 1.0, vUv.y);
+        gl_FragColor = vec4(layerColor, opacity * peakFade);
+      }
+    `,
+    }),
+    [color, opacity]
+  );
+
   return (
     <mesh geometry={geometry} frustumCulled={false} renderOrder={renderOrder}>
-      <meshBasicMaterial
-        color={color}
+      <shaderMaterial
+        ref={materialRef}
+        {...shaderMaterial}
         transparent
-        opacity={opacity}
         side={THREE.DoubleSide}
         depthWrite={false}
       />
@@ -951,11 +1504,20 @@ const DistantWater: React.FC<{
   reflectionColor: string;
   renderOrder?: number;
 }> = React.memo(
-  ({ startAngle, endAngle, innerRadius, outerRadius, baseY, waterColor, reflectionColor, renderOrder = -600 }) => {
+  ({
+    startAngle,
+    endAngle,
+    innerRadius,
+    outerRadius,
+    baseY,
+    waterColor,
+    reflectionColor,
+    renderOrder = -600,
+  }) => {
     const meshRef = useRef<THREE.Mesh>(null);
     const materialRef = useRef<THREE.ShaderMaterial>(null);
 
-    // Custom shader for animated water
+    // Custom shader for animated water with flowing effects
     const waterShader = useMemo(
       () => ({
         uniforms: {
@@ -966,16 +1528,20 @@ const DistantWater: React.FC<{
         vertexShader: `
         varying vec2 vUv;
         varying vec3 vPosition;
+        varying vec3 vWorldPosition;
         uniform float time;
 
         void main() {
           vUv = uv;
           vPosition = position;
+          vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
 
-          // Gentle wave displacement
+          // Multi-layered wave displacement for more natural movement
           vec3 pos = position;
-          float wave = sin(pos.x * 0.05 + time * 0.5) * 0.3;
-          wave += sin(pos.z * 0.08 + time * 0.3) * 0.2;
+          float wave = sin(pos.x * 0.04 + time * 0.8) * 0.4;
+          wave += sin(pos.z * 0.06 + time * 0.6) * 0.3;
+          wave += sin((pos.x + pos.z) * 0.03 + time * 1.2) * 0.25;
+          wave += sin(pos.x * 0.12 - time * 1.5) * 0.15; // Counter-flow ripples
           pos.y += wave;
 
           gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
@@ -987,35 +1553,84 @@ const DistantWater: React.FC<{
         uniform float time;
         varying vec2 vUv;
         varying vec3 vPosition;
+        varying vec3 vWorldPosition;
+
+        // Noise function for organic patterns
+        float hash(vec2 p) {
+          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+        }
+
+        float noise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          float a = hash(i);
+          float b = hash(i + vec2(1.0, 0.0));
+          float c = hash(i + vec2(0.0, 1.0));
+          float d = hash(i + vec2(1.0, 1.0));
+          return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+        }
 
         void main() {
-          // Shimmer effect
-          float shimmer = sin(vPosition.x * 0.1 + time * 2.0) * 0.5 + 0.5;
-          shimmer *= sin(vPosition.z * 0.15 + time * 1.5) * 0.5 + 0.5;
+          // Flowing UV distortion - water moves in a direction
+          vec2 flowUV = vWorldPosition.xz * 0.02;
+          flowUV.x += time * 0.15; // Flow direction
+          flowUV.y += sin(time * 0.3 + vWorldPosition.x * 0.05) * 0.1;
 
-          // Mix water and reflection colors
-          vec3 color = mix(waterColor, reflectionColor, shimmer * 0.3);
+          // Multi-layer ripple patterns
+          float ripple1 = sin(vWorldPosition.x * 0.08 + vWorldPosition.z * 0.06 + time * 1.8) * 0.5 + 0.5;
+          float ripple2 = sin(vWorldPosition.x * 0.12 - time * 2.2 + vWorldPosition.z * 0.1) * 0.5 + 0.5;
+          float ripple3 = sin((vWorldPosition.x + vWorldPosition.z) * 0.15 + time * 1.4) * 0.5 + 0.5;
 
-          // Add sparkles
-          float sparkle = pow(shimmer, 8.0) * 0.5;
-          color += vec3(sparkle);
+          // Combine ripples with varying weights
+          float ripples = ripple1 * 0.4 + ripple2 * 0.35 + ripple3 * 0.25;
+
+          // Caustic-like light patterns
+          float caustic1 = noise(flowUV * 8.0 + time * 0.5);
+          float caustic2 = noise(flowUV * 12.0 - time * 0.7);
+          float caustics = (caustic1 + caustic2) * 0.5;
+          caustics = pow(caustics, 1.5) * 1.2;
+
+          // Dynamic shimmer based on view angle simulation
+          float shimmer = ripples * caustics;
+          shimmer = smoothstep(0.2, 0.8, shimmer);
+
+          // Color mixing - base water with reflection highlights
+          vec3 color = waterColor;
+          color = mix(color, reflectionColor, shimmer * 0.4);
+
+          // Add bright reflection streaks
+          float streak = pow(ripple1 * ripple2, 4.0);
+          color += reflectionColor * streak * 0.6;
+
+          // Sparkle highlights on wave peaks
+          float sparkle = pow(max(ripples, caustics), 12.0);
+          color += vec3(1.0, 0.98, 0.95) * sparkle * 0.8;
+
+          // Subtle color variation for depth
+          float depthVar = noise(vWorldPosition.xz * 0.01 + time * 0.1);
+          color = mix(color, color * 0.85, depthVar * 0.3);
 
           // Fade at edges
-          float edgeFade = smoothstep(0.0, 0.1, vUv.x) * smoothstep(1.0, 0.9, vUv.x);
+          float edgeFade = smoothstep(0.0, 0.15, vUv.x) * smoothstep(1.0, 0.85, vUv.x);
+          float radialFade = smoothstep(0.0, 0.2, vUv.y) * smoothstep(1.0, 0.8, vUv.y);
 
-          gl_FragColor = vec4(color, 0.85 * edgeFade);
+          gl_FragColor = vec4(color, 0.88 * edgeFade * radialFade);
         }
       `,
       }),
       [waterColor, reflectionColor]
     );
 
-    // Animate water
-    useFrame((state) => {
+    // Register water with animation manager
+    useEffect(() => {
       if (materialRef.current) {
-        materialRef.current.uniforms.time.value = state.clock.elapsedTime;
+        registerWater(`water-${startAngle}`, {
+          material: materialRef.current,
+        });
+        return () => unregisterWater(`water-${startAngle}`);
       }
-    });
+    }, [startAngle]);
 
     // Create water segment geometry
     const geometry = useMemo(() => {
@@ -1075,12 +1690,12 @@ export const HorizonRing: React.FC = () => {
   const gameTime = useGameSimulationStore((state) => state.gameTime);
 
   // Determine colors based on time of day
-  const { layerColors, waterColors, mountainColors } = useMemo(() => {
-    const isNight = gameTime >= 20 || gameTime < 6;
+  const { layerColors, waterColors, mountainColors, atmosphereColor, cityColors } = useMemo(() => {
+    const isNightTime = gameTime >= 20 || gameTime < 6;
     const isDawn = gameTime >= 5 && gameTime < 8;
     const isDusk = gameTime >= 17 && gameTime < 20;
 
-    if (isNight) {
+    if (isNightTime) {
       return {
         layerColors: {
           far: '#0a0f1a',
@@ -1096,6 +1711,11 @@ export const HorizonRing: React.FC = () => {
           snow: '#2a3545',
           rock: '#151a24',
           tree: '#0a1210',
+        },
+        atmosphereColor: '#0a1020', // Dark blue night atmosphere
+        cityColors: {
+          building: '#050810',
+          windowLight: '#ffd080', // Warm yellow window light
         },
       };
     } else if (isDawn) {
@@ -1115,6 +1735,11 @@ export const HorizonRing: React.FC = () => {
           rock: '#6a5060',
           tree: '#2a3528',
         },
+        atmosphereColor: '#a08090', // Pink/purple dawn atmosphere
+        cityColors: {
+          building: '#201520',
+          windowLight: '#ffcc66',
+        },
       };
     } else if (isDusk) {
       return {
@@ -1133,9 +1758,14 @@ export const HorizonRing: React.FC = () => {
           rock: '#5a4048',
           tree: '#252820',
         },
+        atmosphereColor: '#804050', // Orange/red dusk atmosphere
+        cityColors: {
+          building: '#1a1015',
+          windowLight: '#ffaa44',
+        },
       };
     } else {
-      // Day - vibrant mountains with snow caps
+      // Day - vibrant mountains with atmospheric blue shift
       return {
         layerColors: {
           far: '#c8dce8', // Hazy blue distant
@@ -1149,74 +1779,84 @@ export const HorizonRing: React.FC = () => {
         },
         mountainColors: {
           snow: '#ffffff',
-          rock: '#8090a0',
+          rock: '#7080a0', // Slightly blue-shifted rock
           tree: '#3a6040',
+        },
+        atmosphereColor: '#b0d0e8', // Pale blue day atmosphere (Rayleigh scattering)
+        cityColors: {
+          building: '#405060',
+          windowLight: '#ffffff',
         },
       };
     }
   }, [gameTime]);
 
-  // Determine if it's night for city lights
+  // Determine if it's night or dusk for city lights
   const isNight = gameTime >= 20 || gameTime < 6;
+  const isDusk = gameTime >= 17 && gameTime < 20;
+  const showCityLights = isNight || isDusk;
 
-  // City colors based on time of day
-  const cityColor = useMemo(() => {
-    if (isNight) return '#0a0e14';
-    if (gameTime >= 17 && gameTime < 20) return '#1a1520'; // Dusk
-    if (gameTime >= 5 && gameTime < 8) return '#201825'; // Dawn
-    return '#2a3540'; // Day - darker silhouette against bright sky
-  }, [gameTime, isNight]);
+  // Generate different mountain profiles for each layer using FBM
+  // Far mountains: tallest, most dramatic peaks
+  const farMountains = useMemo(() => generateMountainProfile(360, 192, 35, 70, 1.0, 42), []);
+  // Mid mountains: medium height
+  const midMountains = useMemo(() => generateMountainProfile(360, 192, 25, 50, 1.5, 137), []);
+  // Near hills: lower, more rolling
+  const nearHills = useMemo(() => generateMountainProfile(360, 192, 15, 35, 2.0, 891), []);
+  // Ground treeline: gentle undulation
+  const groundLevel = useMemo(() => generateMountainProfile(360, 128, 6, 15, 3.0, 2023), []);
 
-  // Generate different mountain profiles for each layer - taller for visibility
-  const farMountains = useMemo(() => generateMountainProfile(360, 128, 40, 60, 1.2, 42), []);
-  const midMountains = useMemo(() => generateMountainProfile(360, 128, 30, 45, 1.8, 137), []);
-  const nearHills = useMemo(() => generateMountainProfile(360, 128, 20, 30, 2.5, 891), []);
-  const groundLevel = useMemo(() => generateMountainProfile(360, 128, 8, 12, 4, 2023), []);
-
-  // Generate city skyline (positioned in one sector of the horizon) - taller buildings
-  const citySkyline = useMemo(() => generateCitySkyline(64, 10, 35, 0.4, 7777), []);
+  // Generate city skyline with building variety
+  const citySkylineData = useMemo(() => generateCitySkyline(96, 8, 40, 0.5, 7777), []);
+  const citySkyline = citySkylineData.heights;
 
   return (
     <group>
-      {/* Far mountains - tallest with snow caps */}
+      {/* Far mountains - tallest with heavy atmospheric perspective */}
       <SnowCappedMountainLayer
         radius={320}
         baseY={-5}
         heights={farMountains}
+        snowLineHeight={0.65}
+        treeLineHeight={0.25}
+        rockColor={mountainColors.rock}
+        treeColor={mountainColors.tree}
+        snowColor={mountainColors.snow}
+        atmosphereColor={atmosphereColor}
+        atmosphereStrength={0.6} // Heavy atmospheric haze for distant mountains
+        opacity={0.9}
+        renderOrder={-950}
+      />
+
+      {/* Mid mountains - medium atmospheric perspective */}
+      <SnowCappedMountainLayer
+        radius={300}
+        baseY={-3}
+        heights={midMountains}
         snowLineHeight={0.7}
         treeLineHeight={0.3}
         rockColor={mountainColors.rock}
         treeColor={mountainColors.tree}
         snowColor={mountainColors.snow}
-        opacity={0.85}
-        renderOrder={-950}
-      />
-
-      {/* Mid mountains with snow caps */}
-      <SnowCappedMountainLayer
-        radius={300}
-        baseY={-3}
-        heights={midMountains}
-        snowLineHeight={0.75}
-        treeLineHeight={0.35}
-        rockColor={mountainColors.rock}
-        treeColor={mountainColors.tree}
-        snowColor={mountainColors.snow}
-        opacity={0.9}
+        atmosphereColor={atmosphereColor}
+        atmosphereStrength={0.35} // Medium haze
+        opacity={0.95}
         renderOrder={-900}
       />
 
-      {/* Near hills - more forested, less snow */}
+      {/* Near hills - light atmospheric perspective, more forested */}
       <SnowCappedMountainLayer
         radius={280}
         baseY={-2}
         heights={nearHills}
         snowLineHeight={0.85}
-        treeLineHeight={0.25}
+        treeLineHeight={0.2}
         rockColor={mountainColors.rock}
         treeColor={mountainColors.tree}
         snowColor={mountainColors.snow}
-        opacity={0.95}
+        atmosphereColor={atmosphereColor}
+        atmosphereStrength={0.15} // Light haze - clearer closer mountains
+        opacity={1.0}
         renderOrder={-850}
       />
 
@@ -1230,14 +1870,17 @@ export const HorizonRing: React.FC = () => {
         renderOrder={-800}
       />
 
-      {/* Distant city skyline - positioned in one sector */}
+      {/* Distant city skyline - positioned in one sector with procedural windows */}
       <CitySkylineLayer
         startAngle={Math.PI * 1.65}
         endAngle={Math.PI * 1.95}
         radius={275}
         baseY={-2}
         heights={citySkyline}
-        color={cityColor}
+        buildingColor={cityColors.building}
+        windowLightColor={cityColors.windowLight}
+        isNight={showCityLights}
+        time={gameTime}
         renderOrder={-700}
       />
 
@@ -1287,7 +1930,12 @@ export const HorizonRing: React.FC = () => {
       />
 
       {/* Solid ground plane below horizon */}
-      <mesh position={[0, -1, 0]} rotation={[-Math.PI / 2, 0, 0]} frustumCulled={false} renderOrder={-750}>
+      <mesh
+        position={[0, -1, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        frustumCulled={false}
+        renderOrder={-750}
+      >
         <ringGeometry args={[0, 260, 64]} />
         <meshBasicMaterial color={layerColors.ground} side={THREE.DoubleSide} />
       </mesh>

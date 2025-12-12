@@ -197,7 +197,7 @@ The system initializes workers from `WORKER_ROSTER` in types.ts:
 | w1 | Marcus Chen | Supervisor | 1.2 | rm-103 | #3b82f6 |
 | w2 | Sarah Mitchell | Engineer | 1.5 | mill-1.5 | #ffffff |
 | w3 | James Rodriguez | Operator | 1.3 | silo-0 | #f97316 |
-| w4 | Emily Watson | Quality Control | 1.1 | packer-2 | #a855f7 |
+| w4 | Emily Ronson | Quality Control | 1.1 | packer-2 | #a855f7 |
 | w5 | David Kim | Maintenance | 1.4 | packer-0 | #eab308 |
 | w6 | Lisa Thompson | Safety Officer | 1.0 | sifter-b | #22c55e |
 | w7 | Robert Garcia | Operator | 1.2 | silo-2 | #f97316 |

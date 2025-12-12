@@ -34,6 +34,7 @@ import {
 // Stores
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { audioManager } from '../utils/audioManager';
 
 interface WorkerSystemProps {
@@ -337,12 +338,22 @@ Worker.displayName = 'Worker';
  */
 export const WorkerSystemNew: React.FC<WorkerSystemProps> = ({ onSelectWorker }) => {
   // Get store state
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
-  const emergencyDrillMode = useGameSimulationStore((state) => state.emergencyDrillMode);
-  const getNearestExit = useGameSimulationStore((state) => state.getNearestExit);
-  const markWorkerEvacuated = useGameSimulationStore((state) => state.markWorkerEvacuated);
-  const quality = useGraphicsStore((state) => state.graphics.quality);
-  const workerLodDistance = useGraphicsStore((state) => state.graphics.workerLodDistance);
+  // PERFORMANCE: Consolidated store subscriptions to prevent unnecessary re-renders
+  const { isTabVisible, emergencyDrillMode, getNearestExit, markWorkerEvacuated } =
+    useGameSimulationStore(
+      useShallow((state) => ({
+        isTabVisible: state.isTabVisible,
+        emergencyDrillMode: state.emergencyDrillMode,
+        getNearestExit: state.getNearestExit,
+        markWorkerEvacuated: state.markWorkerEvacuated,
+      }))
+    );
+  const { quality, workerLodDistance } = useGraphicsStore(
+    useShallow((state) => ({
+      quality: state.graphics.quality,
+      workerLodDistance: state.graphics.workerLodDistance,
+    }))
+  );
 
   // Create animation manager with single useFrame
   const manager = useWorkerAnimationManager(

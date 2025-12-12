@@ -100,6 +100,44 @@ Two autonomous forklifts with:
 - Visual cargo states (loaded/empty pallets)
 - Warning lights (amber = moving, red = stopped for safety)
 
+### Fire Drill Evacuation System
+
+Fully functional emergency evacuation simulation:
+- **Real-time alarm** with continuous emergency siren
+- **Four exit points** (Front, Back, West, East) with glowing markers
+- **Worker evacuation** at running speed (6 units/sec) to nearest exit
+- **Forklift emergency stop** during active drills
+- **Live progress tracking** with evacuation timer and worker count
+- **Completion detection** with final evacuation time
+
+### First-Person Mode
+
+Immersive walkthrough experience with:
+- **WASD movement** with collision detection against machines
+- **Sprint mode** (Shift key) for faster exploration
+- **Mouse look** with pointer lock controls
+- **105° FOV** for immersive factory tours
+- **Physical boundaries** preventing access beyond world edges
+
+### Weather System
+
+Dynamic environmental conditions:
+- **Clear** sunny factory conditions
+- **Cloudy** overcast atmosphere
+- **Rain** with visual effects
+- **Storm** dramatic weather with enhanced effects
+
+### Multiplayer
+
+Explore the factory together with WebRTC peer-to-peer connections:
+- **Room codes** for easy session joining
+- **Up to 8 players** with unique avatar colors
+- **Real-time position sync** at 20Hz with interpolation
+- **Shared machine control** with locking to prevent conflicts
+- **AI decision voting** for collaborative factory management
+- **In-game chat** for coordination
+- **Host migration** when the original host disconnects
+
 ### AI Command Center
 
 Real-time decision feed simulating agentic AI operations:
@@ -230,6 +268,8 @@ MODBUS_PORT=502
 
 ## Controls
 
+### Orbit Camera Mode (Default)
+
 | Input | Action |
 |-------|--------|
 | **Left-drag** | Orbit camera around scene |
@@ -237,10 +277,26 @@ MODBUS_PORT=502
 | **Scroll** | Zoom in/out |
 | **Click machine** | Open machine detail panel |
 | **Click worker** | Open worker profile |
+
+### First-Person Mode
+
+| Input | Action |
+|-------|--------|
+| **V** | Toggle first-person mode |
+| **WASD** | Move forward/left/back/right |
+| **Shift** | Sprint (3.6x speed) |
+| **Mouse** | Look around |
+| **Esc** | Exit first-person mode |
+
+### Global Shortcuts
+
+| Input | Action |
+|-------|--------|
 | **Z** | Toggle safety zone visibility |
 | **I** | Toggle AI Command Center |
 | **S** | Toggle SCADA Panel |
 | **H** | Toggle heatmap view |
+| **M** | Toggle multiplayer lobby |
 | **F1-F4** | Graphics quality presets |
 | **Spacebar** | Emergency stop |
 | **?** | Show keyboard shortcuts |
@@ -267,6 +323,17 @@ src/
 │   ├── DustParticles.tsx       # Instanced particle effects
 │   ├── Environment.tsx         # Lighting & factory structure
 │   ├── HolographicDisplays.tsx # In-scene 3D UI billboards
+│   ├── FirstPersonController.tsx # WASD first-person walkthrough
+│   ├── SkySystem.tsx           # Dynamic sky & weather
+│   │
+│   │   # Physics (Rapier)
+│   ├── physics/
+│   │   ├── FactoryColliders.tsx         # Machine collision boxes
+│   │   ├── PhysicsWorker.tsx            # Worker physics bodies
+│   │   ├── PhysicsForklift.tsx          # Forklift physics
+│   │   ├── PhysicsFirstPersonController.tsx # FPS physics
+│   │   ├── ExitZoneSensors.tsx          # Fire drill exit detection
+│   │   └── PhysicsDebug.tsx             # Debug visualization
 │   │
 │   │   # UI Overlays (React DOM)
 │   ├── UIOverlay.tsx           # Production controls & machine info
@@ -290,6 +357,15 @@ src/
 │       ├── RESTAdapter.ts          # HTTP polling
 │       ├── MQTTAdapter.ts          # MQTT over WebSocket
 │       └── WebSocketAdapter.ts     # Direct WebSocket
+│
+├── multiplayer/                # WebRTC Multiplayer System
+│   ├── types.ts                # Player, room, message types
+│   ├── MultiplayerManager.ts   # Session orchestration
+│   ├── SignalingService.ts     # Room creation & peer discovery
+│   ├── PeerConnection.ts       # WebRTC data channel wrapper
+│   ├── PlayerInterpolation.ts  # Smooth remote player movement
+│   ├── HostMigration.ts        # Failover when host disconnects
+│   └── hooks/                  # React hooks (useMultiplayerSync)
 │
 ├── hooks/                      # Reusable React Hooks
 │   ├── useKeyboardShortcuts.ts # Keyboard navigation (F1-F4, Z, I, H, etc.)
@@ -350,6 +426,7 @@ A custom **PositionRegistry** singleton enables inter-entity awareness:
 | Category | Technology |
 |----------|------------|
 | **3D Rendering** | React Three Fiber, @react-three/drei |
+| **Physics Engine** | Rapier (@react-three/rapier) |
 | **State Management** | Zustand |
 | **UI Animation** | Framer Motion |
 | **Charts** | Recharts |
@@ -358,7 +435,7 @@ A custom **PositionRegistry** singleton enables inter-entity awareness:
 | **Language** | TypeScript |
 | **AI Integration** | Google Gemini API |
 | **SCADA Protocols** | OPC-UA (node-opcua), Modbus (jsmodbus) |
-| **Testing** | Vitest |
+| **Testing** | Vitest, Playwright (E2E) |
 | **Data Storage** | IndexedDB (via idb) |
 | **Containerization** | Docker, Docker Compose |
 
@@ -378,11 +455,17 @@ A custom **PositionRegistry** singleton enables inter-entity awareness:
 - [x] Comprehensive test suite with Vitest
 - [x] Docker containerization for backend services
 - [x] CI/CD workflows (GitHub Actions)
+- [x] Fire drill evacuation system with real-time tracking
+- [x] First-person walkthrough mode (WASD + mouse)
+- [x] Rapier physics engine integration
+- [x] Dynamic weather system (clear, cloudy, rain, storm)
+- [x] Factory exterior with branded signage
+- [x] End-to-end testing with Playwright
+- [x] WebRTC peer-to-peer multiplayer with host migration
 
 ### Planned
 
 - [ ] Live Gemini API integration for dynamic AI decisions
-- [ ] WebSocket support for multi-user observation
 - [ ] VR mode with WebXR controls
 - [ ] Historical playback and time-travel debugging
 - [ ] Custom scenario editor
@@ -422,7 +505,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**MillOS v3.0**
+**MillOS v0.20**
 
 *Transforming grain milling through digital twin technology and industrial SCADA integration*
 

@@ -35,10 +35,23 @@ export const ReflectiveFloor: React.FC<ReflectiveFloorProps> = ({ width, depth }
   // This prevents the dreaded "black screen" or shader errors when switching quality
   const key = `reflector-${quality}-${safeWidth}-${safeDepth}`;
 
+  // TEMPORARY: Disable MeshReflectorMaterial to diagnose NaN PlaneGeometry errors
+  // The reflector's FBO render pass exposes NaN geometry errors elsewhere in the scene
+  const DISABLE_REFLECTOR_FOR_DEBUGGING = true;
+
+  if (DISABLE_REFLECTOR_FOR_DEBUGGING) {
+    return (
+      <mesh key={key} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
+        <planeGeometry args={[safeWidth, safeDepth]} />
+        <meshStandardMaterial color="#1e293b" roughness={0.5} metalness={0.3} />
+      </mesh>
+    );
+  }
+
   return (
     <mesh key={key} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
       <planeGeometry args={[safeWidth, safeDepth]} />
-      {/* 
+      {/*
         MeshReflectorMaterial parameters tuned for polished concrete:
         - mirror: 0 (not a perfect mirror)
         - blur: High blur for rough concrete look

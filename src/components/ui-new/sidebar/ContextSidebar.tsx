@@ -1,6 +1,15 @@
 import React, { Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Thermometer, Activity, MessageSquare, User, Settings, Shield } from 'lucide-react';
+import {
+  X,
+  Thermometer,
+  Activity,
+  MessageSquare,
+  User,
+  Settings,
+  Shield,
+  Radio,
+} from 'lucide-react';
 import { DockMode } from '../dock/Dock';
 import { MachineData, WorkerData } from '../../../types';
 
@@ -18,6 +27,7 @@ import { MachineInspector } from './MachineInspector';
 import { SettingsPanel } from '../panels/SettingsPanel';
 import { SafetyPanel } from '../panels/SafetyPanel';
 import { OverviewPanel } from '../panels/OverviewPanel';
+import { MultiplayerPanel } from '../panels/MultiplayerPanel';
 
 interface ContextSidebarProps {
   mode: DockMode;
@@ -94,6 +104,10 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
     headerTitle = 'Safety & Emergency';
     HeaderIcon = Shield;
     content = <SafetyPanel />;
+  } else if (mode === 'multiplayer') {
+    headerTitle = 'Multiplayer';
+    HeaderIcon = Radio;
+    content = <MultiplayerPanel />;
   } else {
     // Overview or workforce mode without selection - show production overview
     headerTitle = 'Mill Overview';

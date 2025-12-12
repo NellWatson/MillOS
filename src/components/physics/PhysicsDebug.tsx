@@ -8,7 +8,7 @@
 import { useMemo } from 'react';
 import * as THREE from 'three';
 import { useGraphicsStore } from '../../stores/graphicsStore';
-import { FACTORY_BOUNDS } from '../../physics/PhysicsConfig';
+import { WORLD_RADIUS } from '../../physics/PhysicsConfig';
 
 // Obstacle definition for visualization
 interface DebugObstacle {
@@ -95,21 +95,29 @@ export const PhysicsDebug: React.FC = () => {
     []
   );
 
+  // Create circular boundary ring geometry
+  const boundaryRingGeometry = useMemo(() => {
+    const segments = 64;
+    const points: THREE.Vector3[] = [];
+    for (let i = 0; i <= segments; i++) {
+      const angle = (i / segments) * Math.PI * 2;
+      points.push(
+        new THREE.Vector3(Math.cos(angle) * WORLD_RADIUS, 0, Math.sin(angle) * WORLD_RADIUS)
+      );
+    }
+    return new THREE.BufferGeometry().setFromPoints(points);
+  }, []);
+
   return (
     <group name="physics-debug">
-      {/* Factory boundary wireframes */}
-      <lineSegments>
-        <edgesGeometry
-          args={[
-            new THREE.BoxGeometry(
-              FACTORY_BOUNDS.maxX * 2,
-              FACTORY_BOUNDS.height,
-              FACTORY_BOUNDS.maxZ * 2
-            ),
-          ]}
-        />
-        <primitive object={wireframeMaterial} attach="material" />
-      </lineSegments>
+      {/* Circular world boundary wireframe (bottom ring) */}
+      <primitive object={new THREE.Line(boundaryRingGeometry, wireframeMaterial)} />
+
+      {/* Circular world boundary wireframe (top ring at height 35) */}
+      <primitive
+        object={new THREE.Line(boundaryRingGeometry, wireframeMaterial)}
+        position={[0, 35, 0]}
+      />
 
       {/* Obstacle wireframes */}
       {obstacles.map((obs) => {

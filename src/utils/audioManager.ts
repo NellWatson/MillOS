@@ -163,6 +163,11 @@ class AudioManager {
   } | null = null;
   private speechReverbPulseInterval: NodeJS.Timeout | number | null = null;
 
+  // PA announcement queue - prevents messages from cutting each other off
+  private announcementQueue: string[] = [];
+  private isAnnouncementPlaying: boolean = false;
+  private announcementChimeTimeout: ReturnType<typeof setTimeout> | null = null;
+
   constructor() {
     // Shuffle tracks on initialization using Fisher-Yates algorithm
     this.musicTracks = [...this.allMusicTracks];
@@ -4657,7 +4662,9 @@ class AudioManager {
 
       // NO FALLBACK to American voices - if no British voice found, TTS stays disabled
       if (!this._ttsVoice) {
-        audioLog.warn('No British voice found - PA announcements will be silent (refusing American voice)');
+        audioLog.warn(
+          'No British voice found - PA announcements will be silent (refusing American voice)'
+        );
       }
 
       this._ttsVoiceLoaded = true;
@@ -4672,6 +4679,7 @@ class AudioManager {
   }
 
   // Speak a PA announcement using TTS with tannoy echo effect
+  // Messages are queued so they don't cut each other off
   speakAnnouncement(text: string): void {
     if (!this._ttsEnabled || this._muted || !('speechSynthesis' in window)) {
       return;
@@ -4688,8 +4696,30 @@ class AudioManager {
       return;
     }
 
-    // Cancel any current speech
-    this.stopTTS();
+    // Add to queue
+    this.announcementQueue.push(text);
+
+    // If nothing is currently playing, start processing the queue
+    if (!this.isAnnouncementPlaying) {
+      this.processAnnouncementQueue();
+    }
+  }
+
+  // Process the next announcement in the queue
+  private processAnnouncementQueue(): void {
+    // Check if queue is empty or conditions prevent playback
+    if (
+      this.announcementQueue.length === 0 ||
+      !this._ttsEnabled ||
+      this._muted ||
+      !this._ttsVoice
+    ) {
+      this.isAnnouncementPlaying = false;
+      return;
+    }
+
+    this.isAnnouncementPlaying = true;
+    const text = this.announcementQueue.shift()!;
 
     try {
       const utterance = new SpeechSynthesisUtterance(text);
@@ -4705,25 +4735,41 @@ class AudioManager {
         this.startSpeechReverb();
       };
 
-      // When speech ends, stop reverb and play reverberant echo tail
+      // When speech ends, stop reverb, play reverberant echo tail, then process next in queue
       utterance.onend = () => {
         this.stopSpeechReverb();
         this.playPAReverbTail();
+        // Wait for reverb tail to finish before next announcement (1.5s delay)
+        setTimeout(() => {
+          this.processAnnouncementQueue();
+        }, 1500);
       };
       utterance.onerror = (e) => {
         this.stopSpeechReverb();
         audioLog.warn('TTS error', e);
+        // Even on error, continue processing queue after a short delay
+        setTimeout(() => {
+          this.processAnnouncementQueue();
+        }, 500);
       };
 
       // Play PA chime first, then speak after delay
       this.playPAChime();
-      setTimeout(() => {
+      this.announcementChimeTimeout = setTimeout(() => {
         if (this._ttsEnabled && !this._muted) {
           window.speechSynthesis.speak(utterance);
+        } else {
+          // If conditions changed during chime, process next
+          this.processAnnouncementQueue();
         }
       }, 1200); // Match existing PA chime timing
     } catch (e) {
       audioLog.warn('TTS playback failed', e);
+      this.isAnnouncementPlaying = false;
+      // Try next announcement
+      setTimeout(() => {
+        this.processAnnouncementQueue();
+      }, 500);
     }
   }
 
@@ -4889,9 +4935,17 @@ class AudioManager {
     }
   }
 
-  // Stop current TTS playback
+  // Stop current TTS playback and clear announcement queue
   stopTTS(): void {
     this.stopSpeechReverb();
+    // Clear the announcement queue
+    this.announcementQueue = [];
+    this.isAnnouncementPlaying = false;
+    // Cancel any pending chime timeout
+    if (this.announcementChimeTimeout) {
+      clearTimeout(this.announcementChimeTimeout);
+      this.announcementChimeTimeout = null;
+    }
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }

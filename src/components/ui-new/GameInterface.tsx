@@ -1,6 +1,5 @@
 import React, { useEffect } from 'react';
 import { Dock, DockMode } from './dock/Dock';
-import { MissionControl } from './sidebar/MissionControl';
 import { ContextSidebar } from './sidebar/ContextSidebar';
 import { StatusHUD } from './hud/StatusHUD';
 import { EmergencyOverlay } from '../EmergencyOverlay';
@@ -16,6 +15,11 @@ interface GameInterfaceProps {
   selectedMachine: MachineData | null;
   selectedWorker: WorkerData | null;
   onCloseSelection: () => void;
+  // Keyboard shortcut state bridge
+  showAIPanel?: boolean;
+  showSCADAPanel?: boolean;
+  onAIPanelChange?: (show: boolean) => void;
+  onSCADAPanelChange?: (show: boolean) => void;
 }
 
 export const GameInterface: React.FC<GameInterfaceProps> = ({
@@ -26,6 +30,10 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   selectedMachine,
   selectedWorker,
   onCloseSelection,
+  showAIPanel,
+  showSCADAPanel,
+  onAIPanelChange,
+  onSCADAPanelChange,
 }) => {
   // Local state for the Dock
   const [activeMode, setActiveMode] = React.useState<DockMode>('overview');
@@ -39,18 +47,49 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
     }
   }, [selectedMachine, selectedWorker]);
 
+  // Sync keyboard shortcuts with activeMode (I key for AI, O key for SCADA, Escape to close)
+  useEffect(() => {
+    if (showAIPanel && activeMode !== 'ai') {
+      setActiveMode('ai');
+      setSidebarVisible(true);
+    } else if (showAIPanel === false && activeMode === 'ai') {
+      setActiveMode('overview');
+    }
+  }, [showAIPanel, activeMode]);
+
+  useEffect(() => {
+    if (showSCADAPanel && activeMode !== 'scada') {
+      setActiveMode('scada');
+      setSidebarVisible(true);
+    } else if (showSCADAPanel === false && activeMode === 'scada') {
+      setActiveMode('overview');
+    }
+  }, [showSCADAPanel, activeMode]);
+
   // Handler for Dock interactions
   const handleModeChange = (mode: DockMode) => {
     if (
       activeMode === mode &&
-      (mode === 'ai' || mode === 'settings' || mode === 'scada' || mode === 'safety')
+      (mode === 'ai' ||
+        mode === 'settings' ||
+        mode === 'scada' ||
+        mode === 'safety' ||
+        mode === 'multiplayer')
     ) {
       // Toggle off if clicking the same active mode for panels
       setActiveMode('overview');
+      // Notify parent of panel state changes for keyboard shortcut sync
+      if (mode === 'ai') onAIPanelChange?.(false);
+      if (mode === 'scada') onSCADAPanelChange?.(false);
     } else {
       setActiveMode(mode);
       // Show sidebar when changing modes
       setSidebarVisible(true);
+      // Notify parent of panel state changes for keyboard shortcut sync
+      if (mode === 'ai') onAIPanelChange?.(true);
+      else if (activeMode === 'ai') onAIPanelChange?.(false);
+      if (mode === 'scada') onSCADAPanelChange?.(true);
+      else if (activeMode === 'scada') onSCADAPanelChange?.(false);
     }
 
     // Clear 3D selection when switching modes to show the correct panel
@@ -67,8 +106,12 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
       activeMode === 'ai' ||
       activeMode === 'scada' ||
       activeMode === 'settings' ||
-      activeMode === 'safety'
+      activeMode === 'safety' ||
+      activeMode === 'multiplayer'
     ) {
+      // Notify parent of panel state changes for keyboard shortcut sync
+      if (activeMode === 'ai') onAIPanelChange?.(false);
+      if (activeMode === 'scada') onSCADAPanelChange?.(false);
       setActiveMode('overview');
     } else {
       // If already in overview/workforce mode with no selection, hide the sidebar
@@ -95,8 +138,7 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
       <GamificationBar />
       <MiniMap />
 
-      {/* 5. Left Sidebar: Mission Control */}
-      <MissionControl />
+      {/* 5. Left Sidebar: Mission Control - Removed, info consolidated to right sidebar */}
 
       {/* 6. Bottom Dock */}
       <Dock activeMode={activeMode} onModeChange={handleModeChange} />

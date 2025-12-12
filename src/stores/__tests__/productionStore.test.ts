@@ -9,7 +9,7 @@
  * - Index rebuilding for efficient lookups
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useProductionStore } from '../productionStore';
 import { AIDecision } from '../../types';
 
@@ -606,6 +606,7 @@ describe('ProductionStore - AI Decision Management', () => {
     });
 
     it('should limit announcements to 10 items', () => {
+      vi.useFakeTimers();
       const { addAnnouncement } = useProductionStore.getState();
 
       for (let i = 0; i < 15; i++) {
@@ -615,13 +616,17 @@ describe('ProductionStore - AI Decision Management', () => {
           duration: 5,
           priority: 'low',
         });
+        // Advance time past the 15-second cooldown between announcements
+        vi.advanceTimersByTime(16000);
       }
 
       const announcements = useProductionStore.getState().announcements;
       expect(announcements.length).toBe(10);
+      vi.useRealTimers();
     });
 
     it('should dismiss specific announcements', () => {
+      vi.useFakeTimers();
       const { addAnnouncement, dismissAnnouncement } = useProductionStore.getState();
 
       addAnnouncement({
@@ -630,6 +635,9 @@ describe('ProductionStore - AI Decision Management', () => {
         duration: 5,
         priority: 'low',
       });
+
+      // Advance time past the 15-second cooldown between announcements
+      vi.advanceTimersByTime(16000);
 
       addAnnouncement({
         message: 'Announcement 2',
@@ -646,6 +654,7 @@ describe('ProductionStore - AI Decision Management', () => {
       const announcementsAfter = useProductionStore.getState().announcements;
       expect(announcementsAfter).toHaveLength(1);
       expect(announcementsAfter[0].id).not.toBe(idToDismiss);
+      vi.useRealTimers();
     });
   });
 

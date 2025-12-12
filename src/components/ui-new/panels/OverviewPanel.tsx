@@ -150,8 +150,16 @@ export const OverviewPanel: React.FC = () => {
           </div>
           <div className="text-right">
             <div className="text-xl font-mono font-bold text-white">{formatGameTime(gameTime)}</div>
-            <div className={`text-[10px] font-bold ${gameSpeed === 0 ? 'text-red-400' : 'text-green-400'}`}>
-              {gameSpeed === 0 ? 'PAUSED' : gameSpeed === 1 ? '1x' : gameSpeed === 60 ? '60x' : '3000x'}
+            <div
+              className={`text-[10px] font-bold ${gameSpeed === 0 ? 'text-red-400' : 'text-green-400'}`}
+            >
+              {gameSpeed === 0
+                ? 'PAUSED'
+                : gameSpeed === 1
+                  ? '1x'
+                  : gameSpeed === 60
+                    ? '60x'
+                    : '3000x'}
             </div>
           </div>
         </div>

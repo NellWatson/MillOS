@@ -53,11 +53,12 @@ export const PHYSICS_CONFIG = {
 // Workers and forklifts don't collide with each other for performance
 export const COLLISION_GROUPS = {
   NONE: 0x0000,
-  STATIC: 0x0001, // Walls, machines, obstacles
+  STATIC: 0x0001, // Machines, obstacles (not walls)
   WORKER: 0x0002, // Worker NPCs
   FORKLIFT: 0x0004, // Forklifts
   PLAYER: 0x0008, // First-person player
   SENSOR: 0x0010, // Trigger zones (exits, crossings)
+  BOUNDARY: 0x0020, // World boundary walls (no collision)
   ALL: 0xffff,
 } as const;
 
@@ -68,10 +69,7 @@ export const COLLISION_FILTERS = {
   // Static objects collide with everything except sensors
   static: {
     memberships: COLLISION_GROUPS.STATIC,
-    filter:
-      COLLISION_GROUPS.WORKER |
-      COLLISION_GROUPS.FORKLIFT |
-      COLLISION_GROUPS.PLAYER,
+    filter: COLLISION_GROUPS.WORKER | COLLISION_GROUPS.FORKLIFT | COLLISION_GROUPS.PLAYER,
   },
 
   // Workers collide with static and player, not other workers or forklifts
@@ -90,10 +88,7 @@ export const COLLISION_FILTERS = {
   // Player collides with everything physical
   player: {
     memberships: COLLISION_GROUPS.PLAYER,
-    filter:
-      COLLISION_GROUPS.STATIC |
-      COLLISION_GROUPS.WORKER |
-      COLLISION_GROUPS.FORKLIFT,
+    filter: COLLISION_GROUPS.STATIC | COLLISION_GROUPS.WORKER | COLLISION_GROUPS.FORKLIFT,
   },
 
   // Sensors detect workers for fire drill exits
@@ -101,9 +96,18 @@ export const COLLISION_FILTERS = {
     memberships: COLLISION_GROUPS.SENSOR,
     filter: COLLISION_GROUPS.WORKER,
   },
+
+  // Boundary walls - no collision with anything (player can walk through)
+  boundary: {
+    memberships: COLLISION_GROUPS.BOUNDARY,
+    filter: COLLISION_GROUPS.NONE,
+  },
 } as const;
 
-// Factory bounds for physics world
+// World boundary - circular at mountain base (mountains start at radius 260)
+export const WORLD_RADIUS = 255;
+
+// Factory bounds for physics world (legacy - kept for debug visualization)
 export const FACTORY_BOUNDS = {
   minX: -60,
   maxX: 60,
@@ -114,10 +118,7 @@ export const FACTORY_BOUNDS = {
 
 // Helper to create collision groups value for Rapier
 // Returns a number encoding both membership and filter
-export function createCollisionGroups(
-  membership: number,
-  filter: number
-): number {
+export function createCollisionGroups(membership: number, filter: number): number {
   // Rapier expects: (membership << 16) | filter
   return (membership << 16) | filter;
 }

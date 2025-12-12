@@ -1,9 +1,17 @@
 import React from 'react';
-import { Home, Brain, Activity, Users, Shield, Settings, Eye } from 'lucide-react';
+import { Home, Brain, Activity, Users, Shield, Settings, Eye, Radio } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useUIStore } from '../../../stores/uiStore';
+import { useIsMultiplayerActive } from '../../../stores/multiplayerStore';
 
-export type DockMode = 'overview' | 'ai' | 'scada' | 'workforce' | 'safety' | 'settings';
+export type DockMode =
+  | 'overview'
+  | 'ai'
+  | 'scada'
+  | 'workforce'
+  | 'safety'
+  | 'settings'
+  | 'multiplayer';
 
 interface DockProps {
   activeMode: DockMode;
@@ -13,6 +21,7 @@ interface DockProps {
 export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange }) => {
   const fpsMode = useUIStore((state) => state.fpsMode);
   const toggleFpsMode = useUIStore((state) => state.toggleFpsMode);
+  const isMultiplayerActive = useIsMultiplayerActive();
 
   return (
     <nav
@@ -46,6 +55,14 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange }) => {
         label="Workforce"
         isActive={activeMode === 'workforce'}
         onClick={() => onModeChange('workforce')}
+      />
+      <DockItem
+        mode="multiplayer"
+        icon={<Radio />}
+        label="Multiplayer"
+        isActive={activeMode === 'multiplayer'}
+        onClick={() => onModeChange('multiplayer')}
+        badge={isMultiplayerActive}
       />
       <DockItem
         mode="safety"
@@ -95,7 +112,8 @@ const DockItem: React.FC<{
   label: string;
   isActive: boolean;
   onClick: () => void;
-}> = ({ icon, label, isActive, onClick }) => {
+  badge?: boolean;
+}> = ({ icon, label, isActive, onClick, badge }) => {
   return (
     <button
       onClick={onClick}
@@ -106,6 +124,9 @@ const DockItem: React.FC<{
       }`}
     >
       {icon}
+      {badge && (
+        <span className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+      )}
       {isActive && (
         <motion.div
           layoutId="dock-active"

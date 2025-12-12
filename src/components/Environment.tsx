@@ -26,6 +26,626 @@ import { audioManager } from '../utils/audioManager';
 import { shouldRunThisFrame, incrementGlobalFrame } from '../utils/frameThrottle';
 import { useShallow } from 'zustand/react/shallow';
 
+// =============================================================================
+// CENTRALIZED ENVIRONMENT ANIMATION MANAGER
+// =============================================================================
+
+// Registries to track animated objects without React re-renders
+interface LensFlareAnimationState {
+  flares: LensFlareData[];
+  isDaytime: boolean;
+}
+const lensFlareRegistry = new Map<string, LensFlareAnimationState>();
+
+interface GameTimeAnimationState {
+  tickGameTime: (delta: number) => void;
+  lastTickTime: number;
+}
+const gameTimeRegistry = new Map<string, GameTimeAnimationState>();
+
+interface PowerFlickerAnimationState {
+  weather: string;
+  powerFlickerState: typeof powerFlickerState;
+}
+const powerFlickerRegistry = new Map<string, PowerFlickerAnimationState>();
+
+interface LightingAnimationState {
+  overheadLightRefs: THREE.PointLight[];
+  overheadEmissiveRefs: THREE.MeshStandardMaterial[];
+  emergencyLightRefs: THREE.PointLight[];
+  emergencyEmissiveRefs: THREE.MeshStandardMaterial[];
+  baseIntensity: number;
+  weather: string;
+  powerFlickerState: typeof powerFlickerState;
+}
+const lightingRegistry = new Map<string, LightingAnimationState>();
+
+interface RippleAnimationState {
+  meshRef: THREE.Mesh;
+  materialRef: THREE.MeshBasicMaterial;
+  scaleRef: { current: number };
+  opacityRef: { current: number };
+}
+const rippleRegistry = new Map<string, RippleAnimationState>();
+
+interface PuddleSpawnAnimationState {
+  weather: string;
+  quality: string;
+  enableFloorPuddles: boolean;
+  puddlePositions: { x: number; z: number; size: number; irregular: number }[];
+  rippleDataRef: React.MutableRefObject<
+    Map<number, { x: number; z: number; scale: number; opacity: number }>
+  >;
+  nextRippleIdRef: React.MutableRefObject<number>;
+  setRippleKeys: React.Dispatch<React.SetStateAction<number[]>>;
+}
+const puddleSpawnRegistry = new Map<string, PuddleSpawnAnimationState>();
+
+interface WetFloorSignAnimationState {
+  signRef: THREE.Group;
+}
+const wetFloorSignRegistry = new Map<string, WetFloorSignAnimationState>();
+
+interface TrackFadeAnimationState {
+  materialRef: THREE.MeshBasicMaterial;
+  opacityRef: { current: number };
+  fadeRate: number;
+}
+const trackFadeRegistry = new Map<string, TrackFadeAnimationState>();
+
+interface TireTrackSpawnAnimationState {
+  isRainingRef: React.MutableRefObject<boolean>;
+  puddlePositions: { x: number; z: number; size: number }[];
+  trackDataRef: React.MutableRefObject<Map<number, any>>;
+  trackIdRef: React.MutableRefObject<number>;
+  lastTrackTimeRef: React.MutableRefObject<Map<string, number>>;
+  setTrackKeys: React.Dispatch<React.SetStateAction<number[]>>;
+}
+const tireTrackSpawnRegistry = new Map<string, TireTrackSpawnAnimationState>();
+
+interface DripPhysicsAnimationState {
+  groupRef: THREE.Group;
+  materialRef: THREE.MeshStandardMaterial;
+  trailRef: THREE.Mesh;
+  trailMaterialRef: THREE.MeshBasicMaterial;
+  yRef: { current: number };
+  vyRef: { current: number };
+  opacityRef: { current: number };
+  hasImpactedRef: React.MutableRefObject<boolean>;
+  data: { x: number; z: number };
+  onImpact: (x: number, z: number) => void;
+}
+const dripPhysicsRegistry = new Map<string, DripPhysicsAnimationState>();
+
+interface SplashPhysicsAnimationState {
+  meshRef: THREE.Mesh;
+  ringRef: THREE.Mesh;
+  materialRef: THREE.MeshBasicMaterial;
+  ringMaterialRef: THREE.MeshBasicMaterial;
+  posRef: { current: { x: number; y: number; z: number } };
+  velRef: { current: { vx: number; vy: number; vz: number } };
+  lifeRef: { current: number };
+}
+const splashPhysicsRegistry = new Map<string, SplashPhysicsAnimationState>();
+
+interface DripSpawnAnimationState {
+  weather: string;
+  quality: string;
+  dripSources: { x: number; z: number }[];
+  dripDataRef: React.MutableRefObject<Map<number, { x: number; z: number }>>;
+  dripIdRef: React.MutableRefObject<number>;
+  lastDripTimeRef: React.MutableRefObject<number>;
+  setDripKeys: React.Dispatch<React.SetStateAction<number[]>>;
+}
+const dripSpawnRegistry = new Map<string, DripSpawnAnimationState>();
+
+interface WeatherParticlesAnimationState {
+  rainRef: THREE.Points | null;
+  rainStreaksRef: THREE.Points | null;
+  splashRef: THREE.Points | null;
+  rainCount: number;
+  streakCount: number;
+  splashCount: number;
+  weather: string;
+  quality: string;
+  splashVelocities: React.MutableRefObject<Float32Array>;
+  splashLife: React.MutableRefObject<Float32Array>;
+}
+const weatherParticlesRegistry = new Map<string, WeatherParticlesAnimationState>();
+
+export const registerLensFlare = (id: string, state: LensFlareAnimationState) => {
+  lensFlareRegistry.set(id, state);
+};
+export const unregisterLensFlare = (id: string) => {
+  lensFlareRegistry.delete(id);
+};
+
+export const registerGameTime = (id: string, state: GameTimeAnimationState) => {
+  gameTimeRegistry.set(id, state);
+};
+export const unregisterGameTime = (id: string) => {
+  gameTimeRegistry.delete(id);
+};
+
+export const registerPowerFlicker = (id: string, state: PowerFlickerAnimationState) => {
+  powerFlickerRegistry.set(id, state);
+};
+export const unregisterPowerFlicker = (id: string) => {
+  powerFlickerRegistry.delete(id);
+};
+
+export const registerLighting = (id: string, state: LightingAnimationState) => {
+  lightingRegistry.set(id, state);
+};
+export const unregisterLighting = (id: string) => {
+  lightingRegistry.delete(id);
+};
+
+export const registerRipple = (id: string, state: RippleAnimationState) => {
+  rippleRegistry.set(id, state);
+};
+export const unregisterRipple = (id: string) => {
+  rippleRegistry.delete(id);
+};
+
+export const registerPuddleSpawn = (id: string, state: PuddleSpawnAnimationState) => {
+  puddleSpawnRegistry.set(id, state);
+};
+export const unregisterPuddleSpawn = (id: string) => {
+  puddleSpawnRegistry.delete(id);
+};
+
+export const registerWetFloorSign = (id: string, state: WetFloorSignAnimationState) => {
+  wetFloorSignRegistry.set(id, state);
+};
+export const unregisterWetFloorSign = (id: string) => {
+  wetFloorSignRegistry.delete(id);
+};
+
+export const registerTrackFade = (id: string, state: TrackFadeAnimationState) => {
+  trackFadeRegistry.set(id, state);
+};
+export const unregisterTrackFade = (id: string) => {
+  trackFadeRegistry.delete(id);
+};
+
+export const registerTireTrackSpawn = (id: string, state: TireTrackSpawnAnimationState) => {
+  tireTrackSpawnRegistry.set(id, state);
+};
+export const unregisterTireTrackSpawn = (id: string) => {
+  tireTrackSpawnRegistry.delete(id);
+};
+
+export const registerDripPhysics = (id: string, state: DripPhysicsAnimationState) => {
+  dripPhysicsRegistry.set(id, state);
+};
+export const unregisterDripPhysics = (id: string) => {
+  dripPhysicsRegistry.delete(id);
+};
+
+export const registerSplashPhysics = (id: string, state: SplashPhysicsAnimationState) => {
+  splashPhysicsRegistry.set(id, state);
+};
+export const unregisterSplashPhysics = (id: string) => {
+  splashPhysicsRegistry.delete(id);
+};
+
+export const registerDripSpawn = (id: string, state: DripSpawnAnimationState) => {
+  dripSpawnRegistry.set(id, state);
+};
+export const unregisterDripSpawn = (id: string) => {
+  dripSpawnRegistry.delete(id);
+};
+
+export const registerWeatherParticles = (id: string, state: WeatherParticlesAnimationState) => {
+  weatherParticlesRegistry.set(id, state);
+};
+export const unregisterWeatherParticles = (id: string) => {
+  weatherParticlesRegistry.delete(id);
+};
+
+// Manager component to handle all environment animations in a single consolidated loop
+const EnvironmentAnimationManager: React.FC = () => {
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+
+  useFrame((state, delta) => {
+    // Skip if tab not visible
+    if (!isTabVisible) return;
+
+    const time = state.clock.getElapsedTime();
+
+    // 1. Increment global frame counter (every frame)
+    incrementGlobalFrame();
+
+    // 2. Update Lens Flares (30fps - throttled to every 2nd frame)
+    if (lensFlareRegistry.size > 0 && shouldRunThisFrame(2)) {
+      lensFlareRegistry.forEach((data) => {
+        if (!data.isDaytime) return;
+
+        const cameraDir = new THREE.Vector3(0, 0, -1).applyQuaternion(state.camera.quaternion);
+
+        data.flares.forEach((flare) => {
+          if (!flare.ref.current) return;
+
+          const lightPos = new THREE.Vector3(
+            flare.position[0],
+            flare.position[1],
+            flare.position[2]
+          );
+          const toCamera = new THREE.Vector3()
+            .subVectors(state.camera.position, lightPos)
+            .normalize();
+
+          const dot = toCamera.dot(cameraDir);
+          const angleFade = Math.max(0, -dot);
+          flare.ref.current.visible = angleFade > 0.3;
+
+          if (angleFade > 0.3) {
+            const scale = angleFade * flare.intensity;
+            flare.ref.current.scale.setScalar(scale);
+            flare.ref.current.quaternion.copy(state.camera.quaternion);
+          }
+        });
+      });
+    }
+
+    // 3. Update Game Time (runs every 500ms)
+    if (gameTimeRegistry.size > 0) {
+      gameTimeRegistry.forEach((data) => {
+        const now = time;
+        if (now - data.lastTickTime >= 0.5) {
+          data.tickGameTime(0.5);
+          data.lastTickTime = now;
+        }
+      });
+    }
+
+    // 4. Update Power Flicker (every frame for smooth flicker)
+    if (powerFlickerRegistry.size > 0) {
+      powerFlickerRegistry.forEach((data) => {
+        const isStormy = data.weather === 'storm';
+        const now = time;
+
+        if (isStormy) {
+          if (now > data.powerFlickerState.nextFlickerTime) {
+            if (Math.random() < 0.02) {
+              data.powerFlickerState.isFlickering = true;
+              data.powerFlickerState.nextFlickerTime = now + 0.1 + Math.random() * 0.4;
+              audioManager.playPowerFlicker();
+            } else {
+              data.powerFlickerState.nextFlickerTime = now + 0.5;
+            }
+          }
+
+          if (data.powerFlickerState.isFlickering) {
+            data.powerFlickerState.intensity = 0.2 + Math.random() * 0.5;
+
+            if (now > data.powerFlickerState.nextFlickerTime) {
+              data.powerFlickerState.isFlickering = false;
+              data.powerFlickerState.intensity = 1;
+              data.powerFlickerState.nextFlickerTime = now + 5 + Math.random() * 15;
+            }
+          }
+        } else {
+          data.powerFlickerState.intensity = 1;
+          data.powerFlickerState.isFlickering = false;
+        }
+      });
+    }
+
+    // 5. Update Lighting System (15fps - throttled to every 4th frame)
+    if (lightingRegistry.size > 0 && shouldRunThisFrame(4)) {
+      lightingRegistry.forEach((data) => {
+        const overheadIntensity = data.baseIntensity * data.powerFlickerState.intensity;
+        const overheadEmissiveIntensity = 0.5 * data.powerFlickerState.intensity;
+
+        data.overheadLightRefs.forEach((light) => {
+          if (light) light.intensity = overheadIntensity;
+        });
+
+        data.overheadEmissiveRefs.forEach((mat) => {
+          if (mat) mat.emissiveIntensity = overheadEmissiveIntensity;
+        });
+
+        const isStormy = data.weather === 'storm';
+        const isFlickering = data.powerFlickerState.isFlickering;
+        const emergencyOn = isStormy && isFlickering;
+        const emergencyIntensity = emergencyOn ? 8 : 0.5;
+        const emergencyEmissiveIntensity = emergencyOn ? 2 : 0.1;
+
+        data.emergencyLightRefs.forEach((light) => {
+          if (light) light.intensity = emergencyIntensity;
+        });
+
+        data.emergencyEmissiveRefs.forEach((mat) => {
+          if (mat) mat.emissiveIntensity = emergencyEmissiveIntensity;
+        });
+      });
+    }
+
+    // 6. Update Water Ripples (60fps - smooth animation)
+    if (rippleRegistry.size > 0) {
+      rippleRegistry.forEach((data) => {
+        data.scaleRef.current += delta * 2;
+        data.opacityRef.current -= delta * 0.8;
+        if (data.meshRef && data.materialRef) {
+          const s = data.scaleRef.current;
+          data.meshRef.scale.set(s, s, 1);
+          data.materialRef.opacity = Math.max(0, data.opacityRef.current * 0.4);
+        }
+      });
+    }
+
+    // 7. Spawn Puddle Ripples (30fps - throttled to every 2nd frame)
+    if (puddleSpawnRegistry.size > 0 && shouldRunThisFrame(2)) {
+      puddleSpawnRegistry.forEach((data) => {
+        if (data.quality === 'low' || !data.enableFloorPuddles) return;
+
+        const spawnChance = data.quality === 'ultra' ? 0.12 : data.quality === 'high' ? 0.1 : 0.05;
+
+        if ((data.weather === 'rain' || data.weather === 'storm') && Math.random() < spawnChance) {
+          const puddle =
+            data.puddlePositions[Math.floor(Math.random() * data.puddlePositions.length)];
+          const offsetX = (Math.random() - 0.5) * puddle.size * 0.8;
+          const offsetZ = (Math.random() - 0.5) * puddle.size * 0.8;
+          const id = data.nextRippleIdRef.current++;
+          data.rippleDataRef.current.set(id, {
+            x: puddle.x + offsetX,
+            z: puddle.z + offsetZ,
+            scale: 0.1,
+            opacity: 0.6,
+          });
+          data.setRippleKeys((prev) => [...prev.slice(-19), id]);
+        }
+
+        // Clean up expired ripples
+        data.rippleDataRef.current.forEach((rippleData, id) => {
+          if (rippleData.opacity <= 0) {
+            data.rippleDataRef.current.delete(id);
+          }
+        });
+      });
+    }
+
+    // 8. Update Wet Floor Sign Sway (30fps - throttled to every 2nd frame)
+    if (wetFloorSignRegistry.size > 0 && shouldRunThisFrame(2)) {
+      wetFloorSignRegistry.forEach((data) => {
+        if (data.signRef) {
+          data.signRef.rotation.y = Math.sin(time * 0.5) * 0.05;
+        }
+      });
+    }
+
+    // 9. Update Tire Track Fade (60fps - smooth fade)
+    if (trackFadeRegistry.size > 0) {
+      trackFadeRegistry.forEach((data) => {
+        data.opacityRef.current -= delta * data.fadeRate;
+        if (data.materialRef) {
+          data.materialRef.opacity = Math.max(0, data.opacityRef.current);
+        }
+      });
+    }
+
+    // 10. Spawn Tire Tracks (30fps - throttled to every 2nd frame)
+    if (tireTrackSpawnRegistry.size > 0 && shouldRunThisFrame(2)) {
+      tireTrackSpawnRegistry.forEach((data) => {
+        if (!data.isRainingRef.current) return;
+
+        const forkliftPaths = [
+          {
+            id: 'forklift-1',
+            x: -28 + Math.sin(time * 0.3) * 30,
+            z: -18 + Math.cos(time * 0.2) * 25,
+          },
+          {
+            id: 'forklift-2',
+            x: 28 + Math.sin(time * 0.25) * 30,
+            z: 5 + Math.cos(time * 0.3) * 20,
+          },
+        ];
+
+        forkliftPaths.forEach((forklift) => {
+          // Check if in puddle
+          let isInPuddle = false;
+          for (const puddle of data.puddlePositions) {
+            const dx = forklift.x - puddle.x;
+            const dz = forklift.z - puddle.z;
+            if (Math.sqrt(dx * dx + dz * dz) < puddle.size) {
+              isInPuddle = true;
+              break;
+            }
+          }
+
+          if (isInPuddle) {
+            const now = time;
+            const lastTime = data.lastTrackTimeRef.current.get(forklift.id) || 0;
+
+            if (now - lastTime > 0.3) {
+              data.lastTrackTimeRef.current.set(forklift.id, now);
+
+              const trackId = data.trackIdRef.current++;
+              const angle = Math.random() * Math.PI * 2;
+              const offsetX = Math.cos(angle) * 0.3;
+              const offsetZ = Math.sin(angle) * 0.3;
+
+              data.trackDataRef.current.set(trackId, {
+                id: trackId,
+                points: [
+                  [forklift.x - offsetX, 0.02, forklift.z - offsetZ],
+                  [forklift.x + offsetX, 0.02, forklift.z + offsetZ],
+                ],
+                opacity: 0.4,
+                width: 0.15 + Math.random() * 0.1,
+              });
+              data.setTrackKeys((prev) => [...prev.slice(-29), trackId]);
+            }
+          }
+        });
+      });
+    }
+
+    // 11. Update Drip Physics (60fps - smooth falling)
+    if (dripPhysicsRegistry.size > 0) {
+      dripPhysicsRegistry.forEach((data) => {
+        if (data.hasImpactedRef.current) return;
+
+        data.vyRef.current -= 25 * delta;
+        data.yRef.current += data.vyRef.current * delta;
+
+        if (data.yRef.current <= 0.1 && !data.hasImpactedRef.current) {
+          data.hasImpactedRef.current = true;
+          data.onImpact(data.data.x, data.data.z);
+          if (data.groupRef) data.groupRef.visible = false;
+          return;
+        }
+
+        if (data.yRef.current < 1) {
+          data.opacityRef.current -= delta * 3;
+        }
+
+        if (data.groupRef) {
+          data.groupRef.position.y = data.yRef.current;
+        }
+        if (data.materialRef) {
+          data.materialRef.opacity = data.opacityRef.current * 0.6;
+        }
+        if (data.trailRef) {
+          data.trailRef.visible = data.vyRef.current < -5;
+          data.trailRef.position.y = 0.15;
+        }
+        if (data.trailMaterialRef) {
+          data.trailMaterialRef.opacity = data.opacityRef.current * 0.3;
+        }
+      });
+    }
+
+    // 12. Update Splash Physics (60fps - smooth particle motion)
+    if (splashPhysicsRegistry.size > 0) {
+      splashPhysicsRegistry.forEach((data) => {
+        data.velRef.current.vy -= 15 * delta;
+        data.posRef.current.x += data.velRef.current.vx * delta;
+        data.posRef.current.y = Math.max(0, data.posRef.current.y + data.velRef.current.vy * delta);
+        data.posRef.current.z += data.velRef.current.vz * delta;
+        data.lifeRef.current -= delta * 2.5;
+
+        if (data.meshRef) {
+          data.meshRef.position.set(
+            data.posRef.current.x,
+            data.posRef.current.y,
+            data.posRef.current.z
+          );
+        }
+        if (data.materialRef) {
+          data.materialRef.opacity = Math.max(0, data.lifeRef.current * 0.5);
+        }
+        if (data.ringRef && data.ringMaterialRef) {
+          data.ringRef.visible = data.lifeRef.current > 0.7;
+          data.ringRef.position.set(data.posRef.current.x, 0.02, data.posRef.current.z);
+          const ringSize = (1 - data.lifeRef.current) * 0.5;
+          data.ringRef.scale.set(ringSize * 10 + 1, ringSize * 10 + 1, 1);
+          data.ringMaterialRef.opacity = Math.max(0, (data.lifeRef.current - 0.7) * 2);
+        }
+      });
+    }
+
+    // 13. Spawn Ceiling Drips (30fps - throttled to every 2nd frame)
+    if (dripSpawnRegistry.size > 0 && shouldRunThisFrame(2)) {
+      dripSpawnRegistry.forEach((data) => {
+        const isRaining = data.weather === 'rain' || data.weather === 'storm';
+        if (!isRaining || data.quality === 'low') return;
+
+        const now = time;
+        const dripInterval = data.weather === 'storm' ? 0.3 : 0.8;
+
+        if (now - data.lastDripTimeRef.current > dripInterval) {
+          data.lastDripTimeRef.current = now;
+          const source = data.dripSources[Math.floor(Math.random() * data.dripSources.length)];
+          const dripId = data.dripIdRef.current++;
+          data.dripDataRef.current.set(dripId, {
+            x: source.x + (Math.random() - 0.5) * 2,
+            z: source.z + (Math.random() - 0.5) * 2,
+          });
+          data.setDripKeys((prev) => [...prev.slice(-19), dripId]);
+        }
+      });
+    }
+
+    // 14. Update Weather Particles (30fps - throttled to every 2nd frame)
+    if (weatherParticlesRegistry.size > 0 && shouldRunThisFrame(2)) {
+      weatherParticlesRegistry.forEach((data) => {
+        if (data.quality === 'low' || data.quality === 'medium') return;
+
+        const isRaining = data.weather === 'rain' || data.weather === 'storm';
+        const isStorm = data.weather === 'storm';
+
+        // Animate main rain
+        if (data.rainRef && isRaining) {
+          const positions = data.rainRef.geometry.attributes.position.array as Float32Array;
+          const speed = isStorm ? 1.2 : 0.6;
+          const windDrift = isStorm ? 0.3 : 0.1;
+
+          for (let i = 0; i < data.rainCount; i++) {
+            positions[i * 3] += (Math.random() - 0.5) * windDrift * delta;
+            positions[i * 3 + 1] -= speed;
+            if (positions[i * 3 + 1] < 30) {
+              positions[i * 3 + 1] = 47;
+              positions[i * 3] = (Math.random() - 0.5) * 60;
+              positions[i * 3 + 2] = (Math.random() - 0.5) * 50;
+            }
+          }
+          data.rainRef.geometry.attributes.position.needsUpdate = true;
+        }
+
+        // Animate rain streaks
+        if (data.rainStreaksRef && isStorm && data.streakCount > 0) {
+          const positions = data.rainStreaksRef.geometry.attributes.position.array as Float32Array;
+          const speed = 2.5;
+
+          for (let i = 0; i < data.streakCount; i++) {
+            positions[i * 3] += (Math.random() - 0.5) * 0.5 * delta;
+            positions[i * 3 + 1] -= speed;
+            if (positions[i * 3 + 1] < 30) {
+              positions[i * 3 + 1] = 52;
+              positions[i * 3] = (Math.random() - 0.5) * 60;
+              positions[i * 3 + 2] = (Math.random() - 0.5) * 50;
+            }
+          }
+          data.rainStreaksRef.geometry.attributes.position.needsUpdate = true;
+        }
+
+        // Animate splashes
+        if (data.splashRef && isRaining && data.splashCount > 0) {
+          const positions = data.splashRef.geometry.attributes.position.array as Float32Array;
+          const skylightX = [-20, 0, 20];
+
+          for (let i = 0; i < data.splashCount; i++) {
+            data.splashLife.current[i] -= delta * 3;
+
+            if (data.splashLife.current[i] <= 0) {
+              const sx = skylightX[Math.floor(Math.random() * 3)];
+              positions[i * 3] = sx + (Math.random() - 0.5) * 10;
+              positions[i * 3 + 1] = 32;
+              positions[i * 3 + 2] = (Math.random() - 0.5) * 14;
+              data.splashVelocities.current[i * 3] = (Math.random() - 0.5) * 2;
+              data.splashVelocities.current[i * 3 + 1] = 1 + Math.random();
+              data.splashVelocities.current[i * 3 + 2] = (Math.random() - 0.5) * 2;
+              data.splashLife.current[i] = 0.3 + Math.random() * 0.3;
+            } else {
+              positions[i * 3] += data.splashVelocities.current[i * 3] * delta;
+              positions[i * 3 + 1] += data.splashVelocities.current[i * 3 + 1] * delta;
+              positions[i * 3 + 2] += data.splashVelocities.current[i * 3 + 2] * delta;
+              data.splashVelocities.current[i * 3 + 1] -= 8 * delta;
+            }
+          }
+          data.splashRef.geometry.attributes.position.needsUpdate = true;
+        }
+      });
+    }
+  });
+
+  return null;
+};
+
 // Consolidated lens flare system - manages multiple flares in ONE useFrame callback
 interface LensFlareData {
   position: [number, number, number];
@@ -36,54 +656,20 @@ interface LensFlareData {
 
 const LensFlareSystem: React.FC<{ flares: LensFlareData[] }> = memo(({ flares }) => {
   const gameTime = useGameSimulationStore((state) => state.gameTime);
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
-  // Shared Vector3 refs for all flares to reduce GC pressure
-  const lightPosRef = useRef(new THREE.Vector3());
-  const toCameraRef = useRef(new THREE.Vector3());
-  const cameraDirRef = useRef(new THREE.Vector3());
 
   // Only show lens flares during bright daylight
   const isDaytime = gameTime >= 8 && gameTime < 17;
-  const daylightIntensity = isDaytime ? 1 : 0;
 
-  useFrame(({ camera }) => {
-    // PERFORMANCE: Skip when tab hidden or not daytime
-    if (!isTabVisible || !shouldRunThisFrame(2) || daylightIntensity === 0) return;
-
-    // Calculate camera direction once for all flares
-    const cameraDir = cameraDirRef.current.set(0, 0, -1).applyQuaternion(camera.quaternion);
-
-    // Update all flares in a single pass
-    flares.forEach((flare) => {
-      if (!flare.ref.current) return;
-
-      // Calculate vector from light to camera (reusing refs)
-      const lightPos = lightPosRef.current.set(
-        flare.position[0],
-        flare.position[1],
-        flare.position[2]
-      );
-      const toCamera = toCameraRef.current.subVectors(camera.position, lightPos).normalize();
-
-      // Only show flare when looking toward the light
-      const dot = toCamera.dot(cameraDir);
-
-      // Fade based on angle (stronger when looking at light)
-      const angleFade = Math.max(0, -dot);
-      flare.ref.current.visible = angleFade > 0.3;
-
-      if (angleFade > 0.3) {
-        // Scale flare based on angle
-        const scale = angleFade * flare.intensity * daylightIntensity;
-        flare.ref.current.scale.setScalar(scale);
-
-        // Flare always faces camera
-        flare.ref.current.quaternion.copy(camera.quaternion);
-      }
+  // Register lens flare system with animation manager
+  useEffect(() => {
+    registerLensFlare('main', {
+      flares,
+      isDaytime,
     });
-  });
+    return () => unregisterLensFlare('main');
+  }, [flares, isDaytime]);
 
-  if (daylightIntensity === 0) return null;
+  if (!isDaytime) return null;
 
   return (
     <>
@@ -318,29 +904,19 @@ const LightShaft: React.FC<{ position: [number, number, number] }> = memo(({ pos
   );
 });
 
-// Global frame counter - increments once per frame for all throttling utilities
-const GlobalFrameCounter: React.FC = () => {
-  useFrame(() => {
-    incrementGlobalFrame();
-  });
-  return null;
-};
-
-// Game time ticker component - throttled to every 500ms to reduce re-renders
+// Game time ticker component - now managed by EnvironmentAnimationManager
 const GameTimeTicker: React.FC = () => {
   const tickGameTime = useGameSimulationStore((state) => state.tickGameTime);
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const lastTickRef = useRef(0);
 
-  useFrame((state) => {
-    if (!isTabVisible) return;
-    const now = state.clock.elapsedTime;
-    if (now - lastTickRef.current >= 0.5) {
-      // Tick every 500ms
-      tickGameTime(0.5); // Pass real seconds elapsed
-      lastTickRef.current = now;
-    }
-  });
+  // Register game time with animation manager
+  useEffect(() => {
+    registerGameTime('main', {
+      tickGameTime,
+      lastTickTime: lastTickRef.current,
+    });
+    return () => unregisterGameTime('main');
+  }, [tickGameTime]);
 
   return null;
 };
@@ -352,59 +928,25 @@ const powerFlickerState = {
   nextFlickerTime: 0,
 };
 
-// Storm power flicker controller - manages flicker timing
+// Storm power flicker controller - now managed by EnvironmentAnimationManager
 const StormPowerFlicker: React.FC = () => {
   const weather = useGameSimulationStore((state) => state.weather);
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
-  useFrame((state) => {
-    if (!isTabVisible) return;
-    const isStormy = weather === 'storm';
-    const now = state.clock.elapsedTime;
-
-    if (isStormy) {
-      // Check if it's time for a flicker event
-      if (now > powerFlickerState.nextFlickerTime) {
-        // Random chance of flicker during storm
-        if (Math.random() < 0.02) {
-          powerFlickerState.isFlickering = true;
-          // Flicker duration: 0.1 to 0.5 seconds
-          powerFlickerState.nextFlickerTime = now + 0.1 + Math.random() * 0.4;
-
-          // Play electrical buzz sound
-          audioManager.playPowerFlicker();
-        } else {
-          powerFlickerState.nextFlickerTime = now + 0.5;
-        }
-      }
-
-      // Update flicker intensity
-      if (powerFlickerState.isFlickering) {
-        // Rapid random fluctuation
-        powerFlickerState.intensity = 0.2 + Math.random() * 0.5;
-
-        // Check if flicker should end
-        if (now > powerFlickerState.nextFlickerTime) {
-          powerFlickerState.isFlickering = false;
-          powerFlickerState.intensity = 1;
-          // Next potential flicker in 5-20 seconds
-          powerFlickerState.nextFlickerTime = now + 5 + Math.random() * 15;
-        }
-      }
-    } else {
-      // Reset when not stormy
-      powerFlickerState.intensity = 1;
-      powerFlickerState.isFlickering = false;
-    }
-  });
+  // Register power flicker with animation manager
+  useEffect(() => {
+    registerPowerFlicker('main', {
+      weather,
+      powerFlickerState,
+    });
+    return () => unregisterPowerFlicker('main');
+  }, [weather]);
 
   return null;
 };
 
-// Consolidated light animation system - manages overhead + emergency lights in ONE useFrame
+// Consolidated light animation system - now managed by EnvironmentAnimationManager
 const ConsolidatedLightingSystem: React.FC = () => {
   const weather = useGameSimulationStore((state) => state.weather);
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const overheadLightRefs = useRef<THREE.PointLight[]>([]);
   const overheadEmissiveRefs = useRef<THREE.MeshStandardMaterial[]>([]);
   const emergencyLightRefs = useRef<THREE.PointLight[]>([]);
@@ -420,38 +962,19 @@ const ConsolidatedLightingSystem: React.FC = () => {
     []
   );
 
-  // Consolidated useFrame for ALL light animations - throttled to every 3rd frame (~20 FPS)
-  useFrame(() => {
-    // PERFORMANCE: Skip when tab hidden
-    if (!isTabVisible || !shouldRunThisFrame(3)) return;
-
-    // Update overhead flickering lights
-    const overheadIntensity = baseIntensity * powerFlickerState.intensity;
-    const overheadEmissiveIntensity = 0.5 * powerFlickerState.intensity;
-
-    overheadLightRefs.current.forEach((light) => {
-      if (light) light.intensity = overheadIntensity;
+  // Register lighting system with animation manager
+  useEffect(() => {
+    registerLighting('main', {
+      overheadLightRefs: overheadLightRefs.current,
+      overheadEmissiveRefs: overheadEmissiveRefs.current,
+      emergencyLightRefs: emergencyLightRefs.current,
+      emergencyEmissiveRefs: emergencyEmissiveRefs.current,
+      baseIntensity,
+      weather,
+      powerFlickerState,
     });
-
-    overheadEmissiveRefs.current.forEach((mat) => {
-      if (mat) mat.emissiveIntensity = overheadEmissiveIntensity;
-    });
-
-    // Update emergency lights
-    const isStormy = weather === 'storm';
-    const isFlickering = powerFlickerState.isFlickering;
-    const emergencyOn = isStormy && isFlickering;
-    const emergencyIntensity = emergencyOn ? 8 : 0.5;
-    const emergencyEmissiveIntensity = emergencyOn ? 2 : 0.1;
-
-    emergencyLightRefs.current.forEach((light) => {
-      if (light) light.intensity = emergencyIntensity;
-    });
-
-    emergencyEmissiveRefs.current.forEach((mat) => {
-      if (mat) mat.emissiveIntensity = emergencyEmissiveIntensity;
-    });
-  });
+    return () => unregisterLighting('main');
+  }, [weather, baseIntensity]);
 
   return (
     <>
@@ -558,8 +1081,8 @@ export const FactoryEnvironment: React.FC = () => {
 
   return (
     <group>
-      {/* Global frame counter - increment once per frame for all throttling */}
-      <GlobalFrameCounter />
+      {/* Centralized Animation Manager */}
+      <EnvironmentAnimationManager />
 
       {/* Game time ticker - advances time each frame */}
       <GameTimeTicker />
@@ -591,7 +1114,8 @@ export const FactoryEnvironment: React.FC = () => {
       />
 
       {/* Contact shadows for grounding - positioned above floor to prevent z-fighting */}
-      {enableContactShadows && (
+      {/* TEMPORARILY DISABLED to diagnose NaN PlaneGeometry errors */}
+      {false && enableContactShadows && (
         <ContactShadows
           position={[0, 0.05, 0]}
           opacity={0.35}
@@ -900,44 +1424,47 @@ export const FactoryEnvironment: React.FC = () => {
   );
 };
 
-// Single ripple mesh with ref-based animation - memoized
-const RippleMesh: React.FC<{ data: { x: number; z: number; scale: number; opacity: number } }> =
-  memo(({ data }) => {
-    const meshRef = useRef<THREE.Mesh>(null);
-    const materialRef = useRef<THREE.MeshBasicMaterial>(null);
-    const scaleRef = useRef(data.scale);
-    const opacityRef = useRef(data.opacity);
-    const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+// Single ripple mesh with ref-based animation - memoized - now managed by EnvironmentAnimationManager
+const RippleMesh: React.FC<{
+  data: { x: number; z: number; scale: number; opacity: number };
+  id: number;
+}> = memo(({ data, id }) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const materialRef = useRef<THREE.MeshBasicMaterial>(null);
+  const scaleRef = useRef(data.scale);
+  const opacityRef = useRef(data.opacity);
 
-    useFrame((_, delta) => {
-      if (!isTabVisible) return;
-      scaleRef.current += delta * 2;
-      opacityRef.current -= delta * 0.8;
-      if (meshRef.current && materialRef.current) {
-        const s = scaleRef.current;
-        meshRef.current.scale.set(s, s, 1);
-        materialRef.current.opacity = Math.max(0, opacityRef.current * 0.4);
-      }
-    });
+  // Register ripple with animation manager
+  useEffect(() => {
+    if (meshRef.current && materialRef.current) {
+      registerRipple(`ripple-${id}`, {
+        meshRef: meshRef.current,
+        materialRef: materialRef.current,
+        scaleRef,
+        opacityRef,
+      });
+      return () => unregisterRipple(`ripple-${id}`);
+    }
+  }, [id]);
 
-    return (
-      <mesh ref={meshRef} position={[data.x, 0.04, data.z]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.3, 0.35, 32]} />
-        <meshBasicMaterial
-          ref={materialRef}
-          color="#7dd3fc"
-          transparent
-          opacity={data.opacity * 0.4}
-        />
-      </mesh>
-    );
-  });
+  return (
+    <mesh ref={meshRef} position={[data.x, 0.04, data.z]} rotation={[-Math.PI / 2, 0, 0]}>
+      <ringGeometry args={[0.3, 0.35, 32]} />
+      <meshBasicMaterial
+        ref={materialRef}
+        color="#7dd3fc"
+        transparent
+        opacity={data.opacity * 0.4}
+      />
+    </mesh>
+  );
+});
 
 // Puddle reflections on floor during rain
 const PuddleReflections: React.FC = () => {
   const weather = useGameSimulationStore((state) => state.weather);
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const quality = useGraphicsStore((state) => state.graphics.quality);
+  const enableFloorPuddles = useGraphicsStore((state) => state.graphics.enableFloorPuddles);
   const puddleRef = useRef<THREE.Group>(null);
   // Use a ref for ripple data and only re-render when adding new ripples
   const [rippleKeys, setRippleKeys] = useState<number[]>([]);
@@ -961,36 +1488,22 @@ const PuddleReflections: React.FC = () => {
     []
   );
 
-  // Add new ripples during rain (infrequent state updates)
-  useFrame(() => {
-    // PERFORMANCE: Skip on LOW/MEDIUM quality - weather effects are HIGH+ only
-    if (!isTabVisible || quality === 'low' || quality === 'medium') return;
-    if ((weather === 'rain' || weather === 'storm') && Math.random() < 0.1) {
-      const puddle = puddlePositions[Math.floor(Math.random() * puddlePositions.length)];
-      const offsetX = (Math.random() - 0.5) * puddle.size * 0.8;
-      const offsetZ = (Math.random() - 0.5) * puddle.size * 0.8;
-      const id = nextRippleIdRef.current++;
-      rippleDataRef.current.set(id, {
-        x: puddle.x + offsetX,
-        z: puddle.z + offsetZ,
-        scale: 0.1,
-        opacity: 0.6,
-      });
-      // Only update state when adding - happens ~6 times/sec max
-      setRippleKeys((prev) => [...prev.slice(-19), id]);
-    }
-
-    // Clean up expired ripples from ref (no state update needed)
-    rippleDataRef.current.forEach((data, id) => {
-      if (data.opacity <= 0) {
-        rippleDataRef.current.delete(id);
-      }
+  // Register puddle spawn logic with animation manager
+  useEffect(() => {
+    registerPuddleSpawn('main', {
+      weather,
+      quality,
+      enableFloorPuddles,
+      puddlePositions,
+      rippleDataRef,
+      nextRippleIdRef,
+      setRippleKeys,
     });
-  });
+    return () => unregisterPuddleSpawn('main');
+  }, [weather, quality, enableFloorPuddles, puddlePositions]);
 
-  // Don't render puddles in clear weather or on low graphics
-  // Disable rain/storm effects on low AND medium for performance (650+ particles)
-  if (weather === 'clear' || weather === 'cloudy' || quality === 'low' || quality === 'medium')
+  // Don't render puddles in clear weather or when explicitly disabled
+  if (weather === 'clear' || weather === 'cloudy' || quality === 'low' || !enableFloorPuddles)
     return null;
 
   const rainIntensity = weather === 'storm' ? 1 : 0.6;
@@ -1023,7 +1536,7 @@ const PuddleReflections: React.FC = () => {
       {/* Ripple effects - each ripple animates via its own ref */}
       {rippleKeys.map((id) => {
         const data = rippleDataRef.current.get(id);
-        return data ? <RippleMesh key={id} data={data} /> : null;
+        return data ? <RippleMesh key={id} id={id} data={data} /> : null;
       })}
 
       {/* Wet floor warning signs */}
@@ -1038,57 +1551,60 @@ const PuddleReflections: React.FC = () => {
   );
 };
 
-// Wet floor warning sign component - memoized
-const WetFloorSign: React.FC<{ position: [number, number, number] }> = memo(({ position }) => {
-  const signRef = useRef<THREE.Group>(null);
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+// Wet floor warning sign component - now managed by EnvironmentAnimationManager
+const WetFloorSign: React.FC<{ position: [number, number, number]; id: number }> = memo(
+  ({ position, id }) => {
+    const signRef = useRef<THREE.Group>(null);
 
-  useFrame((state) => {
-    if (!isTabVisible) return;
-    if (signRef.current) {
-      // Gentle sway animation
-      signRef.current.rotation.y = Math.sin(state.clock.elapsedTime * 0.5) * 0.05;
-    }
-  });
+    // Register wet floor sign with animation manager
+    useEffect(() => {
+      if (signRef.current) {
+        registerWetFloorSign(`sign-${id}`, {
+          signRef: signRef.current,
+        });
+        return () => unregisterWetFloorSign(`sign-${id}`);
+      }
+    }, [id]);
 
-  return (
-    <group ref={signRef} position={position}>
-      {/* Sign base/stand */}
-      <mesh position={[0, 0.02, 0]}>
-        <boxGeometry args={[0.4, 0.04, 0.4]} />
-        <meshStandardMaterial color="#1f2937" roughness={0.8} />
-      </mesh>
-      {/* Sign pole */}
-      <mesh position={[0, 0.4, 0]}>
-        <cylinderGeometry args={[0.03, 0.03, 0.8, 8]} />
-        <meshStandardMaterial color="#fbbf24" roughness={0.6} />
-      </mesh>
-      {/* Warning triangle sign */}
-      <group position={[0, 0.85, 0]}>
-        {/* Triangle background */}
-        <mesh rotation={[0, 0, 0]}>
-          <coneGeometry args={[0.25, 0.4, 3]} />
-          <meshStandardMaterial color="#fbbf24" roughness={0.4} />
+    return (
+      <group ref={signRef} position={position}>
+        {/* Sign base/stand */}
+        <mesh position={[0, 0.02, 0]}>
+          <boxGeometry args={[0.4, 0.04, 0.4]} />
+          <meshStandardMaterial color="#1f2937" roughness={0.8} />
         </mesh>
-        {/* Inner triangle (black border effect) */}
-        <mesh rotation={[0, 0, 0]} position={[0, 0.02, 0.01]}>
-          <coneGeometry args={[0.18, 0.3, 3]} />
-          <meshStandardMaterial color="#1f2937" roughness={0.6} />
+        {/* Sign pole */}
+        <mesh position={[0, 0.4, 0]}>
+          <cylinderGeometry args={[0.03, 0.03, 0.8, 8]} />
+          <meshStandardMaterial color="#fbbf24" roughness={0.6} />
         </mesh>
-        {/* Exclamation mark - dot */}
-        <mesh position={[0, -0.05, 0.12]}>
-          <sphereGeometry args={[0.03, 8, 8]} />
-          <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={0.3} />
-        </mesh>
-        {/* Exclamation mark - line */}
-        <mesh position={[0, 0.05, 0.12]}>
-          <boxGeometry args={[0.03, 0.12, 0.02]} />
-          <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={0.3} />
-        </mesh>
+        {/* Warning triangle sign */}
+        <group position={[0, 0.85, 0]}>
+          {/* Triangle background */}
+          <mesh rotation={[0, 0, 0]}>
+            <coneGeometry args={[0.25, 0.4, 3]} />
+            <meshStandardMaterial color="#fbbf24" roughness={0.4} />
+          </mesh>
+          {/* Inner triangle (black border effect) */}
+          <mesh rotation={[0, 0, 0]} position={[0, 0.02, 0.01]}>
+            <coneGeometry args={[0.18, 0.3, 3]} />
+            <meshStandardMaterial color="#1f2937" roughness={0.6} />
+          </mesh>
+          {/* Exclamation mark - dot */}
+          <mesh position={[0, -0.05, 0.12]}>
+            <sphereGeometry args={[0.03, 8, 8]} />
+            <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={0.3} />
+          </mesh>
+          {/* Exclamation mark - line */}
+          <mesh position={[0, 0.05, 0.12]}>
+            <boxGeometry args={[0.03, 0.12, 0.02]} />
+            <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={0.3} />
+          </mesh>
+        </group>
       </group>
-    </group>
-  );
-});
+    );
+  }
+);
 
 // Wet floor warning signs near puddles
 const WetFloorSigns: React.FC<{ puddlePositions: { x: number; z: number; size: number }[] }> = ({
@@ -1112,7 +1628,7 @@ const WetFloorSigns: React.FC<{ puddlePositions: { x: number; z: number; size: n
   return (
     <group>
       {signPositions.map((pos, i) => (
-        <WetFloorSign key={i} position={[pos.x, 0, pos.z]} />
+        <WetFloorSign key={i} id={i} position={[pos.x, 0, pos.z]} />
       ))}
     </group>
   );
@@ -1126,19 +1642,22 @@ interface TireTrack {
   width: number;
 }
 
-// Single track mesh with ref-based fade animation - memoized
+// Single track mesh with ref-based fade animation - now managed by EnvironmentAnimationManager
 const TrackMesh: React.FC<{ track: TireTrack; fadeRate: number }> = memo(({ track, fadeRate }) => {
   const materialRef = useRef<THREE.MeshBasicMaterial>(null);
   const opacityRef = useRef(track.opacity);
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
-  useFrame((_, delta) => {
-    if (!isTabVisible) return;
-    opacityRef.current -= delta * fadeRate;
+  // Register track fade with animation manager
+  useEffect(() => {
     if (materialRef.current) {
-      materialRef.current.opacity = Math.max(0, opacityRef.current);
+      registerTrackFade(`track-${track.id}`, {
+        materialRef: materialRef.current,
+        opacityRef,
+        fadeRate,
+      });
+      return () => unregisterTrackFade(`track-${track.id}`);
     }
-  });
+  }, [track.id, fadeRate]);
 
   const rotation = Math.atan2(
     track.points[1][2] - track.points[0][2],
@@ -1164,74 +1683,27 @@ const TireTrackSystem: React.FC<{ puddlePositions: { x: number; z: number; size:
   puddlePositions,
 }) => {
   const weather = useGameSimulationStore((state) => state.weather);
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const [trackKeys, setTrackKeys] = useState<number[]>([]);
   const trackDataRef = useRef<Map<number, TireTrack>>(new Map());
   const trackIdRef = useRef(0);
   const lastTrackTimeRef = useRef<Map<string, number>>(new Map());
   const isRainingRef = useRef(false);
 
-  // Check if a point is in a puddle
-  const isInPuddle = (x: number, z: number): boolean => {
-    for (const puddle of puddlePositions) {
-      const dx = x - puddle.x;
-      const dz = z - puddle.z;
-      if (Math.sqrt(dx * dx + dz * dz) < puddle.size) {
-        return true;
-      }
-    }
-    return false;
-  };
-
   // Track weather state
   isRainingRef.current = weather === 'rain' || weather === 'storm';
 
-  useFrame((state) => {
-    if (!isTabVisible) return;
-    if (!isRainingRef.current) return;
-
-    // Check forklift positions from the scene
-    const forkliftPaths = [
-      {
-        id: 'forklift-1',
-        x: -28 + Math.sin(state.clock.elapsedTime * 0.3) * 30,
-        z: -18 + Math.cos(state.clock.elapsedTime * 0.2) * 25,
-      },
-      {
-        id: 'forklift-2',
-        x: 28 + Math.sin(state.clock.elapsedTime * 0.25) * 30,
-        z: 5 + Math.cos(state.clock.elapsedTime * 0.3) * 20,
-      },
-    ];
-
-    forkliftPaths.forEach((forklift) => {
-      if (isInPuddle(forklift.x, forklift.z)) {
-        const now = state.clock.elapsedTime;
-        const lastTime = lastTrackTimeRef.current.get(forklift.id) || 0;
-
-        if (now - lastTime > 0.3) {
-          lastTrackTimeRef.current.set(forklift.id, now);
-
-          const trackId = trackIdRef.current++;
-          const angle = Math.random() * Math.PI * 2;
-          const offsetX = Math.cos(angle) * 0.3;
-          const offsetZ = Math.sin(angle) * 0.3;
-
-          trackDataRef.current.set(trackId, {
-            id: trackId,
-            points: [
-              [forklift.x - offsetX, 0.02, forklift.z - offsetZ],
-              [forklift.x + offsetX, 0.02, forklift.z + offsetZ],
-            ],
-            opacity: 0.4,
-            width: 0.15 + Math.random() * 0.1,
-          });
-          // Only re-render when adding new track
-          setTrackKeys((prev) => [...prev.slice(-29), trackId]);
-        }
-      }
+  // Register tire track spawn logic with animation manager
+  useEffect(() => {
+    registerTireTrackSpawn('main', {
+      isRainingRef,
+      puddlePositions,
+      trackDataRef,
+      trackIdRef,
+      lastTrackTimeRef,
+      setTrackKeys,
     });
-  });
+    return () => unregisterTireTrackSpawn('main');
+  }, [puddlePositions]);
 
   // Clean up expired tracks periodically
   useEffect(() => {
@@ -1267,11 +1739,12 @@ interface SplashParticle {
   life: number;
 }
 
-// Single drip with ref-based physics - memoized
+// Single drip with ref-based physics - now managed by EnvironmentAnimationManager
 const DripMesh: React.FC<{
   data: { x: number; z: number };
   onImpact: (x: number, z: number) => void;
-}> = memo(({ data, onImpact }) => {
+  id: number;
+}> = memo(({ data, onImpact, id }) => {
   const groupRef = useRef<THREE.Group>(null);
   const dropletRef = useRef<THREE.Mesh>(null);
   const trailRef = useRef<THREE.Mesh>(null);
@@ -1281,40 +1754,25 @@ const DripMesh: React.FC<{
   const vyRef = useRef(0);
   const opacityRef = useRef(0.8);
   const hasImpactedRef = useRef(false);
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
-  useFrame((_, delta) => {
-    if (!isTabVisible) return;
-    if (hasImpactedRef.current) return;
-
-    vyRef.current -= 25 * delta;
-    yRef.current += vyRef.current * delta;
-
-    if (yRef.current <= 0.1 && !hasImpactedRef.current) {
-      hasImpactedRef.current = true;
-      onImpact(data.x, data.z);
-      if (groupRef.current) groupRef.current.visible = false;
-      return;
+  // Register drip physics with animation manager
+  useEffect(() => {
+    if (groupRef.current && materialRef.current && trailRef.current && trailMaterialRef.current) {
+      registerDripPhysics(`drip-${id}`, {
+        groupRef: groupRef.current,
+        materialRef: materialRef.current,
+        trailRef: trailRef.current,
+        trailMaterialRef: trailMaterialRef.current,
+        yRef,
+        vyRef,
+        opacityRef,
+        hasImpactedRef,
+        data,
+        onImpact,
+      });
+      return () => unregisterDripPhysics(`drip-${id}`);
     }
-
-    if (yRef.current < 1) {
-      opacityRef.current -= delta * 3;
-    }
-
-    if (groupRef.current) {
-      groupRef.current.position.y = yRef.current;
-    }
-    if (materialRef.current) {
-      materialRef.current.opacity = opacityRef.current * 0.6;
-    }
-    if (trailRef.current) {
-      trailRef.current.visible = vyRef.current < -5;
-      trailRef.current.position.y = 0.15;
-    }
-    if (trailMaterialRef.current) {
-      trailMaterialRef.current.opacity = opacityRef.current * 0.3;
-    }
-  });
+  }, [id, data, onImpact]);
 
   return (
     <group ref={groupRef} position={[data.x, 31, data.z]}>
@@ -1337,7 +1795,7 @@ const DripMesh: React.FC<{
   );
 });
 
-// Single splash particle with ref-based physics - memoized
+// Single splash particle with ref-based physics - now managed by EnvironmentAnimationManager
 const SplashMesh: React.FC<{ data: SplashParticle }> = memo(({ data }) => {
   const meshRef = useRef<THREE.Mesh>(null);
   const ringRef = useRef<THREE.Mesh>(null);
@@ -1346,30 +1804,22 @@ const SplashMesh: React.FC<{ data: SplashParticle }> = memo(({ data }) => {
   const posRef = useRef({ x: data.x, y: data.y, z: data.z });
   const velRef = useRef({ vx: data.vx, vy: data.vy, vz: data.vz });
   const lifeRef = useRef(data.life);
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
 
-  useFrame((_, delta) => {
-    if (!isTabVisible) return;
-    velRef.current.vy -= 15 * delta;
-    posRef.current.x += velRef.current.vx * delta;
-    posRef.current.y = Math.max(0, posRef.current.y + velRef.current.vy * delta);
-    posRef.current.z += velRef.current.vz * delta;
-    lifeRef.current -= delta * 2.5;
-
-    if (meshRef.current) {
-      meshRef.current.position.set(posRef.current.x, posRef.current.y, posRef.current.z);
+  // Register splash physics with animation manager
+  useEffect(() => {
+    if (meshRef.current && ringRef.current && materialRef.current && ringMaterialRef.current) {
+      registerSplashPhysics(`splash-${data.id}`, {
+        meshRef: meshRef.current,
+        ringRef: ringRef.current,
+        materialRef: materialRef.current,
+        ringMaterialRef: ringMaterialRef.current,
+        posRef,
+        velRef,
+        lifeRef,
+      });
+      return () => unregisterSplashPhysics(`splash-${data.id}`);
     }
-    if (materialRef.current) {
-      materialRef.current.opacity = Math.max(0, lifeRef.current * 0.5);
-    }
-    if (ringRef.current && ringMaterialRef.current) {
-      ringRef.current.visible = lifeRef.current > 0.7;
-      ringRef.current.position.set(posRef.current.x, 0.02, posRef.current.z);
-      const ringSize = (1 - lifeRef.current) * 0.5;
-      ringRef.current.scale.set(ringSize * 10 + 1, ringSize * 10 + 1, 1);
-      ringMaterialRef.current.opacity = Math.max(0, (lifeRef.current - 0.7) * 2);
-    }
-  });
+  }, [data.id]);
 
   return (
     <>
@@ -1393,7 +1843,6 @@ const SplashMesh: React.FC<{ data: SplashParticle }> = memo(({ data }) => {
 // Ceiling drips during/after rain with splash effects
 const CeilingDrips: React.FC = () => {
   const weather = useGameSimulationStore((state) => state.weather);
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const quality = useGraphicsStore((state) => state.graphics.quality);
   const [dripKeys, setDripKeys] = useState<number[]>([]);
   const [splashKeys, setSplashKeys] = useState<number[]>([]);
@@ -1446,26 +1895,19 @@ const CeilingDrips: React.FC = () => {
     [quality]
   );
 
-  // Spawn new drips during rain
-  useFrame((state) => {
-    if (!isTabVisible) return;
-    const isRaining = weather === 'rain' || weather === 'storm';
-    if (!isRaining || quality === 'low') return;
-
-    const now = state.clock.elapsedTime;
-    const dripInterval = weather === 'storm' ? 0.3 : 0.8;
-
-    if (now - lastDripTimeRef.current > dripInterval) {
-      lastDripTimeRef.current = now;
-      const source = dripSources[Math.floor(Math.random() * dripSources.length)];
-      const dripId = dripIdRef.current++;
-      dripDataRef.current.set(dripId, {
-        x: source.x + (Math.random() - 0.5) * 2,
-        z: source.z + (Math.random() - 0.5) * 2,
-      });
-      setDripKeys((prev) => [...prev.slice(-19), dripId]);
-    }
-  });
+  // Register drip spawn logic with animation manager
+  useEffect(() => {
+    registerDripSpawn('main', {
+      weather,
+      quality,
+      dripSources,
+      dripDataRef,
+      dripIdRef,
+      lastDripTimeRef,
+      setDripKeys,
+    });
+    return () => unregisterDripSpawn('main');
+  }, [weather, quality, dripSources]);
 
   if (dripKeys.length === 0 && splashKeys.length === 0) return null;
 
@@ -1473,7 +1915,7 @@ const CeilingDrips: React.FC = () => {
     <group>
       {dripKeys.map((id) => {
         const data = dripDataRef.current.get(id);
-        return data ? <DripMesh key={id} data={data} onImpact={handleImpact} /> : null;
+        return data ? <DripMesh key={id} id={id} data={data} onImpact={handleImpact} /> : null;
       })}
       {splashKeys.map((id) => {
         const data = splashDataRef.current.get(id);
@@ -1486,19 +1928,20 @@ const CeilingDrips: React.FC = () => {
 // Weather effects component with enhanced rain
 const WeatherEffects: React.FC = () => {
   const weather = useGameSimulationStore((state) => state.weather);
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const quality = useGraphicsStore((state) => state.graphics.quality);
   const rainRef = useRef<THREE.Points>(null);
   const rainStreaksRef = useRef<THREE.Points>(null);
   const splashRef = useRef<THREE.Points>(null);
 
-  // Determine if we should render (low/medium graphics disables weather effects)
-  const shouldRender = quality !== 'low' && quality !== 'medium';
+  // Determine if we should render (disable only on low for performance)
+  const shouldRender = quality !== 'low';
 
   // Rain particle count based on graphics quality (always calculate for stable hook deps)
-  const rainCount = quality === 'low' ? 150 : quality === 'medium' ? 300 : 500;
-  const streakCount = quality === 'low' ? 0 : quality === 'medium' ? 100 : 200;
-  const splashCount = quality === 'low' ? 0 : 50;
+  const rainCount =
+    quality === 'medium' ? 180 : quality === 'high' ? 400 : quality === 'ultra' ? 500 : 120;
+  const streakCount =
+    quality === 'medium' ? 40 : quality === 'high' ? 120 : quality === 'ultra' ? 200 : 0;
+  const splashCount = quality === 'medium' ? 20 : 50;
 
   // Main rain positions (sky above skylights)
   const rainPositions = useMemo(() => {
@@ -1539,105 +1982,44 @@ const WeatherEffects: React.FC = () => {
   const splashVelocities = useRef<Float32Array>(new Float32Array(splashCount * 3));
   const splashLife = useRef<Float32Array>(new Float32Array(splashCount));
 
-  // Consolidated weather animation - all rain particles in ONE useFrame, throttled to 30fps
-  useFrame((_, delta) => {
-    // PERFORMANCE: Skip when tab hidden or not rendering
-    if (!isTabVisible || !shouldRender || !shouldRunThisFrame(2)) return;
-
-    const isRaining = weather === 'rain' || weather === 'storm';
-    const isStorm = weather === 'storm';
-
-    // Animate main rain
-    if (rainRef.current && isRaining) {
-      const positions = rainRef.current.geometry.attributes.position.array as Float32Array;
-      const speed = isStorm ? 1.2 : 0.6;
-      const windDrift = isStorm ? 0.3 : 0.1;
-
-      for (let i = 0; i < rainCount; i++) {
-        positions[i * 3] += (Math.random() - 0.5) * windDrift * delta; // Wind drift
-        positions[i * 3 + 1] -= speed;
-        if (positions[i * 3 + 1] < 30) {
-          positions[i * 3 + 1] = 47;
-          positions[i * 3] = (Math.random() - 0.5) * 60;
-          positions[i * 3 + 2] = (Math.random() - 0.5) * 50;
-        }
-      }
-      rainRef.current.geometry.attributes.position.needsUpdate = true;
-    }
-
-    // Animate rain streaks (faster, longer)
-    if (rainStreaksRef.current && isStorm && streakCount > 0) {
-      const positions = rainStreaksRef.current.geometry.attributes.position.array as Float32Array;
-      const speed = 2.5;
-
-      for (let i = 0; i < streakCount; i++) {
-        positions[i * 3] += (Math.random() - 0.5) * 0.5 * delta;
-        positions[i * 3 + 1] -= speed;
-        if (positions[i * 3 + 1] < 30) {
-          positions[i * 3 + 1] = 52;
-          positions[i * 3] = (Math.random() - 0.5) * 60;
-          positions[i * 3 + 2] = (Math.random() - 0.5) * 50;
-        }
-      }
-      rainStreaksRef.current.geometry.attributes.position.needsUpdate = true;
-    }
-
-    // Animate splashes
-    if (splashRef.current && isRaining && splashCount > 0) {
-      const positions = splashRef.current.geometry.attributes.position.array as Float32Array;
-      const skylightX = [-20, 0, 20];
-
-      for (let i = 0; i < splashCount; i++) {
-        splashLife.current[i] -= delta * 3;
-
-        if (splashLife.current[i] <= 0) {
-          // Respawn splash
-          const sx = skylightX[Math.floor(Math.random() * 3)];
-          positions[i * 3] = sx + (Math.random() - 0.5) * 10;
-          positions[i * 3 + 1] = 32;
-          positions[i * 3 + 2] = (Math.random() - 0.5) * 14;
-          splashVelocities.current[i * 3] = (Math.random() - 0.5) * 2;
-          splashVelocities.current[i * 3 + 1] = 1 + Math.random();
-          splashVelocities.current[i * 3 + 2] = (Math.random() - 0.5) * 2;
-          splashLife.current[i] = 0.3 + Math.random() * 0.3;
-        } else {
-          // Update position
-          positions[i * 3] += splashVelocities.current[i * 3] * delta;
-          positions[i * 3 + 1] += splashVelocities.current[i * 3 + 1] * delta;
-          positions[i * 3 + 2] += splashVelocities.current[i * 3 + 2] * delta;
-          splashVelocities.current[i * 3 + 1] -= 8 * delta; // Gravity
-        }
-      }
-      splashRef.current.geometry.attributes.position.needsUpdate = true;
-    }
-  });
+  // Register weather particles with animation manager
+  useEffect(() => {
+    registerWeatherParticles('main', {
+      rainRef: rainRef.current,
+      rainStreaksRef: rainStreaksRef.current,
+      splashRef: splashRef.current,
+      rainCount,
+      streakCount,
+      splashCount,
+      weather,
+      quality,
+      splashVelocities,
+      splashLife,
+    });
+    return () => unregisterWeatherParticles('main');
+  }, [rainCount, streakCount, splashCount, weather, quality]);
 
   // Early return after all hooks
   if (!shouldRender || weather === 'clear') return null;
 
+  // Cloud color based on weather
+  const cloudColor = weather === 'storm' ? '#374151' : '#6b7280';
+
   return (
     <group>
-      {/* Clouds visible through skylights */}
-      {(weather === 'cloudy' || weather === 'rain' || weather === 'storm') && (
-        <group position={[0, 35, 0]}>
-          {[
-            [-15, 0],
-            [0, 5],
-            [15, -3],
-            [-8, 8],
-            [10, 10],
-          ].map(([x, z], i) => (
-            <mesh key={i} position={[x, Math.random() * 3, z]}>
-              <sphereGeometry args={[4 + Math.random() * 3, 16, 16]} />
-              <meshBasicMaterial
-                color={weather === 'storm' ? '#374151' : '#94a3b8'}
-                transparent
-                opacity={0.6}
-              />
-            </mesh>
-          ))}
-        </group>
-      )}
+      {/* Simple cloud layer - only on high/ultra, just a flat plane */}
+      {(quality === 'high' || quality === 'ultra') &&
+        (weather === 'cloudy' || weather === 'rain' || weather === 'storm') && (
+          <mesh position={[0, 38, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[80, 60]} />
+            <meshBasicMaterial
+              color={cloudColor}
+              transparent
+              opacity={weather === 'storm' ? 0.4 : 0.25}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        )}
 
       {/* Main rain particles - key forces remount when count changes */}
       {(weather === 'rain' || weather === 'storm') && (

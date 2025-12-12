@@ -8,14 +8,8 @@
 import { RigidBody, CuboidCollider } from '@react-three/rapier';
 import type { CollisionPayload } from '@react-three/rapier';
 import { useMemo, useCallback } from 'react';
-import {
-  useGameSimulationStore,
-  FIRE_DRILL_EXITS,
-} from '../../stores/gameSimulationStore';
-import {
-  COLLISION_FILTERS,
-  createCollisionGroups,
-} from '../../physics/PhysicsConfig';
+import { useGameSimulationStore, FIRE_DRILL_EXITS } from '../../stores/gameSimulationStore';
+import { COLLISION_FILTERS, createCollisionGroups } from '../../physics/PhysicsConfig';
 
 /**
  * Exit zone sensors for fire drill evacuation
@@ -24,18 +18,13 @@ import {
  * markWorkerEvacuated is called to track evacuation progress.
  */
 export const ExitZoneSensors: React.FC = () => {
-  const markWorkerEvacuated = useGameSimulationStore(
-    (s) => s.markWorkerEvacuated
-  );
+  const markWorkerEvacuated = useGameSimulationStore((s) => s.markWorkerEvacuated);
   const drillActive = useGameSimulationStore((s) => s.drillMetrics.active);
 
   // Sensor collision groups - detects workers only
   const sensorCollisionGroups = useMemo(
     () =>
-      createCollisionGroups(
-        COLLISION_FILTERS.sensor.memberships,
-        COLLISION_FILTERS.sensor.filter
-      ),
+      createCollisionGroups(COLLISION_FILTERS.sensor.memberships, COLLISION_FILTERS.sensor.filter),
     []
   );
 
@@ -45,9 +34,7 @@ export const ExitZoneSensors: React.FC = () => {
       if (!drillActive) return;
 
       // Get worker ID from rigid body userData
-      const workerId = payload.other.rigidBodyObject?.userData?.workerId as
-        | string
-        | undefined;
+      const workerId = payload.other.rigidBodyObject?.userData?.workerId as string | undefined;
       if (workerId) {
         markWorkerEvacuated(workerId);
       }

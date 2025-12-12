@@ -77,7 +77,7 @@ export const mockWorkers: WorkerData[] = [
   },
   {
     id: 'w4',
-    name: 'Emily Watson',
+    name: 'Emily Ronson',
     gender: 'female',
     role: 'Quality Control',
     icon: 'quality',

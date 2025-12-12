@@ -4,6 +4,7 @@ import { Wind, ChevronDown, ChevronUp } from 'lucide-react';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useProductionStore } from '../../stores/productionStore';
 import { useUIStore } from '../../stores/uiStore';
+import { useGraphicsStore } from '../../stores/graphicsStore';
 
 export const WeatherControlPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
@@ -13,6 +14,8 @@ export const WeatherControlPanel: React.FC = () => {
   const setShowHeatMap = useProductionStore((state) => state.setShowHeatMap);
   const clearHeatMap = useProductionStore((state) => state.clearHeatMap);
   const theme = useUIStore((state) => state.theme);
+  const enableFloorPuddles = useGraphicsStore((state) => state.graphics.enableFloorPuddles);
+  const setGraphicsSetting = useGraphicsStore((state) => state.setGraphicsSetting);
 
   const weatherOptions: Array<{
     value: 'clear' | 'cloudy' | 'rain' | 'storm';
@@ -86,6 +89,37 @@ export const WeatherControlPanel: React.FC = () => {
             <div
               className={`rounded-lg p-2 ${theme === 'light' ? 'bg-slate-100' : 'bg-slate-800/50'}`}
             >
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <div
+                    className={`text-[10px] uppercase tracking-wider ${
+                      theme === 'light' ? 'text-slate-500' : 'text-slate-400'
+                    }`}
+                  >
+                    Floor Puddles
+                  </div>
+                  <p
+                    className={`text-[9px] ${
+                      theme === 'light' ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
+                    Enable wet-floor reflections during rain
+                  </p>
+                </div>
+                <button
+                  onClick={() => setGraphicsSetting('enableFloorPuddles', !enableFloorPuddles)}
+                  className={`py-1 px-3 rounded text-[10px] font-medium transition-all ${
+                    enableFloorPuddles
+                      ? 'bg-blue-600 text-white'
+                      : theme === 'light'
+                        ? 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  }`}
+                >
+                  {enableFloorPuddles ? 'ON' : 'OFF'}
+                </button>
+              </div>
+
               <div className="flex items-center justify-between">
                 <div>
                   <div

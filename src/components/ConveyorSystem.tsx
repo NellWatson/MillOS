@@ -2,6 +2,7 @@ import React, { useRef, useMemo, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Text, Html } from '@react-three/drei';
 import * as THREE from 'three';
+import { useShallow } from 'zustand/react/shallow';
 import { audioManager } from '../utils/audioManager';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useProductionStore } from '../stores/productionStore';
@@ -158,7 +159,7 @@ const BagAnimationManager: React.FC<{
   incrementBagsProduced: (count: number) => void;
 }> = ({ productionSpeed, incrementBagsProduced }) => {
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
-  const quality = useGraphicsStore((state) => state.graphics.quality);
+  const quality = useGraphicsStore(useShallow((state) => state.graphics.quality));
 
   useFrame((_, delta) => {
     // PERFORMANCE: Skip when tab hidden or production stopped
@@ -235,7 +236,7 @@ const getRandomQuality = (): GrainQuality => {
 };
 
 export const ConveyorSystem: React.FC<ConveyorSystemProps> = ({ productionSpeed }) => {
-  const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
+  const graphicsQuality = useGraphicsStore(useShallow((state) => state.graphics.quality));
   const incrementBagsProduced = useProductionStore((state) => state.incrementBagsProduced);
   const bagCount = graphicsQuality === 'low' ? 15 : graphicsQuality === 'medium' ? 30 : 60;
 
@@ -453,9 +454,11 @@ const ConveyorBelt: React.FC<{
   const posZ = position[2];
   const conveyorId = `conveyor-main-${posX}-${posZ}`;
   const beltTexture = useConveyorBeltTexture();
-  const quality = useGraphicsStore((state) => state.graphics.quality);
-  const enableProceduralTextures = useGraphicsStore(
-    (state) => state.graphics.enableProceduralTextures
+  const { quality, enableProceduralTextures } = useGraphicsStore(
+    useShallow((state) => ({
+      quality: state.graphics.quality,
+      enableProceduralTextures: state.graphics.enableProceduralTextures,
+    }))
   );
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   // Throttle roller animation more aggressively on non-ultra to cut per-frame work
@@ -602,9 +605,11 @@ const RollerConveyor: React.FC<{ position: [number, number, number]; productionS
   const posY = position[1];
   const posZ = position[2];
   const conveyorId = `conveyor-roller-${posX}-${posZ}`;
-  const quality = useGraphicsStore((state) => state.graphics.quality);
-  const enableProceduralTextures = useGraphicsStore(
-    (state) => state.graphics.enableProceduralTextures
+  const { quality, enableProceduralTextures } = useGraphicsStore(
+    useShallow((state) => ({
+      quality: state.graphics.quality,
+      enableProceduralTextures: state.graphics.enableProceduralTextures,
+    }))
   );
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const movementThrottle = quality === 'ultra' ? 1 : 3;
@@ -761,7 +766,7 @@ const FlourBagMesh: React.FC<{ data: FlourBag }> = React.memo(({ data }) => {
   const ref = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
   const enableProceduralTextures = useGraphicsStore(
-    (state) => state.graphics.enableProceduralTextures
+    useShallow((state) => state.graphics.enableProceduralTextures)
   );
 
   // Register with centralized bag animation manager on mount

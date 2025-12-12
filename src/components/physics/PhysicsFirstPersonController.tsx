@@ -12,16 +12,19 @@ import { RigidBody, CapsuleCollider } from '@react-three/rapier';
 import type { RapierRigidBody } from '@react-three/rapier';
 import * as THREE from 'three';
 import { useUIStore } from '../../stores/uiStore';
+import { useMultiplayerStore } from '../../stores/multiplayerStore';
 import {
   PHYSICS_CONFIG,
   COLLISION_FILTERS,
   createCollisionGroups,
+  WORLD_RADIUS,
 } from '../../physics/PhysicsConfig';
 
 // Movement configuration
 const FPS_FOV = 105;
 const ORBIT_FOV = 65;
 const MOUSE_SENSITIVITY = 1.5;
+const PLAYER_RADIUS = PHYSICS_CONFIG.player.capsuleRadius;
 
 // Track pressed keys (module level to persist across renders)
 const pressedKeys = new Set<string>();
@@ -57,19 +60,44 @@ export const PhysicsFirstPersonController: React.FC<PhysicsFirstPersonController
   // Collision groups
   const collisionGroups = useMemo(
     () =>
-      createCollisionGroups(
-        COLLISION_FILTERS.player.memberships,
-        COLLISION_FILTERS.player.filter
-      ),
+      createCollisionGroups(COLLISION_FILTERS.player.memberships, COLLISION_FILTERS.player.filter),
     []
   );
 
-  // Set initial camera FOV
+  // Calculate spawn position from current camera position (captured at mount)
+  const spawnPosition = useMemo((): [number, number, number] => {
+    const currentX = camera.position.x;
+    const currentZ = camera.position.z;
+    const distanceFromCenter = Math.sqrt(currentX * currentX + currentZ * currentZ);
+
+    let spawnX = currentX;
+    let spawnZ = currentZ;
+
+    // If outside world bounds, clamp to edge
+    if (distanceFromCenter > WORLD_RADIUS - PLAYER_RADIUS) {
+      const scale = (WORLD_RADIUS - PLAYER_RADIUS - 1) / distanceFromCenter;
+      spawnX = currentX * scale;
+      spawnZ = currentZ * scale;
+    }
+
+    // Y position: ground level (capsule base + small offset)
+    return [spawnX, 2, spawnZ];
+  }, []);
+
+  // Set initial camera FOV and look direction
   useEffect(() => {
     if (camera instanceof THREE.PerspectiveCamera) {
       camera.fov = FPS_FOV;
       camera.updateProjectionMatrix();
     }
+
+    // Set camera to look toward center from spawn position
+    camera.position.set(
+      spawnPosition[0],
+      spawnPosition[1] + PHYSICS_CONFIG.player.height,
+      spawnPosition[2]
+    );
+    camera.lookAt(0, PHYSICS_CONFIG.player.height, 0);
 
     return () => {
       if (camera instanceof THREE.PerspectiveCamera) {
@@ -80,7 +108,7 @@ export const PhysicsFirstPersonController: React.FC<PhysicsFirstPersonController
         document.exitPointerLock();
       }
     };
-  }, [camera]);
+  }, [camera, spawnPosition]);
 
   // Keyboard event handlers
   useEffect(() => {
@@ -101,6 +129,9 @@ export const PhysicsFirstPersonController: React.FC<PhysicsFirstPersonController
       pressedKeys.clear();
     };
   }, []);
+
+  // Track frame count for throttled multiplayer updates
+  const frameCount = useRef(0);
 
   // Movement update
   useFrame((_state, delta) => {
@@ -139,9 +170,7 @@ export const PhysicsFirstPersonController: React.FC<PhysicsFirstPersonController
 
     // Determine force and max speed
     const isSprinting = pressedKeys.has('shift');
-    const force = isSprinting
-      ? PHYSICS_CONFIG.player.sprintForce
-      : PHYSICS_CONFIG.player.moveForce;
+    const force = isSprinting ? PHYSICS_CONFIG.player.sprintForce : PHYSICS_CONFIG.player.moveForce;
     const maxSpeed = isSprinting
       ? PHYSICS_CONFIG.player.maxSprintVelocity
       : PHYSICS_CONFIG.player.maxLinearVelocity;
@@ -164,6 +193,18 @@ export const PhysicsFirstPersonController: React.FC<PhysicsFirstPersonController
     // Sync camera to physics body position
     const pos = rb.translation();
     camera.position.set(pos.x, pos.y + PHYSICS_CONFIG.player.height, pos.z);
+
+    // Broadcast position to multiplayer store (throttled to every 3 frames ~20Hz at 60fps)
+    frameCount.current++;
+    if (frameCount.current % 3 === 0) {
+      const vel = rb.linvel();
+      const mpStore = useMultiplayerStore.getState();
+      if (mpStore.connectionState === 'connected') {
+        mpStore.setLocalPosition([pos.x, pos.y + PHYSICS_CONFIG.player.height, pos.z]);
+        mpStore.setLocalRotation(camera.rotation.y);
+        mpStore.setLocalVelocity([vel.x, vel.y, vel.z]);
+      }
+    }
   });
 
   // Handle lock state changes
@@ -185,7 +226,7 @@ export const PhysicsFirstPersonController: React.FC<PhysicsFirstPersonController
       <RigidBody
         ref={rigidBodyRef}
         type="dynamic"
-        position={[30, 2, 40]}
+        position={spawnPosition}
         collisionGroups={collisionGroups}
         linearDamping={PHYSICS_CONFIG.player.linearDamping}
         angularDamping={PHYSICS_CONFIG.player.angularDamping}
@@ -195,11 +236,12 @@ export const PhysicsFirstPersonController: React.FC<PhysicsFirstPersonController
         gravityScale={0}
       >
         <CapsuleCollider
-          args={[
-            PHYSICS_CONFIG.player.capsuleHalfHeight,
-            PHYSICS_CONFIG.player.capsuleRadius,
+          args={[PHYSICS_CONFIG.player.capsuleHalfHeight, PHYSICS_CONFIG.player.capsuleRadius]}
+          position={[
+            0,
+            PHYSICS_CONFIG.player.capsuleHalfHeight + PHYSICS_CONFIG.player.capsuleRadius,
+            0,
           ]}
-          position={[0, PHYSICS_CONFIG.player.capsuleHalfHeight + PHYSICS_CONFIG.player.capsuleRadius, 0]}
         />
       </RigidBody>
 

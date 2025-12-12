@@ -13,13 +13,8 @@ const FPS_FOV = 105; // Wide FOV for immersive first-person view
 const ORBIT_FOV = 65; // Default FOV for orbit mode
 const MOUSE_SENSITIVITY = 1.5; // Mouse look speed multiplier
 
-// Factory bounds (based on 120x160 floor from MillScene)
-const FACTORY_BOUNDS = {
-  minX: -58,
-  maxX: 58,
-  minZ: -78,
-  maxZ: 78,
-};
+// World boundary - circular at mountain base (mountains start at radius 260)
+const WORLD_RADIUS = 255; // Maximum traversal radius before hitting mountains
 
 // Collision boxes for machines (approximate bounding boxes)
 // These are simplified rectangular colliders for major obstacles
@@ -75,8 +70,23 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
 
   // Set initial position and FOV for FPS mode
   useEffect(() => {
-    // Start near the entrance/overview position
-    camera.position.set(30, PLAYER_HEIGHT, 40);
+    // Spawn at current camera XZ position, projected to ground level
+    // Clamp to within world bounds (circular boundary at mountains)
+    const currentX = camera.position.x;
+    const currentZ = camera.position.z;
+    const distanceFromCenter = Math.sqrt(currentX * currentX + currentZ * currentZ);
+
+    let spawnX = currentX;
+    let spawnZ = currentZ;
+
+    // If outside world bounds, clamp to edge
+    if (distanceFromCenter > WORLD_RADIUS - PLAYER_RADIUS) {
+      const scale = (WORLD_RADIUS - PLAYER_RADIUS - 1) / distanceFromCenter;
+      spawnX = currentX * scale;
+      spawnZ = currentZ * scale;
+    }
+
+    camera.position.set(spawnX, PLAYER_HEIGHT, spawnZ);
     camera.lookAt(0, PLAYER_HEIGHT, 0);
 
     // Set wide FOV for FPS mode
@@ -140,17 +150,13 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
 
   // Collision detection
   const checkCollision = useCallback((newX: number, newZ: number): boolean => {
-    // Check factory bounds
-    if (
-      newX < FACTORY_BOUNDS.minX + PLAYER_RADIUS ||
-      newX > FACTORY_BOUNDS.maxX - PLAYER_RADIUS ||
-      newZ < FACTORY_BOUNDS.minZ + PLAYER_RADIUS ||
-      newZ > FACTORY_BOUNDS.maxZ - PLAYER_RADIUS
-    ) {
+    // Check circular world boundary (mountains)
+    const distanceFromCenter = Math.sqrt(newX * newX + newZ * newZ);
+    if (distanceFromCenter > WORLD_RADIUS - PLAYER_RADIUS) {
       return true;
     }
 
-    // Check collision boxes
+    // Check collision boxes for machines
     for (const box of COLLISION_BOXES) {
       if (
         newX + PLAYER_RADIUS > box.minX &&

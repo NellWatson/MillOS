@@ -1,0 +1,247 @@
+/**
+ * SignalingService - Handles WebRTC peer discovery via PeerJS
+ *
+ * PeerJS handles the complexity of WebRTC signaling (ICE candidates, SDP exchange)
+ * and provides a simple room-code based connection system.
+ */
+
+import Peer, { DataConnection } from 'peerjs';
+
+export interface SignalingConfig {
+  roomCode: string;
+  isHost: boolean;
+  playerId: string;
+  playerName: string;
+}
+
+export interface SignalingCallbacks {
+  onPeerConnected: (peerId: string, connection: DataConnection) => void;
+  onPeerDisconnected: (peerId: string) => void;
+  onError: (error: Error) => void;
+  onOpen: (myPeerId: string) => void;
+}
+
+// PeerJS server config - uses free public server by default
+const PEERJS_CONFIG = {
+  // Uses default PeerJS cloud server (free tier, good for small projects)
+  // For production, consider self-hosting: https://github.com/peers/peerjs-server
+  debug: process.env.NODE_ENV === 'development' ? 2 : 0,
+};
+
+export class SignalingService {
+  private peer: Peer | null = null;
+  private connections: Map<string, DataConnection> = new Map();
+  private config: SignalingConfig;
+  private callbacks: SignalingCallbacks;
+  private isDestroyed = false;
+
+  constructor(config: SignalingConfig, callbacks: SignalingCallbacks) {
+    this.config = config;
+    this.callbacks = callbacks;
+  }
+
+  /**
+   * Initialize the PeerJS connection
+   * Host uses room code as peer ID, guests use a generated ID
+   */
+  async initialize(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        // Host uses predictable ID based on room code
+        // Guests use their player ID
+        const peerId = this.config.isHost
+          ? `millos-${this.config.roomCode}`
+          : `millos-${this.config.roomCode}-${this.config.playerId}`;
+
+        this.peer = new Peer(peerId, PEERJS_CONFIG);
+
+        this.peer.on('open', (id) => {
+          if (this.isDestroyed) return;
+          console.log(`[SignalingService] Connected to PeerJS server with ID: ${id}`);
+          this.callbacks.onOpen(id);
+
+          // If not host, connect to the host
+          if (!this.config.isHost) {
+            this.connectToHost();
+          }
+
+          resolve();
+        });
+
+        this.peer.on('connection', (conn) => {
+          if (this.isDestroyed) return;
+          this.handleIncomingConnection(conn);
+        });
+
+        this.peer.on('error', (err) => {
+          if (this.isDestroyed) return;
+          console.error('[SignalingService] PeerJS error:', err);
+
+          // Handle specific error types
+          if (err.type === 'unavailable-id') {
+            // Room code already in use (host) or player already connected
+            this.callbacks.onError(new Error('Room code already in use or already connected'));
+          } else if (err.type === 'peer-unavailable') {
+            // Host not found (for guests)
+            this.callbacks.onError(new Error('Room not found. Check the room code.'));
+          } else {
+            this.callbacks.onError(err);
+          }
+        });
+
+        this.peer.on('disconnected', () => {
+          if (this.isDestroyed) return;
+          console.log(
+            '[SignalingService] Disconnected from PeerJS server, attempting reconnect...'
+          );
+          // PeerJS will auto-reconnect
+        });
+
+        // Set a timeout for initial connection
+        setTimeout(() => {
+          if (!this.peer?.open && !this.isDestroyed) {
+            reject(new Error('Connection timeout - could not reach signaling server'));
+          }
+        }, 10000);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Connect to the host (called by guests)
+   */
+  private connectToHost(): void {
+    if (!this.peer || this.isDestroyed) return;
+
+    const hostPeerId = `millos-${this.config.roomCode}`;
+    console.log(`[SignalingService] Connecting to host: ${hostPeerId}`);
+
+    const conn = this.peer.connect(hostPeerId, {
+      reliable: true,
+      metadata: {
+        playerName: this.config.playerName,
+        playerId: this.config.playerId,
+      },
+    });
+
+    this.setupConnectionHandlers(conn, hostPeerId);
+  }
+
+  /**
+   * Handle incoming connection (host receives guest connections)
+   */
+  private handleIncomingConnection(conn: DataConnection): void {
+    const peerId = conn.peer;
+    console.log(`[SignalingService] Incoming connection from: ${peerId}`);
+    this.setupConnectionHandlers(conn, peerId);
+  }
+
+  /**
+   * Set up event handlers for a data connection
+   */
+  private setupConnectionHandlers(conn: DataConnection, peerId: string): void {
+    conn.on('open', () => {
+      if (this.isDestroyed) return;
+      console.log(`[SignalingService] Connection opened with: ${peerId}`);
+      this.connections.set(peerId, conn);
+      this.callbacks.onPeerConnected(peerId, conn);
+    });
+
+    conn.on('close', () => {
+      if (this.isDestroyed) return;
+      console.log(`[SignalingService] Connection closed with: ${peerId}`);
+      this.connections.delete(peerId);
+      this.callbacks.onPeerDisconnected(peerId);
+    });
+
+    conn.on('error', (err) => {
+      if (this.isDestroyed) return;
+      console.error(`[SignalingService] Connection error with ${peerId}:`, err);
+      this.connections.delete(peerId);
+      this.callbacks.onPeerDisconnected(peerId);
+    });
+  }
+
+  /**
+   * Get a connection by peer ID
+   */
+  getConnection(peerId: string): DataConnection | undefined {
+    return this.connections.get(peerId);
+  }
+
+  /**
+   * Get all active connections
+   */
+  getAllConnections(): DataConnection[] {
+    return Array.from(this.connections.values());
+  }
+
+  /**
+   * Get connected peer IDs
+   */
+  getConnectedPeerIds(): string[] {
+    return Array.from(this.connections.keys());
+  }
+
+  /**
+   * Check if connected to a specific peer
+   */
+  isConnectedTo(peerId: string): boolean {
+    return this.connections.has(peerId);
+  }
+
+  /**
+   * Get total number of connections
+   */
+  getConnectionCount(): number {
+    return this.connections.size;
+  }
+
+  /**
+   * Disconnect from a specific peer
+   */
+  disconnectPeer(peerId: string): void {
+    const conn = this.connections.get(peerId);
+    if (conn) {
+      conn.close();
+      this.connections.delete(peerId);
+    }
+  }
+
+  /**
+   * Clean up and destroy the service
+   */
+  destroy(): void {
+    this.isDestroyed = true;
+
+    // Close all connections
+    for (const conn of this.connections.values()) {
+      conn.close();
+    }
+    this.connections.clear();
+
+    // Destroy PeerJS instance
+    if (this.peer) {
+      this.peer.destroy();
+      this.peer = null;
+    }
+
+    console.log('[SignalingService] Destroyed');
+  }
+
+  /**
+   * Check if the service is active
+   */
+  isActive(): boolean {
+    return !this.isDestroyed && this.peer !== null && !this.peer.destroyed;
+  }
+
+  /**
+   * Get the local peer ID
+   */
+  getLocalPeerId(): string | null {
+    return this.peer?.id ?? null;
+  }
+}

@@ -10,6 +10,7 @@ vi.mock('lucide-react', () => ({
   Users: () => <span data-testid="icon-users" />,
   Shield: () => <span data-testid="icon-shield" />,
   Settings: () => <span data-testid="icon-settings" />,
+  Eye: () => <span data-testid="icon-eye" />,
 }));
 
 describe('Dock Component', () => {
