@@ -12,37 +12,8 @@ import {
 } from 'lucide-react';
 import { useGraphicsStore, GraphicsQuality } from '../../../stores/graphicsStore';
 import { useGameSimulationStore } from '../../../stores/gameSimulationStore';
-import { audioManager } from '../../../utils/audioManager';
-
-// Hook for audio state (re-used from UIOverlay logic)
-function useAudioState() {
-  const [_, forceUpdate] = React.useState({});
-  React.useEffect(() => {
-    return audioManager.subscribe(() => forceUpdate({}));
-  }, []);
-  return {
-    muted: audioManager.muted,
-    volume: audioManager.volume,
-    musicEnabled: audioManager.musicEnabled,
-    musicVolume: audioManager.musicVolume,
-    ttsEnabled: audioManager.ttsEnabled,
-    setMuted: (v: boolean) => {
-      audioManager.muted = v;
-    },
-    setVolume: (v: number) => {
-      audioManager.volume = v;
-    },
-    setMusicEnabled: (v: boolean) => {
-      audioManager.musicEnabled = v;
-    },
-    setMusicVolume: (v: number) => {
-      audioManager.musicVolume = v;
-    },
-    setTtsEnabled: (v: boolean) => {
-      audioManager.ttsEnabled = v;
-    },
-  };
-}
+// Import optimized audio hook (uses useSyncExternalStore instead of forceUpdate)
+import { useAudioStateWithControls as useAudioState } from '../../../hooks/useAudioState';
 
 export const SettingsPanel: React.FC<{
   productionSpeed: number;

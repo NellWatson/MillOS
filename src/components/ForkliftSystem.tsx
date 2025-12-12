@@ -6,6 +6,7 @@ import { audioManager } from '../utils/audioManager';
 import { useSafetyStore } from '../stores/safetyStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
+import { useProductionStore } from '../stores/productionStore';
 import { getForkliftWarningColor } from '../utils/statusColors';
 import { ForkliftModel } from './models';
 import { PhysicsForklift } from './physics/PhysicsForklift';
@@ -433,6 +434,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
   const forkliftEmergencyStop = useSafetyStore((state) => state.forkliftEmergencyStop);
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const emergencyDrillMode = useGameSimulationStore((state) => state.emergencyDrillMode);
+  const truckDocked = useProductionStore((state) => state.truckSchedule.truckDocked);
 
   // Physics system toggle
   const enablePhysics = useGraphicsStore((state) => state.graphics.enablePhysics);
@@ -607,6 +609,14 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       crossingTimerRef.current = 0; // Reset timer once we're in
     } else {
       crossingTimerRef.current = 0; // Reset when not near crossing
+    }
+
+    // Truck coordination: speed up when relevant truck is docked
+    // forklift-1 handles shipping dock, forklift-2 handles receiving dock
+    const isShippingForklift = data.id === 'forklift-1';
+    const isReceivingForklift = data.id === 'forklift-2';
+    if ((isShippingForklift && truckDocked.shipping) || (isReceivingForklift && truckDocked.receiving)) {
+      speedMultiplier *= 1.3; // 30% speed boost when truck is waiting
     }
 
     // Check emergency stop states (forklift E-stop or fire drill in progress)

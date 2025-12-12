@@ -77,15 +77,23 @@ export default defineConfig(({ mode }) => {
           output: {
             // Manual chunks for better caching and parallel loading
             manualChunks: {
+              // Core framework chunks
+              'react-vendor': ['react', 'react-dom'],
+              'state-vendor': ['zustand'],
+              // Three.js ecosystem (largest dependencies)
               'three-core': ['three'],
               'three-fiber': ['@react-three/fiber', '@react-three/drei'],
               'three-postprocessing': ['@react-three/postprocessing', 'postprocessing'],
+              'three-rapier': ['@react-three/rapier'],
+              // UI libraries
               'ui-vendor': ['framer-motion'],
               'charts': ['recharts'],
+              // Utilities
+              'icons': ['lucide-react'],
             },
           },
         },
-        chunkSizeWarningLimit: 1500, // Increase warning limit for 3D app
+        chunkSizeWarningLimit: 2000, // 3D apps have larger bundles
       },
       optimizeDeps: {
         // Pre-bundle heavy dependencies for faster dev startup

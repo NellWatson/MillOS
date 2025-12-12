@@ -23,6 +23,18 @@ export interface ShiftIncident {
   severity: 'low' | 'medium' | 'high' | 'critical';
 }
 
+export interface HandoffConversation {
+  id: string;
+  outgoingWorkerId: string;
+  outgoingWorkerName: string;
+  incomingWorkerId: string;
+  incomingWorkerName: string;
+  topic: string;
+  startTime: number;
+  duration: number; // seconds
+  completed: boolean;
+}
+
 export interface ShiftData {
   currentShift: 'morning' | 'afternoon' | 'night';
   shiftStartTime: number;
@@ -42,6 +54,10 @@ export interface ShiftData {
     workerName: string;
     assignment: string;
   }>;
+  // Clock in/out tracking
+  clockedInWorkerIds: string[];
+  clockedOutWorkerIds: string[];
+  handoffConversations: HandoffConversation[];
 }
 
 // Crisis types
@@ -121,6 +137,19 @@ interface GameSimulationStore {
   resolveShiftIncident: (index: number) => void;
   updateShiftProduction: (actual: number) => void;
   addShiftPriority: (priority: string) => void;
+
+  // Clock in/out tracking
+  clockInWorker: (workerId: string) => void;
+  clockOutWorker: (workerId: string) => void;
+  startHandoffConversation: (
+    outgoingWorkerId: string,
+    outgoingWorkerName: string,
+    incomingWorkerId: string,
+    incomingWorkerName: string,
+    topic: string
+  ) => void;
+  completeHandoffConversation: (conversationId: string) => void;
+  getActiveHandoffConversations: () => HandoffConversation[];
 
   // Emergency state
   emergencyActive: boolean;
@@ -211,6 +240,17 @@ const getShiftForHour = (hour: number): 'morning' | 'afternoon' | 'night' => {
   return 'night'; // 22:00-05:59
 };
 
+// Handoff conversation topics for shift changes
+const HANDOFF_TOPICS = [
+  'Machine status and any issues',
+  'Production targets and progress',
+  'Safety concerns to watch',
+  'Pending maintenance tasks',
+  'Quality control notes',
+  'Forklift scheduling',
+  'Break room status',
+];
+
 // Default initial shift data
 const createDefaultShiftData = (): ShiftData => ({
   currentShift: 'morning',
@@ -227,6 +267,9 @@ const createDefaultShiftData = (): ShiftData => ({
   handoverPhase: 'idle',
   priorities: getShiftPriorities('morning'),
   workerAssignments: [],
+  clockedInWorkerIds: [],
+  clockedOutWorkerIds: [],
+  handoffConversations: [],
 });
 
 // Default crisis state
@@ -325,8 +368,9 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
 
       // Game time starts at 10am (mid-morning, bright daylight)
       // gameSpeed: seconds of game time per real second (60 = 1 min/sec, 600 = 10 min/sec)
+      // 180 = 1 game day = 8 real minutes (24 hours in 480 seconds)
       gameTime: 10,
-      gameSpeed: 60, // Default: 1 real second = 1 game minute
+      gameSpeed: 180, // Default: 1 game day = 8 real minutes
 
       setGameTime: (time) => set({ gameTime: ((time % 24) + 24) % 24 }), // Handle negative wrap
 
@@ -374,7 +418,7 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
       resetGameState: () =>
         set({
           gameTime: 10,
-          gameSpeed: 60,
+          gameSpeed: 180,
           shiftData: createDefaultShiftData(),
           currentShift: 'morning',
           shiftStartTime: Date.now(),
@@ -387,7 +431,7 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
         // Reset to defaults
         set({
           gameTime: 10,
-          gameSpeed: 60,
+          gameSpeed: 180,
           weather: 'clear',
           shiftData: createDefaultShiftData(),
           currentShift: 'morning',
@@ -524,6 +568,9 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
               handoverPhase: 'idle',
               priorities: getShiftPriorities(nextShift),
               workerAssignments: [], // Reset for new shift
+              clockedInWorkerIds: [], // Reset for new shift
+              clockedOutWorkerIds: [],
+              handoffConversations: [],
             },
           };
         }),
@@ -600,6 +647,93 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
             priorities: [...state.shiftData.priorities, priority],
           },
         })),
+
+      // Clock in/out tracking
+      clockInWorker: (workerId) =>
+        set((state) => {
+          // Don't duplicate
+          if (state.shiftData.clockedInWorkerIds.includes(workerId)) return {};
+
+          return {
+            shiftData: {
+              ...state.shiftData,
+              clockedInWorkerIds: [...state.shiftData.clockedInWorkerIds, workerId],
+              // Remove from clocked out if present
+              clockedOutWorkerIds: state.shiftData.clockedOutWorkerIds.filter(
+                (id) => id !== workerId
+              ),
+            },
+          };
+        }),
+
+      clockOutWorker: (workerId) =>
+        set((state) => {
+          // Don't duplicate
+          if (state.shiftData.clockedOutWorkerIds.includes(workerId)) return {};
+
+          return {
+            shiftData: {
+              ...state.shiftData,
+              clockedOutWorkerIds: [...state.shiftData.clockedOutWorkerIds, workerId],
+              // Remove from clocked in
+              clockedInWorkerIds: state.shiftData.clockedInWorkerIds.filter(
+                (id) => id !== workerId
+              ),
+            },
+          };
+        }),
+
+      startHandoffConversation: (
+        outgoingWorkerId,
+        outgoingWorkerName,
+        incomingWorkerId,
+        incomingWorkerName,
+        topic
+      ) =>
+        set((state) => {
+          // Don't create duplicate conversations between same workers
+          const existing = state.shiftData.handoffConversations.find(
+            (c) =>
+              c.outgoingWorkerId === outgoingWorkerId &&
+              c.incomingWorkerId === incomingWorkerId &&
+              !c.completed
+          );
+          if (existing) return {};
+
+          const conversation: HandoffConversation = {
+            id: `handoff-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            outgoingWorkerId,
+            outgoingWorkerName,
+            incomingWorkerId,
+            incomingWorkerName,
+            topic: topic || HANDOFF_TOPICS[Math.floor(Math.random() * HANDOFF_TOPICS.length)],
+            startTime: Date.now(),
+            duration: 3 + Math.floor(Math.random() * 3), // 3-5 seconds
+            completed: false,
+          };
+
+          return {
+            shiftData: {
+              ...state.shiftData,
+              handoffConversations: [...state.shiftData.handoffConversations, conversation],
+            },
+          };
+        }),
+
+      completeHandoffConversation: (conversationId) =>
+        set((state) => ({
+          shiftData: {
+            ...state.shiftData,
+            handoffConversations: state.shiftData.handoffConversations.map((c) =>
+              c.id === conversationId ? { ...c, completed: true } : c
+            ),
+          },
+        })),
+
+      getActiveHandoffConversations: () => {
+        const state = get();
+        return state.shiftData.handoffConversations.filter((c) => !c.completed);
+      },
 
       // Emergency state
       emergencyActive: false,

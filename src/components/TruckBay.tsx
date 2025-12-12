@@ -3128,7 +3128,9 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
   // Dock status updates
   const updateDockStatus = useProductionStore((state) => state.updateDockStatus);
+  const setTruckDocked = useProductionStore((state) => state.setTruckDocked);
   const lastDockUpdateRef = useRef({ receiving: '', shipping: '' });
+  const lastDockedStateRef = useRef({ shipping: false, receiving: false });
 
   // PERFORMANCE: Consolidate store subscriptions with useShallow
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
@@ -3168,6 +3170,12 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         truckState.phase === 'docked' ||
         truckState.phase === 'final_adjustment' ||
         truckState.phase === 'preparing_to_leave';
+
+      // Update store when docked state changes (for forklift speed boost)
+      if (shippingDockedRef.current !== lastDockedStateRef.current.shipping) {
+        lastDockedStateRef.current.shipping = shippingDockedRef.current;
+        setTruckDocked('shipping', shippingDockedRef.current);
+      }
 
       shippingDoorsOpenRef.current = truckState.doorsOpen;
 
@@ -3230,6 +3238,12 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         truckState.phase === 'docked' ||
         truckState.phase === 'final_adjustment' ||
         truckState.phase === 'preparing_to_leave';
+
+      // Update store when docked state changes (for forklift speed boost)
+      if (receivingDockedRef.current !== lastDockedStateRef.current.receiving) {
+        lastDockedStateRef.current.receiving = receivingDockedRef.current;
+        setTruckDocked('receiving', receivingDockedRef.current);
+      }
 
       receivingDoorsOpenRef.current = truckState.doorsOpen;
 
@@ -3603,20 +3617,20 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             {/* Weight scale at yard entrance */}
             <WeightScale position={[0, 0, 52]} rotation={0} />
 
-            {/* Guard shack at entrance */}
-            <GuardShack position={[25, 0, 55]} rotation={-Math.PI / 2} />
+            {/* Guard shack at entrance - relocated to periphery */}
+            <GuardShack position={[45, 0, 60]} rotation={-Math.PI / 2} />
 
-            {/* Intercom call box at guard shack */}
-            <IntercomCallBox position={[20, 0, 55]} rotation={-Math.PI / 2} />
+            {/* Intercom call box at guard shack - relocated with guard shack */}
+            <IntercomCallBox position={[40, 0, 60]} rotation={-Math.PI / 2} />
 
             {/* Yard jockey patrolling */}
             <YardJockey position={[-35, 0, 40]} rotation={0} />
 
-            {/* Truck wash station */}
-            <TruckWashStation position={[-30, 0, 55]} rotation={0} />
+            {/* Truck wash station - relocated to west periphery */}
+            <TruckWashStation position={[-65, 0, 50]} rotation={0} />
 
-            {/* Cardboard compactor/baler for recycling */}
-            <CardboardCompactor position={[-40, 0, 15]} rotation={Math.PI / 2} />
+            {/* Cardboard compactor/baler for recycling - relocated to west periphery */}
+            <CardboardCompactor position={[-65, 0, 25]} rotation={Math.PI / 2} />
 
             {/* Warehouse worker with pallet jack - centered dock */}
             <WarehouseWorkerWithPalletJack
@@ -3655,8 +3669,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Tire inspection area - TESTING */}
         {/* <TireInspectionArea position={[25, 0, 35]} rotation={Math.PI / 2} /> */}
 
-        {/* Driver break room - DISABLED pending relocation */}
-        {/* <DriverBreakRoom position={[65, 0, 65]} rotation={-Math.PI / 2} /> */}
+        {/* Driver break room - relocated to east periphery */}
+        <DriverBreakRoom position={[70, 0, 45]} rotation={-Math.PI / 2} />
 
         {/* Employee parking lot - TESTING */}
         {/* <EmployeeParking position={[45, 0, 55]} rotation={0} /> */}
@@ -3723,9 +3737,9 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           <meshStandardMaterial color="#475569" roughness={0.8} />
         </mesh>
 
-        {/* Dock bumpers - centered for single bay */}
+        {/* Dock bumpers - centered for single bay (narrower to fit platform) */}
         {[-3.5, -1.75, 0, 1.75, 3.5].map((x, i) => (
-          <mesh key={i} position={[x, 0.8, -1.5]}>
+          <mesh key={i} position={[x, 0.8, 0.2]}>
             <boxGeometry args={[0.8, 1.2, 0.6]} />
             <meshStandardMaterial color="#1f2937" />
           </mesh>
@@ -3781,6 +3795,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
         <Text
           position={[0, 6, -1.5]}
+          rotation={[0, Math.PI, 0]}
           fontSize={1.2}
           color="#ffffff"
           anchorX="center"
@@ -3793,6 +3808,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
         <Text
           position={[0, 4.5, -1.5]}
+          rotation={[0, Math.PI, 0]}
           fontSize={0.5}
           color="#f97316"
           anchorX="center"
@@ -3833,19 +3849,6 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             receivingStateRef.current === 'final_adjustment'
           }
           rotation={Math.PI}
-        />
-
-        {/* Manifest holder at dock */}
-        <ManifestHolder position={[5.5, 3, -1]} rotation={0} />
-
-        {/* Dock plate */}
-        <DockPlate position={[0, 2, 1]} isDeployed={receivingDockedRef.current} />
-
-        {/* Warehouse worker with pallet jack */}
-        <WarehouseWorkerWithPalletJack
-          position={[10, 0, 5]}
-          isActive={receivingDoorsOpenRef.current}
-          workAreaBounds={{ minX: -8, maxX: 8, minZ: -5, maxZ: 8 }}
         />
       </group>
 
@@ -3986,66 +3989,87 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           <meshBasicMaterial color="#fbbf24" />
         </mesh>
 
-        {/* Weight scale at yard entrance */}
-        <WeightScale position={[0, 0, -52]} rotation={Math.PI} />
+        {/* PERFORMANCE: Animated decorative components - only on ultra quality */}
+        {/* These components have useFrame hooks that add significant overhead */}
+        {showDecorativeAnimations && (
+          <>
+            {/* Weight scale at yard entrance */}
+            <WeightScale position={[0, 0, -52]} rotation={Math.PI} />
 
-        {/* Guard shack at entrance */}
-        <GuardShack position={[-25, 0, -55]} rotation={Math.PI / 2} />
+            {/* Guard shack at entrance - relocated to periphery */}
+            <GuardShack position={[-45, 0, -60]} rotation={Math.PI / 2} />
 
-        {/* Intercom call box at guard shack */}
-        <IntercomCallBox position={[-20, 0, -55]} rotation={Math.PI / 2} />
+            {/* Intercom call box at guard shack - relocated with guard shack */}
+            <IntercomCallBox position={[-40, 0, -60]} rotation={Math.PI / 2} />
 
-        {/* Fuel island */}
-        <FuelIsland position={[25, 0, -35]} rotation={-Math.PI / 2} />
+            {/* Fuel island */}
+            <FuelIsland position={[25, 0, -35]} rotation={-Math.PI / 2} />
 
-        {/* Tire inspection area */}
-        <TireInspectionArea position={[-25, 0, -35]} rotation={-Math.PI / 2} />
+            {/* Tire inspection area */}
+            <TireInspectionArea position={[-25, 0, -35]} rotation={-Math.PI / 2} />
 
-        {/* Yard jockey patrolling */}
-        <YardJockey position={[0, 0, -25]} rotation={Math.PI} />
+            {/* Yard jockey patrolling */}
+            <YardJockey position={[0, 0, -25]} rotation={Math.PI} />
 
-        {/* Second dumpster area for receiving */}
-        <DumpsterArea position={[35, 0, -15]} rotation={-Math.PI / 2} />
+            {/* Dumpster area for receiving - relocated to east periphery */}
+            <DumpsterArea position={[65, 0, -25]} rotation={-Math.PI / 2} />
 
-        {/* Cardboard compactor/baler for receiving area */}
-        <CardboardCompactor position={[40, 0, -15]} rotation={-Math.PI / 2} />
+            {/* Cardboard compactor/baler for receiving area - relocated to east periphery */}
+            <CardboardCompactor position={[65, 0, -15]} rotation={-Math.PI / 2} />
 
-        {/* Time clock station for receiving area - moved to yard */}
-        <TimeClockStation position={[-18, 0, -52]} rotation={-Math.PI / 2} />
+            {/* Warehouse worker with pallet jack - centered dock */}
+            <WarehouseWorkerWithPalletJack
+              position={[10, 0, -5]}
+              isActive={receivingDoorsOpenRef.current}
+              workAreaBounds={{ minX: -8, maxX: 8, minZ: -8, maxZ: 5 }}
+            />
 
-        {/* Air hose station */}
-        <AirHoseStation position={[-30, 0, -20]} rotation={Math.PI / 2} />
+            {/* Time clock station for receiving area - moved to yard */}
+            <TimeClockStation position={[-18, 0, -52]} rotation={-Math.PI / 2} />
 
-        {/* Scale ticket kiosk */}
-        <ScaleTicketKiosk position={[-3, 0, -52]} rotation={Math.PI} />
+            {/* Air hose station */}
+            <AirHoseStation position={[-30, 0, -20]} rotation={Math.PI / 2} />
 
-        {/* Stretch wrap machine - moved to yard */}
-        <StretchWrapMachine
-          position={[28, 0, -24]}
-          rotation={Math.PI}
-          isActive={receivingDoorsOpenRef.current}
-        />
+            {/* Scale ticket kiosk */}
+            <ScaleTicketKiosk position={[-3, 0, -52]} rotation={Math.PI} />
+
+            {/* Stretch wrap machine - moved to yard */}
+            <StretchWrapMachine
+              position={[28, 0, -24]}
+              rotation={Math.PI}
+              isActive={receivingDoorsOpenRef.current}
+            />
+
+            {/* Pallet jack charging station */}
+            <PalletJackChargingStation position={[-26, 0, -24]} rotation={Math.PI / 2} />
+
+            {/* Truck alignment guides */}
+            <TruckAlignmentGuides position={[0, 0, -4]} />
+          </>
+        )}
+
+        {/* Manifest holder at dock - centered */}
+        <ManifestHolder position={[5.5, 3, 1]} rotation={0} />
+
+        {/* Dock plate - centered */}
+        <DockPlate position={[0, 2, -1]} isDeployed={receivingDockedRef.current} />
 
         {/* Dock bumpers with wear indicators - moved forward to avoid wall */}
-        <DockBumperWithWear position={[-3, 1.2, 0]} wearLevel={0.5} />
-        <DockBumperWithWear position={[3, 1.2, 0]} wearLevel={0.2} />
+        <DockBumperWithWear position={[-2, 1.2, 0]} wearLevel={0.5} />
+        <DockBumperWithWear position={[2, 1.2, 0]} wearLevel={0.2} />
 
-        {/* Floor markings */}
+        {/* Floor markings - centered */}
         <DockFloorMarkings position={[0, 0, -3]} />
 
         {/* Safety mirrors */}
-        <SafetyMirror position={[-5.5, 3, -5]} rotation={Math.PI + Math.PI / 4} />
-        <SafetyMirror position={[5.5, 3, -5]} rotation={Math.PI - Math.PI / 4} />
+        <SafetyMirror position={[-6, 3, -5]} rotation={Math.PI + Math.PI / 4} />
+        <SafetyMirror position={[6, 3, -5]} rotation={Math.PI - Math.PI / 4} />
 
-        {/* Fire extinguisher stations - moved alongside dock */}
-        <FireExtinguisherStation position={[-9, 0, -4]} rotation={Math.PI / 2} />
-        <FireExtinguisherStation position={[9, 0, -4]} rotation={-Math.PI / 2} />
+        {/* Fire extinguisher stations */}
+        <FireExtinguisherStation position={[-5.5, 0, 0]} rotation={Math.PI / 2} />
+        <FireExtinguisherStation position={[5.5, 0, 0]} rotation={-Math.PI / 2} />
 
-        {/* Truck alignment laser guides - on the dock approach */}
-        <TruckAlignmentGuides position={[0, 0, -8]} />
-
-        {/* Pallet jack charging station */}
-        <PalletJackChargingStation position={[-26, 0, -24]} rotation={Math.PI / 2} />
+        {/* PERFORMANCE: TruckAlignmentGuides and PalletJackChargingStation moved to showDecorativeAnimations block */}
       </group>
 
       {/* Receiving truck */}

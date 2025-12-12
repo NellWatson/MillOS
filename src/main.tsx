@@ -2,6 +2,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
+import { registerServiceWorker } from './utils/serviceWorkerRegistration';
 
 // Suppress harmless font warnings from troika-three-text (used by drei's Text component)
 // These warnings about GPOS/GSUB tables don't affect text rendering
@@ -24,3 +25,17 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <App />
   </ErrorBoundary>
 );
+
+// Register service worker for offline caching (production only by default)
+// Set VITE_ENABLE_SW=true in .env to enable during development
+registerServiceWorker({
+  onSuccess: () => {
+    console.log('[MillOS] Service worker installed, assets cached for offline use');
+  },
+  onUpdate: () => {
+    console.log('[MillOS] New version available! Refresh to update.');
+  },
+  onError: (error) => {
+    console.warn('[MillOS] Service worker registration failed:', error);
+  },
+});

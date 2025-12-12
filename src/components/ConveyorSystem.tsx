@@ -10,6 +10,7 @@ import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { GrainQuality } from '../types';
 import { METAL_MATERIALS, SAFETY_MATERIALS, SHARED_GEOMETRIES } from '../utils/sharedMaterials';
 import { shouldRunThisFrame } from '../utils/frameThrottle';
+import { useModelTextures } from '../utils/machineTextures';
 
 // Module-level registry for centralized conveyor audio updates
 const conveyorAudioRegistry = new Map<string, { position: THREE.Vector3; isRunning: boolean }>();
@@ -464,6 +465,28 @@ const ConveyorBelt: React.FC<{
   // Throttle roller animation more aggressively on non-ultra to cut per-frame work
   const movementThrottle = quality === 'ultra' ? 1 : 3;
 
+  // Load conveyor PBR textures (high/ultra only)
+  const conveyorTextures = useModelTextures('conveyor');
+
+  // Configure texture tiling for belt length
+  useMemo(() => {
+    const repeatX = Math.max(1, length / 4);
+    const repeatY = 1;
+
+    if (conveyorTextures.color) {
+      conveyorTextures.color.wrapS = conveyorTextures.color.wrapT = THREE.RepeatWrapping;
+      conveyorTextures.color.repeat.set(repeatX, repeatY);
+    }
+    if (conveyorTextures.normal) {
+      conveyorTextures.normal.wrapS = conveyorTextures.normal.wrapT = THREE.RepeatWrapping;
+      conveyorTextures.normal.repeat.set(repeatX, repeatY);
+    }
+    if (conveyorTextures.roughness) {
+      conveyorTextures.roughness.wrapS = conveyorTextures.roughness.wrapT = THREE.RepeatWrapping;
+      conveyorTextures.roughness.repeat.set(repeatX, repeatY);
+    }
+  }, [conveyorTextures, length]);
+
   // Position vector for audio registry (reused, never recreated)
   const positionVec = useMemo(() => new THREE.Vector3(posX, posY, posZ), [posX, posY, posZ]);
 
@@ -487,10 +510,22 @@ const ConveyorBelt: React.FC<{
     // Cap delta to prevent huge jumps when tab regains focus (max 100ms)
     const cappedDelta = Math.min(delta * movementThrottle, 0.1);
 
-    if (beltRef.current && beltTexture) {
-      // Animate the belt texture scrolling - wrap to prevent float precision issues
-      beltTexture.offset.x = (beltTexture.offset.x + cappedDelta * productionSpeed * 0.3) % 1;
+    // Animate belt texture scrolling - wrap to prevent float precision issues
+    const scrollAmount = cappedDelta * productionSpeed * 0.3;
+    if (beltTexture) {
+      beltTexture.offset.x = (beltTexture.offset.x + scrollAmount) % 1;
     }
+    // Also animate PBR textures if available
+    if (conveyorTextures.color) {
+      conveyorTextures.color.offset.x = (conveyorTextures.color.offset.x + scrollAmount) % 1;
+    }
+    if (conveyorTextures.normal) {
+      conveyorTextures.normal.offset.x = (conveyorTextures.normal.offset.x + scrollAmount) % 1;
+    }
+    if (conveyorTextures.roughness) {
+      conveyorTextures.roughness.offset.x = (conveyorTextures.roughness.offset.x + scrollAmount) % 1;
+    }
+
     // Animate drive rollers - wrap to prevent float precision issues
     if (driveRollerRef.current) {
       driveRollerRef.current.rotation.z =
@@ -503,10 +538,17 @@ const ConveyorBelt: React.FC<{
 
   return (
     <group position={position}>
-      {/* Belt surface with scrolling texture */}
+      {/* Belt surface with scrolling texture - PBR on high/ultra, procedural fallback on low/medium */}
       <mesh ref={beltRef} receiveShadow position={[0, 0.3, 0]}>
         <boxGeometry args={[length, 0.1, 2]} />
-        <meshStandardMaterial map={beltTexture} roughness={0.8} />
+        <meshStandardMaterial
+          color={conveyorTextures.color ? '#ffffff' : undefined}
+          map={conveyorTextures.color || beltTexture}
+          normalMap={conveyorTextures.normal}
+          normalScale={conveyorTextures.normal ? new THREE.Vector2(0.5, 0.5) : undefined}
+          roughnessMap={conveyorTextures.roughness}
+          roughness={0.8}
+        />
       </mesh>
 
       {/* Belt frame */}

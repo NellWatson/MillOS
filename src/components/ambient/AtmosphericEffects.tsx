@@ -131,9 +131,12 @@ export const RustStain: React.FC<{
     return tex;
   }, []);
 
+  // Guard against NaN/invalid size for PlaneGeometry
+  const safeSize = Number.isFinite(size) && size > 0.01 ? size : 0.5;
+
   return (
     <mesh position={position} rotation={rotation}>
-      <planeGeometry args={[size, size]} />
+      <planeGeometry args={[safeSize, safeSize]} />
       <meshBasicMaterial map={texture} transparent depthWrite={false} side={THREE.DoubleSide} />
     </mesh>
   );

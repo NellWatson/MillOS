@@ -11,7 +11,7 @@
 
 import { MoodState, MachineData } from '../types';
 
-export type DialogueType = 'casual' | 'work' | 'safety' | 'radio';
+export type DialogueType = 'casual' | 'work' | 'safety' | 'radio' | 'handoff';
 
 export interface DialogueLine {
   text: string;

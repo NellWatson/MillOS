@@ -144,9 +144,9 @@ export const RemotePlayerAvatar: React.FC<RemotePlayerAvatarProps> = React.memo(
 
       {/* Name tag billboard */}
       <Billboard position={[0, 2.1, 0]} follow lockX={false} lockY={false} lockZ={false}>
-        {/* Background */}
+        {/* Background - guard against NaN from undefined name */}
         <mesh position={[0, 0, -0.01]}>
-          <planeGeometry args={[player.name.length * 0.08 + 0.2, 0.25]} />
+          <planeGeometry args={[(player.name?.length ?? 5) * 0.08 + 0.2, 0.25]} />
           <meshBasicMaterial color="#000000" opacity={0.7} transparent />
         </mesh>
         {/* Name text */}

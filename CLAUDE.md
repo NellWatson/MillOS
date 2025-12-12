@@ -294,3 +294,69 @@ When adding new 3D effects:
 3. **Post-processing effects:** Test on medium settings before enabling by default
 4. **Shadow-casting lights:** Only use ONE shadow-casting directional light
 5. **Floor overlays:** Position at y >= 0.03 to prevent z-fighting with floor
+
+### PlaneGeometry NaN Prevention
+
+**Error:** `THREE.BufferGeometry.computeBoundingSphere(): Computed radius is NaN`
+
+This error occurs when PlaneGeometry receives invalid dimensions. Common causes:
+
+#### 1. Wrong Number of Arguments (CRITICAL)
+
+PlaneGeometry signature: `PlaneGeometry(width, height, widthSegments?, heightSegments?)`
+
+```tsx
+// BAD - 3rd arg becomes widthSegments (must be integer!)
+<planeGeometry args={[0.01, 0.4, 0.3]} />  // widthSegments=0.3 → NaN!
+
+// GOOD - only 2 args for simple plane
+<planeGeometry args={[0.4, 0.3]} />
+```
+
+**Note:** Unlike BoxGeometry which takes `(width, height, depth)`, PlaneGeometry is 2D. The 3rd/4th args are segment counts, NOT depth!
+
+#### 2. Undefined/NaN Props
+
+```tsx
+// BAD - size might be undefined
+<planeGeometry args={[size.width, size.height]} />
+
+// GOOD - guard with fallbacks
+const safeW = Number.isFinite(size?.width) && size.width > 0 ? size.width : 1;
+const safeH = Number.isFinite(size?.height) && size.height > 0 ? size.height : 1;
+<planeGeometry args={[safeW, safeH]} />
+```
+
+#### 3. Division by Zero
+
+```tsx
+// BAD - could be 0/0 = NaN
+const ratio = value / total;
+
+// GOOD - use safeDivide utility
+import { safeDivide } from '@/src/utils/typeGuards';
+const ratio = safeDivide(value, total, 0);
+```
+
+#### Safe Geometry Utilities
+
+Located in `src/utils/typeGuards.ts`:
+
+| Function | Purpose |
+|----------|---------|
+| `safeDimension(value, fallback, min)` | Ensures positive finite number for geometry |
+| `safeDivide(num, denom, fallback)` | Prevents NaN from division by zero |
+| `safeFinite(value, fallback)` | General NaN/Infinity prevention |
+
+#### Debugging NaN Errors
+
+The `useGeometryNaNDetector()` hook in `src/components/SafeGeometry.tsx` patches THREE.PlaneGeometry to log stack traces when NaN values are passed. Add to App.tsx during debugging:
+
+```tsx
+import { useGeometryNaNDetector } from './components/SafeGeometry';
+
+function App() {
+  useGeometryNaNDetector(); // Logs NaN sources with stack traces
+  // ...
+}
+```

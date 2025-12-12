@@ -1,0 +1,294 @@
+import React, { useRef, useEffect, useCallback } from 'react';
+import { useThree, useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import { useMobileControlStore } from '../../stores/mobileControlStore';
+
+// Movement configuration (same as desktop FPS)
+const MOVE_SPEED = 12;
+const SPRINT_SPEED = 24;
+const PLAYER_HEIGHT = 1.7;
+const PLAYER_RADIUS = 0.4;
+const FPS_FOV = 105;
+const ORBIT_FOV = 65;
+const LOOK_SENSITIVITY = 0.003;
+
+// World boundary
+const WORLD_RADIUS = 255;
+
+// Collision boxes (same as desktop FPS)
+const COLLISION_BOXES: Array<{
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}> = [
+  // Silos (Zone 1)
+  { minX: -20, maxX: -12, minZ: -28, maxZ: -16 },
+  { minX: -8, maxX: 0, minZ: -28, maxZ: -16 },
+  { minX: 4, maxX: 12, minZ: -28, maxZ: -16 },
+  { minX: 16, maxX: 24, minZ: -28, maxZ: -16 },
+  // Roller Mills (Zone 2)
+  { minX: -22, maxX: -14, minZ: -12, maxZ: 0 },
+  { minX: -10, maxX: -2, minZ: -12, maxZ: 0 },
+  { minX: 2, maxX: 10, minZ: -12, maxZ: 0 },
+  { minX: 14, maxX: 22, minZ: -12, maxZ: 0 },
+  // Plansifters (Zone 3)
+  { minX: -18, maxX: -6, minZ: 2, maxZ: 14 },
+  { minX: -4, maxX: 8, minZ: 2, maxZ: 14 },
+  { minX: 10, maxX: 22, minZ: 2, maxZ: 14 },
+  // Packers (Zone 4)
+  { minX: -20, maxX: -8, minZ: 16, maxZ: 28 },
+  { minX: -4, maxX: 8, minZ: 16, maxZ: 28 },
+  { minX: 12, maxX: 24, minZ: 16, maxZ: 28 },
+  // Truck bays
+  { minX: -15, maxX: 15, minZ: 45, maxZ: 60 },
+  { minX: -15, maxX: 15, minZ: -60, maxZ: -45 },
+];
+
+/**
+ * Mobile-friendly first-person controller.
+ * Uses D-pad for WASD movement and touch-to-look for camera rotation.
+ * No pointer lock required - works on touch devices.
+ */
+export const MobileFirstPersonController: React.FC = () => {
+  const { camera, gl } = useThree();
+  const velocity = useRef(new THREE.Vector3());
+  const direction = useRef(new THREE.Vector3());
+  const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const lastTouchTimeRef = useRef<number>(0);
+
+  // Set initial position and FOV for FPS mode
+  useEffect(() => {
+    const currentX = camera.position.x;
+    const currentZ = camera.position.z;
+    const distanceFromCenter = Math.sqrt(currentX * currentX + currentZ * currentZ);
+
+    let spawnX = currentX;
+    let spawnZ = currentZ;
+
+    if (distanceFromCenter > WORLD_RADIUS - PLAYER_RADIUS) {
+      const scale = (WORLD_RADIUS - PLAYER_RADIUS - 1) / distanceFromCenter;
+      spawnX = currentX * scale;
+      spawnZ = currentZ * scale;
+    }
+
+    camera.position.set(spawnX, PLAYER_HEIGHT, spawnZ);
+    camera.lookAt(0, PLAYER_HEIGHT, 0);
+
+    // Initialize euler from camera
+    euler.current.setFromQuaternion(camera.quaternion);
+
+    if (camera instanceof THREE.PerspectiveCamera) {
+      camera.fov = FPS_FOV;
+      camera.updateProjectionMatrix();
+    }
+
+    // Force D-pad to move mode during FPS
+    useMobileControlStore.getState().setDpadMode('move');
+
+    return () => {
+      if (camera instanceof THREE.PerspectiveCamera) {
+        camera.fov = ORBIT_FOV;
+        camera.updateProjectionMatrix();
+      }
+    };
+  }, [camera]);
+
+  // Touch-to-look handlers
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const TOUCH_THROTTLE_MS = 16;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+
+      // Check if touch is on UI
+      const target = e.target as HTMLElement;
+      if (target.closest('.pointer-events-auto')) return;
+
+      e.preventDefault();
+      touchStartRef.current = {
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY,
+      };
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!touchStartRef.current || e.touches.length !== 1) return;
+
+      const now = Date.now();
+      if (now - lastTouchTimeRef.current < TOUCH_THROTTLE_MS) return;
+      lastTouchTimeRef.current = now;
+
+      e.preventDefault();
+
+      const deltaX = e.touches[0].clientX - touchStartRef.current.x;
+      const deltaY = e.touches[0].clientY - touchStartRef.current.y;
+
+      // Apply rotation (yaw and pitch)
+      euler.current.y -= deltaX * LOOK_SENSITIVITY;
+      euler.current.x -= deltaY * LOOK_SENSITIVITY;
+
+      // Clamp pitch to prevent flipping
+      euler.current.x = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, euler.current.x));
+
+      camera.quaternion.setFromEuler(euler.current);
+
+      touchStartRef.current = {
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY,
+      };
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length === 0) {
+        touchStartRef.current = null;
+      }
+    };
+
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+    canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      canvas.removeEventListener('touchmove', handleTouchMove);
+      canvas.removeEventListener('touchend', handleTouchEnd);
+      canvas.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, [gl, camera]);
+
+  // Collision detection
+  const checkCollision = useCallback((newX: number, newZ: number): boolean => {
+    const distanceFromCenter = Math.sqrt(newX * newX + newZ * newZ);
+    if (distanceFromCenter > WORLD_RADIUS - PLAYER_RADIUS) {
+      return true;
+    }
+
+    for (const box of COLLISION_BOXES) {
+      if (
+        newX + PLAYER_RADIUS > box.minX &&
+        newX - PLAYER_RADIUS < box.maxX &&
+        newZ + PLAYER_RADIUS > box.minZ &&
+        newZ - PLAYER_RADIUS < box.maxZ
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }, []);
+
+  // Movement update using D-pad input
+  useFrame((_, delta) => {
+    const { dpadDirection, isSprinting } = useMobileControlStore.getState();
+
+    // Get D-pad input for movement
+    direction.current.set(0, 0, 0);
+
+    if (dpadDirection) {
+      // D-pad Y: negative = forward, positive = backward
+      direction.current.z = dpadDirection.y;
+      // D-pad X: negative = left, positive = right
+      direction.current.x = dpadDirection.x;
+    }
+
+    if (direction.current.length() === 0) return;
+
+    // Normalize diagonal movement
+    direction.current.normalize();
+
+    // Calculate speed based on sprint state
+    const speed = isSprinting ? SPRINT_SPEED : MOVE_SPEED;
+
+    // Get forward and right vectors from camera
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+
+    // Keep movement horizontal
+    forward.y = 0;
+    right.y = 0;
+    forward.normalize();
+    right.normalize();
+
+    // Calculate desired movement
+    velocity.current.set(0, 0, 0);
+    velocity.current.addScaledVector(forward, -direction.current.z * speed * delta);
+    velocity.current.addScaledVector(right, direction.current.x * speed * delta);
+
+    // Calculate new position
+    const newX = camera.position.x + velocity.current.x;
+    const newZ = camera.position.z + velocity.current.z;
+
+    // Apply movement with collision detection (sliding along walls)
+    if (!checkCollision(newX, camera.position.z)) {
+      camera.position.x = newX;
+    }
+    if (!checkCollision(camera.position.x, newZ)) {
+      camera.position.z = newZ;
+    }
+
+    // Keep camera at player height
+    camera.position.y = PLAYER_HEIGHT;
+  });
+
+  return null;
+};
+
+/**
+ * Mobile FPS instructions overlay
+ */
+export const MobileFPSInstructions: React.FC<{ visible: boolean; onDismiss: () => void }> = ({
+  visible,
+  onDismiss,
+}) => {
+  if (!visible) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center pointer-events-auto"
+      onClick={onDismiss}
+    >
+      <div
+        className="bg-slate-900/95 backdrop-blur-xl rounded-2xl border border-slate-700/50 p-6 max-w-sm text-center shadow-2xl mx-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-xl font-bold text-white mb-3">First-Person Mode</h2>
+        <p className="text-slate-300 mb-4 text-sm">Explore the factory in first-person view</p>
+
+        <div className="space-y-3 mb-4 text-left">
+          <div className="bg-slate-800/50 rounded-lg p-3 flex items-center gap-3">
+            <div className="w-10 h-10 bg-slate-700 rounded-lg flex items-center justify-center text-lg">
+              +
+            </div>
+            <div>
+              <div className="text-white text-sm font-medium">D-Pad</div>
+              <div className="text-slate-400 text-xs">Move around</div>
+            </div>
+          </div>
+
+          <div className="bg-slate-800/50 rounded-lg p-3 flex items-center gap-3">
+            <div className="w-10 h-10 bg-slate-700 rounded-lg flex items-center justify-center text-lg">
+              👆
+            </div>
+            <div>
+              <div className="text-white text-sm font-medium">Touch & Drag</div>
+              <div className="text-slate-400 text-xs">Look around</div>
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={onDismiss}
+          className="w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors"
+        >
+          Got it!
+        </button>
+
+        <p className="text-slate-500 text-xs mt-3">Tap the eye icon in the dock to exit</p>
+      </div>
+    </div>
+  );
+};

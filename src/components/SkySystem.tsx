@@ -179,6 +179,20 @@ interface WaterAnimationState {
 }
 const waterRegistry = new Map<string, WaterAnimationState>();
 
+interface LightingAnimationState {
+  sunLightRef: THREE.DirectionalLight;
+  moonLightRef: THREE.DirectionalLight;
+  ambientLightRef: THREE.AmbientLight;
+  sunPosition: THREE.Vector3;
+  moonPosition: THREE.Vector3;
+  sunIntensity: number;
+  moonIntensity: number;
+  sunColor: string;
+  ambientColor: string;
+  sunVisible: boolean;
+}
+const lightingRegistry = new Map<string, LightingAnimationState>();
+
 export const registerSkyDome = (id: string, state: SkyDomeAnimationState) => {
   skyDomeRegistry.set(id, state);
 };
@@ -226,6 +240,13 @@ export const registerWater = (id: string, state: WaterAnimationState) => {
 };
 export const unregisterWater = (id: string) => {
   waterRegistry.delete(id);
+};
+
+export const registerLighting = (id: string, state: LightingAnimationState) => {
+  lightingRegistry.set(id, state);
+};
+export const unregisterLighting = (id: string) => {
+  lightingRegistry.delete(id);
 };
 
 // Manager component to handle all sky animations in a single consolidated loop
@@ -307,6 +328,27 @@ const SkyAnimationManager: React.FC = () => {
     if (waterRegistry.size > 0) {
       waterRegistry.forEach((data) => {
         data.material.uniforms.time.value = time;
+      });
+    }
+
+    // 8. Update Sun/Moon/Ambient lights (60fps - smooth position updates)
+    if (lightingRegistry.size > 0) {
+      lightingRegistry.forEach((data) => {
+        if (data.sunLightRef) {
+          data.sunLightRef.position.copy(data.sunPosition);
+          data.sunLightRef.intensity = data.sunIntensity;
+          data.sunLightRef.color.set(data.sunColor);
+        }
+
+        if (data.moonLightRef) {
+          data.moonLightRef.position.copy(data.moonPosition);
+          data.moonLightRef.intensity = data.moonIntensity;
+        }
+
+        if (data.ambientLightRef) {
+          data.ambientLightRef.color.set(data.ambientColor);
+          data.ambientLightRef.intensity = data.sunVisible ? 1.0 : 0.1;
+        }
       });
     }
   });
@@ -496,24 +538,24 @@ export const SkySystem: React.FC = () => {
     }
   }, [skyColors, cloudDensity, sunAngle]);
 
-  // Update lights using useFrame (lights need direct updates every frame)
-  useFrame(() => {
-    if (sunLightRef.current) {
-      sunLightRef.current.position.copy(sunPosition);
-      sunLightRef.current.intensity = sunIntensity;
-      sunLightRef.current.color.set(sunColor);
+  // Register lights with animation manager (replaces direct useFrame for lights)
+  useEffect(() => {
+    if (sunLightRef.current && moonLightRef.current && ambientLightRef.current) {
+      registerLighting('main', {
+        sunLightRef: sunLightRef.current,
+        moonLightRef: moonLightRef.current,
+        ambientLightRef: ambientLightRef.current,
+        sunPosition,
+        moonPosition,
+        sunIntensity,
+        moonIntensity,
+        sunColor,
+        ambientColor: skyColors.ambient,
+        sunVisible,
+      });
+      return () => unregisterLighting('main');
     }
-
-    if (moonLightRef.current) {
-      moonLightRef.current.position.copy(moonPosition);
-      moonLightRef.current.intensity = moonIntensity;
-    }
-
-    if (ambientLightRef.current) {
-      ambientLightRef.current.color.set(skyColors.ambient);
-      ambientLightRef.current.intensity = sunVisible ? 1.0 : 0.1;
-    }
-  });
+  }, [sunPosition, moonPosition, sunIntensity, moonIntensity, sunColor, skyColors.ambient, sunVisible]);
 
   return (
     <group>
@@ -527,11 +569,11 @@ export const SkySystem: React.FC = () => {
         ref={sunLightRef}
         castShadow
         shadow-mapSize={[shadowMapSize, shadowMapSize]}
-        shadow-camera-far={600}
-        shadow-camera-left={-100}
-        shadow-camera-right={100}
-        shadow-camera-top={100}
-        shadow-camera-bottom={-100}
+        shadow-camera-far={200}
+        shadow-camera-left={-70}
+        shadow-camera-right={70}
+        shadow-camera-top={90}
+        shadow-camera-bottom={-90}
         shadow-bias={-0.001}
       />
 

@@ -1,8 +1,9 @@
-import React, { useRef } from 'react';
+import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { shouldRunThisFrame } from '../../utils/frameThrottle';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
+import { useModelTextures } from '../../utils/machineTextures';
 
 // Oil puddle with reflections
 export const OilPuddle: React.FC<{ position: [number, number, number]; size?: number }> = ({
@@ -78,23 +79,58 @@ export const RainPuddle: React.FC<{ position: [number, number, number]; size?: n
   );
 };
 
-// Stacked pallets
+// Stacked pallets with PBR wood textures (high/ultra)
 export const StackedPallets: React.FC<{ position: [number, number, number]; count?: number }> = ({
   position,
   count = 3,
 }) => {
+  // Load pallet/wood textures (high/ultra only)
+  const palletTextures = useModelTextures('pallet');
+
+  // Configure texture tiling for pallet dimensions
+  useMemo(() => {
+    if (palletTextures.color) {
+      palletTextures.color.wrapS = palletTextures.color.wrapT = THREE.RepeatWrapping;
+      palletTextures.color.repeat.set(2, 2);
+    }
+    if (palletTextures.normal) {
+      palletTextures.normal.wrapS = palletTextures.normal.wrapT = THREE.RepeatWrapping;
+      palletTextures.normal.repeat.set(2, 2);
+    }
+    if (palletTextures.roughness) {
+      palletTextures.roughness.wrapS = palletTextures.roughness.wrapT = THREE.RepeatWrapping;
+      palletTextures.roughness.repeat.set(2, 2);
+    }
+  }, [palletTextures]);
+
   return (
     <group position={position}>
       {Array.from({ length: count }).map((_, i) => (
         <group key={i} position={[0, i * 0.15, 0]}>
+          {/* Top board */}
           <mesh position={[0, 0.05, 0]} castShadow>
             <boxGeometry args={[1.2, 0.1, 1]} />
-            <meshStandardMaterial color="#78350f" roughness={0.9} />
+            <meshStandardMaterial
+              color={palletTextures.color ? '#ffffff' : '#78350f'}
+              map={palletTextures.color}
+              normalMap={palletTextures.normal}
+              normalScale={palletTextures.normal ? new THREE.Vector2(0.5, 0.5) : undefined}
+              roughnessMap={palletTextures.roughness}
+              roughness={0.9}
+            />
           </mesh>
+          {/* Support beams */}
           {[-0.4, 0, 0.4].map((x, j) => (
             <mesh key={j} position={[x, 0, 0]} castShadow>
               <boxGeometry args={[0.1, 0.1, 1]} />
-              <meshStandardMaterial color="#92400e" roughness={0.9} />
+              <meshStandardMaterial
+                color={palletTextures.color ? '#ffffff' : '#92400e'}
+                map={palletTextures.color}
+                normalMap={palletTextures.normal}
+                normalScale={palletTextures.normal ? new THREE.Vector2(0.5, 0.5) : undefined}
+                roughnessMap={palletTextures.roughness}
+                roughness={0.9}
+              />
             </mesh>
           ))}
         </group>

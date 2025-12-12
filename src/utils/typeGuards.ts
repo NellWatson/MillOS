@@ -244,3 +244,52 @@ export function hasProperty<K extends PropertyKey>(
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return isObject(value);
 }
+
+// ============================================
+// Geometry NaN Prevention Utilities
+// ============================================
+
+/**
+ * Safe geometry dimension - always returns a positive finite number.
+ * Use this for PlaneGeometry, BoxGeometry, etc. to prevent NaN errors.
+ * @param value - The dimension value (potentially NaN/undefined/0)
+ * @param fallback - Default value if invalid (default: 1)
+ * @param min - Minimum allowed value (default: 0.001)
+ * @returns A valid positive finite number
+ */
+export function safeDimension(value: unknown, fallback = 1, min = 0.001): number {
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num) || num < min) {
+    // Debug: Log NaN detection with stack trace (remove in production)
+    if (import.meta.env.DEV && !Number.isFinite(num)) {
+      console.warn('[NaN DETECTED in safeDimension]', { value, fallback }, new Error().stack);
+    }
+    return fallback;
+  }
+  return num;
+}
+
+/**
+ * Safe division - prevents NaN from 0/0 or x/0.
+ * @param numerator - The numerator
+ * @param denominator - The denominator
+ * @param fallback - Value to return if division would produce NaN/Infinity (default: 0)
+ * @returns A valid finite number
+ */
+export function safeDivide(numerator: number, denominator: number, fallback = 0): number {
+  if (!Number.isFinite(denominator) || denominator === 0) return fallback;
+  const result = numerator / denominator;
+  return Number.isFinite(result) ? result : fallback;
+}
+
+/**
+ * Ensures a value is a valid finite number for 3D operations.
+ * Returns fallback if value is NaN, Infinity, -Infinity, or not a number.
+ * @param value - The value to check
+ * @param fallback - Default value if invalid (default: 0)
+ * @returns A valid finite number
+ */
+export function safeFinite(value: unknown, fallback = 0): number {
+  const num = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}

@@ -10,11 +10,22 @@ import { PhysicsWorker } from './physics/PhysicsWorker';
 import { useSafetyStore } from '../stores/safetyStore';
 import { useUIStore } from '../stores/uiStore';
 import { useProductionStore } from '../stores/productionStore';
+import { useBreakdownStore } from '../stores/breakdownStore';
 import { WorkerMoodOverlay } from './WorkerMoodOverlay';
 import { WorkerReactionOverlay } from './MaintenanceSystem';
 import { audioManager } from '../utils/audioManager';
 import { shouldRunThisFrame, getThrottleLevel } from '../utils/frameThrottle';
+import { useModelTextures } from '../utils/machineTextures';
 import * as THREE from 'three';
+import {
+  SHARED_WORKER_MATERIALS,
+  getSkinMaterial,
+  getSkinSoftMaterial,
+  getHairMaterial,
+  getUniformMaterial,
+  getPantsMaterial,
+  getHatMaterial,
+} from './workers/SharedWorkerMaterials';
 
 interface WorkerSystemProps {
   onSelectWorker: (worker: WorkerData) => void;
@@ -270,19 +281,27 @@ const sharedToolGeometries = {
 // === TOOL ACCESSORY COMPONENTS (memoized) ===
 const Clipboard: React.FC = React.memo(() => (
   <group position={[0.08, -0.02, 0.04]} rotation={[0.3, 0, 0.1]}>
-    <mesh geometry={sharedToolGeometries.clipboard.board}>
-      <meshStandardMaterial color="#8b4513" roughness={0.7} />
-    </mesh>
-    <mesh position={[0, 0.07, 0.01]} geometry={sharedToolGeometries.clipboard.clip}>
-      <meshStandardMaterial color="#c0c0c0" metalness={0.8} roughness={0.2} />
-    </mesh>
-    <mesh position={[0, -0.01, 0.01]} geometry={sharedToolGeometries.clipboard.paper}>
-      <meshStandardMaterial color="#ffffff" />
-    </mesh>
+    <mesh
+      geometry={sharedToolGeometries.clipboard.board}
+      material={SHARED_WORKER_MATERIALS.clipboardBrown}
+    />
+    <mesh
+      position={[0, 0.07, 0.01]}
+      geometry={sharedToolGeometries.clipboard.clip}
+      material={SHARED_WORKER_MATERIALS.chrome}
+    />
+    <mesh
+      position={[0, -0.01, 0.01]}
+      geometry={sharedToolGeometries.clipboard.paper}
+      material={SHARED_WORKER_MATERIALS.white}
+    />
     {[-0.03, 0, 0.03].map((y, i) => (
-      <mesh key={i} position={[0, y, 0.012]} geometry={sharedToolGeometries.clipboard.line}>
-        <meshStandardMaterial color="#333" />
-      </mesh>
+      <mesh
+        key={i}
+        position={[0, y, 0.012]}
+        geometry={sharedToolGeometries.clipboard.line}
+        material={SHARED_WORKER_MATERIALS.mediumGray}
+      />
     ))}
   </group>
 ));
@@ -290,69 +309,83 @@ Clipboard.displayName = 'Clipboard';
 
 const Tablet: React.FC = React.memo(() => (
   <group position={[0.06, -0.02, 0.04]} rotation={[0.4, 0, 0.15]}>
-    <mesh geometry={sharedToolGeometries.tablet.body}>
-      <meshStandardMaterial color="#1a1a1a" roughness={0.3} />
-    </mesh>
-    <mesh position={[0, 0, 0.006]} geometry={sharedToolGeometries.tablet.screen}>
-      <meshStandardMaterial color="#1e40af" emissive="#1e40af" emissiveIntensity={0.3} />
-    </mesh>
-    <mesh position={[0, 0.02, 0.008]} geometry={sharedToolGeometries.tablet.indicator}>
-      <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.5} />
-    </mesh>
+    <mesh
+      geometry={sharedToolGeometries.tablet.body}
+      material={SHARED_WORKER_MATERIALS.darkGray}
+    />
+    <mesh
+      position={[0, 0, 0.006]}
+      geometry={sharedToolGeometries.tablet.screen}
+      material={SHARED_WORKER_MATERIALS.screenBlue}
+    />
+    <mesh
+      position={[0, 0.02, 0.008]}
+      geometry={sharedToolGeometries.tablet.indicator}
+      material={SHARED_WORKER_MATERIALS.safetyGreen}
+    />
   </group>
 ));
 Tablet.displayName = 'Tablet';
 
 const RadioWalkieTalkie: React.FC = React.memo(() => (
   <group position={[0.04, 0, 0.03]} rotation={[0.2, 0.3, 0]}>
-    <mesh geometry={sharedToolGeometries.radio.body}>
-      <meshStandardMaterial color="#1a1a1a" roughness={0.4} />
-    </mesh>
-    <mesh position={[0.01, 0.07, 0]} geometry={sharedToolGeometries.radio.antenna}>
-      <meshStandardMaterial color="#333" />
-    </mesh>
-    <mesh position={[0, 0.04, 0.014]} geometry={sharedToolGeometries.radio.led}>
-      <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={2} />
-    </mesh>
+    <mesh
+      geometry={sharedToolGeometries.radio.body}
+      material={SHARED_WORKER_MATERIALS.darkGray}
+    />
+    <mesh
+      position={[0.01, 0.07, 0]}
+      geometry={sharedToolGeometries.radio.antenna}
+      material={SHARED_WORKER_MATERIALS.mediumGray}
+    />
+    <mesh
+      position={[0, 0.04, 0.014]}
+      geometry={sharedToolGeometries.radio.led}
+      material={SHARED_WORKER_MATERIALS.safetyGreenBright}
+    />
   </group>
 ));
 RadioWalkieTalkie.displayName = 'RadioWalkieTalkie';
 
 const Wrench: React.FC = React.memo(() => (
   <group position={[0.02, -0.04, 0.02]} rotation={[0, 0.5, -0.3]}>
-    <mesh geometry={sharedToolGeometries.wrench.handle}>
-      <meshStandardMaterial color="#c0c0c0" metalness={0.9} roughness={0.3} />
-    </mesh>
-    <mesh position={[0, 0.08, 0]} geometry={sharedToolGeometries.wrench.head}>
-      <meshStandardMaterial color="#c0c0c0" metalness={0.9} roughness={0.3} />
-    </mesh>
-    <mesh position={[0, -0.03, 0.007]} geometry={sharedToolGeometries.wrench.grip}>
-      <meshStandardMaterial color="#ef4444" roughness={0.8} />
-    </mesh>
+    <mesh
+      geometry={sharedToolGeometries.wrench.handle}
+      material={SHARED_WORKER_MATERIALS.chromeShiny}
+    />
+    <mesh
+      position={[0, 0.08, 0]}
+      geometry={sharedToolGeometries.wrench.head}
+      material={SHARED_WORKER_MATERIALS.chromeShiny}
+    />
+    <mesh
+      position={[0, -0.03, 0.007]}
+      geometry={sharedToolGeometries.wrench.grip}
+      material={SHARED_WORKER_MATERIALS.handleRed}
+    />
   </group>
 ));
 Wrench.displayName = 'Wrench';
 
 const Magnifier: React.FC = React.memo(() => (
   <group position={[0.05, 0, 0.04]} rotation={[0.3, 0.2, 0]}>
-    <mesh geometry={sharedToolGeometries.magnifier.handle}>
-      <meshStandardMaterial color="#1a1a1a" roughness={0.5} />
-    </mesh>
+    <mesh
+      geometry={sharedToolGeometries.magnifier.handle}
+      material={SHARED_WORKER_MATERIALS.darkGray}
+    />
     <mesh
       castShadow
       position={[0, 0.06, 0]}
       rotation={[Math.PI / 2, 0, 0]}
       geometry={sharedToolGeometries.magnifier.ring}
-    >
-      <meshStandardMaterial color="#c0c0c0" metalness={0.8} roughness={0.2} />
-    </mesh>
+      material={SHARED_WORKER_MATERIALS.chrome}
+    />
     <mesh
       position={[0, 0.06, 0]}
       rotation={[Math.PI / 2, 0, 0]}
       geometry={sharedToolGeometries.magnifier.lens}
-    >
-      <meshStandardMaterial color="#a0d8ef" transparent opacity={0.4} />
-    </mesh>
+      material={SHARED_WORKER_MATERIALS.lensBlue}
+    />
   </group>
 ));
 Magnifier.displayName = 'Magnifier';
@@ -1374,169 +1407,222 @@ const HumanModel: React.FC<{
         {/* === TORSO === */}
         <group ref={torsoRef} position={[0, 1.15, 0]}>
           {/* Upper torso / chest */}
-          <mesh ref={chestRef} castShadow position={[0, 0.2, 0]}>
-            <boxGeometry args={[0.48, 0.45, 0.24]} />
-            <meshStandardMaterial color={uniformColor} roughness={0.8} />
-          </mesh>
+          <mesh
+            ref={chestRef}
+            castShadow
+            position={[0, 0.2, 0]}
+            geometry={SHARED_WORKER_GEOMETRY.torso}
+            material={getUniformMaterial(uniformColor)}
+          />
 
           {/* Shoulders - rounded */}
-          <mesh castShadow position={[-0.28, 0.32, 0]}>
-            <sphereGeometry args={[0.1, 12, 12]} />
-            <meshStandardMaterial color={uniformColor} roughness={0.8} />
-          </mesh>
-          <mesh castShadow position={[0.28, 0.32, 0]}>
-            <sphereGeometry args={[0.1, 12, 12]} />
-            <meshStandardMaterial color={uniformColor} roughness={0.8} />
-          </mesh>
+          <mesh
+            castShadow
+            position={[-0.28, 0.32, 0]}
+            geometry={SHARED_WORKER_GEOMETRY.sphere_med}
+            scale={[0.1, 0.1, 0.1]}
+            material={getUniformMaterial(uniformColor)}
+          />
+          <mesh
+            castShadow
+            position={[0.28, 0.32, 0]}
+            geometry={SHARED_WORKER_GEOMETRY.sphere_med}
+            scale={[0.1, 0.1, 0.1]}
+            material={getUniformMaterial(uniformColor)}
+          />
 
           {/* Lower torso / waist */}
-          <mesh castShadow position={[0, -0.15, 0]}>
-            <boxGeometry args={[0.42, 0.3, 0.22]} />
-            <meshStandardMaterial color={uniformColor} roughness={0.8} />
-          </mesh>
+          <mesh
+            castShadow
+            position={[0, -0.15, 0]}
+            geometry={SHARED_WORKER_GEOMETRY.box_small}
+            scale={[0.42, 0.3, 0.22]}
+            material={getUniformMaterial(uniformColor)}
+          />
 
           {/* Safety vest overlay - pushed forward to z=0.03 to prevent z-fighting with chest */}
           {hasVest && (
             <>
-              <mesh castShadow position={[0, 0.15, 0.03]}>
-                <boxGeometry args={[0.5, 0.52, 0.22]} />
-                <meshStandardMaterial color="#f97316" roughness={0.6} />
-              </mesh>
+              <mesh
+                castShadow
+                position={[0, 0.15, 0.03]}
+                geometry={SHARED_WORKER_GEOMETRY.box_small}
+                scale={[0.5, 0.52, 0.22]}
+                material={SHARED_WORKER_MATERIALS.vestOrange}
+              />
               {/* Reflective stripes - raised above vest surface */}
-              <mesh position={[0, 0.32, 0.145]}>
-                <boxGeometry args={[0.51, 0.035, 0.01]} />
-                <meshStandardMaterial
-                  color="#e5e5e5"
-                  emissive="#ffffff"
-                  emissiveIntensity={0.4}
-                  metalness={0.9}
-                  roughness={0.1}
-                />
-              </mesh>
-              <mesh position={[0, 0.12, 0.145]}>
-                <boxGeometry args={[0.51, 0.035, 0.01]} />
-                <meshStandardMaterial
-                  color="#e5e5e5"
-                  emissive="#ffffff"
-                  emissiveIntensity={0.4}
-                  metalness={0.9}
-                  roughness={0.1}
-                />
-              </mesh>
-              <mesh position={[0, -0.08, 0.145]}>
-                <boxGeometry args={[0.51, 0.035, 0.01]} />
-                <meshStandardMaterial
-                  color="#e5e5e5"
-                  emissive="#ffffff"
-                  emissiveIntensity={0.4}
-                  metalness={0.9}
-                  roughness={0.1}
-                />
-              </mesh>
+              <mesh
+                position={[0, 0.32, 0.145]}
+                geometry={SHARED_WORKER_GEOMETRY.box_small}
+                scale={[0.51, 0.035, 0.01]}
+                material={SHARED_WORKER_MATERIALS.offWhite}
+              />
+              <mesh
+                position={[0, 0.12, 0.145]}
+                geometry={SHARED_WORKER_GEOMETRY.box_small}
+                scale={[0.51, 0.035, 0.01]}
+                material={SHARED_WORKER_MATERIALS.offWhite}
+              />
+              <mesh
+                position={[0, -0.08, 0.145]}
+                geometry={SHARED_WORKER_GEOMETRY.box_small}
+                scale={[0.51, 0.035, 0.01]}
+                material={SHARED_WORKER_MATERIALS.offWhite}
+              />
             </>
           )}
 
           {/* Collar */}
-          <mesh castShadow position={[0, 0.48, 0.02]}>
-            <boxGeometry args={[0.2, 0.08, 0.15]} />
-            <meshStandardMaterial color={uniformColor} roughness={0.7} />
-          </mesh>
+          <mesh
+            castShadow
+            position={[0, 0.48, 0.02]}
+            geometry={SHARED_WORKER_GEOMETRY.box_small}
+            scale={[0.2, 0.08, 0.15]}
+            material={getUniformMaterial(uniformColor)}
+          />
 
           {/* Neck */}
-          <mesh castShadow position={[0, 0.58, 0]}>
-            <cylinderGeometry args={[0.075, 0.085, 0.12, 16]} />
-            <meshStandardMaterial color={skinTone} roughness={0.6} />
-          </mesh>
+          <mesh
+            castShadow
+            position={[0, 0.58, 0]}
+            geometry={SHARED_WORKER_GEOMETRY.cylinder_med}
+            scale={[0.08, 0.12, 0.08]}
+            material={getSkinMaterial(skinTone)}
+          />
 
           {/* === HEAD === */}
           <group ref={headRef} position={[0, 0.82, 0]}>
             {/* Head base - slightly elongated sphere */}
-            <mesh castShadow>
-              <sphereGeometry args={[0.17, 32, 32]} />
-              <meshStandardMaterial color={skinTone} roughness={0.55} />
-            </mesh>
+            <mesh
+              castShadow
+              geometry={SHARED_WORKER_GEOMETRY.head}
+              material={getSkinSoftMaterial(skinTone)}
+            />
 
             {/* Jaw / chin area */}
-            <mesh castShadow position={[0, -0.08, 0.05]}>
-              <sphereGeometry args={[0.1, 16, 16]} />
-              <meshStandardMaterial color={skinTone} roughness={0.55} />
-            </mesh>
+            <mesh
+              castShadow
+              position={[0, -0.08, 0.05]}
+              geometry={SHARED_WORKER_GEOMETRY.sphere_med}
+              scale={[0.1, 0.1, 0.1]}
+              material={getSkinSoftMaterial(skinTone)}
+            />
 
             {/* Nose */}
-            <mesh castShadow position={[0, -0.02, 0.155]}>
+            <mesh
+              castShadow
+              position={[0, -0.02, 0.155]}
+              material={getSkinMaterial(skinTone)}
+            >
               <coneGeometry args={[0.025, 0.05, 8]} />
-              <meshStandardMaterial color={skinTone} roughness={0.6} />
             </mesh>
-            <mesh castShadow position={[0, -0.045, 0.16]}>
-              <sphereGeometry args={[0.022, 8, 8]} />
-              <meshStandardMaterial color={skinTone} roughness={0.6} />
-            </mesh>
+            <mesh
+              castShadow
+              position={[0, -0.045, 0.16]}
+              geometry={SHARED_WORKER_GEOMETRY.sphere_low}
+              scale={[0.022, 0.022, 0.022]}
+              material={getSkinMaterial(skinTone)}
+            />
 
             {/* Eyes - whites */}
-            <mesh position={[-0.055, 0.025, 0.135]}>
-              <sphereGeometry args={[0.028, 16, 16]} />
-              <meshStandardMaterial color="#fefefe" roughness={0.2} />
-            </mesh>
-            <mesh position={[0.055, 0.025, 0.135]}>
-              <sphereGeometry args={[0.028, 16, 16]} />
-              <meshStandardMaterial color="#fefefe" roughness={0.2} />
-            </mesh>
+            <mesh
+              position={[-0.055, 0.025, 0.135]}
+              geometry={SHARED_WORKER_GEOMETRY.sphere_med}
+              scale={[0.028, 0.028, 0.028]}
+              material={SHARED_WORKER_MATERIALS.eyeWhite}
+            />
+            <mesh
+              position={[0.055, 0.025, 0.135]}
+              geometry={SHARED_WORKER_GEOMETRY.sphere_med}
+              scale={[0.028, 0.028, 0.028]}
+              material={SHARED_WORKER_MATERIALS.eyeWhite}
+            />
 
             {/* Irises */}
-            <mesh position={[-0.055, 0.025, 0.158]}>
-              <sphereGeometry args={[0.016, 12, 12]} />
-              <meshStandardMaterial color="#4a3728" roughness={0.3} />
-            </mesh>
-            <mesh position={[0.055, 0.025, 0.158]}>
-              <sphereGeometry args={[0.016, 12, 12]} />
-              <meshStandardMaterial color="#4a3728" roughness={0.3} />
-            </mesh>
+            <mesh
+              position={[-0.055, 0.025, 0.158]}
+              geometry={SHARED_WORKER_GEOMETRY.sphere_low}
+              scale={[0.016, 0.016, 0.016]}
+              material={SHARED_WORKER_MATERIALS.iris}
+            />
+            <mesh
+              position={[0.055, 0.025, 0.158]}
+              geometry={SHARED_WORKER_GEOMETRY.sphere_low}
+              scale={[0.016, 0.016, 0.016]}
+              material={SHARED_WORKER_MATERIALS.iris}
+            />
 
             {/* Pupils */}
-            <mesh position={[-0.055, 0.025, 0.168]}>
-              <sphereGeometry args={[0.008, 8, 8]} />
-              <meshStandardMaterial color="#0a0a0a" />
-            </mesh>
-            <mesh position={[0.055, 0.025, 0.168]}>
-              <sphereGeometry args={[0.008, 8, 8]} />
-              <meshStandardMaterial color="#0a0a0a" />
-            </mesh>
+            <mesh
+              position={[-0.055, 0.025, 0.168]}
+              geometry={SHARED_WORKER_GEOMETRY.sphere_low}
+              scale={[0.008, 0.008, 0.008]}
+              material={SHARED_WORKER_MATERIALS.pupil}
+            />
+            <mesh
+              position={[0.055, 0.025, 0.168]}
+              geometry={SHARED_WORKER_GEOMETRY.sphere_low}
+              scale={[0.008, 0.008, 0.008]}
+              material={SHARED_WORKER_MATERIALS.pupil}
+            />
 
             {/* Eyelids (for blinking) */}
-            <mesh ref={leftEyelidRef} position={[-0.055, 0.045, 0.155]}>
-              <boxGeometry args={[0.04, 0.025, 0.02]} />
-              <meshStandardMaterial color={skinTone} roughness={0.6} />
-            </mesh>
-            <mesh ref={rightEyelidRef} position={[0.055, 0.045, 0.155]}>
-              <boxGeometry args={[0.04, 0.025, 0.02]} />
-              <meshStandardMaterial color={skinTone} roughness={0.6} />
-            </mesh>
+            <mesh
+              ref={leftEyelidRef}
+              position={[-0.055, 0.045, 0.155]}
+              geometry={SHARED_WORKER_GEOMETRY.box_small}
+              scale={[0.04, 0.025, 0.02]}
+              material={getSkinMaterial(skinTone)}
+            />
+            <mesh
+              ref={rightEyelidRef}
+              position={[0.055, 0.045, 0.155]}
+              geometry={SHARED_WORKER_GEOMETRY.box_small}
+              scale={[0.04, 0.025, 0.02]}
+              material={getSkinMaterial(skinTone)}
+            />
 
             {/* Eyebrows */}
-            <mesh position={[-0.055, 0.07, 0.14]} rotation={[0.15, 0, 0.12]}>
-              <boxGeometry args={[0.045, 0.012, 0.015]} />
-              <meshStandardMaterial color="#2d1810" roughness={0.9} />
-            </mesh>
-            <mesh position={[0.055, 0.07, 0.14]} rotation={[0.15, 0, -0.12]}>
-              <boxGeometry args={[0.045, 0.012, 0.015]} />
-              <meshStandardMaterial color="#2d1810" roughness={0.9} />
-            </mesh>
+            <mesh
+              position={[-0.055, 0.07, 0.14]}
+              rotation={[0.15, 0, 0.12]}
+              geometry={SHARED_WORKER_GEOMETRY.box_small}
+              scale={[0.045, 0.012, 0.015]}
+              material={getHairMaterial(hairColor)}
+            />
+            <mesh
+              position={[0.055, 0.07, 0.14]}
+              rotation={[0.15, 0, -0.12]}
+              geometry={SHARED_WORKER_GEOMETRY.box_small}
+              scale={[0.045, 0.012, 0.015]}
+              material={getHairMaterial(hairColor)}
+            />
 
             {/* Mouth */}
-            <mesh position={[0, -0.075, 0.14]}>
-              <boxGeometry args={[0.06, 0.015, 0.01]} />
-              <meshStandardMaterial color="#a0524a" roughness={0.7} />
-            </mesh>
+            <mesh
+              position={[0, -0.075, 0.14]}
+              geometry={SHARED_WORKER_GEOMETRY.box_small}
+              scale={[0.06, 0.015, 0.01]}
+              material={SHARED_WORKER_MATERIALS.lips}
+            />
 
             {/* Ears */}
-            <mesh castShadow position={[-0.165, 0, 0]} rotation={[0, -0.2, 0]}>
-              <sphereGeometry args={[0.035, 12, 12]} />
-              <meshStandardMaterial color={skinTone} roughness={0.6} />
-            </mesh>
-            <mesh castShadow position={[0.165, 0, 0]} rotation={[0, 0.2, 0]}>
-              <sphereGeometry args={[0.035, 12, 12]} />
-              <meshStandardMaterial color={skinTone} roughness={0.6} />
-            </mesh>
+            <mesh
+              castShadow
+              position={[-0.165, 0, 0]}
+              rotation={[0, -0.2, 0]}
+              geometry={SHARED_WORKER_GEOMETRY.sphere_low}
+              scale={[0.035, 0.035, 0.035]}
+              material={getSkinMaterial(skinTone)}
+            />
+            <mesh
+              castShadow
+              position={[0.165, 0, 0]}
+              rotation={[0, 0.2, 0]}
+              geometry={SHARED_WORKER_GEOMETRY.sphere_low}
+              scale={[0.035, 0.035, 0.035]}
+              material={getSkinMaterial(skinTone)}
+            />
 
             {/* Hair (visible under hard hat) */}
             <Hair style={hairStyle} color={hairColor} />
@@ -1564,31 +1650,45 @@ const HumanModel: React.FC<{
           {/* === LEFT ARM === */}
           <group ref={leftArmRef} position={[-0.34, 0.22, 0]}>
             {/* Upper arm */}
-            <mesh castShadow position={[0, -0.15, 0]}>
-              <capsuleGeometry args={[0.055, 0.22, 8, 16]} />
-              <meshStandardMaterial color={uniformColor} roughness={0.8} />
-            </mesh>
+            <mesh
+              castShadow
+              position={[0, -0.15, 0]}
+              geometry={SHARED_WORKER_GEOMETRY.limb_capsule}
+              material={getUniformMaterial(uniformColor)}
+            />
             {/* Elbow */}
-            <mesh castShadow position={[0, -0.3, 0]}>
-              <sphereGeometry args={[0.055, 12, 12]} />
-              <meshStandardMaterial color={uniformColor} roughness={0.8} />
-            </mesh>
+            <mesh
+              castShadow
+              position={[0, -0.3, 0]}
+              geometry={SHARED_WORKER_GEOMETRY.sphere_med}
+              scale={[0.055, 0.055, 0.055]}
+              material={getUniformMaterial(uniformColor)}
+            />
             {/* Forearm */}
-            <mesh castShadow position={[0, -0.45, 0]}>
-              <capsuleGeometry args={[0.045, 0.2, 8, 16]} />
-              <meshStandardMaterial color={skinTone} roughness={0.6} />
-            </mesh>
+            <mesh
+              castShadow
+              position={[0, -0.45, 0]}
+              geometry={SHARED_WORKER_GEOMETRY.capsule_med}
+              scale={[0.045, 0.045, 0.045]}
+              material={getSkinMaterial(skinTone)}
+            />
             {/* Hand */}
             <group position={[0, -0.62, 0]}>
-              <mesh castShadow>
-                <boxGeometry args={[0.06, 0.08, 0.03]} />
-                <meshStandardMaterial color={skinTone} roughness={0.6} />
-              </mesh>
+              <mesh
+                castShadow
+                geometry={SHARED_WORKER_GEOMETRY.box_small}
+                scale={[0.06, 0.08, 0.03]}
+                material={getSkinMaterial(skinTone)}
+              />
               {/* Fingers */}
-              <mesh ref={leftFingersRef} castShadow position={[0, -0.055, 0]}>
-                <boxGeometry args={[0.055, 0.04, 0.025]} />
-                <meshStandardMaterial color={skinTone} roughness={0.6} />
-              </mesh>
+              <mesh
+                ref={leftFingersRef}
+                castShadow
+                position={[0, -0.055, 0]}
+                geometry={SHARED_WORKER_GEOMETRY.box_small}
+                scale={[0.055, 0.04, 0.025]}
+                material={getSkinMaterial(skinTone)}
+              />
               {/* Tool accessory */}
               <ToolAccessory tool={tool} />
             </group>
@@ -1597,121 +1697,178 @@ const HumanModel: React.FC<{
           {/* === RIGHT ARM === */}
           <group ref={rightArmRef} position={[0.34, 0.22, 0]}>
             {/* Upper arm */}
-            <mesh castShadow position={[0, -0.15, 0]}>
-              <capsuleGeometry args={[0.055, 0.22, 8, 16]} />
-              <meshStandardMaterial color={uniformColor} roughness={0.8} />
-            </mesh>
+            <mesh
+              castShadow
+              position={[0, -0.15, 0]}
+              geometry={SHARED_WORKER_GEOMETRY.limb_capsule}
+              material={getUniformMaterial(uniformColor)}
+            />
             {/* Elbow */}
-            <mesh castShadow position={[0, -0.3, 0]}>
-              <sphereGeometry args={[0.055, 12, 12]} />
-              <meshStandardMaterial color={uniformColor} roughness={0.8} />
-            </mesh>
+            <mesh
+              castShadow
+              position={[0, -0.3, 0]}
+              geometry={SHARED_WORKER_GEOMETRY.sphere_med}
+              scale={[0.055, 0.055, 0.055]}
+              material={getUniformMaterial(uniformColor)}
+            />
             {/* Forearm */}
-            <mesh castShadow position={[0, -0.45, 0]}>
-              <capsuleGeometry args={[0.045, 0.2, 8, 16]} />
-              <meshStandardMaterial color={skinTone} roughness={0.6} />
-            </mesh>
+            <mesh
+              castShadow
+              position={[0, -0.45, 0]}
+              geometry={SHARED_WORKER_GEOMETRY.capsule_med}
+              scale={[0.045, 0.045, 0.045]}
+              material={getSkinMaterial(skinTone)}
+            />
             {/* Hand */}
             <group position={[0, -0.62, 0]}>
-              <mesh castShadow>
-                <boxGeometry args={[0.06, 0.08, 0.03]} />
-                <meshStandardMaterial color={skinTone} roughness={0.6} />
-              </mesh>
+              <mesh
+                castShadow
+                geometry={SHARED_WORKER_GEOMETRY.box_small}
+                scale={[0.06, 0.08, 0.03]}
+                material={getSkinMaterial(skinTone)}
+              />
               {/* Fingers */}
-              <mesh ref={rightFingersRef} castShadow position={[0, -0.055, 0]}>
-                <boxGeometry args={[0.055, 0.04, 0.025]} />
-                <meshStandardMaterial color={skinTone} roughness={0.6} />
-              </mesh>
+              <mesh
+                ref={rightFingersRef}
+                castShadow
+                position={[0, -0.055, 0]}
+                geometry={SHARED_WORKER_GEOMETRY.box_small}
+                scale={[0.055, 0.04, 0.025]}
+                material={getSkinMaterial(skinTone)}
+              />
             </group>
           </group>
         </group>
 
         {/* === HIPS / PELVIS === */}
-        <mesh ref={hipsRef} castShadow position={[0, 0.72, 0]}>
-          <boxGeometry args={[0.38, 0.14, 0.2]} />
-          <meshStandardMaterial color={pantsColor} roughness={0.8} />
-        </mesh>
+        <mesh
+          ref={hipsRef}
+          castShadow
+          position={[0, 0.72, 0]}
+          geometry={SHARED_WORKER_GEOMETRY.box_small}
+          scale={[0.38, 0.14, 0.2]}
+          material={getPantsMaterial(pantsColor)}
+        />
 
         {/* Belt */}
-        <mesh castShadow position={[0, 0.78, 0]}>
-          <boxGeometry args={[0.4, 0.04, 0.22]} />
-          <meshStandardMaterial color="#1a1a1a" roughness={0.5} metalness={0.3} />
-        </mesh>
+        <mesh
+          castShadow
+          position={[0, 0.78, 0]}
+          geometry={SHARED_WORKER_GEOMETRY.box_small}
+          scale={[0.4, 0.04, 0.22]}
+          material={SHARED_WORKER_MATERIALS.darkGray}
+        />
         {/* Belt buckle */}
-        <mesh castShadow position={[0, 0.78, 0.115]}>
-          <boxGeometry args={[0.05, 0.035, 0.01]} />
+        <mesh
+          castShadow
+          position={[0, 0.78, 0.115]}
+          geometry={SHARED_WORKER_GEOMETRY.box_small}
+          scale={[0.05, 0.035, 0.01]}
+        >
           <meshStandardMaterial color="#c9a227" metalness={0.8} roughness={0.2} />
         </mesh>
 
         {/* === LEFT LEG === */}
         <group ref={leftLegRef} position={[-0.1, 0.62, 0]}>
           {/* Upper thigh */}
-          <mesh castShadow position={[0, -0.18, 0]}>
-            <capsuleGeometry args={[0.075, 0.28, 8, 16]} />
-            <meshStandardMaterial color={pantsColor} roughness={0.8} />
-          </mesh>
+          <mesh
+            castShadow
+            position={[0, -0.18, 0]}
+            geometry={SHARED_WORKER_GEOMETRY.capsule_med}
+            scale={[0.075, 0.075, 0.075]}
+            material={getPantsMaterial(pantsColor)}
+          />
           {/* Knee */}
-          <mesh castShadow position={[0, -0.38, 0.02]}>
-            <sphereGeometry args={[0.065, 12, 12]} />
-            <meshStandardMaterial color={pantsColor} roughness={0.8} />
-          </mesh>
+          <mesh
+            castShadow
+            position={[0, -0.38, 0.02]}
+            geometry={SHARED_WORKER_GEOMETRY.sphere_med}
+            scale={[0.065, 0.065, 0.065]}
+            material={getPantsMaterial(pantsColor)}
+          />
           {/* Lower leg / shin */}
-          <mesh castShadow position={[0, -0.58, 0]}>
-            <capsuleGeometry args={[0.055, 0.28, 8, 16]} />
-            <meshStandardMaterial color={pantsColor} roughness={0.8} />
-          </mesh>
+          <mesh
+            castShadow
+            position={[0, -0.58, 0]}
+            geometry={SHARED_WORKER_GEOMETRY.capsule_med}
+            scale={[0.055, 0.055, 0.055]}
+            material={getPantsMaterial(pantsColor)}
+          />
           {/* Boot */}
           <group position={[0, -0.78, 0.03]}>
-            <mesh castShadow>
-              <boxGeometry args={[0.1, 0.1, 0.16]} />
-              <meshStandardMaterial color="#1a1a1a" roughness={0.6} />
-            </mesh>
+            <mesh
+              castShadow
+              geometry={SHARED_WORKER_GEOMETRY.boot}
+              material={SHARED_WORKER_MATERIALS.darkGray}
+            />
             {/* Boot sole */}
-            <mesh castShadow position={[0, -0.05, 0]}>
-              <boxGeometry args={[0.11, 0.02, 0.17]} />
-              <meshStandardMaterial color="#0d0d0d" roughness={0.9} />
-            </mesh>
+            <mesh
+              castShadow
+              position={[0, -0.05, 0]}
+              geometry={SHARED_WORKER_GEOMETRY.box_small}
+              scale={[0.11, 0.02, 0.17]}
+              material={SHARED_WORKER_MATERIALS.black}
+            />
             {/* Boot toe cap */}
-            <mesh castShadow position={[0, -0.02, 0.07]}>
-              <boxGeometry args={[0.09, 0.06, 0.04]} />
-              <meshStandardMaterial color="#333333" roughness={0.5} metalness={0.2} />
-            </mesh>
+            <mesh
+              castShadow
+              position={[0, -0.02, 0.07]}
+              geometry={SHARED_WORKER_GEOMETRY.box_small}
+              scale={[0.09, 0.06, 0.04]}
+              material={SHARED_WORKER_MATERIALS.mediumGray}
+            />
           </group>
         </group>
 
         {/* === RIGHT LEG === */}
         <group ref={rightLegRef} position={[0.1, 0.62, 0]}>
           {/* Upper thigh */}
-          <mesh castShadow position={[0, -0.18, 0]}>
-            <capsuleGeometry args={[0.075, 0.28, 8, 16]} />
-            <meshStandardMaterial color={pantsColor} roughness={0.8} />
-          </mesh>
+          <mesh
+            castShadow
+            position={[0, -0.18, 0]}
+            geometry={SHARED_WORKER_GEOMETRY.capsule_med}
+            scale={[0.075, 0.075, 0.075]}
+            material={getPantsMaterial(pantsColor)}
+          />
           {/* Knee */}
-          <mesh castShadow position={[0, -0.38, 0.02]}>
-            <sphereGeometry args={[0.065, 12, 12]} />
-            <meshStandardMaterial color={pantsColor} roughness={0.8} />
-          </mesh>
+          <mesh
+            castShadow
+            position={[0, -0.38, 0.02]}
+            geometry={SHARED_WORKER_GEOMETRY.sphere_med}
+            scale={[0.065, 0.065, 0.065]}
+            material={getPantsMaterial(pantsColor)}
+          />
           {/* Lower leg / shin */}
-          <mesh castShadow position={[0, -0.58, 0]}>
-            <capsuleGeometry args={[0.055, 0.28, 8, 16]} />
-            <meshStandardMaterial color={pantsColor} roughness={0.8} />
-          </mesh>
+          <mesh
+            castShadow
+            position={[0, -0.58, 0]}
+            geometry={SHARED_WORKER_GEOMETRY.capsule_med}
+            scale={[0.055, 0.055, 0.055]}
+            material={getPantsMaterial(pantsColor)}
+          />
           {/* Boot */}
           <group position={[0, -0.78, 0.03]}>
-            <mesh castShadow>
-              <boxGeometry args={[0.1, 0.1, 0.16]} />
-              <meshStandardMaterial color="#1a1a1a" roughness={0.6} />
-            </mesh>
+            <mesh
+              castShadow
+              geometry={SHARED_WORKER_GEOMETRY.boot}
+              material={SHARED_WORKER_MATERIALS.darkGray}
+            />
             {/* Boot sole */}
-            <mesh castShadow position={[0, -0.05, 0]}>
-              <boxGeometry args={[0.11, 0.02, 0.17]} />
-              <meshStandardMaterial color="#0d0d0d" roughness={0.9} />
-            </mesh>
+            <mesh
+              castShadow
+              position={[0, -0.05, 0]}
+              geometry={SHARED_WORKER_GEOMETRY.box_small}
+              scale={[0.11, 0.02, 0.17]}
+              material={SHARED_WORKER_MATERIALS.black}
+            />
             {/* Boot toe cap */}
-            <mesh castShadow position={[0, -0.02, 0.07]}>
-              <boxGeometry args={[0.09, 0.06, 0.04]} />
-              <meshStandardMaterial color="#333333" roughness={0.5} metalness={0.2} />
-            </mesh>
+            <mesh
+              castShadow
+              position={[0, -0.02, 0.07]}
+              geometry={SHARED_WORKER_GEOMETRY.box_small}
+              scale={[0.09, 0.06, 0.04]}
+              material={SHARED_WORKER_MATERIALS.mediumGray}
+            />
           </group>
         </group>
       </group>
@@ -1756,14 +1913,22 @@ const SimplifiedWorker: React.FC<{
   return (
     <group position={[0, 0.05, 0]}>
       {/* Torso - combined chest and hips */}
-      <mesh position={[0, 1.1, 0]} castShadow>
-        <boxGeometry args={[0.5, 0.9, 0.25]} />
+      <mesh
+        position={[0, 1.1, 0]}
+        castShadow
+        geometry={SHARED_WORKER_GEOMETRY.box_small}
+        scale={[0.5, 0.9, 0.25]}
+      >
         <meshStandardMaterial color={hasVest ? '#f97316' : uniformColor} roughness={0.7} />
       </mesh>
 
       {/* Head */}
-      <mesh position={[0, 1.75, 0]} castShadow>
-        <sphereGeometry args={[0.15, 12, 12]} />
+      <mesh
+        position={[0, 1.75, 0]}
+        castShadow
+        geometry={SHARED_WORKER_GEOMETRY.sphere_med}
+        scale={[0.15, 0.15, 0.15]}
+      >
         <meshStandardMaterial color={skinTone} roughness={0.6} />
       </mesh>
 
@@ -1775,38 +1940,57 @@ const SimplifiedWorker: React.FC<{
 
       {/* Left arm */}
       <group ref={leftArmRef} position={[-0.3, 1.3, 0]}>
-        <mesh position={[0, -0.25, 0]} castShadow>
-          <boxGeometry args={[0.12, 0.5, 0.12]} />
+        <mesh
+          position={[0, -0.25, 0]}
+          castShadow
+          geometry={SHARED_WORKER_GEOMETRY.box_small}
+          scale={[0.12, 0.5, 0.12]}
+        >
           <meshStandardMaterial color={uniformColor} roughness={0.7} />
         </mesh>
       </group>
 
       {/* Right arm */}
       <group ref={rightArmRef} position={[0.3, 1.3, 0]}>
-        <mesh position={[0, -0.25, 0]} castShadow>
-          <boxGeometry args={[0.12, 0.5, 0.12]} />
+        <mesh
+          position={[0, -0.25, 0]}
+          castShadow
+          geometry={SHARED_WORKER_GEOMETRY.box_small}
+          scale={[0.12, 0.5, 0.12]}
+        >
           <meshStandardMaterial color={uniformColor} roughness={0.7} />
         </mesh>
       </group>
 
       {/* Hips */}
-      <mesh position={[0, 0.7, 0]}>
-        <boxGeometry args={[0.45, 0.3, 0.25]} />
+      <mesh
+        position={[0, 0.7, 0]}
+        geometry={SHARED_WORKER_GEOMETRY.box_small}
+        scale={[0.45, 0.3, 0.25]}
+      >
         <meshStandardMaterial color={pantsColor} roughness={0.8} />
       </mesh>
 
       {/* Left leg */}
       <group ref={leftLegRef} position={[-0.13, 0.55, 0]}>
-        <mesh position={[0, -0.3, 0]} castShadow>
-          <boxGeometry args={[0.15, 0.6, 0.15]} />
+        <mesh
+          position={[0, -0.3, 0]}
+          castShadow
+          geometry={SHARED_WORKER_GEOMETRY.box_small}
+          scale={[0.15, 0.6, 0.15]}
+        >
           <meshStandardMaterial color={pantsColor} roughness={0.8} />
         </mesh>
       </group>
 
       {/* Right leg */}
       <group ref={rightLegRef} position={[0.13, 0.55, 0]}>
-        <mesh position={[0, -0.3, 0]} castShadow>
-          <boxGeometry args={[0.15, 0.6, 0.15]} />
+        <mesh
+          position={[0, -0.3, 0]}
+          castShadow
+          geometry={SHARED_WORKER_GEOMETRY.box_small}
+          scale={[0.15, 0.6, 0.15]}
+        >
           <meshStandardMaterial color={pantsColor} roughness={0.8} />
         </mesh>
       </group>
@@ -1814,6 +1998,10 @@ const SimplifiedWorker: React.FC<{
   );
 });
 SimplifiedWorker.displayName = 'SimplifiedWorker';
+
+import { SHARED_WORKER_GEOMETRY } from './workers/SharedWorkerGeometries';
+
+// ... (existing imports)
 
 const WorkerBillboard: React.FC<{
   uniformColor: string;
@@ -1823,13 +2011,11 @@ const WorkerBillboard: React.FC<{
   return (
     <group scale={[0.85, 0.85, 0.85]} position={[0, -0.34, 0]}>
       {/* Simple body - single box */}
-      <mesh position={[0, 1.0, 0]} castShadow>
-        <boxGeometry args={[0.4, 1.2, 0.25]} />
+      <mesh position={[0, 1.0, 0]} castShadow geometry={SHARED_WORKER_GEOMETRY.billboard_body}>
         <meshStandardMaterial color={hasVest ? '#f97316' : uniformColor} roughness={0.8} />
       </mesh>
       {/* Head - sphere */}
-      <mesh position={[0, 1.8, 0]} castShadow>
-        <sphereGeometry args={[0.15, 8, 8]} />
+      <mesh position={[0, 1.8, 0]} castShadow geometry={SHARED_WORKER_GEOMETRY.billboard_head}>
         <meshStandardMaterial color="#f5d0c5" roughness={0.6} />
       </mesh>
       {/* Hard hat */}
@@ -1896,11 +2082,19 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
     const markWorkerEvacuated = useGameSimulationStore((state) => state.markWorkerEvacuated);
     const getNearestExit = useGameSimulationStore((state) => state.getNearestExit);
 
+    // Breakdown repair (maintenance worker only - David Kim w5)
+    const activeBreakdowns = useBreakdownStore((state) => state.activeBreakdowns);
+    const updateRepairProgress = useBreakdownStore((state) => state.updateRepairProgress);
+    const assignRepairWorker = useBreakdownStore((state) => state.assignRepairWorker);
+
     // Physics system toggle
     const enablePhysics = useGraphicsStore((state) => state.graphics.enablePhysics);
 
     // Track if this worker has been marked as evacuated (to prevent multiple calls)
     const hasEvacuatedRef = useRef(false);
+
+    // Track repair assignment for maintenance worker
+    const currentRepairIdRef = useRef<string | null>(null);
 
     // Reset evacuation status when drill ends
     useEffect(() => {
@@ -2077,6 +2271,82 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
           'worker'
         );
         return; // Skip normal behavior during evacuation
+      }
+
+      // === BREAKDOWN REPAIR BEHAVIOR (Maintenance Worker Only) ===
+      // David Kim (w5) is the maintenance technician who repairs breakdowns
+      if (data.id === 'w5' && activeBreakdowns.length > 0) {
+        const cappedDelta = Math.min(delta, 0.1);
+        const REPAIR_SPEED = 4.0; // Walking speed to machine
+        const REPAIR_DISTANCE = 2.5; // Distance to start repairing
+        const REPAIR_RATE = 15; // Progress % per second when repairing
+
+        // Find breakdown assigned to this worker, or first unassigned one
+        let assignedBreakdown = activeBreakdowns.find(
+          (b) => b.assignedWorkerId === data.id
+        );
+
+        // If no assignment, pick first unassigned breakdown
+        if (!assignedBreakdown) {
+          const unassigned = activeBreakdowns.find((b) => !b.assignedWorkerId);
+          if (unassigned) {
+            assignRepairWorker(unassigned.id, data.id, data.name);
+            assignedBreakdown = unassigned;
+            currentRepairIdRef.current = unassigned.id;
+          }
+        }
+
+        if (assignedBreakdown) {
+          // Get machine position from production store
+          const machines = useProductionStore.getState().machines;
+          const targetMachine = machines.find((m) => m.id === assignedBreakdown!.machineId);
+
+          if (targetMachine) {
+            const targetX = targetMachine.position[0];
+            const targetZ = targetMachine.position[2];
+
+            const dx = targetX - ref.current.position.x;
+            const dz = targetZ - ref.current.position.z;
+            const distanceToMachine = Math.sqrt(dx * dx + dz * dz);
+
+            if (distanceToMachine > REPAIR_DISTANCE) {
+              // Move toward machine
+              const dirX = dx / distanceToMachine;
+              const dirZ = dz / distanceToMachine;
+
+              ref.current.position.x += dirX * REPAIR_SPEED * cappedDelta;
+              ref.current.position.z += dirZ * REPAIR_SPEED * cappedDelta;
+
+              // Face direction of movement
+              ref.current.rotation.y = Math.atan2(dirX, dirZ);
+
+              // Walking animation
+              walkCycleRef.current += cappedDelta * 6;
+              ref.current.position.y = Math.abs(Math.sin(walkCycleRef.current)) * 0.02;
+            } else {
+              // At machine - perform repair
+              ref.current.position.y = 0;
+              // Face the machine
+              ref.current.rotation.y = Math.atan2(dx, dz);
+              // Update repair progress
+              updateRepairProgress(assignedBreakdown.id, REPAIR_RATE * cappedDelta);
+            }
+
+            // Update position registry
+            positionRegistry.register(
+              data.id,
+              ref.current.position.x,
+              ref.current.position.z,
+              'worker'
+            );
+            return; // Skip normal behavior during repair
+          }
+        }
+
+        // Clear repair ref if no active breakdown assigned
+        if (!assignedBreakdown) {
+          currentRepairIdRef.current = null;
+        }
       }
 
       // Update cached settings every 60 frames (~1 second at 60fps)

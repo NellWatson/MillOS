@@ -68,6 +68,14 @@ export const WorkerSpeechBubble: React.FC<WorkerSpeechBubbleProps> = ({
           border: 'border-blue-300',
           shadow: 'shadow-blue-200/50',
         };
+      case 'handoff':
+        // Shift handoff conversations - emerald green for visibility
+        return {
+          bg: 'bg-emerald-500',
+          text: 'text-white',
+          border: 'border-emerald-600',
+          shadow: 'shadow-emerald-500/50',
+        };
       case 'casual':
       default:
         return {
@@ -82,7 +90,7 @@ export const WorkerSpeechBubble: React.FC<WorkerSpeechBubbleProps> = ({
   const style = getBubbleStyle();
 
   return (
-    <Html position={position} center distanceFactor={15} zIndexRange={[100, 0]}>
+    <Html position={position} center distanceFactor={12} zIndexRange={[100, 0]}>
       <AnimatePresence>
         {visible && (
           <motion.div
@@ -94,21 +102,21 @@ export const WorkerSpeechBubble: React.FC<WorkerSpeechBubbleProps> = ({
           >
             {/* Speech bubble container */}
             <div className="relative">
-              {/* Bubble */}
+              {/* Bubble - larger for better visibility */}
               <div
                 className={`
                   ${style.bg} ${style.text} ${style.border}
-                  px-3 py-2 rounded-lg border-2 shadow-lg ${style.shadow}
-                  max-w-[200px] min-w-[120px]
+                  px-4 py-3 rounded-xl border-2 shadow-lg ${style.shadow}
+                  max-w-[280px] min-w-[160px]
                   backdrop-blur-sm
-                  flex items-center gap-2
+                  flex items-center gap-3
                 `}
               >
                 {/* Radio icon for radio chatter */}
-                {type === 'radio' && <Radio className="w-4 h-4 flex-shrink-0 animate-pulse" />}
+                {type === 'radio' && <Radio className="w-5 h-5 flex-shrink-0 animate-pulse" />}
 
-                {/* Text content */}
-                <span className="text-sm font-medium leading-tight">{text}</span>
+                {/* Text content - larger font */}
+                <span className="text-base font-medium leading-snug">{text}</span>
               </div>
 
               {/* Bubble tail (pointing down to worker) */}

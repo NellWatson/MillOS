@@ -58,8 +58,9 @@ export const PostProcessing: React.FC = () => {
         )}
 
         {/* Bloom for emissive lights and glow effects */}
+        {/* Tuned for cleaner targeting: higher threshold, sharper falloff */}
         {graphics.enableBloom && (
-          <Bloom intensity={0.5} luminanceThreshold={0.8} luminanceSmoothing={0.9} mipmapBlur />
+          <Bloom intensity={0.4} luminanceThreshold={0.85} luminanceSmoothing={0.8} mipmapBlur />
         )}
 
         {/* Film grain for industrial grittiness */}

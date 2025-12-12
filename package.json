@@ -17,7 +17,10 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,css}\"",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "setup:basis": "./scripts/setup-basis-transcoder.sh",
+    "convert-textures": "node scripts/convert-textures.mjs",
+    "convert-textures:dry": "node scripts/convert-textures.mjs --dry-run"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

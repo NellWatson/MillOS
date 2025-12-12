@@ -1,8 +1,14 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useEffect } from 'react';
 import { Text } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { DoubleSide } from 'three';
+import { useModelTextures } from '../utils/machineTextures';
+import { useProductionStore } from '../stores/productionStore';
+import {
+  calculateShippingTruckState,
+  calculateReceivingTruckState,
+} from './truckbay/useTruckPhysics';
 
 interface FactoryExteriorProps {
   floorWidth?: number;
@@ -258,8 +264,8 @@ const GasStation: React.FC<{ position: [number, number, number]; rotation?: numb
           <meshStandardMaterial color="#212121" roughness={0.4} metalness={0.4} />
         </mesh>
         {/* Coffee display panel */}
-        <mesh position={[0.41, 1.5, 0]}>
-          <planeGeometry args={[0.01, 0.5, 0.4]} />
+        <mesh position={[0.41, 1.5, 0]} rotation={[0, Math.PI / 2, 0]}>
+          <planeGeometry args={[0.4, 0.5]} />
           <meshBasicMaterial color="#4caf50" />
         </mesh>
         {/* Cup dispenser */}
@@ -288,8 +294,8 @@ const GasStation: React.FC<{ position: [number, number, number]; rotation?: numb
           </mesh>
         ))}
         {/* "SLUSH" label */}
-        <mesh position={[0.36, 0.5, 0]}>
-          <planeGeometry args={[0.01, 0.3, 0.3]} />
+        <mesh position={[0.36, 0.5, 0]} rotation={[0, Math.PI / 2, 0]}>
+          <planeGeometry args={[0.3, 0.3]} />
           <meshBasicMaterial color="#fff3e0" />
         </mesh>
       </group>
@@ -392,8 +398,8 @@ const GasStation: React.FC<{ position: [number, number, number]; rotation?: numb
               <meshStandardMaterial color="#e65100" roughness={0.5} />
             </mesh>
             {/* Screen */}
-            <mesh position={[0.31, 1.1, 0]}>
-              <planeGeometry args={[0.01, 0.4, 0.3]} />
+            <mesh position={[0.31, 1.1, 0]} rotation={[0, Math.PI / 2, 0]}>
+              <planeGeometry args={[0.3, 0.4]} />
               <meshBasicMaterial color="#000000" />
             </mesh>
             {/* Nozzle holders */}
@@ -1320,11 +1326,14 @@ const River: React.FC<{
         const nextSeg = riverSegments[i + 1];
         const midX = (seg.x + nextSeg.x) / 2;
         const midZ = (seg.z + nextSeg.z) / 2;
-        const segLength = Math.sqrt(
+        const segLengthRaw = Math.sqrt(
           Math.pow(nextSeg.x - seg.x, 2) + Math.pow(nextSeg.z - seg.z, 2)
         );
+        // Guard against NaN/zero dimensions for PlaneGeometry
+        const segLength = Number.isFinite(segLengthRaw) && segLengthRaw > 0.01 ? segLengthRaw : 1;
         const angle = Math.atan2(nextSeg.z - seg.z, nextSeg.x - seg.x);
-        const avgWidth = (seg.w + nextSeg.w) / 2;
+        const avgWidthRaw = (seg.w + nextSeg.w) / 2;
+        const avgWidth = Number.isFinite(avgWidthRaw) && avgWidthRaw > 0.01 ? avgWidthRaw : 5;
 
         return (
           <group
@@ -3830,46 +3839,105 @@ const ConnectingRoad: React.FC<{
 
 // Checkpoint Charlie style barrier gate with animated lifting arms
 // DESIGN: Booth sits BESIDE the road, barrier arms span ACROSS the road
+// Barriers automatically raise when trucks approach
 const CheckpointBarrier: React.FC<{
   position: [number, number, number];
   rotation?: number;
   label?: string;
   roadWidth?: number;
-}> = ({ position, rotation = 0, label = 'CHECKPOINT', roadWidth = 16 }) => {
+  checkpointType?: 'shipping' | 'receiving';
+}> = ({ position, rotation = 0, label = 'CHECKPOINT', roadWidth = 16, checkpointType }) => {
   const barrierArmRef = useRef<THREE.Group>(null);
   const barrierArm2Ref = useRef<THREE.Group>(null);
   const lightRef = useRef<THREE.MeshBasicMaterial>(null);
   const light2Ref = useRef<THREE.MeshBasicMaterial>(null);
 
-  // Animate the barrier arms lifting and lowering
+  // Get production speed for synchronized truck timing
+  const productionSpeed = useProductionStore((s) => s.productionSpeed);
+
+  // Animate the barrier arms - raise when trucks approach
   useFrame((state) => {
     const time = state.clock.elapsedTime;
-    // Barrier 1: Cycle every 12 seconds (6s down, 6s up)
-    const cycle1 = (time % 12) / 12;
-    const isUp1 = cycle1 > 0.5;
-    const targetAngle1 = isUp1 ? Math.PI / 2 : 0;
+    const adjustedTime = time * (productionSpeed * 0.25 + 0.2);
+    const CYCLE_LENGTH = 60;
 
-    // Barrier 2: Offset by 6 seconds so they alternate
-    const cycle2 = ((time + 6) % 12) / 12;
-    const isUp2 = cycle2 > 0.5;
-    const targetAngle2 = isUp2 ? Math.PI / 2 : 0;
+    // Calculate truck positions
+    const shippingCycle = adjustedTime % CYCLE_LENGTH;
+    const receivingCycle = (adjustedTime + CYCLE_LENGTH / 2) % CYCLE_LENGTH;
 
-    // Smooth animation for barrier 1
+    const shippingState = calculateShippingTruckState(shippingCycle, time);
+    const receivingState = calculateReceivingTruckState(receivingCycle, time);
+
+    // Checkpoint positions: shipping at z=110, receiving at z=-110
+    // Detect when trucks are within range of this checkpoint
+    const DETECTION_RANGE = 40; // Units from checkpoint to start raising
+    const checkpointZ = position[2];
+
+    // Determine if this checkpoint should respond to shipping or receiving trucks
+    const isShippingCheckpoint = checkpointType === 'shipping' || checkpointZ > 0;
+
+    let shouldRaiseInbound = false; // Barrier 1 (left side, z=+3 relative)
+    let shouldRaiseOutbound = false; // Barrier 2 (right side, z=-3 relative)
+
+    if (isShippingCheckpoint) {
+      // Shipping checkpoint at z=110
+      // Truck enters from z=250 (coming from positive z towards negative z in world)
+      // Truck exits towards z=250 (going from negative z towards positive z)
+      const truckZ = shippingState.z;
+
+      // Entering phases: truck coming from road (z=250) towards dock (z=53)
+      const isEntering =
+        shippingState.phase === 'entering' || shippingState.phase === 'positioning';
+      // Leaving phases: truck going from dock back to road
+      const isLeaving = shippingState.phase === 'turning_out' || shippingState.phase === 'leaving';
+
+      if (isEntering && truckZ > checkpointZ - 20 && truckZ < checkpointZ + DETECTION_RANGE) {
+        shouldRaiseInbound = true;
+      }
+      if (isLeaving && truckZ > checkpointZ - 20 && truckZ < checkpointZ + DETECTION_RANGE) {
+        shouldRaiseOutbound = true;
+      }
+    } else {
+      // Receiving checkpoint at z=-110
+      const truckZ = receivingState.z;
+
+      // Entering phases: truck coming from road (z=-250) towards dock (z=-53)
+      const isEntering =
+        receivingState.phase === 'entering' || receivingState.phase === 'positioning';
+      // Leaving phases: truck going from dock back to road
+      const isLeaving =
+        receivingState.phase === 'turning_out' || receivingState.phase === 'leaving';
+
+      if (isEntering && truckZ < checkpointZ + 20 && truckZ > checkpointZ - DETECTION_RANGE) {
+        shouldRaiseInbound = true;
+      }
+      if (isLeaving && truckZ < checkpointZ + 20 && truckZ > checkpointZ - DETECTION_RANGE) {
+        shouldRaiseOutbound = true;
+      }
+    }
+
+    // Target angles: 0 = down, PI/2 = up
+    const targetAngle1 = shouldRaiseInbound ? Math.PI / 2 : 0;
+    const targetAngle2 = shouldRaiseOutbound ? Math.PI / 2 : 0;
+
+    // Smooth animation for barrier 1 (faster response)
     if (barrierArmRef.current) {
       const currentAngle1 = barrierArmRef.current.rotation.z;
       const diff1 = targetAngle1 - currentAngle1;
-      barrierArmRef.current.rotation.z += diff1 * 0.05;
+      barrierArmRef.current.rotation.z += diff1 * 0.08;
     }
 
     // Smooth animation for barrier 2
     if (barrierArm2Ref.current) {
       const currentAngle2 = barrierArm2Ref.current.rotation.z;
       const diff2 = targetAngle2 - currentAngle2;
-      barrierArm2Ref.current.rotation.z += diff2 * 0.05;
+      barrierArm2Ref.current.rotation.z += diff2 * 0.08;
     }
 
-    // Flashing warning lights when barrier is down
+    // Flashing warning lights when barrier is down (truck approaching)
     const flash = Math.sin(time * 4) > 0;
+    const isUp1 = barrierArmRef.current && barrierArmRef.current.rotation.z > Math.PI / 4;
+    const isUp2 = barrierArm2Ref.current && barrierArm2Ref.current.rotation.z > Math.PI / 4;
     if (lightRef.current) {
       lightRef.current.color.setHex(flash && !isUp1 ? 0xff0000 : 0x440000);
     }
@@ -4101,8 +4169,39 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
   const wallColor = '#475569';
   const trimColor = '#374151';
 
+  // Load grass textures (high/ultra only)
+  const grassTextures = useModelTextures('grass');
+
+  // Configure grass texture tiling
+  useEffect(() => {
+    if (grassTextures.color) {
+      grassTextures.color.wrapS = grassTextures.color.wrapT = THREE.RepeatWrapping;
+      grassTextures.color.repeat.set(40, 40);
+    }
+    if (grassTextures.normal) {
+      grassTextures.normal.wrapS = grassTextures.normal.wrapT = THREE.RepeatWrapping;
+      grassTextures.normal.repeat.set(40, 40);
+    }
+    if (grassTextures.roughness) {
+      grassTextures.roughness.wrapS = grassTextures.roughness.wrapT = THREE.RepeatWrapping;
+      grassTextures.roughness.repeat.set(40, 40);
+    }
+  }, [grassTextures]);
+
   return (
     <group>
+      {/* ========== EXTERIOR GRASS GROUND ========== */}
+      <mesh position={[0, -0.2, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <planeGeometry args={[400, 400]} />
+        <meshStandardMaterial
+          color={grassTextures.color ? '#ffffff' : GRASS_COLORS.field}
+          map={grassTextures.color}
+          normalMap={grassTextures.normal}
+          normalScale={grassTextures.normal ? new THREE.Vector2(0.3, 0.3) : undefined}
+          roughnessMap={grassTextures.roughness}
+          roughness={0.95}
+        />
+      </mesh>
       {/* ========== FRONT WALL (Z+) with single centered dock opening ========== */}
       {/* Left section - FULL HEIGHT - extends PAST side wall for clean corner */}
       <mesh
@@ -4974,16 +5073,17 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
 
       {/* ========== PERIMETER FENCE ========== */}
       {/* Fence around property - with gate openings for truck access */}
+      {/* Shipping road at x=20 (width 16, spans x=12-28), Receiving road at x=-20 (spans x=-28 to -12) */}
       <group>
-        {/* Front fence (Z+) - left section */}
-        <FenceSection start={[-95, 0, 85]} end={[-15, 0, 85]} />
-        {/* Front fence - right section (gap for main entrance) */}
-        <FenceSection start={[15, 0, 85]} end={[95, 0, 85]} />
+        {/* Front fence (Z+) - left section (ends before receiving road area) */}
+        <FenceSection start={[-95, 0, 85]} end={[-32, 0, 85]} />
+        {/* Front fence - right section (starts after shipping road area) */}
+        <FenceSection start={[32, 0, 85]} end={[95, 0, 85]} />
 
-        {/* Back fence (Z-) - left section */}
-        <FenceSection start={[-95, 0, -85]} end={[-15, 0, -85]} />
-        {/* Back fence - right section (gap for receiving) */}
-        <FenceSection start={[15, 0, -85]} end={[95, 0, -85]} />
+        {/* Back fence (Z-) - left section (ends before receiving road area) */}
+        <FenceSection start={[-95, 0, -85]} end={[-32, 0, -85]} />
+        {/* Back fence - right section (starts after shipping road area) */}
+        <FenceSection start={[32, 0, -85]} end={[95, 0, -85]} />
 
         {/* Left fence (X-) */}
         <FenceSection start={[-95, 0, -85]} end={[-95, 0, 85]} />
@@ -4991,8 +5091,8 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
         {/* Right fence (X+) */}
         <FenceSection start={[95, 0, -85]} end={[95, 0, 85]} />
 
-        {/* Gate posts - front entrance */}
-        {[-15, 15].map((x, i) => (
+        {/* Gate posts - front entrance (at fence gap edges) */}
+        {[-32, 32].map((x, i) => (
           <group key={`gate-front-${i}`} position={[x, 0, 85]}>
             <mesh position={[0, 1.5, 0]} castShadow>
               <boxGeometry args={[0.4, 3, 0.4]} />
@@ -5005,8 +5105,8 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
           </group>
         ))}
 
-        {/* Gate posts - back entrance */}
-        {[-15, 15].map((x, i) => (
+        {/* Gate posts - back entrance (at fence gap edges) */}
+        {[-32, 32].map((x, i) => (
           <group key={`gate-back-${i}`} position={[x, 0, -85]}>
             <mesh position={[0, 1.5, 0]} castShadow>
               <boxGeometry args={[0.4, 3, 0.4]} />
@@ -5174,10 +5274,20 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
 
       {/* ========== CHECKPOINT BARRIERS AT TRUCK BAY ENTRANCES ========== */}
       {/* Front checkpoint - shipping dock entrance (on the road at z=110) */}
-      <CheckpointBarrier position={[20, 0, 110]} rotation={0} label="SHIPPING" />
+      <CheckpointBarrier
+        position={[20, 0, 110]}
+        rotation={0}
+        label="SHIPPING"
+        checkpointType="shipping"
+      />
 
       {/* Back checkpoint - receiving dock entrance (on the road at z=-110) */}
-      <CheckpointBarrier position={[-20, 0, -110]} rotation={Math.PI} label="RECEIVING" />
+      <CheckpointBarrier
+        position={[-20, 0, -110]}
+        rotation={Math.PI}
+        label="RECEIVING"
+        checkpointType="receiving"
+      />
 
       {/* ========== PARKLAND AREA (Front-right) ========== */}
       <group position={[75, 0, 100]}>
@@ -5305,8 +5415,8 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       <Caravan position={[-100, 0, 125]} rotation={0.3} color="#f5e6d3" />
 
       {/* ========== BUS STOP ========== */}
-      {/* European-style bus shelter along tunnel road near checkpoint */}
-      <BusStop position={[140, 0, 43]} rotation={0} />
+      {/* European-style bus shelter on shipping road, past checkpoint, near farm */}
+      <BusStop position={[29, 0, 140]} rotation={-Math.PI / 2} />
 
       {/* ========== EMPLOYEE PARKING LOT WITH CUTE CARS ========== */}
       {/* Parking lot positioned outside east fence (fence is at x=95) */}
@@ -5455,8 +5565,8 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       {/* Lake in front-right area - scenic water feature */}
       <Lake position={[120, 0, 120]} size={[40, 30]} depth={0.5} />
 
-      {/* Food truck parked by the lake */}
-      <FoodTruck position={[85, 0, 130]} rotation={-Math.PI / 3} color="#ff6b6b" name="TACOS" />
+      {/* Food truck (taco truck) parked next to the parking lot */}
+      <FoodTruck position={[135, 0, 42]} rotation={Math.PI / 2} color="#ff6b6b" name="TACOS" />
 
       {/* River segment - runs along the back boundary */}
       <River position={[0, 0, -145]} length={280} width={20} meander={10} />

@@ -597,7 +597,14 @@ export const MillScene: React.FC<MillSceneProps> = ({
   const isLowGraphics = graphicsQuality === 'low';
 
   // Camera-based visibility culling - hide interior when outside, hide exterior when inside
+  // Exception: In dock zones (near open dock openings), show BOTH interior and exterior
   const isCameraInside = useCameraPositionStore((state) => state.isCameraInside);
+  const isCameraInDockZone = useCameraPositionStore((state) => state.isCameraInDockZone);
+
+  // Show interior when inside OR in dock transition zone
+  const showInterior = isCameraInside || isCameraInDockZone;
+  // Show exterior when outside OR in dock transition zone
+  const showExterior = !isCameraInside || isCameraInDockZone;
 
   return (
     <group>
@@ -606,7 +613,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
       {/* CRITICAL: Wrapped in its own Suspense to prevent blocking the entire scene during load */}
       {!isLowGraphics && (
         <Suspense fallback={null}>
-          <Environment files={warehouseHdrUrl} background={false} environmentIntensity={0.4} />
+          <Environment files={warehouseHdrUrl} background={false} environmentIntensity={0.55} />
         </Suspense>
       )}
 
@@ -617,11 +624,11 @@ export const MillScene: React.FC<MillSceneProps> = ({
       <CameraBoundsTracker />
 
       {/* Main Systems - Respect perfDebug toggles for A/B testing */}
-      {/* PERFORMANCE: Interior systems only render when camera is inside factory */}
-      {isCameraInside && !perfDebug?.disableMachines && (
+      {/* PERFORMANCE: Interior systems only render when camera is inside factory or in dock zone */}
+      {showInterior && !perfDebug?.disableMachines && (
         <Machines machines={displayMachines} onSelect={onSelectMachine} />
       )}
-      {isCameraInside && !isLowGraphics && !perfDebug?.disableMachines && (
+      {showInterior && !isLowGraphics && !perfDebug?.disableMachines && (
         <SpoutingSystem machines={displayMachines} />
       )}
       {/* CRITICAL: Wrapped in Suspense to prevent MeshReflectorMaterial from breaking scene on quality change */}
@@ -635,20 +642,20 @@ export const MillScene: React.FC<MillSceneProps> = ({
       </Suspense>
 
       {/* Dynamic Elements - Respect perfDebug toggles */}
-      {/* PERFORMANCE: Interior systems only render when camera is inside factory */}
-      {isCameraInside && !perfDebug?.disableConveyorSystem && (
+      {/* PERFORMANCE: Interior systems only render when camera is inside factory or in dock zone */}
+      {showInterior && !perfDebug?.disableConveyorSystem && (
         <ConveyorSystem productionSpeed={productionSpeed} />
       )}
-      {isCameraInside && !perfDebug?.disableWorkerSystem && (
+      {showInterior && !perfDebug?.disableWorkerSystem && (
         <WorkerSystem onSelectWorker={onSelectWorker} />
       )}
       {/* Remote multiplayer players */}
       <RemotePlayersGroup />
-      {isCameraInside && !perfDebug?.disableForkliftSystem && (
+      {showInterior && !perfDebug?.disableForkliftSystem && (
         <ForkliftSystem showSpeedZones={showZones} onSelectForklift={onSelectForklift} />
       )}
-      {/* PERFORMANCE: TruckBay renders only when camera is OUTSIDE (exterior view) */}
-      {!isCameraInside &&
+      {/* PERFORMANCE: TruckBay renders when camera is outside OR in dock zone (to see trucks through openings) */}
+      {showExterior &&
         (graphicsQuality === 'medium' ||
           graphicsQuality === 'high' ||
           graphicsQuality === 'ultra') &&
@@ -658,14 +665,14 @@ export const MillScene: React.FC<MillSceneProps> = ({
           </Suspense>
         )}
 
-      {/* Factory exterior walls and signage - renders when camera is outside (all quality levels) */}
-      {!isCameraInside && <FactoryExterior />}
+      {/* Factory exterior walls and signage - renders when camera is outside or in dock zone */}
+      {showExterior && <FactoryExterior />}
 
       {/* Theme Hospital-inspired Mood & Chaos Systems */}
       {/* PERFORMANCE: Interior-only systems, ultra quality only */}
-      {isCameraInside && graphicsQuality === 'ultra' && <VisibleChaos />}
-      {isCameraInside && graphicsQuality === 'ultra' && <FactoryEnvironmentSystem />}
-      {isCameraInside && graphicsQuality === 'ultra' && <MaintenanceSystem />}
+      {showInterior && graphicsQuality === 'ultra' && <VisibleChaos />}
+      {showInterior && graphicsQuality === 'ultra' && <FactoryEnvironmentSystem />}
+      {showInterior && graphicsQuality === 'ultra' && <MaintenanceSystem />}
 
       {/* Incident Heat Map Visualization */}
       <IncidentHeatMap />
@@ -675,7 +682,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
 
       {/* Atmospheric Effects - heavily reduced for performance */}
       {/* PERFORMANCE: Interior-only particle effects */}
-      {isCameraInside && graphicsQuality !== 'low' && (
+      {showInterior && graphicsQuality !== 'low' && (
         <DustAnimationManager>
           <DustParticles
             count={graphicsQuality === 'ultra' ? 150 : graphicsQuality === 'high' ? 80 : 30}
@@ -686,12 +693,12 @@ export const MillScene: React.FC<MillSceneProps> = ({
       )}
 
       {/* Holographic Displays - interior only, high/ultra */}
-      {isCameraInside && (graphicsQuality === 'high' || graphicsQuality === 'ultra') && (
+      {showInterior && (graphicsQuality === 'high' || graphicsQuality === 'ultra') && (
         <HolographicDisplays />
       )}
 
       {/* Ambient Details - interior only, ultra */}
-      {isCameraInside && graphicsQuality === 'ultra' && (
+      {showInterior && graphicsQuality === 'ultra' && (
         <Suspense fallback={null}>
           <AmbientDetailsGroup />
         </Suspense>

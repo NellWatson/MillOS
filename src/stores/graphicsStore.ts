@@ -57,6 +57,11 @@ export interface GraphicsSettings {
   ssaoSamples: number;
   // LOD (Level of Detail) settings
   workerLodDistance: number; // Distance at which workers switch to low-poly (0 = always high detail)
+  // Machine visual enhancement settings
+  enableMachineTextures: boolean; // External PBR texture maps (high/ultra only)
+  enableMachineColorVariation: boolean; // Per-instance color variation (medium+)
+  enableMachineLOD: boolean; // Geometry LOD for machines (all presets)
+  machineLodDistance: number; // Distance threshold for machine LOD switching
 }
 
 // Default perf debug settings (all systems enabled)
@@ -107,6 +112,11 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     shadowMapSize: 1024,
     ssaoSamples: 8,
     workerLodDistance: 15, // Low quality: aggressive LOD
+    // Machine visual enhancements
+    enableMachineTextures: false,
+    enableMachineColorVariation: false,
+    enableMachineLOD: true,
+    machineLodDistance: 30, // Aggressive LOD for low quality
   },
   medium: {
     quality: 'medium',
@@ -141,6 +151,11 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     shadowMapSize: 2048,
     ssaoSamples: 12,
     workerLodDistance: 60, // Medium quality: fairly long LOD distance for detailed workers
+    // Machine visual enhancements
+    enableMachineTextures: false,
+    enableMachineColorVariation: true, // Enable color variation on medium+
+    enableMachineLOD: true,
+    machineLodDistance: 50,
   },
   high: {
     quality: 'high',
@@ -175,6 +190,11 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     shadowMapSize: 2048,
     ssaoSamples: 16,
     workerLodDistance: 45, // High quality: moderate LOD distance
+    // Machine visual enhancements
+    enableMachineTextures: true, // Enable texture maps on high+
+    enableMachineColorVariation: true,
+    enableMachineLOD: true,
+    machineLodDistance: 80,
   },
   ultra: {
     quality: 'ultra',
@@ -209,6 +229,11 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     shadowMapSize: 4096,
     ssaoSamples: 21,
     workerLodDistance: 100, // Ultra: very long LOD distance, full detail at most distances
+    // Machine visual enhancements
+    enableMachineTextures: true,
+    enableMachineColorVariation: true,
+    enableMachineLOD: true,
+    machineLodDistance: 150, // Very long LOD distance for ultra
   },
 };
 

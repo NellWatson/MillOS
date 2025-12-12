@@ -2,6 +2,12 @@
  * Model Loader Utility
  *
  * Handles loading GLTF models with fallback to procedural primitives.
+ * Supports DRACO-compressed models for ~70-90% smaller file sizes.
+ *
+ * DRACO COMPRESSION:
+ * To compress your models with DRACO, use gltf-pipeline:
+ *   npm install -g gltf-pipeline
+ *   gltf-pipeline -i model.glb -o model-draco.glb -d
  *
  * To add models, download GLTF/GLB files from these CC0 sources:
  *
@@ -26,8 +32,11 @@
  * - public/models/machines/silo.glb, mill.glb, etc.
  */
 
-import { useGLTF } from '@react-three/drei';
 import { useState, useEffect } from 'react';
+import { getDracoLoader, preloadDracoModel, useDracoGLTF, disposeDracoLoader } from './dracoLoader';
+
+// Re-export DRACO utilities for convenience
+export { getDracoLoader, preloadDracoModel, useDracoGLTF, disposeDracoLoader };
 
 // Model paths configuration
 export const MODEL_PATHS = {
@@ -151,9 +160,12 @@ export function getWorkerVariantPath(variant: WorkerVariant): string {
 }
 
 /**
- * Preload models that exist
+ * Preload models that exist (with DRACO support)
  */
 export async function preloadAvailableModels(): Promise<void> {
+  // Initialize DRACO loader for better model loading performance
+  getDracoLoader();
+
   const checks = Object.entries(MODEL_PATHS).map(async ([key, path]) => {
     // Skip disabled models
     if (DISABLED_MODELS.includes(key as ModelType)) {
@@ -162,8 +174,9 @@ export async function preloadAvailableModels(): Promise<void> {
     const exists = await checkModelExists(path);
     if (exists) {
       try {
-        useGLTF.preload(path);
-        console.log(`Preloaded model: ${key}`);
+        // Use DRACO-aware preloading
+        preloadDracoModel(path);
+        console.log(`Preloaded model (DRACO enabled): ${key}`);
       } catch (e) {
         console.warn(`Failed to preload ${key}:`, e);
       }

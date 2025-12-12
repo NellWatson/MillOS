@@ -59,44 +59,20 @@ import { ZoneCustomizationPanel } from './ui/ZoneCustomizationPanel';
 import { SafetyConfigPanel } from './ui/SafetyConfigPanel';
 import { KeyboardShortcutsModal } from './ui/KeyboardShortcutsModal';
 import { MultiplayerLobby } from './multiplayer';
+import { TruckScheduleWidget } from './ui/TruckScheduleWidget';
+import { PredictiveMaintenancePanel } from './ui/PredictiveMaintenancePanel';
 
 // Lazy load ProductionMetrics to reduce initial bundle (Recharts is ~403KB)
 const ProductionMetrics = lazy(() =>
   import('./ProductionMetrics').then((module) => ({ default: module.ProductionMetrics }))
 );
 
-function useAudioState() {
-  const [, forceUpdate] = useState({});
-  useEffect(() => {
-    return audioManager.subscribe(() => forceUpdate({}));
-  }, []);
-  return {
-    muted: audioManager.muted,
-    volume: audioManager.volume,
-    musicEnabled: audioManager.musicEnabled,
-    musicVolume: audioManager.musicVolume,
-    currentTrack: audioManager.currentTrack,
-    ttsEnabled: audioManager.ttsEnabled,
-    setMuted: (v: boolean) => {
-      audioManager.muted = v;
-    },
-    setVolume: (v: number) => {
-      audioManager.volume = v;
-    },
-    setMusicEnabled: (v: boolean) => {
-      audioManager.musicEnabled = v;
-    },
-    setMusicVolume: (v: number) => {
-      audioManager.musicVolume = v;
-    },
-    setTtsEnabled: (v: boolean) => {
-      audioManager.ttsEnabled = v;
-    },
-    startMusic: () => audioManager.startMusic(),
-    nextTrack: () => audioManager.nextTrack(),
-    prevTrack: () => audioManager.prevTrack(),
-  };
-}
+// Import optimized audio hook (uses useSyncExternalStore instead of forceUpdate)
+// This replaces the old pattern that created new objects on every audio event
+import { useAudioStateWithControls } from '../hooks/useAudioState';
+
+// Re-export for local usage - now uses optimized implementation
+const useAudioState = useAudioStateWithControls;
 
 // Emergency & Environment Controls Panel
 const EmergencyEnvironmentPanel: React.FC = () => {
@@ -865,6 +841,60 @@ const GraphicsOptionsPanel: React.FC = () => {
     </div>
   );
 };
+
+// Predictive Maintenance Collapsible Panel
+const PredictiveMaintenanceCollapsible: React.FC = () => {
+  const [expanded, setExpanded] = useState(false);
+  const theme = useUIStore((state) => state.theme);
+
+  return (
+    <div
+      className={`border-t pt-2 mt-2 ${theme === 'light' ? 'border-slate-200' : 'border-slate-700/50'}`}
+    >
+      <button
+        onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setExpanded(!expanded);
+          }
+        }}
+        aria-expanded={expanded}
+        aria-controls="predictive-maintenance-panel"
+        className={`w-full flex items-center justify-between text-xs font-medium transition-colors py-1 ${
+          theme === 'light'
+            ? 'text-slate-600 hover:text-slate-800'
+            : 'text-slate-300 hover:text-white'
+        }`}
+      >
+        <span className="flex items-center gap-2">
+          <Activity className="w-4 h-4 text-blue-400" aria-hidden="true" />
+          Predictive Maintenance
+        </span>
+        {expanded ? (
+          <ChevronUp className="w-4 h-4" aria-hidden="true" />
+        ) : (
+          <ChevronDown className="w-4 h-4" aria-hidden="true" />
+        )}
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            id="predictive-maintenance-panel"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="pt-2 overflow-hidden"
+          >
+            <PredictiveMaintenancePanel />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 // Collapsible Legend Component (Draggable)
 const CollapsibleLegend: React.FC = () => {
   const [expanded, setExpanded] = useState(true);
@@ -950,6 +980,11 @@ const CollapsibleLegend: React.FC = () => {
       {/* Daily Target Widget - compact version */}
       <motion.div initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} className="w-44">
         <ProductionTargetsWidget />
+      </motion.div>
+
+      {/* Truck Schedule Widget */}
+      <motion.div initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }} className="w-44">
+        <TruckScheduleWidget />
       </motion.div>
 
       {/* Legend Panel */}
@@ -1737,6 +1772,9 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
               {/* Graphics Options Panel */}
               <GraphicsOptionsPanel />
+
+              {/* Predictive Maintenance Panel - collapsible */}
+              <PredictiveMaintenanceCollapsible />
 
               {/* Safety Configuration Panel */}
               <SafetyConfigPanel />

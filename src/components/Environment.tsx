@@ -26,223 +26,54 @@ import { audioManager } from '../utils/audioManager';
 import { shouldRunThisFrame, incrementGlobalFrame } from '../utils/frameThrottle';
 import { useShallow } from 'zustand/react/shallow';
 
+// Animation registries extracted to separate file for Fast Refresh compatibility
+import {
+  lensFlareRegistry,
+  gameTimeRegistry,
+  powerFlickerRegistry,
+  lightingRegistry,
+  rippleRegistry,
+  puddleSpawnRegistry,
+  wetFloorSignRegistry,
+  trackFadeRegistry,
+  tireTrackSpawnRegistry,
+  dripPhysicsRegistry,
+  splashPhysicsRegistry,
+  dripSpawnRegistry,
+  weatherParticlesRegistry,
+  registerLensFlare,
+  unregisterLensFlare,
+  registerGameTime,
+  unregisterGameTime,
+  registerPowerFlicker,
+  unregisterPowerFlicker,
+  registerLighting,
+  unregisterLighting,
+  registerRipple,
+  unregisterRipple,
+  registerPuddleSpawn,
+  unregisterPuddleSpawn,
+  registerWetFloorSign,
+  unregisterWetFloorSign,
+  registerTrackFade,
+  unregisterTrackFade,
+  registerTireTrackSpawn,
+  unregisterTireTrackSpawn,
+  registerDripPhysics,
+  unregisterDripPhysics,
+  registerSplashPhysics,
+  unregisterSplashPhysics,
+  registerDripSpawn,
+  unregisterDripSpawn,
+  registerWeatherParticles,
+  unregisterWeatherParticles,
+  type LensFlareData,
+  type PowerFlickerStateType,
+} from '../utils/environmentRegistry';
+
 // =============================================================================
 // CENTRALIZED ENVIRONMENT ANIMATION MANAGER
 // =============================================================================
-
-// Registries to track animated objects without React re-renders
-interface LensFlareAnimationState {
-  flares: LensFlareData[];
-  isDaytime: boolean;
-}
-const lensFlareRegistry = new Map<string, LensFlareAnimationState>();
-
-interface GameTimeAnimationState {
-  tickGameTime: (delta: number) => void;
-  lastTickTime: number;
-}
-const gameTimeRegistry = new Map<string, GameTimeAnimationState>();
-
-interface PowerFlickerAnimationState {
-  weather: string;
-  powerFlickerState: typeof powerFlickerState;
-}
-const powerFlickerRegistry = new Map<string, PowerFlickerAnimationState>();
-
-interface LightingAnimationState {
-  overheadLightRefs: THREE.PointLight[];
-  overheadEmissiveRefs: THREE.MeshStandardMaterial[];
-  emergencyLightRefs: THREE.PointLight[];
-  emergencyEmissiveRefs: THREE.MeshStandardMaterial[];
-  baseIntensity: number;
-  weather: string;
-  powerFlickerState: typeof powerFlickerState;
-}
-const lightingRegistry = new Map<string, LightingAnimationState>();
-
-interface RippleAnimationState {
-  meshRef: THREE.Mesh;
-  materialRef: THREE.MeshBasicMaterial;
-  scaleRef: { current: number };
-  opacityRef: { current: number };
-}
-const rippleRegistry = new Map<string, RippleAnimationState>();
-
-interface PuddleSpawnAnimationState {
-  weather: string;
-  quality: string;
-  enableFloorPuddles: boolean;
-  puddlePositions: { x: number; z: number; size: number; irregular: number }[];
-  rippleDataRef: React.MutableRefObject<
-    Map<number, { x: number; z: number; scale: number; opacity: number }>
-  >;
-  nextRippleIdRef: React.MutableRefObject<number>;
-  setRippleKeys: React.Dispatch<React.SetStateAction<number[]>>;
-}
-const puddleSpawnRegistry = new Map<string, PuddleSpawnAnimationState>();
-
-interface WetFloorSignAnimationState {
-  signRef: THREE.Group;
-}
-const wetFloorSignRegistry = new Map<string, WetFloorSignAnimationState>();
-
-interface TrackFadeAnimationState {
-  materialRef: THREE.MeshBasicMaterial;
-  opacityRef: { current: number };
-  fadeRate: number;
-}
-const trackFadeRegistry = new Map<string, TrackFadeAnimationState>();
-
-interface TireTrackSpawnAnimationState {
-  isRainingRef: React.MutableRefObject<boolean>;
-  puddlePositions: { x: number; z: number; size: number }[];
-  trackDataRef: React.MutableRefObject<Map<number, any>>;
-  trackIdRef: React.MutableRefObject<number>;
-  lastTrackTimeRef: React.MutableRefObject<Map<string, number>>;
-  setTrackKeys: React.Dispatch<React.SetStateAction<number[]>>;
-}
-const tireTrackSpawnRegistry = new Map<string, TireTrackSpawnAnimationState>();
-
-interface DripPhysicsAnimationState {
-  groupRef: THREE.Group;
-  materialRef: THREE.MeshStandardMaterial;
-  trailRef: THREE.Mesh;
-  trailMaterialRef: THREE.MeshBasicMaterial;
-  yRef: { current: number };
-  vyRef: { current: number };
-  opacityRef: { current: number };
-  hasImpactedRef: React.MutableRefObject<boolean>;
-  data: { x: number; z: number };
-  onImpact: (x: number, z: number) => void;
-}
-const dripPhysicsRegistry = new Map<string, DripPhysicsAnimationState>();
-
-interface SplashPhysicsAnimationState {
-  meshRef: THREE.Mesh;
-  ringRef: THREE.Mesh;
-  materialRef: THREE.MeshBasicMaterial;
-  ringMaterialRef: THREE.MeshBasicMaterial;
-  posRef: { current: { x: number; y: number; z: number } };
-  velRef: { current: { vx: number; vy: number; vz: number } };
-  lifeRef: { current: number };
-}
-const splashPhysicsRegistry = new Map<string, SplashPhysicsAnimationState>();
-
-interface DripSpawnAnimationState {
-  weather: string;
-  quality: string;
-  dripSources: { x: number; z: number }[];
-  dripDataRef: React.MutableRefObject<Map<number, { x: number; z: number }>>;
-  dripIdRef: React.MutableRefObject<number>;
-  lastDripTimeRef: React.MutableRefObject<number>;
-  setDripKeys: React.Dispatch<React.SetStateAction<number[]>>;
-}
-const dripSpawnRegistry = new Map<string, DripSpawnAnimationState>();
-
-interface WeatherParticlesAnimationState {
-  rainRef: THREE.Points | null;
-  rainStreaksRef: THREE.Points | null;
-  splashRef: THREE.Points | null;
-  rainCount: number;
-  streakCount: number;
-  splashCount: number;
-  weather: string;
-  quality: string;
-  splashVelocities: React.MutableRefObject<Float32Array>;
-  splashLife: React.MutableRefObject<Float32Array>;
-}
-const weatherParticlesRegistry = new Map<string, WeatherParticlesAnimationState>();
-
-export const registerLensFlare = (id: string, state: LensFlareAnimationState) => {
-  lensFlareRegistry.set(id, state);
-};
-export const unregisterLensFlare = (id: string) => {
-  lensFlareRegistry.delete(id);
-};
-
-export const registerGameTime = (id: string, state: GameTimeAnimationState) => {
-  gameTimeRegistry.set(id, state);
-};
-export const unregisterGameTime = (id: string) => {
-  gameTimeRegistry.delete(id);
-};
-
-export const registerPowerFlicker = (id: string, state: PowerFlickerAnimationState) => {
-  powerFlickerRegistry.set(id, state);
-};
-export const unregisterPowerFlicker = (id: string) => {
-  powerFlickerRegistry.delete(id);
-};
-
-export const registerLighting = (id: string, state: LightingAnimationState) => {
-  lightingRegistry.set(id, state);
-};
-export const unregisterLighting = (id: string) => {
-  lightingRegistry.delete(id);
-};
-
-export const registerRipple = (id: string, state: RippleAnimationState) => {
-  rippleRegistry.set(id, state);
-};
-export const unregisterRipple = (id: string) => {
-  rippleRegistry.delete(id);
-};
-
-export const registerPuddleSpawn = (id: string, state: PuddleSpawnAnimationState) => {
-  puddleSpawnRegistry.set(id, state);
-};
-export const unregisterPuddleSpawn = (id: string) => {
-  puddleSpawnRegistry.delete(id);
-};
-
-export const registerWetFloorSign = (id: string, state: WetFloorSignAnimationState) => {
-  wetFloorSignRegistry.set(id, state);
-};
-export const unregisterWetFloorSign = (id: string) => {
-  wetFloorSignRegistry.delete(id);
-};
-
-export const registerTrackFade = (id: string, state: TrackFadeAnimationState) => {
-  trackFadeRegistry.set(id, state);
-};
-export const unregisterTrackFade = (id: string) => {
-  trackFadeRegistry.delete(id);
-};
-
-export const registerTireTrackSpawn = (id: string, state: TireTrackSpawnAnimationState) => {
-  tireTrackSpawnRegistry.set(id, state);
-};
-export const unregisterTireTrackSpawn = (id: string) => {
-  tireTrackSpawnRegistry.delete(id);
-};
-
-export const registerDripPhysics = (id: string, state: DripPhysicsAnimationState) => {
-  dripPhysicsRegistry.set(id, state);
-};
-export const unregisterDripPhysics = (id: string) => {
-  dripPhysicsRegistry.delete(id);
-};
-
-export const registerSplashPhysics = (id: string, state: SplashPhysicsAnimationState) => {
-  splashPhysicsRegistry.set(id, state);
-};
-export const unregisterSplashPhysics = (id: string) => {
-  splashPhysicsRegistry.delete(id);
-};
-
-export const registerDripSpawn = (id: string, state: DripSpawnAnimationState) => {
-  dripSpawnRegistry.set(id, state);
-};
-export const unregisterDripSpawn = (id: string) => {
-  dripSpawnRegistry.delete(id);
-};
-
-export const registerWeatherParticles = (id: string, state: WeatherParticlesAnimationState) => {
-  weatherParticlesRegistry.set(id, state);
-};
-export const unregisterWeatherParticles = (id: string) => {
-  weatherParticlesRegistry.delete(id);
-};
 
 // Manager component to handle all environment animations in a single consolidated loop
 const EnvironmentAnimationManager: React.FC = () => {
@@ -922,7 +753,7 @@ const GameTimeTicker: React.FC = () => {
 };
 
 // Global power flicker state for storm effects
-const powerFlickerState = {
+const powerFlickerState: PowerFlickerStateType = {
   intensity: 1,
   isFlickering: false,
   nextFlickerTime: 0,

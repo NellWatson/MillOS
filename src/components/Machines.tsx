@@ -12,6 +12,12 @@ import { useModelAvailable, MODEL_PATHS } from '../utils/modelLoader';
 import { getThrottleLevel, shouldRunThisFrame } from '../utils/frameThrottle';
 import { MACHINE_MATERIALS, METAL_MATERIALS } from '../utils/sharedMaterials';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
+import { useBreakdownStore } from '../stores/breakdownStore';
+import { BreakdownEffects } from './breakdown/BreakdownEffects';
+import { InstancedSilos } from './machines/InstancedSilos';
+import { InstancedRollerMills } from './machines/InstancedRollerMills';
+import { InstancedPlansifters } from './machines/InstancedPlansifters';
+import { InstancedPackers } from './machines/InstancedPackers';
 
 // =============================================================================
 // CENTRALIZED ANIMATION MANAGER
@@ -1347,6 +1353,28 @@ interface MachineAnimationState {
 }
 
 export const Machines: React.FC<MachinesProps> = ({ machines, onSelect }) => {
+  // Filter machines for optimization
+  const silos = useMemo(() => machines.filter((m) => m.type === MachineType.SILO), [machines]);
+  const rollerMills = useMemo(
+    () => machines.filter((m) => m.type === MachineType.ROLLER_MILL),
+    [machines]
+  );
+  const plansifters = useMemo(
+    () => machines.filter((m) => m.type === MachineType.PLANSIFTER),
+    [machines]
+  );
+  const packers = useMemo(() => machines.filter((m) => m.type === MachineType.PACKER), [machines]);
+  const otherMachines = useMemo(
+    () =>
+      machines.filter(
+        (m) =>
+          m.type !== MachineType.SILO &&
+          m.type !== MachineType.ROLLER_MILL &&
+          m.type !== MachineType.PLANSIFTER &&
+          m.type !== MachineType.PACKER
+      ),
+    [machines]
+  );
   // PERFORMANCE: Centralized animation state for all machines
   // This eliminates 17 separate useFrame hooks, reducing per-frame overhead
   const machineStatesRef = useRef<Map<string, MachineAnimationState>>(new Map());
@@ -1425,8 +1453,6 @@ export const Machines: React.FC<MachinesProps> = ({ machines, onSelect }) => {
         status,
         scadaRpmMultiplier,
         scadaVibrationIntensity,
-        scadaFillLevel,
-        metricsLoad,
         enableVibration,
       } = machineState;
 
@@ -1463,16 +1489,7 @@ export const Machines: React.FC<MachinesProps> = ({ machines, onSelect }) => {
             groupRef.position.x = position[0] + Math.sin(time * 15) * 0.003 * vibIntensity;
             break;
           }
-          case MachineType.SILO: {
-            // Silos have subtle low-frequency rumble when filling
-            const load = scadaFillLevel ?? metricsLoad ?? 0;
-            if (load > 50) {
-              const intensity = 0.002 * (load / 100) * vibIntensity;
-              groupRef.position.x = position[0] + Math.sin(time * 5) * intensity;
-              groupRef.position.z = position[2] + Math.cos(time * 4) * intensity;
-            }
-            break;
-          }
+          // Silo case removed as it's handled in InstancedSilos
         }
       } else if (!enableVibration) {
         // Reset position when vibration is disabled
@@ -1488,10 +1505,28 @@ export const Machines: React.FC<MachinesProps> = ({ machines, onSelect }) => {
     });
   });
 
+  // Get active breakdowns for rendering effects
+  const activeBreakdowns = useBreakdownStore((state) => state.activeBreakdowns);
+
+  // Create a map of machine id to position for breakdown effects
+  const machinePositionMap = useMemo(() => {
+    const map = new Map<string, [number, number, number]>();
+    machines.forEach((m) => {
+      map.set(m.id, m.position);
+    });
+    return map;
+  }, [machines]);
+
   return (
     <group>
       <MachineAnimationManager />
-      {machines.map((m: MachineData) => (
+
+      <InstancedSilos machines={silos} onSelect={onSelect} />
+      <InstancedRollerMills machines={rollerMills} onSelect={onSelect} />
+      <InstancedPlansifters machines={plansifters} onSelect={onSelect} />
+      <InstancedPackers machines={packers} onSelect={onSelect} />
+
+      {otherMachines.map((m: MachineData) => (
         <MachineMesh
           key={m.id}
           data={m}
@@ -1499,6 +1534,19 @@ export const Machines: React.FC<MachinesProps> = ({ machines, onSelect }) => {
           onStateUpdate={updateMachineState}
         />
       ))}
+
+      {/* Breakdown Effects - sparks, smoke, warning beacons for broken machines */}
+      {activeBreakdowns.map((breakdown) => {
+        const position = machinePositionMap.get(breakdown.machineId);
+        if (!position) return null;
+        return (
+          <BreakdownEffects
+            key={breakdown.id}
+            machineId={breakdown.machineId}
+            position={position}
+          />
+        );
+      })}
     </group>
   );
 };

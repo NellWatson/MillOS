@@ -3,6 +3,8 @@ import { Home, Brain, Activity, Users, Shield, Settings, Eye, Radio } from 'luci
 import { motion } from 'framer-motion';
 import { useUIStore } from '../../../stores/uiStore';
 import { useIsMultiplayerActive } from '../../../stores/multiplayerStore';
+import { useMobileDetection } from '../../../hooks/useMobileDetection';
+import { useMobileControlStore } from '../../../stores/mobileControlStore';
 
 export type DockMode =
   | 'overview'
@@ -22,61 +24,90 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange }) => {
   const fpsMode = useUIStore((state) => state.fpsMode);
   const toggleFpsMode = useUIStore((state) => state.toggleFpsMode);
   const isMultiplayerActive = useIsMultiplayerActive();
+  const { isMobile } = useMobileDetection();
+  const openMobilePanel = useMobileControlStore((state) => state.openMobilePanel);
+
+  // On mobile, clicking a dock item opens the mobile panel instead of sidebar
+  const handleModeChange = (mode: DockMode) => {
+    if (isMobile) {
+      openMobilePanel(mode);
+    } else {
+      onModeChange(mode);
+    }
+  };
 
   return (
     <nav
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-3 bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-2xl flex items-center gap-4 shadow-2xl z-50 pointer-events-auto"
+      className={`fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-2xl flex items-center shadow-2xl z-50 pointer-events-auto ${
+        isMobile ? 'px-2 py-2 gap-1' : 'px-4 py-3 gap-4'
+      }`}
       aria-label="Main Navigation"
+      style={
+        isMobile
+          ? {
+              paddingBottom: 'max(8px, env(safe-area-inset-bottom))',
+              marginLeft: 'env(safe-area-inset-left)',
+              marginRight: 'env(safe-area-inset-right)',
+            }
+          : undefined
+      }
     >
       <DockItem
         mode="overview"
         icon={<Home />}
         label="Overview"
         isActive={activeMode === 'overview'}
-        onClick={() => onModeChange('overview')}
+        onClick={() => handleModeChange('overview')}
+        isMobile={isMobile}
       />
       <DockItem
         mode="ai"
         icon={<Brain />}
         label="AI Command"
         isActive={activeMode === 'ai'}
-        onClick={() => onModeChange('ai')}
+        onClick={() => handleModeChange('ai')}
+        isMobile={isMobile}
       />
       <DockItem
         mode="scada"
         icon={<Activity />}
         label="SCADA System"
         isActive={activeMode === 'scada'}
-        onClick={() => onModeChange('scada')}
+        onClick={() => handleModeChange('scada')}
+        isMobile={isMobile}
       />
       <DockItem
         mode="workforce"
         icon={<Users />}
         label="Workforce"
         isActive={activeMode === 'workforce'}
-        onClick={() => onModeChange('workforce')}
+        onClick={() => handleModeChange('workforce')}
+        isMobile={isMobile}
       />
       <DockItem
         mode="multiplayer"
         icon={<Radio />}
         label="Multiplayer"
         isActive={activeMode === 'multiplayer'}
-        onClick={() => onModeChange('multiplayer')}
+        onClick={() => handleModeChange('multiplayer')}
         badge={isMultiplayerActive}
+        isMobile={isMobile}
       />
       <DockItem
         mode="safety"
         icon={<Shield />}
         label="Safety & Emergency"
         isActive={activeMode === 'safety'}
-        onClick={() => onModeChange('safety')}
+        onClick={() => handleModeChange('safety')}
+        isMobile={isMobile}
       />
       <DockItem
         mode="settings"
         icon={<Settings />}
         label="Settings"
         isActive={activeMode === 'settings'}
-        onClick={() => onModeChange('settings')}
+        onClick={() => handleModeChange('settings')}
+        isMobile={isMobile}
       />
 
       {/* Divider */}
@@ -88,7 +119,9 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange }) => {
         aria-label="First Person Mode (V)"
         aria-pressed={fpsMode}
         title="First Person Mode (V)"
-        className={`relative p-3 rounded-xl transition-all ${
+        className={`relative rounded-xl transition-all ${
+          isMobile ? 'p-2 min-w-[44px] min-h-[44px]' : 'p-3'
+        } ${
           fpsMode
             ? 'bg-violet-500/20 text-violet-400'
             : 'text-slate-400 hover:text-white hover:bg-white/5'
@@ -113,15 +146,16 @@ const DockItem: React.FC<{
   isActive: boolean;
   onClick: () => void;
   badge?: boolean;
-}> = ({ icon, label, isActive, onClick, badge }) => {
+  isMobile?: boolean;
+}> = ({ icon, label, isActive, onClick, badge, isMobile }) => {
   return (
     <button
       onClick={onClick}
       aria-label={label}
       aria-pressed={isActive}
-      className={`relative p-3 rounded-xl transition-all ${
-        isActive ? 'bg-white/10 text-cyan-400' : 'text-slate-400 hover:text-white hover:bg-white/5'
-      }`}
+      className={`relative rounded-xl transition-all ${
+        isMobile ? 'p-2 min-w-[44px] min-h-[44px]' : 'p-3'
+      } ${isActive ? 'bg-white/10 text-cyan-400' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
     >
       {icon}
       {badge && (

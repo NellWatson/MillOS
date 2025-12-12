@@ -6,6 +6,7 @@ import { EmergencyOverlay } from '../EmergencyOverlay';
 import { AlertSystem } from '../AlertSystem';
 import { MachineData, WorkerData } from '../../types';
 import { PAAnnouncementSystem, GamificationBar, MiniMap } from '../GameFeatures';
+import { useMobileDetection } from '../../hooks/useMobileDetection';
 
 interface GameInterfaceProps {
   productionSpeed: number;
@@ -35,6 +36,9 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   onAIPanelChange,
   onSCADAPanelChange,
 }) => {
+  // Mobile detection - hide complex desktop UI on mobile
+  const { isMobile } = useMobileDetection();
+
   // Local state for the Dock
   const [activeMode, setActiveMode] = React.useState<DockMode>('overview');
   const [sidebarVisible, setSidebarVisible] = React.useState(true);
@@ -124,37 +128,39 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none">
-      {/* 1. Top HUD Layer */}
-      <StatusHUD />
+      {/* 1. Top HUD Layer - Desktop only (draggable, complex interactions) */}
+      {!isMobile && <StatusHUD />}
 
-      {/* 2. Emergency Flasher */}
+      {/* 2. Emergency Flasher - Always visible */}
       <EmergencyOverlay />
 
-      {/* 3. Toast Notifications */}
+      {/* 3. Toast Notifications - Always visible */}
       <AlertSystem />
 
-      {/* 4. Immersion Overlays */}
+      {/* 4. Immersion Overlays - PA announcements work on mobile, others are desktop only */}
       <PAAnnouncementSystem />
-      <GamificationBar />
-      <MiniMap />
+      {!isMobile && <GamificationBar />}
+      {!isMobile && <MiniMap />}
 
       {/* 5. Left Sidebar: Mission Control - Removed, info consolidated to right sidebar */}
 
-      {/* 6. Bottom Dock */}
+      {/* 6. Bottom Dock - Always visible (adapts to mobile) */}
       <Dock activeMode={activeMode} onModeChange={handleModeChange} />
 
-      {/* 7. Right Context Sidebar */}
-      <ContextSidebar
-        mode={activeMode}
-        isVisible={isSidebarVisible}
-        onClose={handleSidebarClose}
-        selectedMachine={selectedMachine}
-        selectedWorker={selectedWorker}
-        productionSpeed={productionSpeed}
-        setProductionSpeed={setProductionSpeed}
-        showZones={showZones}
-        setShowZones={setShowZones}
-      />
+      {/* 7. Right Context Sidebar - Desktop only (MobilePanel handles this on mobile) */}
+      {!isMobile && (
+        <ContextSidebar
+          mode={activeMode}
+          isVisible={isSidebarVisible}
+          onClose={handleSidebarClose}
+          selectedMachine={selectedMachine}
+          selectedWorker={selectedWorker}
+          productionSpeed={productionSpeed}
+          setProductionSpeed={setProductionSpeed}
+          showZones={showZones}
+          setShowZones={setShowZones}
+        />
+      )}
     </div>
   );
 };

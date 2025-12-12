@@ -3,7 +3,12 @@ import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { create } from 'zustand';
 import { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { useCameraPositionStore, isPositionInsideFactory } from '../stores/useCameraPositionStore';
+import {
+  useCameraPositionStore,
+  isPositionInsideFactory,
+  isPositionInDockZone,
+} from '../stores/useCameraPositionStore';
+import { useMobileControlStore } from '../stores/mobileControlStore';
 
 // Movement key tracking
 const pressedKeys = new Set<string>();
@@ -170,8 +175,42 @@ export const CameraController: React.FC<CameraControllerProps> = ({
   }, []);
 
   useFrame((_, delta) => {
-    // Handle WASD/Arrow key movement
-    if (pressedKeys.size > 0 && orbitControlsRef?.current) {
+    // Get D-pad state from mobile control store
+    const { dpadDirection, dpadMode } = useMobileControlStore.getState();
+
+    // Handle D-pad look mode (rotate camera around target)
+    if (dpadDirection && dpadMode === 'look' && orbitControlsRef?.current) {
+      const LOOK_SPEED = 1.5; // radians per second
+      const target = orbitControlsRef.current.target;
+      const offset = camera.position.clone().sub(target);
+
+      // Convert to spherical coordinates
+      const radius = offset.length();
+      let theta = Math.atan2(offset.x, offset.z); // azimuthal angle
+      let phi = Math.acos(Math.max(-1, Math.min(1, offset.y / radius))); // polar angle
+
+      // Apply rotation
+      theta -= dpadDirection.x * LOOK_SPEED * delta;
+      phi += dpadDirection.y * LOOK_SPEED * delta;
+
+      // Clamp polar angle
+      phi = Math.max(0.2, Math.min(Math.PI / 2 - 0.05, phi));
+
+      // Convert back to cartesian
+      offset.x = radius * Math.sin(phi) * Math.sin(theta);
+      offset.y = radius * Math.cos(phi);
+      offset.z = radius * Math.sin(phi) * Math.cos(theta);
+
+      camera.position.copy(target).add(offset);
+      camera.lookAt(target);
+    }
+
+    // Combine keyboard and D-pad move input
+    const hasDpadMoveInput = dpadDirection && dpadMode === 'move';
+    const hasKeyboardInput = pressedKeys.size > 0;
+
+    // Handle WASD/Arrow key movement OR D-pad move mode
+    if ((hasKeyboardInput || hasDpadMoveInput) && orbitControlsRef?.current) {
       // Get forward direction (from camera to target, but flattened on XZ plane)
       forward.current.subVectors(orbitControlsRef.current.target, camera.position);
       forward.current.y = 0;
@@ -183,7 +222,7 @@ export const CameraController: React.FC<CameraControllerProps> = ({
       // Calculate movement vector
       moveDirection.current.set(0, 0, 0);
 
-      // Forward/Backward (W/S or Up/Down arrows)
+      // Forward/Backward (W/S or Up/Down arrows or D-pad Y)
       if (pressedKeys.has('w') || pressedKeys.has('arrowup')) {
         moveDirection.current.add(forward.current);
       }
@@ -191,12 +230,26 @@ export const CameraController: React.FC<CameraControllerProps> = ({
         moveDirection.current.sub(forward.current);
       }
 
-      // Left/Right strafe (A/D or Left/Right arrows)
+      // Left/Right strafe (A/D or Left/Right arrows or D-pad X)
       if (pressedKeys.has('a') || pressedKeys.has('arrowleft')) {
         moveDirection.current.sub(right.current);
       }
       if (pressedKeys.has('d') || pressedKeys.has('arrowright')) {
         moveDirection.current.add(right.current);
+      }
+
+      // D-pad move input (when in move mode)
+      if (hasDpadMoveInput && dpadDirection) {
+        // D-pad Y: negative = up/forward, positive = down/backward
+        if (dpadDirection.y < 0) {
+          moveDirection.current.addScaledVector(forward.current, -dpadDirection.y);
+        } else if (dpadDirection.y > 0) {
+          moveDirection.current.addScaledVector(forward.current, -dpadDirection.y);
+        }
+        // D-pad X: negative = left, positive = right
+        if (dpadDirection.x !== 0) {
+          moveDirection.current.addScaledVector(right.current, dpadDirection.x);
+        }
       }
 
       // Up/Down (Q/E for vertical movement)
@@ -305,14 +358,17 @@ export const CameraController: React.FC<CameraControllerProps> = ({
  * Camera Bounds Tracker
  *
  * Tracks whether the camera is inside or outside the factory bounds.
+ * Also tracks if camera is in a dock transition zone (near open dock openings).
  * Used to conditionally render interior vs exterior components for performance.
  * Throttled to every 10 frames (~6 checks/second at 60fps) to minimize overhead.
  */
 export const CameraBoundsTracker: React.FC = () => {
   const { camera } = useThree();
   const setIsCameraInside = useCameraPositionStore((state) => state.setIsCameraInside);
+  const setIsCameraInDockZone = useCameraPositionStore((state) => state.setIsCameraInDockZone);
   const frameCountRef = useRef(0);
   const lastInsideRef = useRef(true);
+  const lastInDockZoneRef = useRef(false);
 
   useFrame(() => {
     // Throttle to every 10 frames for performance
@@ -325,10 +381,17 @@ export const CameraBoundsTracker: React.FC = () => {
       camera.position.z
     );
 
+    const isInDockZone = isPositionInDockZone(camera.position.x, camera.position.z);
+
     // Only update store if state changed (prevents unnecessary re-renders)
     if (isInside !== lastInsideRef.current) {
       lastInsideRef.current = isInside;
       setIsCameraInside(isInside);
+    }
+
+    if (isInDockZone !== lastInDockZoneRef.current) {
+      lastInDockZoneRef.current = isInDockZone;
+      setIsCameraInDockZone(isInDockZone);
     }
   });
 

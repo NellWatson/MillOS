@@ -756,6 +756,47 @@ class AudioManager {
     }
   }
 
+  // === QC LAB SOUNDS ===
+
+  private lastLabBeepTime = 0;
+
+  // Play lab equipment beep (soft, subtle)
+  playLabEquipmentBeep() {
+    if (this.getEffectiveVolume() === 0) return;
+
+    const now = Date.now();
+    if (now - this.lastLabBeepTime < 5000) return; // 5 second cooldown
+    this.lastLabBeepTime = now;
+
+    try {
+      const ctx = this.getContext();
+      const masterGain = this.getMasterGain();
+      if (!ctx || !masterGain) return;
+      const currentTime = ctx.currentTime;
+
+      // Short, high-pitched beep
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1200, currentTime);
+
+      // Very short, subtle beep
+      gain.gain.setValueAtTime(0, currentTime);
+      gain.gain.linearRampToValueAtTime(0.05, currentTime + 0.01);
+      gain.gain.setValueAtTime(0.05, currentTime + 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + 0.15);
+
+      osc.connect(gain);
+      gain.connect(masterGain);
+
+      osc.start(currentTime);
+      osc.stop(currentTime + 0.2);
+    } catch (e) {
+      audioLog.warn('Lab beep sound failed', e);
+    }
+  }
+
   // === AMBIENT FACTORY SOUNDS ===
 
   // Start ambient factory soundscape

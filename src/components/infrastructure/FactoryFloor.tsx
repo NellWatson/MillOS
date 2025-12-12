@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { useGraphicsStore } from '../../stores/graphicsStore';
 import { ReflectiveFloor } from './ReflectiveFloor';
+import { useModelTextures } from '../../utils/machineTextures';
 
 interface FactoryFloorProps {
   floorSize: number; // Legacy: used as fallback
@@ -10,60 +11,50 @@ interface FactoryFloorProps {
   showZones: boolean;
 }
 
-// Generate procedural concrete texture for floor
-const useConcreteTexture = () => {
-  return useMemo(() => {
-    const size = 512;
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+// Shared overlay heights to keep all floor decals separated and avoid z-fighting
+const FLOOR_LAYER_HEIGHTS = {
+  puddle: 0.01,
+  wornPrimary: 0.03,
+  wornSecondary: 0.032,
+  safetyMain: 0.034,
+  safetyCross: 0.036,
+  safetyDanger: 0.038,
+  grid: 0.045,
+};
 
-    // Base concrete color
-    ctx.fillStyle = '#1e293b';
-    ctx.fillRect(0, 0, size, size);
+const FLOOR_POLYGON_OFFSET = {
+  factor: -1,
+  units: -1,
+};
 
-    // Add noise for concrete texture
-    const imageData = ctx.getImageData(0, 0, size, size);
-    for (let i = 0; i < imageData.data.length; i += 4) {
-      const noise = (Math.random() - 0.5) * 20;
-      imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
-      imageData.data[i + 1] = Math.max(0, Math.min(255, imageData.data[i + 1] + noise));
-      imageData.data[i + 2] = Math.max(0, Math.min(255, imageData.data[i + 2] + noise));
+// Hook to configure concrete textures for floor tiling
+const useConcreteFloorTextures = (width: number, depth: number) => {
+  const concreteTextures = useModelTextures('concrete');
+
+  // Configure tiling for floor dimensions
+  useMemo(() => {
+    const repeatX = Math.max(1, width / 10);
+    const repeatY = Math.max(1, depth / 10);
+
+    if (concreteTextures.color) {
+      concreteTextures.color.wrapS = concreteTextures.color.wrapT = THREE.RepeatWrapping;
+      concreteTextures.color.repeat.set(repeatX, repeatY);
     }
-    ctx.putImageData(imageData, 0, 0);
-
-    // Add subtle cracks
-    ctx.strokeStyle = 'rgba(20, 30, 40, 0.3)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 8; i++) {
-      ctx.beginPath();
-      ctx.moveTo(Math.random() * size, Math.random() * size);
-      for (let j = 0; j < 5; j++) {
-        ctx.lineTo(ctx.canvas.width * Math.random(), ctx.canvas.height * Math.random());
-      }
-      ctx.stroke();
+    if (concreteTextures.normal) {
+      concreteTextures.normal.wrapS = concreteTextures.normal.wrapT = THREE.RepeatWrapping;
+      concreteTextures.normal.repeat.set(repeatX, repeatY);
     }
-
-    // Add oil stains
-    for (let i = 0; i < 12; i++) {
-      const x = Math.random() * size;
-      const y = Math.random() * size;
-      const radius = 10 + Math.random() * 30;
-      const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
-      gradient.addColorStop(0, 'rgba(40, 50, 60, 0.15)');
-      gradient.addColorStop(1, 'rgba(40, 50, 60, 0)');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+    if (concreteTextures.roughness) {
+      concreteTextures.roughness.wrapS = concreteTextures.roughness.wrapT = THREE.RepeatWrapping;
+      concreteTextures.roughness.repeat.set(repeatX, repeatY);
     }
+    if (concreteTextures.ao) {
+      concreteTextures.ao.wrapS = concreteTextures.ao.wrapT = THREE.RepeatWrapping;
+      concreteTextures.ao.repeat.set(repeatX, repeatY);
+    }
+  }, [concreteTextures, width, depth]);
 
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(8, 8);
-
-    return texture;
-  }, []);
+  return concreteTextures;
 };
 
 // Generate hazard stripe texture for safety walkways
@@ -184,7 +175,15 @@ const SafetyZone: React.FC<{
       {/* Hazard stripe border */}
       <mesh position={[0, 0, 0.01]}>
         <planeGeometry args={[safeWidth, safeHeight]} />
-        <meshBasicMaterial map={clonedTexture} transparent opacity={0.85} depthWrite={false} />
+        <meshBasicMaterial
+          map={clonedTexture}
+          transparent
+          opacity={0.85}
+          depthWrite={false}
+          polygonOffset
+          polygonOffsetFactor={FLOOR_POLYGON_OFFSET.factor}
+          polygonOffsetUnits={FLOOR_POLYGON_OFFSET.units}
+        />
       </mesh>
 
       {/* Subtle inner fill */}
@@ -195,6 +194,9 @@ const SafetyZone: React.FC<{
           transparent
           opacity={0.15}
           depthWrite={false}
+          polygonOffset
+          polygonOffsetFactor={FLOOR_POLYGON_OFFSET.factor}
+          polygonOffsetUnits={FLOOR_POLYGON_OFFSET.units}
         />
       </mesh>
     </group>
@@ -208,6 +210,9 @@ const FloorPuddle: React.FC<{
   seed: number;
 }> = ({ position, size, seed }) => {
   const random = (s: number) => Math.abs(Math.sin(s * 12.9898 + 78.233) * 43758.5453) % 1;
+
+  // Load water textures (high/ultra only)
+  const waterTextures = useModelTextures('water');
 
   // Generate irregular puddle shape points
   const shape = useMemo(() => {
@@ -247,6 +252,10 @@ const FloorPuddle: React.FC<{
       <mesh position={[0, 0, 0.001]} geometry={shapeGeometry}>
         <meshStandardMaterial
           color="#1e3a5f"
+          map={waterTextures.color}
+          normalMap={waterTextures.normal}
+          normalScale={waterTextures.normal ? new THREE.Vector2(0.3, 0.3) : undefined}
+          roughnessMap={waterTextures.roughness}
           metalness={0.9}
           roughness={0.1}
           transparent
@@ -267,7 +276,8 @@ const FloorPuddle: React.FC<{
 const WornFootpath: React.FC<{
   path: Array<[number, number, number]>;
   width?: number;
-}> = ({ path, width = 2 }) => {
+  height?: number;
+}> = ({ path, width = 2, height = FLOOR_LAYER_HEIGHTS.wornPrimary }) => {
   const texture = useMemo(() => {
     const size = 128;
     const canvas = document.createElement('canvas');
@@ -362,9 +372,21 @@ const WornFootpath: React.FC<{
         // Double-guard: ensure geometry dimensions are valid
         const safeLength = Number.isFinite(seg.length) && seg.length > 0 ? seg.length : 0.01;
         return (
-          <mesh key={i} position={seg.position} rotation={[-Math.PI / 2, 0, seg.rotation]}>
+          <mesh
+            key={i}
+            position={[seg.position[0], height, seg.position[2]]}
+            rotation={[-Math.PI / 2, 0, seg.rotation]}
+          >
             <planeGeometry args={[safeWidth, safeLength]} />
-            <meshBasicMaterial map={clonedTexture} transparent opacity={0.5} depthWrite={false} />
+            <meshBasicMaterial
+              map={clonedTexture}
+              transparent
+              opacity={0.5}
+              depthWrite={false}
+              polygonOffset
+              polygonOffsetFactor={FLOOR_POLYGON_OFFSET.factor}
+              polygonOffsetUnits={FLOOR_POLYGON_OFFSET.units}
+            />
           </mesh>
         );
       })}
@@ -378,10 +400,7 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
   floorDepth,
   showZones,
 }) => {
-  useConcreteTexture();
   const graphics = useGraphicsStore((state) => state.graphics);
-  const graphicsQuality = graphics.quality;
-  const isLowGraphics = graphicsQuality === 'low';
 
   // Use new dimensions if provided, otherwise fall back to legacy square
   // CRITICAL: Guard against NaN/undefined/zero dimensions which cause
@@ -390,6 +409,11 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
   const rawDepth = floorDepth ?? floorSize;
   const actualWidth = Number.isFinite(rawWidth) && rawWidth > 0 ? rawWidth : 120;
   const actualDepth = Number.isFinite(rawDepth) && rawDepth > 0 ? rawDepth : 160;
+
+  // Load concrete PBR textures (high/ultra only, returns null on low/medium)
+  const concreteTextures = useConcreteFloorTextures(actualWidth, actualDepth);
+  const graphicsQuality = graphics.quality;
+  const isLowGraphics = graphicsQuality === 'low';
 
   // Feature flags from graphics settings
   const showPuddles = graphics.enableFloorPuddles;
@@ -441,17 +465,34 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
       ) : (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow={false}>
           <planeGeometry args={[actualWidth, actualDepth]} />
-          <meshStandardMaterial color="#1e293b" roughness={0.85} metalness={0.15} />
+          <meshStandardMaterial
+            color={concreteTextures.color ? '#ffffff' : '#1e293b'}
+            map={concreteTextures.color}
+            normalMap={concreteTextures.normal}
+            normalScale={concreteTextures.normal ? new THREE.Vector2(0.5, 0.5) : undefined}
+            roughnessMap={concreteTextures.roughness}
+            roughness={0.85}
+            metalness={0.15}
+            aoMap={concreteTextures.ao}
+            aoMapIntensity={concreteTextures.ao ? 0.5 : 0}
+          />
         </mesh>
       )}
 
       {/* Floor grid lines - OPTIMIZED: Single textured mesh replaces 58 individual meshes */}
       {/* RESTORED: Now shows on MEDIUM+ (!isLowGraphics) instead of HIGH+ only */}
-      {/* Raised to y=0.035 to prevent z-fighting with SafetyZone stripes at y=0.03 */}
+      {/* Raised to y=0.045 to prevent z-fighting with SafetyZone stripes and worn paths */}
       {!isLowGraphics && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, 0]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, FLOOR_LAYER_HEIGHTS.grid, 0]}>
           <planeGeometry args={[actualWidth, actualDepth]} />
-          <meshBasicMaterial map={gridTexture} transparent depthWrite={false} />
+          <meshBasicMaterial
+            map={gridTexture}
+            transparent
+            depthWrite={false}
+            polygonOffset
+            polygonOffsetFactor={FLOOR_POLYGON_OFFSET.factor}
+            polygonOffsetUnits={FLOOR_POLYGON_OFFSET.units}
+          />
         </mesh>
       )}
 
@@ -459,18 +500,26 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
       {showZones && (
         <>
           {/* Main aisles (vertical) */}
-          <SafetyZone position={[-10, 0.02, 0]} size={[3, actualDepth - 10]} type="walkway" />
-          <SafetyZone position={[10, 0.02, 0]} size={[3, actualDepth - 10]} type="walkway" />
+          <SafetyZone
+            position={[-10, FLOOR_LAYER_HEIGHTS.safetyMain, 0]}
+            size={[3, actualDepth - 10]}
+            type="walkway"
+          />
+          <SafetyZone
+            position={[10, FLOOR_LAYER_HEIGHTS.safetyMain, 0]}
+            size={[3, actualDepth - 10]}
+            type="walkway"
+          />
 
           {/* Cross aisles (horizontal) */}
           <SafetyZone
-            position={[0, 0.02, 10]}
+            position={[0, FLOOR_LAYER_HEIGHTS.safetyCross, 10]}
             size={[actualWidth - 20, 2.5]}
             type="walkway"
             rotation={Math.PI / 2}
           />
           <SafetyZone
-            position={[0, 0.02, -10]}
+            position={[0, FLOOR_LAYER_HEIGHTS.safetyCross, -10]}
             size={[actualWidth - 20, 2.5]}
             type="walkway"
             rotation={Math.PI / 2}
@@ -478,7 +527,7 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
 
           {/* Danger zones around machinery */}
           <SafetyZone
-            position={[0, 0.02, -20]}
+            position={[0, FLOOR_LAYER_HEIGHTS.safetyDanger, -20]}
             size={[60, 8]}
             type="danger"
             rotation={Math.PI / 2}
@@ -490,19 +539,27 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
       {showPuddles && (
         <>
           {/* Near machinery areas */}
-          <FloorPuddle position={[-20, 0.01, -15]} size={[2.5, 1.8]} seed={1} />
-          <FloorPuddle position={[22, 0.01, -18]} size={[1.8, 2.2]} seed={2} />
-          <FloorPuddle position={[-10, 0.01, -25]} size={[3, 2]} seed={3} />
+          <FloorPuddle
+            position={[-20, FLOOR_LAYER_HEIGHTS.puddle, -15]}
+            size={[2.5, 1.8]}
+            seed={1}
+          />
+          <FloorPuddle
+            position={[22, FLOOR_LAYER_HEIGHTS.puddle, -18]}
+            size={[1.8, 2.2]}
+            seed={2}
+          />
+          <FloorPuddle position={[-10, FLOOR_LAYER_HEIGHTS.puddle, -25]} size={[3, 2]} seed={3} />
           {/* Central factory */}
-          <FloorPuddle position={[8, 0.01, 10]} size={[2, 1.5]} seed={4} />
-          <FloorPuddle position={[-30, 0.01, 5]} size={[1.5, 1.2]} seed={5} />
-          <FloorPuddle position={[35, 0.01, -5]} size={[2.2, 1.8]} seed={6} />
+          <FloorPuddle position={[8, FLOOR_LAYER_HEIGHTS.puddle, 10]} size={[2, 1.5]} seed={4} />
+          <FloorPuddle position={[-30, FLOOR_LAYER_HEIGHTS.puddle, 5]} size={[1.5, 1.2]} seed={5} />
+          <FloorPuddle position={[35, FLOOR_LAYER_HEIGHTS.puddle, -5]} size={[2.2, 1.8]} seed={6} />
           {/* Near packing zone */}
-          <FloorPuddle position={[-15, 0.01, 28]} size={[2, 1.8]} seed={7} />
-          <FloorPuddle position={[18, 0.01, 32]} size={[1.6, 2]} seed={8} />
+          <FloorPuddle position={[-15, FLOOR_LAYER_HEIGHTS.puddle, 28]} size={[2, 1.8]} seed={7} />
+          <FloorPuddle position={[18, FLOOR_LAYER_HEIGHTS.puddle, 32]} size={[1.6, 2]} seed={8} />
           {/* Near dock staging areas */}
-          <FloorPuddle position={[-38, 0.01, 20]} size={[2.5, 2]} seed={9} />
-          <FloorPuddle position={[40, 0.01, -20]} size={[2, 1.5]} seed={10} />
+          <FloorPuddle position={[-38, FLOOR_LAYER_HEIGHTS.puddle, 20]} size={[2.5, 2]} seed={9} />
+          <FloorPuddle position={[40, FLOOR_LAYER_HEIGHTS.puddle, -20]} size={[2, 1.5]} seed={10} />
         </>
       )}
 
@@ -517,6 +574,7 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
               [-15, 0, 35],
             ]}
             width={2.5}
+            height={FLOOR_LAYER_HEIGHTS.wornPrimary}
           />
           <WornFootpath
             path={[
@@ -525,6 +583,7 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
               [15, 0, 35],
             ]}
             width={2.5}
+            height={FLOOR_LAYER_HEIGHTS.wornPrimary}
           />
           {/* Cross aisle paths */}
           <WornFootpath
@@ -534,6 +593,7 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
               [45, 0, 10],
             ]}
             width={1.8}
+            height={FLOOR_LAYER_HEIGHTS.wornSecondary}
           />
           <WornFootpath
             path={[
@@ -542,6 +602,7 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
               [45, 0, -10],
             ]}
             width={1.8}
+            height={FLOOR_LAYER_HEIGHTS.wornSecondary}
           />
           {/* Path to break rooms (inside factory) */}
           <WornFootpath
@@ -551,6 +612,7 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
               [35, 0, 25],
             ]}
             width={1.5}
+            height={FLOOR_LAYER_HEIGHTS.wornPrimary}
           />
           <WornFootpath
             path={[
@@ -559,6 +621,7 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
               [-35, 0, 25],
             ]}
             width={1.5}
+            height={FLOOR_LAYER_HEIGHTS.wornPrimary}
           />
           {/* Path to locker room (inside factory) */}
           <WornFootpath
@@ -568,6 +631,7 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
               [-35, 0, 35],
             ]}
             width={1.8}
+            height={FLOOR_LAYER_HEIGHTS.wornSecondary}
           />
           {/* Path to toilet block (inside factory) */}
           <WornFootpath
@@ -577,6 +641,7 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
               [35, 0, 35],
             ]}
             width={1.8}
+            height={FLOOR_LAYER_HEIGHTS.wornSecondary}
           />
         </>
       )}

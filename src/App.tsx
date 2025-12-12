@@ -26,6 +26,11 @@ import { MachineData, WorkerData } from './types';
 import { ForkliftData } from './components/ForkliftSystem';
 import { AnimatePresence, motion } from 'framer-motion';
 import { audioManager } from './utils/audioManager';
+import { gpuResourceManager } from './utils/GPUResourceManager';
+import { initKTX2Loader } from './utils/textureCompression';
+import { getGPUSettings } from './utils/resourcePersistence';
+import { initializeGPUTracking, cleanupGPUTracking } from './utils/gpuTrackedResources';
+import { GPUMemoryMonitor } from './components/GPUMemoryMonitor';
 import { initializeAIEngine } from './utils/aiEngine';
 import {
   useGraphicsStore,
@@ -50,10 +55,26 @@ if (import.meta.env.DEV) {
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useMultiplayerSync } from './multiplayer';
 import { MultiplayerChat, AIDecisionVotingPanel } from './components/multiplayer';
+import { useMobileDetection } from './hooks/useMobileDetection';
+import {
+  MobileControlsOverlay,
+  TouchLookHandler,
+  MobileFirstPersonController,
+  MobileFPSInstructions,
+  RotateDeviceOverlay,
+} from './components/mobile/MobileControlsOverlay';
+import { useGeometryNaNDetector } from './components/SafeGeometry';
 
 const App: React.FC = () => {
   // PERF DEBUG: Track App re-renders
   trackRender('App');
+
+  // DEV: Detect PlaneGeometry NaN errors and log them
+  useGeometryNaNDetector();
+
+  // Mobile detection for touch controls
+  const { isMobile, isLandscape } = useMobileDetection();
+  const setFpsMode = useUIStore((state) => state.setFpsMode);
 
   const [productionSpeed, setProductionSpeedLocal] = useState(0.8);
   const [showZones, setShowZones] = useState(true);
@@ -137,6 +158,53 @@ const App: React.FC = () => {
     }
   }, [fpsMode]);
 
+  // Auto-toggle FPS mode on mobile based on orientation
+  // Landscape = FPS mode, Portrait = Orbit mode
+  useEffect(() => {
+    if (isMobile) {
+      setFpsMode(isLandscape);
+    }
+  }, [isMobile, isLandscape, setFpsMode]);
+
+  // Lock mobile devices to landscape orientation
+  useEffect(() => {
+    if (!isMobile) return;
+
+    const lockLandscape = async () => {
+      try {
+        // Screen Orientation API - works on Android and some browsers
+        // TypeScript types may be incomplete, so we cast to any for the lock method
+        const orientation = screen.orientation as ScreenOrientation & {
+          lock?: (orientation: string) => Promise<void>;
+          unlock?: () => void;
+        };
+        if (orientation?.lock) {
+          await orientation.lock('landscape');
+        }
+      } catch {
+        // Orientation lock not supported or not allowed
+        // This is expected on iOS and some desktop browsers
+        console.debug('[Mobile] Orientation lock not available');
+      }
+    };
+
+    lockLandscape();
+
+    // Cleanup: unlock orientation when unmounting or leaving mobile
+    return () => {
+      try {
+        const orientation = screen.orientation as ScreenOrientation & {
+          unlock?: () => void;
+        };
+        if (orientation?.unlock) {
+          orientation.unlock();
+        }
+      } catch {
+        // Ignore unlock errors
+      }
+    };
+  }, [isMobile]);
+
   // Use custom hook for keyboard shortcuts
   useKeyboardShortcuts({
     showAIPanel,
@@ -213,7 +281,7 @@ const App: React.FC = () => {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [setTabVisible]);
 
-  // Cleanup WebGL context listeners on unmount
+  // Cleanup WebGL context listeners and GPU resources on unmount
   useEffect(() => {
     return () => {
       const gl = glRef.current;
@@ -222,6 +290,9 @@ const App: React.FC = () => {
         gl.domElement.removeEventListener('webglcontextlost', handlers.lost);
         gl.domElement.removeEventListener('webglcontextrestored', handlers.restored);
       }
+      // Cleanup GPU resources
+      cleanupGPUTracking();
+      gpuResourceManager.disposeAll();
     };
   }, []);
 
@@ -298,6 +369,9 @@ const App: React.FC = () => {
         onSCADAPanelChange={setShowSCADAPanel}
       />
 
+      {/* Mobile Controls Overlay - D-pad and mobile panel */}
+      {isMobile && <MobileControlsOverlay />}
+
       {/* Forklift Info Panel (Keep as legacy simple overlay for now, or move to sidebar later) */}
       <AnimatePresence>
         {selectedForklift && (
@@ -350,7 +424,12 @@ const App: React.FC = () => {
           <Canvas
             key={`canvas-${canvasQuality}`} // Force remount when quality changes
             shadows={canvasQuality !== 'low' ? { type: THREE.PCFShadowMap } : false}
-            camera={{ position: [70, 40, 70], fov: 65, near: 0.5, far: 600 }}
+            camera={{
+              position: [70, 40, 70],
+              fov: 65,
+              near: 0.5,
+              far: 600,
+            }}
             gl={{
               antialias: canvasQuality !== 'low',
               alpha: false,
@@ -362,13 +441,35 @@ const App: React.FC = () => {
             dpr={canvasQuality === 'low' ? 1 : Math.min(window.devicePixelRatio, 1.5)}
             onCreated={({ gl }) => {
               glRef.current = gl;
+
+              // Initialize GPU management systems
+              try {
+                initKTX2Loader(gl);
+                const settings = getGPUSettings();
+                gpuResourceManager.setBudget({ total: settings.memoryBudget });
+                // Register shared resources (geometries, materials) with tracker
+                initializeGPUTracking();
+                console.log('[GPU] Management initialized');
+              } catch (err) {
+                console.warn('[GPU] Management initialization failed:', err);
+              }
+
               const handleContextLost = (event: Event) => {
                 event.preventDefault();
-                console.error('[WebGL] Context lost - too many GPU resources.');
+                console.error('[WebGL] Context lost - notifying GPUResourceManager');
+                gpuResourceManager.handleContextLost();
+                // Log current resource state for debugging
+                gpuResourceManager.debugLog();
               };
               const handleContextRestored = () => {
-                console.log('[WebGL] Context restored');
-                window.location.reload();
+                console.log('[WebGL] Context restored - attempting resource recreation');
+                gpuResourceManager.handleContextRestored();
+                // Only reload if resource recreation fails
+                const usage = gpuResourceManager.getMemoryUsage();
+                if (usage.total.count === 0) {
+                  console.warn('[WebGL] No resources recovered, reloading page');
+                  window.location.reload();
+                }
               };
               webglHandlersRef.current = {
                 lost: handleContextLost,
@@ -393,7 +494,11 @@ const App: React.FC = () => {
                   <PhysicsDebug />
 
                   {fpsMode ? (
-                    <PhysicsFirstPersonController onLockChange={handleLockChange} />
+                    isMobile ? (
+                      <MobileFirstPersonController />
+                    ) : (
+                      <PhysicsFirstPersonController onLockChange={handleLockChange} />
+                    )
                   ) : (
                     <OrbitControls
                       ref={orbitControlsRef}
@@ -406,6 +511,8 @@ const App: React.FC = () => {
                       target={[0, 5, 0]}
                       enableDamping
                       dampingFactor={0.05}
+                      // On mobile, disable rotate (TouchLookHandler handles single-touch rotation)
+                      enableRotate={!isMobile}
                     />
                   )}
 
@@ -421,7 +528,11 @@ const App: React.FC = () => {
                 /* Legacy non-physics mode */
                 <>
                   {fpsMode ? (
-                    <FirstPersonController onLockChange={handleLockChange} />
+                    isMobile ? (
+                      <MobileFirstPersonController />
+                    ) : (
+                      <FirstPersonController onLockChange={handleLockChange} />
+                    )
                   ) : (
                     <OrbitControls
                       ref={orbitControlsRef}
@@ -434,6 +545,8 @@ const App: React.FC = () => {
                       target={[0, 5, 0]}
                       enableDamping
                       dampingFactor={0.05}
+                      // On mobile, disable rotate (TouchLookHandler handles single-touch rotation)
+                      enableRotate={!isMobile}
                     />
                   )}
 
@@ -457,6 +570,12 @@ const App: React.FC = () => {
                   targetSpeed={0.15}
                 />
               )}
+
+              {/* Mobile touch-to-look handler (inside Canvas for R3F access) */}
+              {isMobile && !fpsMode && (
+                <TouchLookHandler orbitControlsRef={orbitControlsRef} />
+              )}
+
               <Preload all />
             </Suspense>
           </Canvas>
@@ -468,7 +587,14 @@ const App: React.FC = () => {
 
       {/* FPS mode overlays */}
       <FPSCrosshair />
-      <FPSInstructions visible={showFpsInstructions && fpsMode} />
+      {isMobile ? (
+        <MobileFPSInstructions
+          visible={showFpsInstructions && fpsMode}
+          onDismiss={() => setShowFpsInstructions(false)}
+        />
+      ) : (
+        <FPSInstructions visible={showFpsInstructions && fpsMode} />
+      )}
 
       {/* Quality/Status change notification */}
       <AnimatePresence>
@@ -499,6 +625,14 @@ const App: React.FC = () => {
       {/* Multiplayer UI Components */}
       <MultiplayerChat />
       <AIDecisionVotingPanel />
+
+      {/* Mobile portrait rotation prompt - blocks interaction until rotated */}
+      <RotateDeviceOverlay visible={isMobile && !isLandscape} />
+
+      {/* GPU Memory Monitor - dev mode or ?gpudebug query param */}
+      {(import.meta.env.DEV || new URLSearchParams(window.location.search).has('gpudebug')) && (
+        <GPUMemoryMonitor enabled={true} position="bottom-left" />
+      )}
     </div>
   );
 };

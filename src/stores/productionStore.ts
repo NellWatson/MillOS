@@ -10,6 +10,49 @@ import {
   IncidentReplayFrame,
 } from '../types';
 
+// =========================================================================
+// TRUCK SCHEDULING SYSTEM
+// =========================================================================
+
+export interface TruckScheduleState {
+  nextShippingArrival: number; // Seconds until next shipping truck
+  nextReceivingArrival: number; // Seconds until next receiving truck
+  truckDocked: {
+    shipping: boolean;
+    receiving: boolean;
+  };
+  lastShippingDeparture: number; // Timestamp of last departure
+  lastReceivingDeparture: number;
+}
+
+// =========================================================================
+// QUALITY CONTROL LAB SYSTEM
+// =========================================================================
+
+export type QCGrade = 'A' | 'B' | 'C' | 'FAIL';
+
+export interface QualityTestResult {
+  id: string;
+  timestamp: number;
+  sampleSource: string; // Machine ID
+  sampleSourceName: string;
+  grade: QCGrade;
+  moistureLevel: number; // 12-15% normal
+  proteinContent: number; // 10-13% normal
+  contaminationDetected: boolean;
+  testedBy: string; // Worker ID
+  testedByName: string;
+}
+
+export interface QCLabState {
+  currentTest: QualityTestResult | null;
+  testHistory: QualityTestResult[];
+  certificationStatus: 'certified' | 'pending' | 'expired';
+  certificationExpiry: number; // Game time when certification expires
+  contaminationAlerts: number; // Count of contamination events
+  lastTestTime: number;
+}
+
 // Performance-optimized indices for O(1) lookups
 interface ProductionIndices {
   // AI decision indices for fast lookup
@@ -197,6 +240,20 @@ interface ProductionStore {
   // SCADA integration state
   scadaLive: boolean;
   setScadaLive: (live: boolean) => void;
+
+  // Truck scheduling state
+  truckSchedule: TruckScheduleState;
+  setTruckDocked: (dock: 'shipping' | 'receiving', docked: boolean) => void;
+  updateNextArrival: (dock: 'shipping' | 'receiving', seconds: number) => void;
+  recordTruckDeparture: (dock: 'shipping' | 'receiving') => void;
+
+  // Quality Control Lab state
+  qcLab: QCLabState;
+  startQCTest: (sampleSource: string, sampleSourceName: string, workerId: string, workerName: string) => void;
+  completeQCTest: (result: Omit<QualityTestResult, 'id' | 'timestamp'>) => void;
+  triggerContaminationAlert: () => void;
+  updateCertificationStatus: (status: 'certified' | 'pending' | 'expired') => void;
+  getLatestTestResult: () => QualityTestResult | null;
 }
 
 export const useProductionStore = create<ProductionStore>()(
@@ -668,5 +725,129 @@ export const useProductionStore = create<ProductionStore>()(
     // SCADA integration
     scadaLive: false,
     setScadaLive: (live: boolean) => set({ scadaLive: live }),
+
+    // Truck scheduling state
+    truckSchedule: {
+      nextShippingArrival: 45, // Seconds
+      nextReceivingArrival: 30,
+      truckDocked: {
+        shipping: false,
+        receiving: false,
+      },
+      lastShippingDeparture: 0,
+      lastReceivingDeparture: 0,
+    },
+
+    setTruckDocked: (dock, docked) =>
+      set((state) => ({
+        truckSchedule: {
+          ...state.truckSchedule,
+          truckDocked: {
+            ...state.truckSchedule.truckDocked,
+            [dock]: docked,
+          },
+        },
+      })),
+
+    updateNextArrival: (dock, seconds) =>
+      set((state) => ({
+        truckSchedule: {
+          ...state.truckSchedule,
+          [dock === 'shipping' ? 'nextShippingArrival' : 'nextReceivingArrival']: seconds,
+        },
+      })),
+
+    recordTruckDeparture: (dock) =>
+      set((state) => {
+        // Add randomness to next arrival: 45-75 seconds base + random(-15, +15)
+        const baseInterval = 45 + Math.floor(Math.random() * 30);
+        const variance = Math.floor(Math.random() * 30) - 15;
+        const nextArrival = baseInterval + variance;
+
+        return {
+          truckSchedule: {
+            ...state.truckSchedule,
+            [dock === 'shipping' ? 'lastShippingDeparture' : 'lastReceivingDeparture']: Date.now(),
+            [dock === 'shipping' ? 'nextShippingArrival' : 'nextReceivingArrival']: nextArrival,
+            truckDocked: {
+              ...state.truckSchedule.truckDocked,
+              [dock]: false,
+            },
+          },
+        };
+      }),
+
+    // Quality Control Lab state
+    qcLab: {
+      currentTest: null,
+      testHistory: [],
+      certificationStatus: 'certified',
+      certificationExpiry: 24, // Game hours until expiry
+      contaminationAlerts: 0,
+      lastTestTime: 0,
+    },
+
+    startQCTest: (sampleSource, sampleSourceName, workerId, workerName) =>
+      set((state) => ({
+        qcLab: {
+          ...state.qcLab,
+          currentTest: {
+            id: `qc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            timestamp: Date.now(),
+            sampleSource,
+            sampleSourceName,
+            grade: 'A', // Placeholder, will be set on complete
+            moistureLevel: 0,
+            proteinContent: 0,
+            contaminationDetected: false,
+            testedBy: workerId,
+            testedByName: workerName,
+          },
+        },
+      })),
+
+    completeQCTest: (result) =>
+      set((state) => {
+        const newResult: QualityTestResult = {
+          ...result,
+          id: `qc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          timestamp: Date.now(),
+        };
+
+        return {
+          qcLab: {
+            ...state.qcLab,
+            currentTest: null,
+            testHistory: [newResult, ...state.qcLab.testHistory].slice(0, 20), // Keep last 20
+            lastTestTime: Date.now(),
+            contaminationAlerts: result.contaminationDetected
+              ? state.qcLab.contaminationAlerts + 1
+              : state.qcLab.contaminationAlerts,
+          },
+        };
+      }),
+
+    triggerContaminationAlert: () =>
+      set((state) => ({
+        qcLab: {
+          ...state.qcLab,
+          contaminationAlerts: state.qcLab.contaminationAlerts + 1,
+          certificationStatus: 'pending', // Contamination affects certification
+        },
+      })),
+
+    updateCertificationStatus: (status) =>
+      set((state) => ({
+        qcLab: {
+          ...state.qcLab,
+          certificationStatus: status,
+          certificationExpiry: status === 'certified' ? 24 : state.qcLab.certificationExpiry,
+        },
+      })),
+
+    getLatestTestResult: () => {
+      const state = get();
+      return state.qcLab.testHistory[0] || null;
+    },
   }))
 );
