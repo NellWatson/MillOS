@@ -14,7 +14,7 @@
 
 ### AI-Powered Grain Mill Digital Twin Simulator with Industrial SCADA Integration
 
-*An Agentic AI Experiment by Nell Watson*
+*An Agentic Engineering Experiment by Nell Watson*
 
 <br/>
 
@@ -511,6 +511,6 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 <br/>
 
-Made with 🌾 by [Nell Watson](https://github.com/nellwatson)
+Made with ❤️ by [Nell Watson](https://github.com/nellwatson)
 
 </div>
