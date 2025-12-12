@@ -101,7 +101,9 @@ export const MobileFirstPersonController: React.FC = () => {
     const TOUCH_THROTTLE_MS = 16;
 
     const handleTouchStart = (e: TouchEvent) => {
-      if (e.touches.length !== 1) return;
+      // Use targetTouches to only count touches on this element (canvas)
+      // This allows D-pad and look to work simultaneously
+      if (e.targetTouches.length !== 1) return;
 
       // Check if touch is on UI
       const target = e.target as HTMLElement;
@@ -109,13 +111,14 @@ export const MobileFirstPersonController: React.FC = () => {
 
       e.preventDefault();
       touchStartRef.current = {
-        x: e.touches[0].clientX,
-        y: e.touches[0].clientY,
+        x: e.targetTouches[0].clientX,
+        y: e.targetTouches[0].clientY,
       };
     };
 
     const handleTouchMove = (e: TouchEvent) => {
-      if (!touchStartRef.current || e.touches.length !== 1) return;
+      // Use targetTouches to allow simultaneous D-pad + look
+      if (!touchStartRef.current || e.targetTouches.length !== 1) return;
 
       const now = Date.now();
       if (now - lastTouchTimeRef.current < TOUCH_THROTTLE_MS) return;
@@ -123,8 +126,8 @@ export const MobileFirstPersonController: React.FC = () => {
 
       e.preventDefault();
 
-      const deltaX = e.touches[0].clientX - touchStartRef.current.x;
-      const deltaY = e.touches[0].clientY - touchStartRef.current.y;
+      const deltaX = e.targetTouches[0].clientX - touchStartRef.current.x;
+      const deltaY = e.targetTouches[0].clientY - touchStartRef.current.y;
 
       // Apply rotation (yaw and pitch)
       euler.current.y -= deltaX * LOOK_SENSITIVITY;
@@ -136,8 +139,8 @@ export const MobileFirstPersonController: React.FC = () => {
       camera.quaternion.setFromEuler(euler.current);
 
       touchStartRef.current = {
-        x: e.touches[0].clientX,
-        y: e.touches[0].clientY,
+        x: e.targetTouches[0].clientX,
+        y: e.targetTouches[0].clientY,
       };
     };
 

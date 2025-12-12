@@ -123,8 +123,7 @@ export function useGeometryNaNDetector() {
       const THREE = (window as Record<string, unknown>).THREE as typeof import('three') | undefined;
       if (THREE?.PlaneGeometry) {
         const OriginalPlaneGeometry = THREE.PlaneGeometry;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (THREE as any).PlaneGeometry = class PatchedPlaneGeometry extends OriginalPlaneGeometry {
+        (THREE as Record<string, unknown>).PlaneGeometry = class PatchedPlaneGeometry extends OriginalPlaneGeometry {
           constructor(width?: number, height?: number, widthSegments?: number, heightSegments?: number) {
             if (!Number.isFinite(width) || !Number.isFinite(height)) {
               console.warn(

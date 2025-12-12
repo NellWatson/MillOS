@@ -55,12 +55,12 @@ export const MillClockDisplay: React.FC<{ theme: 'dark' | 'light' }> = React.mem
           className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
             gameSpeed === 0
               ? 'bg-red-500/20 text-red-400'
-              : gameSpeed >= 60
+              : gameSpeed > 180
                 ? 'bg-orange-500/20 text-orange-400'
                 : 'bg-green-500/20 text-green-400'
           }`}
         >
-          {gameSpeed === 0 ? 'PAUSED' : gameSpeed === 1 ? '1x' : gameSpeed === 60 ? '60x' : '3000x'}
+          {gameSpeed === 0 ? 'PAUSED' : gameSpeed === 180 ? '1x' : gameSpeed === 1800 ? '10x' : '60x'}
         </div>
       </div>
 
@@ -80,46 +80,46 @@ export const MillClockDisplay: React.FC<{ theme: 'dark' | 'light' }> = React.mem
           <Pause className="w-3 h-3" />
         </button>
         <button
-          onClick={() => setGameSpeed(1)}
+          onClick={() => setGameSpeed(180)}
           className={`flex-1 py-1.5 rounded text-[10px] font-bold transition-all flex items-center justify-center gap-0.5 ${
-            gameSpeed === 1
+            gameSpeed === 180
               ? 'bg-orange-600 text-white'
               : theme === 'light'
                 ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
                 : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
           }`}
-          title="Normal speed (1x)"
+          title="Normal speed (1x - 24hrs in 8min)"
         >
           <Play className="w-3 h-3" />
           1x
         </button>
         <button
-          onClick={() => setGameSpeed(60)}
+          onClick={() => setGameSpeed(1800)}
           className={`flex-1 py-1.5 rounded text-[10px] font-bold transition-all flex items-center justify-center gap-0.5 ${
-            gameSpeed === 60
+            gameSpeed === 1800
               ? 'bg-orange-600 text-white'
               : theme === 'light'
                 ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
                 : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
           }`}
-          title="Fast (60x - 1 min/sec)"
+          title="Fast (10x)"
+        >
+          <FastForward className="w-3 h-3" />
+          10x
+        </button>
+        <button
+          onClick={() => setGameSpeed(10800)}
+          className={`flex-1 py-1.5 rounded text-[10px] font-bold transition-all flex items-center justify-center gap-0.5 ${
+            gameSpeed === 10800
+              ? 'bg-orange-600 text-white'
+              : theme === 'light'
+                ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+          }`}
+          title="Ultra fast (60x)"
         >
           <FastForward className="w-3 h-3" />
           60x
-        </button>
-        <button
-          onClick={() => setGameSpeed(3000)}
-          className={`flex-1 py-1.5 rounded text-[10px] font-bold transition-all flex items-center justify-center gap-0.5 ${
-            gameSpeed === 3000
-              ? 'bg-orange-600 text-white'
-              : theme === 'light'
-                ? 'bg-slate-200 text-slate-500 hover:bg-slate-300'
-                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-          }`}
-          title="Ultra fast (3000x - 50 min/sec)"
-        >
-          <FastForward className="w-3 h-3" />
-          <FastForward className="w-3 h-3 -ml-1.5" />
         </button>
       </div>
     </div>

@@ -525,6 +525,7 @@ export const SkySystem: React.FC = () => {
   }, [moonVisible]);
 
   // Register sky dome with animation manager
+  // Use individual color strings as dependencies for reliable updates
   useEffect(() => {
     if (meshRef.current) {
       const material = meshRef.current.material as THREE.ShaderMaterial;
@@ -536,7 +537,23 @@ export const SkySystem: React.FC = () => {
       });
       return () => unregisterSkyDome('main');
     }
-  }, [skyColors, cloudDensity, sunAngle]);
+  }, [skyColors.top, skyColors.bottom, skyColors.horizon, skyColors.ground, cloudDensity, sunAngle]);
+
+  // Direct uniform update to ensure sky colors stay in sync with game time
+  // This bypasses potential registry timing issues
+  useEffect(() => {
+    if (meshRef.current) {
+      const material = meshRef.current.material as THREE.ShaderMaterial;
+      if (material.uniforms) {
+        material.uniforms.topColor.value.set(skyColors.top);
+        material.uniforms.bottomColor.value.set(skyColors.bottom);
+        material.uniforms.horizonColor.value.set(skyColors.horizon);
+        material.uniforms.groundColor.value.set(skyColors.ground);
+        material.uniforms.cloudDensity.value = cloudDensity;
+        material.uniforms.sunAngle.value = sunAngle;
+      }
+    }
+  }, [skyColors.top, skyColors.bottom, skyColors.horizon, skyColors.ground, cloudDensity, sunAngle]);
 
   // Register lights with animation manager (replaces direct useFrame for lights)
   useEffect(() => {

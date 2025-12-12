@@ -50,17 +50,19 @@ export const TouchLookHandler: React.FC<TouchLookHandlerProps> = ({
       // Prevent default to avoid conflicts with OrbitControls
       e.preventDefault();
 
-      if (e.touches.length === 1) {
-        // Single touch - start look/drag
+      // Use targetTouches to only count touches on this element (canvas)
+      // This allows D-pad and look to work simultaneously
+      if (e.targetTouches.length === 1) {
+        // Single touch on canvas - start look/drag
         touchStartRef.current = {
-          x: e.touches[0].clientX,
-          y: e.touches[0].clientY,
+          x: e.targetTouches[0].clientX,
+          y: e.targetTouches[0].clientY,
         };
         setIsTouchLooking(true);
-      } else if (e.touches.length === 2) {
-        // Two touches - start pinch-to-zoom
+      } else if (e.targetTouches.length === 2) {
+        // Two touches on canvas - start pinch-to-zoom
         touchStartRef.current = null; // Cancel any single-touch drag
-        pinchStartDistRef.current = getTouchDistance(e.touches[0], e.touches[1]);
+        pinchStartDistRef.current = getTouchDistance(e.targetTouches[0], e.targetTouches[1]);
         // Store current camera distance from target
         const controls = orbitControlsRef.current;
         if (controls) {
@@ -77,9 +79,9 @@ export const TouchLookHandler: React.FC<TouchLookHandlerProps> = ({
 
       e.preventDefault();
 
-      // Handle pinch-to-zoom (two fingers)
-      if (e.touches.length === 2 && pinchStartDistRef.current !== null && pinchStartZoomRef.current !== null) {
-        const currentDist = getTouchDistance(e.touches[0], e.touches[1]);
+      // Handle pinch-to-zoom (two fingers on canvas)
+      if (e.targetTouches.length === 2 && pinchStartDistRef.current !== null && pinchStartZoomRef.current !== null) {
+        const currentDist = getTouchDistance(e.targetTouches[0], e.targetTouches[1]);
         const pinchDelta = pinchStartDistRef.current - currentDist;
         const zoomDelta = pinchDelta * zoomSensitivity;
 
@@ -87,7 +89,6 @@ export const TouchLookHandler: React.FC<TouchLookHandlerProps> = ({
         if (controls) {
           const target = controls.target;
           const offset = camera.position.clone().sub(target);
-          const currentRadius = offset.length();
 
           // Calculate new radius with pinch delta
           let newRadius = pinchStartZoomRef.current + zoomDelta;
@@ -100,11 +101,11 @@ export const TouchLookHandler: React.FC<TouchLookHandlerProps> = ({
         return;
       }
 
-      // Handle single-finger drag (look)
-      if (!touchStartRef.current || e.touches.length !== 1) return;
+      // Handle single-finger drag (look) - use targetTouches for simultaneous D-pad + look
+      if (!touchStartRef.current || e.targetTouches.length !== 1) return;
 
-      const deltaX = e.touches[0].clientX - touchStartRef.current.x;
-      const deltaY = e.touches[0].clientY - touchStartRef.current.y;
+      const deltaX = e.targetTouches[0].clientX - touchStartRef.current.x;
+      const deltaY = e.targetTouches[0].clientY - touchStartRef.current.y;
 
       // Apply rotation by manipulating camera position around target
       const controls = orbitControlsRef.current;
@@ -135,8 +136,8 @@ export const TouchLookHandler: React.FC<TouchLookHandlerProps> = ({
 
       // Update start position for continuous drag
       touchStartRef.current = {
-        x: e.touches[0].clientX,
-        y: e.touches[0].clientY,
+        x: e.targetTouches[0].clientX,
+        y: e.targetTouches[0].clientY,
       };
     };
 

@@ -31,6 +31,7 @@ import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useShallow } from 'zustand/react/shallow';
 import { positionRegistry, type EntityPosition } from '../utils/positionRegistry';
 import { audioManager } from '../utils/audioManager';
+import { useMobileDetection } from '../hooks/useMobileDetection';
 
 // Context to share camera feed container refs between DOM and Canvas
 interface CameraFeedContextType {
@@ -2357,6 +2358,7 @@ export const PAAnnouncementSystem: React.FC = () => {
   const announcements = useProductionStore((state) => state.announcements);
   const dismissAnnouncement = useProductionStore((state) => state.dismissAnnouncement);
   const clearOldAnnouncements = useProductionStore((state) => state.clearOldAnnouncements);
+  const { isMobile } = useMobileDetection();
 
   // Track last spoken announcement to avoid repeats
   const lastSpokenRef = useRef<string>('');
@@ -2408,6 +2410,41 @@ export const PAAnnouncementSystem: React.FC = () => {
   // Suppress display during startup period to let speech synthesis initialize
   if (isStartupSuppressed) return null;
   if (announcements.length === 0) return null;
+
+  // Mobile: Show compact ticker instead of large cards
+  if (isMobile) {
+    const latestAnnouncement = announcements[0];
+    return (
+      <div
+        className="fixed top-0 left-0 right-0 z-[60] pointer-events-auto"
+        style={{ paddingTop: 'max(4px, env(safe-area-inset-top))' }}
+      >
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={latestAnnouncement.id}
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="mx-2 bg-slate-900/90 backdrop-blur-md rounded-lg border border-slate-700/50 px-3 py-1.5 flex items-center gap-2"
+            onClick={() => dismissAnnouncement(latestAnnouncement.id)}
+          >
+            <Volume2 className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0 overflow-hidden">
+              <motion.p
+                initial={{ x: '100%' }}
+                animate={{ x: '-100%' }}
+                transition={{ duration: 12, ease: 'linear', repeat: Infinity }}
+                className="text-xs text-slate-200 whitespace-nowrap"
+              >
+                {latestAnnouncement.message}
+              </motion.p>
+            </div>
+            <span className="text-[8px] text-slate-500 uppercase tracking-wider flex-shrink-0">PA</span>
+          </motion.div>
+        </AnimatePresence>
+      </div>
+    );
+  }
 
   const getPriorityStyles = (priority: string) => {
     switch (priority) {

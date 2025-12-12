@@ -1716,6 +1716,23 @@ class AudioManager {
     if (ctx && ctx.state === 'suspended') {
       await ctx.resume();
     }
+
+    // Initialize TTS during user gesture (required for mobile browsers)
+    // Mobile browsers require speechSynthesis to be "primed" from a user interaction
+    this.initTTSVoice();
+
+    // iOS Safari workaround: "warm up" speech synthesis with a silent utterance
+    // This ensures the first real announcement can play without gesture restrictions
+    if ('speechSynthesis' in window) {
+      // Cancel any stuck state (iOS Safari bug)
+      window.speechSynthesis.cancel();
+
+      // Create and immediately cancel a silent utterance to prime the engine
+      const primer = new SpeechSynthesisUtterance('');
+      primer.volume = 0;
+      window.speechSynthesis.speak(primer);
+      window.speechSynthesis.cancel();
+    }
   }
 
   // === SPATIAL AUDIO SUPPORT ===
@@ -4716,6 +4733,21 @@ class AudioManager {
       loadVoices();
     } else {
       window.speechSynthesis.onvoiceschanged = loadVoices;
+
+      // iOS Safari fallback: onvoiceschanged may not fire reliably
+      // Poll for voices a few times as a backup
+      let attempts = 0;
+      const pollVoices = () => {
+        if (this._ttsVoiceLoaded || attempts >= 10) return;
+        attempts++;
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length > 0) {
+          loadVoices();
+        } else {
+          setTimeout(pollVoices, 250);
+        }
+      };
+      setTimeout(pollVoices, 100);
     }
   }
 
@@ -4798,6 +4830,9 @@ class AudioManager {
       this.playPAChime();
       this.announcementChimeTimeout = setTimeout(() => {
         if (this._ttsEnabled && !this._muted) {
+          // iOS Safari workaround: cancel any stuck state before speaking
+          // This fixes a known bug where speechSynthesis can become unresponsive
+          window.speechSynthesis.cancel();
           window.speechSynthesis.speak(utterance);
         } else {
           // If conditions changed during chime, process next

@@ -26,9 +26,9 @@ describe('GameSimulationStore', () => {
       expect(gameTime).toBe(10);
     });
 
-    it('should initialize with default game speed of 60', () => {
+    it('should initialize with default game speed of 180', () => {
       const { gameSpeed } = useGameSimulationStore.getState();
-      expect(gameSpeed).toBe(60);
+      expect(gameSpeed).toBe(180); // 1 game day = 8 real minutes
     });
 
     it('should set game time correctly', () => {
@@ -469,7 +469,7 @@ describe('GameSimulationStore', () => {
 
       const state = useGameSimulationStore.getState();
       expect(state.gameTime).toBe(10); // 10am default
-      expect(state.gameSpeed).toBe(60);
+      expect(state.gameSpeed).toBe(180); // 1 game day = 8 real minutes
       expect(state.currentShift).toBe('morning');
       expect(state.crisisState.active).toBe(false);
     });

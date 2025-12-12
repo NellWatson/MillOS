@@ -155,11 +155,11 @@ export const OverviewPanel: React.FC = () => {
             >
               {gameSpeed === 0
                 ? 'PAUSED'
-                : gameSpeed === 1
+                : gameSpeed === 180
                   ? '1x'
-                  : gameSpeed === 60
-                    ? '60x'
-                    : '3000x'}
+                  : gameSpeed === 1800
+                    ? '10x'
+                    : '60x'}
             </div>
           </div>
         </div>
@@ -177,40 +177,40 @@ export const OverviewPanel: React.FC = () => {
             <Pause className="w-3.5 h-3.5" />
           </button>
           <button
-            onClick={() => setGameSpeed(1)}
+            onClick={() => setGameSpeed(180)}
             className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
-              gameSpeed === 1
+              gameSpeed === 180
                 ? 'bg-orange-600 text-white'
                 : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
             }`}
-            title="Normal (1x)"
+            title="Normal (1x - 24hrs in 8min)"
           >
             <Play className="w-3.5 h-3.5" />
             1x
           </button>
           <button
-            onClick={() => setGameSpeed(60)}
+            onClick={() => setGameSpeed(1800)}
             className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
-              gameSpeed === 60
+              gameSpeed === 1800
                 ? 'bg-orange-600 text-white'
                 : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
             }`}
-            title="Fast (60x)"
+            title="Fast (10x)"
+          >
+            <FastForward className="w-3.5 h-3.5" />
+            10x
+          </button>
+          <button
+            onClick={() => setGameSpeed(10800)}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
+              gameSpeed === 10800
+                ? 'bg-orange-600 text-white'
+                : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+            }`}
+            title="Ultra (60x)"
           >
             <FastForward className="w-3.5 h-3.5" />
             60x
-          </button>
-          <button
-            onClick={() => setGameSpeed(3000)}
-            className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
-              gameSpeed === 3000
-                ? 'bg-orange-600 text-white'
-                : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-            }`}
-            title="Ultra (3000x)"
-          >
-            <FastForward className="w-3.5 h-3.5" />
-            <FastForward className="w-3.5 h-3.5 -ml-2" />
           </button>
         </div>
       </section>
