@@ -1009,6 +1009,15 @@ const CitySkylineLayer: React.FC<{
       }
     }, [buildingColor, windowLightColor, isNight, startAngle]);
 
+    // Direct uniform update to ensure building colors stay in sync with game time
+    useEffect(() => {
+      if (materialRef.current?.uniforms) {
+        materialRef.current.uniforms.buildingColor.value.set(buildingColor);
+        materialRef.current.uniforms.windowLightColor.value.set(windowLightColor);
+        materialRef.current.uniforms.isNight.value = isNight ? 1.0 : 0.0;
+      }
+    }, [buildingColor, windowLightColor, isNight]);
+
     const geometry = useMemo(() => {
       const segments = heights.length - 1;
       const geo = new THREE.BufferGeometry();
@@ -1290,6 +1299,19 @@ const SnowCappedMountainLayer: React.FC<{
       }
     }, [radius, rockColor, treeColor, snowColor, atmosphereColor, atmosphereStrength, opacity]);
 
+    // Direct uniform update to ensure mountain colors stay in sync with game time
+    // This bypasses potential registry timing issues (same pattern as SkyDome)
+    useEffect(() => {
+      if (materialRef.current?.uniforms) {
+        materialRef.current.uniforms.rockColor.value.set(rockColor);
+        materialRef.current.uniforms.treeColor.value.set(treeColor);
+        materialRef.current.uniforms.snowColor.value.set(snowColor);
+        materialRef.current.uniforms.atmosphereColor.value.set(atmosphereColor);
+        materialRef.current.uniforms.atmosphereStrength.value = atmosphereStrength;
+        materialRef.current.uniforms.opacity.value = opacity;
+      }
+    }, [rockColor, treeColor, snowColor, atmosphereColor, atmosphereStrength, opacity]);
+
     const geometry = useMemo(() => {
       const segments = heights.length - 1;
       const geo = new THREE.BufferGeometry();
@@ -1468,6 +1490,14 @@ const HorizonLayer: React.FC<{
       return () => unregisterLayerColor(`layer-${radius}`);
     }
   }, [radius, color, opacity]);
+
+  // Direct uniform update to ensure layer colors stay in sync with game time
+  useEffect(() => {
+    if (materialRef.current?.uniforms) {
+      materialRef.current.uniforms.layerColor.value.set(color);
+      materialRef.current.uniforms.opacity.value = opacity;
+    }
+  }, [color, opacity]);
 
   const geometry = useMemo(() => {
     const segments = heights.length - 1;
@@ -1691,6 +1721,14 @@ const DistantWater: React.FC<{
       }
     }, [startAngle]);
 
+    // Direct uniform update to ensure water colors stay in sync with game time
+    useEffect(() => {
+      if (materialRef.current?.uniforms) {
+        materialRef.current.uniforms.waterColor.value.set(waterColor);
+        materialRef.current.uniforms.reflectionColor.value.set(reflectionColor);
+      }
+    }, [waterColor, reflectionColor]);
+
     // Create water segment geometry
     const geometry = useMemo(() => {
       const segments = 64;
@@ -1850,6 +1888,14 @@ export const HorizonRing: React.FC = () => {
     }
   }, [gameTime]);
 
+  // Time period key to force shader recreation when crossing time boundaries
+  const timePeriod = useMemo(() => {
+    if (gameTime >= 20 || gameTime < 6) return 'night';
+    if (gameTime >= 6 && gameTime < 8) return 'dawn';
+    if (gameTime >= 17 && gameTime < 20) return 'dusk';
+    return 'day';
+  }, [gameTime]);
+
   // Determine if it's night or dusk for city lights
   const isNight = gameTime >= 20 || gameTime < 6;
   const isDusk = gameTime >= 17 && gameTime < 20;
@@ -1870,7 +1916,7 @@ export const HorizonRing: React.FC = () => {
   const citySkyline = citySkylineData.heights;
 
   return (
-    <group>
+    <group key={timePeriod}>
       {/* Far mountains - tallest with heavy atmospheric perspective */}
       <SnowCappedMountainLayer
         radius={320}

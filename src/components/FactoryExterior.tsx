@@ -917,6 +917,29 @@ const WATER_COLORS = {
   pond: '#2563eb', // Bright blue for decorative ponds
 };
 
+// Still canal water surface - shiny reflective without animation
+const StillCanalWater: React.FC<{
+  width: number;
+  length: number;
+  position?: [number, number, number];
+}> = ({ width, length, position = [0, 0, 0] }) => {
+  // CRITICAL: Guard against NaN/zero dimensions to prevent PlaneGeometry errors
+  const safeWidth = Number.isFinite(width) && width > 0 ? width : 10;
+  const safeLength = Number.isFinite(length) && length > 0 ? length : 10;
+
+  return (
+    <mesh position={position} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      <planeGeometry args={[safeWidth, safeLength]} />
+      <meshStandardMaterial
+        color={WATER_COLORS.shallow}
+        metalness={0.3}
+        roughness={0.1}
+        envMapIntensity={1.5}
+      />
+    </mesh>
+  );
+};
+
 // Animated flowing river water surface
 const AnimatedRiverWater: React.FC<{
   width: number;
@@ -1068,12 +1091,11 @@ const Canal: React.FC<{
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
-      {/* Animated water surface - slower flow for canal */}
-      <AnimatedRiverWater
+      {/* Still shiny water surface for canal */}
+      <StillCanalWater
         width={safeWidth - 1}
         length={safeLength}
         position={[0, -0.15, 0]}
-        flowSpeed={0.6}
       />
       {/* Water depth effect */}
       <mesh position={[0, -0.8, 0]} rotation={[-Math.PI / 2, 0, 0]}>

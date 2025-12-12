@@ -405,10 +405,21 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
           // Calculate expected shift based on new time (handles midnight crossover correctly)
           const expectedShift = getShiftForHour(newTime);
 
-          // Trigger shift handover if shift should change and not already in handover
-          if (expectedShift !== state.currentShift && !state.shiftChangeActive) {
-            // Start shift handover automatically
-            get().startShiftHandover();
+          // Auto-update shift when time crosses boundary (no modal - just update silently)
+          if (expectedShift !== state.currentShift) {
+            return {
+              gameTime: newTime,
+              currentShift: expectedShift,
+              shiftStartTime: Date.now(),
+              shiftData: {
+                ...state.shiftData,
+                currentShift: expectedShift,
+                shiftStartTime: Date.now(),
+                outgoingSupervisor: state.shiftData.incomingSupervisor,
+                incomingSupervisor: getSupervisorForShift(expectedShift),
+                priorities: getShiftPriorities(expectedShift),
+              },
+            };
           }
 
           return { gameTime: newTime };

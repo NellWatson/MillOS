@@ -1,5 +1,5 @@
-import React from 'react';
-import { Home, Brain, Activity, Users, Shield, Settings, Eye, Radio } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Home, Brain, Activity, Users, Shield, Settings, Eye, Radio, Maximize, Minimize } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useUIStore } from '../../../stores/uiStore';
 import { useIsMultiplayerActive } from '../../../stores/multiplayerStore';
@@ -26,6 +26,48 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange }) => {
   const isMultiplayerActive = useIsMultiplayerActive();
   const { isMobile } = useMobileDetection();
   const openMobilePanel = useMobileControlStore((state) => state.openMobilePanel);
+
+  // Fullscreen state (mobile only)
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (!document.fullscreenElement) {
+        const docEl = document.documentElement as HTMLElement & {
+          webkitRequestFullscreen?: () => Promise<void>;
+        };
+        if (docEl.requestFullscreen) {
+          await docEl.requestFullscreen();
+        } else if (docEl.webkitRequestFullscreen) {
+          await docEl.webkitRequestFullscreen();
+        }
+      } else {
+        const doc = document as Document & {
+          webkitExitFullscreen?: () => Promise<void>;
+        };
+        if (doc.exitFullscreen) {
+          await doc.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          await doc.webkitExitFullscreen();
+        }
+      }
+      if (navigator.vibrate) navigator.vibrate(15);
+    } catch (err) {
+      console.warn('Fullscreen request failed:', err);
+    }
+  }, []);
 
   // On mobile, clicking a dock item opens the mobile panel instead of sidebar
   const handleModeChange = (mode: DockMode) => {
@@ -135,6 +177,22 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange }) => {
           />
         )}
       </button>
+
+      {/* Fullscreen Toggle (mobile only) */}
+      {isMobile && (
+        <button
+          onClick={toggleFullscreen}
+          aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+          title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+          className={`relative rounded-xl transition-all p-2 min-w-[44px] min-h-[44px] ${
+            isFullscreen
+              ? 'bg-cyan-500/20 text-cyan-400'
+              : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          {isFullscreen ? <Minimize /> : <Maximize />}
+        </button>
+      )}
     </nav>
   );
 };

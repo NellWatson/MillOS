@@ -4,16 +4,19 @@ import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
 import { registerServiceWorker } from './utils/serviceWorkerRegistration';
 
-// Suppress harmless font warnings from troika-three-text (used by drei's Text component)
-// These warnings about GPOS/GSUB tables don't affect text rendering
+// Suppress harmless warnings from third-party libraries
 const originalWarn = console.warn;
 console.warn = (...args: unknown[]): void => {
   const message = args[0];
-  if (
-    typeof message === 'string' &&
-    (message.includes('unsupported GPOS table') || message.includes('unsupported GSUB table'))
-  ) {
-    return; // Suppress these specific warnings
+  if (typeof message === 'string') {
+    // Troika font warnings (drei's Text component) - don't affect rendering
+    if (message.includes('unsupported GPOS table') || message.includes('unsupported GSUB table')) {
+      return;
+    }
+    // Rapier WASM init deprecation (internal to @react-three/rapier, awaiting library fix)
+    if (message.includes('deprecated parameters for the initialization')) {
+      return;
+    }
   }
   originalWarn.apply(console, args);
 };

@@ -1711,10 +1711,12 @@ class AudioManager {
   async resume() {
     // Mark as initialized - this allows getContext() to create the AudioContext
     this._initialized = true;
+    console.log('[MillOS TTS] resume() called - initializing audio');
 
     const ctx = this.getContext();
     if (ctx && ctx.state === 'suspended') {
       await ctx.resume();
+      console.log('[MillOS TTS] AudioContext resumed');
     }
 
     // Initialize TTS during user gesture (required for mobile browsers)
@@ -1724,14 +1726,22 @@ class AudioManager {
     // iOS Safari workaround: "warm up" speech synthesis with a silent utterance
     // This ensures the first real announcement can play without gesture restrictions
     if ('speechSynthesis' in window) {
+      console.log('[MillOS TTS] Priming speechSynthesis for mobile');
+
       // Cancel any stuck state (iOS Safari bug)
       window.speechSynthesis.cancel();
 
-      // Create and immediately cancel a silent utterance to prime the engine
-      const primer = new SpeechSynthesisUtterance('');
-      primer.volume = 0;
+      // Prime with a near-silent short utterance (empty string doesn't work on all browsers)
+      const primer = new SpeechSynthesisUtterance(' ');
+      primer.volume = 0.01; // Near-silent but not zero (zero might be ignored)
+      primer.rate = 10; // Fastest possible to minimize any audible output
       window.speechSynthesis.speak(primer);
-      window.speechSynthesis.cancel();
+
+      // Give iOS a moment to register the speak before canceling
+      setTimeout(() => {
+        window.speechSynthesis.cancel();
+        console.log('[MillOS TTS] Primer cancelled, speechSynthesis should be unlocked');
+      }, 100);
     }
   }
 
@@ -4680,7 +4690,16 @@ class AudioManager {
       const voices = window.speechSynthesis.getVoices();
       if (voices.length === 0) return;
 
-      // Use British voices ONLY for PA announcements - never American
+      // Debug: log available voices on mobile for troubleshooting
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      if (isMobile) {
+        console.log(
+          '[MillOS TTS] Available voices:',
+          voices.map((v) => `${v.name} (${v.lang})`).join(', ')
+        );
+      }
+
+      // Use British voices for PA announcements - prefer British, fall back to any English on mobile
       const preferredBritishVoices = [
         'Google UK English Female',
         'Google UK English Male',
@@ -4690,6 +4709,10 @@ class AudioManager {
         'Kate',
         'Serena',
         'Daniel',
+        // iOS-specific voice names
+        'Karen', // Australian but close
+        'Moira', // Irish
+        'Fiona', // Scottish
       ];
 
       // First pass: exact preferred British voice matches
@@ -4698,6 +4721,7 @@ class AudioManager {
         if (found) {
           this._ttsVoice = found;
           audioLog.info(`TTS voice selected (British): ${found.name}`);
+          console.log(`[MillOS TTS] Selected voice: ${found.name} (${found.lang})`);
           break;
         }
       }
@@ -4715,14 +4739,23 @@ class AudioManager {
         if (britishVoice) {
           this._ttsVoice = britishVoice;
           audioLog.info(`TTS voice selected (British fallback): ${britishVoice.name}`);
+          console.log(`[MillOS TTS] Selected voice (GB locale): ${britishVoice.name}`);
         }
       }
 
-      // NO FALLBACK to American voices - if no British voice found, TTS stays disabled
+      // Third pass (mobile only): fall back to ANY English voice rather than silence
+      if (!this._ttsVoice && isMobile) {
+        const anyEnglishVoice = voices.find((v) => v.lang.startsWith('en'));
+        if (anyEnglishVoice) {
+          this._ttsVoice = anyEnglishVoice;
+          audioLog.info(`TTS voice selected (mobile English fallback): ${anyEnglishVoice.name}`);
+          console.log(`[MillOS TTS] Mobile fallback voice: ${anyEnglishVoice.name}`);
+        }
+      }
+
       if (!this._ttsVoice) {
-        audioLog.warn(
-          'No British voice found - PA announcements will be silent (refusing American voice)'
-        );
+        audioLog.warn('No suitable voice found - PA announcements will be silent');
+        console.warn('[MillOS TTS] No suitable voice found!');
       }
 
       this._ttsVoiceLoaded = true;
@@ -4754,20 +4787,35 @@ class AudioManager {
   // Speak a PA announcement using TTS with tannoy echo effect
   // Messages are queued so they don't cut each other off
   speakAnnouncement(text: string): void {
-    if (!this._ttsEnabled || this._muted || !('speechSynthesis' in window)) {
+    console.log('[MillOS TTS] speakAnnouncement called:', text.substring(0, 50) + '...');
+
+    if (!this._ttsEnabled) {
+      console.log('[MillOS TTS] Blocked: TTS disabled');
+      return;
+    }
+    if (this._muted) {
+      console.log('[MillOS TTS] Blocked: audio muted');
+      return;
+    }
+    if (!('speechSynthesis' in window)) {
+      console.log('[MillOS TTS] Blocked: speechSynthesis not supported');
       return;
     }
 
     // Ensure voice is loaded
     if (!this._ttsVoiceLoaded) {
+      console.log('[MillOS TTS] Voice not loaded, initializing...');
       this.initTTSVoice();
     }
 
-    // CRITICAL: Only speak if we have a British voice - NEVER use American default
+    // Only speak if we have a voice selected
     if (!this._ttsVoice) {
-      audioLog.warn('Blocking announcement - no British voice available');
+      console.warn('[MillOS TTS] Blocked: no voice available');
+      audioLog.warn('Blocking announcement - no voice available');
       return;
     }
+
+    console.log('[MillOS TTS] Adding to queue, voice:', this._ttsVoice.name);
 
     // Add to queue
     this.announcementQueue.push(text);
@@ -4780,6 +4828,8 @@ class AudioManager {
 
   // Process the next announcement in the queue
   private processAnnouncementQueue(): void {
+    console.log('[MillOS TTS] processAnnouncementQueue called, queue length:', this.announcementQueue.length);
+
     // Check if queue is empty or conditions prevent playback
     if (
       this.announcementQueue.length === 0 ||
@@ -4788,16 +4838,18 @@ class AudioManager {
       !this._ttsVoice
     ) {
       this.isAnnouncementPlaying = false;
+      console.log('[MillOS TTS] Queue processing stopped - empty or blocked');
       return;
     }
 
     this.isAnnouncementPlaying = true;
     const text = this.announcementQueue.shift()!;
+    console.log('[MillOS TTS] Processing:', text.substring(0, 50) + '...');
 
     try {
       const utterance = new SpeechSynthesisUtterance(text);
 
-      // Configure voice settings for PA-style delivery (British voice guaranteed)
+      // Configure voice settings for PA-style delivery
       utterance.voice = this._ttsVoice;
       utterance.rate = 0.85; // Slightly slower for PA clarity
       utterance.pitch = 0.95; // Slightly lower for authoritative PA tone
@@ -4805,11 +4857,13 @@ class AudioManager {
 
       // When speech starts, begin continuous reverb simulation
       utterance.onstart = () => {
+        console.log('[MillOS TTS] Speech started');
         this.startSpeechReverb();
       };
 
       // When speech ends, stop reverb, play reverberant echo tail, then process next in queue
       utterance.onend = () => {
+        console.log('[MillOS TTS] Speech ended');
         this.stopSpeechReverb();
         this.playPAReverbTail();
         // Wait for reverb tail to finish before next announcement (1.5s delay)
@@ -4818,6 +4872,7 @@ class AudioManager {
         }, 1500);
       };
       utterance.onerror = (e) => {
+        console.error('[MillOS TTS] Speech error:', e.error, e);
         this.stopSpeechReverb();
         audioLog.warn('TTS error', e);
         // Even on error, continue processing queue after a short delay
@@ -4827,14 +4882,17 @@ class AudioManager {
       };
 
       // Play PA chime first, then speak after delay
+      console.log('[MillOS TTS] Playing chime, will speak in 1.2s');
       this.playPAChime();
       this.announcementChimeTimeout = setTimeout(() => {
         if (this._ttsEnabled && !this._muted) {
           // iOS Safari workaround: cancel any stuck state before speaking
           // This fixes a known bug where speechSynthesis can become unresponsive
           window.speechSynthesis.cancel();
+          console.log('[MillOS TTS] Calling speechSynthesis.speak()');
           window.speechSynthesis.speak(utterance);
         } else {
+          console.log('[MillOS TTS] Conditions changed, skipping speak');
           // If conditions changed during chime, process next
           this.processAnnouncementQueue();
         }
