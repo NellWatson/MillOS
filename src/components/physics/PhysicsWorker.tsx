@@ -93,7 +93,7 @@ export const PhysicsWorker: React.FC<PhysicsWorkerProps> = ({
     const vel = rigidBodyRef.current.linvel();
 
     // Register with position registry for AI awareness
-    positionRegistry.register(data.id, pos.x, pos.z, 'worker');
+    positionRegistry.register(data.id, pos.x, pos.z, 'worker', undefined, undefined, undefined, pos.y);
 
     // Notify parent of position update (for UI, heat map, etc.)
     onPositionUpdate?.(pos.x, pos.z);
@@ -160,7 +160,7 @@ export const PhysicsWorker: React.FC<PhysicsWorkerProps> = ({
     let nearestForklift: EntityPosition | null = null;
 
     if (shouldCheckForklifts) {
-      nearestForklift = positionRegistry.getNearestForklift(pos.x, pos.z, 8);
+      nearestForklift = positionRegistry.getNearestForklift(pos.x, pos.z, 8, pos.y);
       lastForkliftCheckRef.current = nearestForklift;
     } else {
       nearestForklift = lastForkliftCheckRef.current;
@@ -201,7 +201,7 @@ export const PhysicsWorker: React.FC<PhysicsWorkerProps> = ({
     const shouldCheckWorkers = frameCountRef.current % 5 === 0;
     if (shouldCheckWorkers) {
       nearbyWorkersRef.current = positionRegistry
-        .getWorkersNearby(pos.x, pos.z, PHYSICS_CONFIG.worker.avoidanceRadius)
+        .getWorkersNearby(pos.x, pos.z, PHYSICS_CONFIG.worker.avoidanceRadius, pos.y)
         .filter((w) => w.id !== data.id);
     }
 

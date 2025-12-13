@@ -4,6 +4,7 @@
 export interface EntityPosition {
   id: string;
   x: number;
+  y?: number; // Y position (height)
   z: number;
   type: 'worker' | 'forklift';
   dirX?: number; // Direction vector for forklifts
@@ -36,9 +37,10 @@ class PositionRegistry {
     type: 'worker' | 'forklift',
     dirX?: number,
     dirZ?: number,
-    isStopped?: boolean
+    isStopped?: boolean,
+    y: number = 0
   ) {
-    this.positions.set(id, { id, x, z, type, dirX, dirZ, isStopped });
+    this.positions.set(id, { id, x, y, z, type, dirX, dirZ, isStopped });
   }
 
   // Register static obstacles (called once during scene setup)
@@ -125,16 +127,24 @@ class PositionRegistry {
   }
 
   // Get all entities of a specific type within a radius
+  // Get all entities of a specific type within a radius
+  // If y is provided, ignore entities that are too far vertically (> 3 units)
   getEntitiesNearby(
     x: number,
     z: number,
     radius: number,
     type: 'worker' | 'forklift',
-    excludeId?: string
+    excludeId?: string,
+    y?: number
   ): EntityPosition[] {
     const nearby: EntityPosition[] = [];
     this.positions.forEach((pos) => {
       if (pos.type === type && pos.id !== excludeId) {
+        // Check vertical distance if provided
+        if (y !== undefined && pos.y !== undefined) {
+          if (Math.abs(pos.y - y) > 3.0) return;
+        }
+
         const dx = pos.x - x;
         const dz = pos.z - z;
         const distance = Math.sqrt(dx * dx + dz * dz);
@@ -147,13 +157,19 @@ class PositionRegistry {
   }
 
   // Get all workers within a certain radius of a point
-  getWorkersNearby(x: number, z: number, radius: number): EntityPosition[] {
-    return this.getEntitiesNearby(x, z, radius, 'worker');
+  getWorkersNearby(x: number, z: number, radius: number, y?: number): EntityPosition[] {
+    return this.getEntitiesNearby(x, z, radius, 'worker', undefined, y);
   }
 
   // Get all forklifts within a certain radius (excluding self)
-  getForkliftsNearby(x: number, z: number, radius: number, excludeId: string): EntityPosition[] {
-    return this.getEntitiesNearby(x, z, radius, 'forklift', excludeId);
+  getForkliftsNearby(
+    x: number,
+    z: number,
+    radius: number,
+    excludeId: string,
+    y?: number
+  ): EntityPosition[] {
+    return this.getEntitiesNearby(x, z, radius, 'forklift', excludeId, y);
   }
 
   // Check if there's any worker, forklift, or obstacle in the path ahead
@@ -165,19 +181,20 @@ class PositionRegistry {
     checkDistance: number,
     safetyRadius: number,
     forkliftId?: string,
-    checkObstacles: boolean = false
+    checkObstacles: boolean = false,
+    y: number = 0
   ): boolean {
     // Check points along the path ahead
     for (let d = 1; d <= checkDistance; d += 0.5) {
       const checkX = x + dirX * d;
       const checkZ = z + dirZ * d;
-      const workersNearby = this.getWorkersNearby(checkX, checkZ, safetyRadius);
+      const workersNearby = this.getWorkersNearby(checkX, checkZ, safetyRadius, y);
       if (workersNearby.length > 0) {
         return false;
       }
       // Also check for other forklifts if forkliftId is provided
       if (forkliftId) {
-        const forkliftsNearby = this.getForkliftsNearby(checkX, checkZ, safetyRadius, forkliftId);
+        const forkliftsNearby = this.getForkliftsNearby(checkX, checkZ, safetyRadius, forkliftId, y);
         if (forkliftsNearby.length > 0) {
           return false;
         }
@@ -194,12 +211,22 @@ class PositionRegistry {
   }
 
   // Get the nearest forklift to a position (for workers to detect approaching forklifts)
-  getNearestForklift(x: number, z: number, maxDistance: number): EntityPosition | null {
+  getNearestForklift(
+    x: number,
+    z: number,
+    maxDistance: number,
+    y?: number
+  ): EntityPosition | null {
     let nearest: EntityPosition | null = null;
     let nearestDist = maxDistance;
 
     this.positions.forEach((pos) => {
       if (pos.type === 'forklift') {
+        // Check vertical distance
+        if (y !== undefined && pos.y !== undefined) {
+          if (Math.abs(pos.y - y) > 3.0) return;
+        }
+
         const dx = pos.x - x;
         const dz = pos.z - z;
         const distance = Math.sqrt(dx * dx + dz * dz);
@@ -217,13 +244,19 @@ class PositionRegistry {
     x: number,
     z: number,
     maxDistance: number,
-    excludeId: string
+    excludeId: string,
+    y?: number
   ): EntityPosition | null {
     let nearest: EntityPosition | null = null;
     let nearestDist = maxDistance;
 
     this.positions.forEach((pos) => {
       if (pos.type === 'worker' && pos.id !== excludeId) {
+        // Check vertical distance
+        if (y !== undefined && pos.y !== undefined) {
+          if (Math.abs(pos.y - y) > 3.0) return;
+        }
+
         const dx = pos.x - x;
         const dz = pos.z - z;
         const distance = Math.sqrt(dx * dx + dz * dz);

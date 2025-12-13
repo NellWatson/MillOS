@@ -2208,7 +2208,11 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
           data.id,
           ref.current.position.x,
           ref.current.position.z,
-          'worker'
+          'worker',
+          undefined,
+          undefined,
+          undefined,
+          ref.current.position.y
         );
         return; // Skip normal behavior during shift change
       }
@@ -2256,7 +2260,11 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
           data.id,
           ref.current.position.x,
           ref.current.position.z,
-          'worker'
+          'worker',
+          undefined,
+          undefined,
+          undefined,
+          ref.current.position.y
         );
         return; // Skip normal behavior during evacuation
       }
@@ -2323,7 +2331,11 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
               data.id,
               ref.current.position.x,
               ref.current.position.z,
-              'worker'
+              'worker',
+              undefined,
+              undefined,
+              undefined,
+              ref.current.position.y
             );
             return; // Skip normal behavior during repair
           }
@@ -2436,13 +2448,13 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
         const machineId = activeAlerts[0].machineId?.toLowerCase() ?? '';
         const alertPos =
           machinePositions[
-            machineId.includes('silo')
-              ? 'silo'
-              : machineId.includes('mill') || machineId.includes('rm')
-                ? 'mill'
-                : machineId.includes('packer')
-                  ? 'packer'
-                  : 'default'
+          machineId.includes('silo')
+            ? 'silo'
+            : machineId.includes('mill') || machineId.includes('rm')
+              ? 'mill'
+              : machineId.includes('packer')
+                ? 'packer'
+                : 'default'
           ];
         const dx = alertPos.x - ref.current.position.x;
         const dz = alertPos.z - ref.current.position.z;
@@ -2459,7 +2471,8 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
           ref.current.position.x,
           ref.current.position.z,
           5, // 5 unit range
-          data.id
+          data.id,
+          ref.current.position.y
         );
         if (nearbyWorker) {
           const dx = nearbyWorker.x - ref.current.position.x;
@@ -2519,7 +2532,8 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
         nearestForklift = positionRegistry.getNearestForklift(
           ref.current.position.x,
           ref.current.position.z,
-          FORKLIFT_DETECTION_RANGE
+          FORKLIFT_DETECTION_RANGE,
+          ref.current.position.y
         );
         lastForkliftCheckRef.current = nearestForklift;
       } else {
@@ -2746,7 +2760,16 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
       ref.current.rotation.y = directionRef.current > 0 ? 0 : Math.PI;
 
       // Register position for collision avoidance
-      positionRegistry.register(data.id, ref.current.position.x, ref.current.position.z, 'worker');
+      positionRegistry.register(
+        data.id,
+        ref.current.position.x,
+        ref.current.position.z,
+        'worker',
+        undefined,
+        undefined,
+        undefined,
+        ref.current.position.y
+      );
 
       // Record heat map point (throttled to every 60 frames ~1sec to avoid performance issues)
       if (frameCountRef.current % 60 === 0) {

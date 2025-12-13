@@ -102,6 +102,14 @@ export const DPad: React.FC<DPadProps> = ({
     backdrop-blur-sm
   `;
 
+  // Prevent long-press context menus and selection on mobile
+  const noCalloutStyle = {
+    WebkitTouchCallout: 'none',
+    WebkitUserSelect: 'none',
+    userSelect: 'none',
+    touchAction: 'none',
+  } as React.CSSProperties;
+
   const iconClass = 'w-5 h-5 text-slate-200';
 
   return (
@@ -112,6 +120,7 @@ export const DPad: React.FC<DPadProps> = ({
         marginBottom: 'max(16px, env(safe-area-inset-bottom))',
         marginLeft: 'max(16px, env(safe-area-inset-left))',
         opacity: isActive ? activeOpacity : idleOpacity,
+        ...noCalloutStyle,
       }}
     >
       {/* Background circle */}
@@ -122,6 +131,7 @@ export const DPad: React.FC<DPadProps> = ({
         type="button"
         className={`${buttonBaseClass} top-0 left-1/2 -translate-x-1/2 ${dpadMode === 'move' ? 'bg-cyan-500/30' : 'bg-violet-500/30'
           } border border-slate-600/50 active:bg-opacity-60`}
+        style={noCalloutStyle}
         onTouchStart={handleTouchStart('up')}
         onTouchEnd={handleTouchEnd('up')}
         onTouchCancel={handleTouchCancel('up')}
@@ -136,6 +146,7 @@ export const DPad: React.FC<DPadProps> = ({
         type="button"
         className={`${buttonBaseClass} bottom-0 left-1/2 -translate-x-1/2 ${dpadMode === 'move' ? 'bg-cyan-500/30' : 'bg-violet-500/30'
           } border border-slate-600/50 active:bg-opacity-60`}
+        style={noCalloutStyle}
         onTouchStart={handleTouchStart('down')}
         onTouchEnd={handleTouchEnd('down')}
         onTouchCancel={handleTouchCancel('down')}
@@ -150,6 +161,7 @@ export const DPad: React.FC<DPadProps> = ({
         type="button"
         className={`${buttonBaseClass} left-0 top-1/2 -translate-y-1/2 ${dpadMode === 'move' ? 'bg-cyan-500/30' : 'bg-violet-500/30'
           } border border-slate-600/50 active:bg-opacity-60`}
+        style={noCalloutStyle}
         onTouchStart={handleTouchStart('left')}
         onTouchEnd={handleTouchEnd('left')}
         onTouchCancel={handleTouchCancel('left')}
@@ -164,6 +176,7 @@ export const DPad: React.FC<DPadProps> = ({
         type="button"
         className={`${buttonBaseClass} right-0 top-1/2 -translate-y-1/2 ${dpadMode === 'move' ? 'bg-cyan-500/30' : 'bg-violet-500/30'
           } border border-slate-600/50 active:bg-opacity-60`}
+        style={noCalloutStyle}
         onTouchStart={handleTouchStart('right')}
         onTouchEnd={handleTouchEnd('right')}
         onTouchCancel={handleTouchCancel('right')}
@@ -191,6 +204,7 @@ export const DPad: React.FC<DPadProps> = ({
           border-2
           ${fpsMode ? 'opacity-60' : 'active:scale-95'}
         `}
+        style={noCalloutStyle}
         onClick={() => !fpsMode && toggleDpadMode()}
         onTouchStart={(e) => e.stopPropagation()}
         disabled={disabled || fpsMode}

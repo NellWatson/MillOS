@@ -12,6 +12,7 @@ import type { RapierRigidBody } from '@react-three/rapier';
 import * as THREE from 'three';
 import { positionRegistry } from '../../utils/positionRegistry';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
+import { useSafetyStore } from '../../stores/safetyStore';
 import {
   PHYSICS_CONFIG,
   COLLISION_FILTERS,
@@ -92,6 +93,7 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
   // Game state
   const isTabVisible = useGameSimulationStore((s) => s.isTabVisible);
   const emergencyDrillMode = useGameSimulationStore((s) => s.emergencyDrillMode);
+  const forkliftEmergencyStop = useSafetyStore((s) => s.forkliftEmergencyStop);
 
   // Collision groups
   const collisionGroups = useMemo(
@@ -146,8 +148,8 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
     frameCountRef.current++;
 
     // === EMERGENCY STOP ===
-    if (emergencyDrillMode) {
-      // Full stop during fire drill
+    if (emergencyDrillMode || forkliftEmergencyStop) {
+      // Full stop during fire drill or emergency stop
       rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
       updatePosition(0);
       return;

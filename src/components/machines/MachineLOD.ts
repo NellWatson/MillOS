@@ -192,8 +192,8 @@ export function isInstanceVisible(
  * Returns squared distance to avoid sqrt in hot path.
  */
 export function getCullDistanceSquared(machineLodDistance: number): number {
-  // Use 1.5x the LOD distance as the cull threshold
+  // Use 3.0x the LOD distance as the cull threshold
   // This gives a buffer zone where simplified geometry shows before complete culling
-  const cullDist = machineLodDistance * 1.5;
+  const cullDist = machineLodDistance * 3.0;
   return cullDist * cullDist;
 }

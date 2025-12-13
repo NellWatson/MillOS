@@ -13,6 +13,7 @@ import { FactoryInfrastructure } from './FactoryInfrastructure';
 import { SpoutingSystem } from './SpoutingSystem';
 import { DustParticles, GrainFlow, MachineSteamVents, DustAnimationManager } from './DustParticles';
 import { FactoryExterior } from './FactoryExterior';
+import { OpenDockOpening } from './infrastructure/OpenDockOpening';
 import { ForkliftSystem, ForkliftData } from './ForkliftSystem';
 import { FactoryEnvironment } from './Environment';
 import { HolographicDisplays } from './HolographicDisplays';
@@ -608,6 +609,23 @@ export const MillScene: React.FC<MillSceneProps> = ({
 
   return (
     <group>
+      {/* Internal Dock Elements - Shipping and Receiving */}
+      {/* These large black doors link the interior and exterior visually */}
+      {showInterior && !isLowGraphics && (
+        <>
+          {/* Shipping Dock (Front) */}
+          <OpenDockOpening position={[0, 0, 48]} rotation={0} width={30} height={14} label="SHIPPING" />
+          {/* Receiving Dock (Back) */}
+          <OpenDockOpening
+            position={[0, 0, -48]}
+            rotation={Math.PI}
+            width={18}
+            height={14}
+            label="RECEIVING"
+          />
+        </>
+      )}
+
       {/* HDRI Environment for realistic reflections - disable on low */}
       {/* Uses local HDRI to avoid network dependency on GitHub CDN */}
       {/* CRITICAL: Wrapped in its own Suspense to prevent blocking the entire scene during load */}

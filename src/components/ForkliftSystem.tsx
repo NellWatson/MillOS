@@ -315,9 +315,9 @@ export const ForkliftSystem: React.FC<ForkliftSystemProps> = ({ onSelectForklift
           [28, 0, 20], // Packing area (pickup point) - west of break room
           [45, 0, 20], // Move east to clear corridor
           [45, 0, 42], // Move north along east corridor (clear of toilet block)
-          [15, 0, 42], // Approach shipping dock from side (outside platform)
-          [15, 0, 43], // At dock edge (dropoff point) - just outside z=44 obstacle
-          [15, 0, 42], // Pull back from dock
+          [24, 0, 42], // Approach shipping dock from side (outside platform x=18)
+          [24, 0, 44], // At dock edge (dropoff point) - just outside z=44 obstacle boundary
+          [24, 0, 42], // Pull back from dock
           [45, 0, 42], // Return to east corridor
           [45, 0, 20], // Head south
         ],
@@ -333,23 +333,23 @@ export const ForkliftSystem: React.FC<ForkliftSystemProps> = ({ onSelectForklift
         ],
         pathIndex: 0,
         cargo: 'empty',
-        operatorName: 'Tom',
+        operatorName: 'Jake',
       },
       {
         id: 'forklift-2',
-        position: [-15, 0, -38], // Start in west corridor
+        position: [-35, 0, -40], // Start in center of west corridor
         rotation: Math.PI,
         speed: 3,
         // Receiving route: Receiving dock (back, z=-50) -> Silo area
         // IMPORTANT: Dock platform obstacle is x:-10 to 10, z:-54 to -44
         // Must stay outside - approach from side at x=-15
         path: [
-          [-15, 0, -43], // At receiving dock edge (pickup point) - just outside z=-44 obstacle
-          [-15, 0, -38], // Pull out from dock
-          [-20, 0, -30], // West corridor
-          [-20, 0, -22], // Near silos (dropoff point)
-          [-20, 0, -30], // Return to west corridor
-          [-15, 0, -38], // Approach receiving dock
+          [-35, 0, -43], // At receiving dock edge (pickup point) - aligned with corridor
+          [-35, 0, -38], // Pull out
+          [-35, 0, -30], // West corridor (center lane to avoid all collisions)
+          [-35, 0, -22], // Near silos (dropoff point)
+          [-35, 0, -30], // Return to west corridor
+          [-35, 0, -38], // Approach receiving dock
         ],
         pathActions: [
           { type: 'pickup', duration: 2.0 }, // Load at receiving dock
@@ -361,7 +361,7 @@ export const ForkliftSystem: React.FC<ForkliftSystemProps> = ({ onSelectForklift
         ],
         pathIndex: 0,
         cargo: 'empty',
-        operatorName: 'Jake',
+        operatorName: 'Tom',
       },
     ],
     []
@@ -426,8 +426,8 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
   const wheelRefsRef = useRef<THREE.Mesh[]>([]); // Cached wheel references
   const safetyStopTimerRef = useRef(0); // Time since safety stop started (for resume delay)
   const HYSTERESIS_TIME = 0.15; // 150ms before state can change
-  const SAFETY_RESUME_DELAY = 2.5; // Wait 2.5s after safety stop before resuming (prevents worker thrash)
-  const CROSSING_WAIT_TIME = 1.5; // Wait 1.5s before entering crossing zone
+  const SAFETY_RESUME_DELAY = 1.0; // Wait 1.0s after safety stop before resuming (prevents worker thrash)
+  const CROSSING_WAIT_TIME = 1.0; // Wait 1.0s before entering crossing zone
   const CROSSING_APPROACH_DISTANCE = 3; // Distance to start slowing for crossing
   const FORK_LIFT_HEIGHT = 1.2; // Max height forks raise during load/unload
   const recordSafetyStop = useSafetyStore((state) => state.recordSafetyStop);
@@ -440,12 +440,12 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
   const enablePhysics = useGraphicsStore((state) => state.graphics.enablePhysics);
 
   // Callback for physics forklift position updates
-  const handlePhysicsPositionUpdate = useCallback((x: number, z: number, rotation: number) => {
-    if (ref.current) {
-      ref.current.position.x = x;
-      ref.current.position.z = z;
-      ref.current.rotation.y = rotation;
-    }
+  // Note: We do NOT update the position of ref.current here because in physics mode,
+  // ref.current is a child of the RigidBody and moves with it automatically.
+  // Updating it here would cause double-transformation (moving it relative to the moving parent).
+  const handlePhysicsPositionUpdate = useCallback((_x: number, _z: number, _rotation: number) => {
+    // Left empty intentionally to prevent double-transformation
+    // The physics engine handles the movement of the parent RigidBody
   }, []);
 
   // Callbacks for physics forklift state updates
@@ -491,7 +491,11 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
     // When physics is enabled, skip all movement - physics handles position
     // But still update LOD and wheel animations
     if (enablePhysics) {
-      cameraDistanceRef.current = state.camera.position.distanceTo(ref.current.position);
+      // Calculate world distance for LOD (ref.current is local (0,0,0) inside physics body)
+      const worldPos = new THREE.Vector3();
+      ref.current.getWorldPosition(worldPos);
+      cameraDistanceRef.current = state.camera.position.distanceTo(worldPos);
+
       const FAR_THRESHOLD = 50;
       const CLOSE_THRESHOLD = 40;
       if (distanceTier === 'close' && cameraDistanceRef.current > FAR_THRESHOLD) {
@@ -557,18 +561,20 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
         CHECK_DISTANCE,
         SAFETY_RADIUS,
         data.id, // Pass forklift ID to also check for other forklifts
-        true // Enable obstacle checking
+        true, // Enable obstacle checking
+        pos.y // Pass Y position for height checks
       );
 
       // Check immediate vicinity for workers
-      workersNearby = positionRegistry.getWorkersNearby(pos.x, pos.z, SAFETY_RADIUS);
+      workersNearby = positionRegistry.getWorkersNearby(pos.x, pos.z, SAFETY_RADIUS, pos.y);
 
       // Check immediate vicinity for other forklifts
       forkliftsNearby = positionRegistry.getForkliftsNearby(
         pos.x,
         pos.z,
         FORKLIFT_SAFETY_RADIUS,
-        data.id
+        data.id,
+        pos.y
       );
 
       // Cache the results
@@ -634,20 +640,26 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       crossingClear;
 
     // Track safety stop timer - prevents thrash by requiring delay before resume
-    // When stopped for safety, increment timer; when basic safety met, check if delay passed
+    // Timer represents time spent in "safe" state since last safety stop
+    // When basically safe and timer > 0, we're in the resume delay countdown
     if (!basicSafetyMet) {
-      // Currently unsafe - increment or maintain safety stop timer
-      safetyStopTimerRef.current += delta;
-    } else if (safetyStopTimerRef.current > 0) {
-      // Basic safety met but we were recently stopped - check resume delay
-      safetyStopTimerRef.current += delta;
-      if (safetyStopTimerRef.current >= SAFETY_RESUME_DELAY) {
-        safetyStopTimerRef.current = 0; // Reset timer, allow resume
+      // Currently unsafe - reset the resume timer to start fresh on next safe transition
+      // We mark this as -1 to indicate "was recently unsafe"
+      if (safetyStopTimerRef.current !== -1) {
+        safetyStopTimerRef.current = -1;
       }
+    } else if (safetyStopTimerRef.current === -1) {
+      // Just transitioned from unsafe to safe - start the resume delay timer
+      safetyStopTimerRef.current = 0;
+    } else if (safetyStopTimerRef.current < SAFETY_RESUME_DELAY) {
+      // In resume delay - count up
+      safetyStopTimerRef.current += delta;
     }
+    // When timer >= SAFETY_RESUME_DELAY, forklift can move
 
-    // Only safe to move if basic safety met AND resume delay has passed (timer is 0)
-    const isSafeToMove = basicSafetyMet && safetyStopTimerRef.current === 0;
+    // Only safe to move if basic safety met AND resume delay has passed
+    const resumeDelayPassed = safetyStopTimerRef.current >= SAFETY_RESUME_DELAY;
+    const isSafeToMove = basicSafetyMet && resumeDelayPassed;
     const newIsStopped = !isSafeToMove;
 
     // Register position with CURRENT frame's stopped state (not delayed React state)
@@ -659,7 +671,8 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       'forklift',
       dirNormalized.x,
       dirNormalized.z,
-      newIsStopped
+      newIsStopped,
+      pos.y
     );
 
     // Hysteresis: require stable state for HYSTERESIS_TIME before changing React state
