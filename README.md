@@ -10,10 +10,6 @@
   <img src="https://img.shields.io/badge/SCADA-ISA--18.2-00A86B?style=for-the-badge" alt="SCADA" />
 </p>
 
-<p>
-  <a href="https://www.millos.net"><img src="https://img.shields.io/badge/🌐_Live_Demo-www.MillOS.net-FF6B35?style=for-the-badge" alt="Live Demo" /></a>
-</p>
-
 # MillOS
 
 ### AI-Powered Grain Mill Digital Twin Simulator with Industrial SCADA Integration
@@ -27,6 +23,10 @@ A browser-based 3D industrial simulation featuring autonomous workers, intellige
 <br/>
 
 ![MillOS Screenshot](src/0.10%20Archive/assets/Screenshot.png)
+
+<br/>
+
+<a href="https://www.millos.net"><img src="https://img.shields.io/badge/🌐_Live_Demo-www.MillOS.net-FF6B35?style=for-the-badge" alt="Live Demo" /></a>
 
 </div>
 
