@@ -32,13 +32,11 @@ import { getGPUSettings } from './utils/resourcePersistence';
 import { initializeGPUTracking, cleanupGPUTracking } from './utils/gpuTrackedResources';
 import { GPUMemoryMonitor } from './components/GPUMemoryMonitor';
 import { initializeAIEngine } from './utils/aiEngine';
-import {
-  useGraphicsStore,
-  useUIStore,
-  initializeSCADASync,
-  useGameSimulationStore,
-  useProductionStore,
-} from './store';
+import { useGraphicsStore } from './stores/graphicsStore';
+import { useUIStore } from './stores/uiStore';
+import { useGameSimulationStore } from './stores/gameSimulationStore';
+import { useProductionStore } from './stores/productionStore';
+import { initializeSCADASync } from './store';
 import { useShallow } from 'zustand/react/shallow';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 
@@ -115,6 +113,12 @@ const DynamicBackground: React.FC = () => {
     const applyColor = (gameTime: number) => {
       const targetColor = getSkyBackgroundColor(gameTime);
       const shouldUpdate = targetColor !== lastColorRef.current || !isInitializedRef.current;
+
+      // DEBUG: Log game time spread to detect synchronization issues
+      if (Math.abs(gameTime - Math.floor(gameTime)) < 0.05) {
+        console.log(`[App:DynamicBackground] Time: ${gameTime.toFixed(2)}, Color: ${targetColor}`);
+      }
+
       if (!shouldUpdate) return;
 
       lastColorRef.current = targetColor;
@@ -682,11 +686,10 @@ const App: React.FC = () => {
             className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none"
           >
             <div
-              className={`px-6 py-4 rounded-xl backdrop-blur-xl border shadow-2xl ${
-                qualityNotification === 'EMERGENCY STOP'
-                  ? 'bg-red-900/95 border-red-500 text-red-100 animate-pulse'
-                  : 'bg-slate-800/90 border-slate-600 text-slate-300'
-              }`}
+              className={`px-6 py-4 rounded-xl backdrop-blur-xl border shadow-2xl ${qualityNotification === 'EMERGENCY STOP'
+                ? 'bg-red-900/95 border-red-500 text-red-100 animate-pulse'
+                : 'bg-slate-800/90 border-slate-600 text-slate-300'
+                }`}
             >
               <div className="text-center">
                 <div className="text-3xl font-bold uppercase tracking-wider">

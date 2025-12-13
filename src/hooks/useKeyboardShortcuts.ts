@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { GraphicsQuality } from '../store';
+import { GraphicsQuality } from '../stores/graphicsStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useProductionStore } from '../stores/productionStore';
 import { useSafetyStore } from '../stores/safetyStore';
@@ -114,7 +114,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
           // Queue random emergency stop PA announcement
           const announcement =
             EMERGENCY_STOP_ANNOUNCEMENTS[
-              Math.floor(Math.random() * EMERGENCY_STOP_ANNOUNCEMENTS.length)
+            Math.floor(Math.random() * EMERGENCY_STOP_ANNOUNCEMENTS.length)
             ];
           addAnnouncement({
             type: 'emergency',
@@ -276,10 +276,10 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         e.preventDefault();
         audioManager.playClick();
         if (!document.fullscreenElement) {
-          document.documentElement.requestFullscreen().catch(() => {});
+          document.documentElement.requestFullscreen().catch(() => { });
           setQualityNotification('FULLSCREEN');
         } else {
-          document.exitFullscreen().catch(() => {});
+          document.exitFullscreen().catch(() => { });
           setQualityNotification('WINDOWED');
         }
         setTimeout(() => setQualityNotification(null), 1500);

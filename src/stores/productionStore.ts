@@ -266,7 +266,7 @@ export const useProductionStore = create<ProductionStore>()(
     // Initialize performance indices
     _indices: createEmptyProductionIndices(),
 
-    productionSpeed: 0.2,
+    productionSpeed: 1,
     setProductionSpeed: (speed) => set({ productionSpeed: speed }),
 
     workers: [],

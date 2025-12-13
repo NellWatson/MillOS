@@ -364,9 +364,24 @@ export const SkySystem: React.FC = () => {
   const sunLightRef = useRef<THREE.DirectionalLight>(null);
   const moonLightRef = useRef<THREE.DirectionalLight>(null);
   const ambientLightRef = useRef<THREE.AmbientLight>(null);
+  const useRef_lastLoggedTime = useRef(-1);
 
   // Enhanced sky colors with horizon color for each time of day
   const skyColors = useMemo(() => {
+    // Debug logging for sky system time sync
+    if (Math.floor(gameTime) !== Math.floor(useRef_lastLoggedTime.current)) {
+      console.log(`[SkySystem] Time: ${gameTime.toFixed(2)}, Phase: ${gameTime >= 21 || gameTime < 5 ? 'Night' :
+        gameTime >= 5 && gameTime < 6 ? 'Early Dawn' :
+          gameTime >= 6 && gameTime < 8 ? 'Sunrise' :
+            gameTime >= 8 && gameTime < 10 ? 'Morning' :
+              gameTime >= 10 && gameTime < 16 ? 'Midday' :
+                gameTime >= 16 && gameTime < 18 ? 'Afternoon' :
+                  gameTime >= 18 && gameTime < 19 ? 'Golden Hour' :
+                    'Dusk'
+        }`);
+      useRef_lastLoggedTime.current = gameTime;
+    }
+
     // [Top, Bottom, Horizon]
     if (gameTime >= 21 || gameTime < 5) {
       // Deep Night (21:00 - 05:00)
@@ -448,13 +463,14 @@ export const SkySystem: React.FC = () => {
         ground: '#1e293b',
       };
     }
-    // Default to midday
+
+    // Fallback to midday if somehow no condition met (should cover all, but safe default)
     return {
-      top: '#0369a1',
-      bottom: '#7dd3fc',
-      horizon: '#bae6fd',
-      ambient: '#f0f9ff',
-      ground: '#475569',
+      top: '#1e90ff',
+      bottom: '#87ceeb',
+      horizon: '#fffaf0',
+      ambient: '#fffff0',
+      ground: '#7cb77c',
     };
   }, [gameTime]);
 

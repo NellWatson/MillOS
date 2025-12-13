@@ -17,7 +17,7 @@ const pressedKeys = new Set<string>();
 const MOVE_SPEED = 20; // Units per second
 const VERTICAL_SPEED = 15; // Units per second for up/down
 const SPRINT_MULTIPLIER = 3.6; // Speed multiplier when holding Shift
-const MIN_CAMERA_HEIGHT = 2.0; // Minimum camera Y to prevent ground clipping
+const MIN_CAMERA_HEIGHT = 1.5; // Minimum camera Y to prevent ground clipping (25% lower than 2.0)
 const MIN_TARGET_HEIGHT = 0.5; // Minimum orbit target Y (above floor level)
 
 // Camera preset definitions based on MillOS factory zones
@@ -435,9 +435,8 @@ export const CameraPresetIndicator: React.FC = () => {
         {CAMERA_PRESETS.map((_, i) => (
           <div
             key={i}
-            className={`w-4 h-4 rounded text-[9px] font-mono flex items-center justify-center transition-colors ${
-              i === activePreset ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-500'
-            }`}
+            className={`w-4 h-4 rounded text-[9px] font-mono flex items-center justify-center transition-colors ${i === activePreset ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-500'
+              }`}
           >
             {i + 1}
           </div>

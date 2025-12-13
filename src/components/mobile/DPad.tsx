@@ -26,13 +26,26 @@ export const DPad: React.FC<DPadProps> = ({
   idleOpacity = 0.5,
   activeOpacity = 1,
 }) => {
-  const { dpadMode, toggleDpadMode, setDpadDirection } = useMobileControlStore();
+  // Optimize selectors to avoid re-renders when dpadDirection changes
+  const dpadMode = useMobileControlStore((state) => state.dpadMode);
+  const toggleDpadMode = useMobileControlStore((state) => state.toggleDpadMode);
+  const setDpadDirection = useMobileControlStore((state) => state.setDpadDirection);
+
   const fpsMode = useUIStore((state) => state.fpsMode);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const knobRef = useRef<HTMLDivElement>(null);
   const [isActive, setIsActive] = useState(false);
-  const [knobPosition, setKnobPosition] = useState({ x: 0, y: 0 });
   const touchIdRef = useRef<number | null>(null);
+  // Store position in ref to avoid re-renders
+  const positionRef = useRef({ x: 0, y: 0 });
+
+  const updateKnobVisuals = useCallback((x: number, y: number) => {
+    if (knobRef.current) {
+      knobRef.current.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+    }
+    positionRef.current = { x, y };
+  }, []);
 
   const updateJoystick = useCallback(
     (clientX: number, clientY: number) => {
@@ -56,8 +69,8 @@ export const DPad: React.FC<DPadProps> = ({
         deltaY *= scale;
       }
 
-      // Update visual knob position
-      setKnobPosition({ x: deltaX, y: deltaY });
+      // Update visual knob position directly via DOM
+      updateKnobVisuals(deltaX, deltaY);
 
       // Normalize to -1 to 1 range
       let normalizedX = deltaX / MAX_DISTANCE;
@@ -79,15 +92,15 @@ export const DPad: React.FC<DPadProps> = ({
       const direction: DPadDirection = { x: normalizedX, y: normalizedY };
       setDpadDirection(direction);
     },
-    [setDpadDirection]
+    [setDpadDirection, updateKnobVisuals]
   );
 
   const resetJoystick = useCallback(() => {
-    setKnobPosition({ x: 0, y: 0 });
+    updateKnobVisuals(0, 0);
     setDpadDirection(null);
     setIsActive(false);
     touchIdRef.current = null;
-  }, [setDpadDirection]);
+  }, [setDpadDirection, updateKnobVisuals]);
 
   // Global touch listeners to ensure joystick resets even if touch moves off-element
   useEffect(() => {
@@ -114,9 +127,10 @@ export const DPad: React.FC<DPadProps> = ({
       }
     };
 
-    // Add global listeners with passive: true for performance
-    window.addEventListener('touchend', handleGlobalTouchEnd, { passive: true });
-    window.addEventListener('touchcancel', handleGlobalTouchCancel, { passive: true });
+    // Add global listeners with passive: false to ensure we don't miss events
+    // although for end/cancel passive: true is usually fine, being consistent helps
+    window.addEventListener('touchend', handleGlobalTouchEnd);
+    window.addEventListener('touchcancel', handleGlobalTouchCancel);
 
     return () => {
       window.removeEventListener('touchend', handleGlobalTouchEnd);
@@ -127,6 +141,7 @@ export const DPad: React.FC<DPadProps> = ({
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
       if (disabled) return;
+      // Critical for preventing scrolling on iOS
       e.preventDefault();
       e.stopPropagation();
 
@@ -149,6 +164,7 @@ export const DPad: React.FC<DPadProps> = ({
   const handleTouchMove = useCallback(
     (e: React.TouchEvent) => {
       if (disabled || touchIdRef.current === null) return;
+      // Critical for responsiveness
       e.preventDefault();
       e.stopPropagation();
 
@@ -224,24 +240,29 @@ export const DPad: React.FC<DPadProps> = ({
 
       {/* Draggable knob */}
       <div
-        className={`absolute rounded-full transition-colors duration-100 flex items-center justify-center shadow-lg ${
-          isActive
-            ? dpadMode === 'move'
-              ? 'bg-cyan-500/90 border-cyan-400'
-              : 'bg-violet-500/90 border-violet-400'
-            : 'bg-slate-700/90 border-slate-600'
-        } border-2`}
+        ref={knobRef}
+        className={`absolute rounded-full transition-colors duration-100 flex items-center justify-center shadow-lg ${isActive
+          ? dpadMode === 'move'
+            ? 'bg-cyan-500/90 border-cyan-400'
+            : 'bg-violet-500/90 border-violet-400'
+          : 'bg-slate-700/90 border-slate-600'
+          } border-2`}
         style={{
           width: KNOB_SIZE,
           height: KNOB_SIZE,
           left: '50%',
           top: '50%',
-          transform: `translate(calc(-50% + ${knobPosition.x}px), calc(-50% + ${knobPosition.y}px))`,
-          transition: isActive ? 'none' : 'transform 0.15s ease-out',
+          transform: 'translate(-50%, -50%)',
+          // Remove transition when dragging for instant response
+          transition: isActive ? 'none' : 'transform 0.15s ease-out, background 0.1s',
+          // Ensure hardware acceleration
+          willChange: 'transform',
         }}
       >
-        {/* Direction indicator dot */}
-        {isActive && (knobPosition.x !== 0 || knobPosition.y !== 0) && (
+        {/* Direction indicator dot - simple check of ref current would be stale here for render, 
+            but we can use isActive as a proxy since we only show dot when moving usually. 
+            Actually, let's keep it simple: show dot if active. */}
+        {isActive && (
           <div className="w-2 h-2 rounded-full bg-white/80" />
         )}
       </div>
@@ -256,12 +277,11 @@ export const DPad: React.FC<DPadProps> = ({
             flex items-center justify-center
             transition-all duration-200
             touch-none select-none
-            ${
-              fpsMode
+            ${fpsMode
+              ? 'bg-cyan-600/90 border-cyan-400'
+              : dpadMode === 'move'
                 ? 'bg-cyan-600/90 border-cyan-400'
-                : dpadMode === 'move'
-                  ? 'bg-cyan-600/90 border-cyan-400'
-                  : 'bg-violet-600/90 border-violet-400'
+                : 'bg-violet-600/90 border-violet-400'
             }
             border-2
             ${fpsMode ? 'opacity-70' : 'active:scale-95'}
