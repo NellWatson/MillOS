@@ -8,7 +8,7 @@ const MOVE_SPEED = 12;
 const SPRINT_SPEED = 24;
 const PLAYER_HEIGHT = 1.7;
 const PLAYER_RADIUS = 0.4;
-const FPS_FOV = 105;
+const FPS_FOV = 75; // Reduced FOV for mobile to reduce fish-eye effect
 const ORBIT_FOV = 65;
 const LOOK_SENSITIVITY = 0.0075; // Doubled for mobile
 
@@ -22,28 +22,28 @@ const COLLISION_BOXES: Array<{
   minZ: number;
   maxZ: number;
 }> = [
-  // Silos (Zone 1)
-  { minX: -20, maxX: -12, minZ: -28, maxZ: -16 },
-  { minX: -8, maxX: 0, minZ: -28, maxZ: -16 },
-  { minX: 4, maxX: 12, minZ: -28, maxZ: -16 },
-  { minX: 16, maxX: 24, minZ: -28, maxZ: -16 },
-  // Roller Mills (Zone 2)
-  { minX: -22, maxX: -14, minZ: -12, maxZ: 0 },
-  { minX: -10, maxX: -2, minZ: -12, maxZ: 0 },
-  { minX: 2, maxX: 10, minZ: -12, maxZ: 0 },
-  { minX: 14, maxX: 22, minZ: -12, maxZ: 0 },
-  // Plansifters (Zone 3)
-  { minX: -18, maxX: -6, minZ: 2, maxZ: 14 },
-  { minX: -4, maxX: 8, minZ: 2, maxZ: 14 },
-  { minX: 10, maxX: 22, minZ: 2, maxZ: 14 },
-  // Packers (Zone 4)
-  { minX: -20, maxX: -8, minZ: 16, maxZ: 28 },
-  { minX: -4, maxX: 8, minZ: 16, maxZ: 28 },
-  { minX: 12, maxX: 24, minZ: 16, maxZ: 28 },
-  // Truck bays
-  { minX: -15, maxX: 15, minZ: 45, maxZ: 60 },
-  { minX: -15, maxX: 15, minZ: -60, maxZ: -45 },
-];
+    // Silos (Zone 1)
+    { minX: -20, maxX: -12, minZ: -28, maxZ: -16 },
+    { minX: -8, maxX: 0, minZ: -28, maxZ: -16 },
+    { minX: 4, maxX: 12, minZ: -28, maxZ: -16 },
+    { minX: 16, maxX: 24, minZ: -28, maxZ: -16 },
+    // Roller Mills (Zone 2)
+    { minX: -22, maxX: -14, minZ: -12, maxZ: 0 },
+    { minX: -10, maxX: -2, minZ: -12, maxZ: 0 },
+    { minX: 2, maxX: 10, minZ: -12, maxZ: 0 },
+    { minX: 14, maxX: 22, minZ: -12, maxZ: 0 },
+    // Plansifters (Zone 3)
+    { minX: -18, maxX: -6, minZ: 2, maxZ: 14 },
+    { minX: -4, maxX: 8, minZ: 2, maxZ: 14 },
+    { minX: 10, maxX: 22, minZ: 2, maxZ: 14 },
+    // Packers (Zone 4)
+    { minX: -20, maxX: -8, minZ: 16, maxZ: 28 },
+    { minX: -4, maxX: 8, minZ: 16, maxZ: 28 },
+    { minX: 12, maxX: 24, minZ: 16, maxZ: 28 },
+    // Truck bays
+    { minX: -15, maxX: 15, minZ: 45, maxZ: 60 },
+    { minX: -15, maxX: 15, minZ: -60, maxZ: -45 },
+  ];
 
 /**
  * Mobile-friendly first-person controller.
