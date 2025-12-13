@@ -31,7 +31,6 @@ import {
   FastForward,
 } from 'lucide-react';
 import { MachineData } from '../types';
-import { audioManager } from '../utils/audioManager';
 import { GraphicsQuality, GraphicsSettings } from '../stores/graphicsStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useProductionStore } from '../stores/productionStore';
@@ -983,7 +982,12 @@ const CollapsibleLegend: React.FC = () => {
       </motion.div>
 
       {/* Truck Schedule Widget */}
-      <motion.div initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }} className="w-44">
+      <motion.div
+        initial={{ opacity: 0, x: 50 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ delay: 0.1 }}
+        className="w-44"
+      >
         <TruckScheduleWidget />
       </motion.div>
 

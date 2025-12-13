@@ -134,11 +134,7 @@ export const OpenDockOpening: React.FC<OpenDockOpeningProps> = ({
           {/* Green light - available */}
           <mesh position={[0, 0.5, 0]}>
             <sphereGeometry args={[0.15, 16, 16]} />
-            <meshStandardMaterial
-              color="#22c55e"
-              emissive="#22c55e"
-              emissiveIntensity={0.8}
-            />
+            <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.8} />
           </mesh>
           {/* Red light - occupied */}
           <mesh position={[0, -0.5, 0]}>

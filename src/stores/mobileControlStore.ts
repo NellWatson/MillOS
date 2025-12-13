@@ -63,7 +63,6 @@ export const useMobileControlStore = create<MobileControlStore>((set) => ({
   setMobilePanelVisible: (visible) => set({ mobilePanelVisible: visible }),
 
   // Combined actions
-  openMobilePanel: (content) =>
-    set({ mobilePanelContent: content, mobilePanelVisible: true }),
+  openMobilePanel: (content) => set({ mobilePanelContent: content, mobilePanelVisible: true }),
   closeMobilePanel: () => set({ mobilePanelVisible: false }),
 }));

@@ -615,7 +615,10 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
     // forklift-1 handles shipping dock, forklift-2 handles receiving dock
     const isShippingForklift = data.id === 'forklift-1';
     const isReceivingForklift = data.id === 'forklift-2';
-    if ((isShippingForklift && truckDocked.shipping) || (isReceivingForklift && truckDocked.receiving)) {
+    if (
+      (isShippingForklift && truckDocked.shipping) ||
+      (isReceivingForklift && truckDocked.receiving)
+    ) {
       speedMultiplier *= 1.3; // 30% speed boost when truck is waiting
     }
 

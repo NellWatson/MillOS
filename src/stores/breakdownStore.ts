@@ -257,7 +257,9 @@ export const useBreakdownStore = create<BreakdownStore>()(
     assignRepairWorker: (breakdownId, workerId, workerName) =>
       set((state) => ({
         activeBreakdowns: state.activeBreakdowns.map((b) =>
-          b.id === breakdownId ? { ...b, assignedWorkerId: workerId, assignedWorkerName: workerName } : b
+          b.id === breakdownId
+            ? { ...b, assignedWorkerId: workerId, assignedWorkerName: workerName }
+            : b
         ),
       })),
 
@@ -293,10 +295,10 @@ export const useBreakdownStore = create<BreakdownStore>()(
 
         return {
           activeBreakdowns: state.activeBreakdowns.filter((b) => b.id !== breakdownId),
-          breakdownHistory: [
-            { ...breakdown, resolved: true },
-            ...state.breakdownHistory,
-          ].slice(0, 20),
+          breakdownHistory: [{ ...breakdown, resolved: true }, ...state.breakdownHistory].slice(
+            0,
+            20
+          ),
         };
       }),
 

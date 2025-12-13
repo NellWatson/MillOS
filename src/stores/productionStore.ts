@@ -249,7 +249,12 @@ interface ProductionStore {
 
   // Quality Control Lab state
   qcLab: QCLabState;
-  startQCTest: (sampleSource: string, sampleSourceName: string, workerId: string, workerName: string) => void;
+  startQCTest: (
+    sampleSource: string,
+    sampleSourceName: string,
+    workerId: string,
+    workerName: string
+  ) => void;
   completeQCTest: (result: Omit<QualityTestResult, 'id' | 'timestamp'>) => void;
   triggerContaminationAlert: () => void;
   updateCertificationStatus: (status: 'certified' | 'pending' | 'expired') => void;

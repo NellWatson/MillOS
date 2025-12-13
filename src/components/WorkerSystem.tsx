@@ -15,7 +15,6 @@ import { WorkerMoodOverlay } from './WorkerMoodOverlay';
 import { WorkerReactionOverlay } from './MaintenanceSystem';
 import { audioManager } from '../utils/audioManager';
 import { shouldRunThisFrame, getThrottleLevel } from '../utils/frameThrottle';
-import { useModelTextures } from '../utils/machineTextures';
 import * as THREE from 'three';
 import {
   SHARED_WORKER_MATERIALS,
@@ -24,7 +23,6 @@ import {
   getHairMaterial,
   getUniformMaterial,
   getPantsMaterial,
-  getHatMaterial,
 } from './workers/SharedWorkerMaterials';
 
 interface WorkerSystemProps {
@@ -309,10 +307,7 @@ Clipboard.displayName = 'Clipboard';
 
 const Tablet: React.FC = React.memo(() => (
   <group position={[0.06, -0.02, 0.04]} rotation={[0.4, 0, 0.15]}>
-    <mesh
-      geometry={sharedToolGeometries.tablet.body}
-      material={SHARED_WORKER_MATERIALS.darkGray}
-    />
+    <mesh geometry={sharedToolGeometries.tablet.body} material={SHARED_WORKER_MATERIALS.darkGray} />
     <mesh
       position={[0, 0, 0.006]}
       geometry={sharedToolGeometries.tablet.screen}
@@ -329,10 +324,7 @@ Tablet.displayName = 'Tablet';
 
 const RadioWalkieTalkie: React.FC = React.memo(() => (
   <group position={[0.04, 0, 0.03]} rotation={[0.2, 0.3, 0]}>
-    <mesh
-      geometry={sharedToolGeometries.radio.body}
-      material={SHARED_WORKER_MATERIALS.darkGray}
-    />
+    <mesh geometry={sharedToolGeometries.radio.body} material={SHARED_WORKER_MATERIALS.darkGray} />
     <mesh
       position={[0.01, 0.07, 0]}
       geometry={sharedToolGeometries.radio.antenna}
@@ -1509,11 +1501,7 @@ const HumanModel: React.FC<{
             />
 
             {/* Nose */}
-            <mesh
-              castShadow
-              position={[0, -0.02, 0.155]}
-              material={getSkinMaterial(skinTone)}
-            >
+            <mesh castShadow position={[0, -0.02, 0.155]} material={getSkinMaterial(skinTone)}>
               <coneGeometry args={[0.025, 0.05, 8]} />
             </mesh>
             <mesh
@@ -2282,9 +2270,7 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
         const REPAIR_RATE = 15; // Progress % per second when repairing
 
         // Find breakdown assigned to this worker, or first unassigned one
-        let assignedBreakdown = activeBreakdowns.find(
-          (b) => b.assignedWorkerId === data.id
-        );
+        let assignedBreakdown = activeBreakdowns.find((b) => b.assignedWorkerId === data.id);
 
         // If no assignment, pick first unassigned breakdown
         if (!assignedBreakdown) {

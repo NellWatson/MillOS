@@ -105,11 +105,7 @@ const AnalyticalScales: React.FC<{ position: [number, number, number] }> = ({ po
       {/* Display */}
       <mesh position={[0, 0.12, -0.15]}>
         <boxGeometry args={[0.15, 0.06, 0.02]} />
-        <meshStandardMaterial
-          color="#22c55e"
-          emissive="#22c55e"
-          emissiveIntensity={0.5}
-        />
+        <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.5} />
       </mesh>
     </group>
   );
@@ -126,12 +122,7 @@ const SampleContainers: React.FC<{ position: [number, number, number] }> = ({ po
           {/* Jar */}
           <mesh position={[0, 0.1, 0]} castShadow>
             <cylinderGeometry args={[0.04, 0.04, 0.15, 8]} />
-            <meshStandardMaterial
-              color="#f8fafc"
-              transparent
-              opacity={0.4}
-              roughness={0.1}
-            />
+            <meshStandardMaterial color="#f8fafc" transparent opacity={0.4} roughness={0.1} />
           </mesh>
           {/* Sample inside */}
           <mesh position={[0, 0.06, 0]}>
@@ -180,20 +171,12 @@ const ResultsDisplay: React.FC<{ position: [number, number, number] }> = ({ posi
       {/* Screen */}
       <mesh position={[0, 0, 0.03]}>
         <boxGeometry args={[0.9, 0.5, 0.01]} />
-        <meshStandardMaterial
-          color="#0f172a"
-          emissive="#1e293b"
-          emissiveIntensity={0.2}
-        />
+        <meshStandardMaterial color="#0f172a" emissive="#1e293b" emissiveIntensity={0.2} />
       </mesh>
       {/* Grade indicator light */}
       <mesh position={[0.35, 0.2, 0.04]}>
         <sphereGeometry args={[0.03, 8, 8]} />
-        <meshStandardMaterial
-          color={gradeColor}
-          emissive={gradeColor}
-          emissiveIntensity={0.8}
-        />
+        <meshStandardMaterial color={gradeColor} emissive={gradeColor} emissiveIntensity={0.8} />
       </mesh>
       {/* HTML overlay for text */}
       <Html position={[0, 0, 0.05]} center transform scale={0.15}>
@@ -201,15 +184,10 @@ const ResultsDisplay: React.FC<{ position: [number, number, number] }> = ({ posi
           <div className="text-xs text-gray-400 mb-1">LATEST TEST</div>
           {latestTest ? (
             <>
-              <div
-                className="text-3xl font-bold"
-                style={{ color: gradeColor }}
-              >
+              <div className="text-3xl font-bold" style={{ color: gradeColor }}>
                 {latestTest.grade}
               </div>
-              <div className="text-xs text-gray-500 mt-1">
-                {latestTest.sampleSourceName}
-              </div>
+              <div className="text-xs text-gray-500 mt-1">{latestTest.sampleSourceName}</div>
             </>
           ) : (
             <div className="text-lg text-gray-500">NO DATA</div>
@@ -306,12 +284,7 @@ export const QCLabRoom: React.FC<{
       <SafetyShower position={[2.5, 0, -1]} />
 
       {/* Lab lighting - bright for precision work */}
-      <pointLight
-        position={[0, 3, 0]}
-        intensity={20}
-        distance={8}
-        color="#f8fafc"
-      />
+      <pointLight position={[0, 3, 0]} intensity={20} distance={8} color="#f8fafc" />
 
       {/* Room label */}
       <Html position={[0, 2.8, 0]} center>

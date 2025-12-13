@@ -42,6 +42,9 @@ describe('Store Integration Tests', () => {
           handoverPhase: 'idle',
           priorities: [],
           workerAssignments: [],
+          clockedInWorkerIds: [],
+          clockedOutWorkerIds: [],
+          handoffConversations: [],
         },
       });
     });

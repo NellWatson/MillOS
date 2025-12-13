@@ -537,7 +537,14 @@ export const SkySystem: React.FC = () => {
       });
       return () => unregisterSkyDome('main');
     }
-  }, [skyColors.top, skyColors.bottom, skyColors.horizon, skyColors.ground, cloudDensity, sunAngle]);
+  }, [
+    skyColors.top,
+    skyColors.bottom,
+    skyColors.horizon,
+    skyColors.ground,
+    cloudDensity,
+    sunAngle,
+  ]);
 
   // Direct uniform update to ensure sky colors stay in sync with game time
   // This bypasses potential registry timing issues
@@ -553,7 +560,14 @@ export const SkySystem: React.FC = () => {
         material.uniforms.sunAngle.value = sunAngle;
       }
     }
-  }, [skyColors.top, skyColors.bottom, skyColors.horizon, skyColors.ground, cloudDensity, sunAngle]);
+  }, [
+    skyColors.top,
+    skyColors.bottom,
+    skyColors.horizon,
+    skyColors.ground,
+    cloudDensity,
+    sunAngle,
+  ]);
 
   // Register lights with animation manager (replaces direct useFrame for lights)
   useEffect(() => {
@@ -572,7 +586,15 @@ export const SkySystem: React.FC = () => {
       });
       return () => unregisterLighting('main');
     }
-  }, [sunPosition, moonPosition, sunIntensity, moonIntensity, sunColor, skyColors.ambient, sunVisible]);
+  }, [
+    sunPosition,
+    moonPosition,
+    sunIntensity,
+    moonIntensity,
+    sunColor,
+    skyColors.ambient,
+    sunVisible,
+  ]);
 
   return (
     <group>

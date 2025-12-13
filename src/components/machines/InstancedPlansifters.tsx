@@ -29,7 +29,6 @@ const MATERIALS = {
   cable: new THREE.MeshStandardMaterial({ color: '#9ca3af', metalness: 0.5, roughness: 0.5 }),
 };
 
-
 const SIFTER_SIZE = { width: 7, height: 7, depth: 7 };
 
 interface InstancedPlansiftersProps {

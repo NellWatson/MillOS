@@ -18,8 +18,7 @@ export function useMobileDetection(): MobileDetectionResult {
     if (typeof window === 'undefined') {
       return { isMobile: false, isTouchDevice: false, isLandscape: false };
     }
-    const hasTouchSupport =
-      'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    const hasTouchSupport = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     const isLandscape = window.innerWidth > window.innerHeight;
     const isSmallScreen = Math.min(window.innerWidth, window.innerHeight) < 768;
     return {
@@ -30,8 +29,7 @@ export function useMobileDetection(): MobileDetectionResult {
   });
 
   useEffect(() => {
-    const hasTouchSupport =
-      'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    const hasTouchSupport = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
     const handleResize = () => {
       const isLandscape = window.innerWidth > window.innerHeight;
@@ -67,8 +65,7 @@ export function getMobileDetection(): MobileDetectionResult {
   if (typeof window === 'undefined') {
     return { isMobile: false, isTouchDevice: false, isLandscape: false };
   }
-  const hasTouchSupport =
-    'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  const hasTouchSupport = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   const isLandscape = window.innerWidth > window.innerHeight;
   const isSmallScreen = Math.min(window.innerWidth, window.innerHeight) < 768;
   return {

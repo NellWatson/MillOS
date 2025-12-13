@@ -30,7 +30,6 @@ const MATERIALS = {
   }),
 };
 
-
 const PACKER_SIZE = { width: 4, height: 6, depth: 4 };
 
 interface InstancedPackersProps {

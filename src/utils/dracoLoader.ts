@@ -22,6 +22,8 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 
+type ObjectMap = Record<string, unknown>;
+
 // CDN path for DRACO decoder files
 // For offline support, download and place in public/draco/
 const DRACO_DECODER_PATH = 'https://www.gstatic.com/draco/versioned/decoders/1.5.7/';
@@ -54,11 +56,13 @@ export function createDracoGLTFLoader(): GLTFLoader {
   return loader;
 }
 
+export type DracoGLTFResult = GLTF & ObjectMap;
+
 /**
  * Hook to load GLTF models with DRACO support
  * Wrapper around useGLTF that configures DRACO decoding
  */
-export function useDracoGLTF(path: string, useDraco: boolean = true): GLTF {
+export function useDracoGLTF(path: string, useDraco: boolean = true): DracoGLTFResult {
   // Configure drei's useGLTF to use DRACO
   // Note: useGLTF from drei automatically uses DRACO when the decoder is set up
   if (useDraco) {
@@ -66,7 +70,7 @@ export function useDracoGLTF(path: string, useDraco: boolean = true): GLTF {
     getDracoLoader();
   }
 
-  return useGLTF(path, useDraco);
+  return useGLTF(path, useDraco) as unknown as DracoGLTFResult;
 }
 
 /**
@@ -84,13 +88,13 @@ export function preloadDracoModel(path: string | string[]): void {
  * Load a DRACO-compressed model manually (for use outside React components)
  * Returns a promise that resolves with the GLTF object
  */
-export async function loadDracoModel(path: string): Promise<GLTF> {
+export async function loadDracoModel(path: string): Promise<DracoGLTFResult> {
   const loader = createDracoGLTFLoader();
 
   return new Promise((resolve, reject) => {
     loader.load(
       path,
-      (gltf) => resolve(gltf),
+      (gltf) => resolve(gltf as unknown as DracoGLTFResult),
       undefined, // onProgress
       (error) => reject(error)
     );
@@ -121,7 +125,10 @@ export const DRACO_COMPRESSION_RATIOS = {
 /**
  * Calculate estimated original size from compressed size
  */
-export function estimateOriginalSize(compressedBytes: number, complexity: keyof typeof DRACO_COMPRESSION_RATIOS = 'moderate'): number {
+export function estimateOriginalSize(
+  compressedBytes: number,
+  complexity: keyof typeof DRACO_COMPRESSION_RATIOS = 'moderate'
+): number {
   const ratio = DRACO_COMPRESSION_RATIOS[complexity];
   return Math.round(compressedBytes / (1 - ratio));
 }

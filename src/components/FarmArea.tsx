@@ -106,7 +106,13 @@ const SM = {
   mud: new THREE.MeshStandardMaterial({ color: '#5d4037', roughness: 1 }),
   soil: new THREE.MeshStandardMaterial({ color: '#3e2723', roughness: 1 }),
   stone: new THREE.MeshStandardMaterial({ color: '#d7ccc8', roughness: 0.8 }),
-  water: new THREE.MeshStandardMaterial({ color: '#64b5f6', roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.8 }),
+  water: new THREE.MeshStandardMaterial({
+    color: '#64b5f6',
+    roughness: 0.2,
+    metalness: 0.1,
+    transparent: true,
+    opacity: 0.8,
+  }),
   treeTrunk: new THREE.MeshStandardMaterial({ color: '#5d4037', roughness: 0.9 }),
   treeLeafDark: new THREE.MeshStandardMaterial({ color: '#2e7d32', roughness: 0.8 }),
   treeLeafLight: new THREE.MeshStandardMaterial({ color: '#388e3c', roughness: 0.8 }),
@@ -123,191 +129,580 @@ const SM = {
   coopBrown: new THREE.MeshStandardMaterial({ color: '#8B4513', roughness: 0.85 }),
   coopDark: new THREE.MeshStandardMaterial({ color: '#6d4c41', roughness: 0.85 }),
   coopRoof: new THREE.MeshStandardMaterial({ color: '#2e7d32', roughness: 0.7 }),
-  windmillSail: new THREE.MeshStandardMaterial({ color: '#f5f5f5', roughness: 0.7, side: THREE.DoubleSide }),
+  windmillSail: new THREE.MeshStandardMaterial({
+    color: '#f5f5f5',
+    roughness: 0.7,
+    side: THREE.DoubleSide,
+  }),
 };
 
 // Static components with React.memo
 const Barn = React.memo<{ position: [number, number, number] }>(({ position }) => (
   <group position={position}>
-    <mesh position={[0, 3, 0]} castShadow receiveShadow><boxGeometry args={[10, 6, 8]} /><primitive object={SM.barnRed} attach="material" /></mesh>
-    <mesh position={[0, 11, 0]} rotation={[0, Math.PI / 4, 0]} castShadow><cylinderGeometry args={[0, 6.5, 10, 4]} /><primitive object={SM.barnRoof} attach="material" /></mesh>
-    <mesh position={[0, 0.15, 4.01]}><boxGeometry args={[10.2, 0.3, 0.1]} /><primitive object={SM.whiteTrim} attach="material" /></mesh>
-    <mesh position={[5.01, 3, 0]}><boxGeometry args={[0.1, 6.2, 8.2]} /><primitive object={SM.whiteTrim} attach="material" /></mesh>
-    <mesh position={[-5.01, 3, 0]}><boxGeometry args={[0.1, 6.2, 8.2]} /><primitive object={SM.whiteTrim} attach="material" /></mesh>
-    <mesh position={[-1.5, 2, 4.05]}><boxGeometry args={[2.5, 4, 0.1]} /><primitive object={SM.barnDoor} attach="material" /></mesh>
-    <mesh position={[1.5, 2, 4.05]}><boxGeometry args={[2.5, 4, 0.1]} /><primitive object={SM.barnDoor} attach="material" /></mesh>
-    {[-1.5, 1.5].map((x) => (<React.Fragment key={x}><mesh position={[x, 2, 4.1]} rotation={[0, 0, Math.PI / 4]}><boxGeometry args={[0.15, 5, 0.05]} /><primitive object={SM.whiteTrim} attach="material" /></mesh><mesh position={[x, 2, 4.1]} rotation={[0, 0, -Math.PI / 4]}><boxGeometry args={[0.15, 5, 0.05]} /><primitive object={SM.whiteTrim} attach="material" /></mesh></React.Fragment>))}
-    <mesh position={[0, 5, 4.05]}><circleGeometry args={[0.8, 16]} /><primitive object={SM.barnWindow} attach="material" /></mesh>
-    <mesh position={[0, 16.75, 0]} castShadow><cylinderGeometry args={[0.05, 0.05, 1.5, 8]} /><primitive object={SM.darkMetal} attach="material" /></mesh>
-    <mesh position={[0.3, 17.25, 0]} castShadow><coneGeometry args={[0.15, 0.6, 4]} /><primitive object={SM.gold} attach="material" /></mesh>
+    <mesh position={[0, 3, 0]} castShadow receiveShadow>
+      <boxGeometry args={[10, 6, 8]} />
+      <primitive object={SM.barnRed} attach="material" />
+    </mesh>
+    <mesh position={[0, 11, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
+      <cylinderGeometry args={[0, 6.5, 10, 4]} />
+      <primitive object={SM.barnRoof} attach="material" />
+    </mesh>
+    <mesh position={[0, 0.15, 4.01]}>
+      <boxGeometry args={[10.2, 0.3, 0.1]} />
+      <primitive object={SM.whiteTrim} attach="material" />
+    </mesh>
+    <mesh position={[5.01, 3, 0]}>
+      <boxGeometry args={[0.1, 6.2, 8.2]} />
+      <primitive object={SM.whiteTrim} attach="material" />
+    </mesh>
+    <mesh position={[-5.01, 3, 0]}>
+      <boxGeometry args={[0.1, 6.2, 8.2]} />
+      <primitive object={SM.whiteTrim} attach="material" />
+    </mesh>
+    <mesh position={[-1.5, 2, 4.05]}>
+      <boxGeometry args={[2.5, 4, 0.1]} />
+      <primitive object={SM.barnDoor} attach="material" />
+    </mesh>
+    <mesh position={[1.5, 2, 4.05]}>
+      <boxGeometry args={[2.5, 4, 0.1]} />
+      <primitive object={SM.barnDoor} attach="material" />
+    </mesh>
+    {[-1.5, 1.5].map((x) => (
+      <React.Fragment key={x}>
+        <mesh position={[x, 2, 4.1]} rotation={[0, 0, Math.PI / 4]}>
+          <boxGeometry args={[0.15, 5, 0.05]} />
+          <primitive object={SM.whiteTrim} attach="material" />
+        </mesh>
+        <mesh position={[x, 2, 4.1]} rotation={[0, 0, -Math.PI / 4]}>
+          <boxGeometry args={[0.15, 5, 0.05]} />
+          <primitive object={SM.whiteTrim} attach="material" />
+        </mesh>
+      </React.Fragment>
+    ))}
+    <mesh position={[0, 5, 4.05]}>
+      <circleGeometry args={[0.8, 16]} />
+      <primitive object={SM.barnWindow} attach="material" />
+    </mesh>
+    <mesh position={[0, 16.75, 0]} castShadow>
+      <cylinderGeometry args={[0.05, 0.05, 1.5, 8]} />
+      <primitive object={SM.darkMetal} attach="material" />
+    </mesh>
+    <mesh position={[0.3, 17.25, 0]} castShadow>
+      <coneGeometry args={[0.15, 0.6, 4]} />
+      <primitive object={SM.gold} attach="material" />
+    </mesh>
   </group>
 ));
 Barn.displayName = 'Barn';
 
 const ChickenCoop = React.memo<{ position: [number, number, number] }>(({ position }) => (
   <group position={position}>
-    <mesh position={[0, 0.8, 0]} castShadow receiveShadow><boxGeometry args={[3, 1.6, 2.5]} /><primitive object={SM.coopBrown} attach="material" /></mesh>
-    <mesh position={[0, 2, 0]} castShadow><boxGeometry args={[3.5, 0.15, 3]} /><primitive object={SM.coopRoof} attach="material" /></mesh>
-    <mesh position={[0, 2.4, -0.6]} rotation={[0.5, 0, 0]} castShadow><boxGeometry args={[3.5, 0.15, 1.5]} /><primitive object={SM.coopRoof} attach="material" /></mesh>
-    <mesh position={[0, 2.4, 0.6]} rotation={[-0.5, 0, 0]} castShadow><boxGeometry args={[3.5, 0.15, 1.5]} /><primitive object={SM.coopRoof} attach="material" /></mesh>
-    <mesh position={[1.51, 0.4, 0]}><boxGeometry args={[0.1, 0.6, 0.5]} /><primitive object={SM.black} attach="material" /></mesh>
-    <mesh position={[2.2, 0.2, 0]} rotation={[0, 0, 0.4]} castShadow><boxGeometry args={[1.5, 0.08, 0.4]} /><primitive object={SM.woodTan} attach="material" /></mesh>
-    <mesh position={[-1.6, 0.6, 0]} castShadow><boxGeometry args={[0.5, 0.8, 2]} /><primitive object={SM.coopDark} attach="material" /></mesh>
+    <mesh position={[0, 0.8, 0]} castShadow receiveShadow>
+      <boxGeometry args={[3, 1.6, 2.5]} />
+      <primitive object={SM.coopBrown} attach="material" />
+    </mesh>
+    <mesh position={[0, 2, 0]} castShadow>
+      <boxGeometry args={[3.5, 0.15, 3]} />
+      <primitive object={SM.coopRoof} attach="material" />
+    </mesh>
+    <mesh position={[0, 2.4, -0.6]} rotation={[0.5, 0, 0]} castShadow>
+      <boxGeometry args={[3.5, 0.15, 1.5]} />
+      <primitive object={SM.coopRoof} attach="material" />
+    </mesh>
+    <mesh position={[0, 2.4, 0.6]} rotation={[-0.5, 0, 0]} castShadow>
+      <boxGeometry args={[3.5, 0.15, 1.5]} />
+      <primitive object={SM.coopRoof} attach="material" />
+    </mesh>
+    <mesh position={[1.51, 0.4, 0]}>
+      <boxGeometry args={[0.1, 0.6, 0.5]} />
+      <primitive object={SM.black} attach="material" />
+    </mesh>
+    <mesh position={[2.2, 0.2, 0]} rotation={[0, 0, 0.4]} castShadow>
+      <boxGeometry args={[1.5, 0.08, 0.4]} />
+      <primitive object={SM.woodTan} attach="material" />
+    </mesh>
+    <mesh position={[-1.6, 0.6, 0]} castShadow>
+      <boxGeometry args={[0.5, 0.8, 2]} />
+      <primitive object={SM.coopDark} attach="material" />
+    </mesh>
   </group>
 ));
 ChickenCoop.displayName = 'ChickenCoop';
 
-const FenceSection = React.memo<{ position: [number, number, number]; rotation?: number; length?: number }>(({ position, rotation = 0, length = 4 }) => {
+const FenceSection = React.memo<{
+  position: [number, number, number];
+  rotation?: number;
+  length?: number;
+}>(({ position, rotation = 0, length = 4 }) => {
   const railGeom = useMemo(() => new THREE.BoxGeometry(length, 0.08, 0.06), [length]);
   return (
     <group position={position} rotation={[0, rotation, 0]}>
-      <mesh position={[-length / 2, 0.5, 0]} castShadow><primitive object={SG.fencePost} attach="geometry" /><primitive object={SM.woodBrown} attach="material" /></mesh>
-      <mesh position={[length / 2, 0.5, 0]} castShadow><primitive object={SG.fencePost} attach="geometry" /><primitive object={SM.woodBrown} attach="material" /></mesh>
-      <mesh position={[0, 0.7, 0]} castShadow><primitive object={railGeom} attach="geometry" /><primitive object={SM.woodLight} attach="material" /></mesh>
-      <mesh position={[0, 0.35, 0]} castShadow><primitive object={railGeom} attach="geometry" /><primitive object={SM.woodLight} attach="material" /></mesh>
+      <mesh position={[-length / 2, 0.5, 0]} castShadow>
+        <primitive object={SG.fencePost} attach="geometry" />
+        <primitive object={SM.woodBrown} attach="material" />
+      </mesh>
+      <mesh position={[length / 2, 0.5, 0]} castShadow>
+        <primitive object={SG.fencePost} attach="geometry" />
+        <primitive object={SM.woodBrown} attach="material" />
+      </mesh>
+      <mesh position={[0, 0.7, 0]} castShadow>
+        <primitive object={railGeom} attach="geometry" />
+        <primitive object={SM.woodLight} attach="material" />
+      </mesh>
+      <mesh position={[0, 0.35, 0]} castShadow>
+        <primitive object={railGeom} attach="geometry" />
+        <primitive object={SM.woodLight} attach="material" />
+      </mesh>
     </group>
   );
 });
 FenceSection.displayName = 'FenceSection';
 
-const HayBale = React.memo<{ position: [number, number, number]; rotation?: number }>(({ position, rotation = 0 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
-    <mesh position={[0, 0.4, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow><primitive object={SG.hayBale} attach="geometry" /><primitive object={SM.hay} attach="material" /></mesh>
-    <mesh position={[0, 0.4, 0.41]}><primitive object={SG.hayRing} attach="geometry" /><primitive object={SM.hayDark} attach="material" /></mesh>
-  </group>
-));
+const HayBale = React.memo<{ position: [number, number, number]; rotation?: number }>(
+  ({ position, rotation = 0 }) => (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <mesh position={[0, 0.4, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+        <primitive object={SG.hayBale} attach="geometry" />
+        <primitive object={SM.hay} attach="material" />
+      </mesh>
+      <mesh position={[0, 0.4, 0.41]}>
+        <primitive object={SG.hayRing} attach="geometry" />
+        <primitive object={SM.hayDark} attach="material" />
+      </mesh>
+    </group>
+  )
+);
 HayBale.displayName = 'HayBale';
 
-const WaterTrough = React.memo<{ position: [number, number, number]; rotation?: number }>(({ position, rotation = 0 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
-    <mesh position={[0, 0.3, 0]} castShadow><primitive object={SG.troughBody} attach="geometry" /><primitive object={SM.woodBrown} attach="material" /></mesh>
-    <mesh position={[0, 0.5, 0]}><primitive object={SG.troughWater} attach="geometry" /><primitive object={SM.water} attach="material" /></mesh>
-    {[-0.6, 0.6].map((x, i) => <mesh key={i} position={[x, 0.1, 0]} castShadow><primitive object={SG.troughLeg} attach="geometry" /><primitive object={SM.woodBrown} attach="material" /></mesh>)}
-  </group>
-));
+const WaterTrough = React.memo<{ position: [number, number, number]; rotation?: number }>(
+  ({ position, rotation = 0 }) => (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <mesh position={[0, 0.3, 0]} castShadow>
+        <primitive object={SG.troughBody} attach="geometry" />
+        <primitive object={SM.woodBrown} attach="material" />
+      </mesh>
+      <mesh position={[0, 0.5, 0]}>
+        <primitive object={SG.troughWater} attach="geometry" />
+        <primitive object={SM.water} attach="material" />
+      </mesh>
+      {[-0.6, 0.6].map((x, i) => (
+        <mesh key={i} position={[x, 0.1, 0]} castShadow>
+          <primitive object={SG.troughLeg} attach="geometry" />
+          <primitive object={SM.woodBrown} attach="material" />
+        </mesh>
+      ))}
+    </group>
+  )
+);
 WaterTrough.displayName = 'WaterTrough';
 
 const GardenBed = React.memo<{ position: [number, number, number] }>(({ position }) => (
   <group position={position}>
-    <mesh position={[0, 0.15, 0]} receiveShadow><primitive object={SG.gardenFrame} attach="geometry" /><primitive object={SM.woodBrown} attach="material" /></mesh>
-    <mesh position={[0, 0.25, 0]} receiveShadow><primitive object={SG.gardenSoil} attach="geometry" /><primitive object={SM.soil} attach="material" /></mesh>
-    {[-0.8, -0.4, 0, 0.4, 0.8].map((x, i) => (<group key={`carrot-${i}`} position={[x, 0.35, -0.5]}><mesh castShadow><primitive object={SG.carrotTop} attach="geometry" /><primitive object={SM.carrotOrange} attach="material" /></mesh><mesh position={[0, 0.12, 0]} castShadow><primitive object={SG.carrotLeaf} attach="geometry" /><primitive object={SM.vegetableGreen} attach="material" /></mesh></group>))}
-    {[-0.6, 0, 0.6].map((x, i) => <mesh key={`cabbage-${i}`} position={[x, 0.4, 0.4]} castShadow><primitive object={SG.cabbage} attach="geometry" /><primitive object={SM.cabbageGreen} attach="material" /></mesh>)}
+    <mesh position={[0, 0.15, 0]} receiveShadow>
+      <primitive object={SG.gardenFrame} attach="geometry" />
+      <primitive object={SM.woodBrown} attach="material" />
+    </mesh>
+    <mesh position={[0, 0.25, 0]} receiveShadow>
+      <primitive object={SG.gardenSoil} attach="geometry" />
+      <primitive object={SM.soil} attach="material" />
+    </mesh>
+    {[-0.8, -0.4, 0, 0.4, 0.8].map((x, i) => (
+      <group key={`carrot-${i}`} position={[x, 0.35, -0.5]}>
+        <mesh castShadow>
+          <primitive object={SG.carrotTop} attach="geometry" />
+          <primitive object={SM.carrotOrange} attach="material" />
+        </mesh>
+        <mesh position={[0, 0.12, 0]} castShadow>
+          <primitive object={SG.carrotLeaf} attach="geometry" />
+          <primitive object={SM.vegetableGreen} attach="material" />
+        </mesh>
+      </group>
+    ))}
+    {[-0.6, 0, 0.6].map((x, i) => (
+      <mesh key={`cabbage-${i}`} position={[x, 0.4, 0.4]} castShadow>
+        <primitive object={SG.cabbage} attach="geometry" />
+        <primitive object={SM.cabbageGreen} attach="material" />
+      </mesh>
+    ))}
   </group>
 ));
 GardenBed.displayName = 'GardenBed';
 
 const Farmhouse = React.memo<{ position: [number, number, number] }>(({ position }) => (
   <group position={position}>
-    <mesh position={[0, 2, 0]} castShadow receiveShadow><boxGeometry args={[6, 4, 5]} /><primitive object={SM.houseWall} attach="material" /></mesh>
-    <mesh position={[0, 7.25, 0]} rotation={[0, Math.PI / 4, 0]} castShadow><cylinderGeometry args={[0, 4, 6.5, 4]} /><primitive object={SM.roofBrown} attach="material" /></mesh>
-    <mesh position={[2, 5.5, 0]} castShadow><boxGeometry args={[0.8, 2, 0.8]} /><primitive object={SM.chimneyRed} attach="material" /></mesh>
-    <mesh position={[0, 1.2, 2.51]}><boxGeometry args={[1.2, 2.2, 0.1]} /><primitive object={SM.barnDoor} attach="material" /></mesh>
-    {[[-1.8, 2.5, 2.51], [1.8, 2.5, 2.51]].map((pos, i) => (<group key={i} position={pos as [number, number, number]}><mesh><boxGeometry args={[1, 1.2, 0.1]} /><primitive object={SM.windowBlue} attach="material" /></mesh><mesh position={[0, 0, 0.06]}><boxGeometry args={[1.1, 0.08, 0.05]} /><primitive object={SM.whiteTrim} attach="material" /></mesh><mesh position={[0, 0, 0.06]}><boxGeometry args={[0.08, 1.3, 0.05]} /><primitive object={SM.whiteTrim} attach="material" /></mesh></group>))}
-    {[-2.4, -1.2, 1.2, 2.4].map((x, i) => <mesh key={`shutter-${i}`} position={[x, 2.5, 2.51]}><boxGeometry args={[0.3, 1.2, 0.08]} /><primitive object={SM.shutterGreen} attach="material" /></mesh>)}
-    <mesh position={[0, 0.15, 3.2]} receiveShadow><boxGeometry args={[4, 0.3, 1.5]} /><primitive object={SM.woodLight} attach="material" /></mesh>
-    {[-1.5, 1.5].map((x, i) => <mesh key={i} position={[x, 1.2, 3.8]} castShadow><cylinderGeometry args={[0.1, 0.1, 2.1, 8]} /><primitive object={SM.whiteTrim} attach="material" /></mesh>)}
-    <mesh position={[0, 2.3, 3.5]} rotation={[0.2, 0, 0]} castShadow><boxGeometry args={[4.5, 0.15, 2]} /><primitive object={SM.roofBrown} attach="material" /></mesh>
+    <mesh position={[0, 2, 0]} castShadow receiveShadow>
+      <boxGeometry args={[6, 4, 5]} />
+      <primitive object={SM.houseWall} attach="material" />
+    </mesh>
+    <mesh position={[0, 7.25, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
+      <cylinderGeometry args={[0, 4, 6.5, 4]} />
+      <primitive object={SM.roofBrown} attach="material" />
+    </mesh>
+    <mesh position={[2, 5.5, 0]} castShadow>
+      <boxGeometry args={[0.8, 2, 0.8]} />
+      <primitive object={SM.chimneyRed} attach="material" />
+    </mesh>
+    <mesh position={[0, 1.2, 2.51]}>
+      <boxGeometry args={[1.2, 2.2, 0.1]} />
+      <primitive object={SM.barnDoor} attach="material" />
+    </mesh>
+    {[
+      [-1.8, 2.5, 2.51],
+      [1.8, 2.5, 2.51],
+    ].map((pos, i) => (
+      <group key={i} position={pos as [number, number, number]}>
+        <mesh>
+          <boxGeometry args={[1, 1.2, 0.1]} />
+          <primitive object={SM.windowBlue} attach="material" />
+        </mesh>
+        <mesh position={[0, 0, 0.06]}>
+          <boxGeometry args={[1.1, 0.08, 0.05]} />
+          <primitive object={SM.whiteTrim} attach="material" />
+        </mesh>
+        <mesh position={[0, 0, 0.06]}>
+          <boxGeometry args={[0.08, 1.3, 0.05]} />
+          <primitive object={SM.whiteTrim} attach="material" />
+        </mesh>
+      </group>
+    ))}
+    {[-2.4, -1.2, 1.2, 2.4].map((x, i) => (
+      <mesh key={`shutter-${i}`} position={[x, 2.5, 2.51]}>
+        <boxGeometry args={[0.3, 1.2, 0.08]} />
+        <primitive object={SM.shutterGreen} attach="material" />
+      </mesh>
+    ))}
+    <mesh position={[0, 0.15, 3.2]} receiveShadow>
+      <boxGeometry args={[4, 0.3, 1.5]} />
+      <primitive object={SM.woodLight} attach="material" />
+    </mesh>
+    {[-1.5, 1.5].map((x, i) => (
+      <mesh key={i} position={[x, 1.2, 3.8]} castShadow>
+        <cylinderGeometry args={[0.1, 0.1, 2.1, 8]} />
+        <primitive object={SM.whiteTrim} attach="material" />
+      </mesh>
+    ))}
+    <mesh position={[0, 2.3, 3.5]} rotation={[0.2, 0, 0]} castShadow>
+      <boxGeometry args={[4.5, 0.15, 2]} />
+      <primitive object={SM.roofBrown} attach="material" />
+    </mesh>
   </group>
 ));
 Farmhouse.displayName = 'Farmhouse';
 
 const Tree = React.memo<{ position: [number, number, number] }>(({ position }) => (
   <group position={position}>
-    <mesh position={[0, 2, 0]} castShadow><primitive object={SG.treeTrunk} attach="geometry" /><primitive object={SM.treeTrunk} attach="material" /></mesh>
-    <mesh position={[0, 5.5, 0]} castShadow><primitive object={SG.treeFoliage} attach="geometry" /><primitive object={SM.treeLeafDark} attach="material" /></mesh>
-    <mesh position={[0, 8, 0]} castShadow><primitive object={SG.treeFoliageTop} attach="geometry" /><primitive object={SM.treeLeafLight} attach="material" /></mesh>
+    <mesh position={[0, 2, 0]} castShadow>
+      <primitive object={SG.treeTrunk} attach="geometry" />
+      <primitive object={SM.treeTrunk} attach="material" />
+    </mesh>
+    <mesh position={[0, 5.5, 0]} castShadow>
+      <primitive object={SG.treeFoliage} attach="geometry" />
+      <primitive object={SM.treeLeafDark} attach="material" />
+    </mesh>
+    <mesh position={[0, 8, 0]} castShadow>
+      <primitive object={SG.treeFoliageTop} attach="geometry" />
+      <primitive object={SM.treeLeafLight} attach="material" />
+    </mesh>
   </group>
 ));
 Tree.displayName = 'Tree';
 
-const Sheep = React.memo<{ position: [number, number, number]; rotation?: number }>(({ position, rotation = 0 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
-    <mesh position={[0, 0.5, 0]} castShadow><primitive object={SG.sheepBody} attach="geometry" /><primitive object={SM.sheepWool} attach="material" /></mesh>
-    {[[0.2, 0.7, 0.2], [-0.2, 0.75, 0.15], [0, 0.8, -0.2], [0.15, 0.65, -0.25]].map((pos, i) => <mesh key={i} position={pos as [number, number, number]} castShadow><primitive object={SG.sheepFluff} attach="geometry" /><primitive object={SM.sheepWool} attach="material" /></mesh>)}
-    <mesh position={[0.4, 0.55, 0]} castShadow><primitive object={SG.sheepHead} attach="geometry" /><primitive object={SM.sheepFace} attach="material" /></mesh>
-    <mesh position={[0.35, 0.65, 0.15]} rotation={[0, 0.5, 0.5]} castShadow><primitive object={SG.sheepEar} attach="geometry" /><primitive object={SM.sheepFace} attach="material" /></mesh>
-    <mesh position={[0.35, 0.65, -0.15]} rotation={[0, -0.5, -0.5]} castShadow><primitive object={SG.sheepEar} attach="geometry" /><primitive object={SM.sheepFace} attach="material" /></mesh>
-    <mesh position={[0.52, 0.6, 0.08]}><primitive object={SG.sheepEye} attach="geometry" /><primitive object={SM.sheepEye} attach="material" /></mesh>
-    <mesh position={[0.52, 0.6, -0.08]}><primitive object={SG.sheepEye} attach="geometry" /><primitive object={SM.sheepEye} attach="material" /></mesh>
-    {[[0.2, 0.12, 0.18], [0.2, 0.12, -0.18], [-0.2, 0.12, 0.18], [-0.2, 0.12, -0.18]].map((pos, i) => <mesh key={i} position={pos as [number, number, number]} castShadow><primitive object={SG.sheepLeg} attach="geometry" /><primitive object={SM.sheepFace} attach="material" /></mesh>)}
-  </group>
-));
+const Sheep = React.memo<{ position: [number, number, number]; rotation?: number }>(
+  ({ position, rotation = 0 }) => (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <mesh position={[0, 0.5, 0]} castShadow>
+        <primitive object={SG.sheepBody} attach="geometry" />
+        <primitive object={SM.sheepWool} attach="material" />
+      </mesh>
+      {[
+        [0.2, 0.7, 0.2],
+        [-0.2, 0.75, 0.15],
+        [0, 0.8, -0.2],
+        [0.15, 0.65, -0.25],
+      ].map((pos, i) => (
+        <mesh key={i} position={pos as [number, number, number]} castShadow>
+          <primitive object={SG.sheepFluff} attach="geometry" />
+          <primitive object={SM.sheepWool} attach="material" />
+        </mesh>
+      ))}
+      <mesh position={[0.4, 0.55, 0]} castShadow>
+        <primitive object={SG.sheepHead} attach="geometry" />
+        <primitive object={SM.sheepFace} attach="material" />
+      </mesh>
+      <mesh position={[0.35, 0.65, 0.15]} rotation={[0, 0.5, 0.5]} castShadow>
+        <primitive object={SG.sheepEar} attach="geometry" />
+        <primitive object={SM.sheepFace} attach="material" />
+      </mesh>
+      <mesh position={[0.35, 0.65, -0.15]} rotation={[0, -0.5, -0.5]} castShadow>
+        <primitive object={SG.sheepEar} attach="geometry" />
+        <primitive object={SM.sheepFace} attach="material" />
+      </mesh>
+      <mesh position={[0.52, 0.6, 0.08]}>
+        <primitive object={SG.sheepEye} attach="geometry" />
+        <primitive object={SM.sheepEye} attach="material" />
+      </mesh>
+      <mesh position={[0.52, 0.6, -0.08]}>
+        <primitive object={SG.sheepEye} attach="geometry" />
+        <primitive object={SM.sheepEye} attach="material" />
+      </mesh>
+      {[
+        [0.2, 0.12, 0.18],
+        [0.2, 0.12, -0.18],
+        [-0.2, 0.12, 0.18],
+        [-0.2, 0.12, -0.18],
+      ].map((pos, i) => (
+        <mesh key={i} position={pos as [number, number, number]} castShadow>
+          <primitive object={SG.sheepLeg} attach="geometry" />
+          <primitive object={SM.sheepFace} attach="material" />
+        </mesh>
+      ))}
+    </group>
+  )
+);
 Sheep.displayName = 'Sheep';
 
 // Animated components with refs for centralized animation
-const Chicken: React.FC<{ position: [number, number, number]; rotation?: number; animRef: React.RefObject<THREE.Group | null> }> = ({ position, rotation = 0, animRef }) => (
+const Chicken: React.FC<{
+  position: [number, number, number];
+  rotation?: number;
+  animRef: React.RefObject<THREE.Group | null>;
+}> = ({ position, rotation = 0, animRef }) => (
   <group position={position} rotation={[0, rotation, 0]}>
     <group ref={animRef}>
-      <mesh position={[0, 0.25, 0]} castShadow><primitive object={SG.chickenBody} attach="geometry" /><primitive object={SM.chickenFeather} attach="material" /></mesh>
-      <mesh position={[0.15, 0.4, 0]} castShadow><primitive object={SG.chickenHead} attach="geometry" /><primitive object={SM.chickenFeather} attach="material" /></mesh>
-      <mesh position={[0.28, 0.38, 0]} rotation={[0, 0, -0.3]} castShadow><primitive object={SG.chickenBeak} attach="geometry" /><primitive object={SM.chickenBeak} attach="material" /></mesh>
-      <mesh position={[0.15, 0.52, 0]} castShadow><primitive object={SG.chickenComb} attach="geometry" /><primitive object={SM.chickenComb} attach="material" /></mesh>
-      <mesh position={[0.2, 0.32, 0]} castShadow><primitive object={SG.chickenWattle} attach="geometry" /><primitive object={SM.chickenComb} attach="material" /></mesh>
-      <mesh position={[-0.2, 0.35, 0]} rotation={[0, 0, 0.8]} castShadow><primitive object={SG.chickenTail} attach="geometry" /><primitive object={SM.chickenTail} attach="material" /></mesh>
+      <mesh position={[0, 0.25, 0]} castShadow>
+        <primitive object={SG.chickenBody} attach="geometry" />
+        <primitive object={SM.chickenFeather} attach="material" />
+      </mesh>
+      <mesh position={[0.15, 0.4, 0]} castShadow>
+        <primitive object={SG.chickenHead} attach="geometry" />
+        <primitive object={SM.chickenFeather} attach="material" />
+      </mesh>
+      <mesh position={[0.28, 0.38, 0]} rotation={[0, 0, -0.3]} castShadow>
+        <primitive object={SG.chickenBeak} attach="geometry" />
+        <primitive object={SM.chickenBeak} attach="material" />
+      </mesh>
+      <mesh position={[0.15, 0.52, 0]} castShadow>
+        <primitive object={SG.chickenComb} attach="geometry" />
+        <primitive object={SM.chickenComb} attach="material" />
+      </mesh>
+      <mesh position={[0.2, 0.32, 0]} castShadow>
+        <primitive object={SG.chickenWattle} attach="geometry" />
+        <primitive object={SM.chickenComb} attach="material" />
+      </mesh>
+      <mesh position={[-0.2, 0.35, 0]} rotation={[0, 0, 0.8]} castShadow>
+        <primitive object={SG.chickenTail} attach="geometry" />
+        <primitive object={SM.chickenTail} attach="material" />
+      </mesh>
     </group>
-    <mesh position={[0.05, 0.08, 0.05]} castShadow><primitive object={SG.chickenLeg} attach="geometry" /><primitive object={SM.chickenBeak} attach="material" /></mesh>
-    <mesh position={[0.05, 0.08, -0.05]} castShadow><primitive object={SG.chickenLeg} attach="geometry" /><primitive object={SM.chickenBeak} attach="material" /></mesh>
+    <mesh position={[0.05, 0.08, 0.05]} castShadow>
+      <primitive object={SG.chickenLeg} attach="geometry" />
+      <primitive object={SM.chickenBeak} attach="material" />
+    </mesh>
+    <mesh position={[0.05, 0.08, -0.05]} castShadow>
+      <primitive object={SG.chickenLeg} attach="geometry" />
+      <primitive object={SM.chickenBeak} attach="material" />
+    </mesh>
   </group>
 );
 
-const Pig: React.FC<{ position: [number, number, number]; rotation?: number; tailRef: React.RefObject<THREE.Mesh | null> }> = ({ position, rotation = 0, tailRef }) => (
+const Pig: React.FC<{
+  position: [number, number, number];
+  rotation?: number;
+  tailRef: React.RefObject<THREE.Mesh | null>;
+}> = ({ position, rotation = 0, tailRef }) => (
   <group position={position} rotation={[0, rotation, 0]}>
-    <mesh position={[0, 0.35, 0]} castShadow><primitive object={SG.pigBody} attach="geometry" /><primitive object={SM.pigPink} attach="material" /></mesh>
-    <mesh position={[0.35, 0.4, 0]} castShadow><primitive object={SG.pigHead} attach="geometry" /><primitive object={SM.pigPink} attach="material" /></mesh>
-    <mesh position={[0.55, 0.35, 0]} rotation={[0, 0, Math.PI / 2]} castShadow><primitive object={SG.pigSnout} attach="geometry" /><primitive object={SM.pigSnout} attach="material" /></mesh>
-    <mesh position={[0.61, 0.37, 0.04]}><primitive object={SG.pigNostril} attach="geometry" /><primitive object={SM.pigNostril} attach="material" /></mesh>
-    <mesh position={[0.61, 0.37, -0.04]}><primitive object={SG.pigNostril} attach="geometry" /><primitive object={SM.pigNostril} attach="material" /></mesh>
-    <mesh position={[0.25, 0.6, 0.15]} rotation={[0.5, 0.3, 0]} castShadow><primitive object={SG.pigEar} attach="geometry" /><primitive object={SM.pigPink} attach="material" /></mesh>
-    <mesh position={[0.25, 0.6, -0.15]} rotation={[0.5, -0.3, 0]} castShadow><primitive object={SG.pigEar} attach="geometry" /><primitive object={SM.pigPink} attach="material" /></mesh>
-    <mesh position={[0.5, 0.48, 0.12]}><primitive object={SG.pigEye} attach="geometry" /><primitive object={SM.black} attach="material" /></mesh>
-    <mesh position={[0.5, 0.48, -0.12]}><primitive object={SG.pigEye} attach="geometry" /><primitive object={SM.black} attach="material" /></mesh>
-    {[[0.15, 0.1, 0.2], [0.15, 0.1, -0.2], [-0.15, 0.1, 0.2], [-0.15, 0.1, -0.2]].map((pos, i) => <mesh key={i} position={pos as [number, number, number]} castShadow><primitive object={SG.pigLeg} attach="geometry" /><primitive object={SM.pigPink} attach="material" /></mesh>)}
-    <mesh ref={tailRef} position={[-0.4, 0.45, 0]} rotation={[0, 0, 0.5]} castShadow><primitive object={SG.pigTail} attach="geometry" /><primitive object={SM.pigPink} attach="material" /></mesh>
+    <mesh position={[0, 0.35, 0]} castShadow>
+      <primitive object={SG.pigBody} attach="geometry" />
+      <primitive object={SM.pigPink} attach="material" />
+    </mesh>
+    <mesh position={[0.35, 0.4, 0]} castShadow>
+      <primitive object={SG.pigHead} attach="geometry" />
+      <primitive object={SM.pigPink} attach="material" />
+    </mesh>
+    <mesh position={[0.55, 0.35, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+      <primitive object={SG.pigSnout} attach="geometry" />
+      <primitive object={SM.pigSnout} attach="material" />
+    </mesh>
+    <mesh position={[0.61, 0.37, 0.04]}>
+      <primitive object={SG.pigNostril} attach="geometry" />
+      <primitive object={SM.pigNostril} attach="material" />
+    </mesh>
+    <mesh position={[0.61, 0.37, -0.04]}>
+      <primitive object={SG.pigNostril} attach="geometry" />
+      <primitive object={SM.pigNostril} attach="material" />
+    </mesh>
+    <mesh position={[0.25, 0.6, 0.15]} rotation={[0.5, 0.3, 0]} castShadow>
+      <primitive object={SG.pigEar} attach="geometry" />
+      <primitive object={SM.pigPink} attach="material" />
+    </mesh>
+    <mesh position={[0.25, 0.6, -0.15]} rotation={[0.5, -0.3, 0]} castShadow>
+      <primitive object={SG.pigEar} attach="geometry" />
+      <primitive object={SM.pigPink} attach="material" />
+    </mesh>
+    <mesh position={[0.5, 0.48, 0.12]}>
+      <primitive object={SG.pigEye} attach="geometry" />
+      <primitive object={SM.black} attach="material" />
+    </mesh>
+    <mesh position={[0.5, 0.48, -0.12]}>
+      <primitive object={SG.pigEye} attach="geometry" />
+      <primitive object={SM.black} attach="material" />
+    </mesh>
+    {[
+      [0.15, 0.1, 0.2],
+      [0.15, 0.1, -0.2],
+      [-0.15, 0.1, 0.2],
+      [-0.15, 0.1, -0.2],
+    ].map((pos, i) => (
+      <mesh key={i} position={pos as [number, number, number]} castShadow>
+        <primitive object={SG.pigLeg} attach="geometry" />
+        <primitive object={SM.pigPink} attach="material" />
+      </mesh>
+    ))}
+    <mesh ref={tailRef} position={[-0.4, 0.45, 0]} rotation={[0, 0, 0.5]} castShadow>
+      <primitive object={SG.pigTail} attach="geometry" />
+      <primitive object={SM.pigPink} attach="material" />
+    </mesh>
   </group>
 );
 
-const Cow: React.FC<{ position: [number, number, number]; rotation?: number; headRef: React.RefObject<THREE.Group | null> }> = ({ position, rotation = 0, headRef }) => (
+const Cow: React.FC<{
+  position: [number, number, number];
+  rotation?: number;
+  headRef: React.RefObject<THREE.Group | null>;
+}> = ({ position, rotation = 0, headRef }) => (
   <group position={position} rotation={[0, rotation, 0]}>
-    <mesh position={[0, 0.6, 0]} scale={[1.3, 1, 1]} castShadow><primitive object={SG.cowBody} attach="geometry" /><primitive object={SM.cowWhite} attach="material" /></mesh>
-    <mesh position={[0.2, 0.8, 0.3]} castShadow><primitive object={SG.cowSpot} attach="geometry" /><primitive object={SM.cowBlack} attach="material" /></mesh>
-    <mesh position={[-0.3, 0.5, -0.25]} castShadow><primitive object={SG.cowSpotSmall} attach="geometry" /><primitive object={SM.cowBlack} attach="material" /></mesh>
+    <mesh position={[0, 0.6, 0]} scale={[1.3, 1, 1]} castShadow>
+      <primitive object={SG.cowBody} attach="geometry" />
+      <primitive object={SM.cowWhite} attach="material" />
+    </mesh>
+    <mesh position={[0.2, 0.8, 0.3]} castShadow>
+      <primitive object={SG.cowSpot} attach="geometry" />
+      <primitive object={SM.cowBlack} attach="material" />
+    </mesh>
+    <mesh position={[-0.3, 0.5, -0.25]} castShadow>
+      <primitive object={SG.cowSpotSmall} attach="geometry" />
+      <primitive object={SM.cowBlack} attach="material" />
+    </mesh>
     <group ref={headRef}>
-      <mesh position={[0.6, 0.7, 0]} castShadow><primitive object={SG.cowHead} attach="geometry" /><primitive object={SM.cowWhite} attach="material" /></mesh>
-      <mesh position={[0.8, 0.6, 0]} castShadow><primitive object={SG.cowMuzzle} attach="geometry" /><primitive object={SM.cowMuzzle} attach="material" /></mesh>
-      <mesh position={[0.88, 0.62, 0.05]}><primitive object={SG.cowNostril} attach="geometry" /><primitive object={SM.cowNostril} attach="material" /></mesh>
-      <mesh position={[0.88, 0.62, -0.05]}><primitive object={SG.cowNostril} attach="geometry" /><primitive object={SM.cowNostril} attach="material" /></mesh>
-      <mesh position={[0.7, 0.78, 0.12]}><primitive object={SG.cowEye} attach="geometry" /><primitive object={SM.black} attach="material" /></mesh>
-      <mesh position={[0.7, 0.78, -0.12]}><primitive object={SG.cowEye} attach="geometry" /><primitive object={SM.black} attach="material" /></mesh>
-      <mesh position={[0.5, 0.82, 0.18]} rotation={[0, 0.5, 0.3]} castShadow><primitive object={SG.cowEar} attach="geometry" /><primitive object={SM.cowWhite} attach="material" /></mesh>
-      <mesh position={[0.5, 0.82, -0.18]} rotation={[0, -0.5, -0.3]} castShadow><primitive object={SG.cowEar} attach="geometry" /><primitive object={SM.cowWhite} attach="material" /></mesh>
-      <mesh position={[0.45, 0.92, 0.1]} rotation={[0, 0, 0.3]} castShadow><primitive object={SG.cowHorn} attach="geometry" /><primitive object={SM.cowHorn} attach="material" /></mesh>
-      <mesh position={[0.45, 0.92, -0.1]} rotation={[0, 0, -0.3]} castShadow><primitive object={SG.cowHorn} attach="geometry" /><primitive object={SM.cowHorn} attach="material" /></mesh>
+      <mesh position={[0.6, 0.7, 0]} castShadow>
+        <primitive object={SG.cowHead} attach="geometry" />
+        <primitive object={SM.cowWhite} attach="material" />
+      </mesh>
+      <mesh position={[0.8, 0.6, 0]} castShadow>
+        <primitive object={SG.cowMuzzle} attach="geometry" />
+        <primitive object={SM.cowMuzzle} attach="material" />
+      </mesh>
+      <mesh position={[0.88, 0.62, 0.05]}>
+        <primitive object={SG.cowNostril} attach="geometry" />
+        <primitive object={SM.cowNostril} attach="material" />
+      </mesh>
+      <mesh position={[0.88, 0.62, -0.05]}>
+        <primitive object={SG.cowNostril} attach="geometry" />
+        <primitive object={SM.cowNostril} attach="material" />
+      </mesh>
+      <mesh position={[0.7, 0.78, 0.12]}>
+        <primitive object={SG.cowEye} attach="geometry" />
+        <primitive object={SM.black} attach="material" />
+      </mesh>
+      <mesh position={[0.7, 0.78, -0.12]}>
+        <primitive object={SG.cowEye} attach="geometry" />
+        <primitive object={SM.black} attach="material" />
+      </mesh>
+      <mesh position={[0.5, 0.82, 0.18]} rotation={[0, 0.5, 0.3]} castShadow>
+        <primitive object={SG.cowEar} attach="geometry" />
+        <primitive object={SM.cowWhite} attach="material" />
+      </mesh>
+      <mesh position={[0.5, 0.82, -0.18]} rotation={[0, -0.5, -0.3]} castShadow>
+        <primitive object={SG.cowEar} attach="geometry" />
+        <primitive object={SM.cowWhite} attach="material" />
+      </mesh>
+      <mesh position={[0.45, 0.92, 0.1]} rotation={[0, 0, 0.3]} castShadow>
+        <primitive object={SG.cowHorn} attach="geometry" />
+        <primitive object={SM.cowHorn} attach="material" />
+      </mesh>
+      <mesh position={[0.45, 0.92, -0.1]} rotation={[0, 0, -0.3]} castShadow>
+        <primitive object={SG.cowHorn} attach="geometry" />
+        <primitive object={SM.cowHorn} attach="material" />
+      </mesh>
     </group>
-    {[[0.3, 0.2, 0.25], [0.3, 0.2, -0.25], [-0.35, 0.2, 0.25], [-0.35, 0.2, -0.25]].map((pos, i) => <mesh key={i} position={pos as [number, number, number]} castShadow><primitive object={SG.cowLeg} attach="geometry" /><primitive object={SM.cowWhite} attach="material" /></mesh>)}
-    <mesh position={[-0.15, 0.25, 0]} castShadow><primitive object={SG.cowUdder} attach="geometry" /><primitive object={SM.cowMuzzle} attach="material" /></mesh>
-    <mesh position={[-0.65, 0.7, 0]} rotation={[0, 0, 0.8]} castShadow><primitive object={SG.cowTail} attach="geometry" /><primitive object={SM.cowWhite} attach="material" /></mesh>
-    <mesh position={[-0.85, 0.45, 0]} castShadow><primitive object={SG.cowTailTuft} attach="geometry" /><primitive object={SM.cowBlack} attach="material" /></mesh>
+    {[
+      [0.3, 0.2, 0.25],
+      [0.3, 0.2, -0.25],
+      [-0.35, 0.2, 0.25],
+      [-0.35, 0.2, -0.25],
+    ].map((pos, i) => (
+      <mesh key={i} position={pos as [number, number, number]} castShadow>
+        <primitive object={SG.cowLeg} attach="geometry" />
+        <primitive object={SM.cowWhite} attach="material" />
+      </mesh>
+    ))}
+    <mesh position={[-0.15, 0.25, 0]} castShadow>
+      <primitive object={SG.cowUdder} attach="geometry" />
+      <primitive object={SM.cowMuzzle} attach="material" />
+    </mesh>
+    <mesh position={[-0.65, 0.7, 0]} rotation={[0, 0, 0.8]} castShadow>
+      <primitive object={SG.cowTail} attach="geometry" />
+      <primitive object={SM.cowWhite} attach="material" />
+    </mesh>
+    <mesh position={[-0.85, 0.45, 0]} castShadow>
+      <primitive object={SG.cowTailTuft} attach="geometry" />
+      <primitive object={SM.cowBlack} attach="material" />
+    </mesh>
   </group>
 );
 
-const WindmillComp: React.FC<{ position: [number, number, number]; bladesRef: React.RefObject<THREE.Group | null> }> = ({ position, bladesRef }) => (
+const WindmillComp: React.FC<{
+  position: [number, number, number];
+  bladesRef: React.RefObject<THREE.Group | null>;
+}> = ({ position, bladesRef }) => (
   <group position={position}>
-    <mesh position={[0, 3, 0]} castShadow><primitive object={SG.windmillTower} attach="geometry" /><primitive object={SM.stone} attach="material" /></mesh>
-    <mesh position={[0, 6.5, 0]} castShadow><primitive object={SG.windmillCap} attach="geometry" /><primitive object={SM.woodBrown} attach="material" /></mesh>
-    <mesh position={[0, 5.5, 0.9]} castShadow><primitive object={SG.windmillHub} attach="geometry" /><primitive object={SM.woodBrown} attach="material" /></mesh>
+    <mesh position={[0, 3, 0]} castShadow>
+      <primitive object={SG.windmillTower} attach="geometry" />
+      <primitive object={SM.stone} attach="material" />
+    </mesh>
+    <mesh position={[0, 6.5, 0]} castShadow>
+      <primitive object={SG.windmillCap} attach="geometry" />
+      <primitive object={SM.woodBrown} attach="material" />
+    </mesh>
+    <mesh position={[0, 5.5, 0.9]} castShadow>
+      <primitive object={SG.windmillHub} attach="geometry" />
+      <primitive object={SM.woodBrown} attach="material" />
+    </mesh>
     <group ref={bladesRef} position={[0, 5.5, 1]}>
-      {[0, 1, 2, 3].map((i) => (<group key={i} rotation={[0, 0, (i * Math.PI) / 2]}><mesh position={[0, 1.5, 0]} castShadow><primitive object={SG.windmillBladeArm} attach="geometry" /><primitive object={SM.woodLight} attach="material" /></mesh><mesh position={[0.2, 1.5, 0.02]} castShadow><primitive object={SG.windmillBladeSail} attach="geometry" /><primitive object={SM.windmillSail} attach="material" /></mesh></group>))}
+      {[0, 1, 2, 3].map((i) => (
+        <group key={i} rotation={[0, 0, (i * Math.PI) / 2]}>
+          <mesh position={[0, 1.5, 0]} castShadow>
+            <primitive object={SG.windmillBladeArm} attach="geometry" />
+            <primitive object={SM.woodLight} attach="material" />
+          </mesh>
+          <mesh position={[0.2, 1.5, 0.02]} castShadow>
+            <primitive object={SG.windmillBladeSail} attach="geometry" />
+            <primitive object={SM.windmillSail} attach="material" />
+          </mesh>
+        </group>
+      ))}
     </group>
-    <mesh position={[0, 0.9, 1.15]}><primitive object={SG.windmillDoor} attach="geometry" /><primitive object={SM.woodBrown} attach="material" /></mesh>
+    <mesh position={[0, 0.9, 1.15]}>
+      <primitive object={SG.windmillDoor} attach="geometry" />
+      <primitive object={SM.woodBrown} attach="material" />
+    </mesh>
   </group>
 );
 
 // Main component with single useFrame for all animations
 export const FarmArea: React.FC = () => {
-  const chickenRefs = useMemo(() => Array.from({ length: 5 }, () => React.createRef<THREE.Group>()), []);
-  const pigTailRefs = useMemo(() => Array.from({ length: 3 }, () => React.createRef<THREE.Mesh>()), []);
-  const cowHeadRefs = useMemo(() => Array.from({ length: 3 }, () => React.createRef<THREE.Group>()), []);
+  const chickenRefs = useMemo(
+    () => Array.from({ length: 5 }, () => React.createRef<THREE.Group>()),
+    []
+  );
+  const pigTailRefs = useMemo(
+    () => Array.from({ length: 3 }, () => React.createRef<THREE.Mesh>()),
+    []
+  );
+  const cowHeadRefs = useMemo(
+    () => Array.from({ length: 3 }, () => React.createRef<THREE.Group>()),
+    []
+  );
   const windmillBladesRef = useRef<THREE.Group>(null);
   const frameCountRef = useRef(0);
   const chickenOffsets = useMemo(() => [0, 1.2, 2.4, 3.6, 4.8], []);
@@ -324,39 +719,85 @@ export const FarmArea: React.FC = () => {
     }
     // Animals: every 4th frame (15 FPS)
     if (frameCountRef.current % 4 !== 0) return;
-    chickenRefs.forEach((ref, i) => { if (ref.current) ref.current.rotation.x = Math.sin(time * 3 + chickenOffsets[i]) * 0.1; });
-    pigTailRefs.forEach((ref, i) => { if (ref.current) ref.current.rotation.z = Math.sin(time * 5 + pigOffsets[i]) * 0.3; });
-    cowHeadRefs.forEach((ref, i) => { if (ref.current) ref.current.rotation.x = Math.sin(time * 0.5 + cowOffsets[i]) * 0.15; });
+    chickenRefs.forEach((ref, i) => {
+      if (ref.current) ref.current.rotation.x = Math.sin(time * 3 + chickenOffsets[i]) * 0.1;
+    });
+    pigTailRefs.forEach((ref, i) => {
+      if (ref.current) ref.current.rotation.z = Math.sin(time * 5 + pigOffsets[i]) * 0.3;
+    });
+    cowHeadRefs.forEach((ref, i) => {
+      if (ref.current) ref.current.rotation.x = Math.sin(time * 0.5 + cowOffsets[i]) * 0.15;
+    });
   });
 
-  const chickenData = useMemo(() => [{ pos: [13, 0, -3] as [number, number, number], rot: 0.5 }, { pos: [14, 0, -4] as [number, number, number], rot: -0.3 }, { pos: [11, 0, -2.5] as [number, number, number], rot: 1.2 }, { pos: [13.5, 0, -6] as [number, number, number], rot: 2.1 }, { pos: [10.5, 0, -4.5] as [number, number, number], rot: -1.5 }], []);
-  const pigData = useMemo(() => [{ pos: [-1, 0, 0.5] as [number, number, number], rot: 0.8 }, { pos: [1, 0, -0.5] as [number, number, number], rot: -0.5 }, { pos: [0.5, 0, 1.5] as [number, number, number], rot: 1.5 }], []);
-  const cowData = useMemo(() => [{ pos: [-5, 0, 0] as [number, number, number], rot: 0.3 }, { pos: [3, 0, 2] as [number, number, number], rot: -0.8 }, { pos: [-2, 0, -3] as [number, number, number], rot: 1.5 }], []);
+  const chickenData = useMemo(
+    () => [
+      { pos: [13, 0, -3] as [number, number, number], rot: 0.5 },
+      { pos: [14, 0, -4] as [number, number, number], rot: -0.3 },
+      { pos: [11, 0, -2.5] as [number, number, number], rot: 1.2 },
+      { pos: [13.5, 0, -6] as [number, number, number], rot: 2.1 },
+      { pos: [10.5, 0, -4.5] as [number, number, number], rot: -1.5 },
+    ],
+    []
+  );
+  const pigData = useMemo(
+    () => [
+      { pos: [-1, 0, 0.5] as [number, number, number], rot: 0.8 },
+      { pos: [1, 0, -0.5] as [number, number, number], rot: -0.5 },
+      { pos: [0.5, 0, 1.5] as [number, number, number], rot: 1.5 },
+    ],
+    []
+  );
+  const cowData = useMemo(
+    () => [
+      { pos: [-5, 0, 0] as [number, number, number], rot: 0.3 },
+      { pos: [3, 0, 2] as [number, number, number], rot: -0.8 },
+      { pos: [-2, 0, -3] as [number, number, number], rot: 1.5 },
+    ],
+    []
+  );
 
   return (
     <group position={[75, 0, 120]} rotation={[0, Math.PI, 0]}>
-      <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow><primitive object={SG.farmGround} attach="geometry" /><primitive object={SM.grass} attach="material" /></mesh>
+      <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <primitive object={SG.farmGround} attach="geometry" />
+        <primitive object={SM.grass} attach="material" />
+      </mesh>
       <Barn position={[0, 0, 0]} />
       <ChickenCoop position={[12, 0, -5]} />
       <Farmhouse position={[-10, 0, 12]} />
       <GardenBed position={[-15, 0, 16]} />
       <GardenBed position={[-15, 0, 19]} />
-      {chickenData.map((c, i) => <Chicken key={`chicken-${i}`} position={c.pos} rotation={c.rot} animRef={chickenRefs[i]} />)}
+      {chickenData.map((c, i) => (
+        <Chicken key={`chicken-${i}`} position={c.pos} rotation={c.rot} animRef={chickenRefs[i]} />
+      ))}
       <group position={[-12, 0, -5]}>
         <FenceSection position={[0, 0, -3]} length={6} />
         <FenceSection position={[0, 0, 3]} length={6} />
         <FenceSection position={[-3, 0, 0]} rotation={Math.PI / 2} length={6} />
         <FenceSection position={[3, 0, 0]} rotation={Math.PI / 2} length={6} />
-        <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}><primitive object={SG.mudPuddle} attach="geometry" /><primitive object={SM.mud} attach="material" /></mesh>
-        {pigData.map((p, i) => <Pig key={`pig-${i}`} position={p.pos} rotation={p.rot} tailRef={pigTailRefs[i]} />)}
+        <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <primitive object={SG.mudPuddle} attach="geometry" />
+          <primitive object={SM.mud} attach="material" />
+        </mesh>
+        {pigData.map((p, i) => (
+          <Pig key={`pig-${i}`} position={p.pos} rotation={p.rot} tailRef={pigTailRefs[i]} />
+        ))}
       </group>
       <group position={[5, 0, 15]}>
-        {[-8, -3, 2, 7].map((x) => <React.Fragment key={`fence-h-${x}`}><FenceSection position={[x, 0, -6]} length={5} /><FenceSection position={[x, 0, 6]} length={5} /></React.Fragment>)}
+        {[-8, -3, 2, 7].map((x) => (
+          <React.Fragment key={`fence-h-${x}`}>
+            <FenceSection position={[x, 0, -6]} length={5} />
+            <FenceSection position={[x, 0, 6]} length={5} />
+          </React.Fragment>
+        ))}
         <FenceSection position={[-10, 0, 0]} rotation={Math.PI / 2} length={5} />
         <FenceSection position={[-10, 0, -4]} rotation={Math.PI / 2} length={5} />
         <FenceSection position={[10, 0, 0]} rotation={Math.PI / 2} length={5} />
         <FenceSection position={[10, 0, -4]} rotation={Math.PI / 2} length={5} />
-        {cowData.map((c, i) => <Cow key={`cow-${i}`} position={c.pos} rotation={c.rot} headRef={cowHeadRefs[i]} />)}
+        {cowData.map((c, i) => (
+          <Cow key={`cow-${i}`} position={c.pos} rotation={c.rot} headRef={cowHeadRefs[i]} />
+        ))}
         <Sheep position={[6, 0, -2]} rotation={0.6} />
         <Sheep position={[7, 0, 1]} rotation={-0.4} />
         <Sheep position={[5, 0, 3]} rotation={1.8} />

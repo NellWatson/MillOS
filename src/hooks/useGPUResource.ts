@@ -15,11 +15,7 @@
 import { useEffect, useRef, useMemo, useId } from 'react';
 import * as THREE from 'three';
 import { useTexture } from '@react-three/drei';
-import {
-  gpuResourceManager,
-  ResourceType,
-  TrackedResource,
-} from '../utils/GPUResourceManager';
+import { gpuResourceManager, ResourceType, TrackedResource } from '../utils/GPUResourceManager';
 
 type ResourcePriority = TrackedResource['priority'];
 

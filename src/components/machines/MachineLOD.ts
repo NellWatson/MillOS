@@ -22,14 +22,6 @@ const CYLINDER_SEGMENTS: Record<GraphicsQuality, number> = {
   ultra: 32,
 };
 
-// Box segment counts (for rounded edges if needed - currently 1 for all)
-const _BOX_SEGMENTS: Record<GraphicsQuality, number> = {
-  low: 1,
-  medium: 1,
-  high: 1,
-  ultra: 1,
-};
-
 /**
  * Get cylinder geometry with appropriate segment count for quality level
  */
@@ -58,10 +50,7 @@ export function getConeGeometry(
 /**
  * Get sphere geometry with appropriate segment count for quality level
  */
-export function getSphereGeometry(
-  quality: GraphicsQuality,
-  radius = 1
-): THREE.SphereGeometry {
+export function getSphereGeometry(quality: GraphicsQuality, radius = 1): THREE.SphereGeometry {
   const segments = CYLINDER_SEGMENTS[quality];
   const rings = Math.max(4, Math.floor(segments / 2));
   return new THREE.SphereGeometry(radius, segments, rings);
@@ -85,10 +74,7 @@ export function getBoxGeometry(
  */
 const geometryCache = new Map<string, THREE.BufferGeometry>();
 
-function getCachedGeometry<T extends THREE.BufferGeometry>(
-  key: string,
-  factory: () => T
-): T {
+function getCachedGeometry<T extends THREE.BufferGeometry>(key: string, factory: () => T): T {
   if (!geometryCache.has(key)) {
     geometryCache.set(key, factory());
   }
@@ -155,13 +141,6 @@ export function disposeGeometryCache(): void {
 // =========================================================================
 // DISTANCE-BASED INSTANCE CULLING
 // =========================================================================
-
-/**
- * Shared Vector3 for distance calculations (avoid GC pressure)
- * These are reserved for future use with optimized distance calculations.
- */
-const _cameraPos = new THREE.Vector3();
-const _instancePos = new THREE.Vector3();
 
 /**
  * Calculate squared distance between camera and a 3D position.

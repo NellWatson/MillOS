@@ -4828,7 +4828,10 @@ class AudioManager {
 
   // Process the next announcement in the queue
   private processAnnouncementQueue(): void {
-    console.log('[MillOS TTS] processAnnouncementQueue called, queue length:', this.announcementQueue.length);
+    console.log(
+      '[MillOS TTS] processAnnouncementQueue called, queue length:',
+      this.announcementQueue.length
+    );
 
     // Check if queue is empty or conditions prevent playback
     if (

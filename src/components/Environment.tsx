@@ -478,13 +478,6 @@ const EnvironmentAnimationManager: React.FC = () => {
 };
 
 // Consolidated lens flare system - manages multiple flares in ONE useFrame callback
-interface LensFlareData {
-  position: [number, number, number];
-  color: string;
-  intensity: number;
-  ref: React.MutableRefObject<THREE.Group | null>;
-}
-
 const LensFlareSystem: React.FC<{ flares: LensFlareData[] }> = memo(({ flares }) => {
   const gameTime = useGameSimulationStore((state) => state.gameTime);
 

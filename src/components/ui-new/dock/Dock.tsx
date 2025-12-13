@@ -1,5 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Home, Brain, Activity, Users, Shield, Settings, Eye, Radio, Maximize, Minimize } from 'lucide-react';
+import {
+  Home,
+  Brain,
+  Activity,
+  Users,
+  Shield,
+  Settings,
+  Eye,
+  Radio,
+  Maximize,
+  Minimize,
+} from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useUIStore } from '../../../stores/uiStore';
 import { useIsMultiplayerActive } from '../../../stores/multiplayerStore';
@@ -29,10 +40,22 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange }) => {
 
   // Fullscreen state (mobile only)
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenSupported, setFullscreenSupported] = useState(false);
 
   useEffect(() => {
+    // Check if fullscreen is actually supported (iOS Safari doesn't support it)
+    const docEl = document.documentElement as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void>;
+    };
+    const isSupported = !!(
+      docEl.requestFullscreen ||
+      docEl.webkitRequestFullscreen
+    );
+    setFullscreenSupported(isSupported);
+
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const doc = document as Document & { webkitFullscreenElement?: Element };
+      setIsFullscreen(!!(document.fullscreenElement || doc.webkitFullscreenElement));
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
@@ -178,8 +201,8 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange }) => {
         )}
       </button>
 
-      {/* Fullscreen Toggle (mobile only) */}
-      {isMobile && (
+      {/* Fullscreen Toggle (mobile only, when supported) */}
+      {isMobile && fullscreenSupported && (
         <button
           onClick={toggleFullscreen}
           aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}

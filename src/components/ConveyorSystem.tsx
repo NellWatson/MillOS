@@ -523,7 +523,8 @@ const ConveyorBelt: React.FC<{
       conveyorTextures.normal.offset.x = (conveyorTextures.normal.offset.x + scrollAmount) % 1;
     }
     if (conveyorTextures.roughness) {
-      conveyorTextures.roughness.offset.x = (conveyorTextures.roughness.offset.x + scrollAmount) % 1;
+      conveyorTextures.roughness.offset.x =
+        (conveyorTextures.roughness.offset.x + scrollAmount) % 1;
     }
 
     // Animate drive rollers - wrap to prevent float precision issues

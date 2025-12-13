@@ -80,7 +80,11 @@ export const TouchLookHandler: React.FC<TouchLookHandlerProps> = ({
       e.preventDefault();
 
       // Handle pinch-to-zoom (two fingers on canvas)
-      if (e.targetTouches.length === 2 && pinchStartDistRef.current !== null && pinchStartZoomRef.current !== null) {
+      if (
+        e.targetTouches.length === 2 &&
+        pinchStartDistRef.current !== null &&
+        pinchStartZoomRef.current !== null
+      ) {
         const currentDist = getTouchDistance(e.targetTouches[0], e.targetTouches[1]);
         const pinchDelta = pinchStartDistRef.current - currentDist;
         const zoomDelta = pinchDelta * zoomSensitivity;
@@ -174,7 +178,16 @@ export const TouchLookHandler: React.FC<TouchLookHandlerProps> = ({
       canvas.removeEventListener('touchend', handleTouchEnd);
       canvas.removeEventListener('touchcancel', handleTouchCancel);
     };
-  }, [gl, camera, orbitControlsRef, sensitivity, zoomSensitivity, minDistance, maxDistance, setIsTouchLooking]);
+  }, [
+    gl,
+    camera,
+    orbitControlsRef,
+    sensitivity,
+    zoomSensitivity,
+    minDistance,
+    maxDistance,
+    setIsTouchLooking,
+  ]);
 
   // This is a behavior-only component
   return null;

@@ -38,9 +38,7 @@ const PartsInventorySection: React.FC = () => {
         <Package className="w-4 h-4 text-blue-400" />
         <h4 className="text-sm font-semibold text-gray-200">Parts Inventory</h4>
         {hasLowInventory && (
-          <span className="text-xs bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">
-            LOW
-          </span>
+          <span className="text-xs bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">LOW</span>
         )}
       </div>
       <div className="grid grid-cols-5 gap-2">
@@ -99,10 +97,7 @@ const PredictionsSection: React.FC = () => {
       </div>
       <div className="space-y-2 max-h-[200px] overflow-y-auto">
         {unacknowledgedAlerts.map((alert) => (
-          <div
-            key={alert.id}
-            className="bg-gray-700/50 rounded p-2 border-l-2 border-amber-500"
-          >
+          <div key={alert.id} className="bg-gray-700/50 rounded p-2 border-l-2 border-amber-500">
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1">
                 <div className="text-sm font-medium text-gray-200">{alert.machineName}</div>
@@ -162,10 +157,14 @@ const ActiveBreakdownsSection: React.FC = () => {
                 <span className="text-xs text-amber-400">
                   Repair by: {breakdown.assignedWorkerName}
                 </span>
-                <span className="text-xs text-emerald-400">{Math.round(breakdown.repairProgress)}%</span>
+                <span className="text-xs text-emerald-400">
+                  {Math.round(breakdown.repairProgress)}%
+                </span>
               </div>
             ) : (
-              <div className="text-xs text-amber-400 mt-2 animate-pulse">Awaiting technician...</div>
+              <div className="text-xs text-amber-400 mt-2 animate-pulse">
+                Awaiting technician...
+              </div>
             )}
             {/* Progress bar */}
             {breakdown.repairProgress > 0 && (
@@ -208,7 +207,10 @@ const ScheduleSection: React.FC = () => {
       </div>
       <div className="space-y-2 max-h-[150px] overflow-y-auto">
         {pendingTasks.map((task) => (
-          <div key={task.id} className="flex items-center justify-between bg-gray-700/50 rounded p-2">
+          <div
+            key={task.id}
+            className="flex items-center justify-between bg-gray-700/50 rounded p-2"
+          >
             <div>
               <div className="text-sm text-gray-200">{task.machineName}</div>
               <div className="text-xs text-gray-400">{task.type}</div>

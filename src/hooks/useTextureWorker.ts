@@ -34,10 +34,9 @@ export function useTextureWorker() {
   // Initialize worker
   useEffect(() => {
     try {
-      workerRef.current = new Worker(
-        new URL('../workers/textureWorker.ts', import.meta.url),
-        { type: 'module' }
-      );
+      workerRef.current = new Worker(new URL('../workers/textureWorker.ts', import.meta.url), {
+        type: 'module',
+      });
 
       workerRef.current.onmessage = (e: MessageEvent<TextureWorkerResponse>) => {
         const { type, id, result, error: errorMsg } = e.data;

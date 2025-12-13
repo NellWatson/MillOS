@@ -41,12 +41,14 @@ const BreakdownSparks: React.FC<{
   intensity?: number;
 }> = ({ position, intensity = 1 }) => {
   const sparksRef = useRef<THREE.InstancedMesh>(null);
-  const sparkData = useRef<Array<{
-    position: THREE.Vector3;
-    velocity: THREE.Vector3;
-    life: number;
-    maxLife: number;
-  }>>([]);
+  const sparkData = useRef<
+    Array<{
+      position: THREE.Vector3;
+      velocity: THREE.Vector3;
+      life: number;
+      maxLife: number;
+    }>
+  >([]);
 
   // Initialize spark data
   useEffect(() => {
@@ -116,13 +118,15 @@ const BreakdownSmoke: React.FC<{
   position: [number, number, number];
 }> = ({ position }) => {
   const smokeRef = useRef<THREE.InstancedMesh>(null);
-  const smokeData = useRef<Array<{
-    position: THREE.Vector3;
-    velocity: THREE.Vector3;
-    life: number;
-    maxLife: number;
-    scale: number;
-  }>>([]);
+  const smokeData = useRef<
+    Array<{
+      position: THREE.Vector3;
+      velocity: THREE.Vector3;
+      life: number;
+      maxLife: number;
+      scale: number;
+    }>
+  >([]);
 
   // Initialize smoke data
   useEffect(() => {
@@ -153,11 +157,7 @@ const BreakdownSmoke: React.FC<{
 
       if (smoke.life <= 0) {
         // Reset smoke
-        smoke.position.set(
-          (Math.random() - 0.5) * 0.5,
-          0,
-          (Math.random() - 0.5) * 0.5
-        );
+        smoke.position.set((Math.random() - 0.5) * 0.5, 0, (Math.random() - 0.5) * 0.5);
         smoke.life = smoke.maxLife;
         smoke.scale = 0.5 + Math.random() * 0.5;
       } else {
@@ -246,7 +246,13 @@ const BreakdownOverlay: React.FC<{
   position: [number, number, number];
 }> = ({ breakdown, position }) => {
   return (
-    <Billboard position={[position[0], position[1] + 3, position[2]]} follow lockX={false} lockY={false} lockZ={false}>
+    <Billboard
+      position={[position[0], position[1] + 3, position[2]]}
+      follow
+      lockX={false}
+      lockY={false}
+      lockZ={false}
+    >
       <Html center>
         <div className="bg-red-900/90 border-2 border-red-500 rounded-lg p-3 min-w-[150px] text-center">
           <div className="text-red-400 font-bold text-sm mb-1">FAULT</div>

@@ -1,5 +1,5 @@
 import React, { useState, Suspense, useEffect, useCallback, useRef } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Preload } from '@react-three/drei';
 import { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { Physics } from '@react-three/rapier';
@@ -64,6 +64,82 @@ import {
   RotateDeviceOverlay,
 } from './components/mobile/MobileControlsOverlay';
 import { useGeometryNaNDetector } from './components/SafeGeometry';
+
+// Calculate sky background color based on game time (matches SkySystem.tsx logic)
+const getSkyBackgroundColor = (gameTime: number): string => {
+  if (gameTime >= 21 || gameTime < 5) {
+    // Deep Night (21:00 - 05:00)
+    return '#0a0f1a';
+  }
+  if (gameTime >= 5 && gameTime < 6) {
+    // Early Dawn (05:00 - 06:00)
+    return '#1e1b4b';
+  }
+  if (gameTime >= 6 && gameTime < 8) {
+    // Dawn/Sunrise (06:00 - 08:00)
+    return '#3b0764';
+  }
+  if (gameTime >= 8 && gameTime < 10) {
+    // Morning (08:00 - 10:00)
+    return '#0ea5e9';
+  }
+  if (gameTime >= 10 && gameTime < 16) {
+    // Midday (10:00 - 16:00)
+    return '#1e90ff';
+  }
+  if (gameTime >= 16 && gameTime < 18) {
+    // Afternoon (16:00 - 18:00)
+    return '#0ea5e9';
+  }
+  if (gameTime >= 18 && gameTime < 19) {
+    // Golden Hour (18:00 - 19:00)
+    return '#0c4a6e';
+  }
+  if (gameTime >= 19 && gameTime < 21) {
+    // Dusk/Twilight (19:00 - 21:00)
+    return '#1e1b4b';
+  }
+  // Default to midday
+  return '#0369a1';
+};
+
+// Dynamic background color component that syncs with game time
+// Subscribes to the store so it updates even if the render loop throttles
+const DynamicBackground: React.FC = () => {
+  const { scene, gl } = useThree();
+  const colorRef = useRef(new THREE.Color('#0a0f1a'));
+  const lastColorRef = useRef('#0a0f1a');
+  const isInitializedRef = useRef(false);
+
+  useEffect(() => {
+    const applyColor = (gameTime: number) => {
+      const targetColor = getSkyBackgroundColor(gameTime);
+      const shouldUpdate = targetColor !== lastColorRef.current || !isInitializedRef.current;
+      if (!shouldUpdate) return;
+
+      lastColorRef.current = targetColor;
+      colorRef.current.set(targetColor);
+      scene.background = colorRef.current;
+      if (scene.fog && scene.fog instanceof THREE.Fog) {
+        scene.fog.color.copy(colorRef.current);
+      }
+      gl.setClearColor(colorRef.current, 1);
+      isInitializedRef.current = true;
+    };
+
+    // Initialize immediately with current time
+    applyColor(useGameSimulationStore.getState().gameTime);
+
+    // Subscribe to store changes and update only when gameTime changes
+    const unsubscribe = useGameSimulationStore.subscribe((state) => {
+      applyColor(state.gameTime);
+    });
+
+    return () => unsubscribe();
+  }, [scene, gl]);
+
+  return null;
+};
 
 const App: React.FC = () => {
   // PERF DEBUG: Track App re-renders
@@ -479,8 +555,10 @@ const App: React.FC = () => {
               gl.domElement.addEventListener('webglcontextrestored', handleContextRestored);
             }}
           >
-            <color attach="background" args={['#0a0f1a']} />
+            {/* Dynamic background color that syncs with game time */}
+            <DynamicBackground />
             {/* Fog extended to match camera far plane, prevents clipping artifacts */}
+            {/* Note: fog color is updated dynamically by DynamicBackground */}
             <fog attach="fog" args={['#0a0f1a', 150, 550]} />
 
             <Suspense fallback={null}>
@@ -572,9 +650,7 @@ const App: React.FC = () => {
               )}
 
               {/* Mobile touch-to-look handler (inside Canvas for R3F access) */}
-              {isMobile && !fpsMode && (
-                <TouchLookHandler orbitControlsRef={orbitControlsRef} />
-              )}
+              {isMobile && !fpsMode && <TouchLookHandler orbitControlsRef={orbitControlsRef} />}
 
               <Preload all />
             </Suspense>

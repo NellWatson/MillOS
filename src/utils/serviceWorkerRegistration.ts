@@ -34,7 +34,9 @@ export function isServiceWorkerSupported(): boolean {
 /**
  * Register the service worker
  */
-export async function registerServiceWorker(config?: ServiceWorkerConfig): Promise<ServiceWorkerRegistration | null> {
+export async function registerServiceWorker(
+  config?: ServiceWorkerConfig
+): Promise<ServiceWorkerRegistration | null> {
   if (!isServiceWorkerSupported()) {
     console.log('[SW Registration] Service workers not supported');
     return null;
@@ -160,10 +162,7 @@ export async function clearServiceWorkerCache(): Promise<boolean> {
       }
     };
 
-    controller.postMessage(
-      { type: 'CLEAR_CACHE' },
-      [messageChannel.port2]
-    );
+    controller.postMessage({ type: 'CLEAR_CACHE' }, [messageChannel.port2]);
 
     // Timeout after 5 seconds
     setTimeout(() => resolve(false), 5000);
@@ -173,8 +172,15 @@ export async function clearServiceWorkerCache(): Promise<boolean> {
 /**
  * Get cache statistics from the service worker
  */
-export async function getServiceWorkerCacheStats(): Promise<Record<string, { entries: number; urls: string[] }> | null> {
-  if (!isServiceWorkerSupported() || !navigator.serviceWorker.controller) {
+export async function getServiceWorkerCacheStats(): Promise<Record<
+  string,
+  { entries: number; urls: string[] }
+> | null> {
+  if (!isServiceWorkerSupported()) {
+    return null;
+  }
+  const controller = navigator.serviceWorker.controller;
+  if (!controller) {
     return null;
   }
 
@@ -185,10 +191,7 @@ export async function getServiceWorkerCacheStats(): Promise<Record<string, { ent
       resolve(event.data);
     };
 
-    navigator.serviceWorker.controller.postMessage(
-      { type: 'GET_CACHE_SIZE' },
-      [messageChannel.port2]
-    );
+    controller.postMessage({ type: 'GET_CACHE_SIZE' }, [messageChannel.port2]);
 
     // Timeout after 5 seconds
     setTimeout(() => resolve(null), 5000);

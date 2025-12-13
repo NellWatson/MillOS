@@ -155,11 +155,7 @@ export class ObjectPool<T> {
 import * as THREE from 'three';
 
 export class Object3DPool extends ObjectPool<THREE.Object3D> {
-  constructor(
-    factory: () => THREE.Object3D,
-    initialSize: number = 50,
-    maxSize: number = 500
-  ) {
+  constructor(factory: () => THREE.Object3D, initialSize: number = 50, maxSize: number = 500) {
     super(
       factory,
       (obj) => {

@@ -10,7 +10,7 @@ const PLAYER_HEIGHT = 1.7;
 const PLAYER_RADIUS = 0.4;
 const FPS_FOV = 105;
 const ORBIT_FOV = 65;
-const LOOK_SENSITIVITY = 0.003;
+const LOOK_SENSITIVITY = 0.0075; // Doubled for mobile
 
 // World boundary
 const WORLD_RADIUS = 255;
@@ -255,42 +255,31 @@ export const MobileFPSInstructions: React.FC<{ visible: boolean; onDismiss: () =
       onClick={onDismiss}
     >
       <div
-        className="bg-slate-900/95 backdrop-blur-xl rounded-2xl border border-slate-700/50 p-6 max-w-sm text-center shadow-2xl mx-4"
+        className="bg-slate-900/95 backdrop-blur-xl rounded-2xl border border-slate-700/50 p-4 max-w-xs text-center shadow-2xl mx-4"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-xl font-bold text-white mb-3">First-Person Mode</h2>
-        <p className="text-slate-300 mb-4 text-sm">Explore the factory in first-person view</p>
-
-        <div className="space-y-3 mb-4 text-left">
-          <div className="bg-slate-800/50 rounded-lg p-3 flex items-center gap-3">
-            <div className="w-10 h-10 bg-slate-700 rounded-lg flex items-center justify-center text-lg">
+        <div className="flex gap-3 mb-4">
+          <div className="flex-1 bg-slate-800/50 rounded-lg p-3 flex flex-col items-center gap-1">
+            <div className="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center text-base">
               +
             </div>
-            <div>
-              <div className="text-white text-sm font-medium">D-Pad</div>
-              <div className="text-slate-400 text-xs">Move around</div>
-            </div>
+            <div className="text-white text-xs font-medium">D-Pad</div>
           </div>
 
-          <div className="bg-slate-800/50 rounded-lg p-3 flex items-center gap-3">
-            <div className="w-10 h-10 bg-slate-700 rounded-lg flex items-center justify-center text-lg">
-              👆
+          <div className="flex-1 bg-slate-800/50 rounded-lg p-3 flex flex-col items-center gap-1">
+            <div className="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center text-base">
+              <span className="text-slate-300">~</span>
             </div>
-            <div>
-              <div className="text-white text-sm font-medium">Touch & Drag</div>
-              <div className="text-slate-400 text-xs">Look around</div>
-            </div>
+            <div className="text-white text-xs font-medium">Touch & Drag</div>
           </div>
         </div>
 
         <button
           onClick={onDismiss}
-          className="w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors"
+          className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors text-sm"
         >
           Got it!
         </button>
-
-        <p className="text-slate-500 text-xs mt-3">Tap the eye icon in the dock to exit</p>
       </div>
     </div>
   );

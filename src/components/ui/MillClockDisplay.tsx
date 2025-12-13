@@ -60,7 +60,13 @@ export const MillClockDisplay: React.FC<{ theme: 'dark' | 'light' }> = React.mem
                 : 'bg-green-500/20 text-green-400'
           }`}
         >
-          {gameSpeed === 0 ? 'PAUSED' : gameSpeed === 180 ? '1x' : gameSpeed === 1800 ? '10x' : '60x'}
+          {gameSpeed === 0
+            ? 'PAUSED'
+            : gameSpeed === 180
+              ? '1x'
+              : gameSpeed === 1800
+                ? '10x'
+                : '60x'}
         </div>
       </div>
 

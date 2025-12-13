@@ -5,11 +5,11 @@ import { useCameraStore, CAMERA_PRESETS } from '../CameraController';
 
 // Icons for each preset (matching their purpose)
 const PRESET_ICONS = [
-  Eye,      // Overview
-  Factory,  // Silos
-  Wheat,    // Milling
-  Filter,   // Sifting
-  Package,  // Packing
+  Eye, // Overview
+  Factory, // Silos
+  Wheat, // Milling
+  Filter, // Sifting
+  Package, // Packing
 ];
 
 /**
@@ -119,9 +119,7 @@ export const CameraPresetMenu: React.FC = () => {
                       <div className="text-xs font-medium">{preset.name}</div>
                     </div>
                     {/* Keyboard shortcut hint */}
-                    <span className="text-[10px] text-slate-500 font-mono">
-                      {index + 1}
-                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono">{index + 1}</span>
                   </button>
                 );
               })}

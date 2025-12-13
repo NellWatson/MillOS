@@ -17,7 +17,8 @@ import React from 'react';
 export interface LensFlareData {
   position: [number, number, number];
   intensity: number;
-  color: THREE.Color;
+  color: THREE.ColorRepresentation;
+  ref: React.MutableRefObject<THREE.Group | null>;
 }
 
 export interface LensFlareAnimationState {

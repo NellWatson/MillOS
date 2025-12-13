@@ -11,7 +11,7 @@ const PLAYER_HEIGHT = 1.7; // Camera height from ground (eye level)
 const PLAYER_RADIUS = 0.4; // Collision radius
 const FPS_FOV = 105; // Wide FOV for immersive first-person view
 const ORBIT_FOV = 65; // Default FOV for orbit mode
-const MOUSE_SENSITIVITY = 1.5; // Mouse look speed multiplier
+const MOUSE_SENSITIVITY = 1.875; // Mouse look speed multiplier (increased 25%)
 
 // World boundary - circular at mountain base (mountains start at radius 260)
 const WORLD_RADIUS = 255; // Maximum traversal radius before hitting mountains
@@ -255,11 +255,8 @@ export const FPSCrosshair: React.FC = () => {
 
   return (
     <div className="fixed inset-0 pointer-events-none z-50 flex items-center justify-center">
-      {/* Crosshair */}
-      <div className="relative">
-        <div className="absolute w-4 h-0.5 bg-white/70 -left-2 top-0 shadow-sm" />
-        <div className="absolute w-0.5 h-4 bg-white/70 left-0 -top-2 shadow-sm" />
-      </div>
+      {/* Crosshair dot */}
+      <div className="w-1.5 h-1.5 bg-white/80 rounded-full shadow-sm" />
     </div>
   );
 };

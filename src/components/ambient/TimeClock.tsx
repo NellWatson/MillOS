@@ -80,20 +80,14 @@ export const TimeClock: React.FC<{
       {/* Digital display screen */}
       <mesh position={[0, 1.65, 0.08]}>
         <boxGeometry args={[0.45, 0.28, 0.01]} />
-        <meshStandardMaterial
-          color="#0f172a"
-          emissive="#1e3a5f"
-          emissiveIntensity={0.1}
-        />
+        <meshStandardMaterial color="#0f172a" emissive="#1e3a5f" emissiveIntensity={0.1} />
       </mesh>
 
       {/* HTML overlay for time display */}
       <Html position={[0, 1.65, 0.1]} center transform scale={0.12}>
         <div className="bg-slate-900 p-3 rounded font-mono text-center min-w-[180px]">
           {/* Time display */}
-          <div className="text-3xl font-bold text-cyan-400 tracking-wider">
-            {timeDisplay}
-          </div>
+          <div className="text-3xl font-bold text-cyan-400 tracking-wider">{timeDisplay}</div>
           {/* Shift indicator */}
           <div
             className={`text-xs font-semibold mt-1 px-2 py-0.5 rounded inline-block ${
@@ -124,18 +118,11 @@ export const TimeClock: React.FC<{
         <meshStandardMaterial color="#1e40af" roughness={0.4} />
       </mesh>
       <Html position={[0, 2.1, 0.02]} center>
-        <div className="text-white text-xs font-bold whitespace-nowrap">
-          CLOCK IN / OUT
-        </div>
+        <div className="text-white text-xs font-bold whitespace-nowrap">CLOCK IN / OUT</div>
       </Html>
 
       {/* Small light for visibility */}
-      <pointLight
-        position={[0, 1.8, 0.3]}
-        intensity={5}
-        distance={3}
-        color="#67e8f9"
-      />
+      <pointLight position={[0, 1.8, 0.3]} intensity={5} distance={3} color="#67e8f9" />
     </group>
   );
 };

@@ -14,7 +14,9 @@ const isDev = import.meta.env.DEV;
 function safeDim(value: number | undefined, fallback: number, label?: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
     if (isDev && (value === undefined || !Number.isFinite(value))) {
-      console.warn(`[SafeGeometry] Invalid dimension${label ? ` for ${label}` : ''}: ${value} -> using ${fallback}`);
+      console.warn(
+        `[SafeGeometry] Invalid dimension${label ? ` for ${label}` : ''}: ${value} -> using ${fallback}`
+      );
     }
     return fallback;
   }
@@ -38,18 +40,21 @@ interface SafePlaneGeometryProps {
  * <SafePlaneGeometry args={[width, height]} />
  * ```
  */
-export const SafePlaneGeometry: React.FC<SafePlaneGeometryProps> = ({ args, attach = 'geometry' }) => {
+export const SafePlaneGeometry: React.FC<SafePlaneGeometryProps> = ({
+  args,
+  attach = 'geometry',
+}) => {
   const safeArgs = useMemo(() => {
     const [width = 1, height = 1, widthSegments, heightSegments] = args;
     const safeWidth = safeDim(width, 1, 'PlaneGeometry.width');
     const safeHeight = safeDim(height, 1, 'PlaneGeometry.height');
 
-    return [
-      safeWidth,
-      safeHeight,
-      widthSegments ?? 1,
-      heightSegments ?? 1,
-    ] as [number, number, number, number];
+    return [safeWidth, safeHeight, widthSegments ?? 1, heightSegments ?? 1] as [
+      number,
+      number,
+      number,
+      number,
+    ];
   }, [args]);
 
   return <planeGeometry attach={attach} args={safeArgs} />;
@@ -120,11 +125,18 @@ export function useGeometryNaNDetector() {
     // Also patch THREE.PlaneGeometry constructor to catch NaN at source
     if (!patchedRef.current && typeof window !== 'undefined') {
       patchedRef.current = true;
-      const THREE = (window as Record<string, unknown>).THREE as typeof import('three') | undefined;
+      const THREE = (window as unknown as { THREE?: typeof import('three') }).THREE;
       if (THREE?.PlaneGeometry) {
         const OriginalPlaneGeometry = THREE.PlaneGeometry;
-        (THREE as Record<string, unknown>).PlaneGeometry = class PatchedPlaneGeometry extends OriginalPlaneGeometry {
-          constructor(width?: number, height?: number, widthSegments?: number, heightSegments?: number) {
+        (THREE as Record<string, unknown>).PlaneGeometry = class PatchedPlaneGeometry extends (
+          OriginalPlaneGeometry
+        ) {
+          constructor(
+            width?: number,
+            height?: number,
+            widthSegments?: number,
+            heightSegments?: number
+          ) {
             if (!Number.isFinite(width) || !Number.isFinite(height)) {
               console.warn(
                 '[NaN PlaneGeometry DETECTED at construction]',

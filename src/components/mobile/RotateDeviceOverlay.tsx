@@ -16,7 +16,8 @@ export const RotateDeviceOverlay: React.FC<RotateDeviceOverlayProps> = ({ visibl
     <div
       className="fixed inset-0 z-[100] bg-slate-950 flex flex-col items-center justify-center"
       style={{
-        padding: 'max(32px, env(safe-area-inset-top)) max(32px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(32px, env(safe-area-inset-left))',
+        padding:
+          'max(32px, env(safe-area-inset-top)) max(32px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(32px, env(safe-area-inset-left))',
       }}
     >
       {/* Animated rotating phone icon */}
@@ -34,9 +35,7 @@ export const RotateDeviceOverlay: React.FC<RotateDeviceOverlayProps> = ({ visibl
       </div>
 
       {/* Text prompt */}
-      <h2 className="text-2xl font-bold text-white mb-2 text-center">
-        Rotate Your Device
-      </h2>
+      <h2 className="text-2xl font-bold text-white mb-2 text-center">Rotate Your Device</h2>
       <p className="text-slate-400 text-center max-w-xs">
         MillOS works best in landscape mode. Please rotate your device for the full experience.
       </p>

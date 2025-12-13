@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState, useEffect } from 'react';
 import { Move, Eye } from 'lucide-react';
 import { useMobileControlStore, type DPadDirection } from '../../stores/mobileControlStore';
 import { useUIStore } from '../../stores/uiStore';
@@ -34,50 +34,53 @@ export const DPad: React.FC<DPadProps> = ({
   const [knobPosition, setKnobPosition] = useState({ x: 0, y: 0 });
   const touchIdRef = useRef<number | null>(null);
 
-  const updateJoystick = useCallback((clientX: number, clientY: number) => {
-    if (!containerRef.current) return;
+  const updateJoystick = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!containerRef.current) return;
 
-    const rect = containerRef.current.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
+      const rect = containerRef.current.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
 
-    // Calculate offset from center
-    let deltaX = clientX - centerX;
-    let deltaY = clientY - centerY;
+      // Calculate offset from center
+      let deltaX = clientX - centerX;
+      let deltaY = clientY - centerY;
 
-    // Calculate distance from center
-    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+      // Calculate distance from center
+      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
-    // Clamp to max distance
-    if (distance > MAX_DISTANCE) {
-      const scale = MAX_DISTANCE / distance;
-      deltaX *= scale;
-      deltaY *= scale;
-    }
+      // Clamp to max distance
+      if (distance > MAX_DISTANCE) {
+        const scale = MAX_DISTANCE / distance;
+        deltaX *= scale;
+        deltaY *= scale;
+      }
 
-    // Update visual knob position
-    setKnobPosition({ x: deltaX, y: deltaY });
+      // Update visual knob position
+      setKnobPosition({ x: deltaX, y: deltaY });
 
-    // Normalize to -1 to 1 range
-    let normalizedX = deltaX / MAX_DISTANCE;
-    let normalizedY = deltaY / MAX_DISTANCE;
+      // Normalize to -1 to 1 range
+      let normalizedX = deltaX / MAX_DISTANCE;
+      let normalizedY = deltaY / MAX_DISTANCE;
 
-    // Apply dead zone
-    const magnitude = Math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY);
-    if (magnitude < DEAD_ZONE) {
-      setDpadDirection(null);
-      return;
-    }
+      // Apply dead zone
+      const magnitude = Math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY);
+      if (magnitude < DEAD_ZONE) {
+        setDpadDirection(null);
+        return;
+      }
 
-    // Remap values accounting for dead zone for smoother control
-    const remappedMagnitude = (magnitude - DEAD_ZONE) / (1 - DEAD_ZONE);
-    const scale = remappedMagnitude / magnitude;
-    normalizedX *= scale;
-    normalizedY *= scale;
+      // Remap values accounting for dead zone for smoother control
+      const remappedMagnitude = (magnitude - DEAD_ZONE) / (1 - DEAD_ZONE);
+      const scale = remappedMagnitude / magnitude;
+      normalizedX *= scale;
+      normalizedY *= scale;
 
-    const direction: DPadDirection = { x: normalizedX, y: normalizedY };
-    setDpadDirection(direction);
-  }, [setDpadDirection]);
+      const direction: DPadDirection = { x: normalizedX, y: normalizedY };
+      setDpadDirection(direction);
+    },
+    [setDpadDirection]
+  );
 
   const resetJoystick = useCallback(() => {
     setKnobPosition({ x: 0, y: 0 });
@@ -86,61 +89,108 @@ export const DPad: React.FC<DPadProps> = ({
     touchIdRef.current = null;
   }, [setDpadDirection]);
 
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (disabled) return;
-    e.preventDefault();
-    e.stopPropagation();
+  // Global touch listeners to ensure joystick resets even if touch moves off-element
+  useEffect(() => {
+    const handleGlobalTouchEnd = (e: TouchEvent) => {
+      if (touchIdRef.current === null) return;
 
-    // Track the first touch
-    if (touchIdRef.current === null && e.touches.length > 0) {
-      const touch = e.touches[0];
-      touchIdRef.current = touch.identifier;
-      setIsActive(true);
-      updateJoystick(touch.clientX, touch.clientY);
-
-      // Haptic feedback
-      if (navigator.vibrate) {
-        navigator.vibrate(10);
+      // Check if our tracked touch is still active
+      let touchStillActive = false;
+      for (let i = 0; i < e.touches.length; i++) {
+        if (e.touches[i].identifier === touchIdRef.current) {
+          touchStillActive = true;
+          break;
+        }
       }
-    }
-  }, [disabled, updateJoystick]);
 
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (disabled || touchIdRef.current === null) return;
-    e.preventDefault();
-    e.stopPropagation();
-
-    // Find the tracked touch
-    for (let i = 0; i < e.touches.length; i++) {
-      if (e.touches[i].identifier === touchIdRef.current) {
-        updateJoystick(e.touches[i].clientX, e.touches[i].clientY);
-        break;
+      if (!touchStillActive) {
+        resetJoystick();
       }
-    }
-  }, [disabled, updateJoystick]);
+    };
 
-  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    // Check if our tracked touch ended
-    let touchStillActive = false;
-    for (let i = 0; i < e.touches.length; i++) {
-      if (e.touches[i].identifier === touchIdRef.current) {
-        touchStillActive = true;
-        break;
+    const handleGlobalTouchCancel = () => {
+      if (touchIdRef.current !== null) {
+        resetJoystick();
       }
-    }
+    };
 
-    if (!touchStillActive) {
+    // Add global listeners with passive: true for performance
+    window.addEventListener('touchend', handleGlobalTouchEnd, { passive: true });
+    window.addEventListener('touchcancel', handleGlobalTouchCancel, { passive: true });
+
+    return () => {
+      window.removeEventListener('touchend', handleGlobalTouchEnd);
+      window.removeEventListener('touchcancel', handleGlobalTouchCancel);
+    };
+  }, [resetJoystick]);
+
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      if (disabled) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Track the first touch
+      if (touchIdRef.current === null && e.touches.length > 0) {
+        const touch = e.touches[0];
+        touchIdRef.current = touch.identifier;
+        setIsActive(true);
+        updateJoystick(touch.clientX, touch.clientY);
+
+        // Haptic feedback
+        if (navigator.vibrate) {
+          navigator.vibrate(10);
+        }
+      }
+    },
+    [disabled, updateJoystick]
+  );
+
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (disabled || touchIdRef.current === null) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Find the tracked touch
+      for (let i = 0; i < e.touches.length; i++) {
+        if (e.touches[i].identifier === touchIdRef.current) {
+          updateJoystick(e.touches[i].clientX, e.touches[i].clientY);
+          break;
+        }
+      }
+    },
+    [disabled, updateJoystick]
+  );
+
+  const handleTouchEnd = useCallback(
+    (e: React.TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Check if our tracked touch ended
+      let touchStillActive = false;
+      for (let i = 0; i < e.touches.length; i++) {
+        if (e.touches[i].identifier === touchIdRef.current) {
+          touchStillActive = true;
+          break;
+        }
+      }
+
+      if (!touchStillActive) {
+        resetJoystick();
+      }
+    },
+    [resetJoystick]
+  );
+
+  const handleTouchCancel = useCallback(
+    (e: React.TouchEvent) => {
+      e.preventDefault();
       resetJoystick();
-    }
-  }, [resetJoystick]);
-
-  const handleTouchCancel = useCallback((e: React.TouchEvent) => {
-    e.preventDefault();
-    resetJoystick();
-  }, [resetJoystick]);
+    },
+    [resetJoystick]
+  );
 
   // Handle center button touch separately to prevent joystick activation
   const handleCenterTouchStart = useCallback((e: React.TouchEvent) => {
@@ -176,7 +226,9 @@ export const DPad: React.FC<DPadProps> = ({
       <div
         className={`absolute rounded-full transition-colors duration-100 flex items-center justify-center shadow-lg ${
           isActive
-            ? dpadMode === 'move' ? 'bg-cyan-500/90 border-cyan-400' : 'bg-violet-500/90 border-violet-400'
+            ? dpadMode === 'move'
+              ? 'bg-cyan-500/90 border-cyan-400'
+              : 'bg-violet-500/90 border-violet-400'
             : 'bg-slate-700/90 border-slate-600'
         } border-2`}
         style={{

@@ -82,8 +82,9 @@ function getSnapshot(): AudioState {
 }
 
 // Extended snapshot for full controls
-let cachedExtendedSnapshot: (AudioState & { currentTrack: AudioTrack; ttsEnabled: boolean }) | null =
-  null;
+let cachedExtendedSnapshot:
+  | (AudioState & { currentTrack: AudioTrack; ttsEnabled: boolean })
+  | null = null;
 let lastCurrentTrackId: string | null = null;
 let lastTtsEnabled: boolean | null = null;
 

@@ -2439,7 +2439,9 @@ export const PAAnnouncementSystem: React.FC = () => {
                 {latestAnnouncement.message}
               </motion.p>
             </div>
-            <span className="text-[8px] text-slate-500 uppercase tracking-wider flex-shrink-0">PA</span>
+            <span className="text-[8px] text-slate-500 uppercase tracking-wider flex-shrink-0">
+              PA
+            </span>
           </motion.div>
         </AnimatePresence>
       </div>

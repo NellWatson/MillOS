@@ -132,7 +132,8 @@ class AdaptiveQualityManager {
    * Get current FPS stats for display
    */
   getStats(): { currentFps: number; avgFps: number; quality: GraphicsQuality } {
-    const currentFps = this.frameTimes.length > 0 ? this.frameTimes[this.frameTimes.length - 1] : 60;
+    const currentFps =
+      this.frameTimes.length > 0 ? this.frameTimes[this.frameTimes.length - 1] : 60;
     return {
       currentFps: Math.round(currentFps),
       avgFps: Math.round(this.getAverageFps()),
@@ -155,9 +156,10 @@ class AdaptiveQualityManager {
     const currentQuality = useGraphicsStore.getState().graphics.quality;
 
     // Use requestIdleCallback if available, otherwise setTimeout
-    const scheduleChange = typeof requestIdleCallback !== 'undefined'
-      ? requestIdleCallback
-      : (cb: () => void) => setTimeout(cb, 100);
+    const scheduleChange =
+      typeof requestIdleCallback !== 'undefined'
+        ? requestIdleCallback
+        : (cb: () => void) => setTimeout(cb, 100);
 
     scheduleChange(() => {
       try {

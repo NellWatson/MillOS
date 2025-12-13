@@ -153,11 +153,21 @@ const OverviewContent: React.FC = () => {
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-slate-400" />
-            <span className="text-lg font-mono font-bold text-white">{formatGameTime(gameTime)}</span>
+            <span className="text-lg font-mono font-bold text-white">
+              {formatGameTime(gameTime)}
+            </span>
             <span className="text-[10px] text-slate-500 capitalize">{currentShift}</span>
           </div>
-          <span className={`text-[10px] font-bold ${gameSpeed === 0 ? 'text-red-400' : 'text-green-400'}`}>
-            {gameSpeed === 0 ? 'PAUSED' : gameSpeed === 180 ? '1x' : gameSpeed === 1800 ? '10x' : '60x'}
+          <span
+            className={`text-[10px] font-bold ${gameSpeed === 0 ? 'text-red-400' : 'text-green-400'}`}
+          >
+            {gameSpeed === 0
+              ? 'PAUSED'
+              : gameSpeed === 180
+                ? '1x'
+                : gameSpeed === 1800
+                  ? '10x'
+                  : '60x'}
           </span>
         </div>
         <div className="flex gap-1">
@@ -175,7 +185,8 @@ const OverviewContent: React.FC = () => {
               gameSpeed === 180 ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-400'
             }`}
           >
-            <Play className="w-3 h-3" />1x
+            <Play className="w-3 h-3" />
+            1x
           </button>
           <button
             onClick={() => setGameSpeed(1800)}
@@ -183,7 +194,8 @@ const OverviewContent: React.FC = () => {
               gameSpeed === 1800 ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-400'
             }`}
           >
-            <FastForward className="w-3 h-3" />10x
+            <FastForward className="w-3 h-3" />
+            10x
           </button>
           <button
             onClick={() => setGameSpeed(10800)}
@@ -191,17 +203,38 @@ const OverviewContent: React.FC = () => {
               gameSpeed === 10800 ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-400'
             }`}
           >
-            <FastForward className="w-3 h-3" />60x
+            <FastForward className="w-3 h-3" />
+            60x
           </button>
         </div>
       </div>
 
       {/* Production Metrics - 2x2 grid */}
       <div className="grid grid-cols-4 gap-1.5">
-        <MiniMetric label="Throughput" value={metrics.throughput} icon={<Package className="w-3 h-3" />} color="cyan" />
-        <MiniMetric label="Efficiency" value={`${metrics.efficiency.toFixed(0)}%`} icon={<TrendingUp className="w-3 h-3" />} color="green" />
-        <MiniMetric label="Uptime" value={`${metrics.uptime.toFixed(0)}%`} icon={<Gauge className="w-3 h-3" />} color="blue" />
-        <MiniMetric label="Quality" value={`${metrics.quality.toFixed(0)}%`} icon={<CheckCircle className="w-3 h-3" />} color="purple" />
+        <MiniMetric
+          label="Throughput"
+          value={metrics.throughput}
+          icon={<Package className="w-3 h-3" />}
+          color="cyan"
+        />
+        <MiniMetric
+          label="Efficiency"
+          value={`${metrics.efficiency.toFixed(0)}%`}
+          icon={<TrendingUp className="w-3 h-3" />}
+          color="green"
+        />
+        <MiniMetric
+          label="Uptime"
+          value={`${metrics.uptime.toFixed(0)}%`}
+          icon={<Gauge className="w-3 h-3" />}
+          color="blue"
+        />
+        <MiniMetric
+          label="Quality"
+          value={`${metrics.quality.toFixed(0)}%`}
+          icon={<CheckCircle className="w-3 h-3" />}
+          color="purple"
+        />
       </div>
 
       {/* Machine Status */}
@@ -240,15 +273,25 @@ const OverviewContent: React.FC = () => {
         <div className="bg-slate-800/50 rounded-lg p-2">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[10px] text-slate-500">Safety</span>
-            <span className={`text-sm font-bold font-mono ${
-              safetyScore > 90 ? 'text-green-400' : safetyScore > 70 ? 'text-yellow-400' : 'text-red-400'
-            }`}>
+            <span
+              className={`text-sm font-bold font-mono ${
+                safetyScore > 90
+                  ? 'text-green-400'
+                  : safetyScore > 70
+                    ? 'text-yellow-400'
+                    : 'text-red-400'
+              }`}
+            >
               {safetyScore}%
             </span>
           </div>
           <div className="grid grid-cols-2 gap-1 text-[9px]">
-            <div className="text-slate-500">Misses: <span className="text-slate-300">{safetyMetrics?.nearMisses ?? 0}</span></div>
-            <div className="text-slate-500">Days: <span className="text-slate-300">{safetyMetrics?.daysSinceIncident ?? 0}</span></div>
+            <div className="text-slate-500">
+              Misses: <span className="text-slate-300">{safetyMetrics?.nearMisses ?? 0}</span>
+            </div>
+            <div className="text-slate-500">
+              Days: <span className="text-slate-300">{safetyMetrics?.daysSinceIncident ?? 0}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -256,19 +299,21 @@ const OverviewContent: React.FC = () => {
       {/* Total Production */}
       <div className="text-center py-2 bg-gradient-to-r from-cyan-900/20 to-blue-900/20 rounded-lg border border-cyan-500/20">
         <div className="text-[10px] text-slate-500">Total Bags</div>
-        <div className="text-xl font-bold font-mono text-cyan-400">{totalBagsProduced.toLocaleString()}</div>
+        <div className="text-xl font-bold font-mono text-cyan-400">
+          {totalBagsProduced.toLocaleString()}
+        </div>
       </div>
     </div>
   );
 };
 
 // Mini metric card for 4-column layout
-const MiniMetric: React.FC<{ label: string; value: string | number; icon: React.ReactNode; color: string }> = ({
-  label,
-  value,
-  icon,
-  color,
-}) => {
+const MiniMetric: React.FC<{
+  label: string;
+  value: string | number;
+  icon: React.ReactNode;
+  color: string;
+}> = ({ label, value, icon, color }) => {
   const colorClasses: Record<string, string> = {
     cyan: 'text-cyan-400',
     green: 'text-green-400',
@@ -286,7 +331,11 @@ const MiniMetric: React.FC<{ label: string; value: string | number; icon: React.
 };
 
 // Machine status badge
-const MachineStatusBadge: React.FC<{ label: string; count: number; color: string }> = ({ label, count, color }) => {
+const MachineStatusBadge: React.FC<{ label: string; count: number; color: string }> = ({
+  label,
+  count,
+  color,
+}) => {
   const colorClasses: Record<string, string> = {
     green: 'text-green-400 bg-green-500/10',
     yellow: 'text-yellow-400 bg-yellow-500/10',
@@ -316,7 +365,7 @@ const SafetyContent: React.FC = () => {
   // Calculate elapsed time
   const elapsedSeconds = drillMetrics.active
     ? Math.floor((Date.now() - drillMetrics.startTime) / 1000)
-    : drillMetrics.finalTimeSeconds ?? 0;
+    : (drillMetrics.finalTimeSeconds ?? 0);
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -344,7 +393,9 @@ const SafetyContent: React.FC = () => {
             <div className="space-y-2">
               <div className="flex justify-between text-xs">
                 <span className="text-slate-400">Evacuated</span>
-                <span className="text-orange-400 font-mono">{evacuatedCount}/{totalWorkers}</span>
+                <span className="text-orange-400 font-mono">
+                  {evacuatedCount}/{totalWorkers}
+                </span>
               </div>
               <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
                 <div
@@ -441,9 +492,7 @@ const AIContent: React.FC = () => {
         <span>Recent AI Decisions</span>
       </div>
       {recentDecisions.length === 0 ? (
-        <div className="text-center py-4 text-slate-500 text-sm">
-          No AI decisions yet
-        </div>
+        <div className="text-center py-4 text-slate-500 text-sm">No AI decisions yet</div>
       ) : (
         <div className="space-y-2">
           {recentDecisions.map((decision) => (
@@ -454,9 +503,7 @@ const AIContent: React.FC = () => {
               {getStatusIcon(decision.status)}
               <div className="flex-1 min-w-0">
                 <div className="text-xs text-white truncate">{decision.action}</div>
-                <div className="text-[10px] text-slate-400 truncate">
-                  {decision.reasoning}
-                </div>
+                <div className="text-[10px] text-slate-400 truncate">{decision.reasoning}</div>
               </div>
             </div>
           ))}
@@ -471,12 +518,12 @@ const SCADAContent: React.FC = () => {
   const metrics = useProductionStore((s) => s.metrics);
   const scadaLive = useProductionStore((s) => s.scadaLive);
 
-  const MetricCard: React.FC<{ label: string; value: string | number; unit: string; icon: React.ReactNode }> = ({
-    label,
-    value,
-    unit,
-    icon,
-  }) => (
+  const MetricCard: React.FC<{
+    label: string;
+    value: string | number;
+    unit: string;
+    icon: React.ReactNode;
+  }> = ({ label, value, unit, icon }) => (
     <div className="bg-slate-800/50 rounded-lg p-2">
       <div className="flex items-center gap-1 text-slate-400 mb-1">
         {icon}
@@ -496,7 +543,9 @@ const SCADAContent: React.FC = () => {
           <Activity className="w-4 h-4" />
           <span>System Metrics</span>
         </div>
-        <div className={`flex items-center gap-1 text-xs ${scadaLive ? 'text-green-400' : 'text-slate-500'}`}>
+        <div
+          className={`flex items-center gap-1 text-xs ${scadaLive ? 'text-green-400' : 'text-slate-500'}`}
+        >
           {scadaLive ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
           <span>{scadaLive ? 'Live' : 'Offline'}</span>
         </div>
@@ -548,7 +597,9 @@ const WorkforceContent: React.FC = () => {
 
       <div className="grid grid-cols-2 gap-2">
         <div className="bg-slate-800/50 rounded-lg p-3 text-center">
-          <div className="text-2xl font-bold text-white">{activeWorkers}/{totalWorkers}</div>
+          <div className="text-2xl font-bold text-white">
+            {activeWorkers}/{totalWorkers}
+          </div>
           <div className="text-[10px] text-slate-400">Active Workers</div>
         </div>
         <div className="bg-slate-800/50 rounded-lg p-3 text-center">
@@ -636,17 +687,12 @@ const MultiplayerContent: React.FC = () => {
           <div className="mt-2 space-y-1">
             {remotePlayers.slice(0, 3).map((player) => (
               <div key={player.id} className="flex items-center gap-2 text-xs">
-                <div
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: player.color }}
-                />
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: player.color }} />
                 <span className="text-slate-300">{player.name}</span>
               </div>
             ))}
             {remotePlayers.length > 3 && (
-              <div className="text-[10px] text-slate-500">
-                +{remotePlayers.length - 3} more
-              </div>
+              <div className="text-[10px] text-slate-500">+{remotePlayers.length - 3} more</div>
             )}
           </div>
         )}

@@ -80,7 +80,12 @@ export const OpenPersonnelDoorway: React.FC<OpenPersonnelDoorwayProps> = ({
       {/* Floor threshold */}
       <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[width + 0.3, 0.5]} />
-        <meshStandardMaterial color="#64748b" metalness={0.5} roughness={0.6} side={THREE.DoubleSide} />
+        <meshStandardMaterial
+          color="#64748b"
+          metalness={0.5}
+          roughness={0.6}
+          side={THREE.DoubleSide}
+        />
       </mesh>
 
       {/* Outdoor ambient light through the opening */}

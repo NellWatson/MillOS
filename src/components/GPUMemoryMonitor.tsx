@@ -104,9 +104,7 @@ export const GPUMemoryMonitor = memo(function GPUMemoryMonitor({
         }}
       >
         <span>GPU Resources</span>
-        {isContextLost && (
-          <span style={{ color: '#ef4444', fontSize: '10px' }}>CONTEXT LOST</span>
-        )}
+        {isContextLost && <span style={{ color: '#ef4444', fontSize: '10px' }}>CONTEXT LOST</span>}
       </div>
 
       {categories.map(({ name, data }) => (
