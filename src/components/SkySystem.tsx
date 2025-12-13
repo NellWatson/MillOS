@@ -1,5 +1,5 @@
-import React, { useRef, useMemo, useEffect } from 'react';
-import { useFrame } from '@react-three/fiber';
+import React, { useRef, useMemo, useEffect, useLayoutEffect } from 'react';
+import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
@@ -193,6 +193,12 @@ interface LightingAnimationState {
 }
 const lightingRegistry = new Map<string, LightingAnimationState>();
 
+// Expose registries to globalThis in dev mode for debugging
+if (import.meta.env.DEV) {
+  (globalThis as Record<string, unknown>).skyDomeRegistry = skyDomeRegistry;
+  (globalThis as Record<string, unknown>).lightingRegistry = lightingRegistry;
+}
+
 export const registerSkyDome = (id: string, state: SkyDomeAnimationState) => {
   skyDomeRegistry.set(id, state);
 };
@@ -250,25 +256,111 @@ export const unregisterLighting = (id: string) => {
 };
 
 // Manager component to handle all sky animations in a single consolidated loop
+// CRITICAL: Reads store IMPERATIVELY in useFrame to avoid stale closures
 const SkyAnimationManager: React.FC = () => {
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const lastLogTimeRef = useRef(-1);
 
   useFrame((state) => {
+    // Read store state IMPERATIVELY to get fresh values every frame
+    // This avoids stale closure issues with Zustand subscriptions + useFrame
+    const { isTabVisible, gameTime, weather } = useGameSimulationStore.getState();
+
     // Skip if tab not visible
     if (!isTabVisible) return;
 
     const time = state.clock.getElapsedTime();
 
     // 1. Update Sky Dome shader (needs 60fps for smooth cloud movement)
+    // DEBUG: Log registry state periodically
+    if (Math.floor(gameTime) !== Math.floor(lastLogTimeRef.current)) {
+      console.log(`[SkyAnimationManager] gameTime: ${gameTime.toFixed(2)}, registry size: ${skyDomeRegistry.size}`);
+      lastLogTimeRef.current = gameTime;
+    }
+
     if (skyDomeRegistry.size > 0) {
+      // Sky color keyframes for smooth interpolation
+      // Each entry: [hour, {top, bottom, horizon, ground}]
+      const skyKeyframes: [number, { top: string; bottom: string; horizon: string; ground: string }][] = [
+        [0, { top: '#050810', bottom: '#0a1628', horizon: '#1a2744', ground: '#0a0f1a' }],   // Midnight - very dark
+        [4, { top: '#050810', bottom: '#0a1628', horizon: '#1a2744', ground: '#0a0f1a' }],   // Late night - still dark
+        [5, { top: '#1a1a2e', bottom: '#2d1f3d', horizon: '#3d2952', ground: '#1a1a2e' }],   // Pre-dawn - first hint of light
+        [6, { top: '#7c4a1a', bottom: '#d97706', horizon: '#f59e0b', ground: '#451a03' }],   // Dawn - warm orange
+        [7, { top: '#c2410c', bottom: '#fb923c', horizon: '#fcd34d', ground: '#78350f' }],   // Sunrise - golden
+        [8, { top: '#0284c7', bottom: '#7dd3fc', horizon: '#fef3c7', ground: '#4a7c59' }],   // Morning - transitioning to blue
+        [10, { top: '#0369a1', bottom: '#7dd3fc', horizon: '#f0f9ff', ground: '#5a8a5a' }],   // Late morning
+        [12, { top: '#0284c7', bottom: '#38bdf8', horizon: '#f0f9ff', ground: '#6b936b' }],   // Noon - bright blue
+        [16, { top: '#0369a1', bottom: '#67d4fc', horizon: '#fef3c7', ground: '#5a8a5a' }],   // Afternoon
+        [18, { top: '#92400e', bottom: '#ea580c', horizon: '#fbbf24', ground: '#451a03' }],   // Golden hour - warm amber
+        [19, { top: '#7c2d12', bottom: '#c2410c', horizon: '#f97316', ground: '#451a03' }],   // Sunset
+        [20, { top: '#451a03', bottom: '#78350f', horizon: '#92400e', ground: '#1c1917' }],   // Dusk - transitioning to dark
+        [21, { top: '#0f172a', bottom: '#1e293b', horizon: '#334155', ground: '#0f172a' }],   // Night begins
+        [24, { top: '#050810', bottom: '#0a1628', horizon: '#1a2744', ground: '#0a0f1a' }],   // Midnight wrap
+      ];
+
+      // Find the two keyframes to interpolate between
+      let fromIdx = 0;
+      let toIdx = 1;
+      for (let i = 0; i < skyKeyframes.length - 1; i++) {
+        if (gameTime >= skyKeyframes[i][0] && gameTime < skyKeyframes[i + 1][0]) {
+          fromIdx = i;
+          toIdx = i + 1;
+          break;
+        }
+      }
+
+      const fromTime = skyKeyframes[fromIdx][0];
+      const toTime = skyKeyframes[toIdx][0];
+      const fromColors = skyKeyframes[fromIdx][1];
+      const toColors = skyKeyframes[toIdx][1];
+
+      // Calculate lerp factor (0-1)
+      const t = (gameTime - fromTime) / (toTime - fromTime);
+
+      // Helper to lerp hex colors
+      const lerpColor = (from: string, to: string, factor: number): string => {
+        const fromR = parseInt(from.slice(1, 3), 16);
+        const fromG = parseInt(from.slice(3, 5), 16);
+        const fromB = parseInt(from.slice(5, 7), 16);
+        const toR = parseInt(to.slice(1, 3), 16);
+        const toG = parseInt(to.slice(3, 5), 16);
+        const toB = parseInt(to.slice(5, 7), 16);
+        const r = Math.round(fromR + (toR - fromR) * factor);
+        const g = Math.round(fromG + (toG - fromG) * factor);
+        const b = Math.round(fromB + (toB - fromB) * factor);
+        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+      };
+
+      const skyColors = {
+        top: lerpColor(fromColors.top, toColors.top, t),
+        bottom: lerpColor(fromColors.bottom, toColors.bottom, t),
+        horizon: lerpColor(fromColors.horizon, toColors.horizon, t),
+        ground: lerpColor(fromColors.ground, toColors.ground, t),
+      };
+
+      // Compute cloud density from weather
+      const cloudDensity = weather === 'clear' ? 0.3 : weather === 'cloudy' ? 0.7 : weather === 'rain' ? 0.9 : weather === 'storm' ? 1.0 : 0.5;
+
+      // Compute sun angle from gameTime
+      const sunAngle = ((gameTime - 6) / 12) * Math.PI;
+
+      // Update uniforms via .set() / .copy() to mutate existing objects
       skyDomeRegistry.forEach((data) => {
+        if (!data.material?.uniforms) return;
+
+        // DEBUG: Dump uniform keys once to verify they match shader
+        if (import.meta.env.DEV && !(data.material as unknown as { __uniformsDumped?: boolean }).__uniformsDumped) {
+          (data.material as unknown as { __uniformsDumped: boolean }).__uniformsDumped = true;
+          console.log('[Sky] Uniform keys:', Object.keys(data.material.uniforms));
+          console.log('[Sky] topColor type:', data.material.uniforms.topColor?.value?.constructor?.name);
+        }
+
         data.material.uniforms.time.value = time;
-        data.material.uniforms.topColor.value.set(data.skyColors.top);
-        data.material.uniforms.bottomColor.value.set(data.skyColors.bottom);
-        data.material.uniforms.horizonColor.value.set(data.skyColors.horizon);
-        data.material.uniforms.groundColor.value.set(data.skyColors.ground);
-        data.material.uniforms.cloudDensity.value = data.cloudDensity;
-        data.material.uniforms.sunAngle.value = data.sunAngle;
+        data.material.uniforms.topColor.value.set(skyColors.top);
+        data.material.uniforms.bottomColor.value.set(skyColors.bottom);
+        data.material.uniforms.horizonColor.value.set(skyColors.horizon);
+        data.material.uniforms.groundColor.value.set(skyColors.ground);
+        data.material.uniforms.cloudDensity.value = cloudDensity;
+        data.material.uniforms.sunAngle.value = sunAngle;
       });
     }
 
@@ -356,6 +448,48 @@ const SkyAnimationManager: React.FC = () => {
   return null;
 };
 
+// Component to lock sky dome to camera position and scale within far plane
+// This ensures the dome is always visible regardless of camera position
+interface SkyDomeFollowerProps {
+  meshRef: React.RefObject<THREE.Mesh | null>;
+}
+const SkyDomeFollower: React.FC<SkyDomeFollowerProps> = ({ meshRef }) => {
+  const { camera } = useThree();
+  const baseRadiusRef = useRef<number>(1);
+  const hasLoggedRef = useRef(false);
+
+  // Compute base radius once when mesh is available
+  useLayoutEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    mesh.geometry.computeBoundingSphere();
+    baseRadiusRef.current = mesh.geometry.boundingSphere?.radius ?? 350;
+    console.log('[SkyDomeFollower] Base radius:', baseRadiusRef.current);
+  }, [meshRef]);
+
+  useFrame(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+
+    // Log once for debugging
+    if (!hasLoggedRef.current) {
+      hasLoggedRef.current = true;
+      console.log('[SkyDomeFollower] Camera far:', camera.far, 'Camera position:', camera.position.toArray());
+    }
+
+    // Keep camera inside the dome by centering dome on camera
+    mesh.position.copy(camera.position);
+
+    // Keep dome inside far plane (prevents clipping)
+    // Use 95% of far to leave margin
+    const targetRadius = camera.far * 0.95;
+    const scale = targetRadius / baseRadiusRef.current;
+    mesh.scale.setScalar(scale);
+  });
+
+  return null;
+};
+
 export const SkySystem: React.FC = () => {
   const gameTime = useGameSimulationStore((state) => state.gameTime);
   const weather = useGameSimulationStore((state) => state.weather);
@@ -394,22 +528,22 @@ export const SkySystem: React.FC = () => {
       };
     }
     if (gameTime >= 5 && gameTime < 6) {
-      // Early Dawn (05:00 - 06:00)
+      // Early Dawn (05:00 - 06:00) - warm pre-dawn
       return {
-        top: '#1e1b4b',
-        bottom: '#4c1d95',
-        horizon: '#f97316',
-        ambient: '#312e81',
-        ground: '#1e293b',
+        top: '#7c2d12',
+        bottom: '#f97316',
+        horizon: '#fbbf24',
+        ambient: '#ea580c',
+        ground: '#451a03',
       };
     }
     if (gameTime >= 6 && gameTime < 8) {
-      // Dawn/Sunrise (06:00 - 08:00)
+      // Dawn/Sunrise (06:00 - 08:00) - golden sunrise
       return {
-        top: '#3b0764',
+        top: '#dc2626',
         bottom: '#f59e0b',
         horizon: '#fbbf24',
-        ambient: '#7c2d12',
+        ambient: '#f97316',
         ground: '#451a03',
       };
     }
@@ -454,13 +588,13 @@ export const SkySystem: React.FC = () => {
       };
     }
     if (gameTime >= 19 && gameTime < 21) {
-      // Dusk/Twilight (19:00 - 21:00)
+      // Dusk/Twilight (19:00 - 21:00) - warm amber sunset
       return {
-        top: '#1e1b4b',
-        bottom: '#ea580c',
-        horizon: '#dc2626',
-        ambient: '#312e81',
-        ground: '#1e293b',
+        top: '#dc2626',
+        bottom: '#f97316',
+        horizon: '#fbbf24',
+        ambient: '#f97316',
+        ground: '#92400e',
       };
     }
 
@@ -540,50 +674,30 @@ export const SkySystem: React.FC = () => {
     return 0.3; // Dim moonlight
   }, [moonVisible]);
 
-  // Register sky dome with animation manager
-  // Use individual color strings as dependencies for reliable updates
-  useEffect(() => {
-    if (meshRef.current) {
-      const material = meshRef.current.material as THREE.ShaderMaterial;
-      registerSkyDome('main', {
-        material,
-        skyColors,
-        cloudDensity,
-        sunAngle,
-      });
-      return () => unregisterSkyDome('main');
-    }
-  }, [
-    skyColors.top,
-    skyColors.bottom,
-    skyColors.horizon,
-    skyColors.ground,
-    cloudDensity,
-    sunAngle,
-  ]);
+  // Register sky dome with animation manager ONCE when mesh becomes available
+  // CRITICAL: Empty deps [] to prevent registry thrashing that leaves registry empty
+  // The SkyAnimationManager reads gameTime imperatively, so we don't need to re-register on time changes
+  useLayoutEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
 
-  // Direct uniform update to ensure sky colors stay in sync with game time
-  // This bypasses potential registry timing issues
-  useEffect(() => {
-    if (meshRef.current) {
-      const material = meshRef.current.material as THREE.ShaderMaterial;
-      if (material.uniforms) {
-        material.uniforms.topColor.value.set(skyColors.top);
-        material.uniforms.bottomColor.value.set(skyColors.bottom);
-        material.uniforms.horizonColor.value.set(skyColors.horizon);
-        material.uniforms.groundColor.value.set(skyColors.ground);
-        material.uniforms.cloudDensity.value = cloudDensity;
-        material.uniforms.sunAngle.value = sunAngle;
-      }
-    }
-  }, [
-    skyColors.top,
-    skyColors.bottom,
-    skyColors.horizon,
-    skyColors.ground,
-    cloudDensity,
-    sunAngle,
-  ]);
+    const material = mesh.material as THREE.ShaderMaterial;
+    const id = mesh.uuid;
+
+    console.log(`[SkySystem] Registering sky dome with id: ${id}`);
+    registerSkyDome(id, {
+      material,
+      skyColors,
+      cloudDensity,
+      sunAngle,
+    });
+
+    return () => {
+      console.log(`[SkySystem] Unregistering sky dome with id: ${id}`);
+      unregisterSkyDome(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // INTENTIONALLY EMPTY - register once, SkyAnimationManager updates uniforms imperatively
 
   // Register lights with animation manager (replaces direct useFrame for lights)
   useEffect(() => {
@@ -616,6 +730,8 @@ export const SkySystem: React.FC = () => {
     <group>
       {/* Centralized Animation Manager */}
       <SkyAnimationManager />
+      {/* Camera follower - locks dome to camera position and scales within far plane */}
+      <SkyDomeFollower meshRef={meshRef} />
 
       {/* Dynamic Lighting */}
       <ambientLight ref={ambientLightRef} intensity={0.4} />
@@ -646,7 +762,8 @@ export const SkySystem: React.FC = () => {
       </mesh>
 
       {/* Sky Dome - renderOrder -1000 ensures it renders behind everything */}
-      <mesh ref={meshRef} renderOrder={-1000}>
+      {/* frustumCulled={false} ensures dome is always rendered even when camera is inside */}
+      <mesh ref={meshRef} renderOrder={-1000} frustumCulled={false}>
         <sphereGeometry args={[350, 64, 64]} />
         <shaderMaterial
           vertexShader={skyVertexShader}
@@ -662,6 +779,7 @@ export const SkySystem: React.FC = () => {
           }}
           side={THREE.BackSide}
           depthWrite={false}
+          depthTest={false}
         />
       </mesh>
 

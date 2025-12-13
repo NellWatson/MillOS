@@ -2,11 +2,15 @@
 
 **Date:** 2025-12-13  
 **Severity:** High  
-**Status:** Resolved  
+**Status:** Resolved (Updated 2025-12-13)
 
 ## Summary
 
-The application experienced a critical state synchronization issue where the sky rendering system and the main application UI were operating on **two separate instances** of the Zustand game simulation store. This caused the sky to remain "constantly blue" (stuck at midday) while the game time was correctly advancing to night in other parts of the application.
+The application experienced **two related issues** causing the sky to appear stuck at a single color:
+
+1. **Split-Brain Store** (Original): The sky rendering system and main application UI were operating on **two separate instances** of the Zustand game simulation store due to inconsistent import paths.
+
+2. **Scene Background Masking** (Additional): The `DynamicBackground` component was setting `scene.background` to a solid color, which completely masked the procedural `SkySystem` sky dome with its clouds and gradients.
 
 ## Symptoms
 
@@ -107,6 +111,33 @@ By using identical import paths across all files:
 - All components reference the **same store instance**
 - State updates propagate correctly to all subscribers
 - `App.tsx` fog color now syncs with `SkySystem` sky color
+
+### Additional Fix: Remove scene.background Masking
+
+The original fix resolved the store sync issue, but a second problem remained: the `DynamicBackground` component was setting `scene.background` to a solid color, which **completely masks** the `SkySystem` sky dome.
+
+In Three.js, `scene.background` is rendered **behind everything else**, including sky domes. Since `SkySystem` renders a sphere with `side={THREE.BackSide}` at `renderOrder={-1000}`, it was being hidden by the solid background color.
+
+**The fix**: Remove the `scene.background` assignment from `DynamicBackground`:
+
+```diff
+// src/App.tsx - DynamicBackground component
+  lastColorRef.current = targetColor;
+  colorRef.current.set(targetColor);
+- scene.background = colorRef.current;
++ // NOTE: Do NOT set scene.background here - the SkySystem sky dome handles the background
++ // with procedural clouds and gradients. Setting scene.background would mask it entirely.
++ // We only sync the fog color so distant objects fade correctly.
+  if (scene.fog && scene.fog instanceof THREE.Fog) {
+    scene.fog.color.copy(colorRef.current);
+  }
+```
+
+The `SkySystem` sky dome now correctly displays:
+- Dynamic sky gradients based on time of day
+- Procedural clouds with drift animation
+- Sun and moon positioning
+- Stars at night
 
 ## Verification
 

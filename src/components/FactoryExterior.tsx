@@ -4528,8 +4528,9 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
   return (
     <group>
       {/* ========== EXTERIOR GRASS GROUND ========== */}
+      {/* Size 600x600 ensures full coverage beyond the r=400 circular sky ground plane */}
       <mesh position={[0, -0.2, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[400, 400]} />
+        <planeGeometry args={[600, 600]} />
         <meshStandardMaterial
           color={grassTextures.color ? '#ffffff' : GRASS_COLORS.field}
           map={grassTextures.color}

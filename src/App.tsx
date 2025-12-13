@@ -1,5 +1,5 @@
 import React, { useState, Suspense, useEffect, useCallback, useRef } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Preload } from '@react-three/drei';
 import { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { Physics } from '@react-three/rapier';
@@ -34,7 +34,7 @@ import { GPUMemoryMonitor } from './components/GPUMemoryMonitor';
 import { initializeAIEngine } from './utils/aiEngine';
 import { useGraphicsStore } from './stores/graphicsStore';
 import { useUIStore } from './stores/uiStore';
-import { useGameSimulationStore } from './stores/gameSimulationStore';
+import { useGameSimulationStore } from './stores';
 import { useProductionStore } from './stores/productionStore';
 import { initializeSCADASync } from './store';
 import { useShallow } from 'zustand/react/shallow';
@@ -65,82 +65,95 @@ import { useGeometryNaNDetector } from './components/SafeGeometry';
 
 // Calculate sky background color based on game time (matches SkySystem.tsx logic)
 const getSkyBackgroundColor = (gameTime: number): string => {
-  if (gameTime >= 21 || gameTime < 5) {
-    // Deep Night (21:00 - 05:00)
-    return '#0a0f1a';
+  // Keyframes for smooth fog color interpolation (matches sky dome)
+  const fogKeyframes: [number, string][] = [
+    [0, '#050810'],   // Midnight - very dark
+    [4, '#050810'],   // Late night
+    [5, '#1a1a2e'],   // Pre-dawn
+    [6, '#7c4a1a'],   // Dawn
+    [7, '#c2410c'],   // Sunrise
+    [8, '#0284c7'],   // Morning
+    [12, '#0284c7'],  // Noon
+    [16, '#0369a1'],  // Afternoon
+    [18, '#92400e'],  // Golden hour - warm amber
+    [19, '#7c2d12'],  // Sunset
+    [20, '#451a03'],  // Dusk - transitioning to dark
+    [21, '#0f172a'],  // Night begins
+    [24, '#050810'],  // Midnight wrap
+  ];
+
+  // Find keyframes to interpolate between
+  let fromIdx = 0;
+  let toIdx = 1;
+  for (let i = 0; i < fogKeyframes.length - 1; i++) {
+    if (gameTime >= fogKeyframes[i][0] && gameTime < fogKeyframes[i + 1][0]) {
+      fromIdx = i;
+      toIdx = i + 1;
+      break;
+    }
   }
-  if (gameTime >= 5 && gameTime < 6) {
-    // Early Dawn (05:00 - 06:00)
-    return '#1e1b4b';
-  }
-  if (gameTime >= 6 && gameTime < 8) {
-    // Dawn/Sunrise (06:00 - 08:00)
-    return '#3b0764';
-  }
-  if (gameTime >= 8 && gameTime < 10) {
-    // Morning (08:00 - 10:00)
-    return '#0ea5e9';
-  }
-  if (gameTime >= 10 && gameTime < 16) {
-    // Midday (10:00 - 16:00)
-    return '#1e90ff';
-  }
-  if (gameTime >= 16 && gameTime < 18) {
-    // Afternoon (16:00 - 18:00)
-    return '#0ea5e9';
-  }
-  if (gameTime >= 18 && gameTime < 19) {
-    // Golden Hour (18:00 - 19:00)
-    return '#0c4a6e';
-  }
-  if (gameTime >= 19 && gameTime < 21) {
-    // Dusk/Twilight (19:00 - 21:00)
-    return '#1e1b4b';
-  }
-  // Default to midday
-  return '#0369a1';
+
+  const fromTime = fogKeyframes[fromIdx][0];
+  const toTime = fogKeyframes[toIdx][0];
+  const fromColor = fogKeyframes[fromIdx][1];
+  const toColor = fogKeyframes[toIdx][1];
+
+  // Calculate lerp factor
+  const t = (gameTime - fromTime) / (toTime - fromTime);
+
+  // Lerp hex colors
+  const fromR = parseInt(fromColor.slice(1, 3), 16);
+  const fromG = parseInt(fromColor.slice(3, 5), 16);
+  const fromB = parseInt(fromColor.slice(5, 7), 16);
+  const toR = parseInt(toColor.slice(1, 3), 16);
+  const toG = parseInt(toColor.slice(3, 5), 16);
+  const toB = parseInt(toColor.slice(5, 7), 16);
+  const r = Math.round(fromR + (toR - fromR) * t);
+  const g = Math.round(fromG + (toG - fromG) * t);
+  const b = Math.round(fromB + (toB - fromB) * t);
+
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 };
 
-// Dynamic background color component that syncs with game time
-// Subscribes to the store so it updates even if the render loop throttles
+// Dynamic fog color component that syncs with game time
+// NOTE: We intentionally do NOT set scene.background here because that would
+// hide the procedural sky dome (SkySystem) with a solid color. The sky dome
+// renders as the background with dynamic clouds and time-of-day gradients.
+// This component only updates the fog color to match the sky's horizon color.
 const DynamicBackground: React.FC = () => {
   const { scene, gl } = useThree();
   const colorRef = useRef(new THREE.Color('#0a0f1a'));
-  const lastColorRef = useRef('#0a0f1a');
-  const isInitializedRef = useRef(false);
+  const lastColorRef = useRef('');
 
-  useEffect(() => {
-    const applyColor = (gameTime: number) => {
-      const targetColor = getSkyBackgroundColor(gameTime);
-      const shouldUpdate = targetColor !== lastColorRef.current || !isInitializedRef.current;
+  // Use useFrame to continuously check and update fog color
+  // This runs every frame and reads gameTime directly from the store
+  useFrame((state) => {
+    const gameTime = useGameSimulationStore.getState().gameTime;
+    const targetColor = getSkyBackgroundColor(gameTime);
 
-      // DEBUG: Log game time spread to detect synchronization issues
-      if (Math.abs(gameTime - Math.floor(gameTime)) < 0.05) {
-        console.log(`[App:DynamicBackground] Time: ${gameTime.toFixed(2)}, Color: ${targetColor}`);
-      }
+    // DEBUG: Log occasional updates to verify loop is running and time is changing
+    // Log once per second (approx every 60 frames)
+    if (state.clock.elapsedTime % 1 < 0.02) {
+      console.log(`[DynamicBackground] Frame: ${state.clock.elapsedTime.toFixed(1)}, Time: ${gameTime.toFixed(2)}, Color: ${targetColor}`);
+    }
 
-      if (!shouldUpdate) return;
+    // Only update if color actually changed
+    if (targetColor === lastColorRef.current) return;
 
-      lastColorRef.current = targetColor;
-      colorRef.current.set(targetColor);
-      scene.background = colorRef.current;
-      if (scene.fog && scene.fog instanceof THREE.Fog) {
-        scene.fog.color.copy(colorRef.current);
-      }
-      gl.setClearColor(colorRef.current, 1);
-      isInitializedRef.current = true;
-    };
+    lastColorRef.current = targetColor;
+    colorRef.current.set(targetColor);
 
-    // Initialize immediately with current time
-    applyColor(useGameSimulationStore.getState().gameTime);
+    // Do NOT set scene.background - let the SkySystem dome be the background
+    // scene.background = colorRef.current; // DISABLED - was hiding sky dome
 
-    // Subscribe to store changes and update only when gameTime changes
-    const unsubscribe = useGameSimulationStore.subscribe((state) => {
-      applyColor(state.gameTime);
-    });
+    // Update fog color to match sky horizon
+    if (scene.fog && scene.fog instanceof THREE.Fog) {
+      scene.fog.color.copy(colorRef.current);
+    }
 
-    return () => unsubscribe();
-  }, [scene, gl]);
+    // Update clear color as fallback (only visible if sky dome doesn't render)
+    gl.setClearColor(colorRef.current, 1);
+  });
 
   return null;
 };

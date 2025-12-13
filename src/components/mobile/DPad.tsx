@@ -1,5 +1,5 @@
-import React, { useCallback, useRef, useState, useEffect } from 'react';
-import { Move, Eye } from 'lucide-react';
+import React, { useCallback, useRef, useState } from 'react';
+import { Move, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useMobileControlStore, type DPadDirection } from '../../stores/mobileControlStore';
 import { useUIStore } from '../../stores/uiStore';
 
@@ -9,295 +9,199 @@ interface DPadProps {
   activeOpacity?: number;
 }
 
-// Joystick configuration
-const JOYSTICK_SIZE = 144; // Total size in pixels
-const KNOB_SIZE = 48; // Draggable knob size
-const MAX_DISTANCE = (JOYSTICK_SIZE - KNOB_SIZE) / 2; // Max knob travel from center
-const DEAD_ZONE = 0.1; // Ignore inputs below this threshold
-
 /**
- * Analog joystick for mobile movement/camera controls.
- * - Drag the knob to move in any direction with proportional speed
+ * Virtual D-Pad for mobile camera controls.
+ * - 4 directional buttons for movement/look
  * - Center button toggles between move and look modes (disabled in FPS mode)
- * - Outputs normalized direction vector (-1 to 1) to mobileControlStore
+ * - Outputs normalized direction vector to mobileControlStore
+ * - Fades to lower opacity when idle for less visual clutter
  */
 export const DPad: React.FC<DPadProps> = ({
   disabled = false,
-  idleOpacity = 0.5,
+  idleOpacity = 0.4,
   activeOpacity = 1,
 }) => {
-  // Optimize selectors to avoid re-renders when dpadDirection changes
+  // Optimize selectors to avoid re-renders
   const dpadMode = useMobileControlStore((state) => state.dpadMode);
   const toggleDpadMode = useMobileControlStore((state) => state.toggleDpadMode);
   const setDpadDirection = useMobileControlStore((state) => state.setDpadDirection);
-
   const fpsMode = useUIStore((state) => state.fpsMode);
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const knobRef = useRef<HTMLDivElement>(null);
+  const activeDirectionsRef = useRef<Set<string>>(new Set());
   const [isActive, setIsActive] = useState(false);
-  const touchIdRef = useRef<number | null>(null);
-  // Store position in ref to avoid re-renders
-  const positionRef = useRef({ x: 0, y: 0 });
 
-  const updateKnobVisuals = useCallback((x: number, y: number) => {
-    if (knobRef.current) {
-      knobRef.current.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+  const updateDirection = useCallback(() => {
+    const active = activeDirectionsRef.current;
+
+    // Update active state for opacity
+    setIsActive(active.size > 0);
+
+    if (active.size === 0) {
+      setDpadDirection(null);
+      return;
     }
-    positionRef.current = { x, y };
-  }, []);
 
-  const updateJoystick = useCallback(
-    (clientX: number, clientY: number) => {
-      if (!containerRef.current) return;
+    let x = 0;
+    let y = 0;
 
-      const rect = containerRef.current.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
+    if (active.has('left')) x -= 1;
+    if (active.has('right')) x += 1;
+    if (active.has('up')) y -= 1;
+    if (active.has('down')) y += 1;
 
-      // Calculate offset from center
-      let deltaX = clientX - centerX;
-      let deltaY = clientY - centerY;
+    // Normalize diagonal movement
+    if (x !== 0 && y !== 0) {
+      const magnitude = Math.sqrt(x * x + y * y);
+      x /= magnitude;
+      y /= magnitude;
+    }
 
-      // Calculate distance from center
-      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-
-      // Clamp to max distance
-      if (distance > MAX_DISTANCE) {
-        const scale = MAX_DISTANCE / distance;
-        deltaX *= scale;
-        deltaY *= scale;
-      }
-
-      // Update visual knob position directly via DOM
-      updateKnobVisuals(deltaX, deltaY);
-
-      // Normalize to -1 to 1 range
-      let normalizedX = deltaX / MAX_DISTANCE;
-      let normalizedY = deltaY / MAX_DISTANCE;
-
-      // Apply dead zone
-      const magnitude = Math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY);
-      if (magnitude < DEAD_ZONE) {
-        setDpadDirection(null);
-        return;
-      }
-
-      // Remap values accounting for dead zone for smoother control
-      const remappedMagnitude = (magnitude - DEAD_ZONE) / (1 - DEAD_ZONE);
-      const scale = remappedMagnitude / magnitude;
-      normalizedX *= scale;
-      normalizedY *= scale;
-
-      const direction: DPadDirection = { x: normalizedX, y: normalizedY };
-      setDpadDirection(direction);
-    },
-    [setDpadDirection, updateKnobVisuals]
-  );
-
-  const resetJoystick = useCallback(() => {
-    updateKnobVisuals(0, 0);
-    setDpadDirection(null);
-    setIsActive(false);
-    touchIdRef.current = null;
-  }, [setDpadDirection, updateKnobVisuals]);
-
-  // Global touch listeners to ensure joystick resets even if touch moves off-element
-  useEffect(() => {
-    const handleGlobalTouchEnd = (e: TouchEvent) => {
-      if (touchIdRef.current === null) return;
-
-      // Check if our tracked touch is still active
-      let touchStillActive = false;
-      for (let i = 0; i < e.touches.length; i++) {
-        if (e.touches[i].identifier === touchIdRef.current) {
-          touchStillActive = true;
-          break;
-        }
-      }
-
-      if (!touchStillActive) {
-        resetJoystick();
-      }
-    };
-
-    const handleGlobalTouchCancel = () => {
-      if (touchIdRef.current !== null) {
-        resetJoystick();
-      }
-    };
-
-    // Add global listeners with passive: false to ensure we don't miss events
-    // although for end/cancel passive: true is usually fine, being consistent helps
-    window.addEventListener('touchend', handleGlobalTouchEnd);
-    window.addEventListener('touchcancel', handleGlobalTouchCancel);
-
-    return () => {
-      window.removeEventListener('touchend', handleGlobalTouchEnd);
-      window.removeEventListener('touchcancel', handleGlobalTouchCancel);
-    };
-  }, [resetJoystick]);
+    const direction: DPadDirection = { x, y };
+    setDpadDirection(direction);
+  }, [setDpadDirection]);
 
   const handleTouchStart = useCallback(
-    (e: React.TouchEvent) => {
+    (direction: string) => (e: React.TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
       if (disabled) return;
-      // Critical for preventing scrolling on iOS
-      e.preventDefault();
-      e.stopPropagation();
-
-      // Track the first touch
-      if (touchIdRef.current === null && e.touches.length > 0) {
-        const touch = e.touches[0];
-        touchIdRef.current = touch.identifier;
-        setIsActive(true);
-        updateJoystick(touch.clientX, touch.clientY);
-
-        // Haptic feedback
-        if (navigator.vibrate) {
-          navigator.vibrate(10);
-        }
+      activeDirectionsRef.current.add(direction);
+      updateDirection();
+      // Haptic feedback on button press
+      if (navigator.vibrate) {
+        navigator.vibrate(10);
       }
     },
-    [disabled, updateJoystick]
-  );
-
-  const handleTouchMove = useCallback(
-    (e: React.TouchEvent) => {
-      if (disabled || touchIdRef.current === null) return;
-      // Critical for responsiveness
-      e.preventDefault();
-      e.stopPropagation();
-
-      // Find the tracked touch
-      for (let i = 0; i < e.touches.length; i++) {
-        if (e.touches[i].identifier === touchIdRef.current) {
-          updateJoystick(e.touches[i].clientX, e.touches[i].clientY);
-          break;
-        }
-      }
-    },
-    [disabled, updateJoystick]
+    [disabled, updateDirection]
   );
 
   const handleTouchEnd = useCallback(
-    (e: React.TouchEvent) => {
+    (direction: string) => (e: React.TouchEvent) => {
       e.preventDefault();
       e.stopPropagation();
-
-      // Check if our tracked touch ended
-      let touchStillActive = false;
-      for (let i = 0; i < e.touches.length; i++) {
-        if (e.touches[i].identifier === touchIdRef.current) {
-          touchStillActive = true;
-          break;
-        }
-      }
-
-      if (!touchStillActive) {
-        resetJoystick();
-      }
+      activeDirectionsRef.current.delete(direction);
+      updateDirection();
     },
-    [resetJoystick]
+    [updateDirection]
   );
 
   const handleTouchCancel = useCallback(
-    (e: React.TouchEvent) => {
+    (direction: string) => (e: React.TouchEvent) => {
       e.preventDefault();
-      resetJoystick();
+      activeDirectionsRef.current.delete(direction);
+      updateDirection();
     },
-    [resetJoystick]
+    [updateDirection]
   );
 
-  // Handle center button touch separately to prevent joystick activation
-  const handleCenterTouchStart = useCallback((e: React.TouchEvent) => {
-    e.stopPropagation();
-  }, []);
+  // Button styling
+  const buttonBaseClass = `
+    absolute flex items-center justify-center
+    w-11 h-11 rounded-xl
+    transition-colors duration-100
+    touch-none select-none
+    backdrop-blur-sm
+  `;
+
+  const iconClass = 'w-5 h-5 text-slate-200';
 
   return (
     <div
-      ref={containerRef}
-      className="relative pointer-events-auto touch-none select-none transition-opacity duration-300"
+      className="relative w-36 h-36 pointer-events-auto transition-opacity duration-300"
       style={{
-        width: JOYSTICK_SIZE,
-        height: JOYSTICK_SIZE,
+        // Safe area padding for notched devices
         marginBottom: 'max(16px, env(safe-area-inset-bottom))',
         marginLeft: 'max(16px, env(safe-area-inset-left))',
         opacity: isActive ? activeOpacity : idleOpacity,
       }}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      onTouchCancel={handleTouchCancel}
     >
-      {/* Background circle with subtle ring indicators */}
-      <div className="absolute inset-0 rounded-full bg-slate-900/70 backdrop-blur-md border border-slate-700/50">
-        {/* Inner guide ring */}
-        <div
-          className="absolute inset-4 rounded-full border border-slate-600/30"
-          style={{ borderStyle: 'dashed' }}
-        />
-      </div>
+      {/* Background circle */}
+      <div className="absolute inset-0 rounded-full bg-slate-900/60 backdrop-blur-md border border-slate-700/50" />
 
-      {/* Draggable knob */}
-      <div
-        ref={knobRef}
-        className={`absolute rounded-full transition-colors duration-100 flex items-center justify-center shadow-lg ${isActive
-          ? dpadMode === 'move'
-            ? 'bg-cyan-500/90 border-cyan-400'
-            : 'bg-violet-500/90 border-violet-400'
-          : 'bg-slate-700/90 border-slate-600'
-          } border-2`}
-        style={{
-          width: KNOB_SIZE,
-          height: KNOB_SIZE,
-          left: '50%',
-          top: '50%',
-          transform: 'translate(-50%, -50%)',
-          // Remove transition when dragging for instant response
-          transition: isActive ? 'none' : 'transform 0.15s ease-out, background 0.1s',
-          // Ensure hardware acceleration
-          willChange: 'transform',
-        }}
+      {/* Up button */}
+      <button
+        type="button"
+        className={`${buttonBaseClass} top-0 left-1/2 -translate-x-1/2 ${dpadMode === 'move' ? 'bg-cyan-500/30' : 'bg-violet-500/30'
+          } border border-slate-600/50 active:bg-opacity-60`}
+        onTouchStart={handleTouchStart('up')}
+        onTouchEnd={handleTouchEnd('up')}
+        onTouchCancel={handleTouchCancel('up')}
+        disabled={disabled}
+        aria-label="Move up"
       >
-        {/* Direction indicator dot - simple check of ref current would be stale here for render, 
-            but we can use isActive as a proxy since we only show dot when moving usually. 
-            Actually, let's keep it simple: show dot if active. */}
-        {isActive && (
-          <div className="w-2 h-2 rounded-full bg-white/80" />
-        )}
-      </div>
+        <ChevronUp className={iconClass} />
+      </button>
 
-      {/* Center mode toggle button - overlays when not dragging */}
-      {!isActive && (
-        <button
-          type="button"
-          className={`
-            absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
-            w-12 h-12 rounded-full
-            flex items-center justify-center
-            transition-all duration-200
-            touch-none select-none
-            ${fpsMode
-              ? 'bg-cyan-600/90 border-cyan-400'
-              : dpadMode === 'move'
-                ? 'bg-cyan-600/90 border-cyan-400'
-                : 'bg-violet-600/90 border-violet-400'
-            }
-            border-2
-            ${fpsMode ? 'opacity-70' : 'active:scale-95'}
-          `}
-          onClick={() => !fpsMode && toggleDpadMode()}
-          onTouchStart={handleCenterTouchStart}
-          disabled={disabled || fpsMode}
-          aria-label={`Switch to ${dpadMode === 'move' ? 'look' : 'move'} mode`}
-        >
-          {fpsMode || dpadMode === 'move' ? (
-            <Move className="w-5 h-5 text-white" />
-          ) : (
-            <Eye className="w-5 h-5 text-white" />
-          )}
-        </button>
-      )}
+      {/* Down button */}
+      <button
+        type="button"
+        className={`${buttonBaseClass} bottom-0 left-1/2 -translate-x-1/2 ${dpadMode === 'move' ? 'bg-cyan-500/30' : 'bg-violet-500/30'
+          } border border-slate-600/50 active:bg-opacity-60`}
+        onTouchStart={handleTouchStart('down')}
+        onTouchEnd={handleTouchEnd('down')}
+        onTouchCancel={handleTouchCancel('down')}
+        disabled={disabled}
+        aria-label="Move down"
+      >
+        <ChevronDown className={iconClass} />
+      </button>
+
+      {/* Left button */}
+      <button
+        type="button"
+        className={`${buttonBaseClass} left-0 top-1/2 -translate-y-1/2 ${dpadMode === 'move' ? 'bg-cyan-500/30' : 'bg-violet-500/30'
+          } border border-slate-600/50 active:bg-opacity-60`}
+        onTouchStart={handleTouchStart('left')}
+        onTouchEnd={handleTouchEnd('left')}
+        onTouchCancel={handleTouchCancel('left')}
+        disabled={disabled}
+        aria-label="Move left"
+      >
+        <ChevronLeft className={iconClass} />
+      </button>
+
+      {/* Right button */}
+      <button
+        type="button"
+        className={`${buttonBaseClass} right-0 top-1/2 -translate-y-1/2 ${dpadMode === 'move' ? 'bg-cyan-500/30' : 'bg-violet-500/30'
+          } border border-slate-600/50 active:bg-opacity-60`}
+        onTouchStart={handleTouchStart('right')}
+        onTouchEnd={handleTouchEnd('right')}
+        onTouchCancel={handleTouchCancel('right')}
+        disabled={disabled}
+        aria-label="Move right"
+      >
+        <ChevronRight className={iconClass} />
+      </button>
+
+      {/* Center mode toggle button - disabled in FPS mode (always move) */}
+      <button
+        type="button"
+        className={`
+          absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
+          w-12 h-12 rounded-full
+          flex items-center justify-center
+          transition-all duration-200
+          touch-none select-none
+          ${fpsMode
+            ? 'bg-cyan-600/80 border-cyan-400' // Always cyan in FPS mode
+            : dpadMode === 'move'
+              ? 'bg-cyan-600/80 border-cyan-400'
+              : 'bg-violet-600/80 border-violet-400'
+          }
+          border-2
+          ${fpsMode ? 'opacity-60' : 'active:scale-95'}
+        `}
+        onClick={() => !fpsMode && toggleDpadMode()}
+        onTouchStart={(e) => e.stopPropagation()}
+        disabled={disabled || fpsMode}
+        aria-label={`Switch to ${dpadMode === 'move' ? 'look' : 'move'} mode`}
+      >
+        {fpsMode || dpadMode === 'move' ? (
+          <Move className="w-5 h-5 text-white" />
+        ) : (
+          <Eye className="w-5 h-5 text-white" />
+        )}
+      </button>
     </div>
   );
 };
