@@ -5649,8 +5649,8 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
         <SimpleTree position={[0, 0, 12]} scale={0.8} />
 
         {/* Benches */}
-        <ParkBench position={[-3, 0, 0]} rotation={Math.PI / 4} />
-        <ParkBench position={[5, 0, 6]} rotation={-Math.PI / 3} />
+        <ParkBench position={[-4, 0, -10]} rotation={Math.PI / 6} />
+        <ParkBench position={[4, 0, -10]} rotation={-Math.PI / 6} />
 
         {/* Small path - raised to y=0.15 to prevent z-fighting with grass and other surfaces */}
         <mesh position={[0, 0.15, -12]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
@@ -5661,10 +5661,10 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
 
       {/* ========== SMALL OFFICE BUILDINGS ========== */}
       {/* Admin office - front left outside fence */}
-      <SmallOffice position={[-45, 0, 70]} size={[14, 7, 10]} rotation={0} />
+      <SmallOffice position={[-45, 0, 110]} size={[14, 7, 10]} rotation={0} />
 
       {/* Security/visitor office - near front gate */}
-      <group position={[-25, 0, 75]}>
+      <group position={[-25, 0, 115]}>
         <mesh position={[0, 2, 0]} castShadow receiveShadow>
           <boxGeometry args={[6, 4, 5]} />
           <meshStandardMaterial color="#607d8b" roughness={0.7} />
@@ -5796,7 +5796,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
 
       {/* ========== ADDITIONAL SMALL BUILDINGS ========== */}
       {/* Weighbridge office */}
-      <group position={[30, 0, 80]}>
+      <group position={[30, 0, 120]}>
         <mesh position={[0, 1.5, 0]} castShadow receiveShadow>
           <boxGeometry args={[4, 3, 3]} />
           <meshStandardMaterial color="#90a4ae" roughness={0.7} />

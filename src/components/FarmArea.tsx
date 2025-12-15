@@ -462,12 +462,20 @@ const Sheep = React.memo<{ position: [number, number, number]; rotation?: number
 Sheep.displayName = 'Sheep';
 
 // Animated components with refs for centralized animation
+// Movement interface
+interface AnimalState {
+  target: THREE.Vector3;
+  isIdle: boolean;
+  idleTime: number;
+}
+
 const Chicken: React.FC<{
   position: [number, number, number];
   rotation?: number;
+  groupRef: React.RefObject<THREE.Group | null>;
   animRef: React.RefObject<THREE.Group | null>;
-}> = ({ position, rotation = 0, animRef }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+}> = ({ position, rotation = 0, groupRef, animRef }) => (
+  <group ref={groupRef} position={position} rotation={[0, rotation, 0]}>
     <group ref={animRef}>
       <mesh position={[0, 0.25, 0]} castShadow>
         <primitive object={SG.chickenBody} attach="geometry" />
@@ -508,9 +516,10 @@ const Chicken: React.FC<{
 const Pig: React.FC<{
   position: [number, number, number];
   rotation?: number;
+  groupRef: React.RefObject<THREE.Group | null>;
   tailRef: React.RefObject<THREE.Mesh | null>;
-}> = ({ position, rotation = 0, tailRef }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+}> = ({ position, rotation = 0, groupRef, tailRef }) => (
+  <group ref={groupRef} position={position} rotation={[0, rotation, 0]}>
     <mesh position={[0, 0.35, 0]} castShadow>
       <primitive object={SG.pigBody} attach="geometry" />
       <primitive object={SM.pigPink} attach="material" />
@@ -568,9 +577,10 @@ const Pig: React.FC<{
 const Cow: React.FC<{
   position: [number, number, number];
   rotation?: number;
+  groupRef: React.RefObject<THREE.Group | null>;
   headRef: React.RefObject<THREE.Group | null>;
-}> = ({ position, rotation = 0, headRef }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+}> = ({ position, rotation = 0, groupRef, headRef }) => (
+  <group ref={groupRef} position={position} rotation={[0, rotation, 0]}>
     <mesh position={[0, 0.6, 0]} scale={[1.3, 1, 1]} castShadow>
       <primitive object={SG.cowBody} attach="geometry" />
       <primitive object={SM.cowWhite} attach="material" />
@@ -691,42 +701,183 @@ const WindmillComp: React.FC<{
 
 // Main component with single useFrame for all animations
 export const FarmArea: React.FC = () => {
+  // --- Chicken Refs & State ---
   const chickenRefs = useMemo(
     () => Array.from({ length: 5 }, () => React.createRef<THREE.Group>()),
+    []
+  );
+  const chickenAnimRefs = useMemo(
+    () => Array.from({ length: 5 }, () => React.createRef<THREE.Group>()),
+    []
+  );
+  const chickenStates = useRef<AnimalState[]>(
+    Array.from({ length: 5 }, () => ({
+      target: new THREE.Vector3(12 + (Math.random() - 0.5) * 8, 0, -5 + (Math.random() - 0.5) * 8),
+      isIdle: false,
+      idleTime: 0,
+    }))
+  );
+
+  // --- Pig Refs & State ---
+  const pigRefs = useMemo(
+    () => Array.from({ length: 3 }, () => React.createRef<THREE.Group>()),
     []
   );
   const pigTailRefs = useMemo(
     () => Array.from({ length: 3 }, () => React.createRef<THREE.Mesh>()),
     []
   );
+  const pigStates = useRef<AnimalState[]>(
+    Array.from({ length: 3 }, () => ({
+      target: new THREE.Vector3(-12 + (Math.random() - 0.5) * 4, 0, -5 + (Math.random() - 0.5) * 4),
+      isIdle: false,
+      idleTime: 0,
+    }))
+  );
+
+  // --- Cow Refs & State ---
+  const cowRefs = useMemo(
+    () => Array.from({ length: 3 }, () => React.createRef<THREE.Group>()),
+    []
+  );
   const cowHeadRefs = useMemo(
     () => Array.from({ length: 3 }, () => React.createRef<THREE.Group>()),
     []
   );
+  const cowStates = useRef<AnimalState[]>(
+    Array.from({ length: 3 }, () => ({
+      target: new THREE.Vector3(5 + (Math.random() - 0.5) * 15, 0, 15 + (Math.random() - 0.5) * 8),
+      isIdle: false,
+      idleTime: 0,
+    }))
+  );
+
   const windmillBladesRef = useRef<THREE.Group>(null);
   const frameCountRef = useRef(0);
+
+  // Animation offsets
   const chickenOffsets = useMemo(() => [0, 1.2, 2.4, 3.6, 4.8], []);
   const pigOffsets = useMemo(() => [0, 1.5, 3], []);
   const cowOffsets = useMemo(() => [0, 2, 4], []);
 
-  // SINGLE useFrame - THROTTLED (was 12 separate hooks, now 1)
-  useFrame((state) => {
+  // Movement Helpers
+  const updateAnimalMovement = (
+    ref: THREE.Group | null,
+    state: AnimalState,
+    delta: number,
+    speed: number,
+    bounds: { minX: number; maxX: number; minZ: number; maxZ: number },
+    yOffset: number = 0
+  ) => {
+    if (!ref) return;
+
+    if (state.isIdle) {
+      state.idleTime -= delta;
+      if (state.idleTime <= 0) {
+        state.isIdle = false;
+        // Pick new target within bounds
+        state.target.set(
+          bounds.minX + Math.random() * (bounds.maxX - bounds.minX),
+          yOffset,
+          bounds.minZ + Math.random() * (bounds.maxZ - bounds.minZ)
+        );
+      }
+    } else {
+      // Move towards target
+      const currentPos = ref.position;
+      const direction = new THREE.Vector3().subVectors(state.target, currentPos);
+      const dist = direction.length();
+
+      if (dist < 0.1) {
+        state.isIdle = true;
+        state.idleTime = 2 + Math.random() * 4; // Idle for 2-6 seconds
+      } else {
+        direction.normalize();
+
+        // Smooth rotation
+        const targetRotation = Math.atan2(direction.x, direction.z);
+        ref.rotation.y = THREE.MathUtils.lerp(ref.rotation.y, targetRotation, delta * 5);
+
+        // Move
+        currentPos.add(direction.multiplyScalar(speed * delta));
+      }
+    }
+  };
+
+  // SINGLE useFrame - THROTTLED/BATCHED
+  useFrame((state, delta) => {
     frameCountRef.current++;
     const time = state.clock.elapsedTime;
+
     // Windmill: every 2nd frame (30 FPS)
     if (frameCountRef.current % 2 === 0 && windmillBladesRef.current) {
       windmillBladesRef.current.rotation.z = time * 0.5;
     }
-    // Animals: every 4th frame (15 FPS)
+
+    // Animals: every 2nd frame for smooth movement (30 FPS)
+    // We update movement slightly more often than the body animations (pecking/wagging)
+    if (frameCountRef.current % 2 === 0) {
+      const adjustDelta = delta * 2; // Compensate for skipping frames
+
+      // Chickens
+      chickenRefs.forEach((ref, i) => {
+        updateAnimalMovement(
+          ref.current,
+          chickenStates.current[i],
+          adjustDelta,
+          1.5, // Speed
+          { minX: 8, maxX: 16, minZ: -9, maxZ: -1 } // Bounds
+        );
+      });
+
+      // Pigs
+      pigRefs.forEach((ref, i) => {
+        updateAnimalMovement(
+          ref.current,
+          pigStates.current[i],
+          adjustDelta,
+          0.8, // Speed
+          { minX: -14, maxX: -10, minZ: -7, maxZ: -3 } // Bounds
+        );
+      });
+
+      // Cows
+      cowRefs.forEach((ref, i) => {
+        updateAnimalMovement(
+          ref.current,
+          cowStates.current[i],
+          adjustDelta,
+          0.5, // Speed
+          { minX: -5, maxX: 15, minZ: 10, maxZ: 20 } // Bounds
+        );
+      });
+    }
+
+    // Body animations (Pecking, Wagging, Grazing)
+    // Throttle to every 4th frame (15 FPS)
     if (frameCountRef.current % 4 !== 0) return;
-    chickenRefs.forEach((ref, i) => {
-      if (ref.current) ref.current.rotation.x = Math.sin(time * 3 + chickenOffsets[i]) * 0.1;
+
+    chickenAnimRefs.forEach((ref, i) => {
+      // Pecking motion only when idle
+      if (ref.current && chickenStates.current[i].isIdle) {
+        ref.current.rotation.x = Math.sin(time * 10 + chickenOffsets[i]) * 0.2 + 0.2;
+      } else if (ref.current) {
+        // Reset when moving
+        ref.current.rotation.x = THREE.MathUtils.lerp(ref.current.rotation.x, 0, 0.1);
+      }
     });
+
     pigTailRefs.forEach((ref, i) => {
       if (ref.current) ref.current.rotation.z = Math.sin(time * 5 + pigOffsets[i]) * 0.3;
     });
+
     cowHeadRefs.forEach((ref, i) => {
-      if (ref.current) ref.current.rotation.x = Math.sin(time * 0.5 + cowOffsets[i]) * 0.15;
+      // Grazing motion only when idle
+      if (ref.current && cowStates.current[i].isIdle) {
+        ref.current.rotation.x = Math.sin(time * 0.5 + cowOffsets[i]) * 0.15 + 0.3; // Head down
+      } else if (ref.current) {
+        ref.current.rotation.x = THREE.MathUtils.lerp(ref.current.rotation.x, 0, 0.1); // Head up
+      }
     });
   });
 
@@ -742,17 +893,17 @@ export const FarmArea: React.FC = () => {
   );
   const pigData = useMemo(
     () => [
-      { pos: [-1, 0, 0.5] as [number, number, number], rot: 0.8 },
-      { pos: [1, 0, -0.5] as [number, number, number], rot: -0.5 },
-      { pos: [0.5, 0, 1.5] as [number, number, number], rot: 1.5 },
+      { pos: [-12, 0, -5] as [number, number, number], rot: 0.8 },
+      { pos: [-11, 0, -6] as [number, number, number], rot: -0.5 },
+      { pos: [-13, 0, -4] as [number, number, number], rot: 1.5 },
     ],
     []
   );
   const cowData = useMemo(
     () => [
-      { pos: [-5, 0, 0] as [number, number, number], rot: 0.3 },
-      { pos: [3, 0, 2] as [number, number, number], rot: -0.8 },
-      { pos: [-2, 0, -3] as [number, number, number], rot: 1.5 },
+      { pos: [0, 0, 15] as [number, number, number], rot: 0.3 },
+      { pos: [5, 0, 18] as [number, number, number], rot: -0.8 },
+      { pos: [8, 0, 13] as [number, number, number], rot: 1.5 },
     ],
     []
   );
@@ -769,7 +920,13 @@ export const FarmArea: React.FC = () => {
       <GardenBed position={[-15, 0, 16]} />
       <GardenBed position={[-15, 0, 19]} />
       {chickenData.map((c, i) => (
-        <Chicken key={`chicken-${i}`} position={c.pos} rotation={c.rot} animRef={chickenRefs[i]} />
+        <Chicken
+          key={`chicken-${i}`}
+          position={c.pos}
+          rotation={c.rot}
+          groupRef={chickenRefs[i]}
+          animRef={chickenAnimRefs[i]}
+        />
       ))}
       <group position={[-12, 0, -5]}>
         <FenceSection position={[0, 0, -3]} length={6} />
@@ -780,10 +937,25 @@ export const FarmArea: React.FC = () => {
           <primitive object={SG.mudPuddle} attach="geometry" />
           <primitive object={SM.mud} attach="material" />
         </mesh>
-        {pigData.map((p, i) => (
-          <Pig key={`pig-${i}`} position={p.pos} rotation={p.rot} tailRef={pigTailRefs[i]} />
-        ))}
+        {/** Pigs are now positioned at top level relative to FarmArea, not inside this group, 
+             so that they can move freely within the fence bounds defined in world/farm space.
+             Wait, if I move them out of this group, I need to adjust their initial coordinates 
+             and bounds to be relative to the FarmArea origin. 
+             Result: I will render them at the FarmArea level but use coordinates that place them here.
+             The fence is at [-12, 0, -5].
+        */}
       </group>
+      {/* Pig Rendering moved to main group to allow easier ref movement control */}
+      {pigData.map((p, i) => (
+        <Pig
+          key={`pig-${i}`}
+          position={p.pos}
+          rotation={p.rot}
+          groupRef={pigRefs[i]}
+          tailRef={pigTailRefs[i]}
+        />
+      ))}
+
       <group position={[5, 0, 15]}>
         {[-8, -3, 2, 7].map((x) => (
           <React.Fragment key={`fence-h-${x}`}>
@@ -795,16 +967,24 @@ export const FarmArea: React.FC = () => {
         <FenceSection position={[-10, 0, -4]} rotation={Math.PI / 2} length={5} />
         <FenceSection position={[10, 0, 0]} rotation={Math.PI / 2} length={5} />
         <FenceSection position={[10, 0, -4]} rotation={Math.PI / 2} length={5} />
-        {cowData.map((c, i) => (
-          <Cow key={`cow-${i}`} position={c.pos} rotation={c.rot} headRef={cowHeadRefs[i]} />
-        ))}
-        <Sheep position={[6, 0, -2]} rotation={0.6} />
-        <Sheep position={[7, 0, 1]} rotation={-0.4} />
-        <Sheep position={[5, 0, 3]} rotation={1.8} />
-        <Sheep position={[-6, 0, 3]} rotation={2.5} />
-        <WaterTrough position={[0, 0, -4]} />
       </group>
-      <WindmillComp position={[-18, 0, 10]} bladesRef={windmillBladesRef} />
+      {/* Cow Rendering moved to main group */}
+      {cowData.map((c, i) => (
+        <Cow
+          key={`cow-${i}`}
+          position={c.pos}
+          rotation={c.rot}
+          groupRef={cowRefs[i]}
+          headRef={cowHeadRefs[i]}
+        />
+      ))}
+
+      <WindmillComp position={[15, 0, -15]} bladesRef={windmillBladesRef} />
+      <Sheep position={[6, 0, -2]} rotation={0.6} />
+      <Sheep position={[7, 0, 1]} rotation={-0.4} />
+      <Sheep position={[5, 0, 3]} rotation={1.8} />
+      <Sheep position={[-6, 0, 3]} rotation={2.5} />
+      <WaterTrough position={[0, 0, -4]} />
       <HayBale position={[6, 0, -2]} rotation={0.3} />
       <HayBale position={[6.5, 0, 0]} rotation={-0.2} />
       <HayBale position={[6.2, 0.8, -1]} rotation={0.5} />

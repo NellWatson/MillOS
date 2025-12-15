@@ -998,6 +998,9 @@ const TruckWashStation: React.FC<{ position: [number, number, number]; rotation?
   );
 };
 
+
+
+
 // Driver break room/lounge building
 export const DriverBreakRoom: React.FC<{
   position: [number, number, number];
@@ -2889,156 +2892,7 @@ const LicensePlate: React.FC<{
   </group>
 );
 
-// Dock forklift that loads/unloads the truck
-const DockForklift: React.FC<{
-  dockPosition: [number, number, number];
-  isActive: boolean;
-  cycleOffset: number;
-}> = ({ dockPosition, isActive, cycleOffset }) => {
-  const forkliftRef = useRef<THREE.Group>(null);
-  const forkRef = useRef<THREE.Group>(null);
-  const animId = useRef(`forklift-${Math.random().toString(36).substr(2, 9)}`);
-  const isActiveRef = useRef(isActive);
-  isActiveRef.current = isActive;
 
-  useEffect(() => {
-    const id = animId.current;
-    registerAnimation(id, 'custom', null, { cycleOffset }, (time, _delta, _mesh, data) => {
-      if (!forkliftRef.current || !forkRef.current) return;
-
-      if (isActiveRef.current) {
-        const adjTime = time + data.cycleOffset;
-        const loadCycle = (adjTime * 0.3) % 1;
-        let zPos: number;
-        let forkHeight: number;
-
-        if (loadCycle < 0.3) {
-          const t = loadCycle / 0.3;
-          zPos = THREE.MathUtils.lerp(-8, 2, t);
-          forkHeight = 0;
-        } else if (loadCycle < 0.4) {
-          const t = (loadCycle - 0.3) / 0.1;
-          zPos = 2;
-          forkHeight = t * 0.8;
-        } else if (loadCycle < 0.7) {
-          const t = (loadCycle - 0.4) / 0.3;
-          zPos = THREE.MathUtils.lerp(2, -8, t);
-          forkHeight = 0.8;
-        } else if (loadCycle < 0.8) {
-          const t = (loadCycle - 0.7) / 0.1;
-          zPos = -8;
-          forkHeight = (1 - t) * 0.8;
-        } else {
-          zPos = -8;
-          forkHeight = 0;
-        }
-
-        forkliftRef.current.position.z = zPos;
-        forkRef.current.position.y = forkHeight;
-      } else {
-        forkliftRef.current.position.z = -10;
-        forkRef.current.position.y = 0;
-      }
-    });
-    return () => unregisterAnimation(id);
-  }, [cycleOffset]);
-
-  return (
-    <group position={dockPosition}>
-      <group ref={forkliftRef} position={[0, 0, -10]}>
-        {/* Forklift body */}
-        <mesh position={[0, 0.6, 0]}>
-          <boxGeometry args={[1.5, 1, 2]} />
-          <meshStandardMaterial color="#f59e0b" metalness={0.4} roughness={0.6} />
-        </mesh>
-
-        {/* Driver cage */}
-        <mesh position={[0, 1.4, -0.2]}>
-          <boxGeometry args={[1.3, 1.2, 1.2]} />
-          <meshStandardMaterial color="#374151" metalness={0.3} roughness={0.7} />
-        </mesh>
-
-        {/* Cage frame */}
-        {[
-          [-0.6, -0.6],
-          [-0.6, 0.6],
-          [0.6, -0.6],
-          [0.6, 0.6],
-        ].map(([x, z], i) => (
-          <mesh key={i} position={[x * 0.9, 1.6, -0.2 + z * 0.4]}>
-            <cylinderGeometry args={[0.03, 0.03, 1.6, 6]} />
-            <meshStandardMaterial color="#1f2937" />
-          </mesh>
-        ))}
-
-        {/* Mast */}
-        <mesh position={[0, 1.2, 0.9]}>
-          <boxGeometry args={[0.15, 2, 0.15]} />
-          <meshStandardMaterial color="#1f2937" metalness={0.6} roughness={0.3} />
-        </mesh>
-        <mesh position={[0.4, 1.2, 0.9]}>
-          <boxGeometry args={[0.15, 2, 0.15]} />
-          <meshStandardMaterial color="#1f2937" metalness={0.6} roughness={0.3} />
-        </mesh>
-
-        {/* Forks */}
-        <group ref={forkRef} position={[0, 0.3, 1.2]}>
-          <mesh position={[-0.3, 0, 0.4]}>
-            <boxGeometry args={[0.1, 0.08, 1.2]} />
-            <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
-          </mesh>
-          <mesh position={[0.3, 0, 0.4]}>
-            <boxGeometry args={[0.1, 0.08, 1.2]} />
-            <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
-          </mesh>
-          {/* Fork backrest */}
-          <mesh position={[0, 0.4, -0.1]}>
-            <boxGeometry args={[0.9, 0.8, 0.05]} />
-            <meshStandardMaterial color="#374151" />
-          </mesh>
-
-          {/* Pallet with sacks (when carrying) */}
-          <group position={[0, 0.15, 0.5]}>
-            <mesh>
-              <boxGeometry args={[0.8, 0.1, 0.8]} />
-              <meshStandardMaterial color="#92400e" roughness={0.9} />
-            </mesh>
-            {/* Flour sacks */}
-            {[
-              [-0.2, 0],
-              [0.2, 0],
-              [0, 0.25],
-            ].map(([x, y], i) => (
-              <mesh key={i} position={[x, 0.2 + y, 0]}>
-                <boxGeometry args={[0.25, 0.3, 0.4]} />
-                <meshStandardMaterial color="#f5f5f4" roughness={0.8} />
-              </mesh>
-            ))}
-          </group>
-        </group>
-
-        {/* Wheels */}
-        {[
-          [-0.5, -0.6],
-          [0.5, -0.6],
-          [-0.5, 0.5],
-          [0.5, 0.5],
-        ].map(([x, z], i) => (
-          <mesh key={i} position={[x, 0.2, z]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.2, 0.2, 0.15, 12]} />
-            <meshStandardMaterial color="#1f2937" roughness={0.8} />
-          </mesh>
-        ))}
-
-        {/* Warning light */}
-        <mesh position={[0, 2.2, -0.2]}>
-          <sphereGeometry args={[0.1, 8, 8]} />
-          <meshStandardMaterial color="#f97316" emissive="#f97316" emissiveIntensity={0.5} />
-        </mesh>
-      </group>
-    </group>
-  );
-};
 
 // Dock status light component
 const DockStatusLight: React.FC<{
@@ -3440,12 +3294,6 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           DOCK 1 - OUTBOUND
         </Text>
 
-        {/* Dock forklift - centered */}
-        <DockForklift
-          dockPosition={[0, 0, 2]}
-          isActive={shippingDoorsOpenRef.current}
-          cycleOffset={0}
-        />
 
         {/* Pallet staging area - moved outside dock to avoid wall clipping */}
         <PalletStaging position={[12, 0, 5]} />
@@ -3670,7 +3518,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* <TireInspectionArea position={[25, 0, 35]} rotation={Math.PI / 2} /> */}
 
         {/* Driver break room - relocated to east periphery */}
-        <DriverBreakRoom position={[70, 0, 45]} rotation={-Math.PI / 2} />
+        <DriverBreakRoom position={[100, 0, 100]} rotation={-Math.PI / 2} />
+
 
         {/* Employee parking lot - TESTING */}
         {/* <EmployeeParking position={[45, 0, 55]} rotation={0} /> */}
@@ -3817,12 +3666,6 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           DOCK 2 - INBOUND
         </Text>
 
-        {/* Dock forklift */}
-        <DockForklift
-          dockPosition={[0, 0, 2]}
-          isActive={receivingDoorsOpenRef.current}
-          cycleOffset={Math.PI}
-        />
 
         {/* Pallet staging area - moved outside dock to avoid wall clipping */}
         <PalletStaging position={[12, 0, 5]} />

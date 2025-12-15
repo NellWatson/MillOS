@@ -6,7 +6,7 @@ import { useMobileControlStore } from '../../stores/mobileControlStore';
 // Movement configuration (same as desktop FPS)
 const MOVE_SPEED = 12;
 const SPRINT_SPEED = 24;
-const PLAYER_HEIGHT = 1.7;
+const PLAYER_HEIGHT = 0.48;
 const PLAYER_RADIUS = 0.4;
 const FPS_FOV = 75; // Reduced FOV for mobile to reduce fish-eye effect
 const ORBIT_FOV = 65;

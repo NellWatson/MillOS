@@ -7,7 +7,7 @@ import { useUIStore } from '../stores/uiStore';
 // Movement configuration
 const MOVE_SPEED = 12; // Units per second (walking speed)
 const SPRINT_MULTIPLIER = 3.6; // Speed multiplier when sprinting (doubled for fast gameplay)
-const PLAYER_HEIGHT = 1.7; // Camera height from ground (eye level)
+const PLAYER_HEIGHT = 0.48; // Camera height from ground (eye level - reduced by 4ft)
 const PLAYER_RADIUS = 0.4; // Collision radius
 const FPS_FOV = 105; // Wide FOV for immersive first-person view
 const ORBIT_FOV = 65; // Default FOV for orbit mode
@@ -25,32 +25,32 @@ const COLLISION_BOXES: Array<{
   maxZ: number;
   name: string;
 }> = [
-  // Silos (Zone 1, z = -22)
-  { minX: -20, maxX: -12, minZ: -28, maxZ: -16, name: 'Silo Alpha' },
-  { minX: -8, maxX: 0, minZ: -28, maxZ: -16, name: 'Silo Beta' },
-  { minX: 4, maxX: 12, minZ: -28, maxZ: -16, name: 'Silo Gamma' },
-  { minX: 16, maxX: 24, minZ: -28, maxZ: -16, name: 'Silo Delta' },
+    // Silos (Zone 1, z = -22)
+    { minX: -20, maxX: -12, minZ: -28, maxZ: -16, name: 'Silo Alpha' },
+    { minX: -8, maxX: 0, minZ: -28, maxZ: -16, name: 'Silo Beta' },
+    { minX: 4, maxX: 12, minZ: -28, maxZ: -16, name: 'Silo Gamma' },
+    { minX: 16, maxX: 24, minZ: -28, maxZ: -16, name: 'Silo Delta' },
 
-  // Roller Mills (Zone 2, z = -6)
-  { minX: -22, maxX: -14, minZ: -12, maxZ: 0, name: 'RM-101' },
-  { minX: -10, maxX: -2, minZ: -12, maxZ: 0, name: 'RM-102' },
-  { minX: 2, maxX: 10, minZ: -12, maxZ: 0, name: 'RM-103' },
-  { minX: 14, maxX: 22, minZ: -12, maxZ: 0, name: 'RM-104' },
+    // Roller Mills (Zone 2, z = -6)
+    { minX: -22, maxX: -14, minZ: -12, maxZ: 0, name: 'RM-101' },
+    { minX: -10, maxX: -2, minZ: -12, maxZ: 0, name: 'RM-102' },
+    { minX: 2, maxX: 10, minZ: -12, maxZ: 0, name: 'RM-103' },
+    { minX: 14, maxX: 22, minZ: -12, maxZ: 0, name: 'RM-104' },
 
-  // Plansifters (Zone 3, z = 6, elevated platform)
-  { minX: -18, maxX: -6, minZ: 2, maxZ: 14, name: 'Plansifter A' },
-  { minX: -4, maxX: 8, minZ: 2, maxZ: 14, name: 'Plansifter B' },
-  { minX: 10, maxX: 22, minZ: 2, maxZ: 14, name: 'Plansifter C' },
+    // Plansifters (Zone 3, z = 6, elevated platform)
+    { minX: -18, maxX: -6, minZ: 2, maxZ: 14, name: 'Plansifter A' },
+    { minX: -4, maxX: 8, minZ: 2, maxZ: 14, name: 'Plansifter B' },
+    { minX: 10, maxX: 22, minZ: 2, maxZ: 14, name: 'Plansifter C' },
 
-  // Packers (Zone 4, z = 20)
-  { minX: -20, maxX: -8, minZ: 16, maxZ: 28, name: 'Packer Line 1' },
-  { minX: -4, maxX: 8, minZ: 16, maxZ: 28, name: 'Packer Line 2' },
-  { minX: 12, maxX: 24, minZ: 16, maxZ: 28, name: 'Packer Line 3' },
+    // Packers (Zone 4, z = 20)
+    { minX: -20, maxX: -8, minZ: 16, maxZ: 28, name: 'Packer Line 1' },
+    { minX: -4, maxX: 8, minZ: 16, maxZ: 28, name: 'Packer Line 2' },
+    { minX: 12, maxX: 24, minZ: 16, maxZ: 28, name: 'Packer Line 3' },
 
-  // Truck bays
-  { minX: -15, maxX: 15, minZ: 45, maxZ: 60, name: 'Shipping Bay' },
-  { minX: -15, maxX: 15, minZ: -60, maxZ: -45, name: 'Receiving Bay' },
-];
+    // Truck bays
+    { minX: -15, maxX: 15, minZ: 45, maxZ: 60, name: 'Shipping Bay' },
+    { minX: -15, maxX: 15, minZ: -60, maxZ: -45, name: 'Receiving Bay' },
+  ];
 
 // Track pressed keys
 const pressedKeys = new Set<string>();
@@ -171,6 +171,31 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
     return false;
   }, []);
 
+  // Ladder zones for climbing (Aligned with visual ladders at X offset +2.6 from Silo center)
+  const LADDER_ZONES = [
+    // Silo Alpha Ladder (Center X: -16 -> Ladder: -13.4)
+    { minX: -13.9, maxX: -12.9, minZ: -22.5, maxZ: -21.5, height: 20 },
+    // Silo Beta Ladder (Center X: -4 -> Ladder: -1.4)
+    { minX: -1.9, maxX: -0.9, minZ: -22.5, maxZ: -21.5, height: 20 },
+    // Silo Gamma Ladder (Center X: 8 -> Ladder: 10.6)
+    { minX: 10.1, maxX: 11.1, minZ: -22.5, maxZ: -21.5, height: 20 },
+    // Silo Delta Ladder (Center X: 20 -> Ladder: 22.6)
+    { minX: 22.1, maxX: 23.1, minZ: -22.5, maxZ: -21.5, height: 20 },
+  ];
+
+  const currentHeight = useRef(PLAYER_HEIGHT);
+  const isClimbing = useRef(false);
+
+  // Check if player is in a ladder zone
+  const checkLadder = useCallback((x: number, z: number): number | null => {
+    for (const zone of LADDER_ZONES) {
+      if (x >= zone.minX && x <= zone.maxX && z >= zone.minZ && z <= zone.maxZ) {
+        return zone.height;
+      }
+    }
+    return null;
+  }, []);
+
   // Movement update
   useFrame((_, delta) => {
     if (!isLocked.current) return;
@@ -195,31 +220,74 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
     const forward = forwardRef.current.set(0, 0, -1).applyQuaternion(camera.quaternion);
     const right = rightRef.current.set(1, 0, 0).applyQuaternion(camera.quaternion);
 
-    // Keep movement horizontal (no flying)
+    // Keep movement horizontal (no flying) unless climbing
     forward.y = 0;
     right.y = 0;
     forward.normalize();
     right.normalize();
 
+    // Check ladder status
+    const ladderMaxHeight = checkLadder(camera.position.x, camera.position.z);
+
+    // Enter/Exit climbing mode
+    if (ladderMaxHeight !== null) {
+      isClimbing.current = true;
+    } else {
+      isClimbing.current = false;
+    }
+
     // Calculate desired movement
     velocity.current.set(0, 0, 0);
-    velocity.current.addScaledVector(forward, -direction.current.z * speed * delta);
-    velocity.current.addScaledVector(right, direction.current.x * speed * delta);
 
-    // Calculate new position
-    const newX = camera.position.x + velocity.current.x;
-    const newZ = camera.position.z + velocity.current.z;
+    if (isClimbing.current && ladderMaxHeight !== null) {
+      // CLIMBING PHYSICS: W/S moves Up/Down
+      const climbSpeed = speed * 0.8;
 
-    // Apply movement with collision detection (sliding along walls)
-    if (!checkCollision(newX, camera.position.z)) {
-      camera.position.x = newX;
+      if (pressedKeys.has('w')) velocity.current.y += climbSpeed * delta;
+      if (pressedKeys.has('s')) velocity.current.y -= climbSpeed * delta;
+
+      // Allow some horizontal movement to guide onto/off ladder
+      velocity.current.addScaledVector(right, direction.current.x * speed * 0.5 * delta);
+      velocity.current.addScaledVector(forward, -direction.current.z * speed * 0.5 * delta);
+
+      // Update height
+      currentHeight.current += velocity.current.y;
+
+      // Clamp height
+      if (currentHeight.current < PLAYER_HEIGHT) currentHeight.current = PLAYER_HEIGHT;
+      if (currentHeight.current > ladderMaxHeight) currentHeight.current = ladderMaxHeight;
+
+      const newX = camera.position.x + velocity.current.x;
+      const newZ = camera.position.z + velocity.current.z;
+
+      // Simple collision for ladder (don't walk through silo wall)
+      if (!checkCollision(newX, camera.position.z)) camera.position.x = newX;
+      if (!checkCollision(camera.position.x, newZ)) camera.position.z = newZ;
+
+      camera.position.y = currentHeight.current;
+      velocity.current.y = 0; // Reset vertical velocity accumulation for next frame logic
+
+    } else {
+      // WALKING PHYSICS
+      velocity.current.addScaledVector(forward, -direction.current.z * speed * delta);
+      velocity.current.addScaledVector(right, direction.current.x * speed * delta);
+
+      // Calculate new position
+      const newX = camera.position.x + velocity.current.x;
+      const newZ = camera.position.z + velocity.current.z;
+
+      // Apply movement with collision detection (sliding along walls)
+      if (!checkCollision(newX, camera.position.z)) {
+        camera.position.x = newX;
+      }
+      if (!checkCollision(camera.position.x, newZ)) {
+        camera.position.z = newZ;
+      }
+
+      // Gravity / Snap to ground
+      currentHeight.current = PLAYER_HEIGHT;
+      camera.position.y = PLAYER_HEIGHT;
     }
-    if (!checkCollision(camera.position.x, newZ)) {
-      camera.position.z = newZ;
-    }
-
-    // Keep camera at player height
-    camera.position.y = PLAYER_HEIGHT;
   });
 
   // Handle lock state changes

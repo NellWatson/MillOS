@@ -13,6 +13,7 @@ import { FactoryInfrastructure } from './FactoryInfrastructure';
 import { SpoutingSystem } from './SpoutingSystem';
 import { DustParticles, GrainFlow, MachineSteamVents, DustAnimationManager } from './DustParticles';
 import { FactoryExterior } from './FactoryExterior';
+import { FarmArea } from './FarmArea';
 import { OpenDockOpening } from './infrastructure/OpenDockOpening';
 import { ForkliftSystem, ForkliftData } from './ForkliftSystem';
 import { FactoryEnvironment } from './Environment';
@@ -685,6 +686,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
 
       {/* Factory exterior walls and signage - renders when camera is outside or in dock zone */}
       {showExterior && <FactoryExterior />}
+      {showExterior && <FarmArea />}
 
       {/* Theme Hospital-inspired Mood & Chaos Systems */}
       {/* PERFORMANCE: Interior-only systems, ultra quality only */}

@@ -787,23 +787,24 @@ export const SkySystem: React.FC = () => {
       {/* Geometry scaled 1.21x to maintain visual size at increased radius (340 vs 280) */}
       {sunVisible && (
         <group position={sunPosition}>
+          {/* Main Sun Meshes - Render order -990 ensures they are behind mountains (-950) but in front of SkyDome (-1000) */}
           {/* Core sun - bright white */}
-          <mesh>
+          <mesh renderOrder={-990}>
             <sphereGeometry args={[22, 32, 32]} />
             <meshBasicMaterial color="#ffffff" />
           </mesh>
           {/* Inner glow */}
-          <mesh>
+          <mesh renderOrder={-990}>
             <sphereGeometry args={[36, 32, 32]} />
             <meshBasicMaterial color="#fffde7" transparent opacity={0.6} />
           </mesh>
           {/* Mid glow */}
-          <mesh>
+          <mesh renderOrder={-990}>
             <sphereGeometry args={[55, 32, 32]} />
             <meshBasicMaterial color={sunColor} transparent opacity={0.35} depthWrite={false} />
           </mesh>
           {/* Outer glow - large corona */}
-          <mesh>
+          <mesh renderOrder={-990}>
             <sphereGeometry args={[85, 32, 32]} />
             <meshBasicMaterial color="#fff8e1" transparent opacity={0.15} depthWrite={false} />
           </mesh>
@@ -815,7 +816,7 @@ export const SkySystem: React.FC = () => {
       {moonVisible && (
         <group position={moonPosition}>
           {/* Moon surface - fog={false} prevents dark artifacts at far distances */}
-          <mesh>
+          <mesh renderOrder={-990}>
             <sphereGeometry args={[15, 32, 32]} />
             <meshStandardMaterial
               color="#e2e8f0"
@@ -825,7 +826,7 @@ export const SkySystem: React.FC = () => {
             />
           </mesh>
           {/* Moon glow */}
-          <mesh>
+          <mesh renderOrder={-990}>
             <sphereGeometry args={[22, 32, 32]} />
             <meshBasicMaterial color="#a5f3fc" transparent opacity={0.15} depthWrite={false} />
           </mesh>
@@ -936,8 +937,8 @@ const Stars: React.FC<{ visible: boolean }> = React.memo(({ visible }) => {
 
   return (
     <group>
-      {/* Main star field */}
-      <points ref={starsRef}>
+      {/* Main star field - renderOrder -995 ensures stars are behind mountains and sun/moon */}
+      <points ref={starsRef} renderOrder={-995}>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[starPositions, 3]} />
           <bufferAttribute attach="attributes-color" args={[starColors, 3]} />
@@ -954,7 +955,7 @@ const Stars: React.FC<{ visible: boolean }> = React.memo(({ visible }) => {
       </points>
 
       {/* Bright prominent stars */}
-      <points ref={brightStarsRef}>
+      <points ref={brightStarsRef} renderOrder={-995}>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[brightStarPositions, 3]} />
         </bufferGeometry>

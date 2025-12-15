@@ -11,6 +11,7 @@ import {
   getSiloBodyGeometry,
   getSiloConeGeometry,
   getSiloLegGeometry,
+  getSiloLadderGeometry,
   isInstanceVisible,
   getCullDistanceSquared,
 } from './MachineLOD';
@@ -74,13 +75,12 @@ const MaintenanceCountdown: React.FC<{
   return (
     <Html position={position} center distanceFactor={12}>
       <div
-        className={`bg-slate-900/90 backdrop-blur px-2 py-1 rounded border ${
-          isCritical
+        className={`bg-slate-900/90 backdrop-blur px-2 py-1 rounded border ${isCritical
             ? 'border-red-500/50 animate-pulse'
             : isUrgent
               ? 'border-amber-500/50'
               : 'border-slate-700'
-        }`}
+          }`}
       >
         <div className="text-[8px] text-slate-500 uppercase tracking-wider">Maintenance</div>
         <div className="text-xs font-mono font-bold flex items-center gap-1" style={{ color }}>
@@ -157,6 +157,7 @@ export const InstancedSilos: React.FC<InstancedSilosProps> = ({ machines, onSele
   const conesRef = useRef<THREE.InstancedMesh>(null); // Top and Bottom cones
   const legsRef = useRef<THREE.InstancedMesh>(null); // 4 legs per silo
   const fillRef = useRef<THREE.InstancedMesh>(null); // Grain fill level
+  const ladderRef = useRef<THREE.InstancedMesh>(null); // Access ladder
 
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const count = machines.length;
@@ -167,6 +168,7 @@ export const InstancedSilos: React.FC<InstancedSilosProps> = ({ machines, onSele
       cylinder: getSiloBodyGeometry(quality),
       cone: getSiloConeGeometry(quality),
       leg: getSiloLegGeometry(quality),
+      ladder: getSiloLadderGeometry(quality, SILO_SIZE.height),
     }),
     [quality]
   );
@@ -188,9 +190,9 @@ export const InstancedSilos: React.FC<InstancedSilosProps> = ({ machines, onSele
     }
   }, [textures]);
 
-  // Initialize static positions (Body, Cones, Legs)
+  // Initialize static positions (Body, Cones, Legs, Ladders)
   useEffect(() => {
-    if (!bodyRef.current || !conesRef.current || !legsRef.current) return;
+    if (!bodyRef.current || !conesRef.current || !legsRef.current || !ladderRef.current) return;
 
     machines.forEach((machine, i) => {
       // 1. Main Body Cylinder
@@ -240,11 +242,25 @@ export const InstancedSilos: React.FC<InstancedSilosProps> = ({ machines, onSele
           legsRef.current!.setMatrixAt(legIndex, dummy.matrix);
         });
       });
+
+      // 4. Access Ladder
+      // Positioned on positive X side, offset by radius + padding
+      const ladderOffset = SILO_SIZE.width / 2 + 0.35;
+      dummy.position.set(
+        machine.position[0] + ladderOffset,
+        machine.position[1] + SILO_SIZE.height / 2,
+        machine.position[2]
+      );
+      dummy.scale.set(1, 1, 1); // Geometry is already sized
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      ladderRef.current!.setMatrixAt(i, dummy.matrix);
     });
 
     bodyRef.current.instanceMatrix.needsUpdate = true;
     conesRef.current.instanceMatrix.needsUpdate = true;
     legsRef.current.instanceMatrix.needsUpdate = true;
+    ladderRef.current.instanceMatrix.needsUpdate = true;
   }, [machines, dummy]);
 
   // Apply per-instance color variation (medium+ quality)
@@ -308,6 +324,10 @@ export const InstancedSilos: React.FC<InstancedSilosProps> = ({ machines, onSele
         dummy.updateMatrix();
         bodyRef.current!.setMatrixAt(i, dummy.matrix);
         fillRef.current!.setMatrixAt(i, dummy.matrix);
+        // Also cull ladder
+        if (ladderRef.current) {
+          ladderRef.current.setMatrixAt(i, dummy.matrix);
+        }
         return;
       }
 
@@ -337,6 +357,20 @@ export const InstancedSilos: React.FC<InstancedSilosProps> = ({ machines, onSele
         bodyRef.current!.setMatrixAt(i, dummy.matrix);
       }
 
+      // Update Ladder Position (sync with body vibration)
+      if (ladderRef.current) {
+        const ladderOffset = SILO_SIZE.width / 2 + 0.35;
+        dummy.position.set(
+          machine.position[0] + ladderOffset + offsetX,
+          machine.position[1] + SILO_SIZE.height / 2,
+          machine.position[2] + offsetZ
+        );
+        dummy.scale.set(1, 1, 1); // Fixed size
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        ladderRef.current.setMatrixAt(i, dummy.matrix);
+      }
+
       // Update Fill Level Mesh
       const posY = machine.position[1] - height / 2 + fillHeight / 2 + 0.5;
       dummy.position.set(machine.position[0] + offsetX, posY, machine.position[2] + offsetZ);
@@ -347,7 +381,12 @@ export const InstancedSilos: React.FC<InstancedSilosProps> = ({ machines, onSele
     });
 
     fillRef.current.instanceMatrix.needsUpdate = true;
-    if (vibrationEnabled) bodyRef.current.instanceMatrix.needsUpdate = true;
+    if (vibrationEnabled) {
+      bodyRef.current.instanceMatrix.needsUpdate = true;
+      if (ladderRef.current) ladderRef.current.instanceMatrix.needsUpdate = true;
+    }
+    // Update ladder matrix if culling happened
+    if (ladderRef.current) ladderRef.current.instanceMatrix.needsUpdate = true;
   });
 
   const handleClick = (e: any, multiplier: number) => {
@@ -384,6 +423,14 @@ export const InstancedSilos: React.FC<InstancedSilosProps> = ({ machines, onSele
         ref={legsRef}
         args={[geometries.leg, MATERIALS.darkMetal, count * 4]}
         onClick={(e) => handleClick(e, 4)}
+        castShadow
+      />
+
+      {/* Access Ladders */}
+      <instancedMesh
+        ref={ladderRef}
+        args={[geometries.ladder, MATERIALS.darkMetal, count]}
+        onClick={(e) => handleClick(e, 1)}
         castShadow
       />
 

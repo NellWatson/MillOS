@@ -43,7 +43,7 @@ export const PHYSICS_CONFIG = {
     maxSprintVelocity: 36, // Sprint speed (3x walk)
     moveForce: 1500,
     sprintForce: 4500,
-    height: 1.7, // Eye height
+    height: 0.48, // Eye height
     capsuleRadius: 0.4,
     capsuleHalfHeight: 0.5,
   },

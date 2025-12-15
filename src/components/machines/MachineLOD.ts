@@ -97,6 +97,12 @@ export function getSiloLegGeometry(quality: GraphicsQuality): THREE.CylinderGeom
   });
 }
 
+export function getSiloLadderGeometry(quality: GraphicsQuality, height: number): THREE.BoxGeometry {
+  return getCachedGeometry(`silo-ladder-${quality}-${height}`, () => {
+    return new THREE.BoxGeometry(0.6, height, 0.1);
+  });
+}
+
 // Roller Mill geometries
 export function getMillCylinderGeometry(quality: GraphicsQuality): THREE.CylinderGeometry {
   return getCachedGeometry(`mill-cylinder-${quality}`, () => getCylinderGeometry(quality));

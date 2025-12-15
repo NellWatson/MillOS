@@ -4,3 +4,4 @@ export { FactoryRoof } from './FactoryRoof';
 export { FactoryLighting } from './FactoryLighting';
 export { SafetyEquipment } from './SafetyEquipment';
 export { UtilityConduits } from './UtilityConduits';
+export { DockForklift } from './DockForklift';

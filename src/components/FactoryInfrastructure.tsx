@@ -6,6 +6,7 @@ import {
   FactoryLighting,
   SafetyEquipment,
   UtilityConduits,
+  DockForklift,
 } from './infrastructure';
 
 interface Props {
@@ -49,6 +50,12 @@ export const FactoryInfrastructure: React.FC<Props> = ({
 
       {/* Cables, conduits, and utility infrastructure */}
       <UtilityConduits floorWidth={actualWidth} floorDepth={actualDepth} />
+
+      {/* Dock Forklifts - visible internally and externally */}
+      {/* Front Dock (Shipping) */}
+      <DockForklift position={[0, 0, 52]} rotation={[0, 0, 0]} cycleOffset={0} />
+      {/* Back Dock (Receiving) */}
+      <DockForklift position={[0, 0, -52]} rotation={[0, Math.PI, 0]} cycleOffset={Math.PI} />
     </group>
   );
 };
