@@ -1596,20 +1596,21 @@ const River: React.FC<{
       })}
       {/* Trees removed - were causing placement issues */}
       {/* Stone bridge - narrower footbridge spanning the river */}
+      {/* Deck raised to y=2.0 to prevent water wave clipping (waves can reach ~y=1.0 from base at y=-0.08) */}
       <group position={[0, 0, 0]}>
-        {/* Bridge deck */}
-        <mesh position={[0, 1.5, 0]} castShadow receiveShadow>
+        {/* Bridge deck - raised to y=2.0 for clearance above wave amplitude */}
+        <mesh position={[0, 2.0, 0]} castShadow receiveShadow>
           <boxGeometry args={[6.375, 0.8, width + 14.375]} />
           <meshStandardMaterial color="#6b7280" roughness={0.8} />
         </mesh>
-        {/* Bridge arch (simplified) */}
-        <mesh position={[0, 0.5, 0]} castShadow>
+        {/* Bridge arch (simplified) - raised proportionally */}
+        <mesh position={[0, 1.0, 0]} castShadow>
           <boxGeometry args={[5.1, 1.5, width - 2]} />
           <meshStandardMaterial color="#5b6470" roughness={0.85} />
         </mesh>
-        {/* Bridge railings */}
+        {/* Bridge railings - raised proportionally */}
         {[-1, 1].map((side, i) => (
-          <mesh key={`railing-${i}`} position={[side * 3.1875, 2.2, 0]} castShadow>
+          <mesh key={`railing-${i}`} position={[side * 3.1875, 2.7, 0]} castShadow>
             <boxGeometry args={[0.3, 1, width + 14.375]} />
             <meshStandardMaterial color="#4b5563" roughness={0.7} />
           </mesh>

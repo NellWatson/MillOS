@@ -2528,7 +2528,7 @@ const RoadTunnel: React.FC<{
 }> = ({ position, rotation = 0, roadWidth = 10 }) => {
   const tunnelWidth = roadWidth + 2;
   const tunnelHeight = 7;
-  const tunnelDepth = 50;
+  const tunnelDepth = 90;
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
