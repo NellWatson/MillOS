@@ -4212,15 +4212,20 @@ const CheckpointBarrier: React.FC<{
 
     if (isShippingCheckpoint) {
       // Shipping checkpoint at z=110
-      // Truck enters from z=250 (coming from positive z towards negative z in world)
-      // Truck exits towards z=250 (going from negative z towards positive z)
+      // Truck enters from z=200 (coming from positive z towards dock at z=53)
+      // Truck exits towards z=200 (going from dock back to road)
       const truckZ = shippingState.z;
 
-      // Entering phases: truck coming from road (z=250) towards dock (z=53)
+      // Entering phases: truck coming from road towards dock
+      // 'entering' is when truck is on straight approach, 'slowing' would be deceleration
       const isEntering =
-        shippingState.phase === 'entering' || shippingState.phase === 'positioning';
+        shippingState.phase === 'entering' || shippingState.phase === 'slowing';
       // Leaving phases: truck going from dock back to road
-      const isLeaving = shippingState.phase === 'turning_out' || shippingState.phase === 'leaving';
+      // 'accelerating' is when truck actually passes checkpoint on the way out
+      const isLeaving =
+        shippingState.phase === 'turning_out' ||
+        shippingState.phase === 'accelerating' ||
+        shippingState.phase === 'leaving';
 
       if (isEntering && truckZ > checkpointZ - 20 && truckZ < checkpointZ + DETECTION_RANGE) {
         shouldRaiseInbound = true;
@@ -4232,12 +4237,15 @@ const CheckpointBarrier: React.FC<{
       // Receiving checkpoint at z=-110
       const truckZ = receivingState.z;
 
-      // Entering phases: truck coming from road (z=-250) towards dock (z=-53)
+      // Entering phases: truck coming from road (z=-200) towards dock (z=-53)
       const isEntering =
-        receivingState.phase === 'entering' || receivingState.phase === 'positioning';
+        receivingState.phase === 'entering' || receivingState.phase === 'slowing';
       // Leaving phases: truck going from dock back to road
+      // 'accelerating' is when truck actually passes checkpoint on the way out
       const isLeaving =
-        receivingState.phase === 'turning_out' || receivingState.phase === 'leaving';
+        receivingState.phase === 'turning_out' ||
+        receivingState.phase === 'accelerating' ||
+        receivingState.phase === 'leaving';
 
       if (isEntering && truckZ < checkpointZ + 20 && truckZ > checkpointZ - DETECTION_RANGE) {
         shouldRaiseInbound = true;
