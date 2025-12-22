@@ -34,7 +34,7 @@ import {
   AlertOctagon,
 } from 'lucide-react';
 import { useUIStore } from '../stores/uiStore';
-import { useProductionStore } from '../stores/productionStore';
+// Note: useProductionStore is available for future enhancement to show actual machine sensor data
 
 // ============================================================================
 // Types & Interfaces

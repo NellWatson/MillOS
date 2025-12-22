@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import {
   Bot,
   Brain,
@@ -62,7 +62,9 @@ interface AICommandCenterProps {
 }
 
 // Sparkline component for trend visualization
-const Sparkline: React.FC<{ data: number[]; color?: string; height?: number }> = ({
+// Note: Currently unused but kept for future feature expansion
+ 
+const _Sparkline: React.FC<{ data: number[]; color?: string; height?: number }> = ({
   data,
   color = '#22d3ee',
   height = 20,
@@ -98,7 +100,9 @@ const Sparkline: React.FC<{ data: number[]; color?: string; height?: number }> =
 };
 
 // Confidence adjustment indicator component
-const ConfidenceIndicator: React.FC<{ type: AIDecision['type']; confidence: number }> = ({
+// Note: Currently unused but kept for future feature expansion
+ 
+const _ConfidenceIndicator: React.FC<{ type: AIDecision['type']; confidence: number }> = ({
   type,
   confidence,
 }) => {
@@ -122,13 +126,13 @@ const ConfidenceIndicator: React.FC<{ type: AIDecision['type']; confidence: numb
 
 export const AICommandCenter: React.FC<AICommandCenterProps> = ({
   isOpen,
-  onClose,
+  onClose: _onClose,
   embedded = false,
 }) => {
   const [isThinking, setIsThinking] = useState(false);
   const [activeTab, setActiveTab] = useState<'decisions' | 'predictions' | 'strategic'>('decisions');
   const [predictedEvents, setPredictedEvents] = useState<ReturnType<typeof getPredictedEvents>>([]);
-  const [impactStats, setImpactStats] = useState<ReturnType<typeof getImpactStats> | null>(null);
+  const [_impactStats, setImpactStats] = useState<ReturnType<typeof getImpactStats> | null>(null);
   // Track actual decision outcomes for real success rate calculation
   const decisionOutcomesRef = useRef<{ successful: number; total: number }>({
     successful: 0,
@@ -141,7 +145,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
     decisions: 0,
     successRate: 0, // Start at 0, will be calculated from actual decisions
   });
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const _scrollRef = useRef<HTMLDivElement>(null);
   const lastAlertCountRef = useRef(0);
   const lastDecisionIdRef = useRef<string | null>(null);
   const decisionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -156,7 +160,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
   const isGeneratingStrategicRef = useRef(false);
 
   // Get state from stores using useShallow to prevent unnecessary re-renders
-  const { aiDecisions, machines, metrics, workerSatisfaction } = useProductionStore(
+  const { aiDecisions, machines: _machines, metrics, workerSatisfaction: _workerSatisfaction } = useProductionStore(
     useShallow((state) => ({
       aiDecisions: state.aiDecisions,
       machines: state.machines,
@@ -167,7 +171,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
 
   const alerts = useUIStore((state) => state.alerts);
 
-  const { weather, currentShift, gameTime, emergencyDrillMode } = useGameSimulationStore(
+  const { weather, currentShift, gameTime: _gameTime, emergencyDrillMode } = useGameSimulationStore(
     useShallow((state) => ({
       weather: state.weather,
       currentShift: state.currentShift,
@@ -451,7 +455,9 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
     return colors[priority] || colors.medium;
   };
 
-  const getWeatherIcon = () => {
+  // Weather icon helper - kept for future UI expansion
+   
+  const _getWeatherIcon = () => {
     switch (weather) {
       case 'storm':
         return <CloudLightning className="w-4 h-4 text-purple-400" />;
@@ -464,7 +470,9 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
     }
   };
 
-  const formatGameTime = (time: number) => {
+  // Time formatter - kept for future UI expansion
+   
+  const _formatGameTime = (time: number) => {
     const hours = Math.floor(time);
     const minutes = Math.floor((time - hours) * 60);
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;

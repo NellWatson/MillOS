@@ -72,7 +72,7 @@ export const SmartForklift: React.FC<SmartForkliftProps> = ({
     useFrame((state, delta) => {
         if (!groupRef.current || !forkRef.current) return;
 
-        const time = state.clock.elapsedTime + cycleOffset;
+        const _time = state.clock.elapsedTime + cycleOffset;
         const currentWaypoint = waypoints[currentWaypointRef.current];
         const targetPos = new THREE.Vector3(...currentWaypoint.position);
 
