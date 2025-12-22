@@ -1,7 +1,7 @@
 /**
  * VCPDebugPanel Component
  * 
- * Beautiful showcase of the VCP (Value & Context Protocol) encoding system.
+ * Beautiful showcase of the VCP (Value Context Protocol) encoding system.
  * Shows side-by-side comparison of verbose text vs compact emoji encoding.
  * Demonstrates the 95%+ token savings when communicating factory state to Gemini.
  */
@@ -108,7 +108,7 @@ export const VCLDebugPanel: React.FC = () => {
                     </div>
                     <div className="text-left">
                         <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-white">Value & Context Protocol</span>
+                            <span className="text-sm font-bold text-white">Value Context Protocol</span>
                             <span className="text-[9px] px-2 py-0.5 bg-gradient-to-r from-emerald-500/30 to-cyan-500/30 text-emerald-300 rounded-full font-semibold text-center">
                                 {savingsPercent}% SAVED
                             </span>

@@ -1,5 +1,5 @@
 /**
- * VCP (Value & Context Protocol) Encoder for MillOS
+ * VCP (Value Context Protocol) Encoder for MillOS
  * 
  * Implements the Enneagram Protocol for compact context encoding using emoji.
  * Reduces token usage while preserving semantic richness.
