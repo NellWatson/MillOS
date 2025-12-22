@@ -1594,11 +1594,7 @@ const River: React.FC<{
           </group>
         );
       })}
-      {/* Trees along riverbank */}
-      <SimpleTree position={[-length / 4, 0, width / 2 + 6]} scale={1.2} />
-      <SimpleTree position={[length / 4, 0, -width / 2 - 5]} scale={1.0} />
-      <SimpleTree position={[0, 0, width / 2 + 8]} scale={1.1} />
-      <SimpleTree position={[-length / 3, 0, -width / 2 - 7]} scale={0.9} />
+      {/* Trees removed - were causing placement issues */}
       {/* Stone bridge - narrower footbridge spanning the river */}
       <group position={[0, 0, 0]}>
         {/* Bridge deck */}
@@ -5858,7 +5854,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       </group>
 
       {/* Additional trees along boundaries */}
-      <SimpleTree position={[-110, 0, 60]} scale={1.3} />
+      <SimpleTree position={[-105, 0, 60]} scale={1.3} />
       <SimpleTree position={[-110, 0, 30]} scale={1.1} />
       <SimpleTree position={[-110, 0, 0]} scale={1.2} />
       <SimpleTree position={[-110, 0, -30]} scale={1.0} />
@@ -6173,8 +6169,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       {/* Path from back gate to river */}
       <GravelPath start={[0, 0, -85]} end={[0, 0, -125]} width={3} type="paved" />
 
-      {/* Riverbank path */}
-      <GravelPath start={[-100, 0, -135]} end={[100, 0, -135]} width={2.5} type="gravel" />
+      {/* Riverbank path removed - was crossing through river */}
 
       {/* Path to front pond */}
       <GravelPath start={[-100, 0, 95]} end={[-125, 0, 105]} width={2} type="gravel" />
@@ -6266,11 +6261,11 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       <SimpleTree position={[-160, 0, -50]} scale={1.0} />
       <SimpleTree position={[-160, 0, -90]} scale={1.1} />
 
-      {/* Trees by river */}
-      <SimpleTree position={[-80, 0, -155]} scale={1.3} />
-      <SimpleTree position={[-40, 0, -160]} scale={1.0} />
-      <SimpleTree position={[40, 0, -158]} scale={1.2} />
-      <SimpleTree position={[80, 0, -155]} scale={0.9} />
+      {/* Trees by river - positioned on far riverbank */}
+      <SimpleTree position={[-80, 0, -170]} scale={1.3} />
+      <SimpleTree position={[-40, 0, -172]} scale={1.0} />
+      <SimpleTree position={[40, 0, -170]} scale={1.2} />
+      <SimpleTree position={[80, 0, -168]} scale={0.9} />
 
       {/* Additional trees by lake */}
       <SimpleTree position={[155, 0, 110]} scale={1.0} />

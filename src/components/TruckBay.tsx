@@ -7,6 +7,7 @@ import { audioManager } from '../utils/audioManager';
 import { useProductionStore } from '../stores/productionStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
+import { FLOOR_LAYERS, POLYGON_OFFSET, RENDER_ORDER } from '../constants/renderLayers';
 import {
   OptimizedTrafficConeInstances,
   OptimizedBollardInstances,
@@ -2612,14 +2613,15 @@ const RoadTunnel: React.FC<{
 const PalletStaging: React.FC<{ position: [number, number, number] }> = ({ position }) => (
   <group position={position}>
     {/* Ground marking - raised and with polygon offset to prevent z-fighting */}
-    <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
+    <mesh position={[0, FLOOR_LAYERS.truckMarkings, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={RENDER_ORDER.floorMarkings}>
       <planeGeometry args={[4, 6]} />
       <meshStandardMaterial
         color="#fbbf24"
         transparent
         opacity={0.3}
         polygonOffset
-        polygonOffsetFactor={-10}
+        polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+        polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
         depthWrite={false}
       />
     </mesh>
@@ -3347,7 +3349,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           <meshBasicMaterial
             color="#3b82f6"
             polygonOffset
-            polygonOffsetFactor={-10}
+            polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
           />
         </mesh>
@@ -3358,7 +3361,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             transparent
             opacity={0.5}
             polygonOffset
-            polygonOffsetFactor={-10}
+            polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
           />
         </mesh>
@@ -3369,7 +3373,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             transparent
             opacity={0.5}
             polygonOffset
-            polygonOffsetFactor={-10}
+            polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
           />
         </mesh>
@@ -3379,7 +3384,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           <meshBasicMaterial
             color="#ef4444"
             polygonOffset
-            polygonOffsetFactor={-10}
+            polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
           />
         </mesh>
@@ -3719,7 +3725,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           <meshBasicMaterial
             color="#3b82f6"
             polygonOffset
-            polygonOffsetFactor={-10}
+            polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
           />
         </mesh>
@@ -3730,7 +3737,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             transparent
             opacity={0.5}
             polygonOffset
-            polygonOffsetFactor={-10}
+            polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
           />
         </mesh>
@@ -3741,7 +3749,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             transparent
             opacity={0.5}
             polygonOffset
-            polygonOffsetFactor={-10}
+            polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
           />
         </mesh>
@@ -3751,7 +3760,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           <meshBasicMaterial
             color="#ef4444"
             polygonOffset
-            polygonOffsetFactor={-10}
+            polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
           />
         </mesh>
@@ -5479,7 +5489,8 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
         transparent
         opacity={0.3}
         polygonOffset
-        polygonOffsetFactor={-10}
+        polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+        polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
         depthWrite={false}
       />
     </mesh>
@@ -5488,7 +5499,8 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
       <meshBasicMaterial
         color="#22c55e"
         polygonOffset
-        polygonOffsetFactor={-10}
+        polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+        polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
         depthWrite={false}
       />
     </mesh>
@@ -5497,7 +5509,8 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
       <meshBasicMaterial
         color="#22c55e"
         polygonOffset
-        polygonOffsetFactor={-10}
+        polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+        polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
         depthWrite={false}
       />
     </mesh>
@@ -5508,7 +5521,8 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
         transparent
         opacity={0.3}
         polygonOffset
-        polygonOffsetFactor={-10}
+        polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+        polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
         depthWrite={false}
       />
     </mesh>
@@ -5519,7 +5533,8 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
         transparent
         opacity={0.2}
         polygonOffset
-        polygonOffsetFactor={-10}
+        polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+        polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
         depthWrite={false}
       />
     </mesh>
@@ -5532,7 +5547,8 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
         <meshBasicMaterial
           color="#fbbf24"
           polygonOffset
-          polygonOffsetFactor={-10}
+          polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+          polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
           depthWrite={false}
         />
       </mesh>
@@ -5544,7 +5560,8 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
         transparent
         opacity={0.25}
         polygonOffset
-        polygonOffsetFactor={-10}
+        polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+        polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
         depthWrite={false}
       />
     </mesh>
@@ -5672,7 +5689,8 @@ const TruckAlignmentGuides: React.FC<{ position: [number, number, number] }> = (
           transparent
           opacity={0.8}
           polygonOffset
-          polygonOffsetFactor={-10}
+          polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+          polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
           depthWrite={false}
         />
       </mesh>
@@ -5692,7 +5710,8 @@ const TruckAlignmentGuides: React.FC<{ position: [number, number, number] }> = (
           transparent
           opacity={0.6}
           polygonOffset
-          polygonOffsetFactor={-10}
+          polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+          polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
           depthWrite={false}
         />
       </mesh>
@@ -5707,7 +5726,8 @@ const TruckAlignmentGuides: React.FC<{ position: [number, number, number] }> = (
           transparent
           opacity={0.6}
           polygonOffset
-          polygonOffsetFactor={-10}
+          polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+          polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
           depthWrite={false}
         />
       </mesh>
@@ -5720,7 +5740,8 @@ const TruckAlignmentGuides: React.FC<{ position: [number, number, number] }> = (
           emissive="#ef4444"
           emissiveIntensity={0.4}
           polygonOffset
-          polygonOffsetFactor={-10}
+          polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
+          polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
           depthWrite={false}
         />
       </mesh>

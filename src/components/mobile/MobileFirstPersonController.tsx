@@ -10,7 +10,8 @@ const PLAYER_HEIGHT = 0.48;
 const PLAYER_RADIUS = 0.4;
 const FPS_FOV = 75; // Reduced FOV for mobile to reduce fish-eye effect
 const ORBIT_FOV = 65;
-const LOOK_SENSITIVITY = 0.0075; // Doubled for mobile
+const LOOK_SENSITIVITY = 0.006; // Fine-tuned for smooth mobile experience
+const LOOK_SMOOTHING = 0.15; // Lerp factor for smooth camera movement
 
 // World boundary
 const WORLD_RADIUS = 255;
@@ -55,6 +56,7 @@ export const MobileFirstPersonController: React.FC = () => {
   const velocity = useRef(new THREE.Vector3());
   const direction = useRef(new THREE.Vector3());
   const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
+  const targetEuler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const lastTouchTimeRef = useRef<number>(0);
 
@@ -78,6 +80,7 @@ export const MobileFirstPersonController: React.FC = () => {
 
     // Initialize euler from camera
     euler.current.setFromQuaternion(camera.quaternion);
+    targetEuler.current.copy(euler.current);
 
     if (camera instanceof THREE.PerspectiveCamera) {
       camera.fov = FPS_FOV;
@@ -129,14 +132,12 @@ export const MobileFirstPersonController: React.FC = () => {
       const deltaX = e.targetTouches[0].clientX - touchStartRef.current.x;
       const deltaY = e.targetTouches[0].clientY - touchStartRef.current.y;
 
-      // Apply rotation (yaw and pitch)
-      euler.current.y -= deltaX * LOOK_SENSITIVITY;
-      euler.current.x -= deltaY * LOOK_SENSITIVITY;
+      // Apply rotation with smoothing for better feel
+      targetEuler.current.y -= deltaX * LOOK_SENSITIVITY;
+      targetEuler.current.x -= deltaY * LOOK_SENSITIVITY;
 
       // Clamp pitch to prevent flipping
-      euler.current.x = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, euler.current.x));
-
-      camera.quaternion.setFromEuler(euler.current);
+      targetEuler.current.x = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, targetEuler.current.x));
 
       touchStartRef.current = {
         x: e.targetTouches[0].clientX,
@@ -232,6 +233,11 @@ export const MobileFirstPersonController: React.FC = () => {
     if (!checkCollision(camera.position.x, newZ)) {
       camera.position.z = newZ;
     }
+
+    // Smoothly interpolate camera rotation for better feel
+    euler.current.x += (targetEuler.current.x - euler.current.x) * LOOK_SMOOTHING;
+    euler.current.y += (targetEuler.current.y - euler.current.y) * LOOK_SMOOTHING;
+    camera.quaternion.setFromEuler(euler.current);
 
     // Keep camera at player height
     camera.position.y = PLAYER_HEIGHT;

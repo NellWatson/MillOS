@@ -22,7 +22,7 @@
 const FORKLIFT_MODEL_SCALE = 15;
 
 import React, { useRef, Suspense } from 'react';
-import { useGLTF } from '@react-three/drei';
+import { useDracoGLTF } from '../../utils/dracoLoader';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useModelAvailable, MODEL_PATHS } from '../../utils/modelLoader';
@@ -42,7 +42,7 @@ const GLTFForklift: React.FC<ForkliftModelProps> = ({
   speedMultiplier = 1,
   forkHeightRef,
 }) => {
-  const { scene } = useGLTF(MODEL_PATHS.forklift);
+  const { scene } = useDracoGLTF(MODEL_PATHS.forklift);
   const modelRef = useRef<THREE.Group>(null);
   const cargoRef = useRef<THREE.Group>(null);
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);

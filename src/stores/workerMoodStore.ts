@@ -71,15 +71,17 @@ export interface WorkerReactionState {
   duration: number;
 }
 
-// Generate initial moods for all workers - they're a jolly bunch!
+// Generate initial moods for all workers - deterministic based on worker index
 const generateInitialMoods = (): Record<string, WorkerMood> => {
   const moods: Record<string, WorkerMood> = {};
-  WORKER_ROSTER.forEach((worker) => {
+  WORKER_ROSTER.forEach((worker, index) => {
+    // Deterministic mood values based on worker index (no Math.random)
+    const indexFactor = (index % 5) / 5; // 0, 0.2, 0.4, 0.6, 0.8 cycling
     moods[worker.id] = {
       workerId: worker.id,
-      energy: 85 + Math.random() * 15, // Start with HIGH energy (85-100)
-      satisfaction: 80 + Math.random() * 20, // Start happy (80-100)
-      patience: 85 + Math.random() * 15, // Start patient (85-100)
+      energy: 85 + indexFactor * 15,        // Deterministic: 85-100
+      satisfaction: 80 + indexFactor * 20,  // Deterministic: 80-100
+      patience: 85 + indexFactor * 15,      // Deterministic: 85-100
       state: 'content',
       lastBreak: 6, // Assume shift just started at 6am
       grumbleQueue: [],
@@ -89,7 +91,7 @@ const generateInitialMoods = (): Record<string, WorkerMood> => {
   return moods;
 };
 
-// Generate initial factory plants
+// Generate initial factory plants - deterministic health based on index
 const generateInitialPlants = (): FactoryPlant[] => {
   const plantPositions: [number, number, number][] = [
     [-25, 0, 15], // Near break room area
@@ -105,7 +107,7 @@ const generateInitialPlants = (): FactoryPlant[] => {
     id: `plant-${i}`,
     position: pos,
     type: (['potted_fern', 'desk_succulent', 'tall_palm', 'hanging_ivy'] as const)[i % 4],
-    health: 70 + Math.random() * 30,
+    health: 70 + (i * 4),  // Deterministic: 70, 74, 78, 82, 86, 90, 94
     lastWatered: 6,
     name: PLANT_NAMES[i % PLANT_NAMES.length],
   }));

@@ -158,14 +158,22 @@ interface ProductionStore {
   getMachineById: (machineId: string) => MachineData | undefined;
   getWorkerById: (workerId: string) => WorkerData | undefined;
 
-  // Metrics
+  // Metrics - now computed from actual simulation state
   metrics: {
-    throughput: number;
-    efficiency: number;
-    uptime: number;
-    quality: number;
+    throughput: number;    // Bags per minute based on packer output
+    efficiency: number;    // Running machines / total machines * 100
+    uptime: number;        // Cumulative running time / elapsed time * 100
+    quality: number;       // Average QC test grade (A=100, B=85, C=70, FAIL=0)
+  };
+  // Metric tracking for uptime calculation
+  _metricTracking: {
+    totalRunningSeconds: number;   // Cumulative time machines spent running
+    totalElapsedSeconds: number;   // Total simulation time elapsed
+    lastRecalcTime: number;        // Timestamp of last recalc
   };
   updateMetrics: (metrics: Partial<ProductionStore['metrics']>) => void;
+  recalculateMetrics: () => void;  // Recompute all metrics from current state
+  tickMetrics: (deltaSeconds: number) => void;  // Called by game loop to update tracking
 
   // Heat map data (worker position history)
   heatMapData: Array<{ x: number; z: number; intensity: number }>;
@@ -326,6 +334,10 @@ export const useProductionStore = create<ProductionStore>()(
     aiDecisions: [],
     addAIDecision: (decision) =>
       set((state) => {
+        // Prevent duplicate decisions by checking if ID already exists
+        if (state.aiDecisions.some((d) => d.id === decision.id)) {
+          return state; // No-op if decision already exists
+        }
         const updatedDecisions = [decision, ...state.aiDecisions].slice(0, 50);
         const { aiDecisionsByMachine, aiDecisionsByWorker } =
           rebuildAIDecisionIndices(updatedDecisions);
@@ -403,15 +415,67 @@ export const useProductionStore = create<ProductionStore>()(
     },
 
     metrics: {
-      throughput: 1240,
-      efficiency: 98.2,
-      uptime: 99.7,
-      quality: 99.9,
+      throughput: 0,     // Will be computed
+      efficiency: 100,   // Will be computed
+      uptime: 100,       // Will be computed
+      quality: 100,      // Will be computed from QC tests
+    },
+    _metricTracking: {
+      totalRunningSeconds: 0,
+      totalElapsedSeconds: 0,
+      lastRecalcTime: Date.now(),
     },
     updateMetrics: (metrics: Partial<ProductionStore['metrics']>) =>
       set((state) => ({
         metrics: { ...state.metrics, ...metrics },
       })),
+
+    // Recalculate all metrics from current simulation state
+    recalculateMetrics: () => set((state) => {
+      const machines = state.machines;
+      const totalMachines = machines.length || 1;
+      const runningMachines = machines.filter(m => m.status === 'running' || m.status === 'warning').length;
+
+      // Efficiency: percentage of machines that are running
+      const efficiency = Math.round((runningMachines / totalMachines) * 100 * 10) / 10;
+
+      // Uptime: percentage of time machines have been running
+      const tracking = state._metricTracking;
+      const uptime = tracking.totalElapsedSeconds > 0
+        ? Math.round((tracking.totalRunningSeconds / (tracking.totalElapsedSeconds * totalMachines)) * 100 * 10) / 10
+        : 100;
+
+      // Quality: average from QC test history (A=100, B=85, C=70, FAIL=0)
+      const gradeValues: Record<string, number> = { 'A': 100, 'B': 85, 'C': 70, 'FAIL': 0 };
+      const testHistory = state.qcLab.testHistory;
+      const quality = testHistory.length > 0
+        ? Math.round(testHistory.slice(-10).reduce((sum, t) => sum + (gradeValues[t.grade] || 85), 0) / Math.min(testHistory.length, 10) * 10) / 10
+        : 99.5; // Default before any tests
+
+      // Throughput: bags per minute based on running packers
+      // Each packer at full production speed produces ~12 bags/min
+      const packers = machines.filter(m => m.type.toString() === 'PACKER');
+      const runningPackers = packers.filter(m => m.status === 'running' || m.status === 'warning').length;
+      const throughput = Math.round(runningPackers * 12 * state.productionSpeed);
+
+      return {
+        metrics: { efficiency, uptime, quality, throughput },
+      };
+    }),
+
+    // Tick metrics tracking - called by game simulation loop
+    tickMetrics: (deltaSeconds: number) => set((state) => {
+      const machines = state.machines;
+      const runningMachines = machines.filter(m => m.status === 'running' || m.status === 'warning').length;
+
+      return {
+        _metricTracking: {
+          ...state._metricTracking,
+          totalRunningSeconds: state._metricTracking.totalRunningSeconds + (runningMachines * deltaSeconds),
+          totalElapsedSeconds: state._metricTracking.totalElapsedSeconds + deltaSeconds,
+        },
+      };
+    }),
 
     // Heat map data
     heatMapData: [],
@@ -541,11 +605,11 @@ export const useProductionStore = create<ProductionStore>()(
       set((state) => ({
         productionTarget: state.productionTarget
           ? {
-              ...state.productionTarget,
-              producedBags: bagsProduced,
-              status:
-                bagsProduced >= state.productionTarget.targetBags ? 'completed' : 'in_progress',
-            }
+            ...state.productionTarget,
+            producedBags: bagsProduced,
+            status:
+              bagsProduced >= state.productionTarget.targetBags ? 'completed' : 'in_progress',
+          }
           : null,
       })),
     totalBagsProduced: 0,
@@ -556,18 +620,18 @@ export const useProductionStore = create<ProductionStore>()(
           totalBagsProduced: newTotal,
           productionTarget: state.productionTarget
             ? {
-                ...state.productionTarget,
-                producedBags: state.productionTarget.producedBags + count,
-                status:
-                  state.productionTarget.producedBags + count >= state.productionTarget.targetBags
-                    ? 'completed'
-                    : 'in_progress',
-              }
+              ...state.productionTarget,
+              producedBags: state.productionTarget.producedBags + count,
+              status:
+                state.productionTarget.producedBags + count >= state.productionTarget.targetBags
+                  ? 'completed'
+                  : 'in_progress',
+            }
             : null,
         };
       }),
 
-    // Achievements - with initial progress for demo
+    // Achievements - start at 0, will be tracked by real events
     achievements: [
       {
         id: 'safety-100',
@@ -576,8 +640,8 @@ export const useProductionStore = create<ProductionStore>()(
         icon: 'Shield',
         category: 'safety',
         requirement: 100,
-        currentValue: 73,
-        progress: 73,
+        currentValue: 0,
+        progress: 0,
       },
       {
         id: 'bags-1m',
@@ -586,8 +650,8 @@ export const useProductionStore = create<ProductionStore>()(
         icon: 'Package',
         category: 'production',
         requirement: 1000000,
-        currentValue: 847293,
-        progress: 84.7,
+        currentValue: 0,
+        progress: 0,
       },
       {
         id: 'quality-99',
@@ -596,8 +660,8 @@ export const useProductionStore = create<ProductionStore>()(
         icon: 'Award',
         category: 'quality',
         requirement: 7,
-        currentValue: 5,
-        progress: 71.4,
+        currentValue: 0,
+        progress: 0,
       },
       {
         id: 'team-player',
@@ -606,9 +670,8 @@ export const useProductionStore = create<ProductionStore>()(
         icon: 'Users',
         category: 'teamwork',
         requirement: 50,
-        currentValue: 50,
-        progress: 100,
-        unlockedAt: '2024-11-15T10:30:00Z',
+        currentValue: 0,
+        progress: 0,
       },
       {
         id: 'efficiency-expert',
@@ -617,8 +680,8 @@ export const useProductionStore = create<ProductionStore>()(
         icon: 'TrendingUp',
         category: 'production',
         requirement: 99,
-        currentValue: 97.2,
-        progress: 98.2,
+        currentValue: 0,
+        progress: 0,
       },
     ] as Achievement[],
     unlockAchievement: (achievementId: string) =>
@@ -632,10 +695,10 @@ export const useProductionStore = create<ProductionStore>()(
         achievements: state.achievements.map((a) =>
           a.id === achievementId
             ? {
-                ...a,
-                currentValue: progress,
-                progress: Math.min(100, (progress / a.requirement) * 100),
-              }
+              ...a,
+              currentValue: progress,
+              progress: Math.min(100, (progress / a.requirement) * 100),
+            }
             : a
         ),
       })),

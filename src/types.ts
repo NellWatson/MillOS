@@ -118,12 +118,12 @@ export interface WorkerData {
   name: string;
   gender: WorkerGender;
   role:
-    | 'Operator'
-    | 'Engineer'
-    | 'Supervisor'
-    | 'Safety Officer'
-    | 'Quality Control'
-    | 'Maintenance';
+  | 'Operator'
+  | 'Engineer'
+  | 'Supervisor'
+  | 'Safety Officer'
+  | 'Quality Control'
+  | 'Maintenance';
   icon: WorkerIconType;
   position: [number, number, number];
   speed: number;
@@ -143,6 +143,8 @@ export interface WorkerData {
   productivityScore?: number; // 0-100 current shift
   tasksCompleted?: number;
   trainingSessions?: number;
+  // Fatigue system
+  energy?: number; // 0-100, decreases during shift
 }
 
 export interface ProductData {
@@ -438,12 +440,12 @@ export interface FactoryPlant {
 export interface MaintenanceTask {
   id: string;
   type:
-    | 'sweeping'
-    | 'oiling'
-    | 'lightbulb'
-    | 'plant_watering'
-    | 'spill_cleanup'
-    | 'general_tidying';
+  | 'sweeping'
+  | 'oiling'
+  | 'lightbulb'
+  | 'plant_watering'
+  | 'spill_cleanup'
+  | 'general_tidying';
   position: [number, number, number];
   priority: 'low' | 'medium' | 'high';
   assignedWorkerId?: string;

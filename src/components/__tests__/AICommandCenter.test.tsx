@@ -45,6 +45,20 @@ vi.mock('../../stores/gameSimulationStore', () => ({
   useGameSimulationStore: (selector: any) => mockGameSimulationStore(selector),
 }));
 
+// Mock aiConfigStore - CRITICAL: must return static values to prevent re-render loops
+vi.mock('../../stores/aiConfigStore', () => ({
+  useAIConfigStore: (selector?: any) => {
+    const staticState = {
+      aiMode: 'heuristic',
+      isGeminiConnected: false,
+      getFormattedCost: () => '$0.00',
+      costTracking: { requestCount: 0, sessionCost: 0 },
+    };
+    if (selector) return selector(staticState);
+    return staticState;
+  },
+}));
+
 // Mock zustand/react/shallow
 vi.mock('zustand/react/shallow', () => ({
   useShallow: (fn: any) => fn,
@@ -60,6 +74,10 @@ vi.mock('../../utils/aiEngine', () => ({
   getSparklineData: vi.fn(() => [0.2, 0.4, 0.6, 0.5, 0.7]),
   shouldTriggerAudioCue: vi.fn(() => false),
   getConfidenceAdjustmentForType: vi.fn(() => 0),
+  // Layer activation checks - must return true for tests to exercise decision logic
+  isTacticalLayerActive: vi.fn(() => true),
+  isStrategicLayerActive: vi.fn(() => false),
+  isGeminiModeActive: vi.fn(() => false),
 }));
 
 // Mock Audio Manager
@@ -377,7 +395,7 @@ describe('AICommandCenter', () => {
       expect(screen.getByText(/0.0%/)).toBeInTheDocument();
     });
 
-    it('should reset isGeneratingDecisionRef on unmount', () => {
+    it('should reset isGeneratingDecisionRef on unmount', async () => {
       const { unmount } = render(<AICommandCenter isOpen={true} onClose={vi.fn()} />);
 
       // Unmount
@@ -401,9 +419,9 @@ describe('AICommandCenter', () => {
       render(<AICommandCenter isOpen={true} onClose={vi.fn()} />);
 
       // Should be able to generate decisions after remount
-      act(() => {
-        vi.advanceTimersByTime(2000);
-        vi.advanceTimersByTime(1500);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+        await vi.advanceTimersByTimeAsync(1500);
       });
 
       expect(aiEngine.generateContextAwareDecision).toHaveBeenCalled();

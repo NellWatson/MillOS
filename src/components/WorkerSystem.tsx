@@ -15,6 +15,7 @@ import { WorkerMoodOverlay } from './WorkerMoodOverlay';
 import { WorkerReactionOverlay } from './MaintenanceSystem';
 import { audioManager } from '../utils/audioManager';
 import { shouldRunThisFrame, getThrottleLevel } from '../utils/frameThrottle';
+import { useAIConfigStore } from '../stores/aiConfigStore';
 import * as THREE from 'three';
 import {
   SHARED_WORKER_MATERIALS,
@@ -24,6 +25,8 @@ import {
   getUniformMaterial,
   getPantsMaterial,
 } from './workers/SharedWorkerMaterials';
+import { RecommendedWorkerRing } from './workers/RecommendedWorkerRing';
+import { FatigueIndicator } from './workers/FatigueIndicator';
 
 interface WorkerSystemProps {
   onSelectWorker: (worker: WorkerData) => void;
@@ -2058,6 +2061,10 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
     const productionEfficiency = useProductionStore((state) => state.metrics.efficiency);
     const recordHeatMapPoint = useProductionStore((state) => state.recordHeatMapPoint);
 
+    // Strategic AI recommendation - highlight this worker if recommended
+    const recommendWorker = useAIConfigStore((state) => state.strategic.recommendWorker);
+    const isRecommended = recommendWorker?.toLowerCase().includes(data.name.toLowerCase()) || false;
+
     // Cache graphics settings (updated every ~1 second instead of every frame)
     const cachedThrottleLevelRef = useRef(2);
     const workerSettingsCacheFrameRef = useRef(0);
@@ -2893,6 +2900,12 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
             hatColor={appearance.hatColor}
           />
         )}
+
+        {/* Strategic AI Recommendation Highlight Ring - Animated */}
+        <RecommendedWorkerRing visible={isRecommended} />
+
+        {/* Worker Fatigue/Energy Indicator */}
+        <FatigueIndicator energy={data.energy || 100} visible={true} />
 
         {/* Status indicator above head */}
         <group position={[0, 2.15, 0]}>

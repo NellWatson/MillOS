@@ -25,6 +25,7 @@ import { useProductionStore } from '../stores/productionStore';
 import { audioManager } from '../utils/audioManager';
 import { shouldRunThisFrame, incrementGlobalFrame } from '../utils/frameThrottle';
 import { useShallow } from 'zustand/react/shallow';
+import { FLOOR_LAYERS } from '../constants/renderLayers';
 
 // Animation registries extracted to separate file for Fast Refresh compatibility
 import {
@@ -729,18 +730,33 @@ const LightShaft: React.FC<{ position: [number, number, number] }> = memo(({ pos
 });
 
 // Game time ticker component - now managed by EnvironmentAnimationManager
+// Also updates production metrics to keep them in sync with simulation state
 const GameTimeTicker: React.FC = () => {
   const tickGameTime = useGameSimulationStore((state) => state.tickGameTime);
+  const { tickMetrics, recalculateMetrics } = useProductionStore(
+    useShallow((state) => ({
+      tickMetrics: state.tickMetrics,
+      recalculateMetrics: state.recalculateMetrics,
+    }))
+  );
   const lastTickRef = useRef(0);
 
-  // Register game time with animation manager
+  // Register game time with animation manager - wrapper that also updates metrics
   useEffect(() => {
+    const wrappedTickGameTime = (delta: number) => {
+      tickGameTime(delta);
+      // Also tick production metrics to track uptime
+      tickMetrics(delta);
+      // Recalculate derived metrics (efficiency, quality, throughput)
+      recalculateMetrics();
+    };
+
     registerGameTime('main', {
-      tickGameTime,
+      tickGameTime: wrappedTickGameTime,
       lastTickTime: lastTickRef.current,
     });
     return () => unregisterGameTime('main');
-  }, [tickGameTime]);
+  }, [tickGameTime, tickMetrics, recalculateMetrics]);
 
   return null;
 };
@@ -1336,7 +1352,7 @@ const PuddleReflections: React.FC = () => {
     <group ref={puddleRef}>
       {/* Puddle reflective surfaces */}
       {puddlePositions.map((puddle, i) => (
-        <group key={i} position={[puddle.x, 0.02, puddle.z]}>
+        <group key={i} position={[puddle.x, FLOOR_LAYERS.puddle, puddle.z]}>
           {/* Main puddle surface - reflective */}
           <mesh rotation={[-Math.PI / 2, 0, 0]}>
             <circleGeometry args={[puddle.size, 32]} />

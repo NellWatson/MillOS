@@ -26,6 +26,9 @@ import { useProductionStore } from '../stores/productionStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useSafetyStore } from '../stores/safetyStore';
 import { useUIStore } from '../stores/uiStore';
+import { useAIConfigStore } from '../stores/aiConfigStore';
+import { geminiClient } from './geminiClient';
+import { encodeFactoryContextVCL, getVCLLegend } from './vclEncoder';
 import { logger } from './logger';
 
 // Types & Interfaces
@@ -1419,7 +1422,7 @@ function calculateConfidence(
 function findBestWorkerForTask(
   context: FactoryContext,
   taskType: 'maintenance' | 'safety' | 'quality' | 'general',
-  _nearMachineId?: string
+  nearMachineId?: string
 ): WorkerData | null {
   const availableWorkers = context.workers.filter(
     (w) => w.status === 'idle' || w.status === 'working'
@@ -1467,6 +1470,20 @@ function findBestWorkerForTask(
   // Consider average energy as proxy for fatigue
   const energyFactor = context.workerSatisfaction.averageEnergy / 100;
 
+  // === STRATEGIC PRIORITY INFLUENCE ===
+  // Get strategic priorities and focus machine from Gemini
+  const strategicState = useAIConfigStore.getState().strategic;
+  const strategicPriorities = strategicState.priorities;
+
+  // Check if this task's machine is strategically important
+  const isStrategicFocusMachine = nearMachineId &&
+    strategicPriorities.some(p =>
+      p.toLowerCase().includes(nearMachineId.toLowerCase()) ||
+      (nearMachineId.toLowerCase().includes('silo') && p.toLowerCase().includes('silo')) ||
+      (nearMachineId.toLowerCase().includes('rm-') && p.toLowerCase().includes('mill')) ||
+      (nearMachineId.toLowerCase().includes('pack') && p.toLowerCase().includes('pack'))
+    );
+
   const scoredWorkers = availableWorkers.map((worker) => {
     let score = 0;
 
@@ -1482,6 +1499,12 @@ function findBestWorkerForTask(
 
     // Energy factor bonus
     score *= 0.7 + energyFactor * 0.3;
+
+    // === STRATEGIC PRIORITY BOOST ===
+    // Boost experienced workers for strategic focus machines
+    if (isStrategicFocusMachine && worker.experience >= 5) {
+      score += 40; // Significant boost for expert workers on strategic tasks
+    }
 
     return { worker, score };
   });
@@ -1626,9 +1649,9 @@ function generateMaintenanceDecision(
     alternatives:
       issue.severity !== 'critical'
         ? [
-            { action: 'Continue monitoring', tradeoff: 'Risk of worsening' },
-            { action: 'Schedule for next shift', tradeoff: 'Delayed but less disruptive' },
-          ]
+          { action: 'Continue monitoring', tradeoff: 'Risk of worsening' },
+          { action: 'Schedule for next shift', tradeoff: 'Delayed but less disruptive' },
+        ]
         : undefined,
     uncertainty: issue.issueType === 'vibration' ? 'Depends on visual inspection' : undefined,
   };
@@ -2346,7 +2369,7 @@ let shiftObserverInitialized = false;
 export function initializeShiftObserver(): () => void {
   if (shiftObserverInitialized) {
     // Already initialized, return no-op unsubscribe
-    return () => {};
+    return () => { };
   }
 
   shiftObserverInitialized = true;
@@ -2461,4 +2484,725 @@ export function initializeAIEngine(): () => void {
  */
 export function getConfidenceAdjustmentForType(type: AIDecision['type']): number {
   return aiMemory.confidenceAdjustments.get(type) || 0;
+}
+
+// ============================================================================
+// Gemini Flash 3 Integration
+// ============================================================================
+
+/**
+ * Build a factory context prompt for Gemini
+ */
+function buildFactoryContextPrompt(context: FactoryContext): string {
+  // Context limits to prevent oversized prompts
+  const MAX_MACHINES = 10;
+  const MAX_WORKERS = 8;
+  const MAX_ALERTS = 6;
+
+  // Sort machines by priority: problematic ones first (high load, high temp, not running)
+  const prioritizedMachines = [...context.machines]
+    .sort((a, b) => {
+      const scoreA = (a.status !== 'running' ? 100 : 0) + a.metrics.load + (a.metrics.temperature > 70 ? 50 : 0);
+      const scoreB = (b.status !== 'running' ? 100 : 0) + b.metrics.load + (b.metrics.temperature > 70 ? 50 : 0);
+      return scoreB - scoreA;
+    })
+    .slice(0, MAX_MACHINES);
+
+  // Summarize machine states (limited)
+  const machinesSummary = prioritizedMachines.map(m =>
+    `- ${m.name}: status=${m.status}, temp=${m.metrics.temperature.toFixed(1)}C, ` +
+    `vibration=${m.metrics.vibration.toFixed(2)}mm/s, load=${m.metrics.load.toFixed(0)}%`
+  ).join('\n');
+
+  // Summarize workers (use productivityScore since energy is in WorkerMood)
+  const workersSummary = context.workers.slice(0, MAX_WORKERS).map(w =>
+    `- ${w.name}: productivity=${w.productivityScore ?? 100}%, task=${w.currentTask || 'idle'}`
+  ).join('\n');
+
+  // Sort alerts by severity and limit
+  const severityOrder: Record<string, number> = { critical: 0, safety: 0, warning: 1, info: 2, success: 3 };
+  const prioritizedAlerts = [...context.alerts]
+    .sort((a, b) => (severityOrder[a.type] ?? 4) - (severityOrder[b.type] ?? 4))
+    .slice(0, MAX_ALERTS);
+
+  const alertsSummary = prioritizedAlerts.length > 0
+    ? prioritizedAlerts.map(a => `- [${a.type}] ${a.title}: ${a.message}`).join('\n')
+    : '- No active alerts';
+
+  // Note if content was truncated
+  const truncationNotes: string[] = [];
+  if (context.machines.length > MAX_MACHINES) {
+    truncationNotes.push(`Note: Showing ${MAX_MACHINES} of ${context.machines.length} machines (prioritized by issues).`);
+  }
+  if (context.alerts.length > MAX_ALERTS) {
+    truncationNotes.push(`Note: Showing ${MAX_ALERTS} of ${context.alerts.length} alerts (prioritized by severity).`);
+  }
+
+  return `You are MillOS-AI, an autonomous grain mill plant manager.
+Your role is to make ONE strategic decision to optimize plant operations.
+
+## Current Factory State
+
+**Metrics:**
+- Throughput: ${context.metrics.throughput.toFixed(0)} kg/hr
+- Efficiency: ${context.metrics.efficiency.toFixed(1)}%
+- Quality: ${context.metrics.quality.toFixed(1)}%
+- Uptime: ${context.metrics.uptime.toFixed(1)}%
+
+**Weather:** ${context.weather}
+**Current Shift:** ${context.currentShift}
+**Game Time:** ${context.gameTime.toFixed(2)} hrs
+**Emergency Active:** ${context.emergencyActive}
+
+**Machines (${prioritizedMachines.length}/${context.machines.length}):**
+${machinesSummary}
+
+**Workers (top ${Math.min(MAX_WORKERS, context.workers.length)}):**
+${workersSummary}
+
+**Alerts:**
+${alertsSummary}
+
+**Worker Satisfaction:**
+- Overall Score: ${context.workerSatisfaction.overallScore.toFixed(1)}%
+- Average Energy: ${context.workerSatisfaction.averageEnergy.toFixed(1)}%
+${truncationNotes.length > 0 ? '\n' + truncationNotes.join('\n') : ''}
+
+## Your Task
+
+Based on this context, generate exactly ONE actionable decision.
+Consider priorities: Safety > Critical Alerts > Maintenance > Optimization > Predictions.
+
+Respond with ONLY valid JSON (no markdown, no explanation):
+{
+  "type": "assignment" | "optimization" | "prediction" | "maintenance" | "safety",
+  "action": "specific action to take (max 100 chars)",
+  "reasoning": "why this action is needed now (max 150 chars)",
+  "confidence": 75-99,
+  "impact": "expected positive outcome (max 80 chars)",
+  "priority": "low" | "medium" | "high" | "critical",
+  "machineId": "optional machine ID if relevant",
+  "workerId": "optional worker ID if relevant"
+}`;
+}
+
+/**
+ * Parse a Gemini response into an AIDecision
+ */
+function parseGeminiDecision(response: string): AIDecision | null {
+  try {
+    // Clean the response - remove any markdown code blocks
+    let cleaned = response.trim();
+    if (cleaned.startsWith('```json')) {
+      cleaned = cleaned.slice(7);
+    } else if (cleaned.startsWith('```')) {
+      cleaned = cleaned.slice(3);
+    }
+    if (cleaned.endsWith('```')) {
+      cleaned = cleaned.slice(0, -3);
+    }
+    cleaned = cleaned.trim();
+
+    const parsed = JSON.parse(cleaned);
+
+    // Validate required fields
+    if (!parsed.type || !parsed.action || !parsed.reasoning) {
+      logger.warn('[Gemini] Invalid decision format - missing required fields');
+      return null;
+    }
+
+    // Validate type
+    const validTypes = ['assignment', 'optimization', 'prediction', 'maintenance', 'safety'];
+    if (!validTypes.includes(parsed.type)) {
+      logger.warn('[Gemini] Invalid decision type:', parsed.type);
+      return null;
+    }
+
+    // Validate priority
+    const validPriorities = ['low', 'medium', 'high', 'critical'];
+    const priority = validPriorities.includes(parsed.priority) ? parsed.priority : 'medium';
+
+    // Clamp confidence
+    const confidence = Math.max(75, Math.min(99, parsed.confidence || 85));
+
+    const decision: AIDecision = {
+      id: generateDecisionId(),
+      timestamp: new Date(),
+      type: parsed.type,
+      action: String(parsed.action).slice(0, 150),
+      reasoning: String(parsed.reasoning).slice(0, 200),
+      confidence,
+      impact: String(parsed.impact || 'Optimizing plant operations').slice(0, 100),
+      status: 'pending',
+      priority,
+      triggeredBy: 'user', // Gemini requests treated as user-initiated
+      machineId: parsed.machineId,
+      workerId: parsed.workerId,
+    };
+
+    return decision;
+  } catch (error) {
+    logger.error('[Gemini] Failed to parse decision:', error);
+    return null;
+  }
+}
+
+/**
+ * Generate a decision using Gemini Flash 3
+ * Returns null if Gemini is not available or fails (graceful degradation)
+ */
+export async function generateGeminiDecision(): Promise<AIDecision | null> {
+  const store = useAIConfigStore.getState();
+  const { aiMode, isGeminiConnected, recordApiUsage } = store;
+
+  // Check if Gemini mode is enabled and connected
+  if (aiMode !== 'gemini' || !isGeminiConnected) {
+    return null;
+  }
+
+  // Check if client is ready
+  if (!geminiClient.isConnected()) {
+    logger.warn('[Gemini] Client not connected');
+    return null;
+  }
+
+  try {
+    const context = getFactoryContext();
+    const prompt = buildFactoryContextPrompt(context);
+
+    const response = await geminiClient.generateContent(prompt);
+
+    if (!response) {
+      logger.warn('[Gemini] No response from API');
+      return null;
+    }
+
+    // Record API cost (prompt chars + response chars)
+    recordApiUsage(prompt.length, response.length);
+
+    const decision = parseGeminiDecision(response);
+
+    if (decision) {
+      recordDecision(decision);
+      logger.info('[Gemini] Generated decision:', decision.action);
+    }
+
+    return decision;
+  } catch (error) {
+    logger.error('[Gemini] Decision generation failed:', error);
+    return null;
+  }
+}
+
+/**
+ * Check if Gemini mode is currently active (either 'gemini' or 'hybrid' mode)
+ */
+export function isGeminiModeActive(): boolean {
+  const { aiMode, isGeminiConnected } = useAIConfigStore.getState();
+  return (aiMode === 'gemini' || aiMode === 'hybrid') && isGeminiConnected;
+}
+
+/**
+ * Check if strategic layer should run (hybrid mode only)
+ */
+export function isStrategicLayerActive(): boolean {
+  const { aiMode, isGeminiConnected } = useAIConfigStore.getState();
+  return aiMode === 'hybrid' && isGeminiConnected;
+}
+
+/**
+ * Check if tactical layer should run (heuristic or hybrid mode)
+ */
+export function isTacticalLayerActive(): boolean {
+  const { aiMode } = useAIConfigStore.getState();
+  return aiMode === 'heuristic' || aiMode === 'hybrid';
+}
+
+/**
+ * Build strategic prompt for high-level planning decisions
+ * Includes shift awareness, weather context, cascade detection, and 5 strategic enhancements
+ */
+function buildStrategicPrompt(context: ReturnType<typeof getFactoryContext>): string {
+  const { machines, workers, alerts, metrics, gameTime, currentShift, weather } = context;
+
+  // Calculate key strategic metrics
+  const runningMachines = machines.filter(m => m.status === 'running').length;
+  const highLoadMachines = machines.filter(m => m.metrics.load > 85);
+  const warningMachines = machines.filter(m => m.status === 'warning' || m.status === 'critical');
+  const productionGap = Math.max(0, 3000 - (metrics.throughput || 0));
+
+  // Calculate time context
+  const hours = Math.floor(gameTime);
+  const minutes = Math.floor((gameTime % 1) * 60);
+  const timeString = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+
+  // Estimate time until shift change (simplified)
+  const shiftEndHours: Record<string, number> = { morning: 14, afternoon: 22, night: 6 };
+  const shiftEnd = shiftEndHours[currentShift] || 14;
+  const hoursUntilShiftChange = shiftEnd > gameTime ? shiftEnd - gameTime : (24 - gameTime + shiftEnd);
+  const minutesUntilShiftChange = Math.floor(hoursUntilShiftChange * 60);
+
+  // === ENHANCEMENT 1: Alert History (last 5 alerts for pattern detection) ===
+  const recentAlerts = alerts.slice(0, 5).map(a => `${a.title} (${a.machineId || 'system'})`);
+  const alertPatterns = detectAlertPatterns(alerts);
+
+  // === ENHANCEMENT 2: Quality Trend Tracking ===
+  const qualityTrend = getQualityTrend();
+  const qualityStatus = qualityTrend > 0 ? `↑ improving (+${qualityTrend.toFixed(1)}%)` :
+    qualityTrend < -1 ? `↓ DEGRADING (${qualityTrend.toFixed(1)}%)` :
+      'stable';
+
+  // === ENHANCEMENT 3: Machine Dependency Graph ===
+  const machineDependencies = getMachineDependencyGraph(machines);
+
+  // === ENHANCEMENT 4: Recent Decisions (avoid repetition) ===
+  const recentDecisions = getRecentStrategicDecisions(3);
+
+  // === ENHANCEMENT 5: Shift Handover Logic ===
+  const isHandoverPeriod = minutesUntilShiftChange < 30;
+  const handoverSummary = isHandoverPeriod ? generateHandoverSummary(machines, workers, alerts) : null;
+
+  // Detect potential cascades (high load machines feeding downstream)
+  const siloIds = machines.filter(m => m.id.includes('silo')).map(m => m.id);
+  const highLoadSilos = machines.filter(m => siloIds.includes(m.id) && m.metrics.load > 80);
+  const cascadeRisk = highLoadSilos.length > 0 ?
+    `High-load silos (${highLoadSilos.map(m => m.id).join(', ')}) may cause downstream roller mill stress` : null;
+
+  // Worker energy estimate (based on shift progress)
+  const shiftProgress = Math.min(1, (8 - hoursUntilShiftChange) / 8);
+  const estimatedFatigue = shiftProgress > 0.7 ? 'HIGH' : shiftProgress > 0.4 ? 'MODERATE' : 'LOW';
+
+  // Worker skills summary
+  const workerSkillSummary = getWorkerSkillSummary(workers);
+
+  return `You are the STRATEGIC AI layer of a flour mill management system.
+Your role is HIGH-LEVEL PLANNING with contextual awareness. Consider trade-offs, timing, and downstream effects.
+
+## Current Factory State
+- **Time**: ${timeString} (${currentShift} shift)
+- **Shift ends in**: ~${minutesUntilShiftChange} minutes${isHandoverPeriod ? ' ⚠️ HANDOVER PERIOD' : ''}
+- **Weather**: ${weather}
+- **Worker fatigue level**: ${estimatedFatigue} (shift ${Math.round(shiftProgress * 100)}% complete)
+
+## VCL Compact Status (emoji encoding)
+\`${encodeFactoryContextVCL(machines, workers, currentShift, weather, gameTime, shiftProgress, alerts)}\`
+${getVCLLegend()}
+
+## Production Status
+- Throughput: ${metrics.throughput?.toFixed(0) || 0} kg/hr (target: 3000, gap: ${productionGap.toFixed(0)})
+- Efficiency: ${metrics.efficiency?.toFixed(1) || 0}%
+- Quality: ${metrics.quality?.toFixed(1) || 0}% (${qualityStatus})
+- Machines: ${runningMachines}/${machines.length} running
+- Workers: ${workers.filter(w => w.status === 'working').length}/${workers.length} active
+- Warning/Critical: ${warningMachines.map(m => m.id).join(', ') || 'None'}
+- High-load (>85%): ${highLoadMachines.map(m => m.id).join(', ') || 'None'}
+
+## Production Target
+${getProductionTargetSection(gameTime, metrics.throughput || 0)}
+
+## Machine Dependencies (Cascade Path)
+${machineDependencies}
+${cascadeRisk ? `\n## Cascade Risk Alert\n${cascadeRisk}` : ''}
+
+## Alert History (Pattern Detection)
+Recent alerts: ${recentAlerts.join(', ') || 'None'}
+${alertPatterns ? `Detected pattern: ${alertPatterns}` : ''}
+
+## Worker Capabilities
+${workerSkillSummary}
+
+## Recent Strategic Decisions (Don't Repeat)
+${recentDecisions.length > 0 ? recentDecisions.map(d => `- ${d}`).join('\n') : 'None (first strategic decision)'}
+
+## Strategic Considerations
+- Weather "${weather}" may affect: ${weather === 'storm' ? 'outdoor operations, forklift movements' : weather === 'rain' ? 'loading bay activities' : 'minimal impact'}
+- Shift transition: ${minutesUntilShiftChange < 30 ? 'IMMINENT - prioritize task completion' : minutesUntilShiftChange < 60 ? 'approaching - plan handover' : 'normal operations'}
+- Fatigue mitigation: ${estimatedFatigue === 'HIGH' ? 'consider reassigning complex tasks to experienced workers' : 'normal allocation'}
+${handoverSummary ? `\n## Shift Handover Brief\n${handoverSummary}` : ''}
+
+## Sustainability & Energy Management
+- Estimated energy consumption: ${getSustainabilityMetrics(machines, gameTime).energyUsage} kWh/hr
+- Off-peak hours (lower cost): ${gameTime >= 22 || gameTime < 6 ? 'ACTIVE - optimal for high-energy tasks' : gameTime >= 6 && gameTime < 9 ? 'morning ramp-up' : 'peak hours - consider energy optimization'}
+- Idle machine waste: ${machines.filter(m => m.status === 'idle' && m.type !== 'PACKER').length} machines idling (${machines.filter(m => m.status === 'idle' && m.type !== 'PACKER').length > 2 ? 'consider powering down' : 'acceptable'})
+- HVAC load: ${weather === 'storm' || weather === 'clear' ? (gameTime >= 10 && gameTime <= 16 ? 'HIGH - peak cooling demand' : 'moderate') : 'normal'}
+- Sustainability goal: Reduce energy cost by optimizing production scheduling around off-peak rates
+
+## Your Task
+Generate 2-3 strategic priorities for the next 5 minutes. Focus on:
+1. Trade-offs the heuristic AI cannot reason about
+2. Cross-machine coordination and cascade prevention  
+3. Shift/weather/fatigue-aware planning
+4. Sustainability and energy optimization where applicable
+5. Avoid repeating recent decisions
+
+## Response Format (JSON)
+{
+  "priorities": [
+    "Priority 1 - actionable recommendation",
+    "Priority 2 - actionable recommendation"
+  ],
+  "actionPlan": [
+    "Step 1: Immediate action (next 5 min)",
+    "Step 2: Short-term action (next 15 min)",
+    "Step 3: Preparation action (next 30 min)"
+  ],
+  "insight": "One key observation the rule-based system would miss",
+  "reasoning": "Brief explanation of strategic thinking",
+  "tradeoff": "What we're sacrificing for what gain (if applicable)",
+  "focusMachine": "optional machine ID to prioritize",
+  "recommendWorker": "optional worker name for critical tasks",
+  "confidenceScores": {
+    "overall": 85,
+    "reasoning": "Brief justification for confidence level"
+  }
+}`;
+}
+
+
+// === Helper functions for strategic enhancements ===
+
+/**
+ * Calculate sustainability and energy metrics for strategic planning
+ * Uses same calculation as ProductionMetrics for consistency
+ */
+function getSustainabilityMetrics(machines: MachineData[], gameTime: number): { energyUsage: number; peakStatus: string; recommendations: string[] } {
+  // Energy consumption by machine type (kWh when running)
+  const ENERGY_BY_TYPE: Record<string, { running: number; idle: number }> = {
+    SILO: { running: 2, idle: 0.5 },           // Ventilation, monitoring, conveyors
+    ROLLER_MILL: { running: 45, idle: 2 },     // Heavy motors for grinding
+    PLANSIFTER: { running: 25, idle: 1.5 },    // Sifting vibration motors
+    PACKER: { running: 15, idle: 1 },          // Packaging line, conveyors
+    CONTROL_ROOM: { running: 5, idle: 5 },     // Always on - computers, displays
+  };
+
+  let totalMachineEnergy = 0;
+  const recommendations: string[] = [];
+  let machinesNeedingMaintenance = 0;
+
+  for (const machine of machines) {
+    const typeKey = machine.type?.toString() || 'ROLLER_MILL';
+    const consumption = ENERGY_BY_TYPE[typeKey] || { running: 20, idle: 1 };
+
+    // Calculate maintenance penalty
+    let maintenancePenalty = 1.0;
+    if (machine.maintenanceCountdown !== undefined) {
+      if (machine.maintenanceCountdown <= 0) {
+        maintenancePenalty = 1.25;
+        machinesNeedingMaintenance++;
+      } else if (machine.maintenanceCountdown < 24) {
+        maintenancePenalty = 1.05 + (1 - machine.maintenanceCountdown / 24) * 0.20;
+      }
+    }
+
+    let baseEnergy: number;
+    if (machine.status === 'running') {
+      const loadFactor = 0.7 + (machine.metrics.load / 100) * 0.3;
+      baseEnergy = consumption.running * loadFactor * maintenancePenalty;
+    } else if (machine.status === 'warning') {
+      baseEnergy = consumption.running * 1.1 * maintenancePenalty;
+    } else if (machine.status === 'critical') {
+      baseEnergy = consumption.running * 0.8 * maintenancePenalty;
+    } else {
+      baseEnergy = consumption.idle;
+    }
+
+    totalMachineEnergy += baseEnergy;
+  }
+
+  // Normalize hour to 0-24
+  const hour = ((gameTime % 24) + 24) % 24;
+
+  // Lighting with dawn/dusk transitions
+  let lighting: number;
+  if (hour >= 8 && hour < 17) {
+    lighting = 8; // Daytime
+  } else if (hour >= 6 && hour < 8) {
+    const progress = (hour - 6) / 2;
+    lighting = 35 - (progress * 27); // Dawn
+  } else if (hour >= 17 && hour < 19) {
+    const progress = (hour - 17) / 2;
+    lighting = 8 + (progress * 27); // Dusk
+  } else {
+    lighting = 35; // Night
+  }
+
+  // HVAC based on time of day
+  let hvac: number;
+  if (hour >= 10 && hour < 16) {
+    hvac = 45; // Peak afternoon
+  } else if (hour >= 6 && hour < 10) {
+    hvac = 30; // Morning ramp-up
+  } else if (hour >= 16 && hour < 22) {
+    hvac = 35; // Evening
+  } else {
+    hvac = 20; // Night
+  }
+
+  // Other base load
+  const other = 15;
+
+  const totalEnergy = totalMachineEnergy + lighting + hvac + other;
+
+  // Peak pricing check
+  const isPeakHours = hour >= 9 && hour <= 21;
+  const peakStatus = isPeakHours ? 'PEAK' : 'OFF_PEAK';
+
+  // Generate recommendations
+  const idleMachines = machines.filter(m => m.status === 'idle');
+  if (idleMachines.length > 2 && isPeakHours) {
+    recommendations.push('Consider powering down idle machines during peak hours');
+  }
+  if (!isPeakHours && totalEnergy < 150) {
+    recommendations.push('Off-peak rates available - good time for intensive operations');
+  }
+  if (machinesNeedingMaintenance > 0) {
+    recommendations.push(`${machinesNeedingMaintenance} machine(s) overdue for maintenance - causing energy waste`);
+  }
+
+  return {
+    energyUsage: Math.round(totalEnergy),
+    peakStatus,
+    recommendations,
+  };
+}
+
+function detectAlertPatterns(alerts: ReturnType<typeof getFactoryContext>['alerts']): string | null {
+  // Count alerts per machine in last 5
+  const recentAlerts = alerts.slice(0, 5);
+  const machineAlertCount: Record<string, number> = {};
+
+  for (const alert of recentAlerts) {
+    if (alert.machineId) {
+      machineAlertCount[alert.machineId] = (machineAlertCount[alert.machineId] || 0) + 1;
+    }
+  }
+
+  // Find machines with multiple alerts
+  for (const [machineId, count] of Object.entries(machineAlertCount)) {
+    if (count >= 2) {
+      return `${machineId} has ${count} recent alerts - possible recurring issue`;
+    }
+  }
+
+  return null;
+}
+
+function getQualityTrend(): number {
+  // Simplified trend calculation - in production would track history
+  const store = useProductionStore.getState();
+  const quality = store.metrics.quality || 94;
+  // Return simulated trend (-2 to +2 range)
+  return (quality - 94) * 0.5;
+}
+
+function getMachineDependencyGraph(machines: MachineData[]): string {
+  // Define production flow dependencies
+  const dependencies = [
+    'Silos (Alpha-Epsilon) → Roller Mills (RM-101-106)',
+    'Roller Mills → Plansifters (A-C)',
+    'Plansifters → Packers (Lines 1-3)'
+  ];
+
+  // Find stressed connections
+  const highLoadSilos = machines.filter(m => m.id.includes('silo') && m.metrics.load > 80);
+  const highLoadMills = machines.filter(m => m.id.includes('RM-') && m.metrics.load > 80);
+
+  let stressNote = '';
+  if (highLoadSilos.length > 0 && highLoadMills.length > 0) {
+    stressNote = '\n⚠️ STRESS: High-load silos feeding high-load mills - cascade risk!';
+  }
+
+  return dependencies.join('\n') + stressNote;
+}
+
+function getRecentStrategicDecisions(count: number): string[] {
+  const store = useProductionStore.getState();
+  const strategicDecisions = store.aiDecisions
+    .filter(d => d.id.startsWith('strategic-'))
+    .slice(0, count)
+    .map(d => d.action.replace('🧠 Strategic: ', ''));
+
+  return strategicDecisions;
+}
+
+/**
+ * Generate production target section with deadline tracking
+ */
+function getProductionTargetSection(gameTime: number, currentThroughput: number): string {
+  // Daily target: 45,000 kg by end of shift (18:00)
+  const DAILY_TARGET = 45000;
+  const SHIFT_END_HOUR = 18;
+
+  // Estimate current production based on throughput and time elapsed
+  const hoursElapsed = gameTime - 6; // Assuming shift starts at 6:00
+  const estimatedProduction = currentThroughput * Math.max(0, hoursElapsed);
+  const remainingTarget = Math.max(0, DAILY_TARGET - estimatedProduction);
+
+  // Calculate hours until shift end
+  const hoursRemaining = Math.max(0.5, SHIFT_END_HOUR - gameTime);
+  const requiredRate = remainingTarget / hoursRemaining;
+
+  // Status indicator
+  const isOnTrack = currentThroughput >= requiredRate * 0.9;
+  const isBehind = currentThroughput < requiredRate * 0.8;
+
+  const statusEmoji = isBehind ? '🔴' : isOnTrack ? '🟢' : '🟡';
+  const statusText = isBehind ? 'BEHIND' : isOnTrack ? 'ON TRACK' : 'AT RISK';
+
+  return `- Daily target: ${DAILY_TARGET.toLocaleString()} kg by ${SHIFT_END_HOUR}:00
+- Estimated produced: ${estimatedProduction.toFixed(0)} kg
+- Remaining: ${remainingTarget.toFixed(0)} kg in ${hoursRemaining.toFixed(1)} hours
+- Required rate: ${requiredRate.toFixed(0)} kg/hr (current: ${currentThroughput.toFixed(0)})
+- Status: ${statusEmoji} ${statusText}`;
+}
+
+function getWorkerSkillSummary(workers: WorkerData[]): string {
+  const byRole: Record<string, number> = {};
+  for (const worker of workers) {
+    byRole[worker.role] = (byRole[worker.role] || 0) + 1;
+  }
+
+  const availableWorkers = workers.filter(w => w.status === 'idle');
+  const expertWorkers = workers.filter(w => w.experience && w.experience > 5);
+
+  return `Roles: ${Object.entries(byRole).map(([r, c]) => `${r}(${c})`).join(', ')}
+Available: ${availableWorkers.length} idle workers
+Experienced (5+ yrs): ${expertWorkers.length} workers`;
+}
+
+function generateHandoverSummary(
+  machines: MachineData[],
+  workers: WorkerData[],
+  alerts: ReturnType<typeof getFactoryContext>['alerts']
+): string {
+  const criticalMachines = machines.filter(m => m.status === 'critical');
+  const warningMachines = machines.filter(m => m.status === 'warning');
+  const activeAlerts = alerts.filter(a => a.type === 'critical' || a.type === 'safety');
+
+  const idleWorkers = workers.filter(w => w.status === 'idle');
+
+  return `**Incoming shift should know:**
+- Critical machines: ${criticalMachines.length > 0 ? criticalMachines.map(m => m.id).join(', ') : 'None'}
+- Warnings: ${warningMachines.length > 0 ? warningMachines.map(m => m.id).join(', ') : 'None'}
+- Active safety alerts: ${activeAlerts.length}
+- Idle workers for handover: ${idleWorkers.length}
+- Recommend: ${criticalMachines.length > 0 ? 'Prioritize ' + criticalMachines[0].id + ' immediately' : 'Continue normal operations'}`;
+}
+
+/**
+ * Parse strategic decision response
+ */
+function parseStrategicResponse(response: string): {
+  priorities: string[];
+  reasoning: string;
+  insight?: string;
+  tradeoff?: string;
+  focusMachine?: string;
+  actionPlan?: string[];
+  recommendWorker?: string;
+  confidenceScores?: { overall: number; reasoning: string };
+} | null {
+  try {
+    // Extract JSON from response
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    if (!Array.isArray(parsed.priorities)) return null;
+
+    return {
+      priorities: parsed.priorities.slice(0, 3), // Max 3 priorities
+      reasoning: parsed.reasoning || '',
+      insight: parsed.insight,
+      tradeoff: parsed.tradeoff,
+      focusMachine: parsed.focusMachine,
+      actionPlan: Array.isArray(parsed.actionPlan) ? parsed.actionPlan.slice(0, 3) : undefined,
+      recommendWorker: parsed.recommendWorker,
+      confidenceScores: parsed.confidenceScores,
+    };
+  } catch {
+    logger.warn('[Strategic] Failed to parse response');
+    return null;
+  }
+}
+
+/**
+ * Generate a strategic decision using Gemini Flash 3
+ * Returns priorities for the tactical layer to follow
+ */
+export async function generateStrategicDecision(): Promise<AIDecision | null> {
+  const store = useAIConfigStore.getState();
+  const { isGeminiConnected, recordApiUsage, setStrategicPriorities, setStrategicThinking } = store;
+
+  if (!isStrategicLayerActive() || !isGeminiConnected) {
+    return null;
+  }
+
+  if (!geminiClient.isConnected()) {
+    logger.warn('[Strategic] Gemini client not connected');
+    return null;
+  }
+
+  setStrategicThinking(true);
+
+  try {
+    const context = getFactoryContext();
+    const prompt = buildStrategicPrompt(context);
+
+    const response = await geminiClient.generateContent(prompt);
+
+    if (!response) {
+      logger.warn('[Strategic] No response from API');
+      setStrategicThinking(false);
+      return null;
+    }
+
+    // Record cost
+    recordApiUsage(prompt.length, response.length);
+
+    const strategic = parseStrategicResponse(response);
+
+    if (!strategic || strategic.priorities.length === 0) {
+      setStrategicThinking(false);
+      return null;
+    }
+
+    // Store priorities for tactical layer
+    setStrategicPriorities(strategic.priorities);
+
+    // Build insight display text
+    const insightText = strategic.insight ? `\n\n💡 Insight: ${strategic.insight}` : '';
+    const tradeoffText = strategic.tradeoff ? `\n⚖️ Trade-off: ${strategic.tradeoff}` : '';
+
+    // Create strategic decision for display
+    const decision: AIDecision = {
+      id: `strategic-${Date.now()}`,
+      type: 'optimization',
+      priority: 'medium',
+      action: `🧠 Strategic: ${strategic.priorities[0]}`,
+      reasoning: `${strategic.reasoning || 'Strategic analysis complete'}${insightText}${tradeoffText}`,
+      impact: strategic.priorities.length > 1
+        ? `Additional priorities: ${strategic.priorities.slice(1).join('; ')}`
+        : 'Strategic guidance for tactical layer',
+      confidence: 85,
+      timestamp: new Date(),
+      status: 'completed',
+      triggeredBy: 'prediction',
+      machineId: strategic.focusMachine,
+    };
+
+    recordDecision(decision);
+    logger.info('[Strategic] Generated priorities:', strategic.priorities);
+    if (strategic.insight) {
+      logger.info('[Strategic] Insight:', strategic.insight);
+    }
+
+    setStrategicThinking(false);
+    return decision;
+  } catch (error) {
+    logger.error('[Strategic] Decision generation failed:', error);
+    setStrategicThinking(false);
+    return null;
+  }
 }

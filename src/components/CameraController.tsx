@@ -154,6 +154,8 @@ export const CameraController: React.FC<CameraControllerProps> = ({
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      // Guard against undefined e.key (can happen with some meta keys or during blur)
+      if (!e.key) return;
       const key = e.key.toLowerCase();
       pressedKeys.delete(key);
     };

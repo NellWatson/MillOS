@@ -258,8 +258,6 @@ export const unregisterLighting = (id: string) => {
 // Manager component to handle all sky animations in a single consolidated loop
 // CRITICAL: Reads store IMPERATIVELY in useFrame to avoid stale closures
 const SkyAnimationManager: React.FC = () => {
-  const lastLogTimeRef = useRef(-1);
-
   useFrame((state) => {
     // Read store state IMPERATIVELY to get fresh values every frame
     // This avoids stale closure issues with Zustand subscriptions + useFrame
@@ -269,13 +267,6 @@ const SkyAnimationManager: React.FC = () => {
     if (!isTabVisible) return;
 
     const time = state.clock.getElapsedTime();
-
-    // 1. Update Sky Dome shader (needs 60fps for smooth cloud movement)
-    // DEBUG: Log registry state periodically
-    if (Math.floor(gameTime) !== Math.floor(lastLogTimeRef.current)) {
-      console.log(`[SkyAnimationManager] gameTime: ${gameTime.toFixed(2)}, registry size: ${skyDomeRegistry.size}`);
-      lastLogTimeRef.current = gameTime;
-    }
 
     if (skyDomeRegistry.size > 0) {
       // Sky color keyframes for smooth interpolation
@@ -346,13 +337,6 @@ const SkyAnimationManager: React.FC = () => {
       // Update uniforms via .set() / .copy() to mutate existing objects
       skyDomeRegistry.forEach((data) => {
         if (!data.material?.uniforms) return;
-
-        // DEBUG: Dump uniform keys once to verify they match shader
-        if (import.meta.env.DEV && !(data.material as unknown as { __uniformsDumped?: boolean }).__uniformsDumped) {
-          (data.material as unknown as { __uniformsDumped: boolean }).__uniformsDumped = true;
-          console.log('[Sky] Uniform keys:', Object.keys(data.material.uniforms));
-          console.log('[Sky] topColor type:', data.material.uniforms.topColor?.value?.constructor?.name);
-        }
 
         data.material.uniforms.time.value = time;
         data.material.uniforms.topColor.value.set(skyColors.top);
@@ -456,7 +440,6 @@ interface SkyDomeFollowerProps {
 const SkyDomeFollower: React.FC<SkyDomeFollowerProps> = ({ meshRef }) => {
   const { camera } = useThree();
   const baseRadiusRef = useRef<number>(1);
-  const hasLoggedRef = useRef(false);
 
   // Compute base radius once when mesh is available
   useLayoutEffect(() => {
@@ -464,18 +447,11 @@ const SkyDomeFollower: React.FC<SkyDomeFollowerProps> = ({ meshRef }) => {
     if (!mesh) return;
     mesh.geometry.computeBoundingSphere();
     baseRadiusRef.current = mesh.geometry.boundingSphere?.radius ?? 350;
-    console.log('[SkyDomeFollower] Base radius:', baseRadiusRef.current);
   }, [meshRef]);
 
   useFrame(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
-
-    // Log once for debugging
-    if (!hasLoggedRef.current) {
-      hasLoggedRef.current = true;
-      console.log('[SkyDomeFollower] Camera far:', camera.far, 'Camera position:', camera.position.toArray());
-    }
 
     // Keep camera inside the dome by centering dome on camera
     mesh.position.copy(camera.position);
@@ -498,23 +474,9 @@ export const SkySystem: React.FC = () => {
   const sunLightRef = useRef<THREE.DirectionalLight>(null);
   const moonLightRef = useRef<THREE.DirectionalLight>(null);
   const ambientLightRef = useRef<THREE.AmbientLight>(null);
-  const useRef_lastLoggedTime = useRef(-1);
 
   // Enhanced sky colors with horizon color for each time of day
   const skyColors = useMemo(() => {
-    // Debug logging for sky system time sync
-    if (Math.floor(gameTime) !== Math.floor(useRef_lastLoggedTime.current)) {
-      console.log(`[SkySystem] Time: ${gameTime.toFixed(2)}, Phase: ${gameTime >= 21 || gameTime < 5 ? 'Night' :
-        gameTime >= 5 && gameTime < 6 ? 'Early Dawn' :
-          gameTime >= 6 && gameTime < 8 ? 'Sunrise' :
-            gameTime >= 8 && gameTime < 10 ? 'Morning' :
-              gameTime >= 10 && gameTime < 16 ? 'Midday' :
-                gameTime >= 16 && gameTime < 18 ? 'Afternoon' :
-                  gameTime >= 18 && gameTime < 19 ? 'Golden Hour' :
-                    'Dusk'
-        }`);
-      useRef_lastLoggedTime.current = gameTime;
-    }
 
     // [Top, Bottom, Horizon]
     if (gameTime >= 21 || gameTime < 5) {
@@ -684,7 +646,6 @@ export const SkySystem: React.FC = () => {
     const material = mesh.material as THREE.ShaderMaterial;
     const id = mesh.uuid;
 
-    console.log(`[SkySystem] Registering sky dome with id: ${id}`);
     registerSkyDome(id, {
       material,
       skyColors,
@@ -693,10 +654,8 @@ export const SkySystem: React.FC = () => {
     });
 
     return () => {
-      console.log(`[SkySystem] Unregistering sky dome with id: ${id}`);
       unregisterSkyDome(id);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // INTENTIONALLY EMPTY - register once, SkyAnimationManager updates uniforms imperatively
 
   // Register lights with animation manager (replaces direct useFrame for lights)
@@ -1016,7 +975,10 @@ const generateMountainProfile = (
   const heights: number[] = [];
 
   for (let i = 0; i <= segments; i++) {
-    const x = (i / segments) * width;
+    // Use modular arithmetic to ensure seamless wrap (position 0 and segments have same x value conceptually)
+    const normalizedPos = i / segments;
+    // Map to 0-1 range that wraps seamlessly
+    const x = normalizedPos * width;
 
     // Base terrain using FBM
     let h = fbm(x * frequency * 0.01, seed, 6) * amplitude;
@@ -1035,6 +997,14 @@ const generateMountainProfile = (
 
     heights.push(Math.max(2, baseHeight + h));
   }
+
+  // Ensure seamless wrap: blend first and last heights together
+  if (heights.length > 1) {
+    const blendedHeight = (heights[0] + heights[heights.length - 1]) / 2;
+    heights[0] = blendedHeight;
+    heights[heights.length - 1] = blendedHeight;
+  }
+
   return heights;
 };
 
@@ -1542,37 +1512,64 @@ const SnowCappedMountainLayer: React.FC<{
       varying vec2 vUv;
       varying vec3 vWorldPos;
 
-      // Simple noise for texture variation
-      float hash(vec2 p) {
-        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      // Stable world-space noise with smooth interpolation (no jitter, no pixelation)
+      float hash3(vec3 p) {
+        return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+      }
+
+      // Smooth 3D noise using trilinear interpolation
+      float smoothNoise3D(vec3 p) {
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        // Smooth interpolation curve (cubic Hermite)
+        vec3 u = f * f * (3.0 - 2.0 * f);
+        
+        // Sample 8 corners of the cube
+        float n000 = hash3(i);
+        float n100 = hash3(i + vec3(1.0, 0.0, 0.0));
+        float n010 = hash3(i + vec3(0.0, 1.0, 0.0));
+        float n110 = hash3(i + vec3(1.0, 1.0, 0.0));
+        float n001 = hash3(i + vec3(0.0, 0.0, 1.0));
+        float n101 = hash3(i + vec3(1.0, 0.0, 1.0));
+        float n011 = hash3(i + vec3(0.0, 1.0, 1.0));
+        float n111 = hash3(i + vec3(1.0, 1.0, 1.0));
+        
+        // Trilinear interpolation
+        float nx00 = mix(n000, n100, u.x);
+        float nx10 = mix(n010, n110, u.x);
+        float nx01 = mix(n001, n101, u.x);
+        float nx11 = mix(n011, n111, u.x);
+        float nxy0 = mix(nx00, nx10, u.y);
+        float nxy1 = mix(nx01, nx11, u.y);
+        return mix(nxy0, nxy1, u.z);
       }
 
       void main() {
         float h = vUv.y; // Normalized height 0-1
         vec3 color;
 
-        // Add subtle noise variation to break up uniform bands
-        float noiseVal = hash(vUv * 50.0) * 0.08;
+        // Smooth world-space noise for stable texture variation
+        // Higher frequency = finer detail (mountains are at radius ~300)
+        float worldNoise = smoothNoise3D(vWorldPos * 3.0) * 0.08;
 
-        // Height thresholds with noise perturbation
-        float snowLine = snowLineHeight + noiseVal;
-        float treeLine = treeLineHeight + noiseVal * 0.5;
+        // Height thresholds with subtle world-space variation
+        float snowLine = snowLineHeight + worldNoise;
+        float treeLine = treeLineHeight + worldNoise * 0.5;
 
         if (h > snowLine) {
-          // Snow cap with gradient
+          // Snow cap with gradient and subtle world-space texture
           float snowBlend = smoothstep(snowLine, snowLine + 0.12, h);
           // Add slight blue tint to shadowed snow areas
           vec3 shadowedSnow = mix(snowColor, snowColor * vec3(0.9, 0.95, 1.0), 0.3);
           color = mix(rockColor, mix(shadowedSnow, snowColor, snowBlend), snowBlend);
         } else if (h > treeLine) {
-          // Rocky area with variation
+          // Rocky area with smooth world-space texture variation
           float rockBlend = smoothstep(treeLine, treeLine + 0.08, h);
-          // Add some variation to rock color
-          vec3 variedRock = rockColor * (0.9 + hash(vUv * 30.0) * 0.2);
+          vec3 variedRock = rockColor * (0.9 + smoothNoise3D(vWorldPos * 2.0) * 0.2);
           color = mix(treeColor, variedRock, rockBlend);
         } else {
-          // Tree line at base with variation
-          color = treeColor * (0.85 + hash(vUv * 20.0) * 0.3);
+          // Tree line at base with smooth world-space texture variation
+          color = treeColor * (0.85 + smoothNoise3D(vWorldPos * 1.5) * 0.3);
         }
 
         // ATMOSPHERIC PERSPECTIVE (Rayleigh scattering simulation)

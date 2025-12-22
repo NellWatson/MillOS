@@ -20,9 +20,12 @@
     "test:e2e:headed": "playwright test --headed",
     "setup:basis": "./scripts/setup-basis-transcoder.sh",
     "convert-textures": "node scripts/convert-textures.mjs",
-    "convert-textures:dry": "node scripts/convert-textures.mjs --dry-run"
+    "convert-textures:dry": "node scripts/convert-textures.mjs --dry-run",
+    "optimize-assets": "node scripts/optimize-assets.mjs",
+    "optimize-assets:dry": "node scripts/optimize-assets.mjs --dry-run"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.4.0",
     "@react-three/postprocessing": "^3.0.4",
@@ -41,6 +44,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@gltf-transform/cli": "^4.2.1",
     "@playwright/test": "^1.57.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",

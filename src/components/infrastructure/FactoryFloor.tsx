@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { useGraphicsStore } from '../../stores/graphicsStore';
 import { ReflectiveFloor } from './ReflectiveFloor';
 import { useModelTextures } from '../../utils/machineTextures';
+import { FLOOR_LAYERS, POLYGON_OFFSET } from '../../constants/renderLayers';
 
 interface FactoryFloorProps {
   floorSize: number; // Legacy: used as fallback
@@ -11,21 +12,10 @@ interface FactoryFloorProps {
   showZones: boolean;
 }
 
-// Shared overlay heights to keep all floor decals separated and avoid z-fighting
-const FLOOR_LAYER_HEIGHTS = {
-  puddle: 0.01,
-  wornPrimary: 0.03,
-  wornSecondary: 0.032,
-  safetyMain: 0.034,
-  safetyCross: 0.036,
-  safetyDanger: 0.038,
-  grid: 0.045,
-};
+// Legacy alias for backward compatibility within this file
+const FLOOR_LAYER_HEIGHTS = FLOOR_LAYERS;
+const FLOOR_POLYGON_OFFSET = POLYGON_OFFSET.standard;
 
-const FLOOR_POLYGON_OFFSET = {
-  factor: -1,
-  units: -1,
-};
 
 // Hook to configure concrete textures for floor tiling
 const useConcreteFloorTextures = (width: number, depth: number) => {

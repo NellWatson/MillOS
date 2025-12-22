@@ -167,6 +167,7 @@ class AudioManager {
   private announcementQueue: string[] = [];
   private isAnnouncementPlaying: boolean = false;
   private announcementChimeTimeout: ReturnType<typeof setTimeout> | null = null;
+  private announcementSafetyTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     // Shuffle tracks on initialization using Fisher-Yates algorithm
@@ -257,7 +258,7 @@ class AudioManager {
     }
     if (this._musicEnabled && this.musicAudio) {
       this.musicAudio.src = this.currentTrack.file;
-      this.musicAudio.play().catch(() => {});
+      this.musicAudio.play().catch(() => { });
     }
     this.notifyListeners();
   }
@@ -267,7 +268,7 @@ class AudioManager {
       (this._currentTrackIndex - 1 + this.musicTracks.length) % this.musicTracks.length;
     if (this._musicEnabled && this.musicAudio) {
       this.musicAudio.src = this.currentTrack.file;
-      this.musicAudio.play().catch(() => {});
+      this.musicAudio.play().catch(() => { });
     }
     this.notifyListeners();
   }
@@ -297,7 +298,7 @@ class AudioManager {
     this.victoryAudio.onended = () => {
       if (wasPlaying && this.musicAudio && this._musicEnabled) {
         this.musicAudio.currentTime = currentTime;
-        this.musicAudio.play().catch(() => {});
+        this.musicAudio.play().catch(() => { });
       }
     };
 
@@ -305,7 +306,7 @@ class AudioManager {
       audioLog.warn('Victory fanfare playback failed', e);
       // Resume music if fanfare failed
       if (wasPlaying && this.musicAudio && this._musicEnabled) {
-        this.musicAudio.play().catch(() => {});
+        this.musicAudio.play().catch(() => { });
       }
     });
   }
@@ -539,7 +540,7 @@ class AudioManager {
       this.backgroundMuted = false;
       this.updateMasterVolume();
       if (this._musicEnabled && this.musicAudio && this.musicAudio.paused) {
-        this.musicAudio.play().catch(() => {});
+        this.musicAudio.play().catch(() => { });
       }
     }
   }
@@ -1959,15 +1960,29 @@ class AudioManager {
   // === TIME-OF-DAY AUDIO ===
 
   private currentTimeOfDay: 'day' | 'night' = 'day';
+  private isDuskCricketTime: boolean = false;
 
   // Update ambient sounds based on game time (0-24)
   updateTimeOfDay(gameTime: number) {
     const isNight = gameTime < 6 || gameTime > 20;
     const newTimeOfDay = isNight ? 'night' : 'day';
 
+    // Late dusk window for cricket chirps (19:30 to 21:00 only)
+    const isDusk = gameTime >= 19.5 && gameTime <= 21;
+
     if (newTimeOfDay !== this.currentTimeOfDay) {
       this.currentTimeOfDay = newTimeOfDay;
       this.adjustAmbientForTimeOfDay();
+    }
+
+    // Crickets only during late dusk window
+    if (isDusk !== this.isDuskCricketTime) {
+      this.isDuskCricketTime = isDusk;
+      if (isDusk) {
+        this.startNightAmbient();
+      } else {
+        this.stopNightAmbient();
+      }
     }
   }
 
@@ -1994,12 +2009,7 @@ class AudioManager {
       this.outdoorNodes.traffic.gain.gain.setTargetAtTime(trafficVolume, currentTime, 2);
     }
 
-    // Play cricket sounds at night (one-shot, will be triggered periodically)
-    if (this.currentTimeOfDay === 'night') {
-      this.startNightAmbient();
-    } else {
-      this.stopNightAmbient();
-    }
+    // Note: Cricket sounds are now handled separately by isDuskCricketTime logic
   }
 
   private nightAmbientInterval: NodeJS.Timeout | number | null = null;
@@ -2014,8 +2024,8 @@ class AudioManager {
       this.playCricketChirp();
     };
 
-    // Cricket chirps every 2-5 seconds
-    this.nightAmbientInterval = setInterval(playCrickets, 2000 + Math.random() * 3000);
+    // Cricket chirps every 15-30 seconds (sparse, occasional ambiance)
+    this.nightAmbientInterval = setInterval(playCrickets, 15000 + Math.random() * 15000);
   }
 
   private stopNightAmbient() {
@@ -4849,6 +4859,26 @@ class AudioManager {
     const text = this.announcementQueue.shift()!;
     console.log('[MillOS TTS] Processing:', text.substring(0, 50) + '...');
 
+    // Clear any existing safety timeout
+    if (this.announcementSafetyTimeout) {
+      clearTimeout(this.announcementSafetyTimeout);
+      this.announcementSafetyTimeout = null;
+    }
+
+    // Safety timeout: if announcement doesn't complete within 30 seconds, force reset
+    // This prevents the PA system from getting stuck when speechSynthesis callbacks fail
+    this.announcementSafetyTimeout = setTimeout(() => {
+      console.warn('[MillOS TTS] Safety timeout - forcing queue reset');
+      this.stopSpeechReverb();
+      this.isAnnouncementPlaying = false;
+      // Cancel any stuck speech
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      // Continue processing queue
+      this.processAnnouncementQueue();
+    }, 30000);
+
     try {
       const utterance = new SpeechSynthesisUtterance(text);
 
@@ -4857,6 +4887,14 @@ class AudioManager {
       utterance.rate = 0.85; // Slightly slower for PA clarity
       utterance.pitch = 0.95; // Slightly lower for authoritative PA tone
       utterance.volume = this._volume * 0.75; // Slightly quieter to blend with reverb
+
+      // Helper to clear safety timeout when speech completes normally
+      const clearSafetyTimeout = () => {
+        if (this.announcementSafetyTimeout) {
+          clearTimeout(this.announcementSafetyTimeout);
+          this.announcementSafetyTimeout = null;
+        }
+      };
 
       // When speech starts, begin continuous reverb simulation
       utterance.onstart = () => {
@@ -4867,6 +4905,7 @@ class AudioManager {
       // When speech ends, stop reverb, play reverberant echo tail, then process next in queue
       utterance.onend = () => {
         console.log('[MillOS TTS] Speech ended');
+        clearSafetyTimeout();
         this.stopSpeechReverb();
         this.playPAReverbTail();
         // Wait for reverb tail to finish before next announcement (1.5s delay)
@@ -4876,6 +4915,7 @@ class AudioManager {
       };
       utterance.onerror = (e) => {
         console.error('[MillOS TTS] Speech error:', e.error, e);
+        clearSafetyTimeout();
         this.stopSpeechReverb();
         audioLog.warn('TTS error', e);
         // Even on error, continue processing queue after a short delay
@@ -4896,6 +4936,7 @@ class AudioManager {
           window.speechSynthesis.speak(utterance);
         } else {
           console.log('[MillOS TTS] Conditions changed, skipping speak');
+          clearSafetyTimeout();
           // If conditions changed during chime, process next
           this.processAnnouncementQueue();
         }

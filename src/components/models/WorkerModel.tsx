@@ -12,7 +12,7 @@
  */
 
 import React, { useRef, Suspense, useMemo } from 'react';
-import { useGLTF } from '@react-three/drei';
+import { useDracoGLTF } from '../../utils/dracoLoader';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useModelAvailable, WorkerVariant, getWorkerVariantPath } from '../../utils/modelLoader';
@@ -42,7 +42,7 @@ const GLTFWorker: React.FC<WorkerModelProps> = ({
   variant = 'default',
 }) => {
   const modelPath = getWorkerVariantPath(variant);
-  const { scene } = useGLTF(modelPath);
+  const { scene } = useDracoGLTF(modelPath);
   const modelRef = useRef<THREE.Group>(null);
   const bobPhase = useRef(0);
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);

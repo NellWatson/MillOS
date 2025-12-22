@@ -77,5 +77,10 @@ export { SpatialAudioTracker } from './SpatialAudioTracker';
 // === Post-Processing Components ===
 export { PostProcessing } from './PostProcessing';
 
+// === AI Visualization Components ===
+export { CascadeVisualization } from './CascadeVisualization';
+export { StrategicOverlay3D } from './StrategicOverlay3D';
+export { ProductionTargetWidget } from './ProductionTargetWidget';
+
 // === Error Handling Components ===
 export { default as ErrorBoundary } from './ErrorBoundary';

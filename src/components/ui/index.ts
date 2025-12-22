@@ -11,3 +11,22 @@ export { ZoneCustomizationPanel } from './ZoneCustomizationPanel';
 export { EmergencyStopButton } from './EmergencyStopButton';
 export { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
 export { CollapsibleLegend } from './CollapsibleLegend';
+
+// Strategic AI UI Components
+export { DecisionHistoryPanel } from './DecisionHistoryPanel';
+export { VCLDebugPanel } from './VCLDebugPanel';
+export { StrategicPriorityCards } from './StrategicPriorityCards';
+export { ActionPlanTimeline } from './ActionPlanTimeline';
+export { ConfidenceBar } from './ConfidenceBar';
+export { EnergyDashboard } from './EnergyDashboard';
+
+// Phase 3 Enhancements
+export { VCLDiffPanel } from './VCLDiffPanel';
+export { DecisionReplay, DecisionReplayTrigger } from './DecisionReplay';
+export { MultiObjectiveDashboard } from './MultiObjectiveDashboard';
+
+// Phase 4 Enhancements
+export { ShiftHandoverSummary } from './ShiftHandoverSummary';
+export { AlertAcknowledgmentFlow } from './AlertAcknowledgmentFlow';
+export { CostEstimationOverlay } from './CostEstimationOverlay';
+export { WeatherEffectsOverlay } from './WeatherEffectsOverlay';

@@ -18,6 +18,9 @@ import { OpenDockOpening } from './infrastructure/OpenDockOpening';
 import { ForkliftSystem, ForkliftData } from './ForkliftSystem';
 import { FactoryEnvironment } from './Environment';
 import { HolographicDisplays } from './HolographicDisplays';
+import { CascadeVisualization } from './CascadeVisualization';
+import { StrategicOverlay3D } from './StrategicOverlay3D';
+import { useAIConfigStore } from '../stores/aiConfigStore';
 
 // Lazy load heavy 3D components to reduce initial bundle
 const TruckBay = React.lazy(() => import('./TruckBay').then((m) => ({ default: m.TruckBay })));
@@ -267,9 +270,11 @@ export const MillScene: React.FC<MillSceneProps> = ({
     // ZONE 1: Raw Material Storage (Silos) - Back Row
     const siloNames = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon'];
     for (let i = -2; i <= 2; i++) {
+      // Deterministic metrics based on machine index (no Math.random)
+      const idx = i + 2; // 0-4
       _machines.push({
         id: `silo-${i}`,
-        name: `Silo ${siloNames[i + 2]}`,
+        name: `Silo ${siloNames[idx]}`,
         type: MachineType.SILO,
         position: [i * 9, 0, -22],
         size: [4.5, 16, 4.5],
@@ -277,9 +282,9 @@ export const MillScene: React.FC<MillSceneProps> = ({
         status: 'running',
         metrics: {
           rpm: 0,
-          temperature: 20 + Math.random() * 2,
-          vibration: 0.8 + Math.random() * 0.2,
-          load: 60 + Math.random() * 15,
+          temperature: 20 + idx * 0.4,  // Deterministic: 20-21.6°C
+          vibration: 0.8 + idx * 0.04,   // Deterministic: 0.8-0.96
+          load: 60 + idx * 3,            // Deterministic: 60-72%
         },
         lastMaintenance: '2024-01-15',
         nextMaintenance: '2024-04-15',
@@ -291,6 +296,8 @@ export const MillScene: React.FC<MillSceneProps> = ({
     let millIndex = 0;
     for (let i = -3; i <= 3; i += 1.5) {
       if (Math.abs(i) < 0.5) continue;
+      // Deterministic metrics based on mill position
+      const idx = millIndex;
       _machines.push({
         id: `mill-${i}`,
         name: millNames[millIndex],
@@ -298,12 +305,12 @@ export const MillScene: React.FC<MillSceneProps> = ({
         position: [i * 5, 0, -6],
         size: [3.5, 5, 3.5],
         rotation: 0,
-        status: 'running', // Always start running (no random warning)
+        status: 'running',
         metrics: {
-          rpm: 1200 + Math.random() * 50,
-          temperature: 42 + Math.random() * 5,
-          vibration: 1.5 + Math.random() * 0.5,
-          load: 70 + Math.random() * 10,
+          rpm: 1200 + idx * 8,            // Deterministic: 1200-1240
+          temperature: 42 + idx * 0.8,    // Deterministic: 42-46°C
+          vibration: 1.5 + idx * 0.08,    // Deterministic: 1.5-1.9
+          load: 70 + idx * 1.6,           // Deterministic: 70-80%
         },
         lastMaintenance: '2024-02-01',
         nextMaintenance: '2024-05-01',
@@ -314,19 +321,21 @@ export const MillScene: React.FC<MillSceneProps> = ({
     // ZONE 3: Sifting (Plansifters) - Elevated
     const sifterNames = ['Sifter A', 'Sifter B', 'Sifter C'];
     for (let i = -1; i <= 1; i++) {
+      // Deterministic metrics based on sifter position
+      const idx = i + 1; // 0-2
       _machines.push({
         id: `sifter-${i}`,
-        name: sifterNames[i + 1],
+        name: sifterNames[idx],
         type: MachineType.PLANSIFTER,
         position: [i * 14, 9, 6],
         size: [7, 7, 7],
         rotation: 0,
         status: 'running',
         metrics: {
-          rpm: 200 + Math.random() * 20,
-          temperature: 28 + Math.random() * 4,
-          vibration: 5.5 + Math.random() * 1,
-          load: 75 + Math.random() * 10,
+          rpm: 200 + idx * 6,             // Deterministic: 200-212
+          temperature: 28 + idx * 1.3,    // Deterministic: 28-30.6°C
+          vibration: 5.5 + idx * 0.3,     // Deterministic: 5.5-6.1
+          load: 75 + idx * 3,             // Deterministic: 75-81%
         },
         lastMaintenance: '2024-01-20',
         nextMaintenance: '2024-04-20',
@@ -336,9 +345,11 @@ export const MillScene: React.FC<MillSceneProps> = ({
     // ZONE 4: Packaging (Packers) - Moved forward to z=25 for more space
     const packerNames = ['Pack Line 1', 'Pack Line 2', 'Pack Line 3'];
     for (let i = -1; i <= 1; i++) {
+      // Deterministic metrics based on packer position
+      const idx = i + 1; // 0-2
       _machines.push({
         id: `packer-${i}`,
-        name: packerNames[i + 1],
+        name: packerNames[idx],
         type: MachineType.PACKER,
         position: [i * 8, 0, 25],
         size: [4, 6, 4],
@@ -346,9 +357,9 @@ export const MillScene: React.FC<MillSceneProps> = ({
         status: 'running',
         metrics: {
           rpm: 60,
-          temperature: 28 + Math.random() * 5,
-          vibration: 1 + Math.random(),
-          load: 85 + Math.random() * 10,
+          temperature: 28 + idx * 1.6,    // Deterministic: 28-31.2°C
+          vibration: 1 + idx * 0.3,        // Deterministic: 1.0-1.6
+          load: 85 + idx * 3,              // Deterministic: 85-91%
         },
         lastMaintenance: '2024-02-10',
         nextMaintenance: '2024-05-10',
@@ -444,6 +455,17 @@ export const MillScene: React.FC<MillSceneProps> = ({
       maxZ: 22.5,
     });
 
+    // Central longitudinal conveyor - runs from silos (z=-22) to packers (z=25)
+    // Located at x=-1.5 to 1.5 (center of factory), workers must walk around
+    // Note: Safe aisles at x=±2.5 remain clear for workers to walk beside conveyor
+    obs.push({
+      id: 'central-conveyor-belt',
+      minX: -1.8,  // Actual belt width (x: -1.5 to 1.5) + small buffer
+      maxX: 1.8,
+      minZ: -20,   // From just past silos
+      maxZ: 18,    // Up to just before the lateral conveyors
+    });
+
     // LOADING DOCK PLATFORMS - Forklifts must not drive onto elevated docks
     // Shipping dock (front, z=50): platform at [0, 1, 47], size 32x6 (expanded for 2 bays)
     obs.push({
@@ -535,7 +557,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
   // Simulate realistic machine metric changes over time
   // Throttled to check every 30 frames (~0.5s at 60fps) instead of every frame
   useFrame((state) => {
-    // When SCADA is driving metrics, skip local randomization
+    // When SCADA is driving metrics, skip local simulation
     if (scadaLive) return;
     frameCountRef.current++;
 
@@ -551,37 +573,90 @@ export const MillScene: React.FC<MillSceneProps> = ({
     // Only update if store has machines
     if (storeMachines.length === 0) return;
 
-    // Randomly select a machine to update (simulates real sensor data)
-    const machineIndex = Math.floor(Math.random() * storeMachines.length);
-    const machine = storeMachines[machineIndex];
+    // PHYSICS-BASED METRIC SIMULATION
+    // Update ALL machines based on their actual state (not random selection)
+    for (const machine of storeMachines) {
+      const isRunning = machine.status === 'running' || machine.status === 'warning';
+      const isIdle = machine.status === 'idle';
+      const isCritical = machine.status === 'critical';
 
-    // Calculate metric changes based on machine type and current state
-    const tempDrift = (Math.random() - 0.5) * 2;
-    const vibrationDrift = (Math.random() - 0.5) * 0.3;
-    const loadDrift = (Math.random() - 0.5) * 3;
+      // Get base temps for machine type
+      const baseTemp: Record<string, number> = {
+        SILO: 20,
+        ROLLER_MILL: 42,
+        PLANSIFTER: 28,
+        PACKER: 28,
+        CONTROL_ROOM: 22,
+      };
+      const machineBaseTemp = baseTemp[machine.type.toString()] || 30;
 
-    // Apply changes
-    const newTemp = Math.max(20, Math.min(85, machine.metrics.temperature + tempDrift));
-    const newVibration = Math.max(0, Math.min(10, machine.metrics.vibration + vibrationDrift));
-    const newLoad = Math.max(50, Math.min(100, machine.metrics.load + loadDrift));
+      // LOAD: Responds to productionSpeed setting
+      let targetLoad = machine.metrics.load;
+      if (isRunning) {
+        // Running machines adjust load toward productionSpeed * 80
+        targetLoad = 50 + (productionSpeed * 30); // 50-80% based on speed
+      } else if (isIdle) {
+        targetLoad = 0; // Idle = no load
+      }
+      const loadChange = (targetLoad - machine.metrics.load) * 0.1; // Smooth transition
+      const newLoad = Math.max(0, Math.min(100, machine.metrics.load + loadChange));
 
-    updateMachineMetrics(machine.id, {
-      temperature: newTemp,
-      vibration: newVibration,
-      load: newLoad,
-    });
+      // TEMPERATURE: Correlates with load (high load = heat up, idle = cool down)
+      let targetTemp = machineBaseTemp;
+      if (isRunning) {
+        // Temperature rises with load: base + up to 20°C at full load
+        targetTemp = machineBaseTemp + (newLoad / 100) * 20;
+      } else if (isIdle) {
+        // Cooling down toward ambient
+        targetTemp = 20;
+      } else if (isCritical) {
+        // Critical machines run hot
+        targetTemp = machineBaseTemp + 40;
+      }
+      const tempChange = (targetTemp - machine.metrics.temperature) * 0.05; // Slow thermal change
+      const newTemp = Math.max(15, Math.min(90, machine.metrics.temperature + tempChange));
 
-    // Occasionally trigger status changes based on metrics
-    if (machine.status === 'running') {
-      if (newTemp > 70 || newVibration > 5) {
-        if (Math.random() < 0.1) {
+      // VIBRATION: Correlates with RPM and machine status
+      let targetVibration = 1.0;
+      if (isRunning) {
+        // Vibration based on RPM ratio and load
+        const rpmRatio = machine.metrics.rpm / 1200; // Normalize to 1200 RPM base
+        targetVibration = 1.0 + (rpmRatio * 2) + (newLoad / 100);
+        // Warning machines vibrate more (something is wrong)
+        if (machine.status === 'warning') targetVibration *= 1.5;
+      } else if (isCritical) {
+        targetVibration = 7; // Critical = high vibration
+      } else {
+        targetVibration = 0.2; // Idle = minimal vibration
+      }
+      const vibrationChange = (targetVibration - machine.metrics.vibration) * 0.1;
+      const newVibration = Math.max(0, Math.min(10, machine.metrics.vibration + vibrationChange));
+
+      updateMachineMetrics(machine.id, {
+        temperature: Math.round(newTemp * 10) / 10,
+        vibration: Math.round(newVibration * 100) / 100,
+        load: Math.round(newLoad * 10) / 10,
+      });
+
+      // STATUS CHANGES: Based on actual threshold crossings (deterministic)
+      if (machine.status === 'running') {
+        // Transition to warning if temp or vibration exceeds threshold
+        if (newTemp > 70 || newVibration > 5) {
           updateMachineStatus(machine.id, 'warning');
         }
-      }
-    } else if (machine.status === 'warning') {
-      if (newTemp < 60 && newVibration < 4) {
-        if (Math.random() < 0.2) {
+      } else if (machine.status === 'warning') {
+        // Recovery when metrics return to safe levels
+        if (newTemp < 55 && newVibration < 3.5) {
           updateMachineStatus(machine.id, 'running');
+        }
+        // Escalate to critical if thresholds exceeded significantly
+        if (newTemp > 80 || newVibration > 8) {
+          updateMachineStatus(machine.id, 'critical');
+        }
+      } else if (machine.status === 'critical') {
+        // Only recover from critical if metrics are very low (machine cooled down)
+        if (newTemp < 40 && newVibration < 2) {
+          updateMachineStatus(machine.id, 'warning');
         }
       }
     }
@@ -602,6 +677,9 @@ export const MillScene: React.FC<MillSceneProps> = ({
   // Exception: In dock zones (near open dock openings), show BOTH interior and exterior
   const isCameraInside = useCameraPositionStore((state) => state.isCameraInside);
   const isCameraInDockZone = useCameraPositionStore((state) => state.isCameraInDockZone);
+
+  // AI Visualization toggles (all default OFF)
+  const showCascadeVisualization = useAIConfigStore((state) => state.showCascadeVisualization);
 
   // Show interior when inside OR in dock transition zone
   const showInterior = isCameraInside || isCameraInDockZone;
@@ -699,6 +777,12 @@ export const MillScene: React.FC<MillSceneProps> = ({
 
       {/* Fire Drill Exit Markers - shown during active drill */}
       <FireDrillExitMarkers />
+
+      {/* AI Cascade Visualization - shows production flow stress (default OFF, toggle with 'K') */}
+      {showCascadeVisualization && <CascadeVisualization />}
+
+      {/* Strategic Overlay 3D - floating priority text above factory (default OFF, toggle with 'J') */}
+      <StrategicOverlay3D />
 
       {/* Atmospheric Effects - heavily reduced for performance */}
       {/* PERFORMANCE: Interior-only particle effects */}

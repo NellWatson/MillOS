@@ -2,12 +2,116 @@ import React, { useState, useEffect, useRef } from 'react';
 import { AreaChart, Area, ResponsiveContainer } from 'recharts';
 import { useProductionStore } from '../stores/productionStore';
 import { useSafetyStore } from '../stores/safetyStore';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
+import { MachineType, MachineData } from '../types';
 
 interface MetricsData {
   time: string;
   throughput: number;
   efficiency: number;
   quality: number;
+}
+
+// Energy consumption by machine type (kWh when running)
+const MACHINE_ENERGY_CONSUMPTION: Record<MachineType, { running: number; idle: number }> = {
+  [MachineType.SILO]: { running: 2, idle: 0.5 },           // Ventilation, monitoring, conveyors
+  [MachineType.ROLLER_MILL]: { running: 45, idle: 2 },     // Heavy motors for grinding
+  [MachineType.PLANSIFTER]: { running: 25, idle: 1.5 },    // Sifting vibration motors
+  [MachineType.PACKER]: { running: 15, idle: 1 },          // Packaging line, conveyors
+  [MachineType.CONTROL_ROOM]: { running: 5, idle: 5 },     // Always on - computers, displays
+};
+
+// Calculate energy for a single machine based on its current state
+function getMachineEnergy(machine: MachineData): number {
+  const consumption = MACHINE_ENERGY_CONSUMPTION[machine.type] || { running: 20, idle: 1 };
+
+  // Maintenance penalty: machines close to or overdue for maintenance use more energy
+  // maintenanceCountdown: hours until maintenance needed (lower = more overdue)
+  // 0 or negative = overdue, uses 25% more energy
+  // 0-24 hours = soon due, uses 5-25% more energy (linear)
+  // >24 hours = well maintained, normal energy
+  let maintenancePenalty = 1.0;
+  if (machine.maintenanceCountdown !== undefined) {
+    if (machine.maintenanceCountdown <= 0) {
+      maintenancePenalty = 1.25; // 25% penalty when overdue
+    } else if (machine.maintenanceCountdown < 24) {
+      // Linear interpolation from 5% to 25% penalty as maintenance becomes due
+      maintenancePenalty = 1.05 + (1 - machine.maintenanceCountdown / 24) * 0.20;
+    }
+  }
+
+  let baseEnergy: number;
+  switch (machine.status) {
+    case 'running':
+      // Running machines also factor in load - higher load = more energy
+      const loadFactor = 0.7 + (machine.metrics.load / 100) * 0.3; // 70-100% based on load
+      baseEnergy = consumption.running * loadFactor;
+      break;
+    case 'warning':
+      // Warning state - running but potentially inefficient (slightly higher energy)
+      baseEnergy = consumption.running * 1.1;
+      break;
+    case 'critical':
+      // Critical - still consuming but erratically
+      baseEnergy = consumption.running * 0.8;
+      break;
+    case 'idle':
+    default:
+      baseEnergy = consumption.idle;
+      break;
+  }
+
+  // Apply maintenance penalty (affects running machines more than idle)
+  return machine.status === 'idle'
+    ? baseEnergy // Idle machines don't get penalty
+    : baseEnergy * maintenancePenalty;
+}
+
+// Calculate base facility load (lighting, HVAC, etc.) based on time of day
+function getFacilityBaseLoad(gameTime: number): { lighting: number; hvac: number; other: number } {
+  // Normalize hour to 0-24
+  const hour = ((gameTime % 24) + 24) % 24;
+
+  // Lighting: Full power at night (18:00-06:00), reduced during day
+  // Dawn/dusk transitions (06:00-08:00, 17:00-19:00) have partial lighting
+  let lighting: number;
+  if (hour >= 8 && hour < 17) {
+    // Daytime - natural light, minimal artificial lighting
+    lighting = 8;
+  } else if (hour >= 6 && hour < 8) {
+    // Dawn - transitioning
+    const progress = (hour - 6) / 2; // 0 to 1
+    lighting = 35 - (progress * 27); // 35 down to 8
+  } else if (hour >= 17 && hour < 19) {
+    // Dusk - transitioning
+    const progress = (hour - 17) / 2; // 0 to 1
+    lighting = 8 + (progress * 27); // 8 up to 35
+  } else {
+    // Night - full artificial lighting
+    lighting = 35;
+  }
+
+  // HVAC: Higher during extreme hours (cold mornings, hot afternoons)
+  // Also higher at night for heating/cooling depending on season (simplified)
+  let hvac: number;
+  if (hour >= 10 && hour < 16) {
+    // Peak afternoon - cooling load
+    hvac = 45;
+  } else if (hour >= 6 && hour < 10) {
+    // Morning ramp-up
+    hvac = 30;
+  } else if (hour >= 16 && hour < 22) {
+    // Evening cool-down
+    hvac = 35;
+  } else {
+    // Night - reduced but still maintaining temp
+    hvac = 20;
+  }
+
+  // Other base load: Emergency systems, fire suppression standby, security, IT
+  const other = 15;
+
+  return { lighting, hvac, other };
 }
 
 export const ProductionMetrics: React.FC = () => {
@@ -18,6 +122,8 @@ export const ProductionMetrics: React.FC = () => {
   const productionSpeed = useProductionStore((state) => state.productionSpeed);
   const machines = useProductionStore((state) => state.machines);
   const safetyMetrics = useSafetyStore((state) => state.safetyMetrics);
+  const emergencyActive = useGameSimulationStore((state) => state.emergencyActive);
+  const gameTime = useGameSimulationStore((state) => state.gameTime);
 
   // Calculate real-time metrics based on actual store data
   const liveMetrics = React.useMemo(() => {
@@ -35,18 +141,30 @@ export const ProductionMetrics: React.FC = () => {
     // Bags per minute from production speed
     const bagsPerMinute = Math.round(35 * productionSpeed + runningMachines * 1.5);
 
-    // Energy usage scales with production
-    const energyUsage = Math.round(700 + productionSpeed * 200 + runningMachines * 15);
+    // REAL ENERGY CALCULATION
+    // During emergency stop, machines are idle so calculate normally (they're set to idle)
+    // Calculate total machine energy consumption
+    const machineEnergy = machines.reduce((total, machine) => {
+      return total + getMachineEnergy(machine);
+    }, 0);
+
+    // Get facility base load based on time of day
+    const baseLoad = getFacilityBaseLoad(gameTime);
+
+    // During emergency, only emergency lighting and minimal HVAC
+    const energyUsage = emergencyActive
+      ? Math.round(baseLoad.lighting * 0.3 + baseLoad.hvac * 0.5 + baseLoad.other + 10) // Emergency mode
+      : Math.round(machineEnergy + baseLoad.lighting + baseLoad.hvac + baseLoad.other);
 
     return {
-      throughput: actualThroughput,
+      throughput: emergencyActive ? 0 : actualThroughput,
       efficiency: storeMetrics.efficiency,
       quality: storeMetrics.quality,
       uptime: storeMetrics.uptime,
-      bagsPerMinute,
+      bagsPerMinute: emergencyActive ? 0 : bagsPerMinute,
       energyUsage,
     };
-  }, [storeMetrics, productionSpeed, machines]);
+  }, [storeMetrics, productionSpeed, machines, emergencyActive, gameTime]);
 
   // Track previous efficiency for trend calculation
   const prevEfficiencyRef = useRef(storeMetrics.efficiency);

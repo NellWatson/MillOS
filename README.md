@@ -156,6 +156,81 @@ Real-time decision feed simulating agentic AI operations:
 
 Each decision includes confidence scores, reasoning, and expected business impact.
 
+### Dual-Brain AI Architecture
+
+MillOS features a **hierarchical AI system** where fast heuristic decisions and thoughtful LLM reasoning work in concert:
+
+![Dual-Brain Architecture](docs/assets/dual-brain-architecture.png)
+
+**Decision Flow:**
+
+```mermaid
+flowchart TD
+    A[AI Command Center] --> B{Current Mode?}
+    B -->|Heuristic| C[Tactical Only<br/>Every 6s]
+    B -->|Gemini| D[Strategic Only<br/>Every 6s]
+    B -->|Hybrid| E[Both Layers]
+    E --> F[Tactical<br/>6s interval<br/>Fast rules]
+    E --> G[Strategic<br/>45s interval<br/>Gemini planning]
+    F --> H[Apply Effects]
+    G --> H
+```
+
+**Three Operating Modes:**
+
+| Mode | Strategic | Tactical | Best For |
+|------|:---------:|:--------:|----------|
+| **Heuristic** | ❌ | ✅ | Offline, low-cost, deterministic |
+| **Gemini** | ✅ | ❌ | Testing LLM reasoning |
+| **Hybrid** | ✅ | ✅ | **Full autonomy demo** |
+
+**Gemini Value-Add:**
+
+| Capability | Heuristic | Gemini |
+|------------|:---------:|:------:|
+| "Machine X overheating" → dispatch tech | ✅ Rule-based | Overkill |
+| "Production 15% behind with maintenance due" | ❌ Can't reason | ✅ Trade-off analysis |
+| "Storm + shift change + low inventory" | ❌ No cross-domain | ✅ Contextual planning |
+| "Silo → Mill → Packer cascade risk" | ❌ Simple triggers | ✅ Pattern recognition |
+
+**Example Strategic Insights:**
+- *Heuristic*: "Alert! Silo B overdue maintenance" → dispatch
+- *Gemini*: "Recommend deferring Silo B maintenance 30 min to complete current batch, avoiding $2,400 restart cost"
+
+#### Strategic Value Propositions
+
+The heuristic engine excels at **reactive, deterministic decisions**. Gemini focuses on **proactive, contextual reasoning**:
+
+| Scenario | Heuristic Says | Gemini Says |
+|----------|---------------|-------------|
+| **Production Trade-off** | "Behind schedule → speed up" | "Behind by 1,800 kg/hr with 2 hours left. Quality dropped 3%. Boost Line 3 only (has quality headroom) by 15%." |
+| **Cascade Prevention** | Monitors each machine independently | "Silo Delta at 87% → Mill 103 overloading → Sifter A queuing. Reduce Delta output, divert to Epsilon." |
+| **Shift Orchestration** | No timing awareness | "Shift change in 18 min. Expedite Mill 105 oil change, defer Sifter B to next shift." |
+| **Weather Adaptation** | Weather is decorative | "Storm in 2 hours. Complete outdoor loading by 14:00, stage inventory indoors." |
+| **Fatigue Management** | Assigns nearest worker | "Night shift hour 5. Assign experienced workers to critical machines, rotate others to monitoring." |
+| **Pattern Recognition** | Reacts to each alert | "Third Mill 103 spike this week. Correlates with high humidity (78%). Recommend preemptive cooling." |
+
+**Key Differentiator:**
+- **Heuristic**: *"What is happening? → React."*
+- **Gemini**: *"Why is this happening? What else will happen? What should we prioritize?"*
+
+#### AI Visualization Tools
+
+All visualizations are **optional** and **default OFF** — toggle via keyboard or AI settings:
+
+| Key | Feature | Description |
+|:---:|---------|-------------|
+| `K` | Cascade Visualization | 3D lines showing production flow stress between machines |
+| `H` | Heat Map | Incident frequency visualization |
+| `I` | AI Command Center | Strategic decisions and priorities panel |
+
+**Strategic Response Enhancements:**
+- **Multi-step Action Plans** — 3-step plans (immediate, short-term, preparation)
+- **Confidence Scoring** — Gemini reports confidence % per decision
+- **Worker Recommendations** — Specific worker names for critical tasks
+- **VCL Encoding** — Compact emoji-based context (75% token savings)
+- **Response Caching** — 30s TTL reduces API calls for similar contexts
+
 ### Live Production Metrics
 
 Real-time KPIs with 30-minute historical trends:
@@ -474,10 +549,14 @@ A custom **PositionRegistry** singleton enables inter-entity awareness:
 - [x] Compressed texture support (KTX2/Basis Universal)
 - [x] Service worker for offline caching
 - [x] Shared geometry/material optimization for memory efficiency
+- [x] **Gemini Flash 3 AI integration** with Dual-Brain architecture
+- [x] **Hybrid mode**: Tactical (heuristic 6s) + Strategic (Gemini 45s)
+- [x] **Live cost tracking** for API usage
+- [x] **Context limit protection** with token estimation and smart truncation
 
 ### Planned
 
-- [ ] Live Gemini API integration for dynamic AI decisions
+- [ ] Strategic priority influence on tactical scoring
 - [ ] VR mode with WebXR controls
 - [ ] Historical playback and time-travel debugging
 - [ ] Custom scenario editor

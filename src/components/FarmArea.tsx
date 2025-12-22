@@ -826,7 +826,7 @@ export const FarmArea: React.FC = () => {
           chickenStates.current[i],
           adjustDelta,
           1.5, // Speed
-          { minX: 8, maxX: 16, minZ: -9, maxZ: -1 } // Bounds
+          { minX: 9, maxX: 15, minZ: -8, maxZ: -2 } // Bounds (tighter, near coop)
         );
       });
 

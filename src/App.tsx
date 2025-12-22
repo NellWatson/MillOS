@@ -30,11 +30,10 @@ import { gpuResourceManager } from './utils/GPUResourceManager';
 import { initKTX2Loader } from './utils/textureCompression';
 import { getGPUSettings } from './utils/resourcePersistence';
 import { initializeGPUTracking, cleanupGPUTracking } from './utils/gpuTrackedResources';
-import { GPUMemoryMonitor } from './components/GPUMemoryMonitor';
 import { initializeAIEngine } from './utils/aiEngine';
 import { useGraphicsStore } from './stores/graphicsStore';
 import { useUIStore } from './stores/uiStore';
-import { useGameSimulationStore } from './stores';
+import { useGameSimulationStore } from './stores/gameSimulationStore';
 import { useProductionStore } from './stores/productionStore';
 import { initializeSCADASync } from './store';
 import { useShallow } from 'zustand/react/shallow';
@@ -62,6 +61,8 @@ import {
   RotateDeviceOverlay,
 } from './components/mobile/MobileControlsOverlay';
 import { useGeometryNaNDetector } from './components/SafeGeometry';
+import { ProductionTargetWidget } from './components/ProductionTargetWidget';
+import { EnergyDashboard, MultiObjectiveDashboard, ShiftHandoverSummary, CostEstimationOverlay, WeatherEffectsOverlay } from './components/ui';
 
 // Calculate sky background color based on game time (matches SkySystem.tsx logic)
 const getSkyBackgroundColor = (gameTime: number): string => {
@@ -718,13 +719,20 @@ const App: React.FC = () => {
       <MultiplayerChat />
       <AIDecisionVotingPanel />
 
+      {/* AI Strategic Widgets (optional, default OFF - toggle with T/U/Y) */}
+      <ProductionTargetWidget />
+      <EnergyDashboard />
+      <MultiObjectiveDashboard />
+      <CostEstimationOverlay />
+
+      {/* Shift change summary modal */}
+      <ShiftHandoverSummary />
+
+      {/* Weather effects 2D overlay - shows rain/storm based on alerts */}
+      <WeatherEffectsOverlay />
+
       {/* Mobile portrait rotation prompt - blocks interaction until rotated */}
       <RotateDeviceOverlay visible={isMobile && !isLandscape} />
-
-      {/* GPU Memory Monitor - dev mode or ?gpudebug query param */}
-      {(import.meta.env.DEV || new URLSearchParams(window.location.search).has('gpudebug')) && (
-        <GPUMemoryMonitor enabled={true} position="bottom-left" />
-      )}
     </div>
   );
 };

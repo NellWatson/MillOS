@@ -1,0 +1,321 @@
+/**
+ * AI Configuration Store for MillOS
+ * 
+ * Manages AI mode settings, Gemini API key, connection state,
+ * and live cost tracking for Gemini API usage.
+ */
+
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+import { safeJSONStorage } from './storage';
+import { geminiClient } from '../utils/geminiClient';
+import { logger } from '../utils/logger';
+
+export type AIMode = 'heuristic' | 'gemini' | 'hybrid';
+
+// Gemini Flash pricing (per 1M tokens, as of Dec 2024)
+// https://ai.google.dev/pricing
+const GEMINI_FLASH_INPUT_COST_PER_1M = 0.075;  // $0.075 per 1M input tokens
+const GEMINI_FLASH_OUTPUT_COST_PER_1M = 0.30;  // $0.30 per 1M output tokens
+const CHARS_PER_TOKEN = 4; // Conservative estimate
+
+// Strategic layer configuration
+const DEFAULT_STRATEGIC_INTERVAL_MS = 45000; // 45 seconds
+
+interface CostTracking {
+    sessionCost: number;           // Total cost this session in USD
+    totalInputTokens: number;      // Estimated input tokens
+    totalOutputTokens: number;     // Estimated output tokens
+    requestCount: number;          // Number of API calls
+    lastRequestCost: number;       // Cost of most recent request
+    sessionStartTime: number;      // When this session started
+}
+
+interface StrategicState {
+    priorities: string[];             // Current strategic directives
+    lastDecisionTime: number | null;  // Timestamp of last strategic decision
+    isThinking: boolean;              // Strategic layer actively reasoning
+    actionPlan?: string[];            // 3-step action plan (immediate, short-term, prep)
+    insight?: string;                 // Key observation from Gemini
+    tradeoff?: string;                // Trade-off explanation
+    focusMachine?: string;            // Machine ID to prioritize
+    recommendWorker?: string;         // Recommended worker for critical tasks
+    confidenceScores?: { overall: number; reasoning: string };
+}
+
+interface AIConfigState {
+    // Mode settings
+    aiMode: AIMode;
+    setAIMode: (mode: AIMode) => void;
+
+    // Gemini connection
+    geminiApiKey: string | null;
+    isGeminiConnected: boolean;
+    connectionError: string | null;
+
+    // Strategic layer state
+    strategic: StrategicState;
+    strategicIntervalMs: number;
+    setStrategicPriorities: (priorities: string[]) => void;
+    setStrategicThinking: (thinking: boolean) => void;
+
+    // Cost tracking
+    costTracking: CostTracking;
+    recordApiUsage: (inputChars: number, outputChars: number) => void;
+    resetSessionCosts: () => void;
+    getFormattedCost: () => string;
+    trackAPICost: (cost: number, tokens: number) => void;
+
+    // Actions
+    setGeminiApiKey: (key: string | null) => Promise<boolean>;
+    testGeminiConnection: () => Promise<{ success: boolean; message: string }>;
+    clearGeminiConfig: () => void;
+    initializeFromStorage: () => void;
+
+    // AI Visualization toggles (all default OFF)
+    showCascadeVisualization: boolean;
+    showProductionTarget: boolean;
+    showStrategicOverlay: boolean;
+    showVCLDebug: boolean;
+    showEnergyDashboard: boolean;
+    showMultiObjective: boolean;
+    showCostOverlay: boolean;
+    showShiftHandover: boolean;
+    setShowCascadeVisualization: (show: boolean) => void;
+    setShowProductionTarget: (show: boolean) => void;
+    setShowStrategicOverlay: (show: boolean) => void;
+    setShowVCLDebug: (show: boolean) => void;
+    setShowEnergyDashboard: (show: boolean) => void;
+    setShowMultiObjective: (show: boolean) => void;
+    setShowCostOverlay: (show: boolean) => void;
+    setShowShiftHandover: (show: boolean) => void;
+}
+
+export const useAIConfigStore = create<AIConfigState>()(
+    persist(
+        (set, get) => ({
+            // Default to heuristic mode
+            aiMode: 'heuristic',
+            setAIMode: (mode) => {
+                set({ aiMode: mode });
+                logger.info(`[AIConfigStore] AI mode set to: ${mode}`);
+            },
+
+            // Gemini state
+            geminiApiKey: null,
+            isGeminiConnected: false,
+            connectionError: null,
+
+            // Strategic layer state
+            strategic: {
+                priorities: [],
+                lastDecisionTime: null,
+                isThinking: false,
+            },
+            strategicIntervalMs: DEFAULT_STRATEGIC_INTERVAL_MS,
+
+            setStrategicPriorities: (priorities: string[]) => {
+                set((state) => ({
+                    strategic: {
+                        ...state.strategic,
+                        priorities,
+                        lastDecisionTime: Date.now(),
+                    },
+                }));
+            },
+
+            setStrategicThinking: (isThinking: boolean) => {
+                set((state) => ({
+                    strategic: {
+                        ...state.strategic,
+                        isThinking,
+                    },
+                }));
+            },
+
+            // AI Visualization toggles - all default OFF
+            showCascadeVisualization: false,
+            showProductionTarget: false,
+            showStrategicOverlay: false,
+            showVCLDebug: true,
+            showEnergyDashboard: false,
+            showMultiObjective: false,
+            showCostOverlay: false,
+            showShiftHandover: true,
+
+            setShowCascadeVisualization: (show: boolean) => set({ showCascadeVisualization: show }),
+            setShowProductionTarget: (show: boolean) => set({ showProductionTarget: show }),
+            setShowStrategicOverlay: (show: boolean) => set({ showStrategicOverlay: show }),
+            setShowVCLDebug: (show: boolean) => set({ showVCLDebug: show }),
+            setShowEnergyDashboard: (show: boolean) => set({ showEnergyDashboard: show }),
+            setShowMultiObjective: (show: boolean) => set({ showMultiObjective: show }),
+            setShowCostOverlay: (show: boolean) => set({ showCostOverlay: show }),
+            setShowShiftHandover: (show: boolean) => set({ showShiftHandover: show }),
+
+            // Cost tracking - session state
+            costTracking: {
+                sessionCost: 0,
+                totalInputTokens: 0,
+                totalOutputTokens: 0,
+                requestCount: 0,
+                lastRequestCost: 0,
+                sessionStartTime: Date.now(),
+            },
+
+            // Record API usage and calculate cost
+            recordApiUsage: (inputChars: number, outputChars: number) => {
+                const inputTokens = Math.ceil(inputChars / CHARS_PER_TOKEN);
+                const outputTokens = Math.ceil(outputChars / CHARS_PER_TOKEN);
+
+                // Calculate cost in USD
+                const inputCost = (inputTokens / 1_000_000) * GEMINI_FLASH_INPUT_COST_PER_1M;
+                const outputCost = (outputTokens / 1_000_000) * GEMINI_FLASH_OUTPUT_COST_PER_1M;
+                const requestCost = inputCost + outputCost;
+
+                set((state) => ({
+                    costTracking: {
+                        ...state.costTracking,
+                        sessionCost: state.costTracking.sessionCost + requestCost,
+                        totalInputTokens: state.costTracking.totalInputTokens + inputTokens,
+                        totalOutputTokens: state.costTracking.totalOutputTokens + outputTokens,
+                        requestCount: state.costTracking.requestCount + 1,
+                        lastRequestCost: requestCost,
+                    },
+                }));
+
+                logger.info(`[AIConfigStore] API usage: ${inputTokens} in / ${outputTokens} out tokens, cost: $${requestCost.toFixed(6)}`);
+            },
+
+            // Reset session costs
+            resetSessionCosts: () => {
+                set({
+                    costTracking: {
+                        sessionCost: 0,
+                        totalInputTokens: 0,
+                        totalOutputTokens: 0,
+                        requestCount: 0,
+                        lastRequestCost: 0,
+                        sessionStartTime: Date.now(),
+                    },
+                });
+                logger.info('[AIConfigStore] Session costs reset');
+            },
+
+            // Get formatted cost string
+            getFormattedCost: () => {
+                const { sessionCost, requestCount } = get().costTracking;
+                if (requestCount === 0) return '$0.00';
+                if (sessionCost < 0.01) return `$${sessionCost.toFixed(4)}`;
+                return `$${sessionCost.toFixed(2)}`;
+            },
+
+            // Track API cost directly (for geminiApi.ts)
+            trackAPICost: (cost: number, tokens: number) => {
+                set((state) => ({
+                    costTracking: {
+                        ...state.costTracking,
+                        sessionCost: state.costTracking.sessionCost + cost,
+                        totalInputTokens: state.costTracking.totalInputTokens + Math.floor(tokens * 0.7),
+                        totalOutputTokens: state.costTracking.totalOutputTokens + Math.floor(tokens * 0.3),
+                        requestCount: state.costTracking.requestCount + 1,
+                        lastRequestCost: cost,
+                    },
+                }));
+                logger.info(`[AIConfigStore] API cost tracked: $${cost.toFixed(4)}, ${tokens} tokens`);
+            },
+
+            // Set and validate API key
+            setGeminiApiKey: async (key) => {
+                if (!key) {
+                    get().clearGeminiConfig();
+                    return false;
+                }
+
+                set({ connectionError: null });
+
+                const success = geminiClient.initialize(key);
+                if (!success) {
+                    set({
+                        connectionError: 'Failed to initialize Gemini client',
+                        isGeminiConnected: false,
+                    });
+                    return false;
+                }
+
+                // Test the connection
+                const testResult = await geminiClient.testConnection();
+                if (!testResult.success) {
+                    set({
+                        connectionError: testResult.message,
+                        isGeminiConnected: false,
+                    });
+                    geminiClient.disconnect();
+                    return false;
+                }
+
+                set({
+                    geminiApiKey: key,
+                    isGeminiConnected: true,
+                    aiMode: 'hybrid', // Auto-switch to Hybrid mode (heuristic + strategic) on connect
+                    connectionError: null,
+                });
+
+                logger.info('[AIConfigStore] Gemini API key set and validated');
+                return true;
+            },
+
+            // Test connection without saving key
+            testGeminiConnection: async () => {
+                const key = get().geminiApiKey;
+                if (!key) {
+                    return { success: false, message: 'No API key configured' };
+                }
+
+                return geminiClient.testConnection();
+            },
+
+            // Clear all Gemini config
+            clearGeminiConfig: () => {
+                geminiClient.disconnect();
+                set({
+                    geminiApiKey: null,
+                    isGeminiConnected: false,
+                    aiMode: 'heuristic',
+                    connectionError: null,
+                });
+                logger.info('[AIConfigStore] Gemini config cleared');
+            },
+
+            // Re-initialize client from stored key (call on app startup)
+            initializeFromStorage: () => {
+                const key = get().geminiApiKey;
+                if (key) {
+                    const success = geminiClient.initialize(key);
+                    if (success) {
+                        set({ isGeminiConnected: true });
+                        logger.info('[AIConfigStore] Gemini client re-initialized from storage');
+                    } else {
+                        set({ isGeminiConnected: false, aiMode: 'heuristic' });
+                    }
+                }
+            },
+        }),
+        {
+            name: 'millos-ai-config',
+            storage: safeJSONStorage,
+            partialize: (state) => ({
+                // Only persist these fields
+                aiMode: state.aiMode,
+                geminiApiKey: state.geminiApiKey,
+            }),
+        }
+    )
+);
+
+// Initialize on module load (will run after rehydration)
+if (typeof window !== 'undefined') {
+    // Small delay to ensure rehydration completes
+    setTimeout(() => {
+        useAIConfigStore.getState().initializeFromStorage();
+    }, 100);
+}

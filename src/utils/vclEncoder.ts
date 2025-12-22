@@ -1,0 +1,284 @@
+/**
+ * VCP (Value & Context Protocol) Encoder for MillOS
+ * 
+ * Implements the Enneagram Protocol for compact context encoding using emoji.
+ * Reduces token usage while preserving semantic richness.
+ * 
+ * Based on VCL_MAIN.md - the 9-dimensional context encoding system.
+ */
+
+import { MachineData, WorkerData } from '../types';
+
+// ============================================
+// WORKER CONTEXT ENCODING (VCL Enneagram-based)
+// ============================================
+
+/**
+ * Worker Role Emojis (COMPANY dimension adaptation)
+ */
+const WORKER_ROLE_EMOJI: Record<string, string> = {
+    'Supervisor': '👑',
+    'Engineer': '🔧',
+    'Operator': '👷',
+    'Technician': '🛠️',
+    'QC Inspector': '🔬',
+    'Safety Officer': '🛡️',
+    'Maintenance': '🔩',
+    'Loader': '📦',
+};
+
+/**
+ * Worker Status Emojis (STATE dimension)
+ */
+const WORKER_STATUS_EMOJI: Record<string, string> = {
+    'idle': '💤',
+    'working': '⚙️',
+    'walking': '🚶',
+    'break': '☕',
+    'emergency': '🚨',
+};
+
+/**
+ * Experience Level Emojis (AGENCY dimension)
+ */
+const EXPERIENCE_EMOJI = {
+    expert: '🎓',      // 5+ years
+    competent: '📚',   // 2-5 years  
+    novice: '❓',      // <2 years
+};
+
+/**
+ * Fatigue Level Emojis (STATE dimension)
+ */
+const FATIGUE_EMOJI = {
+    fresh: '😊',
+    moderate: '😐',
+    tired: '😴',
+    exhausted: '😵',
+};
+
+/**
+ * Encode a worker's context using VCL format
+ * Format: ROLE|STATUS|EXPERIENCE|FATIGUE
+ * Example: 👑|⚙️|🎓|😊 = Supervisor, working, expert, fresh
+ */
+export function encodeWorkerVCL(worker: WorkerData, shiftProgress: number): string {
+    const role = WORKER_ROLE_EMOJI[worker.role] || '👤';
+    const status = WORKER_STATUS_EMOJI[worker.status] || '❓';
+
+    // Experience level
+    const years = worker.experience || 0;
+    const experience = years >= 5 ? EXPERIENCE_EMOJI.expert :
+        years >= 2 ? EXPERIENCE_EMOJI.competent :
+            EXPERIENCE_EMOJI.novice;
+
+    // Fatigue based on shift progress
+    const fatigue = shiftProgress < 0.3 ? FATIGUE_EMOJI.fresh :
+        shiftProgress < 0.6 ? FATIGUE_EMOJI.moderate :
+            shiftProgress < 0.85 ? FATIGUE_EMOJI.tired :
+                FATIGUE_EMOJI.exhausted;
+
+    return `${role}${status}${experience}${fatigue}`;
+}
+
+/**
+ * Encode all workers into a compact VCL summary
+ */
+export function encodeWorkersVCL(workers: WorkerData[], shiftProgress: number): string {
+    // Group by role for compact representation
+    const byRole: Record<string, { count: number; working: number; idle: number }> = {};
+
+    for (const worker of workers) {
+        if (!byRole[worker.role]) {
+            byRole[worker.role] = { count: 0, working: 0, idle: 0 };
+        }
+        byRole[worker.role].count++;
+        if (worker.status === 'working') byRole[worker.role].working++;
+        if (worker.status === 'idle') byRole[worker.role].idle++;
+    }
+
+    // Compact format: ROLE(working/total)
+    const summary = Object.entries(byRole)
+        .map(([role, stats]) => {
+            const emoji = WORKER_ROLE_EMOJI[role] || '👤';
+            return `${emoji}${stats.working}/${stats.count}`;
+        })
+        .join(' ');
+
+    // Overall fatigue indicator
+    const fatigueEmoji = shiftProgress < 0.3 ? FATIGUE_EMOJI.fresh :
+        shiftProgress < 0.6 ? FATIGUE_EMOJI.moderate :
+            shiftProgress < 0.85 ? FATIGUE_EMOJI.tired :
+                FATIGUE_EMOJI.exhausted;
+
+    return `${summary} ${fatigueEmoji}`;
+}
+
+// ============================================
+// MACHINE STATE ENCODING (MillOS-specific VCL extension)
+// ============================================
+
+/**
+ * Machine Type Emojis (adapted for industrial context)
+ */
+const MACHINE_TYPE_EMOJI: Record<string, string> = {
+    'silo': '🏛️',       // Storage
+    'roller-mill': '⚙️', // Processing
+    'plansifter': '🔀',  // Sifting
+    'packer': '📦',      // Packaging
+};
+
+/**
+ * Machine Status Emojis (Heath/State dimension)
+ */
+const MACHINE_STATUS_EMOJI: Record<string, string> = {
+    'running': '✅',
+    'idle': '⏸️',
+    'warning': '⚠️',
+    'critical': '🔴',
+    'maintenance': '🔧',
+    'offline': '⚫',
+};
+
+/**
+ * Load Level Emojis (CONSTRAINTS dimension adaptation)
+ */
+const LOAD_EMOJI = {
+    low: '🟢',       // <50%
+    medium: '🟡',    // 50-80%
+    high: '🟠',      // 80-90%
+    critical: '🔴',  // >90%
+};
+
+/**
+ * Encode a single machine's state using VCL
+ * Format: TYPE|STATUS|LOAD
+ * Example: 🏛️✅🟢 = Silo, running, low load
+ */
+export function encodeMachineVCL(machine: MachineData): string {
+    // Determine machine type from ID
+    let type = '❓';
+    if (machine.id.toLowerCase().includes('silo')) type = MACHINE_TYPE_EMOJI['silo'];
+    else if (machine.id.toLowerCase().includes('rm-')) type = MACHINE_TYPE_EMOJI['roller-mill'];
+    else if (machine.id.toLowerCase().includes('sifter') || machine.id.toLowerCase().includes('plansifter')) type = MACHINE_TYPE_EMOJI['plansifter'];
+    else if (machine.id.toLowerCase().includes('pack') || machine.id.toLowerCase().includes('line')) type = MACHINE_TYPE_EMOJI['packer'];
+
+    const status = MACHINE_STATUS_EMOJI[machine.status] || '❓';
+
+    const load = machine.metrics.load;
+    const loadEmoji = load < 50 ? LOAD_EMOJI.low :
+        load < 80 ? LOAD_EMOJI.medium :
+            load < 90 ? LOAD_EMOJI.high :
+                LOAD_EMOJI.critical;
+
+    return `${type}${status}${loadEmoji}`;
+}
+
+/**
+ * Encode all machines into a compact VCL production line summary
+ * Groups by zone for visual production flow
+ */
+export function encodeMachinesVCL(machines: MachineData[]): string {
+    // Group by production zone
+    const silos = machines.filter(m => m.id.toLowerCase().includes('silo'));
+    const mills = machines.filter(m => m.id.toLowerCase().includes('rm-'));
+    const sifters = machines.filter(m => m.id.toLowerCase().includes('sifter') || m.id.toLowerCase().includes('plansifter'));
+    const packers = machines.filter(m => m.id.toLowerCase().includes('pack') || m.id.toLowerCase().includes('line'));
+
+    const encodeZone = (zone: MachineData[], emoji: string): string => {
+        const running = zone.filter(m => m.status === 'running').length;
+        const warning = zone.filter(m => m.status === 'warning' || m.status === 'critical').length;
+        const avgLoad = zone.length > 0 ? zone.reduce((sum, m) => sum + m.metrics.load, 0) / zone.length : 0;
+
+        const loadEmoji = avgLoad < 50 ? LOAD_EMOJI.low :
+            avgLoad < 80 ? LOAD_EMOJI.medium :
+                avgLoad < 90 ? LOAD_EMOJI.high :
+                    LOAD_EMOJI.critical;
+
+        const alertEmoji = warning > 0 ? '⚠️' : '';
+
+        return `${emoji}${running}/${zone.length}${loadEmoji}${alertEmoji}`;
+    };
+
+    // Production flow format: Zone1 → Zone2 → Zone3 → Zone4
+    return [
+        encodeZone(silos, '🏛️'),
+        encodeZone(mills, '⚙️'),
+        encodeZone(sifters, '🔀'),
+        encodeZone(packers, '📦'),
+    ].join('→');
+}
+
+// ============================================
+// FACTORY CONTEXT ENCODING (Full Enneagram)
+// ============================================
+
+/**
+ * Time of Day Emoji (TIME dimension)
+ */
+const TIME_EMOJI = {
+    morning: '🌅',
+    afternoon: '☀️',
+    evening: '🌆',
+    night: '🌙',
+};
+
+/**
+ * Weather Emoji (ENVIRONMENT dimension)
+ */
+const WEATHER_EMOJI: Record<string, string> = {
+    'clear': '☀️',
+    'cloudy': '☁️',
+    'rain': '🌧️',
+    'storm': '⛈️',
+};
+
+/**
+ * Shift Status Emoji
+ */
+const SHIFT_EMOJI: Record<string, string> = {
+    'morning': '🌅',
+    'afternoon': '☀️',
+    'night': '🌙',
+};
+
+/**
+ * Encode complete factory context using VCL
+ * Returns a compact string that can be included in strategic prompts
+ */
+export function encodeFactoryContextVCL(
+    machines: MachineData[],
+    workers: WorkerData[],
+    currentShift: string,
+    weather: string,
+    gameTime: number,
+    shiftProgress: number,
+    alerts: { type: string }[]
+): string {
+    const timeEmoji = gameTime < 6 ? TIME_EMOJI.night :
+        gameTime < 12 ? TIME_EMOJI.morning :
+            gameTime < 18 ? TIME_EMOJI.afternoon :
+                gameTime < 22 ? TIME_EMOJI.evening :
+                    TIME_EMOJI.night;
+
+    const shiftEmoji = SHIFT_EMOJI[currentShift] || '⏰';
+    const weatherEmoji = WEATHER_EMOJI[weather] || '☀️';
+
+    const criticalAlerts = alerts.filter(a => a.type === 'critical' || a.type === 'safety').length;
+    const alertEmoji = criticalAlerts > 0 ? `🚨${criticalAlerts}` : '';
+
+    return `${timeEmoji}${shiftEmoji}${weatherEmoji}|${encodeMachinesVCL(machines)}|${encodeWorkersVCL(workers, shiftProgress)}${alertEmoji}`;
+}
+
+/**
+ * Generate a human-readable legend for VCL encoding
+ */
+export function getVCLLegend(): string {
+    return `## VCL Legend
+**Workers**: 👑Supervisor 🔧Engineer 👷Operator 🛠️Tech 🔬QC 🛡️Safety
+**Status**: ⚙️Working 💤Idle 🚶Walking 🚨Emergency
+**Fatigue**: 😊Fresh 😐Moderate 😴Tired 😵Exhausted
+**Machines**: 🏛️Silo ⚙️Mill 🔀Sifter 📦Packer
+**Load**: 🟢Low 🟡Med 🟠High 🔴Critical
+**Health**: ✅Running ⏸️Idle ⚠️Warning 🔧Maint`;
+}

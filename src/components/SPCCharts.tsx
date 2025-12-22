@@ -4,6 +4,10 @@
  *
  * Displays control charts with UCL/LCL/CL limits and Western Electric rules detection.
  * Monitors process metrics like temperature, vibration, production rate, and quality.
+ * 
+ * NOTE: Currently uses generateMockData for historical data visualization.
+ * Real-time machine metrics are available via useProductionStore().machines
+ * for future enhancement to show actual machine sensor data.
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -30,6 +34,7 @@ import {
   AlertOctagon,
 } from 'lucide-react';
 import { useUIStore } from '../stores/uiStore';
+import { useProductionStore } from '../stores/productionStore';
 
 // ============================================================================
 // Types & Interfaces
@@ -163,7 +168,8 @@ const calculateControlLimits = (values: number[]): ControlLimits => {
 };
 
 // ============================================================================
-// Mock Data Generator (replace with real SCADA data)
+// Deterministic Data Generator (uses time-based patterns instead of random)
+// NOTE: For production, replace with actual machine metric history from store
 // ============================================================================
 
 const generateMockData = (metricType: MetricType, hours = 24): SPCDataPoint[] => {
@@ -198,18 +204,26 @@ const generateMockData = (metricType: MetricType, hours = 24): SPCDataPoint[] =>
       break;
   }
 
-  // Generate values with occasional anomalies
+  // Generate values with DETERMINISTIC patterns (no Math.random)
+  // Uses sine waves and index-based variation for reproducible charts
   for (let i = 0; i < 50; i++) {
-    let value = baseValue + (Math.random() - 0.5) * noiseLevel * 2;
+    // Base oscillation using sine (creates natural-looking variation)
+    const sineVariation = Math.sin(i * 0.3) * noiseLevel * 0.8;
+    const cosineVariation = Math.cos(i * 0.5) * noiseLevel * 0.4;
 
-    // Inject occasional anomalies (10% chance)
-    if (Math.random() < 0.1) {
-      value += (Math.random() - 0.5) * noiseLevel * 6;
+    let value = baseValue + sineVariation + cosineVariation;
+
+    // Add deterministic "anomalies" at specific positions (every 7th and 11th point)
+    if (i % 7 === 0) {
+      value += noiseLevel * 1.5;
+    }
+    if (i % 11 === 0) {
+      value -= noiseLevel * 2;
     }
 
-    // Add trend in middle section
+    // Add trend in middle section (indices 20-30)
     if (i >= 20 && i <= 30) {
-      value += (i - 20) * (noiseLevel / 3);
+      value += (i - 20) * (noiseLevel / 4);
     }
 
     points.push(value);
@@ -513,9 +527,8 @@ export const SPCCharts: React.FC<SPCChartsProps> = ({ className = '', embedded =
                   <div className="flex items-end gap-2">
                     <button
                       onClick={() => setShowAnnotations(!_showAnnotations)}
-                      className={`flex-1 text-xs px-3 py-2 rounded transition-colors ${
-                        _showAnnotations ? 'bg-cyan-600 text-white' : 'bg-slate-700 text-slate-300'
-                      }`}
+                      className={`flex-1 text-xs px-3 py-2 rounded transition-colors ${_showAnnotations ? 'bg-cyan-600 text-white' : 'bg-slate-700 text-slate-300'
+                        }`}
                     >
                       Annotations
                     </button>
@@ -544,9 +557,8 @@ export const SPCCharts: React.FC<SPCChartsProps> = ({ className = '', embedded =
                   <div className="text-center">
                     <div className="text-xs text-slate-400 mb-1">Cpk</div>
                     <div
-                      className={`text-lg font-bold font-mono ${
-                        stats.processCapable ? 'text-green-400' : 'text-red-400'
-                      }`}
+                      className={`text-lg font-bold font-mono ${stats.processCapable ? 'text-green-400' : 'text-red-400'
+                        }`}
                     >
                       {stats.cpk}
                     </div>
@@ -694,11 +706,10 @@ export const SPCCharts: React.FC<SPCChartsProps> = ({ className = '', embedded =
                     {violations.map((violation, i) => (
                       <div
                         key={i}
-                        className={`flex items-start gap-3 p-3 rounded-lg ${
-                          violation.severity === 'critical'
-                            ? 'bg-red-500/10 border border-red-500/30'
-                            : 'bg-yellow-500/10 border border-yellow-500/30'
-                        }`}
+                        className={`flex items-start gap-3 p-3 rounded-lg ${violation.severity === 'critical'
+                          ? 'bg-red-500/10 border border-red-500/30'
+                          : 'bg-yellow-500/10 border border-yellow-500/30'
+                          }`}
                       >
                         {violation.severity === 'critical' ? (
                           <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5" />

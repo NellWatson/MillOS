@@ -155,6 +155,7 @@ interface GameSimulationStore {
   emergencyActive: boolean;
   emergencyMachineId: string | null;
   emergencyDrillMode: boolean;
+  preEmergencyMachineStatuses: Map<string, string>; // Stores machine statuses before emergency
   triggerEmergency: (machineId: string) => void;
   resolveEmergency: () => void;
   startEmergencyDrill: (totalWorkers: number) => void;
@@ -750,16 +751,55 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
       emergencyActive: false,
       emergencyMachineId: null,
       emergencyDrillMode: false,
+      preEmergencyMachineStatuses: new Map(),
 
-      triggerEmergency: (machineId) =>
-        set({ emergencyActive: true, emergencyMachineId: machineId }),
+      triggerEmergency: (machineId) => {
+        // Store current machine statuses and stop all machines
+        const productionStore = useProductionStore.getState();
+        const machines = productionStore.machines;
+        const preEmergencyStatuses = new Map<string, string>();
 
-      resolveEmergency: () =>
+        // Save current statuses before stopping
+        machines.forEach(m => {
+          preEmergencyStatuses.set(m.id, m.status);
+        });
+
+        // Set all running/warning machines to idle during emergency
+        machines.forEach(m => {
+          if (m.status === 'running' || m.status === 'warning') {
+            productionStore.updateMachineStatus(m.id, 'idle');
+          }
+        });
+
+        set({
+          emergencyActive: true,
+          emergencyMachineId: machineId,
+          preEmergencyMachineStatuses: preEmergencyStatuses,
+        });
+      },
+
+      resolveEmergency: () => {
+        const state = get();
+        const productionStore = useProductionStore.getState();
+
+        // Restore machine statuses from before emergency
+        state.preEmergencyMachineStatuses.forEach((status, machineId) => {
+          // Only restore if machine is currently idle (set by emergency stop)
+          const currentMachine = productionStore.machines.find(m => m.id === machineId);
+          if (currentMachine && currentMachine.status === 'idle') {
+            // Restore to original status (running, warning, etc.)
+            const validStatus = status as 'running' | 'idle' | 'warning' | 'critical';
+            productionStore.updateMachineStatus(machineId, validStatus);
+          }
+        });
+
         set({
           emergencyActive: false,
           emergencyMachineId: null,
           emergencyDrillMode: false,
-        }),
+          preEmergencyMachineStatuses: new Map(),
+        });
+      },
 
       // Fire drill with full evacuation
       drillMetrics: createDefaultDrillMetrics(),

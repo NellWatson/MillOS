@@ -4,6 +4,7 @@ import { useGraphicsStore } from '../stores/graphicsStore';
 import { useProductionStore } from '../stores/productionStore';
 import { useSafetyStore } from '../stores/safetyStore';
 import { useUIStore } from '../stores/uiStore';
+import { useAIConfigStore } from '../stores/aiConfigStore';
 import { audioManager } from '../utils/audioManager';
 import { useCameraStore, CAMERA_PRESETS } from '../components/CameraController';
 import { MachineData, WorkerData } from '../types';
@@ -221,6 +222,72 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         const currentHeatMap = useProductionStore.getState().showHeatMap;
         useProductionStore.getState().setShowHeatMap(!currentHeatMap);
         setQualityNotification(currentHeatMap ? 'HEATMAP OFF' : 'HEATMAP ON');
+        setTimeout(() => setQualityNotification(null), 1500);
+        return;
+      }
+
+      // K - Toggle AI cascade visualization (production flow stress lines)
+      if (key === 'k') {
+        e.preventDefault();
+        audioManager.playClick();
+        const current = useAIConfigStore.getState().showCascadeVisualization;
+        useAIConfigStore.getState().setShowCascadeVisualization(!current);
+        setQualityNotification(current ? 'CASCADE OFF' : 'CASCADE ON');
+        setTimeout(() => setQualityNotification(null), 1500);
+        return;
+      }
+
+      // J - Toggle strategic overlay (floating priority text)
+      if (key === 'j') {
+        e.preventDefault();
+        audioManager.playClick();
+        const current = useAIConfigStore.getState().showStrategicOverlay;
+        useAIConfigStore.getState().setShowStrategicOverlay(!current);
+        setQualityNotification(current ? 'STRATEGY OFF' : 'STRATEGY ON');
+        setTimeout(() => setQualityNotification(null), 1500);
+        return;
+      }
+
+      // T - Toggle production target widget
+      if (key === 't') {
+        e.preventDefault();
+        audioManager.playClick();
+        const current = useAIConfigStore.getState().showProductionTarget;
+        useAIConfigStore.getState().setShowProductionTarget(!current);
+        setQualityNotification(current ? 'TARGET OFF' : 'TARGET ON');
+        setTimeout(() => setQualityNotification(null), 1500);
+        return;
+      }
+
+      // U - Toggle energy dashboard (E reserved for camera up movement)
+      if (key === 'u') {
+        e.preventDefault();
+        audioManager.playClick();
+        const current = useAIConfigStore.getState().showEnergyDashboard;
+        useAIConfigStore.getState().setShowEnergyDashboard(!current);
+        setQualityNotification(current ? 'ENERGY OFF' : 'ENERGY ON');
+        setTimeout(() => setQualityNotification(null), 1500);
+        return;
+      }
+
+      // Y - Toggle multi-objective dashboard
+      if (key === 'y') {
+        e.preventDefault();
+        audioManager.playClick();
+        const current = useAIConfigStore.getState().showMultiObjective;
+        useAIConfigStore.getState().setShowMultiObjective(!current);
+        setQualityNotification(current ? 'OBJECTIVES OFF' : 'OBJECTIVES ON');
+        setTimeout(() => setQualityNotification(null), 1500);
+        return;
+      }
+
+      // $ (Shift+4) - Toggle cost estimation overlay
+      if (key === '$') {
+        e.preventDefault();
+        audioManager.playClick();
+        const current = useAIConfigStore.getState().showCostOverlay;
+        useAIConfigStore.getState().setShowCostOverlay(!current);
+        setQualityNotification(current ? 'COSTS OFF' : 'COSTS ON');
         setTimeout(() => setQualityNotification(null), 1500);
         return;
       }
