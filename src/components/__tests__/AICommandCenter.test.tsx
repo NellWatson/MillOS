@@ -53,6 +53,12 @@ vi.mock('../../stores/aiConfigStore', () => ({
       isGeminiConnected: false,
       getFormattedCost: () => '$0.00',
       costTracking: { requestCount: 0, sessionCost: 0 },
+      systemStatus: {
+        cpu: 45,
+        memory: 62,
+        decisions: 0,
+        successRate: 95,
+      },
     };
     if (selector) return selector(staticState);
     return staticState;
