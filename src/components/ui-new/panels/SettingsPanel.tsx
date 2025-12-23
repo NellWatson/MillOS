@@ -9,11 +9,9 @@ import {
   Activity,
   RotateCcw,
   Grid3X3,
-  History,
 } from 'lucide-react';
 import { useGraphicsStore, GraphicsQuality } from '../../../stores/graphicsStore';
 import { useGameSimulationStore } from '../../../stores/gameSimulationStore';
-import { useHistoricalPlaybackStore } from '../../../stores/historicalPlaybackStore';
 // Import optimized audio hook (uses useSyncExternalStore instead of forceUpdate)
 import { useAudioStateWithControls as useAudioState } from '../../../hooks/useAudioState';
 

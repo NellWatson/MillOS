@@ -4,7 +4,6 @@ import * as THREE from 'three';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { audioManager } from '../utils/audioManager';
 import { shouldRunThisFrame } from '../utils/frameThrottle';
-import { playCritterSound } from '../utils/critterAudio';
 
 // ==========================================
 // CENTRALIZED ANIMATION MANAGER

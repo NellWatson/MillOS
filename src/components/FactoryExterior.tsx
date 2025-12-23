@@ -85,7 +85,7 @@ const SmallOffice: React.FC<{
   <group position={position} rotation={[0, rotation, 0]}>
     {/* Main building */}
     <mesh position={[0, size[1] / 2, 0]} castShadow receiveShadow>
-      <boxGeometry args={size} />
+      <boxGeometry args={[size[0], size[1], size[2]]} />
       <meshStandardMaterial color="#78909c" roughness={0.7} />
     </mesh>
     {/* Roof */}
@@ -867,7 +867,6 @@ const FenceSection: React.FC<{
   const meshRef = useRef<THREE.InstancedMesh>(null);
 
   // Memoize post positions
-  /* eslint-disable-next-line react-hooks/exhaustive-deps */
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
   useEffect(() => {
