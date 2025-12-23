@@ -15,6 +15,7 @@ import { encodeFactoryContextVCL } from '../../utils/vclEncoder';
 
 export const VCLDiffPanel: React.FC = () => {
     const showVCLDebug = useAIConfigStore((state) => state.showVCLDebug);
+    const aiMode = useAIConfigStore((state) => state.aiMode);
     const [previousVCL, setPreviousVCL] = useState<string>('');
     const [currentVCL, setCurrentVCL] = useState<string>('');
     const [copied, setCopied] = useState(false);
@@ -86,7 +87,8 @@ export const VCLDiffPanel: React.FC = () => {
         return { added, removed };
     };
 
-    if (!showVCLDebug) return null;
+    // VCP only relevant when using Gemini AI (not in pure heuristic mode)
+    if (!showVCLDebug || aiMode === 'heuristic') return null;
 
     const diff = getDiffHighlights();
     const hasChanges = diff.added.length > 0 || diff.removed.length > 0;

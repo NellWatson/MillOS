@@ -41,6 +41,7 @@ Active Alerts: None`;
 
 export const VCLDebugPanel: React.FC = () => {
     const showVCLDebug = useAIConfigStore((state) => state.showVCLDebug);
+    const aiMode = useAIConfigStore((state) => state.aiMode);
     const [expanded, setExpanded] = useState(false);
     const [copied, setCopied] = useState(false);
     const [showComparison, setShowComparison] = useState(true);
@@ -89,7 +90,8 @@ export const VCLDebugPanel: React.FC = () => {
         setTimeout(() => setCopied(false), 2000);
     };
 
-    if (!showVCLDebug) return null;
+    // VCP only relevant when using Gemini AI (not in pure heuristic mode)
+    if (!showVCLDebug || aiMode === 'heuristic') return null;
 
     return (
         <div className="bg-gradient-to-br from-slate-900 via-purple-950/50 to-slate-900 rounded-xl border-2 border-cyan-400/40 overflow-hidden shadow-2xl shadow-cyan-500/10">
