@@ -159,7 +159,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     enableMachineColorVariation: true, // Enable color variation on medium+
     enableMachineLOD: true,
     machineLodDistance: 50,
-    resolutionScale: 0.75, // 75% resolution for balance
+    resolutionScale: 0.65, // 65% resolution - good balance of quality and performance
   },
   high: {
     quality: 'high',
