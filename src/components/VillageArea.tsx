@@ -1238,7 +1238,7 @@ const Forge = React.memo<{ position: [number, number, number]; rotation?: number
                 color="#fef3c7"
                 anchorX="center"
                 anchorY="middle"
-                font="/fonts/MedievalSharp.ttf"
+                font={FONT_URL}
             >
                 BLACKSMITH
             </Text>

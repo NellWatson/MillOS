@@ -1,64 +1,62 @@
 /**
- * MillOS Service Worker
+ * MillOS Service Worker v2
  *
  * Provides offline caching for faster loads and offline support.
- * Uses cache-first for static assets, network-first for API calls.
  *
  * Cache Strategy:
  * - Static assets (JS, CSS, fonts, images): Cache-first with network fallback
  * - Audio files: Cache-first (large files benefit most from caching)
- * - 3D models (GLB, GLTF): Cache-first
+ * - 3D models (GLB, GLTF, KTX2): Cache-first
  * - HDRI files: Cache-first
  * - API calls: Network-first with cache fallback
  * - HTML: Network-first (always get latest)
+ *
+ * Important: Only HTTP 200 responses are cached. Partial responses (206) from
+ * range requests (common for audio/video seeking) cannot be stored in the Cache API.
+ * This is by design - full resources are cached on initial load, and subsequent
+ * range requests work normally but don't update the cache.
  */
 
-const CACHE_NAME = 'millos-v1';
-const STATIC_CACHE = 'millos-static-v1';
-const AUDIO_CACHE = 'millos-audio-v1';
-const MODEL_CACHE = 'millos-models-v1';
+// Cache version - bump this to invalidate all caches on deploy
+const CACHE_VERSION = 'v2';
+const STATIC_CACHE = `millos-static-${CACHE_VERSION}`;
+const AUDIO_CACHE = `millos-audio-${CACHE_VERSION}`;
+const MODEL_CACHE = `millos-models-${CACHE_VERSION}`;
 
-// Assets to precache on install
+// Assets to precache on install - critical for offline functionality
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
   '/hdri/warehouse.hdr',
+  '/fonts/MedievalSharp.ttf', // Village 3D text font
 ];
 
-// File extensions to cache with cache-first strategy
-const CACHE_FIRST_EXTENSIONS = [
-  '.js',
-  '.css',
-  '.woff',
-  '.woff2',
-  '.ttf',
-  '.otf',
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.svg',
-  '.webp',
-  '.ico',
-];
+// File extensions by caching strategy
+const CACHE_FIRST_EXTENSIONS = new Set([
+  '.js', '.css',
+  '.woff', '.woff2', '.ttf', '.otf',
+  '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico',
+]);
 
-// Large assets that should be cached aggressively
-const AUDIO_EXTENSIONS = ['.mp3', '.ogg', '.wav', '.m4a'];
-const MODEL_EXTENSIONS = ['.glb', '.gltf', '.bin', '.hdr', '.ktx2'];
+const AUDIO_EXTENSIONS = new Set(['.mp3', '.ogg', '.wav', '.m4a']);
+const MODEL_EXTENSIONS = new Set(['.glb', '.gltf', '.bin', '.hdr', '.ktx2']);
 
 /**
- * Get the appropriate cache name for a URL
+ * Get file extension from URL pathname
+ */
+function getExtension(url) {
+  const pathname = new URL(url).pathname;
+  const lastDot = pathname.lastIndexOf('.');
+  return lastDot !== -1 ? pathname.substring(lastDot) : '';
+}
+
+/**
+ * Get the appropriate cache name for a URL based on file type
  */
 function getCacheName(url) {
-  const pathname = new URL(url).pathname;
-  const ext = pathname.substring(pathname.lastIndexOf('.'));
-
-  if (AUDIO_EXTENSIONS.includes(ext)) {
-    return AUDIO_CACHE;
-  }
-  if (MODEL_EXTENSIONS.includes(ext)) {
-    return MODEL_CACHE;
-  }
+  const ext = getExtension(url);
+  if (AUDIO_EXTENSIONS.has(ext)) return AUDIO_CACHE;
+  if (MODEL_EXTENSIONS.has(ext)) return MODEL_CACHE;
   return STATIC_CACHE;
 }
 
@@ -66,14 +64,19 @@ function getCacheName(url) {
  * Determine if URL should use cache-first strategy
  */
 function shouldCacheFirst(url) {
-  const pathname = new URL(url).pathname;
-  const ext = pathname.substring(pathname.lastIndexOf('.'));
+  const ext = getExtension(url);
+  return CACHE_FIRST_EXTENSIONS.has(ext) ||
+         AUDIO_EXTENSIONS.has(ext) ||
+         MODEL_EXTENSIONS.has(ext);
+}
 
-  return (
-    CACHE_FIRST_EXTENSIONS.includes(ext) ||
-    AUDIO_EXTENSIONS.includes(ext) ||
-    MODEL_EXTENSIONS.includes(ext)
-  );
+/**
+ * Check if a response is cacheable
+ * Only cache complete (200) responses - partial (206) responses from range
+ * requests are not supported by the Cache API
+ */
+function isCacheable(response) {
+  return response.status === 200;
 }
 
 /**
@@ -84,14 +87,15 @@ self.addEventListener('install', (event) => {
 
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => {
-      console.log('[SW] Precaching essential assets');
+      console.log('[SW] Precaching essential assets:', PRECACHE_ASSETS);
       return cache.addAll(PRECACHE_ASSETS).catch((err) => {
+        // Log but don't fail - some assets may be unavailable during dev
         console.warn('[SW] Some assets failed to precache:', err);
       });
     })
   );
 
-  // Immediately take control
+  // Immediately take control (don't wait for old SW to stop)
   self.skipWaiting();
 });
 
@@ -101,17 +105,13 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   console.log('[SW] Activating service worker...');
 
+  const currentCaches = [STATIC_CACHE, AUDIO_CACHE, MODEL_CACHE];
+
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames
-          .filter((name) => {
-            // Delete old cache versions
-            return (
-              name.startsWith('millos-') &&
-              ![CACHE_NAME, STATIC_CACHE, AUDIO_CACHE, MODEL_CACHE].includes(name)
-            );
-          })
+          .filter((name) => name.startsWith('millos-') && !currentCaches.includes(name))
           .map((name) => {
             console.log('[SW] Deleting old cache:', name);
             return caches.delete(name);
@@ -125,163 +125,141 @@ self.addEventListener('activate', (event) => {
 });
 
 /**
- * Fetch event - handle caching strategies
+ * Fetch event - route requests to appropriate caching strategy
  */
 self.addEventListener('fetch', (event) => {
-  const url = event.request.url;
+  const { request } = event;
+  const url = request.url;
 
-  // Skip non-GET requests
-  if (event.request.method !== 'GET') {
-    return;
-  }
+  // Skip non-GET requests (POST, PUT, DELETE, etc.)
+  if (request.method !== 'GET') return;
 
-  // Skip cross-origin requests (except for CDN resources we want to cache)
+  // Skip cross-origin requests (except allowlisted CDNs)
   const requestUrl = new URL(url);
   if (requestUrl.origin !== self.location.origin) {
-    // Allow caching of DRACO decoder from CDN
-    if (!url.includes('gstatic.com/draco')) {
-      return;
-    }
+    // Allow DRACO decoder from Google CDN
+    if (!url.includes('gstatic.com/draco')) return;
   }
 
-  // Skip service worker and hot reload requests in development
-  if (url.includes('sw.js') || url.includes('__vite') || url.includes('/@')) {
-    return;
-  }
+  // Skip development/tooling requests
+  if (url.includes('sw.js') || url.includes('__vite') || url.includes('/@')) return;
 
-  // Determine caching strategy
+  // Route to appropriate strategy
   if (shouldCacheFirst(url)) {
-    // Cache-first strategy for static assets
-    event.respondWith(cacheFirst(event.request));
+    event.respondWith(cacheFirst(request));
   } else {
-    // Network-first strategy for HTML and API calls
-    event.respondWith(networkFirst(event.request));
+    event.respondWith(networkFirst(request));
   }
 });
 
 /**
- * Cache-first strategy: Try cache, fall back to network
+ * Cache-first strategy: Serve from cache, fall back to network
+ * Best for static assets that rarely change
  */
 async function cacheFirst(request) {
   const cacheName = getCacheName(request.url);
 
   try {
+    // Check cache first
     const cachedResponse = await caches.match(request);
     if (cachedResponse) {
-      // Return cached response immediately
-      // Optionally update cache in background (stale-while-revalidate)
       return cachedResponse;
     }
 
-    // Not in cache, fetch from network
+    // Not in cache - fetch from network
     const networkResponse = await fetch(request);
 
-    // Cache successful responses
-    if (networkResponse.ok) {
+    // Cache if it's a complete response (not partial/206)
+    if (isCacheable(networkResponse)) {
       const cache = await caches.open(cacheName);
+      // Don't await - cache in background
       cache.put(request, networkResponse.clone());
     }
 
     return networkResponse;
   } catch (error) {
-    console.warn('[SW] Cache-first failed for:', request.url, error);
+    console.warn('[SW] Cache-first failed:', request.url, error.message);
 
-    // Try to return stale cache as last resort
+    // Try stale cache as last resort
     const staleResponse = await caches.match(request);
     if (staleResponse) {
+      console.log('[SW] Serving stale cache for:', request.url);
       return staleResponse;
     }
 
-    // Return a fallback response
-    return new Response('Offline', {
-      status: 503,
-      statusText: 'Service Unavailable',
-    });
+    return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
   }
 }
 
 /**
- * Network-first strategy: Try network, fall back to cache
+ * Network-first strategy: Fetch from network, fall back to cache
+ * Best for HTML and dynamic content
  */
 async function networkFirst(request) {
   try {
     const networkResponse = await fetch(request);
 
-    // Cache successful GET responses
-    if (networkResponse.ok) {
+    // Cache complete responses for offline fallback
+    if (isCacheable(networkResponse)) {
       const cache = await caches.open(STATIC_CACHE);
       cache.put(request, networkResponse.clone());
     }
 
     return networkResponse;
   } catch (error) {
-    console.warn('[SW] Network-first falling back to cache for:', request.url);
+    console.warn('[SW] Network-first falling back to cache:', request.url);
 
-    // Network failed, try cache
     const cachedResponse = await caches.match(request);
     if (cachedResponse) {
       return cachedResponse;
     }
 
-    // No cache either, return offline page for navigation requests
+    // For navigation, return cached index.html (SPA fallback)
     if (request.mode === 'navigate') {
-      return caches.match('/index.html');
+      const indexResponse = await caches.match('/index.html');
+      if (indexResponse) return indexResponse;
     }
 
-    return new Response('Offline', {
-      status: 503,
-      statusText: 'Service Unavailable',
-    });
+    return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
   }
 }
 
 /**
- * Message event - handle cache management commands
+ * Message handler - cache management commands from main thread
  */
 self.addEventListener('message', (event) => {
-  if (event.data.type === 'CLEAR_CACHE') {
+  const { type } = event.data;
+
+  if (type === 'CLEAR_CACHE') {
     event.waitUntil(
-      caches.keys().then((cacheNames) => {
-        return Promise.all(
-          cacheNames.map((name) => {
-            if (name.startsWith('millos-')) {
-              console.log('[SW] Clearing cache:', name);
-              return caches.delete(name);
-            }
-          })
-        );
-      }).then(() => {
-        event.ports[0]?.postMessage({ success: true });
-      })
+      caches.keys()
+        .then((names) => Promise.all(
+          names.filter((n) => n.startsWith('millos-')).map((n) => caches.delete(n))
+        ))
+        .then(() => event.ports[0]?.postMessage({ success: true }))
     );
   }
 
-  if (event.data.type === 'GET_CACHE_SIZE') {
-    event.waitUntil(
-      getCacheSize().then((sizes) => {
-        event.ports[0]?.postMessage(sizes);
-      })
-    );
+  if (type === 'GET_CACHE_SIZE') {
+    event.waitUntil(getCacheStats().then((stats) => event.ports[0]?.postMessage(stats)));
   }
 });
 
 /**
- * Calculate cache sizes for debugging
+ * Get cache statistics for debugging
  */
-async function getCacheSize() {
-  const cacheNames = await caches.keys();
-  const sizes = {};
+async function getCacheStats() {
+  const stats = {};
+  const names = await caches.keys();
 
-  for (const name of cacheNames) {
-    if (name.startsWith('millos-')) {
-      const cache = await caches.open(name);
-      const requests = await cache.keys();
-      sizes[name] = {
-        entries: requests.length,
-        urls: requests.map((r) => r.url),
-      };
-    }
+  for (const name of names.filter((n) => n.startsWith('millos-'))) {
+    const cache = await caches.open(name);
+    const requests = await cache.keys();
+    stats[name] = {
+      entries: requests.length,
+      urls: requests.map((r) => new URL(r.url).pathname),
+    };
   }
 
-  return sizes;
+  return stats;
 }
