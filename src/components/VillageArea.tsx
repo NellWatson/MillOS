@@ -37,8 +37,8 @@ const COLORS = {
     water: '#3b82f6',
 };
 
-// Font URL constant for easy swapping/updates
-const FONT_URL = '/fonts/MedievalSharp.ttf';
+// Font URL - uses Vite's BASE_URL for correct path at any deployment location
+const FONT_URL = `${import.meta.env.BASE_URL}fonts/MedievalSharp.ttf`;
 
 // Shared materials
 const SM = {

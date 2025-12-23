@@ -24,11 +24,12 @@ const AUDIO_CACHE = `millos-audio-${CACHE_VERSION}`;
 const MODEL_CACHE = `millos-models-${CACHE_VERSION}`;
 
 // Assets to precache on install - critical for offline functionality
+// Use relative paths (./) so they work at any base URL (/, /v0.20/, etc.)
 const PRECACHE_ASSETS = [
-  '/',
-  '/index.html',
-  '/hdri/warehouse.hdr',
-  '/fonts/MedievalSharp.ttf', // Village 3D text font
+  './',
+  './index.html',
+  './hdri/warehouse.hdr',
+  './fonts/MedievalSharp.ttf', // Village 3D text font
 ];
 
 // File extensions by caching strategy
