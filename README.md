@@ -593,10 +593,11 @@ A custom **PositionRegistry** singleton enables inter-entity awareness:
 
 ### Planned
 
-- [ ] Integration with real SCADA historians (OSIsoft PI, Wonderware)
+_No major features currently planned._
 
 ### Recently Completed
 
+- [x] Integration with real SCADA historians (OSIsoft PI, Wonderware)
 - [x] Strategic priority influence on tactical scoring
 - [x] Historical playback and time-travel debugging (Quick Actions UI)
 

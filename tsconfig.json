@@ -2,7 +2,8 @@
   "exclude": [
     "node_modules",
     "dist",
-    "src/0.10 Archive"
+    "src/0.10 Archive",
+    "scada-proxy"
   ],
   "compilerOptions": {
     "target": "ES2022",
