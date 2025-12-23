@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import {
   Activity,
   Package,
@@ -10,12 +11,118 @@ import {
   Pause,
   Play,
   FastForward,
+  Trophy,
+  History,
+  Map,
+  Image,
+  Download,
 } from 'lucide-react';
 import { useProductionStore } from '../../../stores/productionStore';
 import { useGameSimulationStore } from '../../../stores/gameSimulationStore';
 import { useSafetyStore } from '../../../stores/safetyStore';
+import { useUIStore } from '../../../stores/uiStore';
+import { useHistoricalPlaybackStore } from '../../../stores/historicalPlaybackStore';
+import { useShallow } from 'zustand/react/shallow';
+import { AchievementsPanel, WorkerLeaderboard } from '../../GameFeatures';
+import { TimelinePlayback } from '../../ui/TimelinePlayback';
 
-export const OverviewPanel: React.FC = () => {
+// Isolated Clock component to prevent full panel re-renders
+const GameClock: React.FC = React.memo(() => {
+  const gameTime = useGameSimulationStore((state) => state.gameTime);
+  const gameSpeed = useGameSimulationStore((state) => state.gameSpeed);
+
+  const formatGameTime = (time: number) => {
+    const hours = Math.floor(time);
+    const minutes = Math.floor((time % 1) * 60);
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+  };
+
+  return (
+    <div className="text-right">
+      <div className="text-xl font-mono font-bold text-white">{formatGameTime(gameTime)}</div>
+      <div
+        className={`text-[10px] font-bold ${gameSpeed === 0 ? 'text-red-400' : 'text-green-400'}`}
+      >
+        {gameSpeed === 0
+          ? 'PAUSED'
+          : gameSpeed === 180
+            ? '1x'
+            : gameSpeed === 1800
+              ? '10x'
+              : '60x'}
+      </div>
+    </div>
+  );
+});
+
+// Isolated Speed Controls
+const GameSpeedControls: React.FC = React.memo(() => {
+  const gameSpeed = useGameSimulationStore((state) => state.gameSpeed);
+  const setGameSpeed = useGameSimulationStore((state) => state.setGameSpeed);
+
+  return (
+    <div className="flex gap-1">
+      <button
+        onClick={() => setGameSpeed(0)}
+        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${gameSpeed === 0
+          ? 'bg-orange-600 text-white'
+          : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+          }`}
+        title="Pause"
+      >
+        <Pause className="w-3.5 h-3.5" />
+      </button>
+      <button
+        onClick={() => setGameSpeed(180)}
+        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${gameSpeed === 180
+          ? 'bg-orange-600 text-white'
+          : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+          }`}
+        title="Normal (1x - 24hrs in 8min)"
+      >
+        <Play className="w-3.5 h-3.5" />
+        1x
+      </button>
+      <button
+        onClick={() => setGameSpeed(1800)}
+        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${gameSpeed === 1800
+          ? 'bg-orange-600 text-white'
+          : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+          }`}
+        title="Fast (10x)"
+      >
+        <FastForward className="w-3.5 h-3.5" />
+        10x
+      </button>
+      <button
+        onClick={() => setGameSpeed(10800)}
+        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${gameSpeed === 10800
+          ? 'bg-orange-600 text-white'
+          : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+          }`}
+        title="Ultra (60x)"
+      >
+        <FastForward className="w-3.5 h-3.5" />
+        60x
+      </button>
+    </div>
+  );
+});
+
+// Isolated Shift Display
+const ShiftDisplay: React.FC = React.memo(() => {
+  const currentShift = useGameSimulationStore((state) => state.currentShift);
+
+  return (
+    <div>
+      <div className="text-[10px] text-slate-500 uppercase tracking-wider">Current Shift</div>
+      <div className="text-sm font-bold text-white capitalize">{currentShift}</div>
+    </div>
+  );
+});
+
+// Optimized OverviewPanel - No longer subscribes to high-frequency gameTime
+export const OverviewPanel: React.FC = React.memo(() => {
   const metrics = useProductionStore((state) => state.metrics);
   const totalBagsProduced = useProductionStore((state) => state.totalBagsProduced);
   const productionTarget = useProductionStore((state) => state.productionTarget);
@@ -24,10 +131,7 @@ export const OverviewPanel: React.FC = () => {
   const dockStatus = useProductionStore((state) => state.dockStatus);
 
   const weather = useGameSimulationStore((state) => state.weather);
-  const currentShift = useGameSimulationStore((state) => state.currentShift);
-  const gameTime = useGameSimulationStore((state) => state.gameTime);
-  const gameSpeed = useGameSimulationStore((state) => state.gameSpeed);
-  const setGameSpeed = useGameSimulationStore((state) => state.setGameSpeed);
+  // Removed direct gameTime/gameSpeed/currentShift subscriptions from main panel!
 
   const safetyMetrics = useSafetyStore((state) => state.safetyMetrics);
 
@@ -45,18 +149,11 @@ export const OverviewPanel: React.FC = () => {
     Math.min(
       100,
       100 -
-        (safetyMetrics?.nearMisses ?? 0) * 5 -
-        (safetyMetrics?.safetyStops ?? 0) * 2 -
-        (safetyMetrics?.workerEvasions ?? 0)
+      (safetyMetrics?.nearMisses ?? 0) * 5 -
+      (safetyMetrics?.safetyStops ?? 0) * 2 -
+      (safetyMetrics?.workerEvasions ?? 0)
     )
   );
-
-  // Format time
-  const formatGameTime = (time: number) => {
-    const hours = Math.floor(time);
-    const minutes = Math.floor((time % 1) * 60);
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-  };
 
   // Progress to target
   const targetProgress = productionTarget
@@ -115,9 +212,8 @@ export const OverviewPanel: React.FC = () => {
           </div>
           <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
             <div
-              className={`h-full transition-all duration-500 ${
-                targetProgress >= 100 ? 'bg-green-500' : 'bg-cyan-500'
-              }`}
+              className={`h-full transition-all duration-500 ${targetProgress >= 100 ? 'bg-green-500' : 'bg-cyan-500'
+                }`}
               style={{ width: `${targetProgress}%` }}
             />
           </div>
@@ -144,75 +240,10 @@ export const OverviewPanel: React.FC = () => {
       {/* Shift & Time Control */}
       <section className="bg-slate-800/50 border border-white/5 rounded-xl p-3">
         <div className="flex items-center justify-between mb-2">
-          <div>
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider">Current Shift</div>
-            <div className="text-sm font-bold text-white capitalize">{currentShift}</div>
-          </div>
-          <div className="text-right">
-            <div className="text-xl font-mono font-bold text-white">{formatGameTime(gameTime)}</div>
-            <div
-              className={`text-[10px] font-bold ${gameSpeed === 0 ? 'text-red-400' : 'text-green-400'}`}
-            >
-              {gameSpeed === 0
-                ? 'PAUSED'
-                : gameSpeed === 180
-                  ? '1x'
-                  : gameSpeed === 1800
-                    ? '10x'
-                    : '60x'}
-            </div>
-          </div>
+          <ShiftDisplay />
+          <GameClock />
         </div>
-        {/* Fast Forward Buttons */}
-        <div className="flex gap-1">
-          <button
-            onClick={() => setGameSpeed(0)}
-            className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
-              gameSpeed === 0
-                ? 'bg-orange-600 text-white'
-                : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-            }`}
-            title="Pause"
-          >
-            <Pause className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => setGameSpeed(180)}
-            className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
-              gameSpeed === 180
-                ? 'bg-orange-600 text-white'
-                : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-            }`}
-            title="Normal (1x - 24hrs in 8min)"
-          >
-            <Play className="w-3.5 h-3.5" />
-            1x
-          </button>
-          <button
-            onClick={() => setGameSpeed(1800)}
-            className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
-              gameSpeed === 1800
-                ? 'bg-orange-600 text-white'
-                : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-            }`}
-            title="Fast (10x)"
-          >
-            <FastForward className="w-3.5 h-3.5" />
-            10x
-          </button>
-          <button
-            onClick={() => setGameSpeed(10800)}
-            className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
-              gameSpeed === 10800
-                ? 'bg-orange-600 text-white'
-                : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-            }`}
-            title="Ultra (60x)"
-          >
-            <FastForward className="w-3.5 h-3.5" />
-            60x
-          </button>
-        </div>
+        <GameSpeedControls />
       </section>
 
       {/* Weather & Workers */}
@@ -300,9 +331,12 @@ export const OverviewPanel: React.FC = () => {
           {totalBagsProduced.toLocaleString()}
         </div>
       </div>
+
+      {/* Quick Actions */}
+      <QuickActionsSection />
     </div>
   );
-};
+});
 
 // Sub-components
 const StatCard: React.FC<{
@@ -378,5 +412,158 @@ const DockCard: React.FC<{ label: string; status: string; eta: number }> = ({
         <div className="text-[10px] text-slate-500">ETA: {eta} min</div>
       )}
     </div>
+  );
+};
+
+// Quick Actions Section with Gamification Controls
+const QuickActionsSection: React.FC = () => {
+  const [showAchievements, setShowAchievements] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const achievements = useProductionStore((state) => state.achievements);
+  const { showMiniMap, setShowMiniMap } = useUIStore(
+    useShallow((state) => ({
+      showMiniMap: state.showMiniMap,
+      setShowMiniMap: state.setShowMiniMap,
+    }))
+  );
+  const isReplaying = useHistoricalPlaybackStore((state) => state.isReplaying);
+
+  const unlockedCount = achievements.filter((a) => a.unlockedAt).length;
+
+  const handleScreenshot = useCallback(() => {
+    const canvas = document.querySelector('canvas');
+    if (canvas) {
+      const link = document.createElement('a');
+      link.download = `millos-${new Date().toISOString().split('T')[0]}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    }
+  }, []);
+
+  const handleExport = useCallback(() => {
+    const store = useProductionStore.getState();
+    const report = {
+      timestamp: new Date().toISOString(),
+      metrics: store.metrics,
+      productionTarget: store.productionTarget,
+      totalBagsProduced: store.totalBagsProduced,
+      achievements: store.achievements.filter((a) => a.unlockedAt),
+    };
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.download = `millos-report-${new Date().toISOString().split('T')[0]}.json`;
+    link.href = URL.createObjectURL(blob);
+    link.click();
+  }, []);
+
+  const handleToggleReplay = useCallback(() => {
+    const playbackStore = useHistoricalPlaybackStore.getState();
+    if (playbackStore.isReplaying) {
+      playbackStore.exitReplayMode();
+    } else {
+      playbackStore.enterReplayMode();
+    }
+  }, []);
+
+  return (
+    <>
+      <section>
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+          <Activity size={14} className="text-purple-400" />
+          Quick Actions
+        </h3>
+        <div className="grid grid-cols-2 gap-2">
+          {/* Achievements */}
+          <button
+            onClick={() => setShowAchievements(!showAchievements)}
+            className={`py-2.5 px-3 rounded-lg flex items-center gap-2 transition-colors relative ${showAchievements
+                ? 'bg-yellow-600 text-white'
+                : 'bg-slate-700/80 text-slate-300 hover:bg-slate-600'
+              }`}
+            title="Achievements"
+          >
+            <Trophy size={16} className={showAchievements ? 'text-white' : 'text-yellow-400'} />
+            <span className="text-xs font-medium">Achievements</span>
+            {unlockedCount > 0 && (
+              <span className="ml-auto w-5 h-5 bg-yellow-500 text-black text-[10px] font-bold rounded-full flex items-center justify-center">
+                {unlockedCount}
+              </span>
+            )}
+          </button>
+
+          {/* Leaderboard */}
+          <button
+            onClick={() => setShowLeaderboard(!showLeaderboard)}
+            className={`py-2.5 px-3 rounded-lg flex items-center gap-2 transition-colors ${showLeaderboard
+                ? 'bg-cyan-600 text-white'
+                : 'bg-slate-700/80 text-slate-300 hover:bg-slate-600'
+              }`}
+            title="Leaderboard"
+          >
+            <TrendingUp size={16} className={showLeaderboard ? 'text-white' : 'text-cyan-400'} />
+            <span className="text-xs font-medium">Leaderboard</span>
+          </button>
+
+          {/* Replay History */}
+          <button
+            onClick={handleToggleReplay}
+            className={`py-2.5 px-3 rounded-lg flex items-center gap-2 transition-colors ${isReplaying
+                ? 'bg-red-600 text-white'
+                : 'bg-slate-700/80 text-slate-300 hover:bg-slate-600'
+              }`}
+            title="Replay History"
+          >
+            <History size={16} className={isReplaying ? 'text-white' : 'text-red-400'} />
+            <span className="text-xs font-medium">Replay</span>
+          </button>
+
+          {/* GPS Map */}
+          <button
+            onClick={() => setShowMiniMap(!showMiniMap)}
+            className={`py-2.5 px-3 rounded-lg flex items-center gap-2 transition-colors ${showMiniMap
+                ? 'bg-green-600 text-white'
+                : 'bg-slate-700/80 text-slate-300 hover:bg-slate-600'
+              }`}
+            title="GPS Map"
+          >
+            <Map size={16} className={showMiniMap ? 'text-white' : 'text-green-400'} />
+            <span className="text-xs font-medium">GPS Map</span>
+          </button>
+        </div>
+
+        {/* Screenshot/Export row */}
+        <div className="flex gap-2 mt-2">
+          <button
+            onClick={handleScreenshot}
+            className="flex-1 h-8 rounded-lg flex items-center justify-center gap-1.5 text-xs bg-slate-700/60 text-slate-400 hover:bg-slate-600 hover:text-white transition-colors"
+            title="Screenshot"
+          >
+            <Image size={12} />
+            Screenshot
+          </button>
+          <button
+            onClick={handleExport}
+            className="flex-1 h-8 rounded-lg flex items-center justify-center gap-1.5 text-xs bg-slate-700/60 text-slate-400 hover:bg-slate-600 hover:text-white transition-colors"
+            title="Export Report"
+          >
+            <Download size={12} />
+            Export
+          </button>
+        </div>
+      </section>
+
+      {/* Timeline Playback - shows when replaying */}
+      {isReplaying && (
+        <section className="mt-4">
+          <TimelinePlayback className="w-full" />
+        </section>
+      )}
+
+      {/* Panels */}
+      <AnimatePresence>
+        {showAchievements && <AchievementsPanel onClose={() => setShowAchievements(false)} />}
+        {showLeaderboard && <WorkerLeaderboard onClose={() => setShowLeaderboard(false)} />}
+      </AnimatePresence>
+    </>
   );
 };

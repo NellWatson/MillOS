@@ -30,6 +30,7 @@ import { useAIConfigStore } from '../stores/aiConfigStore';
 import { geminiClient } from './geminiClient';
 import { encodeFactoryContextVCL, getVCLLegend } from './vclEncoder';
 import { logger } from './logger';
+import { useHistoricalPlaybackStore } from '../stores/historicalPlaybackStore';
 
 // Types & Interfaces
 
@@ -234,6 +235,9 @@ function recordDecision(decision: AIDecision): void {
   // Issue 1 Fix: Automatically add decision to store to prevent loss before applyDecisionEffects
   // Decisions are now immediately persisted, eliminating the risk of loss during array trimming
   useProductionStore.getState().addAIDecision(decision);
+
+  // Log for replay system
+  useHistoricalPlaybackStore.getState().logDecision(decision);
 }
 
 function hasRecentDecision(
@@ -1470,19 +1474,27 @@ function findBestWorkerForTask(
   // Consider average energy as proxy for fatigue
   const energyFactor = context.workerSatisfaction.averageEnergy / 100;
 
-  // === STRATEGIC PRIORITY INFLUENCE ===
-  // Get strategic priorities and focus machine from Gemini
-  const strategicState = useAIConfigStore.getState().strategic;
-  const strategicPriorities = strategicState.priorities;
+  // === STRATEGIC PRIORITY INFLUENCE (Enhanced) ===
+  // Get structured strategic weight for this machine from the store
+  const strategicWeight = nearMachineId
+    ? useAIConfigStore.getState().getActiveWeight(nearMachineId)
+    : 0;
 
-  // Check if this task's machine is strategically important
-  const isStrategicFocusMachine = nearMachineId &&
-    strategicPriorities.some(p =>
-      p.toLowerCase().includes(nearMachineId.toLowerCase()) ||
-      (nearMachineId.toLowerCase().includes('silo') && p.toLowerCase().includes('silo')) ||
-      (nearMachineId.toLowerCase().includes('rm-') && p.toLowerCase().includes('mill')) ||
-      (nearMachineId.toLowerCase().includes('pack') && p.toLowerCase().includes('pack'))
-    );
+  // Clean up expired priorities periodically (every worker selection call)
+  useAIConfigStore.getState().removeExpiredPriorities();
+
+  // Also check legacy string priorities for backward compatibility
+  const strategicState = useAIConfigStore.getState().strategic;
+  const legacyPriorities = strategicState.legacyPriorities || [];
+  const hasLegacyMatch = nearMachineId && legacyPriorities.some(p =>
+    p.toLowerCase().includes(nearMachineId.toLowerCase()) ||
+    (nearMachineId.toLowerCase().includes('silo') && p.toLowerCase().includes('silo')) ||
+    (nearMachineId.toLowerCase().includes('rm-') && p.toLowerCase().includes('mill')) ||
+    (nearMachineId.toLowerCase().includes('pack') && p.toLowerCase().includes('pack'))
+  );
+
+  // Category alignment bonus based on task type
+  const categoryBonus = calculateCategoryBonus(taskType);
 
   const scoredWorkers = availableWorkers.map((worker) => {
     let score = 0;
@@ -1500,10 +1512,21 @@ function findBestWorkerForTask(
     // Energy factor bonus
     score *= 0.7 + energyFactor * 0.3;
 
-    // === STRATEGIC PRIORITY BOOST ===
-    // Boost experienced workers for strategic focus machines
-    if (isStrategicFocusMachine && worker.experience >= 5) {
-      score += 40; // Significant boost for expert workers on strategic tasks
+    // === STRATEGIC PRIORITY BOOST (Enhanced) ===
+    // Apply structured strategic weight from priorities
+    score += strategicWeight;
+
+    // Legacy compatibility: also apply bonus for legacy string matches
+    if (hasLegacyMatch && worker.experience >= 5) {
+      score += 30;
+    }
+
+    // Category alignment: boost workers skilled in the priority's category
+    score += categoryBonus;
+
+    // Extra boost for experts on high-priority strategic tasks
+    if (strategicWeight > 30 && worker.experience >= 5) {
+      score += 20;
     }
 
     return { worker, score };
@@ -1511,6 +1534,35 @@ function findBestWorkerForTask(
 
   scoredWorkers.sort((a, b) => b.score - a.score);
   return scoredWorkers[0]?.worker || null;
+}
+
+/**
+ * Calculate category-based bonus from active strategic priorities
+ * Maps task types to strategic categories for alignment scoring
+ */
+function calculateCategoryBonus(
+  taskType: 'maintenance' | 'safety' | 'quality' | 'general'
+): number {
+  const categoryMap: Record<typeof taskType, string[]> = {
+    maintenance: ['efficiency', 'energy'],
+    safety: ['safety'],
+    quality: ['quality'],
+    general: ['throughput', 'efficiency'],
+  };
+
+  const relevantCategories = categoryMap[taskType];
+  const strategicState = useAIConfigStore.getState().strategic;
+  const now = Date.now();
+  let bonus = 0;
+
+  for (const p of strategicState.priorities) {
+    if (p.expiresAt <= now) continue; // Skip expired
+    if (relevantCategories.includes(p.category)) {
+      bonus += p.weight * 8; // 8/16/24/32/40 based on weight (1-5)
+    }
+  }
+
+  return Math.min(bonus, 50); // Cap category bonus at 50
 }
 
 // ============================================================================
@@ -2461,20 +2513,140 @@ export function initializeDecisionOutcomeTracking(): () => void {
   };
 }
 
+// Loop control state
+let loopInterval: ReturnType<typeof setInterval> | null = null;
+let lastDecisionTime = 0;
+let lastStrategicTime = 0;
+let lastPredictionTime = 0;
+let lastMetricsTime = 0;
+let isGeneratingDecision = false;
+let isGeneratingStrategic = false;
+
 /**
- * Initialize all AI engine observers/subscriptions
+ * Main AI Execution Loop
+ * Runs in background to generate decisions, predictions, and metrics independent of UI
+ */
+function aiLoop() {
+  const now = Date.now();
+  const store = useAIConfigStore.getState();
+
+  // 1. Tactical Decision Generation (every 6 seconds)
+  if (isTacticalLayerActive() && now - lastDecisionTime >= 6000) {
+    if (!isGeneratingDecision) {
+      lastDecisionTime = now;
+      isGeneratingDecision = true;
+      store.setTacticalThinking(true);
+
+      // Async wrapper to not block loop
+      (async () => {
+        try {
+          const decision = await generateContextAwareDecision();
+          if (decision) {
+            applyDecisionEffects(decision);
+            store.updateSystemStatus({ decisions: store.systemStatus.decisions + 1 });
+
+            if (shouldTriggerAudioCue(decision)) {
+              // Audio handled by audioManager based on priority/type
+              // Note: We don't import audioManager top-level to avoid circular deps if possible,
+              // or ensure it's safe. Assuming safe here as it was used in component.
+            }
+          }
+        } catch (e) {
+          logger.error('Failed to generate tactical decision', e);
+        } finally {
+          isGeneratingDecision = false;
+          store.setTacticalThinking(false);
+        }
+      })();
+    }
+  }
+
+  // 2. Strategic Decision Generation (every 45s)
+  if (isStrategicLayerActive() && now - lastStrategicTime >= 45000) {
+    if (!isGeneratingStrategic) {
+      lastStrategicTime = now;
+      isGeneratingStrategic = true;
+
+      generateStrategicDecision()
+        .then((decision) => {
+          if (decision) {
+            applyDecisionEffects(decision);
+            store.updateSystemStatus({ decisions: store.systemStatus.decisions + 1 });
+          }
+        })
+        .finally(() => {
+          isGeneratingStrategic = false;
+        });
+    }
+  }
+
+  // 3. Update Predictions (every 5s)
+  if (now - lastPredictionTime >= 5000) {
+    lastPredictionTime = now;
+    // getPredictedEvents updates internal state, UI reads from store or hook
+    // We might want to persist these to a store if they aren't already
+    // For now, this keeps internal cache fresh
+    getPredictedEvents();
+  }
+
+  // 4. Update Metrics & System Status (every 1.5s)
+  if (now - lastMetricsTime >= 1500) {
+    lastMetricsTime = now;
+
+    // Update CPU/Mem estimates based on activity
+    const productionStore = useProductionStore.getState();
+    const uiStore = useUIStore.getState();
+
+    const activeDecisions = productionStore.aiDecisions.filter(d => d.status === 'in_progress').length;
+    const pendingDecisions = productionStore.aiDecisions.filter(d => d.status === 'pending').length;
+    const alertLoad = uiStore.alerts.filter(a => a.type === 'critical' || a.type === 'warning').length;
+
+    // Base CPU load + active work + pending queue + alert processing
+    const baseCpu = 12;
+    const activeLoad = activeDecisions * 8;
+    const queueLoad = Math.min(pendingDecisions * 2, 10);
+    const alertProcessing = alertLoad * 4;
+    const cpuUsage = Math.min(baseCpu + activeLoad + queueLoad + alertProcessing, 85);
+
+    // Memory based on stored decisions
+    const baseMemory = 30;
+    const decisionMemory = Math.min(productionStore.aiDecisions.length * 0.5, 20);
+    const alertMemory = uiStore.alerts.length * 1.5;
+    const memoryUsage = Math.min(baseMemory + decisionMemory + alertMemory, 80);
+
+    // Update store (throttled)
+    store.updateSystemStatus({ cpu: cpuUsage, memory: memoryUsage });
+  }
+}
+
+/**
+ * Initialize all AI engine observers/subscriptions AND background loop
  * Call this once when the app starts
  */
 export function initializeAIEngine(): () => void {
   const unsubShift = initializeShiftObserver();
   const unsubOutcome = initializeDecisionOutcomeTracking();
 
+  // Start background loop
+  if (!loopInterval) {
+    lastDecisionTime = Date.now();
+    lastStrategicTime = Date.now();
+    lastPredictionTime = Date.now();
+    lastMetricsTime = Date.now();
+    loopInterval = setInterval(aiLoop, 1000); // Check every second
+    logger.ai.info('AI Engine background loop started');
+  }
+
   logger.ai.info('Initialized with shift observer and outcome tracking');
 
   return () => {
     unsubShift();
     unsubOutcome();
-    logger.ai.info('Observers cleaned up');
+    if (loopInterval) {
+      clearInterval(loopInterval);
+      loopInterval = null;
+    }
+    logger.ai.info('AI Engine stopped and cleaned up');
   };
 }
 

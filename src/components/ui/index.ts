@@ -30,3 +30,6 @@ export { ShiftHandoverSummary } from './ShiftHandoverSummary';
 export { AlertAcknowledgmentFlow } from './AlertAcknowledgmentFlow';
 export { CostEstimationOverlay } from './CostEstimationOverlay';
 export { WeatherEffectsOverlay } from './WeatherEffectsOverlay';
+
+// Historical Playback
+export { TimelinePlayback } from './TimelinePlayback';

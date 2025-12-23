@@ -349,8 +349,12 @@ export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
   const mesh = useRef<THREE.InstancedMesh>(null);
   const idRef = useRef(`dustParticles-${Math.random().toString(36).slice(2, 9)}`);
   const context = useDustAnimation();
-  const gameTime = useGameSimulationStore((state) => state.gameTime);
+  // const gameTime = useGameSimulationStore((state) => state.gameTime); // Replaced with shallow selector below
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+
+  // PERF: Only re-render when daytime status changes, not every tick
+  const isDaytime = useGameSimulationStore(useShallow((state) => state.gameTime >= 7 && state.gameTime < 18));
+
   const { dustParticleCount, enableDustParticles, quality } = useGraphicsStore(
     useShallow((state) => ({
       dustParticleCount: state.graphics.dustParticleCount,
@@ -362,8 +366,7 @@ export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
   // Use graphics setting for particle count
   const effectiveCount = Math.min(count, dustParticleCount);
 
-  // Determine if it's daytime (light shafts visible)
-  const isDaytime = gameTime >= 7 && gameTime < 18;
+
 
   // Create particle pool with max count
   const pool = useMemo(() => new ParticlePool(count), [count]);

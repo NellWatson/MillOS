@@ -8,7 +8,7 @@ interface DockForkliftProps {
     cycleOffset?: number;
 }
 
-export const DockForklift: React.FC<DockForkliftProps> = ({
+export const DockForklift: React.FC<DockForkliftProps> = React.memo(({
     position,
     rotation,
     cycleOffset = 0,
@@ -18,6 +18,8 @@ export const DockForklift: React.FC<DockForkliftProps> = ({
 
     useFrame((state) => {
         if (!forkliftRef.current || !forkRef.current) return;
+
+        // Performance: Only update if visible in frustum (approximated by simple distance check could describe here but simpler to just memo the component first)
 
         const time = state.clock.elapsedTime + cycleOffset;
         // Slower cycle for background ambiance
@@ -139,4 +141,4 @@ export const DockForklift: React.FC<DockForkliftProps> = ({
             </group>
         </group>
     );
-};
+});

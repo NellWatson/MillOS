@@ -59,23 +59,26 @@ export class SimulationAdapter implements IProtocolAdapter {
   constructor(tagDefinitions: TagDefinition[]) {
     tagDefinitions.forEach((tag) => this.tags.set(tag.id, tag));
 
-    // Initialize default machine states to 'running' based on tag definitions
+    // Initialize default machine states to 'running'
     // This prevents LOLO alarms during startup before store syncs
-    const machineIds = new Set<string>();
+    // Crucial: Iterate ALL tags to catch every machineId referenced
     tagDefinitions.forEach((tag) => {
-      if (tag.machineId) {
-        machineIds.add(tag.machineId);
+      if (tag.machineId && !this.machineStates.has(tag.machineId)) {
+        this.machineStates.set(tag.machineId, {
+          id: tag.machineId,
+          status: 'running',
+          load: 65, // Default to 65% load for comfortable headroom from alarms
+          rpm: this.getDefaultRpmForMachine(tag.machineId),
+        });
       }
     });
+  }
 
-    machineIds.forEach((id) => {
-      this.machineStates.set(id, {
-        id,
-        status: 'running',
-        load: 65, // Default to 65% load for comfortable headroom from alarms
-        rpm: 450, // Default RPM for mills
-      });
-    });
+  private getDefaultRpmForMachine(machineId: string): number {
+    if (machineId.includes('packer')) return 60; // Packers ~60 bags/min
+    if (machineId.includes('sifter')) return 220; // Sifters ~200-240 RPM
+    if (machineId.includes('mill')) return 1200; // Mills ~1200 RPM
+    return 100; // Generic default
   }
 
   // =========================================================================
@@ -98,6 +101,7 @@ export class SimulationAdapter implements IProtocolAdapter {
 
     // PERFORMANCE FIX: Reduced from 100ms (10Hz) to 1000ms (1Hz)
     // 10Hz was causing 900 tag updates/second - way too much overhead
+    this.tick(); // Force immediate update to apply machine states (prevents 0-value alarms)
     this.simulationInterval = setInterval(() => this.tick(), 1000);
     this.connected = true;
     this.connectTime = Date.now();
@@ -332,7 +336,9 @@ export class SimulationAdapter implements IProtocolAdapter {
 
       // Get machine state
       const machineState = this.machineStates.get(tag.machineId);
-      const isRunning = machineState?.status === 'running';
+      // Default to 'running' if state is unknown to prevent startup alarms
+      // This covers the gap between SimulationAdapter init and the first store sync
+      const isRunning = machineState ? machineState.status === 'running' : true;
 
       // Check for active fault
       const activeFault = this.activeFaults.get(id);

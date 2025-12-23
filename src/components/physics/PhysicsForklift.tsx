@@ -158,7 +158,10 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
     // === LOADING/UNLOADING OPERATION ===
     if (operationRef.current !== 'traveling') {
       operationTimerRef.current += cappedDelta;
-      const progress = operationTimerRef.current / operationDurationRef.current;
+
+      // Guard against zero/negative duration to prevent NaN
+      const duration = Math.max(0.1, operationDurationRef.current);
+      const progress = Math.min(1, operationTimerRef.current / duration);
 
       // Toggle cargo at midpoint
       if (progress >= 0.5 && progress < 0.5 + cappedDelta / operationDurationRef.current) {

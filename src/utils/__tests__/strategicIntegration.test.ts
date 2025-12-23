@@ -33,6 +33,7 @@ describe('Strategic AI Integration', () => {
         useAIConfigStore.setState({
             strategic: {
                 priorities: [],
+                legacyPriorities: [],
                 lastDecisionTime: null,
                 isThinking: false,
             },
@@ -84,7 +85,7 @@ describe('Strategic AI Integration', () => {
             store.setStrategicPriorities([mockStrategicResponse.priority]);
 
             const newState = useAIConfigStore.getState();
-            expect(newState.strategic.priorities).toContain(mockStrategicResponse.priority);
+            expect(newState.strategic.legacyPriorities).toContain(mockStrategicResponse.priority);
         });
 
         it('should track thinking state', () => {
@@ -118,6 +119,47 @@ describe('Strategic AI Integration', () => {
         it('should have insight and tradeoff', () => {
             expect(mockStrategicResponse.insight).toBeDefined();
             expect(mockStrategicResponse.tradeoff).toBeDefined();
+        });
+    });
+
+    describe('Full Strategic Decision Cycle', () => {
+        it('should process a complete decision update', () => {
+            const store = useAIConfigStore.getState();
+
+            // 1. Start Cycle
+            store.setStrategicThinking(true);
+            expect(useAIConfigStore.getState().strategic.isThinking).toBe(true);
+
+            // 2. Simulate AI Response Processing
+            const decisionTime = Date.now();
+            const mockPriorityObj = {
+                id: 'p1',
+                priority: mockStrategicResponse.priority,
+                weight: 5,
+                category: 'efficiency',
+                machineAffinities: [],
+                createdAt: Date.now(),
+                expiresAt: Date.now() + 1000
+            };
+
+            useAIConfigStore.setState(state => ({
+                strategic: {
+                    ...state.strategic,
+                    priorities: [mockPriorityObj as any],
+                    actionPlan: mockStrategicResponse.actionPlan,
+                    lastDecisionTime: decisionTime,
+                    isThinking: false
+                }
+            }));
+
+            // 3. Verify State Updates
+            const finalState = useAIConfigStore.getState();
+
+            expect(finalState.strategic.isThinking).toBe(false);
+            expect(finalState.strategic.priorities).toHaveLength(1);
+            expect(finalState.strategic.priorities[0].priority).toBe(mockStrategicResponse.priority);
+            expect(finalState.strategic.actionPlan).toHaveLength(3);
+            expect(finalState.strategic.lastDecisionTime).toBe(decisionTime);
         });
     });
 });

@@ -15,6 +15,8 @@ export type PersonalityTrait = 'reliable' | 'temperamental' | 'workhorse' | 'qui
 // Machine mood states
 export type MachineMood = 'happy' | 'neutral' | 'grumpy' | 'stressed';
 
+export const BAG_WEIGHT_KG = 25;
+
 export interface MachinePersonality {
   nickname: string;
   trait: PersonalityTrait;
@@ -238,6 +240,23 @@ export interface AIDecision {
   expiresAt?: Date;
 }
 
+// =========================================================================
+// STRATEGIC-TACTICAL INTEGRATION
+// Gemini strategic priorities that influence tactical heuristic scoring
+// =========================================================================
+
+export type StrategicCategory = 'efficiency' | 'safety' | 'quality' | 'throughput' | 'energy';
+
+export interface StrategicPriority {
+  id: string;                         // Unique identifier
+  priority: string;                   // Human-readable description
+  weight: 1 | 2 | 3 | 4 | 5;          // Importance (1=low, 5=critical)
+  category: StrategicCategory;        // Type of optimization
+  machineAffinities: string[];        // Machine IDs this applies to
+  createdAt: number;                  // Timestamp when created
+  expiresAt: number;                  // TTL timestamp for auto-decay
+}
+
 export interface ForkliftData {
   id: string;
   position: [number, number, number];
@@ -297,6 +316,10 @@ export const GRUMBLE_PHRASES: Record<MoodState, string[]> = {
     'Love the smell of flour in the morning.',
     "Best job I've ever had. Seriously.",
     '*hums a jaunty tune*',
+    'I wonder if the grain dreams of becoming bread?',
+    'A perfect day for milling!',
+    'Did that sheep just wink at me?',
+    'Productivity is its own reward. Just kidding, I want cake.',
   ],
   tired: [
     '*yaaawn* Is it break time yet?',
@@ -305,6 +328,9 @@ export const GRUMBLE_PHRASES: Record<MoodState, string[]> = {
     '*stretches dramatically*',
     'Five more minutes...',
     'My kingdom for an espresso.',
+    'I need coffee or a new timeline.',
+    'Why is the floor so... floor-y today?',
+    'Energy levels critical. Initiate nap sequence.',
   ],
   frustrated: [
     'This again?!',
@@ -314,6 +340,9 @@ export const GRUMBLE_PHRASES: Record<MoodState, string[]> = {
     '*mutters under breath*',
     'Fine. FINE. I got it.',
     '*eye roll of the century*',
+    'The entropy in this factory is too high.',
+    'Calculated probability of success: Low.',
+    'I suspect the conveyor belt has a vendetta.',
   ],
   hangry: [
     'Is the vending machine broken AGAIN?!',

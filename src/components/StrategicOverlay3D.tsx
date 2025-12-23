@@ -25,15 +25,21 @@ export const StrategicOverlay3D: React.FC = () => {
         }
     });
 
-    // Get the top priority
+    // Get the top priority - prefer legacy string priorities for display, fall back to structured
     const topPriority = useMemo(() => {
-        if (strategic.priorities.length === 0) {
-            return 'No Strategic Priorities Set';
+        // First try legacy string priorities (human-readable)
+        const legacyPriorities = strategic.legacyPriorities || [];
+        if (legacyPriorities.length > 0) {
+            const priority = legacyPriorities[0];
+            return priority.length > 50 ? priority.slice(0, 47) + '...' : priority;
         }
-        // Truncate if too long
-        const priority = strategic.priorities[0];
-        return priority.length > 50 ? priority.slice(0, 47) + '...' : priority;
-    }, [strategic.priorities]);
+        // Fall back to structured priorities
+        if (strategic.priorities.length > 0) {
+            const priority = strategic.priorities[0].priority;
+            return priority.length > 50 ? priority.slice(0, 47) + '...' : priority;
+        }
+        return 'No Strategic Priorities Set';
+    }, [strategic.priorities, strategic.legacyPriorities]);
 
     // Don't render if toggle is off
     if (!showStrategicOverlay) return null;

@@ -10,7 +10,7 @@
 import { MachineData, WorkerData } from '../types';
 
 // ============================================
-// WORKER CONTEXT ENCODING (VCL Enneagram-based)
+// CONSTANTS (EMOJI DEFINITIONS)
 // ============================================
 
 /**
@@ -58,67 +58,6 @@ const FATIGUE_EMOJI = {
 };
 
 /**
- * Encode a worker's context using VCL format
- * Format: ROLE|STATUS|EXPERIENCE|FATIGUE
- * Example: 👑|⚙️|🎓|😊 = Supervisor, working, expert, fresh
- */
-export function encodeWorkerVCL(worker: WorkerData, shiftProgress: number): string {
-    const role = WORKER_ROLE_EMOJI[worker.role] || '👤';
-    const status = WORKER_STATUS_EMOJI[worker.status] || '❓';
-
-    // Experience level
-    const years = worker.experience || 0;
-    const experience = years >= 5 ? EXPERIENCE_EMOJI.expert :
-        years >= 2 ? EXPERIENCE_EMOJI.competent :
-            EXPERIENCE_EMOJI.novice;
-
-    // Fatigue based on shift progress
-    const fatigue = shiftProgress < 0.3 ? FATIGUE_EMOJI.fresh :
-        shiftProgress < 0.6 ? FATIGUE_EMOJI.moderate :
-            shiftProgress < 0.85 ? FATIGUE_EMOJI.tired :
-                FATIGUE_EMOJI.exhausted;
-
-    return `${role}${status}${experience}${fatigue}`;
-}
-
-/**
- * Encode all workers into a compact VCL summary
- */
-export function encodeWorkersVCL(workers: WorkerData[], shiftProgress: number): string {
-    // Group by role for compact representation
-    const byRole: Record<string, { count: number; working: number; idle: number }> = {};
-
-    for (const worker of workers) {
-        if (!byRole[worker.role]) {
-            byRole[worker.role] = { count: 0, working: 0, idle: 0 };
-        }
-        byRole[worker.role].count++;
-        if (worker.status === 'working') byRole[worker.role].working++;
-        if (worker.status === 'idle') byRole[worker.role].idle++;
-    }
-
-    // Compact format: ROLE(working/total)
-    const summary = Object.entries(byRole)
-        .map(([role, stats]) => {
-            const emoji = WORKER_ROLE_EMOJI[role] || '👤';
-            return `${emoji}${stats.working}/${stats.count}`;
-        })
-        .join(' ');
-
-    // Overall fatigue indicator
-    const fatigueEmoji = shiftProgress < 0.3 ? FATIGUE_EMOJI.fresh :
-        shiftProgress < 0.6 ? FATIGUE_EMOJI.moderate :
-            shiftProgress < 0.85 ? FATIGUE_EMOJI.tired :
-                FATIGUE_EMOJI.exhausted;
-
-    return `${summary} ${fatigueEmoji}`;
-}
-
-// ============================================
-// MACHINE STATE ENCODING (MillOS-specific VCL extension)
-// ============================================
-
-/**
  * Machine Type Emojis (adapted for industrial context)
  */
 const MACHINE_TYPE_EMOJI: Record<string, string> = {
@@ -151,21 +90,122 @@ const LOAD_EMOJI = {
 };
 
 /**
- * Encode a single machine's state using VCL
- * Format: TYPE|STATUS|LOAD
- * Example: 🏛️✅🟢 = Silo, running, low load
+ * Time of Day Emoji (TIME dimension)
  */
+const TIME_EMOJI = {
+    morning: '🌅',
+    afternoon: '☀️',
+    evening: '🌆',
+    night: '🌙',
+};
+
+/**
+ * Weather Emoji (ENVIRONMENT dimension)
+ */
+const WEATHER_EMOJI: Record<string, string> = {
+    'clear': '☀️',
+    'cloudy': '☁️',
+    'rain': '🌧️',
+    'storm': '⛈️',
+};
+
+/**
+ * Shift Status Emoji
+ */
+const SHIFT_EMOJI: Record<string, string> = {
+    'morning': '🌅',
+    'afternoon': '☀️',
+    'night': '🌙',
+};
+
+// ============================================
+// WORKER CONTEXT ENCODING (VCL Enneagram-based)
+// ============================================
+
+/**
+ * Encode a worker's context using VCL format
+ * Format: ROLE|STATUS|EXPERIENCE|FATIGUE
+ * Example: 👑|⚙️|🎓|😊 = Supervisor, working, expert, fresh
+ */
+export function encodeWorkerVCL(worker: WorkerData, shiftProgress: number): string {
+    if (!worker) return '❓';
+
+    const role = WORKER_ROLE_EMOJI[worker.role] || '👤';
+    const status = WORKER_STATUS_EMOJI[worker.status] || '❓';
+
+    // Experience level
+    const years = worker.experience || 0;
+    const experience = years >= 5 ? EXPERIENCE_EMOJI.expert :
+        years >= 2 ? EXPERIENCE_EMOJI.competent :
+            EXPERIENCE_EMOJI.novice;
+
+    // Fatigue based on shift progress
+    const fatigue = shiftProgress < 0.3 ? FATIGUE_EMOJI.fresh :
+        shiftProgress < 0.6 ? FATIGUE_EMOJI.moderate :
+            shiftProgress < 0.85 ? FATIGUE_EMOJI.tired :
+                FATIGUE_EMOJI.exhausted;
+
+    return `${role}${status}${experience}${fatigue}`;
+}
+
+/**
+ * Encode all workers into a compact VCL summary
+ */
+export function encodeWorkersVCL(workers: WorkerData[], shiftProgress: number): string {
+    if (!workers || workers.length === 0) return 'No Workers';
+
+    // Safety check for massive lists to prevent performance cliff
+    const processingList = workers.length > 200 ? workers.slice(0, 200) : workers;
+
+    // Group by role for compact representation
+    const byRole: Record<string, { count: number; working: number; idle: number }> = {};
+
+    for (const worker of processingList) {
+        if (!worker) continue;
+
+        const role = worker.role || 'Unknown';
+        if (!byRole[role]) {
+            byRole[role] = { count: 0, working: 0, idle: 0 };
+        }
+        byRole[role].count++;
+        if (worker.status === 'working') byRole[role].working++;
+        if (worker.status === 'idle') byRole[role].idle++;
+    }
+
+    // Compact format: ROLE(working/total)
+    const summary = Object.entries(byRole)
+        .map(([role, stats]) => {
+            const emoji = WORKER_ROLE_EMOJI[role] || '👤';
+            return `${emoji}${stats.working}/${stats.count}`;
+        })
+        .join(' ');
+
+    // Overall fatigue indicator
+    const fatigueEmoji = shiftProgress < 0.3 ? FATIGUE_EMOJI.fresh :
+        shiftProgress < 0.6 ? FATIGUE_EMOJI.moderate :
+            shiftProgress < 0.85 ? FATIGUE_EMOJI.tired :
+                FATIGUE_EMOJI.exhausted;
+
+    return `${summary} ${fatigueEmoji}${workers.length > 200 ? ' (truncated)' : ''}`;
+}
+
+// ... related machine encoding ...
+
 export function encodeMachineVCL(machine: MachineData): string {
+    if (!machine || !machine.id) return '❓';
+
     // Determine machine type from ID
     let type = '❓';
-    if (machine.id.toLowerCase().includes('silo')) type = MACHINE_TYPE_EMOJI['silo'];
-    else if (machine.id.toLowerCase().includes('rm-')) type = MACHINE_TYPE_EMOJI['roller-mill'];
-    else if (machine.id.toLowerCase().includes('sifter') || machine.id.toLowerCase().includes('plansifter')) type = MACHINE_TYPE_EMOJI['plansifter'];
-    else if (machine.id.toLowerCase().includes('pack') || machine.id.toLowerCase().includes('line')) type = MACHINE_TYPE_EMOJI['packer'];
+    const id = machine.id.toLowerCase();
 
-    const status = MACHINE_STATUS_EMOJI[machine.status] || '❓';
+    if (id.includes('silo')) type = MACHINE_TYPE_EMOJI['silo'];
+    else if (id.includes('rm-')) type = MACHINE_TYPE_EMOJI['roller-mill'];
+    else if (id.includes('sifter') || id.includes('plansifter')) type = MACHINE_TYPE_EMOJI['plansifter'];
+    else if (id.includes('pack') || id.includes('line')) type = MACHINE_TYPE_EMOJI['packer'];
 
-    const load = machine.metrics.load;
+    const status = MACHINE_STATUS_EMOJI[machine.status || 'offline'] || '❓';
+
+    const load = machine.metrics?.load || 0;
     const loadEmoji = load < 50 ? LOAD_EMOJI.low :
         load < 80 ? LOAD_EMOJI.medium :
             load < 90 ? LOAD_EMOJI.high :
@@ -212,35 +252,6 @@ export function encodeMachinesVCL(machines: MachineData[]): string {
 // ============================================
 // FACTORY CONTEXT ENCODING (Full Enneagram)
 // ============================================
-
-/**
- * Time of Day Emoji (TIME dimension)
- */
-const TIME_EMOJI = {
-    morning: '🌅',
-    afternoon: '☀️',
-    evening: '🌆',
-    night: '🌙',
-};
-
-/**
- * Weather Emoji (ENVIRONMENT dimension)
- */
-const WEATHER_EMOJI: Record<string, string> = {
-    'clear': '☀️',
-    'cloudy': '☁️',
-    'rain': '🌧️',
-    'storm': '⛈️',
-};
-
-/**
- * Shift Status Emoji
- */
-const SHIFT_EMOJI: Record<string, string> = {
-    'morning': '🌅',
-    'afternoon': '☀️',
-    'night': '🌙',
-};
 
 /**
  * Encode complete factory context using VCL

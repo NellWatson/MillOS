@@ -248,6 +248,8 @@ export const unregisterWater = (id: string) => {
   waterRegistry.delete(id);
 };
 
+
+
 export const registerLighting = (id: string, state: LightingAnimationState) => {
   lightingRegistry.set(id, state);
 };
@@ -255,13 +257,103 @@ export const unregisterLighting = (id: string) => {
   lightingRegistry.delete(id);
 };
 
+// Define color palettes for each time period
+const nightPalette = {
+  layerColors: { far: '#0a0f1a', mid: '#0d1420', near: '#101824', ground: '#080c12' },
+  waterColors: { water: '#0a1525', reflection: '#1a2540' },
+  mountainColors: { snow: '#2a3545', rock: '#151a24', tree: '#0a1210' },
+  atmosphereColor: '#0a1020',
+  cityColors: { building: '#050810', windowLight: '#ffd080' },
+};
+
+const dawnPalette = {
+  layerColors: { far: '#1a1520', mid: '#25151a', near: '#301f30', ground: '#120e18' },
+  waterColors: { water: '#1a2535', reflection: '#f0a060' },
+  mountainColors: { snow: '#f0d0c0', rock: '#6a5060', tree: '#2a3528' },
+  atmosphereColor: '#a08090',
+  cityColors: { building: '#201520', windowLight: '#ffcc66' },
+};
+
+const dayPalette = {
+  layerColors: { far: '#c8dce8', mid: '#a8c8dc', near: '#88b4cc', ground: '#5a8a5a' },
+  waterColors: { water: '#40a0c0', reflection: '#e0ffff' },
+  mountainColors: { snow: '#ffffff', rock: '#7080a0', tree: '#3a6040' },
+  atmosphereColor: '#b0d0e8',
+  cityColors: { building: '#405060', windowLight: '#ffffff' },
+};
+
+const duskPalette = {
+  layerColors: { far: '#1a1015', mid: '#25151a', near: '#301a20', ground: '#100a0d' },
+  waterColors: { water: '#1a1525', reflection: '#e07040' },
+  mountainColors: { snow: '#e0b0a0', rock: '#5a4048', tree: '#252820' },
+  atmosphereColor: '#804050',
+  cityColors: { building: '#1a1015', windowLight: '#ffaa44' },
+};
+
+// Helper function to interpolate between hex colors
+const lerpColor = (color1: string, color2: string, t: number): string => {
+  const c1 = parseInt(color1.slice(1), 16);
+  const c2 = parseInt(color2.slice(1), 16);
+  const r1 = (c1 >> 16) & 0xff, g1 = (c1 >> 8) & 0xff, b1 = c1 & 0xff;
+  const r2 = (c2 >> 16) & 0xff, g2 = (c2 >> 8) & 0xff, b2 = c2 & 0xff;
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+};
+
+const lerpPalette = (p1: typeof nightPalette, p2: typeof nightPalette, t: number) => ({
+  layerColors: {
+    far: lerpColor(p1.layerColors.far, p2.layerColors.far, t),
+    mid: lerpColor(p1.layerColors.mid, p2.layerColors.mid, t),
+    near: lerpColor(p1.layerColors.near, p2.layerColors.near, t),
+    ground: lerpColor(p1.layerColors.ground, p2.layerColors.ground, t),
+  },
+  waterColors: {
+    water: lerpColor(p1.waterColors.water, p2.waterColors.water, t),
+    reflection: lerpColor(p1.waterColors.reflection, p2.waterColors.reflection, t),
+  },
+  mountainColors: {
+    snow: lerpColor(p1.mountainColors.snow, p2.mountainColors.snow, t),
+    rock: lerpColor(p1.mountainColors.rock, p2.mountainColors.rock, t),
+    tree: lerpColor(p1.mountainColors.tree, p2.mountainColors.tree, t),
+  },
+  atmosphereColor: lerpColor(p1.atmosphereColor, p2.atmosphereColor, t),
+  cityColors: {
+    building: lerpColor(p1.cityColors.building, p2.cityColors.building, t),
+    windowLight: lerpColor(p1.cityColors.windowLight, p2.cityColors.windowLight, t),
+  },
+});
+
+// Smooth game time tracker for perceptually smooth sun/moon movement
+// Uses deltaTime interpolation to avoid the 100ms store update quantization
+let smoothGameTime = 10; // Will sync on first frame
+
 // Manager component to handle all sky animations in a single consolidated loop
 // CRITICAL: Reads store IMPERATIVELY in useFrame to avoid stale closures
 const SkyAnimationManager: React.FC = () => {
-  useFrame((state) => {
+  useFrame((state, delta) => {
     // Read store state IMPERATIVELY to get fresh values every frame
     // This avoids stale closure issues with Zustand subscriptions + useFrame
-    const { isTabVisible, gameTime, weather } = useGameSimulationStore.getState();
+    const { isTabVisible, gameTime, gameSpeed, weather } = useGameSimulationStore.getState();
+
+    // Smooth sun/moon movement: interpolate between discrete store updates
+    // The store updates gameTime every 100ms, but we need 60fps smooth movement
+    if (gameSpeed > 0) {
+      // Apply real-time delta to smoothGameTime for continuous movement
+      const hoursPerSecond = gameSpeed / 3600;
+      smoothGameTime = (((smoothGameTime + delta * hoursPerSecond) % 24) + 24) % 24;
+
+      // Re-sync if store time jumped significantly (user changed time, or drift correction)
+      const timeDiff = Math.abs(smoothGameTime - gameTime);
+      // Allow larger drift at high speeds, sync if difference > 0.1 hours (~6 min game time)
+      if (timeDiff > 0.1 && timeDiff < 23.9) {
+        smoothGameTime = gameTime;
+      }
+    } else {
+      // Paused - sync to store time exactly
+      smoothGameTime = gameTime;
+    }
 
     // Skip if tab not visible
     if (!isTabVisible) return;
@@ -272,9 +364,9 @@ const SkyAnimationManager: React.FC = () => {
       // Sky color keyframes for smooth interpolation
       // Each entry: [hour, {top, bottom, horizon, ground}]
       const skyKeyframes: [number, { top: string; bottom: string; horizon: string; ground: string }][] = [
-        [0, { top: '#050810', bottom: '#0a1628', horizon: '#1a2744', ground: '#0a0f1a' }],   // Midnight - very dark
-        [4, { top: '#050810', bottom: '#0a1628', horizon: '#1a2744', ground: '#0a0f1a' }],   // Late night - still dark
-        [5, { top: '#1a1a2e', bottom: '#2d1f3d', horizon: '#3d2952', ground: '#1a1a2e' }],   // Pre-dawn - first hint of light
+        [0, { top: '#050810', bottom: '#0a1628', horizon: '#1a2744', ground: '#030508' }],   // Midnight - very dark (darker ground)
+        [4, { top: '#050810', bottom: '#0a1628', horizon: '#1a2744', ground: '#030508' }],   // Late night - still dark (darker ground)
+        [5, { top: '#1a1a2e', bottom: '#2d1f3d', horizon: '#3d2952', ground: '#0a0a12' }],   // Pre-dawn - first hint of light
         [6, { top: '#7c4a1a', bottom: '#d97706', horizon: '#f59e0b', ground: '#451a03' }],   // Dawn - warm orange
         [7, { top: '#c2410c', bottom: '#fb923c', horizon: '#fcd34d', ground: '#78350f' }],   // Sunrise - golden
         [8, { top: '#0284c7', bottom: '#7dd3fc', horizon: '#fef3c7', ground: '#4a7c59' }],   // Morning - transitioning to blue
@@ -284,15 +376,15 @@ const SkyAnimationManager: React.FC = () => {
         [18, { top: '#92400e', bottom: '#ea580c', horizon: '#fbbf24', ground: '#451a03' }],   // Golden hour - warm amber
         [19, { top: '#7c2d12', bottom: '#c2410c', horizon: '#f97316', ground: '#451a03' }],   // Sunset
         [20, { top: '#451a03', bottom: '#78350f', horizon: '#92400e', ground: '#1c1917' }],   // Dusk - transitioning to dark
-        [21, { top: '#0f172a', bottom: '#1e293b', horizon: '#334155', ground: '#0f172a' }],   // Night begins
-        [24, { top: '#050810', bottom: '#0a1628', horizon: '#1a2744', ground: '#0a0f1a' }],   // Midnight wrap
+        [21, { top: '#0f172a', bottom: '#1e293b', horizon: '#334155', ground: '#050a12' }],   // Night begins (darker ground)
+        [24, { top: '#050810', bottom: '#0a1628', horizon: '#1a2744', ground: '#030508' }],   // Midnight wrap (darker ground)
       ];
 
       // Find the two keyframes to interpolate between
       let fromIdx = 0;
       let toIdx = 1;
       for (let i = 0; i < skyKeyframes.length - 1; i++) {
-        if (gameTime >= skyKeyframes[i][0] && gameTime < skyKeyframes[i + 1][0]) {
+        if (smoothGameTime >= skyKeyframes[i][0] && smoothGameTime < skyKeyframes[i + 1][0]) {
           fromIdx = i;
           toIdx = i + 1;
           break;
@@ -305,7 +397,7 @@ const SkyAnimationManager: React.FC = () => {
       const toColors = skyKeyframes[toIdx][1];
 
       // Calculate lerp factor (0-1)
-      const t = (gameTime - fromTime) / (toTime - fromTime);
+      const t = (smoothGameTime - fromTime) / (toTime - fromTime);
 
       // Helper to lerp hex colors
       const lerpColor = (from: string, to: string, factor: number): string => {
@@ -331,8 +423,8 @@ const SkyAnimationManager: React.FC = () => {
       // Compute cloud density from weather
       const cloudDensity = weather === 'clear' ? 0.3 : weather === 'cloudy' ? 0.7 : weather === 'rain' ? 0.9 : weather === 'storm' ? 1.0 : 0.5;
 
-      // Compute sun angle from gameTime
-      const sunAngle = ((gameTime - 6) / 12) * Math.PI;
+      // Compute sun angle from smoothGameTime for consistency
+      const sunAngle = ((smoothGameTime - 6) / 12) * Math.PI;
 
       // Update uniforms via .set() / .copy() to mutate existing objects
       skyDomeRegistry.forEach((data) => {
@@ -348,10 +440,16 @@ const SkyAnimationManager: React.FC = () => {
       });
     }
 
-    // 2. Update Stars twinkling (30fps is enough)
+    // 2. Update Stars twinkling and visibility (30fps)
     if (starsRegistry.size > 0 && shouldRunThisFrame(2)) {
+      const areStarsVisible = smoothGameTime >= 20 || smoothGameTime < 6;
+
       starsRegistry.forEach((data) => {
-        if (!data.visible) return;
+        // Update visibility on the mesh directly
+        if (data.starsRef) data.starsRef.visible = areStarsVisible;
+        if (data.brightStarsRef) data.brightStarsRef.visible = areStarsVisible;
+
+        if (!areStarsVisible) return;
 
         const material = data.starsRef.material as THREE.PointsMaterial;
         material.opacity = 0.75 + Math.sin(time * 0.3) * 0.15;
@@ -361,12 +459,36 @@ const SkyAnimationManager: React.FC = () => {
       });
     }
 
+    // Calculate environment colors based on smoothGameTime
+    let envColors = dayPalette;
+    const hour = smoothGameTime;
+
+    if (hour >= 5 && hour < 6) { // Night -> Dawn
+      envColors = lerpPalette(nightPalette, dawnPalette, hour - 5);
+    } else if (hour >= 6 && hour < 7) { // Solid Dawn
+      envColors = dawnPalette;
+    } else if (hour >= 7 && hour < 8) { // Dawn -> Day
+      envColors = lerpPalette(dawnPalette, dayPalette, hour - 7);
+    } else if (hour >= 8 && hour < 17) { // Solid Day
+      envColors = dayPalette;
+    } else if (hour >= 17 && hour < 18) { // Day -> Dusk
+      envColors = lerpPalette(dayPalette, duskPalette, hour - 17);
+    } else if (hour >= 18 && hour < 19) { // Solid Dusk
+      envColors = duskPalette;
+    } else if (hour >= 19 && hour < 20) { // Dusk -> Night
+      envColors = lerpPalette(duskPalette, nightPalette, hour - 19);
+    } else { // Night
+      envColors = nightPalette;
+    }
+
+    const isNightOrDusk = hour >= 17 || hour < 6;
+
     // 3. Update Building shaders (15fps for color updates)
     if (buildingShaderRegistry.size > 0 && shouldRunThisFrame(4)) {
       buildingShaderRegistry.forEach((data) => {
-        data.material.uniforms.buildingColor.value.set(data.buildingColor);
-        data.material.uniforms.windowLightColor.value.set(data.windowLightColor);
-        data.material.uniforms.isNight.value = data.isNight ? 1.0 : 0.0;
+        data.material.uniforms.buildingColor.value.set(envColors.cityColors.building);
+        data.material.uniforms.windowLightColor.value.set(envColors.cityColors.windowLight);
+        data.material.uniforms.isNight.value = isNightOrDusk ? 1.0 : 0.0;
         data.material.uniforms.time.value = time;
       });
     }
@@ -374,7 +496,10 @@ const SkyAnimationManager: React.FC = () => {
     // 4. Update City lights twinkling (30fps)
     if (cityLightsRegistry.size > 0 && shouldRunThisFrame(2)) {
       cityLightsRegistry.forEach((data) => {
-        if (!data.isNight) return;
+        // Toggle visibility based on time (night/dusk) ignoring registry 'isNight'
+        if (data.lightsRef) data.lightsRef.visible = isNightOrDusk;
+
+        if (!isNightOrDusk) return;
         const material = data.lightsRef.material as THREE.PointsMaterial;
         material.opacity = 0.7 + Math.sin(time * 2) * 0.2;
       });
@@ -383,10 +508,10 @@ const SkyAnimationManager: React.FC = () => {
     // 5. Update Mountain shader colors (15fps for color updates)
     if (mountainShaderRegistry.size > 0 && shouldRunThisFrame(4)) {
       mountainShaderRegistry.forEach((data) => {
-        data.material.uniforms.rockColor.value.set(data.rockColor);
-        data.material.uniforms.treeColor.value.set(data.treeColor);
-        data.material.uniforms.snowColor.value.set(data.snowColor);
-        data.material.uniforms.atmosphereColor.value.set(data.atmosphereColor);
+        data.material.uniforms.rockColor.value.set(envColors.mountainColors.rock);
+        data.material.uniforms.treeColor.value.set(envColors.mountainColors.tree);
+        data.material.uniforms.snowColor.value.set(envColors.mountainColors.snow);
+        data.material.uniforms.atmosphereColor.value.set(envColors.atmosphereColor);
         data.material.uniforms.atmosphereStrength.value = data.atmosphereStrength;
         data.material.uniforms.opacity.value = data.opacity;
       });
@@ -395,7 +520,11 @@ const SkyAnimationManager: React.FC = () => {
     // 6. Update Layer colors (15fps)
     if (layerColorRegistry.size > 0 && shouldRunThisFrame(4)) {
       layerColorRegistry.forEach((data) => {
-        data.material.uniforms.layerColor.value.set(data.layerColor);
+        // We need a way to map specific layers to colors. 
+        // For now, assume 'ground' is the main one used.
+        // Ideally registry should contain type. 
+        // fallback: use ground color for all layers for now
+        data.material.uniforms.layerColor.value.set(envColors.layerColors.ground);
         data.material.uniforms.opacity.value = data.opacity;
       });
     }
@@ -404,26 +533,53 @@ const SkyAnimationManager: React.FC = () => {
     if (waterRegistry.size > 0) {
       waterRegistry.forEach((data) => {
         data.material.uniforms.time.value = time;
+        data.material.uniforms.waterColor.value.set(envColors.waterColors.water);
+        data.material.uniforms.reflectionColor.value.set(envColors.waterColors.reflection);
       });
     }
 
     // 8. Update Sun/Moon/Ambient lights (60fps - smooth position updates)
+    // SMOOTH SUN/MOON: Compute positions directly from smoothGameTime for 60fps movement
     if (lightingRegistry.size > 0) {
+      // Compute sun angle from smooth game time (not discrete store time)
+      const smoothSunAngle = ((smoothGameTime - 6) / 12) * Math.PI;
+
+      // Compute sun position (same formula as SkySystem but using smooth time)
+      const radius = 340;
+      const heightMultiplier = 1.3;
+      const smoothSunX = Math.cos(smoothSunAngle) * -radius;
+      const smoothSunY = Math.sin(smoothSunAngle) * radius * heightMultiplier + 60;
+      const smoothSunZ = Math.cos(smoothSunAngle) * 50;
+
+      // Moon position is opposite to sun
+      const smoothMoonX = -smoothSunX;
+      const smoothMoonY = -smoothSunY;
+      const smoothMoonZ = -smoothSunZ;
+
+      // Sun visibility and intensity
+      const smoothSunVisible = smoothSunY > -5;
+      const smoothSunIntensity = smoothSunVisible ? Math.max(0, Math.sin(smoothSunAngle)) * 3.5 + 0.8 : 0;
+      const smoothMoonVisible = smoothMoonY > -5;
+      const smoothMoonIntensity = smoothMoonVisible ? 0.3 : 0;
+
+      // Sun color
+      const smoothSunColor = (smoothSunAngle < 0.3 || smoothSunAngle > 2.84) ? '#ff6b35' : '#fff7ed';
+
       lightingRegistry.forEach((data) => {
         if (data.sunLightRef) {
-          data.sunLightRef.position.copy(data.sunPosition);
-          data.sunLightRef.intensity = data.sunIntensity;
-          data.sunLightRef.color.set(data.sunColor);
+          data.sunLightRef.position.set(smoothSunX, smoothSunY, smoothSunZ);
+          data.sunLightRef.intensity = smoothSunIntensity;
+          data.sunLightRef.color.set(smoothSunColor);
         }
 
         if (data.moonLightRef) {
-          data.moonLightRef.position.copy(data.moonPosition);
-          data.moonLightRef.intensity = data.moonIntensity;
+          data.moonLightRef.position.set(smoothMoonX, smoothMoonY, smoothMoonZ);
+          data.moonLightRef.intensity = smoothMoonIntensity;
         }
 
         if (data.ambientLightRef) {
           data.ambientLightRef.color.set(data.ambientColor);
-          data.ambientLightRef.intensity = data.sunVisible ? 1.0 : 0.1;
+          data.ambientLightRef.intensity = smoothSunVisible ? 1.0 : 0.03;
         }
       });
     }
@@ -466,9 +622,114 @@ const SkyDomeFollower: React.FC<SkyDomeFollowerProps> = ({ meshRef }) => {
   return null;
 };
 
+// Smooth Sun visual component - updates position every frame for perceptually smooth movement
+const SmoothSun: React.FC = () => {
+  const groupRef = useRef<THREE.Group>(null);
+  const glowMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+
+  useFrame(() => {
+    if (!isTabVisible || !groupRef.current) return;
+
+    // Compute sun position from smoothGameTime (set by SkyAnimationManager)
+    const smoothSunAngle = ((smoothGameTime - 6) / 12) * Math.PI;
+    const radius = 340;
+    const heightMultiplier = 1.3;
+    const smoothSunX = Math.cos(smoothSunAngle) * -radius;
+    const smoothSunY = Math.sin(smoothSunAngle) * radius * heightMultiplier + 60;
+    const smoothSunZ = Math.cos(smoothSunAngle) * 50;
+
+    groupRef.current.position.set(smoothSunX, smoothSunY, smoothSunZ);
+
+    // Toggle visibility based on height
+    groupRef.current.visible = smoothSunY > -5;
+
+    // Update color for sunset/sunrise
+    if (glowMaterialRef.current) {
+      // Orange at sunrise/sunset (< 0.3 rad or > 2.84 rad)
+      const isGoldenHour = smoothSunAngle < 0.3 || smoothSunAngle > 2.84;
+      glowMaterialRef.current.color.set(isGoldenHour ? '#ff6b35' : '#fff7ed');
+    }
+  });
+
+  return (
+    <group ref={groupRef}>
+      {/* Core sun - bright white */}
+      <mesh renderOrder={-990}>
+        <sphereGeometry args={[22, 32, 32]} />
+        <meshBasicMaterial color="#ffffff" />
+      </mesh>
+      {/* Inner glow */}
+      <mesh renderOrder={-990}>
+        <sphereGeometry args={[36, 32, 32]} />
+        <meshBasicMaterial color="#fffde7" transparent opacity={0.6} />
+      </mesh>
+      {/* Mid glow */}
+      <mesh renderOrder={-990}>
+        <sphereGeometry args={[55, 32, 32]} />
+        <meshBasicMaterial ref={glowMaterialRef} color="#fff7ed" transparent opacity={0.35} depthWrite={false} />
+      </mesh>
+      {/* Outer glow - large corona */}
+      <mesh renderOrder={-990}>
+        <sphereGeometry args={[85, 32, 32]} />
+        <meshBasicMaterial color="#fff8e1" transparent opacity={0.15} depthWrite={false} />
+      </mesh>
+    </group>
+  );
+};
+
+// Smooth Moon visual component - updates position every frame for perceptually smooth movement
+const SmoothMoon: React.FC = () => {
+  const groupRef = useRef<THREE.Group>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+
+  useFrame(() => {
+    if (!isTabVisible || !groupRef.current) return;
+
+    // Compute moon position (opposite to sun) from smoothGameTime
+    const smoothSunAngle = ((smoothGameTime - 6) / 12) * Math.PI;
+    const radius = 340;
+    const heightMultiplier = 1.3;
+    const smoothSunX = Math.cos(smoothSunAngle) * -radius;
+    const smoothSunY = Math.sin(smoothSunAngle) * radius * heightMultiplier + 60;
+    const smoothSunZ = Math.cos(smoothSunAngle) * 50;
+
+    // Moon is opposite
+    const smoothMoonX = -smoothSunX;
+    const smoothMoonY = -smoothSunY;
+    const smoothMoonZ = -smoothSunZ;
+
+    groupRef.current.position.set(smoothMoonX, smoothMoonY, smoothMoonZ);
+
+    // Toggle visibility based on height
+    groupRef.current.visible = smoothMoonY > -5;
+  });
+
+  return (
+    <group ref={groupRef}>
+      {/* Moon surface */}
+      <mesh renderOrder={-990}>
+        <sphereGeometry args={[15, 32, 32]} />
+        <meshStandardMaterial
+          color="#e2e8f0"
+          emissive="#94a3b8"
+          emissiveIntensity={0.3}
+          fog={false}
+        />
+      </mesh>
+      {/* Moon glow */}
+      <mesh renderOrder={-990}>
+        <sphereGeometry args={[22, 32, 32]} />
+        <meshBasicMaterial color="#a5f3fc" transparent opacity={0.15} depthWrite={false} />
+      </mesh>
+    </group>
+  );
+};
+
 export const SkySystem: React.FC = () => {
-  const gameTime = useGameSimulationStore((state) => state.gameTime);
-  const weather = useGameSimulationStore((state) => state.weather);
+  // PERFORMANCE: Removed subscriptions to prevent re-renders. Animation handled by SkyAnimationManager.
+  // const gameTime = useGameSimulationStore((state) => state.gameTime);
+  // const weather = useGameSimulationStore((state) => state.weather);
   const shadowMapSize = useGraphicsStore((state) => state.graphics.shadowMapSize);
   const meshRef = useRef<THREE.Mesh>(null);
   const sunLightRef = useRef<THREE.DirectionalLight>(null);
@@ -476,165 +737,31 @@ export const SkySystem: React.FC = () => {
   const ambientLightRef = useRef<THREE.AmbientLight>(null);
 
   // Enhanced sky colors with horizon color for each time of day
-  const skyColors = useMemo(() => {
-
-    // [Top, Bottom, Horizon]
-    if (gameTime >= 21 || gameTime < 5) {
-      // Deep Night (21:00 - 05:00)
-      return {
-        top: '#0a0f1a',
-        bottom: '#1a2744',
-        horizon: '#2d3748',
-        ambient: '#0f172a',
-        ground: '#0f172a',
-      };
-    }
-    if (gameTime >= 5 && gameTime < 6) {
-      // Early Dawn (05:00 - 06:00) - warm pre-dawn
-      return {
-        top: '#7c2d12',
-        bottom: '#f97316',
-        horizon: '#fbbf24',
-        ambient: '#ea580c',
-        ground: '#451a03',
-      };
-    }
-    if (gameTime >= 6 && gameTime < 8) {
-      // Dawn/Sunrise (06:00 - 08:00) - golden sunrise
-      return {
-        top: '#dc2626',
-        bottom: '#f59e0b',
-        horizon: '#fbbf24',
-        ambient: '#f97316',
-        ground: '#451a03',
-      };
-    }
-    if (gameTime >= 8 && gameTime < 10) {
-      // Morning (08:00 - 10:00) - bright and fresh
-      return {
-        top: '#0ea5e9',
-        bottom: '#a5d8ff',
-        horizon: '#fff7ed',
-        ambient: '#f0f9ff',
-        ground: '#5a7a5a',
-      };
-    }
-    if (gameTime >= 10 && gameTime < 16) {
-      // Midday (10:00 - 16:00) - Far Cry bright tropical sun
-      return {
-        top: '#1e90ff',
-        bottom: '#87ceeb',
-        horizon: '#fffaf0',
-        ambient: '#fffff0',
-        ground: '#7cb77c',
-      };
-    }
-    if (gameTime >= 16 && gameTime < 18) {
-      // Afternoon (16:00 - 18:00) - warm sunny
-      return {
-        top: '#0ea5e9',
-        bottom: '#67d4fc',
-        horizon: '#fef3c7',
-        ambient: '#fef9c3',
-        ground: '#5a7a5a',
-      };
-    }
-    if (gameTime >= 18 && gameTime < 19) {
-      // Golden Hour (18:00 - 19:00)
-      return {
-        top: '#0c4a6e',
-        bottom: '#f97316',
-        horizon: '#fbbf24',
-        ambient: '#ea580c',
-        ground: '#451a03',
-      };
-    }
-    if (gameTime >= 19 && gameTime < 21) {
-      // Dusk/Twilight (19:00 - 21:00) - warm amber sunset
-      return {
-        top: '#dc2626',
-        bottom: '#f97316',
-        horizon: '#fbbf24',
-        ambient: '#f97316',
-        ground: '#92400e',
-      };
-    }
-
-    // Fallback to midday if somehow no condition met (should cover all, but safe default)
-    return {
-      top: '#1e90ff',
-      bottom: '#87ceeb',
-      horizon: '#fffaf0',
-      ambient: '#fffff0',
-      ground: '#7cb77c',
-    };
-  }, [gameTime]);
+  // Initial values for registry - subsequent updates handled by SkyAnimationManager
+  const skyColors = useMemo(() => ({
+    top: '#0ea5e9',
+    bottom: '#a5d8ff',
+    horizon: '#fff7ed',
+    ambient: '#f0f9ff',
+    ground: '#5a7a5a',
+  }), []);
 
   // Cloud density based on weather
-  const cloudDensity = useMemo(() => {
-    switch (weather) {
-      case 'clear':
-        return 0.3;
-      case 'cloudy':
-        return 0.7;
-      case 'rain':
-        return 0.9;
-      case 'storm':
-        return 1.0;
-      default:
-        return 0.5;
-    }
-  }, [weather]);
-
-  // Sun angle calculation - 6am = sunrise (0), 12pm = zenith (PI/2), 6pm = sunset (PI)
-  const sunAngle = useMemo(() => {
-    return ((gameTime - 6) / 12) * Math.PI;
-  }, [gameTime]);
+  // Initial defaults
+  const cloudDensity = 0.5;
+  const sunAngle = Math.PI / 2; // High noon default
 
   // Sun position - orbits from East (negative Z) to West (positive Z)
   // Adjusted orbit to track across the sky properly
   // Radius 340 places sun BEHIND all mountain layers (260-320) for proper occlusion at sunrise/sunset
-  const sunPosition = useMemo(() => {
-    const radius = 340; // Beyond mountains (320 max) so sun sets behind them
-    const theta = sunAngle;
-    // Simple orbit in X-Y plane (East-West) with some Z tilt
-    // East (Sunrise) -> Up -> West (Sunset)
-    // Add vertical offset to push sun higher in the sky
-    const heightMultiplier = 1.3; // Makes zenith higher
-    return new THREE.Vector3(
-      Math.cos(theta) * -radius,
-      Math.sin(theta) * radius * heightMultiplier + 60, // Higher base + amplified arc (adjusted for new radius)
-      Math.cos(theta) * 50 // Slight tilt (adjusted for new radius)
-    );
-  }, [sunAngle]);
-
-  // Moon position - opposite to sun
-  const moonPosition = useMemo(() => {
-    return sunPosition.clone().negate();
-  }, [sunPosition]);
-
-  // Sun visibility (above horizon)
-  const sunVisible = sunPosition.y > -5;
-  const moonVisible = moonPosition.y > -5;
-
-  // Sun color based on position
-  const sunColor = useMemo(() => {
-    if (sunAngle < 0.3 || sunAngle > 2.84) {
-      return '#ff6b35'; // Orange at sunrise/sunset
-    }
-    return '#fff7ed'; // Bright warm white during day
-  }, [sunAngle]);
-
-  // Sun/Moon Light Intensity - Far Cry intense sunlight
-  const sunIntensity = useMemo(() => {
-    if (!sunVisible) return 0;
-    return Math.max(0, Math.sin(sunAngle)) * 3.5 + 0.8;
-  }, [sunVisible, sunAngle]);
-
-  const moonIntensity = useMemo(() => {
-    if (!moonVisible) return 0;
-    return 0.3; // Dim moonlight
-  }, [moonVisible]);
+  // Static initial positions/values (overridden immediately by manager)
+  const sunPosition = useMemo(() => new THREE.Vector3(0, 100, 0), []);
+  const moonPosition = useMemo(() => new THREE.Vector3(0, -100, 0), []);
+  const sunColor = '#fff7ed';
+  const sunIntensity = 1.0;
+  const moonIntensity = 0.0;
+  const sunVisible = true;
+  // moonVisible removed
 
   // Register sky dome with animation manager ONCE when mesh becomes available
   // CRITICAL: Empty deps [] to prevent registry thrashing that leaves registry empty
@@ -742,58 +869,14 @@ export const SkySystem: React.FC = () => {
         />
       </mesh>
 
-      {/* Sun Visuals - Far Cry intense sun with multiple glow layers */}
-      {/* Geometry scaled 1.21x to maintain visual size at increased radius (340 vs 280) */}
-      {sunVisible && (
-        <group position={sunPosition}>
-          {/* Main Sun Meshes - Render order -990 ensures they are behind mountains (-950) but in front of SkyDome (-1000) */}
-          {/* Core sun - bright white */}
-          <mesh renderOrder={-990}>
-            <sphereGeometry args={[22, 32, 32]} />
-            <meshBasicMaterial color="#ffffff" />
-          </mesh>
-          {/* Inner glow */}
-          <mesh renderOrder={-990}>
-            <sphereGeometry args={[36, 32, 32]} />
-            <meshBasicMaterial color="#fffde7" transparent opacity={0.6} />
-          </mesh>
-          {/* Mid glow */}
-          <mesh renderOrder={-990}>
-            <sphereGeometry args={[55, 32, 32]} />
-            <meshBasicMaterial color={sunColor} transparent opacity={0.35} depthWrite={false} />
-          </mesh>
-          {/* Outer glow - large corona */}
-          <mesh renderOrder={-990}>
-            <sphereGeometry args={[85, 32, 32]} />
-            <meshBasicMaterial color="#fff8e1" transparent opacity={0.15} depthWrite={false} />
-          </mesh>
-        </group>
-      )}
+      {/* Sun Visuals - Smooth 60fps movement via SmoothSun component */}
+      <SmoothSun />
 
-      {/* Moon Visuals */}
-      {/* Geometry scaled 1.21x to maintain visual size at increased radius (340 vs 280) */}
-      {moonVisible && (
-        <group position={moonPosition}>
-          {/* Moon surface - fog={false} prevents dark artifacts at far distances */}
-          <mesh renderOrder={-990}>
-            <sphereGeometry args={[15, 32, 32]} />
-            <meshStandardMaterial
-              color="#e2e8f0"
-              emissive="#94a3b8"
-              emissiveIntensity={0.3}
-              fog={false}
-            />
-          </mesh>
-          {/* Moon glow */}
-          <mesh renderOrder={-990}>
-            <sphereGeometry args={[22, 32, 32]} />
-            <meshBasicMaterial color="#a5f3fc" transparent opacity={0.15} depthWrite={false} />
-          </mesh>
-        </group>
-      )}
+      {/* Moon Visuals - Smooth 60fps movement via SmoothMoon component */}
+      <SmoothMoon />
 
-      {/* Stars - visible at night (21:00-05:00) */}
-      <Stars visible={gameTime >= 20 || gameTime < 6} />
+      {/* Stars - visible at night (controlled by animation manager) */}
+      <Stars visible={true} />
 
       {/* Horizon Silhouette Ring - provides mountains and distant city */}
       <HorizonRing />
@@ -1288,7 +1371,8 @@ const CitySkylineLayer: React.FC<{
       }
     `,
       }),
-      [buildingColor, windowLightColor, isNight]
+      // Empty dependencies - colors are controlled by game time
+      []
     );
 
     return (
@@ -1596,16 +1680,8 @@ const SnowCappedMountainLayer: React.FC<{
       }
     `,
       }),
-      [
-        rockColor,
-        treeColor,
-        snowColor,
-        atmosphereColor,
-        atmosphereStrength,
-        snowLineHeight,
-        treeLineHeight,
-        opacity,
-      ]
+      // Only depend on static properties - colors are updated via useEffect above
+      [snowLineHeight, treeLineHeight]
     );
 
     return (
@@ -1720,7 +1796,8 @@ const HorizonLayer: React.FC<{
       }
     `,
     }),
-    [color, opacity]
+    // Empty dependencies - colors are updated via useEffect above
+    []
   );
 
   return (
@@ -1862,7 +1939,8 @@ const DistantWater: React.FC<{
         }
       `,
       }),
-      [waterColor, reflectionColor]
+      // Empty dependencies - colors are updated via useEffect below
+      []
     );
 
     // Register water with animation manager
@@ -1938,122 +2016,13 @@ const DistantWater: React.FC<{
 );
 
 export const HorizonRing: React.FC = () => {
-  const gameTime = useGameSimulationStore((state) => state.gameTime);
-
-  // Determine colors based on time of day
-  const { layerColors, waterColors, mountainColors, atmosphereColor, cityColors } = useMemo(() => {
-    const isNightTime = gameTime >= 20 || gameTime < 6;
-    const isDawn = gameTime >= 5 && gameTime < 8;
-    const isDusk = gameTime >= 17 && gameTime < 20;
-
-    if (isNightTime) {
-      return {
-        layerColors: {
-          far: '#0a0f1a',
-          mid: '#0d1420',
-          near: '#101824',
-          ground: '#080c12',
-        },
-        waterColors: {
-          water: '#0a1525',
-          reflection: '#1a2540',
-        },
-        mountainColors: {
-          snow: '#2a3545',
-          rock: '#151a24',
-          tree: '#0a1210',
-        },
-        atmosphereColor: '#0a1020', // Dark blue night atmosphere
-        cityColors: {
-          building: '#050810',
-          windowLight: '#ffd080', // Warm yellow window light
-        },
-      };
-    } else if (isDawn) {
-      return {
-        layerColors: {
-          far: '#1a1520',
-          mid: '#251a28',
-          near: '#301f30',
-          ground: '#120e18',
-        },
-        waterColors: {
-          water: '#1a2535',
-          reflection: '#f0a060',
-        },
-        mountainColors: {
-          snow: '#f0d0c0',
-          rock: '#6a5060',
-          tree: '#2a3528',
-        },
-        atmosphereColor: '#a08090', // Pink/purple dawn atmosphere
-        cityColors: {
-          building: '#201520',
-          windowLight: '#ffcc66',
-        },
-      };
-    } else if (isDusk) {
-      return {
-        layerColors: {
-          far: '#1a1015',
-          mid: '#25151a',
-          near: '#301a20',
-          ground: '#100a0d',
-        },
-        waterColors: {
-          water: '#1a1525',
-          reflection: '#e07040',
-        },
-        mountainColors: {
-          snow: '#e0b0a0',
-          rock: '#5a4048',
-          tree: '#252820',
-        },
-        atmosphereColor: '#804050', // Orange/red dusk atmosphere
-        cityColors: {
-          building: '#1a1015',
-          windowLight: '#ffaa44',
-        },
-      };
-    } else {
-      // Day - vibrant mountains with atmospheric blue shift
-      return {
-        layerColors: {
-          far: '#c8dce8', // Hazy blue distant
-          mid: '#a8c8dc', // Light blue mid
-          near: '#88b4cc', // Soft blue near
-          ground: '#5a8a5a', // Forest green
-        },
-        waterColors: {
-          water: '#40a0c0',
-          reflection: '#e0ffff',
-        },
-        mountainColors: {
-          snow: '#ffffff',
-          rock: '#7080a0', // Slightly blue-shifted rock
-          tree: '#3a6040',
-        },
-        atmosphereColor: '#b0d0e8', // Pale blue day atmosphere (Rayleigh scattering)
-        cityColors: {
-          building: '#405060',
-          windowLight: '#ffffff',
-        },
-      };
-    }
-  }, [gameTime]);
-
-  // Time period key to force shader recreation when crossing time boundaries
-  const timePeriod = useMemo(() => {
-    if (gameTime >= 20 || gameTime < 6) return 'night';
-    if (gameTime >= 6 && gameTime < 8) return 'dawn';
-    if (gameTime >= 17 && gameTime < 20) return 'dusk';
-    return 'day';
-  }, [gameTime]);
-
   // Determine if it's night or dusk for city lights
-  const isNight = gameTime >= 20 || gameTime < 6;
-  const isDusk = gameTime >= 17 && gameTime < 20;
-  const showCityLights = isNight || isDusk;
+  // Use day palette as default
+  const { layerColors, waterColors, mountainColors, atmosphereColor, cityColors } = dayPalette;
+
+  const isNight = false;
+  // const isDusk = false; // Unused
+  const showCityLights = false;
 
   // Generate different mountain profiles for each layer using FBM
   // Far mountains: tallest, most dramatic peaks
@@ -2070,7 +2039,7 @@ export const HorizonRing: React.FC = () => {
   const citySkyline = citySkylineData.heights;
 
   return (
-    <group key={timePeriod}>
+    <group>
       {/* Far mountains - tallest with heavy atmospheric perspective */}
       <SnowCappedMountainLayer
         radius={320}
@@ -2139,7 +2108,7 @@ export const HorizonRing: React.FC = () => {
         buildingColor={cityColors.building}
         windowLightColor={cityColors.windowLight}
         isNight={showCityLights}
-        time={gameTime}
+        time={0}
         renderOrder={-700}
       />
 

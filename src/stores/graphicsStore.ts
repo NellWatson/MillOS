@@ -62,6 +62,8 @@ export interface GraphicsSettings {
   enableMachineColorVariation: boolean; // Per-instance color variation (medium+)
   enableMachineLOD: boolean; // Geometry LOD for machines (all presets)
   machineLodDistance: number; // Distance threshold for machine LOD switching
+  // Resolution scaling (0.25 to 1.0 multiplier of device pixel ratio)
+  resolutionScale: number;
 }
 
 // Default perf debug settings (all systems enabled)
@@ -117,6 +119,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     enableMachineColorVariation: false,
     enableMachineLOD: true,
     machineLodDistance: 30, // Aggressive LOD for low quality
+    resolutionScale: 0.5, // Half resolution for performance
   },
   medium: {
     quality: 'medium',
@@ -156,6 +159,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     enableMachineColorVariation: true, // Enable color variation on medium+
     enableMachineLOD: true,
     machineLodDistance: 50,
+    resolutionScale: 0.75, // 75% resolution for balance
   },
   high: {
     quality: 'high',
@@ -195,6 +199,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     enableMachineColorVariation: true,
     enableMachineLOD: true,
     machineLodDistance: 80,
+    resolutionScale: 1.0, // Full resolution
   },
   ultra: {
     quality: 'ultra',
@@ -234,6 +239,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     enableMachineColorVariation: true,
     enableMachineLOD: true,
     machineLodDistance: 150, // Very long LOD distance for ultra
+    resolutionScale: 1.0, // Full resolution
   },
 };
 

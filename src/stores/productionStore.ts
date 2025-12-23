@@ -9,6 +9,7 @@ import {
   PAnnouncement,
   IncidentReplayFrame,
 } from '../types';
+import { useHistoricalPlaybackStore } from './historicalPlaybackStore';
 
 // =========================================================================
 // TRUCK SCHEDULING SYSTEM
@@ -153,6 +154,7 @@ interface ProductionStore {
   // Machine management
   setMachines: (machines: MachineData[]) => void;
   updateMachineMetrics: (machineId: string, metrics: Partial<MachineData['metrics']>) => void;
+  batchUpdateMachineMetrics: (updates: { machineId: string; metrics: Partial<MachineData['metrics']> }[]) => void;
 
   // Memoized selector utilities for performance
   getMachineById: (machineId: string) => MachineData | undefined;
@@ -205,6 +207,7 @@ interface ProductionStore {
   achievements: Achievement[];
   unlockAchievement: (achievementId: string) => void;
   updateAchievementProgress: (achievementId: string, progress: number) => void;
+  resetAchievements: () => void;
 
   // PA Announcements
   announcements: PAnnouncement[];
@@ -341,6 +344,10 @@ export const useProductionStore = create<ProductionStore>()(
         const updatedDecisions = [decision, ...state.aiDecisions].slice(0, 50);
         const { aiDecisionsByMachine, aiDecisionsByWorker } =
           rebuildAIDecisionIndices(updatedDecisions);
+
+        // Log decision to historical playback store (fire-and-forget)
+        useHistoricalPlaybackStore.getState().logDecision(decision);
+
         return {
           aiDecisions: updatedDecisions,
           _indices: {
@@ -404,6 +411,35 @@ export const useProductionStore = create<ProductionStore>()(
         };
       }),
 
+    batchUpdateMachineMetrics: (updates: { machineId: string; metrics: Partial<MachineData['metrics']> }[]) =>
+      set((state) => {
+        if (updates.length === 0) return state;
+
+        const newMachinesById = new Map(state._indices.machinesById);
+        const machinesMap = new Map(state.machines.map(m => [m.id, m]));
+        let hasChanges = false;
+
+        updates.forEach(({ machineId, metrics }) => {
+          const machine = machinesMap.get(machineId);
+          if (machine) {
+            const updatedMachine = { ...machine, metrics: { ...machine.metrics, ...metrics } };
+            machinesMap.set(machineId, updatedMachine);
+            newMachinesById.set(machineId, updatedMachine);
+            hasChanges = true;
+          }
+        });
+
+        if (!hasChanges) return state;
+
+        return {
+          machines: Array.from(machinesMap.values()),
+          _indices: {
+            ...state._indices,
+            machinesById: newMachinesById,
+          },
+        };
+      }),
+
     // Memoized selector utilities
     getMachineById: (machineId: string): MachineData | undefined => {
       const state = get();
@@ -456,7 +492,7 @@ export const useProductionStore = create<ProductionStore>()(
       // Each packer at full production speed produces ~12 bags/min
       const packers = machines.filter(m => m.type.toString() === 'PACKER');
       const runningPackers = packers.filter(m => m.status === 'running' || m.status === 'warning').length;
-      const throughput = Math.round(runningPackers * 12 * state.productionSpeed);
+      const throughput = Math.round(runningPackers * 12 * 60 * state.productionSpeed);
 
       return {
         metrics: { efficiency, uptime, quality, throughput },
@@ -594,9 +630,9 @@ export const useProductionStore = create<ProductionStore>()(
     productionTarget: {
       id: 'daily-target-1',
       date: new Date().toISOString().split('T')[0],
-      targetBags: 5000,
+      targetBags: 15000,
       producedBags: 0,
-      targetThroughput: 50,
+      targetThroughput: 1500,
       actualThroughput: 0,
       status: 'in_progress' as const,
     },
@@ -631,55 +667,85 @@ export const useProductionStore = create<ProductionStore>()(
         };
       }),
 
-    // Achievements - start at 0, will be tracked by real events
+    // Achievements - balanced goals that require actual play time
     achievements: [
       {
-        id: 'safety-100',
-        name: 'Safety Champion',
-        description: '100 days without incident',
+        id: 'safety-5',
+        name: 'Safety First',
+        description: '5 days without incident',
         icon: 'Shield',
         category: 'safety',
-        requirement: 100,
+        requirement: 5,
         currentValue: 0,
         progress: 0,
       },
       {
-        id: 'bags-1m',
-        name: 'Million Bags',
-        description: 'Pack 1 million bags',
+        id: 'bags-1k',
+        name: 'Getting Started',
+        description: 'Pack 1,000 bags',
         icon: 'Package',
         category: 'production',
-        requirement: 1000000,
+        requirement: 1000,
         currentValue: 0,
         progress: 0,
       },
       {
-        id: 'quality-99',
-        name: 'Quality Master',
-        description: 'Maintain 99% quality for a week',
+        id: 'quality-streak',
+        name: 'Quality Streak',
+        description: 'Maintain 95% quality for 5 minutes',
         icon: 'Award',
         category: 'quality',
-        requirement: 7,
+        requirement: 5, // 5 consecutive checks at 95%+
         currentValue: 0,
         progress: 0,
       },
       {
         id: 'team-player',
         name: 'Team Player',
-        description: '50 worker collaborations',
+        description: '10 worker collaborations',
         icon: 'Users',
         category: 'teamwork',
-        requirement: 50,
+        requirement: 10,
         currentValue: 0,
         progress: 0,
       },
       {
-        id: 'efficiency-expert',
-        name: 'Efficiency Expert',
-        description: 'Reach 99% uptime',
+        id: 'efficiency-sustained',
+        name: 'Steady Runner',
+        description: 'Maintain 90% uptime for 10 minutes',
         icon: 'TrendingUp',
         category: 'production',
-        requirement: 99,
+        requirement: 10, // 10 consecutive checks at 90%+
+        currentValue: 0,
+        progress: 0,
+      },
+      {
+        id: 'night-owl',
+        name: 'Night Owl',
+        description: 'Complete a night shift',
+        icon: 'Moon',
+        category: 'production',
+        requirement: 1,
+        currentValue: 0,
+        progress: 0,
+      },
+      {
+        id: 'first-emergency',
+        name: 'Crisis Manager',
+        description: 'Handle your first emergency',
+        icon: 'Siren',
+        category: 'safety',
+        requirement: 1,
+        currentValue: 0,
+        progress: 0,
+      },
+      {
+        id: 'bags-10k',
+        name: 'Production Pro',
+        description: 'Pack 10,000 bags',
+        icon: 'Boxes',
+        category: 'production',
+        requirement: 10000,
         currentValue: 0,
         progress: 0,
       },
@@ -701,6 +767,15 @@ export const useProductionStore = create<ProductionStore>()(
             }
             : a
         ),
+      })),
+    resetAchievements: () =>
+      set((state) => ({
+        achievements: state.achievements.map((a) => ({
+          ...a,
+          unlockedAt: undefined,
+          currentValue: 0,
+          progress: 0,
+        })),
       })),
 
     // PA Announcements

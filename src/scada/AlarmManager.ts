@@ -9,6 +9,7 @@
  * - Alarm history for post-incident analysis
  */
 
+import { logger } from '../utils/logger';
 import {
   TagDefinition,
   TagValue,
@@ -204,7 +205,7 @@ export class AlarmManager {
     const lastLog = this.lastLogTime.get(key) ?? 0;
 
     if (now - lastLog >= AlarmManager.LOG_THROTTLE_MS) {
-      console.log(message);
+      logger.scada.debug(message);
       this.lastLogTime.set(key, now);
     }
   }
@@ -301,12 +302,12 @@ export class AlarmManager {
     if (alarm.state === 'UNACK') {
       // Active alarm - mark as acknowledged
       alarm.state = 'ACKED';
-      console.log(`[AlarmManager] ALARM ACKED: ${alarm.tagName} by ${operator}`);
+      logger.scada.info(`[AlarmManager] ALARM ACKED: ${alarm.tagName} by ${operator}`);
     } else if (alarm.state === 'RTN_UNACK') {
       // Returned to normal - archive and clear
       this.archiveAlarm(alarm, now);
       this.activeAlarms.delete(alarmId);
-      console.log(`[AlarmManager] ALARM CLEARED (RTN): ${alarm.tagName} by ${operator}`);
+      logger.scada.info(`[AlarmManager] ALARM CLEARED (RTN): ${alarm.tagName} by ${operator}`);
     }
 
     this.notifyListeners();
@@ -357,7 +358,7 @@ export class AlarmManager {
       reason,
       expiresAt: durationMs ? Date.now() + durationMs : undefined,
     });
-    console.log(`[AlarmManager] Alarms suppressed for ${tagId}: ${reason}`);
+    logger.scada.info(`[AlarmManager] Alarms suppressed for ${tagId}: ${reason}`);
   }
 
   /**
@@ -365,7 +366,7 @@ export class AlarmManager {
    */
   unsuppress(tagId: string): void {
     this.suppressions.delete(tagId);
-    console.log(`[AlarmManager] Suppression removed for ${tagId}`);
+    logger.scada.info(`[AlarmManager] Suppression removed for ${tagId}`);
   }
 
   /**

@@ -32,7 +32,9 @@ export const StrategicPriorityCards: React.FC<StrategicPriorityCardsProps> = ({ 
         setDismissedPriorities(prev => new Set([...prev, index]));
     };
 
-    const visiblePriorities = strategic.priorities.filter((_, i) => !dismissedPriorities.has(i));
+    // Use legacy string priorities for display (human-readable)
+    const displayPriorities = strategic.legacyPriorities || [];
+    const visiblePriorities = displayPriorities.filter((_, i) => !dismissedPriorities.has(i));
 
     if (visiblePriorities.length === 0 && !strategic.isThinking) {
         return null;
@@ -57,7 +59,7 @@ export const StrategicPriorityCards: React.FC<StrategicPriorityCardsProps> = ({ 
                 )}
 
                 {/* Priority Cards */}
-                {strategic.priorities.map((priority, index) => {
+                {displayPriorities.map((priority, index) => {
                     if (dismissedPriorities.has(index)) return null;
 
                     const priorityNumber = index + 1;

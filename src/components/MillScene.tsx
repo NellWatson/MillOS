@@ -1,11 +1,11 @@
-import React, { useMemo, useEffect, useRef, Suspense } from 'react';
+import React, { useMemo, useEffect, useRef, Suspense, useCallback } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Environment, Text } from '@react-three/drei';
 import * as THREE from 'three';
 
 // Import static assets so Vite handles base path correctly
 import warehouseHdrUrl from '/hdri/warehouse.hdr?url';
-import { Machines } from './Machines';
+import { MachinesContainer, MachineSimulationController } from './Machines';
 import { ConveyorSystem } from './ConveyorSystem';
 // Using new optimized worker system with centralized animation manager
 import { WorkerSystemNew as WorkerSystem } from './WorkerSystemNew';
@@ -14,6 +14,7 @@ import { SpoutingSystem } from './SpoutingSystem';
 import { DustParticles, GrainFlow, MachineSteamVents, DustAnimationManager } from './DustParticles';
 import { FactoryExterior } from './FactoryExterior';
 import { FarmArea } from './FarmArea';
+import { VillageArea } from './VillageArea';
 import { OpenDockOpening } from './infrastructure/OpenDockOpening';
 import { ForkliftSystem, ForkliftData } from './ForkliftSystem';
 import { FactoryEnvironment } from './Environment';
@@ -39,22 +40,40 @@ import { useSafetyStore } from '../stores/safetyStore';
 import { useGameSimulationStore, FIRE_DRILL_EXITS } from '../stores/gameSimulationStore';
 import { positionRegistry, Obstacle } from '../utils/positionRegistry';
 import { useShallow } from 'zustand/react/shallow';
-import { trackRender } from '../utils/renderProfiler';
 import { CameraBoundsTracker } from './CameraController';
 import { useCameraPositionStore } from '../stores/useCameraPositionStore';
 
 // Single heat map point with ref-based animation (throttled to reduce CPU load)
 // Memoized to prevent re-renders when parent updates
+// Single heat map point with ref-based animation (managed centrally)
+// Memoized to prevent re-renders when parent updates
+// Single heat map point with ref-based animation (throttled to reduce CPU load)
+// Memoized to prevent re-renders when parent updates
 const HeatMapPoint = React.memo<{
   point: { x: number; z: number; intensity: number; type: string };
-}>(({ point }) => {
+  registerAnimation: (
+    id: string,
+    refs: {
+      circle: THREE.MeshBasicMaterial | null;
+      ring: THREE.MeshBasicMaterial | null;
+      column: THREE.MeshBasicMaterial | null;
+      intensityRef: React.MutableRefObject<number>;
+    }
+  ) => void;
+  unregisterAnimation: (id: string) => void;
+}>(({ point, registerAnimation, unregisterAnimation }) => {
   const circleMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
   const ringMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
   const columnMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
-  const frameCountRef = useRef(0);
+  const id = `${point.x}-${point.z}`;
 
   // Memoize derived values to prevent recalculation
-  const intensity = useMemo(() => point.intensity / 10, [point.intensity]);
+  const intensity = point.intensity / 10;
+  // Use a ref for intensity to avoid re-running the registration effect when it changes
+  const intensityRef = useRef(intensity);
+  // Update ref on every render
+  intensityRef.current = intensity;
+
   const radius = useMemo(() => 1 + intensity * 2, [intensity]);
   const color = useMemo(
     () =>
@@ -82,16 +101,16 @@ const HeatMapPoint = React.memo<{
   const floorRotation = useMemo<[number, number, number]>(() => [-Math.PI / 2, 0, 0], []);
   const labelPosition = useMemo<[number, number, number]>(() => [0, 0.5, 0], []);
 
-  useFrame((state) => {
-    // Throttle to every 4th frame (~15 FPS) - heat map pulse doesn't need 60 FPS
-    frameCountRef.current++;
-    if (frameCountRef.current % 4 !== 0) return;
-
-    const pulse = Math.sin(state.clock.elapsedTime * 2) * 0.3 + 0.7;
-    if (circleMaterialRef.current) circleMaterialRef.current.opacity = 0.3 * pulse * intensity;
-    if (ringMaterialRef.current) ringMaterialRef.current.opacity = 0.6 * pulse;
-    if (columnMaterialRef.current) columnMaterialRef.current.opacity = 0.2 * pulse;
-  });
+  // Register with parent manager
+  useEffect(() => {
+    registerAnimation(id, {
+      circle: circleMaterialRef.current,
+      ring: ringMaterialRef.current,
+      column: columnMaterialRef.current,
+      intensityRef, // Pass the ref instead of the value
+    });
+    return () => unregisterAnimation(id);
+  }, [id, registerAnimation, unregisterAnimation]); // No intensity dependency!
 
   return (
     <group position={groupPosition}>
@@ -140,13 +159,50 @@ const IncidentHeatMap: React.FC = () => {
   const incidentHeatMap = useSafetyStore((state) => state.incidentHeatMap);
   const showIncidentHeatMap = useSafetyStore((state) => state.showIncidentHeatMap);
 
+  // Registry for animated materials
+  const animatedRefs = useRef<Map<string, {
+    circle: THREE.MeshBasicMaterial | null;
+    ring: THREE.MeshBasicMaterial | null;
+    column: THREE.MeshBasicMaterial | null;
+    intensityRef: React.MutableRefObject<number>;
+  }>>(new Map());
+
+  const registerAnimation = useCallback((id: string, refs: any) => {
+    animatedRefs.current.set(id, refs);
+  }, []);
+
+  const unregisterAnimation = useCallback((id: string) => {
+    animatedRefs.current.delete(id);
+  }, []);
+
+  // Single centralized animation loop
+  useFrame((state) => {
+    if (!showIncidentHeatMap || animatedRefs.current.size === 0) return;
+
+    // Throttle animation update? Maybe not needed for simple opacity pulse, 
+    // but we can throttle if needed. For now run every frame for smooth pulse.
+    const pulse = Math.sin(state.clock.elapsedTime * 2) * 0.3 + 0.7;
+
+    animatedRefs.current.forEach((refs) => {
+      // Use the ref value for intensity
+      if (refs.circle) refs.circle.opacity = 0.3 * pulse * refs.intensityRef.current;
+      if (refs.ring) refs.ring.opacity = 0.6 * pulse;
+      if (refs.column) refs.column.opacity = 0.2 * pulse;
+    });
+  });
+
   if (!showIncidentHeatMap || incidentHeatMap.length === 0) return null;
 
   return (
     <group>
       {incidentHeatMap.map((point) => (
         // PERFORMANCE: Use stable position-based key instead of array index to prevent unnecessary re-renders
-        <HeatMapPoint key={`${point.x}-${point.z}`} point={point} />
+        <HeatMapPoint
+          key={`${point.x}-${point.z}`}
+          point={point}
+          registerAnimation={registerAnimation}
+          unregisterAnimation={unregisterAnimation}
+        />
       ))}
     </group>
   );
@@ -246,20 +302,16 @@ export const MillScene: React.FC<MillSceneProps> = ({
   onSelectWorker,
 }) => {
   // PERF DEBUG: Track renders
-  trackRender('MillScene');
+  // trackRender('MillScene');
 
-  const { setMachines, storeMachines, updateMachineMetrics, updateMachineStatus, scadaLive } =
+  const { setMachines } =
     useProductionStore(
       useShallow((state) => ({
         setMachines: state.setMachines,
-        storeMachines: state.machines,
-        updateMachineMetrics: state.updateMachineMetrics,
-        updateMachineStatus: state.updateMachineStatus,
-        scadaLive: state.scadaLive,
+        // Removed subscriptions that cause re-renders
       }))
     );
-  const lastUpdateRef = useRef(0);
-  const frameCountRef = useRef(0);
+
 
   // Worker mood simulation - Theme Hospital inspired mood system
   useMoodSimulation();
@@ -273,7 +325,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
       // Deterministic metrics based on machine index (no Math.random)
       const idx = i + 2; // 0-4
       _machines.push({
-        id: `silo-${i}`,
+        id: `silo-${idx}`, // silo-0 to silo-4
         name: `Silo ${siloNames[idx]}`,
         type: MachineType.SILO,
         position: [i * 9, 0, -22],
@@ -299,7 +351,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
       // Deterministic metrics based on mill position
       const idx = millIndex;
       _machines.push({
-        id: `mill-${i}`,
+        id: `rm-${millNames[millIndex].split('-')[1]}`, // rm-101 to rm-106
         name: millNames[millIndex],
         type: MachineType.ROLLER_MILL,
         position: [i * 5, 0, -6],
@@ -324,7 +376,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
       // Deterministic metrics based on sifter position
       const idx = i + 1; // 0-2
       _machines.push({
-        id: `sifter-${i}`,
+        id: `sifter-${['a', 'b', 'c'][idx]}`, // sifter-a, sifter-b, sifter-c
         name: sifterNames[idx],
         type: MachineType.PLANSIFTER,
         position: [i * 14, 9, 6],
@@ -348,7 +400,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
       // Deterministic metrics based on packer position
       const idx = i + 1; // 0-2
       _machines.push({
-        id: `packer-${i}`,
+        id: `packer-${idx}`, // packer-0, packer-1, packer-2
         name: packerNames[idx],
         type: MachineType.PACKER,
         position: [i * 8, 0, 25],
@@ -548,122 +600,20 @@ export const MillScene: React.FC<MillSceneProps> = ({
   }, [obstacles]);
 
   // Sync machines with store on mount
+  // Sync machines with store on mount
   useEffect(() => {
-    if (machines.length > 0 && storeMachines.length === 0) {
+    // Only set if store is empty
+    if (useProductionStore.getState().machines.length === 0) {
       setMachines(machines);
     }
-  }, [machines, storeMachines.length, setMachines]);
+  }, [machines, setMachines]);
 
-  // Simulate realistic machine metric changes over time
-  // Throttled to check every 30 frames (~0.5s at 60fps) instead of every frame
-  useFrame((state) => {
-    // When SCADA is driving metrics, skip local simulation
-    if (scadaLive) return;
-    frameCountRef.current++;
-
-    // Only check time every 30 frames to reduce overhead
-    if (frameCountRef.current % 30 !== 0) return;
-
-    const now = state.clock.elapsedTime;
-
-    // Update every 2 seconds
-    if (now - lastUpdateRef.current < 2) return;
-    lastUpdateRef.current = now;
-
-    // Only update if store has machines
-    if (storeMachines.length === 0) return;
-
-    // PHYSICS-BASED METRIC SIMULATION
-    // Update ALL machines based on their actual state (not random selection)
-    for (const machine of storeMachines) {
-      const isRunning = machine.status === 'running' || machine.status === 'warning';
-      const isIdle = machine.status === 'idle';
-      const isCritical = machine.status === 'critical';
-
-      // Get base temps for machine type
-      const baseTemp: Record<string, number> = {
-        SILO: 20,
-        ROLLER_MILL: 42,
-        PLANSIFTER: 28,
-        PACKER: 28,
-        CONTROL_ROOM: 22,
-      };
-      const machineBaseTemp = baseTemp[machine.type.toString()] || 30;
-
-      // LOAD: Responds to productionSpeed setting
-      let targetLoad = machine.metrics.load;
-      if (isRunning) {
-        // Running machines adjust load toward productionSpeed * 80
-        targetLoad = 50 + (productionSpeed * 30); // 50-80% based on speed
-      } else if (isIdle) {
-        targetLoad = 0; // Idle = no load
-      }
-      const loadChange = (targetLoad - machine.metrics.load) * 0.1; // Smooth transition
-      const newLoad = Math.max(0, Math.min(100, machine.metrics.load + loadChange));
-
-      // TEMPERATURE: Correlates with load (high load = heat up, idle = cool down)
-      let targetTemp = machineBaseTemp;
-      if (isRunning) {
-        // Temperature rises with load: base + up to 20°C at full load
-        targetTemp = machineBaseTemp + (newLoad / 100) * 20;
-      } else if (isIdle) {
-        // Cooling down toward ambient
-        targetTemp = 20;
-      } else if (isCritical) {
-        // Critical machines run hot
-        targetTemp = machineBaseTemp + 40;
-      }
-      const tempChange = (targetTemp - machine.metrics.temperature) * 0.05; // Slow thermal change
-      const newTemp = Math.max(15, Math.min(90, machine.metrics.temperature + tempChange));
-
-      // VIBRATION: Correlates with RPM and machine status
-      let targetVibration = 1.0;
-      if (isRunning) {
-        // Vibration based on RPM ratio and load
-        const rpmRatio = machine.metrics.rpm / 1200; // Normalize to 1200 RPM base
-        targetVibration = 1.0 + (rpmRatio * 2) + (newLoad / 100);
-        // Warning machines vibrate more (something is wrong)
-        if (machine.status === 'warning') targetVibration *= 1.5;
-      } else if (isCritical) {
-        targetVibration = 7; // Critical = high vibration
-      } else {
-        targetVibration = 0.2; // Idle = minimal vibration
-      }
-      const vibrationChange = (targetVibration - machine.metrics.vibration) * 0.1;
-      const newVibration = Math.max(0, Math.min(10, machine.metrics.vibration + vibrationChange));
-
-      updateMachineMetrics(machine.id, {
-        temperature: Math.round(newTemp * 10) / 10,
-        vibration: Math.round(newVibration * 100) / 100,
-        load: Math.round(newLoad * 10) / 10,
-      });
-
-      // STATUS CHANGES: Based on actual threshold crossings (deterministic)
-      if (machine.status === 'running') {
-        // Transition to warning if temp or vibration exceeds threshold
-        if (newTemp > 70 || newVibration > 5) {
-          updateMachineStatus(machine.id, 'warning');
-        }
-      } else if (machine.status === 'warning') {
-        // Recovery when metrics return to safe levels
-        if (newTemp < 55 && newVibration < 3.5) {
-          updateMachineStatus(machine.id, 'running');
-        }
-        // Escalate to critical if thresholds exceeded significantly
-        if (newTemp > 80 || newVibration > 8) {
-          updateMachineStatus(machine.id, 'critical');
-        }
-      } else if (machine.status === 'critical') {
-        // Only recover from critical if metrics are very low (machine cooled down)
-        if (newTemp < 40 && newVibration < 2) {
-          updateMachineStatus(machine.id, 'warning');
-        }
-      }
-    }
-  });
 
   // Use store machines if available, otherwise use local machines
-  const displayMachines = storeMachines.length > 0 ? storeMachines : machines;
+  // PERFORMANCE: MillScene NO LONGER subscribes to storeMachines updates to prevent full scene re-renders
+  // MachinesContainer handles live updates internally
+  const displayMachines = machines;
+
   // PERFORMANCE: Consolidated store subscriptions with useShallow to prevent unnecessary re-renders
   const { graphicsQuality, perfDebug } = useGraphicsStore(
     useShallow((state) => ({
@@ -723,7 +673,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
       {/* Main Systems - Respect perfDebug toggles for A/B testing */}
       {/* PERFORMANCE: Interior systems only render when camera is inside factory or in dock zone */}
       {showInterior && !perfDebug?.disableMachines && (
-        <Machines machines={displayMachines} onSelect={onSelectMachine} />
+        <MachinesContainer initialMachines={displayMachines} onSelect={onSelectMachine} />
       )}
       {showInterior && !isLowGraphics && !perfDebug?.disableMachines && (
         <SpoutingSystem machines={displayMachines} />
@@ -765,6 +715,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
       {/* Factory exterior walls and signage - renders when camera is outside or in dock zone */}
       {showExterior && <FactoryExterior />}
       {showExterior && <FarmArea />}
+      {showExterior && <VillageArea />}
 
       {/* Theme Hospital-inspired Mood & Chaos Systems */}
       {/* PERFORMANCE: Interior-only systems, ultra quality only */}
@@ -783,6 +734,9 @@ export const MillScene: React.FC<MillSceneProps> = ({
 
       {/* Strategic Overlay 3D - floating priority text above factory (default OFF, toggle with 'J') */}
       <StrategicOverlay3D />
+
+      {/* Physics Simulation Controller - Isolated from render tree */}
+      <MachineSimulationController />
 
       {/* Atmospheric Effects - heavily reduced for performance */}
       {/* PERFORMANCE: Interior-only particle effects */}

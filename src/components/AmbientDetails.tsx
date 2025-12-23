@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { audioManager } from '../utils/audioManager';
 import { shouldRunThisFrame } from '../utils/frameThrottle';
+import { playCritterSound } from '../utils/critterAudio';
 
 // ==========================================
 // CENTRALIZED ANIMATION MANAGER
@@ -4700,7 +4701,8 @@ export const AmbientDetailsGroup: React.FC = () => {
       {/* First aid kits on walls */}
       <FirstAidKit position={[-52, 6, 30]} rotation={[0, Math.PI / 2, 0]} />
       <FirstAidKit position={[52, 6, -25]} rotation={[0, -Math.PI / 2, 0]} />
-      <FirstAidKit position={[25, 6, -38]} rotation={[0, 0, 0]} />
+      {/* First aid kit outside bathroom door (ToiletBlock at [35,0,35], door on south wall at z=37.5) */}
+      <FirstAidKit position={[38, 1.5, 39]} rotation={[0, Math.PI, 0]} />
 
       {/* Extension cords */}
       <ExtensionCord start={[-30, 0.01, -12]} end={[-22, 0.01, -8]} color="#f97316" />

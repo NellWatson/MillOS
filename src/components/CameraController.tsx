@@ -377,10 +377,15 @@ export const CameraBoundsTracker: React.FC = () => {
     frameCountRef.current++;
     if (frameCountRef.current % 10 !== 0) return;
 
+    // HYSTERESIS: Use a larger buffer when already inside to prevent rapid flipping
+    // effectively creating a "dead zone" at the boundary
+    const hysteresisBuffer = lastInsideRef.current ? -2 : 2; // -2 expands the "inside" zone, +2 shrinks it
+
     const isInside = isPositionInsideFactory(
       camera.position.x,
       camera.position.y,
-      camera.position.z
+      camera.position.z,
+      hysteresisBuffer
     );
 
     const isInDockZone = isPositionInDockZone(camera.position.x, camera.position.z);

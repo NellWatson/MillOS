@@ -258,4 +258,57 @@ describe('VCL Encoder', () => {
             expect(legend).toContain('⚙️'); // Operator/Mill
         });
     });
+    describe('Extreme Edge Cases', () => {
+        it('should handle machine on fire (!critical)', () => {
+            const fireMachine = createMockMachine({
+                id: 'oven-1',
+                status: 'critical',
+                metrics: { temperature: 300, vibration: 10, load: 0, rpm: 0 }, // Extreme temp
+            });
+
+            const encoded = encodeMachineVCL(fireMachine);
+
+            // Should flag extreme danger
+            expect(encoded).toContain('🔴');
+            // In a real VCL this might trigger special fire emojis if implemented
+        });
+
+        it('should handle negative values gracefully', () => {
+            const weirdMachine = createMockMachine({
+                metrics: { load: -50, temperature: -20, rpm: -100, vibration: -1 }
+            });
+
+            const encoded = encodeMachineVCL(weirdMachine);
+            expect(encoded).toBeDefined();
+            // Should not crash
+        });
+
+        it('should handle massive worker lists with truncation', () => {
+            // Create 250 workers (limit is 200)
+            const hugeWorkerList = Array.from({ length: 250 }, (_, i) =>
+                createMockWorker({ id: `w-${i}`, name: `Worker ${i}` })
+            );
+
+            const encoded = encodeWorkersVCL(hugeWorkerList, 0.5);
+
+            // Should show the capped count for the role (200)
+            expect(encoded).toContain('200');
+            // Should verify it didn't process all 250 in the counts
+            expect(encoded).not.toContain('250');
+            // Should indicate truncation
+            expect(encoded).toContain('(truncated)');
+        });
+
+        it('should handle undefined/null properties safely', () => {
+            // Force type casting to test runtime safety
+            const brokenMachine = {
+                id: 'broken',
+                type: 'unknown',
+                // missing metrics
+            } as unknown as MachineData;
+
+            // Should not throw
+            expect(() => encodeMachineVCL(brokenMachine)).not.toThrow();
+        });
+    });
 });

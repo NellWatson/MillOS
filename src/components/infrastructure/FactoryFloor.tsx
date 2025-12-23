@@ -140,7 +140,7 @@ const SafetyZone: React.FC<{
   size: [number, number];
   type: 'walkway' | 'danger';
   rotation?: number;
-}> = ({ position, size, type, rotation = 0 }) => {
+}> = React.memo(({ position, size, type, rotation = 0 }) => {
   const texture = useHazardStripeTexture(type);
 
   // CRITICAL: Guard against NaN/invalid dimensions
@@ -191,14 +191,14 @@ const SafetyZone: React.FC<{
       </mesh>
     </group>
   );
-};
+});
 
 // Floor puddle with reflective surface
 const FloorPuddle: React.FC<{
   position: [number, number, number];
   size: [number, number];
   seed: number;
-}> = ({ position, size, seed }) => {
+}> = React.memo(({ position, size, seed }) => {
   const random = (s: number) => Math.abs(Math.sin(s * 12.9898 + 78.233) * 43758.5453) % 1;
 
   // Load water textures (high/ultra only)
@@ -260,14 +260,14 @@ const FloorPuddle: React.FC<{
       </mesh>
     </group>
   );
-};
+});
 
 // Worn footpath texture overlay
 const WornFootpath: React.FC<{
   path: Array<[number, number, number]>;
   width?: number;
   height?: number;
-}> = ({ path, width = 2, height = FLOOR_LAYER_HEIGHTS.wornPrimary }) => {
+}> = React.memo(({ path, width = 2, height = FLOOR_LAYER_HEIGHTS.wornPrimary }) => {
   const texture = useMemo(() => {
     const size = 128;
     const canvas = document.createElement('canvas');
@@ -382,9 +382,9 @@ const WornFootpath: React.FC<{
       })}
     </group>
   );
-};
+});
 
-export const FactoryFloor: React.FC<FactoryFloorProps> = ({
+export const FactoryFloor: React.FC<FactoryFloorProps> = React.memo(({
   floorSize,
   floorWidth,
   floorDepth,
@@ -637,4 +637,4 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = ({
       )}
     </group>
   );
-};
+});

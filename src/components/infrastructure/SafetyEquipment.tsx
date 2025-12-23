@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
+import { Instances, Instance } from '@react-three/drei';
 import { useGraphicsStore } from '../../stores/graphicsStore';
 
 interface SafetyEquipmentProps {
@@ -12,7 +13,7 @@ const WarningSign: React.FC<{
   position: [number, number, number];
   rotation?: [number, number, number];
   type: 'forklift' | 'hardhat' | 'danger' | 'exit' | 'electrical';
-}> = ({ position, rotation = [0, 0, 0], type }) => {
+}> = React.memo(({ position, rotation = [0, 0, 0], type }) => {
   const colors = {
     forklift: { bg: '#fbbf24', text: '#1e293b' },
     hardhat: { bg: '#fbbf24', text: '#1e293b' },
@@ -22,9 +23,11 @@ const WarningSign: React.FC<{
   };
 
   const { bg, text } = colors[type];
+  // Ensure rotation is treated as a valid Euler tuple
+  const safeRotation = rotation as [number, number, number];
 
   return (
-    <group position={position} rotation={rotation}>
+    <group position={position} rotation={safeRotation}>
       {/* Sign backing */}
       <mesh castShadow>
         <boxGeometry args={[0.8, 0.6, 0.02]} />
@@ -66,7 +69,7 @@ const WarningSign: React.FC<{
       </mesh>
     </group>
   );
-};
+});
 
 // Wall-mounted sign
 const WallSign: React.FC<{
@@ -74,9 +77,10 @@ const WallSign: React.FC<{
   rotation?: [number, number, number];
   text: string;
   color?: string;
-}> = ({ position, rotation = [0, 0, 0], color = '#3b82f6' }) => {
+}> = React.memo(({ position, rotation = [0, 0, 0], color = '#3b82f6' }) => {
+  const safeRotation = rotation as [number, number, number];
   return (
-    <group position={position} rotation={rotation}>
+    <group position={position} rotation={safeRotation}>
       <mesh>
         <boxGeometry args={[1.2, 0.4, 0.03]} />
         <meshStandardMaterial color={color} />
@@ -88,13 +92,13 @@ const WallSign: React.FC<{
       </mesh>
     </group>
   );
-};
+});
 
 // Safety Station component - includes first-aid, eyewash, fire, emergency-stop, aed, and spill-kit
 const SafetyStation: React.FC<{
   position: [number, number, number];
   type: 'first-aid' | 'eyewash' | 'fire' | 'emergency-stop' | 'aed' | 'spill-kit';
-}> = ({ position, type }) => {
+}> = React.memo(({ position, type }) => {
   const colors = {
     'first-aid': '#22c55e',
     eyewash: '#3b82f6',
@@ -205,7 +209,7 @@ const SafetyStation: React.FC<{
       <pointLight position={[0, 1.5, 0.3]} color={color} intensity={0.3} distance={3} />
     </group>
   );
-};
+});
 
 // Stacked pallets with optional crates
 const PalletStack: React.FC<{
@@ -213,7 +217,7 @@ const PalletStack: React.FC<{
   layers?: number;
   hasCrates?: boolean;
   rotation?: number;
-}> = ({ position, layers = 1, hasCrates = false, rotation = 0 }) => {
+}> = React.memo(({ position, layers = 1, hasCrates = false, rotation = 0 }) => {
   return (
     <group position={position} rotation={[0, rotation, 0]}>
       {/* Wooden pallet(s) */}
@@ -261,14 +265,14 @@ const PalletStack: React.FC<{
       )}
     </group>
   );
-};
+});
 
 // Sack stack (grain bags)
 const SackStack: React.FC<{
   position: [number, number, number];
   count?: number;
   rotation?: number;
-}> = ({ position, count = 3, rotation = 0 }) => {
+}> = React.memo(({ position, count = 3, rotation = 0 }) => {
   const sackPositions = useMemo(() => {
     const positions: Array<[number, number, number, number]> = [];
     let y = 0.15;
@@ -298,7 +302,7 @@ const SackStack: React.FC<{
       ))}
     </group>
   );
-};
+});
 
 // Chain link fence with barbed wire
 const PerimeterFence: React.FC<{
@@ -306,11 +310,9 @@ const PerimeterFence: React.FC<{
   end: [number, number, number];
   height?: number;
   hasGate?: boolean;
-}> = ({ start, end, height = 3, hasGate = false }) => {
+}> = React.memo(({ start, end, height = 3, hasGate = false }) => {
   const length = Math.sqrt(Math.pow(end[0] - start[0], 2) + Math.pow(end[2] - start[2], 2));
-
   const midpoint: [number, number, number] = [(start[0] + end[0]) / 2, 0, (start[2] + end[2]) / 2];
-
   const angle = Math.atan2(end[0] - start[0], end[2] - start[2]);
   const postCount = Math.max(2, Math.floor(length / 3));
 
@@ -344,33 +346,52 @@ const PerimeterFence: React.FC<{
     return tex;
   }, [length, height]);
 
+  // Pre-calculate post positions
+  const postPositions = useMemo(() => {
+    return Array.from({ length: postCount }).map((_, i) => {
+      const z = -length / 2 + (i / (postCount - 1)) * length;
+      return z;
+    });
+  }, [length, postCount]);
+
   return (
     <group position={midpoint} rotation={[0, angle, 0]}>
-      {/* Fence posts */}
-      {Array.from({ length: postCount }).map((_, i) => {
-        const z = -length / 2 + (i / (postCount - 1)) * length;
-        return (
-          <group key={i} position={[0, 0, z]}>
-            {/* Main post */}
-            <mesh position={[0, height / 2, 0]} castShadow>
-              <cylinderGeometry args={[0.04, 0.04, height, 8]} />
-              <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
-            </mesh>
+      {/* INSTANCED: Main posts */}
+      <Instances limit={postCount} range={postCount}>
+        <cylinderGeometry args={[0.04, 0.04, height, 8]} />
+        <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
+        {postPositions.map((z, i) => (
+          <Instance key={i} position={[0, height / 2, z]} castShadow />
+        ))}
+      </Instances>
 
-            {/* Barbed wire support arms (angled outward) */}
-            <mesh position={[0.15, height + 0.1, 0]} rotation={[0, 0, -Math.PI / 4]}>
-              <boxGeometry args={[0.3, 0.03, 0.03]} />
-              <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
-            </mesh>
-            <mesh position={[-0.15, height + 0.1, 0]} rotation={[0, 0, Math.PI / 4]}>
-              <boxGeometry args={[0.3, 0.03, 0.03]} />
-              <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
-            </mesh>
-          </group>
-        );
-      })}
+      {/* INSTANCED: Left support arms */}
+      <Instances limit={postCount} range={postCount}>
+        <boxGeometry args={[0.3, 0.03, 0.03]} />
+        <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
+        {postPositions.map((z, i) => (
+          <Instance
+            key={i}
+            position={[0.15, height + 0.1, z]}
+            rotation={[0, 0, -Math.PI / 4]}
+          />
+        ))}
+      </Instances>
 
-      {/* Chain link mesh */}
+      {/* INSTANCED: Right support arms */}
+      <Instances limit={postCount} range={postCount}>
+        <boxGeometry args={[0.3, 0.03, 0.03]} />
+        <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
+        {postPositions.map((z, i) => (
+          <Instance
+            key={i}
+            position={[-0.15, height + 0.1, z]}
+            rotation={[0, 0, Math.PI / 4]}
+          />
+        ))}
+      </Instances>
+
+      {/* Chain link mesh - single mesh, already optimized */}
       {!hasGate && (
         <mesh position={[0, height / 2, 0]}>
           <planeGeometry args={[0.1, height]} />
@@ -386,6 +407,7 @@ const PerimeterFence: React.FC<{
       )}
 
       {/* Actual fence panels between posts */}
+      {/* Kept as individual loop for now as panels scale differently, but reduced complexity if possible */}
       {Array.from({ length: postCount - 1 }).map((_, i) => {
         const z1 = -length / 2 + (i / (postCount - 1)) * length;
         const z2 = -length / 2 + ((i + 1) / (postCount - 1)) * length;
@@ -394,7 +416,8 @@ const PerimeterFence: React.FC<{
 
         return (
           <mesh key={i} position={[0, height / 2, segmentMid]}>
-            <planeGeometry args={[0.02, height - 0.2, segmentLength]} />
+            {/* Switched to BoxGeometry to give the panel proper volume and length */}
+            <boxGeometry args={[0.02, height - 0.2, segmentLength]} />
             <meshStandardMaterial
               color="#94a3b8"
               transparent
@@ -433,27 +456,31 @@ const PerimeterFence: React.FC<{
         </group>
       ))}
 
-      {/* Barbs (simplified) */}
-      {Array.from({ length: Math.floor(length / 0.5) }).map((_, i) => {
-        const z = -length / 2 + i * 0.5 + 0.25;
-        return (
-          <group key={i} position={[0, height + 0.35, z]}>
-            <mesh position={[-0.2, 0, 0]} rotation={[Math.random() * 0.5, 0, Math.PI / 4]}>
-              <boxGeometry args={[0.04, 0.008, 0.008]} />
-              <meshStandardMaterial color="#374151" metalness={0.8} />
-            </mesh>
-            <mesh position={[0.2, 0, 0]} rotation={[Math.random() * 0.5, 0, -Math.PI / 4]}>
-              <boxGeometry args={[0.04, 0.008, 0.008]} />
-              <meshStandardMaterial color="#374151" metalness={0.8} />
-            </mesh>
-          </group>
-        );
-      })}
+      {/* Barbs (simplified) - INSTANCED */}
+      <Instances limit={Math.floor(length / 0.5) * 2}>
+        <boxGeometry args={[0.04, 0.008, 0.008]} />
+        <meshStandardMaterial color="#374151" metalness={0.8} />
+        {Array.from({ length: Math.floor(length / 0.5) }).map((_, i) => {
+          const z = -length / 2 + i * 0.5 + 0.25;
+          return (
+            <React.Fragment key={i}>
+              <Instance
+                position={[-0.2, height + 0.35, z]}
+                rotation={[Math.random() * 0.5, 0, Math.PI / 4]}
+              />
+              <Instance
+                position={[0.2, height + 0.35, z]}
+                rotation={[Math.random() * 0.5, 0, -Math.PI / 4]}
+              />
+            </React.Fragment>
+          );
+        })}
+      </Instances>
     </group>
   );
-};
+});
 
-export const SafetyEquipment: React.FC<SafetyEquipmentProps> = () => {
+export const SafetyEquipment: React.FC<SafetyEquipmentProps> = React.memo(() => {
   const graphics = useGraphicsStore((state) => state.graphics);
 
   // PERFORMANCE: Decorative safety equipment moved to HIGH+ only
@@ -604,4 +631,4 @@ export const SafetyEquipment: React.FC<SafetyEquipmentProps> = () => {
       )}
     </group>
   );
-};
+});

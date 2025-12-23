@@ -1,8 +1,11 @@
-import React, { useMemo, useRef, useEffect } from 'react';
+import React, { useMemo, useRef, useEffect, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Text } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { DoubleSide } from 'three';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
+import { playCritterSound } from '../utils/critterAudio';
+import { HeartParticle } from './effects/HeartParticle';
 import { useModelTextures } from '../utils/machineTextures';
 import { useProductionStore } from '../stores/productionStore';
 import {
@@ -25,7 +28,7 @@ const GRASS_COLORS = {
 };
 
 // Simple low-poly tree component
-const SimpleTree: React.FC<{ position: [number, number, number]; scale?: number }> = ({
+const SimpleTree: React.FC<{ position: [number, number, number]; scale?: number }> = React.memo(({
   position,
   scale = 1,
 }) => (
@@ -45,10 +48,10 @@ const SimpleTree: React.FC<{ position: [number, number, number]; scale?: number 
       <meshStandardMaterial color="#388e3c" roughness={0.8} />
     </mesh>
   </group>
-);
+));
 
 // Simple park bench
-const ParkBench: React.FC<{ position: [number, number, number]; rotation?: number }> = ({
+const ParkBench: React.FC<{ position: [number, number, number]; rotation?: number }> = React.memo(({
   position,
   rotation = 0,
 }) => (
@@ -71,14 +74,14 @@ const ParkBench: React.FC<{ position: [number, number, number]; rotation?: numbe
       </mesh>
     ))}
   </group>
-);
+));
 
 // Small office building
 const SmallOffice: React.FC<{
   position: [number, number, number];
   size?: [number, number, number];
   rotation?: number;
-}> = ({ position, size = [12, 8, 10], rotation = 0 }) => (
+}> = React.memo(({ position, size = [12, 8, 10], rotation = 0 }) => (
   <group position={position} rotation={[0, rotation, 0]}>
     {/* Main building */}
     <mesh position={[0, size[1] / 2, 0]} castShadow receiveShadow>
@@ -103,7 +106,7 @@ const SmallOffice: React.FC<{
       <meshStandardMaterial color="#5d4037" roughness={0.8} />
     </mesh>
   </group>
-);
+));
 
 // Gas station with canopy and pumps
 const GasStation: React.FC<{ position: [number, number, number]; rotation?: number }> = ({
@@ -708,7 +711,7 @@ const NissenHut: React.FC<{
       {/* Semi-cylindrical roof/walls - corrugated iron using ExtrudeGeometry */}
       <mesh position={[0, 0, -length / 2]} castShadow receiveShadow>
         <extrudeGeometry args={[arcShape, extrudeSettings]} />
-        <meshStandardMaterial color="#6b7280" roughness={0.7} metalness={0.4} side={DoubleSide} />
+        <meshStandardMaterial color="#6b7280" roughness={0.7} metalness={0.4} side={THREE.DoubleSide} />
       </mesh>
 
       {/* End walls - semi-circular caps matching the cylinder cross-section */}
@@ -717,7 +720,7 @@ const NissenHut: React.FC<{
           {/* Semi-circular end wall - rotated to face outward */}
           <mesh rotation={[0, i === 0 ? Math.PI : 0, 0]} castShadow receiveShadow>
             <circleGeometry args={[radius, 16, 0, Math.PI]} />
-            <meshStandardMaterial color="#5a6268" roughness={0.8} side={DoubleSide} />
+            <meshStandardMaterial color="#5a6268" roughness={0.8} side={THREE.DoubleSide} />
           </mesh>
           {/* Door on front end only */}
           {i === 0 && (
@@ -850,39 +853,47 @@ const OfficeApartment: React.FC<{
   );
 };
 
-// Perimeter fence section
+// Perimeter fence section - optimized with InstancedMesh
 const FenceSection: React.FC<{
   start: [number, number, number];
   end: [number, number, number];
   postSpacing?: number;
-}> = ({ start, end, postSpacing = 8 }) => {
+}> = React.memo(({ start, end, postSpacing = 8 }) => {
   const dx = end[0] - start[0];
   const dz = end[2] - start[2];
   const length = Math.sqrt(dx * dx + dz * dz);
   const angle = Math.atan2(dx, dz);
   const postCount = Math.floor(length / postSpacing) + 1;
+  const meshRef = useRef<THREE.InstancedMesh>(null);
 
-  const posts = useMemo(() => {
-    const arr = [];
+  // Memoize post positions
+  /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+
+  useEffect(() => {
+    if (!meshRef.current) return;
+
     for (let i = 0; i < postCount; i++) {
       const t = postCount > 1 ? i / (postCount - 1) : 0;
-      arr.push({
-        x: start[0] + dx * t,
-        z: start[2] + dz * t,
-      });
+      dummy.position.set(
+        start[0] + dx * t,
+        1.2,
+        start[2] + dz * t
+      );
+      dummy.updateMatrix();
+      meshRef.current.setMatrixAt(i, dummy.matrix);
     }
-    return arr;
-  }, [start[0], start[2], dx, dz, postCount]);
+    meshRef.current.instanceMatrix.needsUpdate = true;
+  }, [postCount, start, dx, dz, dummy]);
 
   return (
     <group>
-      {/* Fence posts */}
-      {posts.map((post, i) => (
-        <mesh key={i} position={[post.x, 1.2, post.z]} castShadow>
-          <boxGeometry args={[0.15, 2.4, 0.15]} />
-          <meshStandardMaterial color="#37474f" roughness={0.7} metalness={0.2} />
-        </mesh>
-      ))}
+      {/* Fence posts - instanced */}
+      <instancedMesh ref={meshRef} args={[undefined, undefined, postCount]} castShadow>
+        <boxGeometry args={[0.15, 2.4, 0.15]} />
+        <meshStandardMaterial color="#37474f" roughness={0.7} metalness={0.2} />
+      </instancedMesh>
+
       {/* Horizontal rails */}
       <group
         position={[(start[0] + end[0]) / 2, 0, (start[2] + end[2]) / 2]}
@@ -906,7 +917,7 @@ const FenceSection: React.FC<{
       </group>
     </group>
   );
-};
+});
 
 // Water colors
 const WATER_COLORS = {
@@ -1071,7 +1082,7 @@ const AnimatedRiverWater: React.FC<{
         vertexShader={vertexShader}
         fragmentShader={fragmentShader}
         transparent
-        side={DoubleSide}
+        side={THREE.DoubleSide}
         depthWrite={false}
       />
     </mesh>
@@ -1135,209 +1146,237 @@ const CanalBoat: React.FC<{
   rotation?: number;
   hullColor?: string;
   cabinColor?: string;
-}> = ({
+}> = React.memo(({
   position,
   rotation = 0,
   hullColor = '#1e3a5a', // Traditional dark blue
   cabinColor = '#8b2323', // Traditional burgundy red
 }) => {
-    // Narrowboat dimensions (scaled for scene)
-    const boatLength = 12;
-    const boatWidth = 2.4; // Slightly wider for better proportion
-    const hullHeight = 0.9;
-    const cabinHeight = 1.5;
-    const cabinLength = 7.5;
+  const isNight = useGameSimulationStore(useShallow((state) => state.gameTime >= 20 || state.gameTime < 6));
 
-    return (
-      <group position={position} rotation={[0, rotation, 0]}>
-        {/* ===== UPGRADED NARROWBOAT HULL ===== */}
+  // Narrowboat dimensions (scaled for scene)
+  const boatLength = 12;
+  const boatWidth = 2.4; // Slightly wider for better proportion
+  const hullHeight = 0.9;
+  const cabinHeight = 1.5;
+  const cabinLength = 7.5;
 
-        {/* Main Hull Body - smoother darker metal */}
-        <mesh position={[0, -0.1, 0]} castShadow receiveShadow>
-          <boxGeometry args={[boatWidth, hullHeight, boatLength - 2.5]} />
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      {/* ===== UPGRADED NARROWBOAT HULL ===== */}
+
+      {/* Main Hull Body - smoother darker metal */}
+      <mesh position={[0, -0.1, 0]} castShadow receiveShadow>
+        <boxGeometry args={[boatWidth, hullHeight, boatLength - 2.5]} />
+        <meshStandardMaterial color={hullColor} roughness={0.4} metalness={0.3} />
+      </mesh>
+
+      {/* Tapered Bow Section */}
+      <group position={[0, 0, boatLength / 2 - 1.25]}>
+        <mesh position={[0, -0.1, 1]} rotation={[Math.PI / 2, Math.PI, 0]} castShadow>
+          <cylinderGeometry args={[0.1, boatWidth / 2, 2, 8, 1, false, Math.PI / 2, Math.PI]} />
           <meshStandardMaterial color={hullColor} roughness={0.4} metalness={0.3} />
         </mesh>
+        <mesh position={[0, -0.1, 1]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+          <cylinderGeometry args={[0.1, boatWidth / 2, 2, 8, 1, false, Math.PI / 2, Math.PI]} />
+          <meshStandardMaterial color={hullColor} roughness={0.4} metalness={0.3} />
+        </mesh>
+        {/* Bow Deck */}
+        <mesh position={[0, 0.35, 1]} castShadow>
+          <cylinderGeometry args={[boatWidth / 2 - 0.2, boatWidth / 2 - 0.2, 0.1, 16]} />
+          <meshStandardMaterial color="#5d4e37" roughness={0.9} />
+        </mesh>
+      </group>
 
-        {/* Tapered Bow Section */}
-        <group position={[0, 0, boatLength / 2 - 1.25]}>
-          <mesh position={[0, -0.1, 1]} rotation={[Math.PI / 2, Math.PI, 0]} castShadow>
-            <cylinderGeometry args={[0.1, boatWidth / 2, 2, 8, 1, false, Math.PI / 2, Math.PI]} />
-            <meshStandardMaterial color={hullColor} roughness={0.4} metalness={0.3} />
+      {/* Tapered Stern Section */}
+      <group position={[0, 0, -boatLength / 2 + 1.25]}>
+        <mesh position={[0, -0.1, -0.5]} castShadow>
+          <boxGeometry args={[boatWidth, hullHeight, 1]} />
+          <meshStandardMaterial color={hullColor} roughness={0.4} metalness={0.3} />
+        </mesh>
+        {/* Stern Deck */}
+        <mesh position={[0, 0.36, -0.2]} castShadow>
+          <boxGeometry args={[boatWidth - 0.2, 0.05, 2.5]} />
+          <meshStandardMaterial color="#5d4e37" roughness={0.9} />
+        </mesh>
+      </group>
+
+
+      {/* Rubbing Strakes (Protective Rails) - More detailed */}
+      {[-0.2, 0.1].map((y, i) => (
+        <group key={`strake-${i}`} position={[0, y, 0]}>
+          <mesh position={[boatWidth / 2 + 0.05, 0, 0]} castShadow>
+            <boxGeometry args={[0.1, 0.1, boatLength - 3]} />
+            <meshStandardMaterial color="#111" roughness={0.8} />
           </mesh>
-          <mesh position={[0, -0.1, 1]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-            <cylinderGeometry args={[0.1, boatWidth / 2, 2, 8, 1, false, Math.PI / 2, Math.PI]} />
-            <meshStandardMaterial color={hullColor} roughness={0.4} metalness={0.3} />
-          </mesh>
-          {/* Bow Deck */}
-          <mesh position={[0, 0.35, 1]} castShadow>
-            <cylinderGeometry args={[boatWidth / 2 - 0.2, boatWidth / 2 - 0.2, 0.1, 16]} />
-            <meshStandardMaterial color="#5d4e37" roughness={0.9} />
-          </mesh>
-        </group>
-
-        {/* Tapered Stern Section */}
-        <group position={[0, 0, -boatLength / 2 + 1.25]}>
-          <mesh position={[0, -0.1, -0.5]} castShadow>
-            <boxGeometry args={[boatWidth, hullHeight, 1]} />
-            <meshStandardMaterial color={hullColor} roughness={0.4} metalness={0.3} />
-          </mesh>
-          {/* Stern Deck */}
-          <mesh position={[0, 0.36, -0.2]} castShadow>
-            <boxGeometry args={[boatWidth - 0.2, 0.05, 2.5]} />
-            <meshStandardMaterial color="#5d4e37" roughness={0.9} />
-          </mesh>
-        </group>
-
-
-        {/* Rubbing Strakes (Protective Rails) - More detailed */}
-        {[-0.2, 0.1].map((y, i) => (
-          <group key={`strake-${i}`} position={[0, y, 0]}>
-            <mesh position={[boatWidth / 2 + 0.05, 0, 0]} castShadow>
-              <boxGeometry args={[0.1, 0.1, boatLength - 3]} />
-              <meshStandardMaterial color="#111" roughness={0.8} />
-            </mesh>
-            <mesh position={[-boatWidth / 2 - 0.05, 0, 0]} castShadow>
-              <boxGeometry args={[0.1, 0.1, boatLength - 3]} />
-              <meshStandardMaterial color="#111" roughness={0.8} />
-            </mesh>
-          </group>
-        ))}
-
-        {/* ===== CABIN ===== */}
-        <group position={[0, 0.4, -0.5]}>
-          {/* Main Cabin Structure */}
-          <mesh position={[0, cabinHeight / 2, 0]} castShadow receiveShadow>
-            <boxGeometry args={[boatWidth - 0.4, cabinHeight, cabinLength]} />
-            <meshStandardMaterial color={cabinColor} roughness={0.6} />
-          </mesh>
-
-          {/* Painted Panels (Roses & Castles style) */}
-          {[-1, 0, 1].map((xOffset) => (
-            <mesh position={[0, cabinHeight / 2, xOffset * 2]} key={`panel-${xOffset}`}>
-              <boxGeometry args={[boatWidth - 0.35, cabinHeight - 0.4, 1.5]} />
-              <meshStandardMaterial color="#a03030" roughness={0.6} />
-            </mesh>
-          ))}
-
-
-          {/* Windows - Proper portholes and rectangle windows */}
-          {[-2.5, -1, 0.5, 2].map((z, i) => (
-            <React.Fragment key={`win-${i}`}>
-              {/* Port */}
-              <group position={[-boatWidth / 2 + 0.2, 0.9, z]}>
-                <mesh rotation={[0, 0, Math.PI / 2]}>
-                  <cylinderGeometry args={[0.25, 0.25, 0.1, 16]} />
-                  <meshStandardMaterial color="#d4af37" metalness={0.8} roughness={0.2} />
-                </mesh>
-                <mesh rotation={[0, 0, Math.PI / 2]} position={[0.02, 0, 0]}>
-                  <cylinderGeometry args={[0.2, 0.2, 0.1, 16]} />
-                  <meshStandardMaterial color="#add8e6" metalness={0.5} roughness={0.1} />
-                </mesh>
-              </group>
-              {/* Starboard */}
-              <group position={[boatWidth / 2 - 0.2, 0.9, z]}>
-                <mesh rotation={[0, 0, Math.PI / 2]}>
-                  <cylinderGeometry args={[0.25, 0.25, 0.1, 16]} />
-                  <meshStandardMaterial color="#d4af37" metalness={0.8} roughness={0.2} />
-                </mesh>
-                <mesh rotation={[0, 0, Math.PI / 2]} position={[-0.02, 0, 0]}>
-                  <cylinderGeometry args={[0.2, 0.2, 0.1, 16]} />
-                  <meshStandardMaterial color="#add8e6" metalness={0.5} roughness={0.1} />
-                </mesh>
-              </group>
-            </React.Fragment>
-          ))}
-
-          {/* Roof Accessories Restored */}
-
-          {/* Chimney - Brass and Smoke */}
-          <group position={[0.5, cabinHeight + 0.6, -1.5]}>
-            <mesh castShadow>
-              <cylinderGeometry args={[0.15, 0.18, 1, 12]} />
-              <meshStandardMaterial color="#b8860b" metalness={0.8} roughness={0.3} />
-            </mesh>
-            <mesh position={[0, 0.5, 0]} rotation={[Math.PI / 2, 0, 0]}>
-              <torusGeometry args={[0.18, 0.04, 8, 16]} />
-              <meshStandardMaterial color="#b8860b" metalness={0.8} roughness={0.3} />
-            </mesh>
-            {/* Rain Cap */}
-            <mesh position={[0, 0.8, 0]} rotation={[0, 0, 0.4]}>
-              <cylinderGeometry args={[0.2, 0.01, 0.1, 8]} />
-              <meshStandardMaterial color="#333" />
-            </mesh>
-          </group>
-
-          {/* Roof Storage Box */}
-          <mesh position={[-0.4, cabinHeight + 0.3, 1]} castShadow>
-            <boxGeometry args={[0.6, 0.3, 1.2]} />
-            <meshStandardMaterial color="#5d4e37" roughness={0.9} />
-          </mesh>
-
-          {/* Lantern on Roof */}
-          <group position={[0, cabinHeight + 0.15, 3]}>
-            <mesh castShadow>
-              <boxGeometry args={[0.2, 0.3, 0.2]} />
-              <meshStandardMaterial color="#222" metalness={0.6} />
-            </mesh>
-            <mesh position={[0, 0, 0]}>
-              <boxGeometry args={[0.15, 0.25, 0.15]} />
-              <meshStandardMaterial color="#ffaa00" emissive="#ffaa00" emissiveIntensity={2} />
-            </mesh>
-          </group>
-
-        </group>
-
-        {/* ===== DECK DETAILS ===== */}
-
-        {/* Tiller (Steering) - Distinctive Z shape */}
-        <group position={[0, 1.1, -boatLength / 2 + 1.5]}>
-          <mesh rotation={[0.5, 0, 0]}>
-            <cylinderGeometry args={[0.04, 0.04, 0.8]} />
-            <meshStandardMaterial color="#8b4513" />
-          </mesh>
-          <mesh position={[0, 0.4, -0.4]} rotation={[1.8, 0, 0]}>
-            <cylinderGeometry args={[0.035, 0.035, 1]} />
-            <meshStandardMaterial color="#ccc" metalness={0.7} />
-          </mesh>
-          <mesh position={[0, 0.4, -0.9]}>
-            <sphereGeometry args={[0.06]} />
-            <meshStandardMaterial color="#d4af37" metalness={0.8} />
+          <mesh position={[-boatWidth / 2 - 0.05, 0, 0]} castShadow>
+            <boxGeometry args={[0.1, 0.1, boatLength - 3]} />
+            <meshStandardMaterial color="#111" roughness={0.8} />
           </mesh>
         </group>
+      ))}
 
-        {/* Cratch Board (Front triangular cover frame) */}
-        <group position={[0, 0.8, boatLength / 2 - 1.2]}>
-          <mesh rotation={[-0.4, 0, 0]}>
-            <boxGeometry args={[boatWidth - 0.4, 0.8, 0.05]} />
-            <meshStandardMaterial color="#222" transparent opacity={0.4} />
-          </mesh>
-          <mesh rotation={[-0.4, 0, 0]} position={[0, 0, 0]}>
-            <boxGeometry args={[boatWidth - 0.4, 0.8, 0.05]} />
-            <meshStandardMaterial color="#333" wireframe />
-          </mesh>
-        </group>
-
-        {/* Rope Coils on Bow */}
-        <group position={[0, 0.4, boatLength / 2 - 0.5]}>
-          <mesh rotation={[Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[0.3, 0.08, 8, 16]} />
-            <meshStandardMaterial color="#c2b280" roughness={1} />
-          </mesh>
-          <mesh rotation={[Math.PI / 2, 0, 0.5]} position={[0.2, 0.05, 0.1]}>
-            <torusGeometry args={[0.25, 0.07, 8, 16]} />
-            <meshStandardMaterial color="#c2b280" roughness={1} />
-          </mesh>
-        </group>
-
-        {/* Water Reflection / Shadow */}
-        <mesh position={[0, -0.2, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[boatWidth + 0.5, boatLength + 1]} />
-          <meshBasicMaterial color="#000" transparent opacity={0.3} />
+      {/* ===== CABIN ===== */}
+      <group position={[0, 0.4, -0.5]}>
+        {/* Main Cabin Structure */}
+        <mesh position={[0, cabinHeight / 2, 0]} castShadow receiveShadow>
+          <boxGeometry args={[boatWidth - 0.4, cabinHeight, cabinLength]} />
+          <meshStandardMaterial color={cabinColor} roughness={0.6} />
         </mesh>
 
+        {/* Painted Panels (Roses & Castles style) */}
+        {[-1, 0, 1].map((xOffset) => (
+          <mesh position={[0, cabinHeight / 2, xOffset * 2]} key={`panel-${xOffset}`}>
+            <boxGeometry args={[boatWidth - 0.35, cabinHeight - 0.4, 1.5]} />
+            <meshStandardMaterial color="#a03030" roughness={0.6} />
+          </mesh>
+        ))}
+
+
+        {/* Windows - Proper portholes and rectangle windows */}
+        {[-2.5, -1, 0.5, 2].map((z, i) => (
+          <React.Fragment key={`win-${i}`}>
+            {/* Port */}
+            <group position={[-boatWidth / 2 + 0.2, 0.9, z]}>
+              <mesh rotation={[0, 0, Math.PI / 2]}>
+                <cylinderGeometry args={[0.25, 0.25, 0.1, 16]} />
+                <meshStandardMaterial
+                  color="#d4af37"
+                  metalness={0.8}
+                  roughness={0.2}
+                />
+              </mesh>
+              <mesh rotation={[0, 0, Math.PI / 2]} position={[0.02, 0, 0]}>
+                <cylinderGeometry args={[0.2, 0.2, 0.1, 16]} />
+                {isNight ? (
+                  <meshStandardMaterial
+                    color="#ffaa00"
+                    emissive="#ffaa00"
+                    emissiveIntensity={2}
+                    toneMapped={false}
+                  />
+                ) : (
+                  <meshStandardMaterial color="#add8e6" metalness={0.5} roughness={0.1} />
+                )}
+              </mesh>
+            </group>
+            {/* Starboard */}
+            <group position={[boatWidth / 2 - 0.2, 0.9, z]}>
+              <mesh rotation={[0, 0, Math.PI / 2]}>
+                <cylinderGeometry args={[0.25, 0.25, 0.1, 16]} />
+                <meshStandardMaterial
+                  color="#d4af37"
+                  metalness={0.8}
+                  roughness={0.2}
+                />
+              </mesh>
+              <mesh rotation={[0, 0, Math.PI / 2]} position={[-0.02, 0, 0]}>
+                <cylinderGeometry args={[0.2, 0.2, 0.1, 16]} />
+                {isNight ? (
+                  <meshStandardMaterial
+                    color="#ffaa00"
+                    emissive="#ffaa00"
+                    emissiveIntensity={2}
+                    toneMapped={false}
+                  />
+                ) : (
+                  <meshStandardMaterial color="#add8e6" metalness={0.5} roughness={0.1} />
+                )}
+              </mesh>
+            </group>
+          </React.Fragment>
+        ))}
+
+        {/* Roof Accessories Restored */}
+
+        {/* Chimney - Brass and Smoke */}
+        <group position={[0.5, cabinHeight + 0.6, -1.5]}>
+          <mesh castShadow>
+            <cylinderGeometry args={[0.15, 0.18, 1, 12]} />
+            <meshStandardMaterial color="#b8860b" metalness={0.8} roughness={0.3} />
+          </mesh>
+          <mesh position={[0, 0.5, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.18, 0.04, 8, 16]} />
+            <meshStandardMaterial color="#b8860b" metalness={0.8} roughness={0.3} />
+          </mesh>
+          {/* Rain Cap */}
+          <mesh position={[0, 0.8, 0]} rotation={[0, 0, 0.4]}>
+            <cylinderGeometry args={[0.2, 0.01, 0.1, 8]} />
+            <meshStandardMaterial color="#333" />
+          </mesh>
+        </group>
+
+        {/* Roof Storage Box */}
+        <mesh position={[-0.4, cabinHeight + 0.3, 1]} castShadow>
+          <boxGeometry args={[0.6, 0.3, 1.2]} />
+          <meshStandardMaterial color="#5d4e37" roughness={0.9} />
+        </mesh>
+
+        {/* Lantern on Roof */}
+        <group position={[0, cabinHeight + 0.15, 3]}>
+          <mesh castShadow>
+            <boxGeometry args={[0.2, 0.3, 0.2]} />
+            <meshStandardMaterial color="#222" metalness={0.6} />
+          </mesh>
+          <mesh position={[0, 0, 0]}>
+            <boxGeometry args={[0.15, 0.25, 0.15]} />
+            <meshStandardMaterial color="#ffaa00" emissive="#ffaa00" emissiveIntensity={2} />
+          </mesh>
+        </group>
+
       </group>
-    );
-  };
+
+      {/* ===== DECK DETAILS ===== */}
+
+      {/* Tiller (Steering) - Distinctive Z shape */}
+      <group position={[0, 1.1, -boatLength / 2 + 1.5]}>
+        <mesh rotation={[0.5, 0, 0]}>
+          <cylinderGeometry args={[0.04, 0.04, 0.8]} />
+          <meshStandardMaterial color="#8b4513" />
+        </mesh>
+        <mesh position={[0, 0.4, -0.4]} rotation={[1.8, 0, 0]}>
+          <cylinderGeometry args={[0.035, 0.035, 1]} />
+          <meshStandardMaterial color="#ccc" metalness={0.7} />
+        </mesh>
+        <mesh position={[0, 0.4, -0.9]}>
+          <sphereGeometry args={[0.06]} />
+          <meshStandardMaterial color="#d4af37" metalness={0.8} />
+        </mesh>
+      </group>
+
+      {/* Cratch Board (Front triangular cover frame) */}
+      <group position={[0, 0.8, boatLength / 2 - 1.2]}>
+        <mesh rotation={[-0.4, 0, 0]}>
+          <boxGeometry args={[boatWidth - 0.4, 0.8, 0.05]} />
+          <meshStandardMaterial color="#222" transparent opacity={0.4} />
+        </mesh>
+        <mesh rotation={[-0.4, 0, 0]} position={[0, 0, 0]}>
+          <boxGeometry args={[boatWidth - 0.4, 0.8, 0.05]} />
+          <meshStandardMaterial color="#333" wireframe />
+        </mesh>
+      </group>
+
+      {/* Rope Coils on Bow */}
+      <group position={[0, 0.4, boatLength / 2 - 0.5]}>
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.3, 0.08, 8, 16]} />
+          <meshStandardMaterial color="#c2b280" roughness={1} />
+        </mesh>
+        <mesh rotation={[Math.PI / 2, 0, 0.5]} position={[0.2, 0.05, 0.1]}>
+          <torusGeometry args={[0.25, 0.07, 8, 16]} />
+          <meshStandardMaterial color="#c2b280" roughness={1} />
+        </mesh>
+      </group>
+
+      {/* Water Reflection / Shadow */}
+      <mesh position={[0, -0.2, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[boatWidth + 0.5, boatLength + 1]} />
+        <meshBasicMaterial color="#000" transparent opacity={0.3} />
+      </mesh>
+
+    </group>
+  );
+});
 
 // Natural Lake component - irregular shape with shoreline
 const Lake: React.FC<{
@@ -1409,93 +1448,187 @@ const Lake: React.FC<{
   );
 };
 
-// River Tunnel/Culvert - box-based culvert where river enters/exits
+// River Tunnel/Culvert - Victorian arched culvert where river enters/exits
 const RiverTunnel: React.FC<{
   position: [number, number, number];
   width: number;
   rotation?: number; // Y rotation for direction
   flowDirection: 'in' | 'out'; // Which way water flows
-}> = ({ position, width, rotation = 0, flowDirection }) => {
-  const tunnelHeight = width * 0.6;
+}> = React.memo(({ position, width, rotation = 0, flowDirection }) => {
+  const tunnelHeight = width * 0.7; // Slightly taller for arched profile
   const tunnelDepth = 14; // How far back the tunnel goes
   const zDir = flowDirection === 'in' ? -1 : 1;
-  const wallThickness = 1.5;
+  const wallThickness = 1.8;
+  const archRadius = width / 2;
+  const archSegments = 16;
+  const stonesRef = useRef<THREE.InstancedMesh>(null);
+
+  // Stone colors for weathered Victorian masonry
+  const stoneMain = '#5d6875';
+  const stoneDark = '#4a535e';
+  const stoneLight = '#6e7a87';
+  const brickColor = '#5c4033';
+  const mossColor = '#3d5c3a';
+  const ironColor = '#2a2a2a';
+
+  // Set up instanced stones
+  useEffect(() => {
+    if (!stonesRef.current) return;
+
+    const dummy = new THREE.Object3D();
+
+    for (let i = 0; i <= archSegments; i++) {
+      const angle = (Math.PI * i) / archSegments;
+      const x = Math.cos(angle) * archRadius;
+      const y = Math.sin(angle) * archRadius + tunnelHeight * 0.4;
+      const blockRotation = angle - Math.PI / 2;
+
+      dummy.position.set(x, y, zDir * 0.3);
+      dummy.rotation.set(0, 0, blockRotation);
+      dummy.updateMatrix();
+      stonesRef.current.setMatrixAt(i, dummy.matrix);
+
+      // Vary color slightly per instance? InstancedMesh only supports one color unless using instanceColor attribute.
+      // For simplicity/performance we'll use a single color for now, or we could add instanceColor support.
+      // Given fidelity request, let's stick to single material for now to avoid complexity, 
+      // or just use 2 instanced meshes for alternating colors if really needed.
+      // Actually, let's just use one color (stoneMain) for the arch ring to keep it simple and fast.
+      // The original had alternating colors. To keep that, we'd need coloring or 2 meshes.
+      // Let's settle for one color for the instanced version or add instanceColor.
+      stonesRef.current.setColorAt(i, new THREE.Color(i % 2 === 0 ? stoneMain : stoneLight));
+    }
+
+    stonesRef.current.instanceMatrix.needsUpdate = true;
+    if (stonesRef.current.instanceColor) stonesRef.current.instanceColor.needsUpdate = true;
+  }, [archSegments, archRadius, tunnelHeight, zDir, stoneMain, stoneLight]);
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
       {/* Earthen embankment/hill that the tunnel goes through */}
       <mesh position={[0, 4, zDir * 10]} castShadow receiveShadow>
-        <boxGeometry args={[width + 20, 10, 18]} />
+        <boxGeometry args={[width + 24, 10, 18]} />
         <meshStandardMaterial color="#4a5d3a" roughness={0.95} />
       </mesh>
       {/* Sloped front of embankment - left */}
-      <mesh position={[width / 2 + 12, 2, zDir * 3]} rotation={[0, 0, Math.PI * 0.2]} castShadow>
-        <boxGeometry args={[8, 6, 10]} />
+      <mesh position={[width / 2 + 14, 2, zDir * 3]} rotation={[0, 0, Math.PI * 0.18]} castShadow>
+        <boxGeometry args={[10, 6, 12]} />
         <meshStandardMaterial color="#5a6d4a" roughness={0.95} />
       </mesh>
       {/* Sloped front of embankment - right */}
-      <mesh position={[-width / 2 - 12, 2, zDir * 3]} rotation={[0, 0, -Math.PI * 0.2]} castShadow>
-        <boxGeometry args={[8, 6, 10]} />
+      <mesh position={[-width / 2 - 14, 2, zDir * 3]} rotation={[0, 0, -Math.PI * 0.18]} castShadow>
+        <boxGeometry args={[10, 6, 12]} />
         <meshStandardMaterial color="#5a6d4a" roughness={0.95} />
       </mesh>
       {/* Grass top of embankment */}
       <mesh position={[0, 9.05, zDir * 10]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[width + 22, 20]} />
+        <planeGeometry args={[width + 26, 20]} />
         <meshStandardMaterial color={GRASS_COLORS.meadow} roughness={0.9} />
       </mesh>
 
-      {/* Stone culvert - rectangular tunnel entrance */}
+      {/* ===== VICTORIAN ARCHED STONE PORTAL ===== */}
       <group position={[0, 0, 0]}>
-        {/* Top stone lintel */}
-        <mesh position={[0, tunnelHeight + wallThickness / 2, zDir * 0.5]} castShadow>
-          <boxGeometry args={[width + 4, wallThickness, 3]} />
-          <meshStandardMaterial color="#5b6470" roughness={0.85} />
+        {/* Stone arch ring - Instanced */}
+        <instancedMesh ref={stonesRef} args={[undefined, undefined, archSegments + 1]} castShadow>
+          <boxGeometry args={[0.9, 1.6, 2.5]} />
+          <meshStandardMaterial color="#ffffff" roughness={0.85} />
+        </instancedMesh>
+
+        {/* Prominent keystone at arch apex */}
+        <mesh position={[0, tunnelHeight * 0.4 + archRadius + 0.6, zDir * 0.2]} castShadow>
+          <boxGeometry args={[1.8, 2.2, 2.8]} />
+          <meshStandardMaterial color={stoneDark} roughness={0.8} />
+        </mesh>
+        {/* Keystone decorative face carving */}
+        <mesh position={[0, tunnelHeight * 0.4 + archRadius + 0.5, -zDir * 0.8]} castShadow>
+          <boxGeometry args={[1.2, 1.4, 0.3]} />
+          <meshStandardMaterial color="#3d454f" roughness={0.75} />
         </mesh>
 
-        {/* Stone pillar walls on sides */}
+        {/* Stone pilasters (vertical side columns) */}
         {[-1, 1].map((side) => (
-          <mesh
-            key={`wall-${side}`}
-            position={[side * (width / 2 + wallThickness / 2), tunnelHeight / 2, zDir * 0.5]}
-            castShadow
-            receiveShadow
-          >
-            <boxGeometry args={[wallThickness, tunnelHeight + 2, 3]} />
-            <meshStandardMaterial color="#5b6470" roughness={0.85} />
-          </mesh>
+          <group key={`pilaster-${side}`} position={[side * (width / 2 + wallThickness / 2), 0, 0]}>
+            {/* Main pilaster body */}
+            <mesh position={[0, tunnelHeight * 0.35, zDir * 0.5]} castShadow receiveShadow>
+              <boxGeometry args={[wallThickness, tunnelHeight * 0.7 + 1, 3]} />
+              <meshStandardMaterial color={stoneMain} roughness={0.85} />
+            </mesh>
+            {/* Pilaster cap */}
+            <mesh position={[0, tunnelHeight * 0.7 + 0.5, zDir * 0.5]} castShadow>
+              <boxGeometry args={[wallThickness + 0.4, 0.5, 3.2]} />
+              <meshStandardMaterial color={stoneLight} roughness={0.8} />
+            </mesh>
+            {/* Pilaster base plinth */}
+            <mesh position={[0, 0.3, zDir * 0.5]} castShadow>
+              <boxGeometry args={[wallThickness + 0.5, 0.6, 3.4]} />
+              <meshStandardMaterial color={stoneDark} roughness={0.9} />
+            </mesh>
+            {/* Weathering/moss patch at base */}
+            <mesh position={[side * -0.3, 0.2, zDir * -0.3]} castShadow>
+              <boxGeometry args={[0.8, 0.4, 1.5]} />
+              <meshStandardMaterial color={mossColor} roughness={0.95} />
+            </mesh>
+          </group>
         ))}
 
-        {/* Keystone decoration at top center */}
-        <mesh position={[0, tunnelHeight + wallThickness + 0.5, 0]} castShadow>
-          <boxGeometry args={[3, 1.5, 2]} />
-          <meshStandardMaterial color="#4b5563" roughness={0.8} />
+        {/* String course (horizontal decorative band) below arch spring */}
+        <mesh position={[0, tunnelHeight * 0.38, zDir * 0.6]} castShadow>
+          <boxGeometry args={[width + 3.5, 0.4, 2.8]} />
+          <meshStandardMaterial color={stoneLight} roughness={0.8} />
         </mesh>
 
-        {/* Dark tunnel interior - top */}
+        {/* Dark tunnel interior plane - just behind the iron bars */}
+        <mesh position={[0, tunnelHeight * 0.45, 0.5]}>
+          <planeGeometry args={[width - 0.5, tunnelHeight * 0.85]} />
+          <meshBasicMaterial color="#030303" side={THREE.DoubleSide} />
+        </mesh>
+
+        {/* ===== IRON GRATING/BARS ===== */}
+        {/* Horizontal top bar */}
+        <mesh position={[0, tunnelHeight * 0.85, zDir * -0.5]} castShadow>
+          <boxGeometry args={[width - 0.5, 0.15, 0.15]} />
+          <meshStandardMaterial color={ironColor} metalness={0.6} roughness={0.4} />
+        </mesh>
+        {/* Vertical bars */}
+        {Array.from({ length: 7 }).map((_, i) => {
+          const barX = ((i - 3) / 3) * (width / 2 - 0.5);
+          return (
+            <mesh
+              key={`bar-${i}`}
+              position={[barX, tunnelHeight * 0.5, zDir * -0.5]}
+              castShadow
+            >
+              <cylinderGeometry args={[0.06, 0.06, tunnelHeight * 0.7, 8]} />
+              <meshStandardMaterial color={ironColor} metalness={0.6} roughness={0.4} />
+            </mesh>
+          );
+        })}
+
+        {/* ===== BRICK-LINED TUNNEL INTERIOR ===== */}
+        {/* Arched ceiling inside tunnel */}
         <mesh
-          position={[0, tunnelHeight, zDir * (tunnelDepth / 2 + 1)]}
+          position={[0, tunnelHeight * 0.75, zDir * (tunnelDepth / 2 + 1)]}
           rotation={[-Math.PI / 2, 0, 0]}
         >
           <planeGeometry args={[width, tunnelDepth]} />
-          <meshBasicMaterial color="#080808" side={THREE.DoubleSide} />
+          <meshStandardMaterial color={brickColor} roughness={0.9} />
         </mesh>
 
-        {/* Dark tunnel interior - left wall */}
+        {/* Brick interior - left wall */}
         <mesh
-          position={[-width / 2, tunnelHeight / 2, zDir * (tunnelDepth / 2 + 1)]}
+          position={[-width / 2, tunnelHeight * 0.4, zDir * (tunnelDepth / 2 + 1)]}
           rotation={[0, Math.PI / 2, 0]}
         >
-          <planeGeometry args={[tunnelDepth, tunnelHeight]} />
-          <meshBasicMaterial color="#0a0a0a" side={THREE.DoubleSide} />
+          <planeGeometry args={[tunnelDepth, tunnelHeight * 0.8]} />
+          <meshStandardMaterial color="#4a3528" roughness={0.92} />
         </mesh>
 
-        {/* Dark tunnel interior - right wall */}
+        {/* Brick interior - right wall */}
         <mesh
-          position={[width / 2, tunnelHeight / 2, zDir * (tunnelDepth / 2 + 1)]}
+          position={[width / 2, tunnelHeight * 0.4, zDir * (tunnelDepth / 2 + 1)]}
           rotation={[0, -Math.PI / 2, 0]}
         >
-          <planeGeometry args={[tunnelDepth, tunnelHeight]} />
-          <meshBasicMaterial color="#0a0a0a" side={THREE.DoubleSide} />
+          <planeGeometry args={[tunnelDepth, tunnelHeight * 0.8]} />
+          <meshStandardMaterial color="#4a3528" roughness={0.92} />
         </mesh>
 
         {/* Tunnel floor/water bed inside */}
@@ -1505,9 +1638,25 @@ const RiverTunnel: React.FC<{
         </mesh>
 
         {/* Back wall of tunnel (darkness) */}
-        <mesh position={[0, tunnelHeight / 2, zDir * (tunnelDepth + 1)]}>
+        <mesh position={[0, tunnelHeight * 0.4, zDir * (tunnelDepth + 1)]}>
           <planeGeometry args={[width, tunnelHeight]} />
           <meshBasicMaterial color="#030303" side={THREE.DoubleSide} />
+        </mesh>
+
+        {/* ===== WEATHERING DETAILS ===== */}
+        {/* Water staining below arch */}
+        <mesh position={[0, tunnelHeight * 0.3, zDir * -0.7]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[width * 0.6, 0.3]} />
+          <meshBasicMaterial color="#3a4a42" transparent opacity={0.5} />
+        </mesh>
+        {/* Moss patches on stone */}
+        <mesh position={[width / 2 + 0.8, 0.5, zDir * 1.2]} castShadow>
+          <sphereGeometry args={[0.4, 8, 6]} />
+          <meshStandardMaterial color={mossColor} roughness={0.95} />
+        </mesh>
+        <mesh position={[-width / 2 - 0.6, 0.3, zDir * 0.8]} castShadow>
+          <sphereGeometry args={[0.3, 8, 6]} />
+          <meshStandardMaterial color={mossColor} roughness={0.95} />
         </mesh>
       </group>
 
@@ -1522,9 +1671,21 @@ const RiverTunnel: React.FC<{
       {/* Vegetation around tunnel entrance */}
       <SimpleTree position={[width / 2 + 10, 0, zDir * 5]} scale={0.9} />
       <SimpleTree position={[-width / 2 - 9, 0, zDir * 7]} scale={0.8} />
+
+      {/* Reeds/rushes near water entrance */}
+      {[-1, 1].map((side) => (
+        <group key={`reeds-${side}`} position={[side * (width / 2 + 2), 0, zDir * -2]}>
+          {[0, 0.2, -0.15, 0.35, -0.3].map((offset, j) => (
+            <mesh key={j} position={[offset * 0.8, 0.5, offset * 0.4]} castShadow>
+              <cylinderGeometry args={[0.03, 0.05, 1.2, 4]} />
+              <meshStandardMaterial color="#4a6741" roughness={0.9} />
+            </mesh>
+          ))}
+        </group>
+      ))}
     </group>
   );
-};
+});
 
 // River component - meandering natural waterway
 const River: React.FC<{
@@ -1532,7 +1693,7 @@ const River: React.FC<{
   length: number;
   width: number;
   meander?: number;
-}> = ({ position, length, width, meander = 5 }) => {
+}> = React.memo(({ position, length, width, meander = 5 }) => {
   // Generate river path points with natural meander
   const riverSegments = useMemo(() => {
     const segments: { x: number; z: number; w: number }[] = [];
@@ -1620,7 +1781,7 @@ const River: React.FC<{
       <RiverTunnel
         position={[-length / 2 - 2, 0, riverSegments[0].z]}
         width={width}
-        rotation={Math.PI / 2}
+        rotation={-Math.PI / 2}
         flowDirection="out"
       />
       <RiverTunnel
@@ -1631,7 +1792,7 @@ const River: React.FC<{
       />
     </group>
   );
-};
+});
 
 // Animated frog that hops on lily pads
 const AnimatedFrog: React.FC<{
@@ -1640,9 +1801,38 @@ const AnimatedFrog: React.FC<{
   hopOffset?: number;
 }> = ({ position, rotation = 0, hopOffset = 0 }) => {
   const frogRef = useRef<THREE.Group>(null);
+  const [isExcited, setIsExcited] = useState(false);
+  const [hearts, setHearts] = useState<{ id: number; pos: [number, number, number] }[]>([]);
+
+  const handlePet = (e: any) => {
+    e.stopPropagation();
+    setIsExcited(true);
+    playCritterSound('frog');
+    const id = Date.now();
+    setHearts((prev: { id: number; pos: [number, number, number] }[]) => [...prev, { id, pos: [0, 0.5, 0] }]);
+  };
+
+  const removeHeart = (id: number) => {
+    setHearts((prev: { id: number; pos: [number, number, number] }[]) => prev.filter((h) => h.id !== id));
+  };
+
+  useEffect(() => {
+    if (isExcited) {
+      const t = setTimeout(() => setIsExcited(false), 500);
+      return () => clearTimeout(t);
+    }
+  }, [isExcited]);
 
   useFrame((state) => {
     if (frogRef.current) {
+      if (isExcited) {
+        // Rapid hop / shudder
+        const t = state.clock.elapsedTime * 30;
+        frogRef.current.position.y = position[1] + Math.abs(Math.sin(t)) * 0.1;
+        frogRef.current.rotation.x = 0;
+        return;
+      }
+
       // Create a hopping animation
       const time = state.clock.elapsedTime + hopOffset;
       const hopCycle = time * 0.8; // Slower hop frequency
@@ -1662,53 +1852,59 @@ const AnimatedFrog: React.FC<{
   });
 
   return (
-    <group ref={frogRef} position={position} rotation={[0, rotation, 0]}>
-      {/* Frog body */}
-      <mesh castShadow>
-        <sphereGeometry args={[0.12, 12, 8]} />
-        <meshStandardMaterial color="#4a7c3f" roughness={0.8} />
-      </mesh>
-      {/* Head */}
-      <mesh position={[0.1, 0.04, 0]} castShadow>
-        <sphereGeometry args={[0.08, 10, 8]} />
-        <meshStandardMaterial color="#5a8c4f" roughness={0.8} />
-      </mesh>
-      {/* Eyes */}
-      <mesh position={[0.14, 0.1, 0.04]} castShadow>
-        <sphereGeometry args={[0.03, 8, 6]} />
-        <meshStandardMaterial color="#2d4a2a" roughness={0.6} />
-      </mesh>
-      <mesh position={[0.14, 0.1, -0.04]} castShadow>
-        <sphereGeometry args={[0.03, 8, 6]} />
-        <meshStandardMaterial color="#2d4a2a" roughness={0.6} />
-      </mesh>
-      {/* Eye highlights */}
-      <mesh position={[0.16, 0.11, 0.04]}>
-        <sphereGeometry args={[0.015, 6, 6]} />
-        <meshBasicMaterial color="#ffffff" />
-      </mesh>
-      <mesh position={[0.16, 0.11, -0.04]}>
-        <sphereGeometry args={[0.015, 6, 6]} />
-        <meshBasicMaterial color="#ffffff" />
-      </mesh>
-      {/* Back legs */}
-      <mesh position={[-0.1, -0.04, 0.08]} rotation={[0, 0, 0.5]} castShadow>
-        <capsuleGeometry args={[0.025, 0.1, 4, 6]} />
-        <meshStandardMaterial color="#3d6b35" roughness={0.8} />
-      </mesh>
-      <mesh position={[-0.1, -0.04, -0.08]} rotation={[0, 0, 0.5]} castShadow>
-        <capsuleGeometry args={[0.025, 0.1, 4, 6]} />
-        <meshStandardMaterial color="#3d6b35" roughness={0.8} />
-      </mesh>
-      {/* Front legs */}
-      <mesh position={[0.06, -0.06, 0.06]} castShadow>
-        <capsuleGeometry args={[0.02, 0.05, 4, 6]} />
-        <meshStandardMaterial color="#3d6b35" roughness={0.8} />
-      </mesh>
-      <mesh position={[0.06, -0.06, -0.06]} castShadow>
-        <capsuleGeometry args={[0.02, 0.05, 4, 6]} />
-        <meshStandardMaterial color="#3d6b35" roughness={0.8} />
-      </mesh>
+    <group position={position} rotation={[0, rotation, 0]} onClick={handlePet}>
+      <group ref={frogRef}>
+        {/* Frog body */}
+        <mesh castShadow>
+          <sphereGeometry args={[0.12, 12, 8]} />
+          <meshStandardMaterial color="#4a7c3f" roughness={0.8} />
+        </mesh>
+        {/* Head */}
+        <mesh position={[0.1, 0.04, 0]} castShadow>
+          <sphereGeometry args={[0.08, 10, 8]} />
+          <meshStandardMaterial color="#5a8c4f" roughness={0.8} />
+        </mesh>
+        {/* Eyes */}
+        <mesh position={[0.14, 0.1, 0.04]} castShadow>
+          <sphereGeometry args={[0.03, 8, 6]} />
+          <meshStandardMaterial color="#2d4a2a" roughness={0.6} />
+        </mesh>
+        <mesh position={[0.14, 0.1, -0.04]} castShadow>
+          <sphereGeometry args={[0.03, 8, 6]} />
+          <meshStandardMaterial color="#2d4a2a" roughness={0.6} />
+        </mesh>
+        {/* Eye highlights */}
+        <mesh position={[0.16, 0.11, 0.04]}>
+          <sphereGeometry args={[0.015, 6, 6]} />
+          <meshBasicMaterial color="#ffffff" />
+        </mesh>
+        <mesh position={[0.16, 0.11, -0.04]}>
+          <sphereGeometry args={[0.015, 6, 6]} />
+          <meshBasicMaterial color="#ffffff" />
+        </mesh>
+        {/* Back legs */}
+        <mesh position={[-0.1, -0.04, 0.08]} rotation={[0, 0, 0.5]} castShadow>
+          <capsuleGeometry args={[0.025, 0.1, 4, 6]} />
+          <meshStandardMaterial color="#3d6b35" roughness={0.8} />
+        </mesh>
+        <mesh position={[-0.1, -0.04, -0.08]} rotation={[0, 0, 0.5]} castShadow>
+          <capsuleGeometry args={[0.025, 0.1, 4, 6]} />
+          <meshStandardMaterial color="#3d6b35" roughness={0.8} />
+        </mesh>
+        {/* Front legs */}
+        <mesh position={[0.06, -0.06, 0.06]} castShadow>
+          <capsuleGeometry args={[0.02, 0.05, 4, 6]} />
+          <meshStandardMaterial color="#3d6b35" roughness={0.8} />
+        </mesh>
+        <mesh position={[0.06, -0.06, -0.06]} castShadow>
+          <capsuleGeometry args={[0.02, 0.05, 4, 6]} />
+          <meshStandardMaterial color="#3d6b35" roughness={0.8} />
+        </mesh>
+      </group>
+
+      {hearts.map((h: { id: number; pos: [number, number, number] }) => (
+        <HeartParticle key={h.id} position={h.pos} onComplete={() => removeHeart(h.id)} />
+      ))}
     </group>
   );
 };
@@ -1755,14 +1951,14 @@ const CupidStatue: React.FC<{
       <group position={[-0.1, 0.4, -0.12]} rotation={[0.2, -0.4, 0.3]}>
         <mesh castShadow>
           <coneGeometry args={[0.2, 0.5, 4]} />
-          <meshStandardMaterial color="#f0e8e0" roughness={0.5} side={DoubleSide} />
+          <meshStandardMaterial color="#f0e8e0" roughness={0.5} side={THREE.DoubleSide} />
         </mesh>
       </group>
       {/* Right wing */}
       <group position={[0.1, 0.4, -0.12]} rotation={[0.2, 0.4, -0.3]}>
         <mesh castShadow>
           <coneGeometry args={[0.2, 0.5, 4]} />
-          <meshStandardMaterial color="#f0e8e0" roughness={0.5} side={DoubleSide} />
+          <meshStandardMaterial color="#f0e8e0" roughness={0.5} side={THREE.DoubleSide} />
         </mesh>
       </group>
       {/* Left arm - holding bow */}
@@ -1841,12 +2037,12 @@ const Pond: React.FC<{
           {/* Lily pad */}
           <mesh position={[pad.x, -0.12, pad.z]} rotation={[-Math.PI / 2, pad.rot, 0]}>
             <circleGeometry args={[0.5, 12]} />
-            <meshStandardMaterial color="#3d6b4f" roughness={0.7} side={DoubleSide} />
+            <meshStandardMaterial color="#3d6b4f" roughness={0.7} side={THREE.DoubleSide} />
           </mesh>
           {/* Lily pad notch effect - darker center */}
           <mesh position={[pad.x, -0.115, pad.z]} rotation={[-Math.PI / 2, pad.rot, 0]}>
             <ringGeometry args={[0.1, 0.25, 12]} />
-            <meshStandardMaterial color="#2d5a3f" roughness={0.8} side={DoubleSide} />
+            <meshStandardMaterial color="#2d5a3f" roughness={0.8} side={THREE.DoubleSide} />
           </mesh>
           {/* Frog on the lily pad */}
           <AnimatedFrog
@@ -2012,7 +2208,7 @@ const KioskCafe: React.FC<{
         {/* Umbrella canopy */}
         <mesh position={[0, 2.6, 0]} castShadow>
           <coneGeometry args={[1.5, 0.6, 8]} />
-          <meshStandardMaterial color={accentColor} roughness={0.6} side={DoubleSide} />
+          <meshStandardMaterial color={accentColor} roughness={0.6} side={THREE.DoubleSide} />
         </mesh>
         {/* Umbrella finial */}
         <mesh position={[0, 2.95, 0]} castShadow>
@@ -2604,7 +2800,7 @@ const LockGate: React.FC<{
 const PathLamp: React.FC<{
   position: [number, number, number];
   style?: 'modern' | 'victorian';
-}> = ({ position, style = 'modern' }) => (
+}> = React.memo(({ position, style = 'modern' }) => (
   <group position={position}>
     {/* Pole */}
     <mesh position={[0, 2, 0]} castShadow>
@@ -2640,13 +2836,13 @@ const PathLamp: React.FC<{
       </group>
     )}
   </group>
-);
+));
 
 // Bollard for paths and waterside
 const Bollard: React.FC<{
   position: [number, number, number];
   type?: 'wood' | 'metal' | 'stone';
-}> = ({ position, type = 'metal' }) => {
+}> = React.memo(({ position, type = 'metal' }) => {
   const colors = {
     wood: '#5d4037',
     metal: '#374151',
@@ -2662,7 +2858,7 @@ const Bollard: React.FC<{
       />
     </mesh>
   );
-};
+});
 
 // Information sign
 const InfoSign: React.FC<{
@@ -4328,7 +4524,7 @@ const CheckpointBarrier: React.FC<{
               opacity={0.6}
               metalness={0.5}
               roughness={0.1}
-              side={DoubleSide}
+              side={THREE.DoubleSide}
             />
           </mesh>
         ))}
@@ -4347,7 +4543,7 @@ const CheckpointBarrier: React.FC<{
               opacity={0.6}
               metalness={0.5}
               roughness={0.1}
-              side={DoubleSide}
+              side={THREE.DoubleSide}
             />
           </mesh>
         ))}
@@ -4563,7 +4759,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
             wallThickness,
           ]}
         />
-        <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
+        <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={THREE.DoubleSide} />
       </mesh>
 
       {/* Right section - FULL HEIGHT - extends PAST side wall for clean corner */}
@@ -4583,7 +4779,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
             wallThickness,
           ]}
         />
-        <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
+        <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={THREE.DoubleSide} />
       </mesh>
 
       {/* Section above the centered dock opening */}
@@ -4593,13 +4789,13 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
         receiveShadow
       >
         <boxGeometry args={[dockOpeningWidth, wallHeight - dockOpeningHeight, wallThickness]} />
-        <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
+        <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={THREE.DoubleSide} />
       </mesh>
 
       {/* Front wall trim */}
       <mesh position={[0, wallHeight + 0.3, buildingFrontZ]}>
         <boxGeometry args={[buildingHalfWidth * 2 + 1, 0.6, 0.8]} />
-        <meshStandardMaterial color={trimColor} roughness={0.6} metalness={0.4} side={DoubleSide} />
+        <meshStandardMaterial color={trimColor} roughness={0.6} metalness={0.4} side={THREE.DoubleSide} />
       </mesh>
 
       {/* ========== FRONT PERSONNEL ENTRANCES - Realistic Industrial Style ========== */}
@@ -4885,7 +5081,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
             wallThickness,
           ]}
         />
-        <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
+        <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={THREE.DoubleSide} />
       </mesh>
       {/* Right section - FULL HEIGHT - extends PAST side wall for clean corner */}
       <mesh
@@ -4904,7 +5100,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
             wallThickness,
           ]}
         />
-        <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
+        <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={THREE.DoubleSide} />
       </mesh>
       {/* Section above dock opening - matches wall height */}
       <mesh
@@ -4913,13 +5109,13 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
         receiveShadow
       >
         <boxGeometry args={[dockOpeningWidth, wallHeight - dockOpeningHeight, wallThickness]} />
-        <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={DoubleSide} />
+        <meshStandardMaterial color={wallColor} roughness={0.8} metalness={0.2} side={THREE.DoubleSide} />
       </mesh>
 
       {/* Back wall trim */}
       <mesh position={[0, wallHeight + 0.3, buildingBackZ]}>
         <boxGeometry args={[buildingHalfWidth * 2 + 1, 0.6, 0.8]} />
-        <meshStandardMaterial color={trimColor} roughness={0.6} metalness={0.4} side={DoubleSide} />
+        <meshStandardMaterial color={trimColor} roughness={0.6} metalness={0.4} side={THREE.DoubleSide} />
       </mesh>
 
       {/* ========== BACK EMERGENCY EXITS - Realistic Industrial Style ========== */}
@@ -5149,7 +5345,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
                 color={wallColor}
                 roughness={0.8}
                 metalness={0.2}
-                side={DoubleSide}
+                side={THREE.DoubleSide}
               />
             </mesh>
             {/* Back section of left wall */}
@@ -5163,7 +5359,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
                 color={wallColor}
                 roughness={0.8}
                 metalness={0.2}
-                side={DoubleSide}
+                side={THREE.DoubleSide}
               />
             </mesh>
             {/* Section above door opening */}
@@ -5177,7 +5373,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
                 color={wallColor}
                 roughness={0.8}
                 metalness={0.2}
-                side={DoubleSide}
+                side={THREE.DoubleSide}
               />
             </mesh>
             {/* West Personnel Door - exterior side */}
@@ -5265,7 +5461,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
         <boxGeometry
           args={[0.8, 0.6, Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2 + 0.5]}
         />
-        <meshStandardMaterial color={trimColor} roughness={0.6} metalness={0.4} side={DoubleSide} />
+        <meshStandardMaterial color={trimColor} roughness={0.6} metalness={0.4} side={THREE.DoubleSide} />
       </mesh>
 
       {/* ========== RIGHT SIDE WALL (X+) with personnel door ========== */}
@@ -5293,7 +5489,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
                 color={wallColor}
                 roughness={0.8}
                 metalness={0.2}
-                side={DoubleSide}
+                side={THREE.DoubleSide}
               />
             </mesh>
             {/* Back section of right wall */}
@@ -5307,7 +5503,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
                 color={wallColor}
                 roughness={0.8}
                 metalness={0.2}
-                side={DoubleSide}
+                side={THREE.DoubleSide}
               />
             </mesh>
             {/* Section above door opening */}
@@ -5321,7 +5517,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
                 color={wallColor}
                 roughness={0.8}
                 metalness={0.2}
-                side={DoubleSide}
+                side={THREE.DoubleSide}
               />
             </mesh>
             {/* East Personnel Door - exterior side */}
@@ -5409,7 +5605,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
         <boxGeometry
           args={[0.8, 0.6, Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2 + 0.5]}
         />
-        <meshStandardMaterial color={trimColor} roughness={0.6} metalness={0.4} side={DoubleSide} />
+        <meshStandardMaterial color={trimColor} roughness={0.6} metalness={0.4} side={THREE.DoubleSide} />
       </mesh>
 
       {/* CORNER COLUMNS REMOVED - were causing visual protrusion issues */}
@@ -5646,12 +5842,9 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
           />
         </mesh>
 
-        {/* Trees */}
+        {/* Trees - Removed ones colliding with FarmArea at [75, 0, 120] */}
         <SimpleTree position={[-8, 0, -5]} scale={1.2} />
         <SimpleTree position={[6, 0, -8]} scale={0.9} />
-        <SimpleTree position={[10, 0, 4]} scale={1.1} />
-        <SimpleTree position={[-5, 0, 8]} scale={1.0} />
-        <SimpleTree position={[0, 0, 12]} scale={0.8} />
 
         {/* Benches */}
         <ParkBench position={[-4, 0, -10]} rotation={Math.PI / 6} />

@@ -66,9 +66,14 @@ export const DecisionReplay: React.FC<DecisionReplayProps> = ({ decision, onClos
                 onClick={onClose}
             >
                 <motion.div
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.9, opacity: 0 }}
+                    initial={{ scale: 0.95, opacity: 0, y: 15 }}
+                    animate={{
+                        scale: 1,
+                        opacity: 1,
+                        y: 0,
+                        transition: { type: "spring", stiffness: 350, damping: 25 }
+                    }}
+                    exit={{ scale: 0.95, opacity: 0, y: 15, transition: { duration: 0.15 } }}
                     className="bg-slate-900/95 rounded-xl border border-cyan-500/30 shadow-2xl max-w-lg w-full max-h-[80vh] overflow-hidden"
                     onClick={(e) => e.stopPropagation()}
                 >

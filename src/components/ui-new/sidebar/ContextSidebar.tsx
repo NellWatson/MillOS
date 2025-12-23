@@ -129,7 +129,7 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
           <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5">
             <div className="flex items-center gap-2 text-cyan-400">
               <HeaderIcon size={18} />
-              <h2 className="font-bold tracking-wide text-sm uppercase truncate max-w-[200px]">
+              <h2 className="font-bold tracking-wide text-sm uppercase">
                 {headerTitle}
               </h2>
             </div>

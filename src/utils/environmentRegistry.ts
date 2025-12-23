@@ -248,3 +248,20 @@ export const registerWeatherParticles = (id: string, state: WeatherParticlesAnim
 export const unregisterWeatherParticles = (id: string) => {
   weatherParticlesRegistry.delete(id);
 };
+
+export const windowGlowRefs = new Set<THREE.MeshBasicMaterial>();
+export const lightShaftRefs = new Set<THREE.MeshBasicMaterial>();
+
+export const registerWindowGlow = (material: THREE.MeshBasicMaterial) => {
+  windowGlowRefs.add(material);
+};
+export const unregisterWindowGlow = (material: THREE.MeshBasicMaterial) => {
+  windowGlowRefs.delete(material);
+};
+
+export const registerLightShaft = (material: THREE.MeshBasicMaterial) => {
+  lightShaftRefs.add(material);
+};
+export const unregisterLightShaft = (material: THREE.MeshBasicMaterial) => {
+  lightShaftRefs.delete(material);
+};

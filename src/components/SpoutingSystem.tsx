@@ -7,7 +7,7 @@ import { PIPE_MATERIALS } from '../utils/sharedMaterials';
 import { shouldRunThisFrame } from '../utils/frameThrottle';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 
-export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines }) => {
+export const SpoutingSystem = React.memo<{ machines: MachineData[] }>(({ machines }) => {
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   // Extract stable machine data to prevent unnecessary re-renders
   // Only recompute when machine IDs or positions actually change
@@ -236,7 +236,7 @@ export const SpoutingSystem: React.FC<{ machines: MachineData[] }> = ({ machines
       <PipeSupports />
     </group>
   );
-};
+});
 
 // Pipe support positions (static, defined at module level)
 const PIPE_SUPPORT_POSITIONS: [number, number, number][] = [

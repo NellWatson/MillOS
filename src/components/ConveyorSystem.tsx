@@ -236,7 +236,7 @@ const getRandomQuality = (): GrainQuality => {
   return 'standard';
 };
 
-export const ConveyorSystem: React.FC<ConveyorSystemProps> = ({ productionSpeed }) => {
+export const ConveyorSystem = React.memo<ConveyorSystemProps>(({ productionSpeed }) => {
   const graphicsQuality = useGraphicsStore(useShallow((state) => state.graphics.quality));
   const incrementBagsProduced = useProductionStore((state) => state.incrementBagsProduced);
   const bagCount = graphicsQuality === 'low' ? 15 : graphicsQuality === 'medium' ? 30 : 60;
@@ -293,7 +293,7 @@ export const ConveyorSystem: React.FC<ConveyorSystemProps> = ({ productionSpeed 
       <TensionMechanism position={[27.5, 0.5, 24]} />
     </group>
   );
-};
+});
 
 // Bracket count: 11 positions × 2 brackets (front + back) = 22 brackets
 const BRACKET_COUNT = 22;

@@ -1,5 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { AnimatePresence } from 'framer-motion';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Bot,
   Brain,
@@ -13,16 +12,7 @@ import {
   AlertTriangle,
   Activity,
   TrendingUp,
-  Cloud,
-  CloudRain,
-  CloudLightning,
-  Sun,
-  Users,
-  Gauge,
-  Calendar,
   Target,
-  ArrowUp,
-  ArrowDown,
   Settings,
 } from 'lucide-react';
 import { AIDecision } from '../types';
@@ -32,20 +22,9 @@ import { useUIStore } from '../stores/uiStore';
 import { useAIConfigStore } from '../stores/aiConfigStore';
 import { useShallow } from 'zustand/react/shallow';
 import {
-  generateContextAwareDecision,
-  generateGeminiDecision,
-  generateStrategicDecision,
   applyDecisionEffects,
   reactToAlert,
-  getPredictedEvents,
-  getImpactStats,
-  shouldTriggerAudioCue,
-  getConfidenceAdjustmentForType,
-  isGeminiModeActive,
-  isStrategicLayerActive,
-  isTacticalLayerActive,
 } from '../utils/aiEngine';
-import { audioManager } from '../utils/audioManager';
 import { GeminiSettingsModal } from './GeminiSettingsModal';
 import {
   DecisionHistoryPanel,
@@ -63,66 +42,13 @@ interface AICommandCenterProps {
 
 // Sparkline component for trend visualization
 // Note: Currently unused but kept for future feature expansion
- 
-const _Sparkline: React.FC<{ data: number[]; color?: string; height?: number }> = ({
-  data,
-  color = '#22d3ee',
-  height = 20,
-}) => {
-  if (data.length < 2) return null;
 
-  const width = 60;
-  const points = data.map((v, i) => ({
-    x: (i / (data.length - 1)) * width,
-    y: height - v * height,
-  }));
 
-  const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-
-  return (
-    <svg width={width} height={height} className="opacity-80">
-      <path
-        d={pathD}
-        fill="none"
-        stroke={color}
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle
-        cx={points[points.length - 1].x}
-        cy={points[points.length - 1].y}
-        r="2"
-        fill={color}
-      />
-    </svg>
-  );
-};
 
 // Confidence adjustment indicator component
 // Note: Currently unused but kept for future feature expansion
- 
-const _ConfidenceIndicator: React.FC<{ type: AIDecision['type']; confidence: number }> = ({
-  type,
-  confidence,
-}) => {
-  const adjustment = getConfidenceAdjustmentForType(type);
-  const hasAdjustment = Math.abs(adjustment) >= 1; // Only show if adjustment is >= 1%
 
-  return (
-    <span className="text-cyan-400 inline-flex items-center gap-0.5">
-      {confidence.toFixed(0)}% conf
-      {hasAdjustment && (
-        <span
-          className={`inline-flex items-center ${adjustment > 0 ? 'text-green-400' : 'text-orange-400'}`}
-          title={`AI learning: ${adjustment > 0 ? '+' : ''}${adjustment.toFixed(1)}% adjustment based on historical accuracy`}
-        >
-          {adjustment > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-        </span>
-      )}
-    </span>
-  );
-};
+
 
 export const AICommandCenter: React.FC<AICommandCenterProps> = ({
   isOpen,
@@ -130,9 +56,9 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
   embedded = false,
 }) => {
   const [isThinking, setIsThinking] = useState(false);
-  const [activeTab, setActiveTab] = useState<'decisions' | 'predictions' | 'strategic'>('decisions');
-  const [predictedEvents, setPredictedEvents] = useState<ReturnType<typeof getPredictedEvents>>([]);
-  const [_impactStats, setImpactStats] = useState<ReturnType<typeof getImpactStats> | null>(null);
+  const [activeTab, setActiveTab] = useState<'decisions' | 'strategic'>('decisions');
+
+  // Track actual decision outcomes for real success rate calculation
   // Track actual decision outcomes for real success rate calculation
   const decisionOutcomesRef = useRef<{ successful: number; total: number }>({
     successful: 0,
@@ -145,19 +71,11 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
     decisions: 0,
     successRate: 0, // Start at 0, will be calculated from actual decisions
   });
-  const _scrollRef = useRef<HTMLDivElement>(null);
+
   const lastAlertCountRef = useRef(0);
-  const lastDecisionIdRef = useRef<string | null>(null);
-  const decisionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+
   const alertReactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const initialTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const masterIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const lastDecisionTime = useRef(0);
-  const lastStrategicTime = useRef(0);
-  const lastPredictionTime = useRef(0);
-  const lastMetricsTime = useRef(0);
-  const isGeneratingDecisionRef = useRef(false);
-  const isGeneratingStrategicRef = useRef(false);
 
   // Get state from stores using useShallow to prevent unnecessary re-renders
   const { aiDecisions, machines: _machines, metrics, workerSatisfaction: _workerSatisfaction } = useProductionStore(
@@ -189,63 +107,6 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
   );
   const [showGeminiSettings, setShowGeminiSettings] = useState(false);
 
-  // Generate context-aware decisions (Gemini or heuristic)
-  const generateDecision = useCallback(async () => {
-    // Prevent overlapping decision generation
-    if (isGeneratingDecisionRef.current) return;
-
-    isGeneratingDecisionRef.current = true;
-    setIsThinking(true);
-
-    if (decisionTimeoutRef.current) clearTimeout(decisionTimeoutRef.current);
-
-    // Small delay for UI responsiveness
-    await new Promise(resolve => setTimeout(resolve, 600 + Math.random() * 400));
-
-    let decision = null;
-
-    // Try Gemini first if enabled
-    if (isGeminiModeActive()) {
-      try {
-        decision = await generateGeminiDecision();
-      } catch (error) {
-        console.warn('[AICommandCenter] Gemini decision failed, falling back to heuristic');
-      }
-    }
-
-    // Fall back to heuristic if no Gemini decision
-    if (!decision) {
-      decision = generateContextAwareDecision();
-    }
-
-    if (decision) {
-      applyDecisionEffects(decision);
-      setSystemStatus((prev) => ({
-        ...prev,
-        decisions: prev.decisions + 1,
-      }));
-
-      // Play appropriate audio cue based on decision type/priority
-      if (shouldTriggerAudioCue(decision)) {
-        if (decision.priority === 'critical') {
-          audioManager.playAICriticalAlert();
-        } else if (decision.action.includes('anomaly')) {
-          audioManager.playAIAnomaly();
-        } else {
-          audioManager.playAIDecision();
-        }
-      }
-
-      lastDecisionIdRef.current = decision.id;
-    }
-
-    // Update predicted events and impact stats
-    setPredictedEvents(getPredictedEvents());
-    setImpactStats(getImpactStats());
-
-    setIsThinking(false);
-    isGeneratingDecisionRef.current = false;
-  }, []);
 
   // React to new alerts
   useEffect(() => {
@@ -270,109 +131,31 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
     lastAlertCountRef.current = alerts.length;
   }, [alerts, isOpen]);
 
-  // Master interval - consolidates all periodic tasks
+  // Master interval removed - AI logic now runs in background via aiEngine.ts logic
+  // This component now strictly visualizes the state
+
+  // Force update when decisions change
   useEffect(() => {
-    if (!isOpen) return;
+    // Optional: add any side effects needed on decision updates
+  }, [aiDecisions]);
 
-    // Initial decision generation after 2 seconds
-    if (initialTimeoutRef.current) clearTimeout(initialTimeoutRef.current);
-    initialTimeoutRef.current = setTimeout(generateDecision, 2000);
+  // Sync isThinking state from store
+  const isTacticalThinking = useAIConfigStore(state => state.isTacticalThinking);
+  useEffect(() => {
+    setIsThinking(isTacticalThinking);
+  }, [isTacticalThinking]);
 
-    // Initialize timestamps
-    lastDecisionTime.current = Date.now();
-    lastStrategicTime.current = Date.now();
-    lastPredictionTime.current = Date.now();
-    lastMetricsTime.current = Date.now();
-
-    // Master interval runs every second and checks if each task is due
-    if (masterIntervalRef.current) clearInterval(masterIntervalRef.current);
-    masterIntervalRef.current = setInterval(() => {
-      const now = Date.now();
-
-      // Tactical decision generation every 6 seconds (heuristic or hybrid)
-      if (isTacticalLayerActive() && now - lastDecisionTime.current >= 6000) {
-        lastDecisionTime.current = now;
-        generateDecision();
-      }
-
-      // Strategic decision generation every 45 seconds (hybrid mode only)
-      if (isStrategicLayerActive() && !isGeneratingStrategicRef.current && now - lastStrategicTime.current >= 45000) {
-        lastStrategicTime.current = now;
-        isGeneratingStrategicRef.current = true;
-        generateStrategicDecision()
-          .then((decision) => {
-            if (decision) {
-              applyDecisionEffects(decision);
-              setSystemStatus((prev) => ({
-                ...prev,
-                decisions: prev.decisions + 1,
-              }));
-              audioManager.playAIDecision();
-            }
-          })
-          .finally(() => {
-            isGeneratingStrategicRef.current = false;
-          });
-      }
-
-      // Predictions every 5 seconds
-      if (now - lastPredictionTime.current >= 5000) {
-        lastPredictionTime.current = now;
-        setPredictedEvents(getPredictedEvents());
-      }
-
-      // Metrics update every 1.5 seconds
-      if (now - lastMetricsTime.current >= 1500) {
-        lastMetricsTime.current = now;
-
-        // Calculate CPU based on actual work being done
-        const activeDecisions = aiDecisions.filter(
-          (d: AIDecision) => d.status === 'in_progress'
-        ).length;
-        const pendingDecisions = aiDecisions.filter(
-          (d: AIDecision) => d.status === 'pending'
-        ).length;
-        const alertLoad = alerts.filter(
-          (a: any) => a.type === 'critical' || a.type === 'warning'
-        ).length;
-
-        // Base CPU load + active work + pending queue + alert processing
-        const baseCpu = 12;
-        const activeLoad = activeDecisions * 8;
-        const queueLoad = Math.min(pendingDecisions * 2, 10);
-        const alertProcessing = alertLoad * 4;
-        const cpuUsage = Math.min(baseCpu + activeLoad + queueLoad + alertProcessing, 85);
-
-        // Memory based on stored decisions and history
-        const baseMemory = 30;
-        const decisionMemory = Math.min(aiDecisions.length * 0.5, 20);
-        const alertMemory = alerts.length * 1.5;
-        const memoryUsage = Math.min(baseMemory + decisionMemory + alertMemory, 80);
-
-        // Calculate real success rate
-        const { successful, total } = decisionOutcomesRef.current;
-        const successRate = total > 0 ? (successful / total) * 100 : 0;
-
-        setSystemStatus((prev) => ({
-          ...prev,
-          cpu: cpuUsage,
-          memory: memoryUsage,
-          successRate: successRate > 0 ? successRate : prev.successRate,
-        }));
-      }
-    }, 1000); // Check every second
-
-    return () => {
-      if (initialTimeoutRef.current) clearTimeout(initialTimeoutRef.current);
-      if (masterIntervalRef.current) clearInterval(masterIntervalRef.current);
-      if (decisionTimeoutRef.current) clearTimeout(decisionTimeoutRef.current);
-      if (alertReactionTimeoutRef.current) clearTimeout(alertReactionTimeoutRef.current);
-      // Reset decision generation flag to prevent stuck state
-      isGeneratingDecisionRef.current = false;
-      // Reset decision outcomes tracking on cleanup
-      decisionOutcomesRef.current = { successful: 0, total: 0 };
-    };
-  }, [isOpen, generateDecision, aiDecisions, alerts]);
+  // Update system status from store instead of local calculation
+  const storeSystemStatus = useAIConfigStore(state => state.systemStatus);
+  useEffect(() => {
+    // Sync store status to local state for display
+    setSystemStatus(prev => ({
+      ...prev,
+      cpu: storeSystemStatus.cpu,
+      memory: storeSystemStatus.memory,
+      decisions: storeSystemStatus.decisions
+    }));
+  }, [storeSystemStatus]);
 
   // Calculate real success rate from actual decision outcomes
   useEffect(() => {
@@ -456,35 +239,14 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
   };
 
   // Weather icon helper - kept for future UI expansion
-   
-  const _getWeatherIcon = () => {
-    switch (weather) {
-      case 'storm':
-        return <CloudLightning className="w-4 h-4 text-purple-400" />;
-      case 'rain':
-        return <CloudRain className="w-4 h-4 text-blue-400" />;
-      case 'cloudy':
-        return <Cloud className="w-4 h-4 text-slate-400" />;
-      default:
-        return <Sun className="w-4 h-4 text-yellow-400" />;
-    }
-  };
+
+
 
   // Time formatter - kept for future UI expansion
-   
-  const _formatGameTime = (time: number) => {
-    const hours = Math.floor(time);
-    const minutes = Math.floor((time - hours) * 60);
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-  };
 
-  const formatTimeUntil = (date: Date) => {
-    const diff = date.getTime() - Date.now();
-    if (diff < 0) return 'now';
-    const mins = Math.floor(diff / 60000);
-    if (mins < 60) return `${mins}m`;
-    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
-  };
+
+
+
 
   if (!isOpen) return null;
 
@@ -587,16 +349,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
               <Activity className="w-3 h-3 inline mr-1" />
               Decisions ({aiDecisions.length})
             </button>
-            <button
-              onClick={() => setActiveTab('predictions')}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${activeTab === 'predictions'
-                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800'
-                }`}
-            >
-              <Eye className="w-3 h-3 inline mr-1" />
-              Predictions ({predictedEvents.length})
-            </button>
+
             <button
               onClick={() => setActiveTab('strategic')}
               className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${activeTab === 'strategic'
@@ -655,62 +408,6 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
                   <div className="text-center py-6 text-slate-500">
                     <Bot className="w-6 h-6 mx-auto mb-2" />
                     <p className="text-xs">AI analyzing factory state...</p>
-                  </div>
-                )}
-              </>
-            ) : activeTab === 'predictions' ? (
-              <>
-                {predictedEvents.map((event) => (
-                  <div
-                    key={event.id}
-                    className="bg-slate-800/50 rounded-lg border border-slate-700/50 p-2"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-2">
-                        <div
-                          className={`p-1 rounded ${event.type === 'maintenance'
-                            ? 'bg-yellow-500/20'
-                            : event.type === 'shift_change'
-                              ? 'bg-blue-500/20'
-                              : event.type === 'weather'
-                                ? 'bg-purple-500/20'
-                                : event.type === 'fatigue'
-                                  ? 'bg-orange-500/20'
-                                  : 'bg-green-500/20'
-                            }`}
-                        >
-                          {event.type === 'maintenance' && (
-                            <Wrench className="w-3 h-3 text-yellow-400" />
-                          )}
-                          {event.type === 'shift_change' && (
-                            <Users className="w-3 h-3 text-blue-400" />
-                          )}
-                          {event.type === 'weather' && <Cloud className="w-3 h-3 text-purple-400" />}
-                          {event.type === 'fatigue' && <Gauge className="w-3 h-3 text-orange-400" />}
-                          {event.type === 'optimization' && (
-                            <Zap className="w-3 h-3 text-green-400" />
-                          )}
-                        </div>
-                        <div>
-                          <div className="text-xs text-white font-medium">{event.description}</div>
-                          <div className="text-[9px] text-slate-500 capitalize">
-                            {event.type.replace('_', ' ')}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xs font-mono text-cyan-400">
-                          {formatTimeUntil(event.predictedTime)}
-                        </div>
-                        <div className="text-[9px] text-slate-500">{event.confidence}%</div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                {predictedEvents.length === 0 && (
-                  <div className="text-center py-6 text-slate-500">
-                    <Calendar className="w-6 h-6 mx-auto mb-2" />
-                    <p className="text-xs">No upcoming predictions</p>
                   </div>
                 )}
               </>

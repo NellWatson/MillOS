@@ -22,6 +22,7 @@ import { useGameSimulationStore } from '../../stores';
 import { useProductionStore } from '../../stores/productionStore';
 import { useUIStore } from '../../stores';
 import { useAIConfigStore } from '../../stores/aiConfigStore';
+import { BAG_WEIGHT_KG } from '../../types';
 
 interface ShiftSummary {
     shift: string;
@@ -32,20 +33,45 @@ interface ShiftSummary {
     handoverNotes: string[];
 }
 
-export const ShiftHandoverSummary: React.FC = () => {
-    const currentShift = useGameSimulationStore((state) => state.currentShift);
-    const gameTime = useGameSimulationStore((state) => state.gameTime);
-    const metrics = useProductionStore((state) => state.metrics);
-    const aiDecisions = useProductionStore((state) => state.aiDecisions);
-    const alerts = useUIStore((state) => state.alerts);
+import { useShallow } from 'zustand/react/shallow';
 
-    const showShiftHandover = useAIConfigStore((state) => state.showShiftHandover);
-    const setShowShiftHandover = useAIConfigStore((state) => state.setShowShiftHandover);
+// ...
+
+export const ShiftHandoverSummary: React.FC = () => {
+    // 1. Game State (Simulation)
+    const { currentShift, gameTime } = useGameSimulationStore(
+        useShallow((state) => ({
+            currentShift: state.currentShift,
+            gameTime: state.gameTime
+        }))
+    );
+
+    // 2. Production Metrics (Shallow to prevent re-render on *other* production changes)
+    const { metrics, aiDecisions } = useProductionStore(
+        useShallow((state) => ({
+            metrics: state.metrics,
+            aiDecisions: state.aiDecisions
+        }))
+    );
+
+    // 3. UI Alerts (Only grab warnings/errors for summary count)
+    const warningCount = useUIStore(useShallow((state) =>
+        state.alerts.filter(a => a.type === 'warning' || a.type === 'critical').length
+    ));
+
+    // 4. Config
+    const { showShiftHandover, setShowShiftHandover } = useAIConfigStore(
+        useShallow((state) => ({
+            showShiftHandover: state.showShiftHandover,
+            setShowShiftHandover: state.setShowShiftHandover
+        }))
+    );
 
     const [previousShift, setPreviousShift] = useState<string>(currentShift);
     const [showSummary, setShowSummary] = useState(false);
     const [summary, setSummary] = useState<ShiftSummary | null>(null);
     const [copied, setCopied] = useState(false);
+    const [countdown, setCountdown] = useState(15); // Auto-dismiss after 15 seconds
 
     // Detect shift change
     useEffect(() => {
@@ -61,11 +87,28 @@ export const ShiftHandoverSummary: React.FC = () => {
             };
             setSummary(summary);
             setShowSummary(true);
+            setCountdown(15); // Reset countdown when new summary appears
             setPreviousShift(currentShift);
         } else if (currentShift !== previousShift) {
             setPreviousShift(currentShift);
         }
     }, [currentShift, previousShift, gameTime, showShiftHandover]);
+
+    // Auto-dismiss countdown
+    useEffect(() => {
+        if (!showSummary) return;
+
+        if (countdown <= 0) {
+            setShowSummary(false);
+            return;
+        }
+
+        const timer = setTimeout(() => {
+            setCountdown(prev => prev - 1);
+        }, 1000);
+
+        return () => clearTimeout(timer);
+    }, [showSummary, countdown]);
 
     const getShiftStartTime = (shift: string): number => {
         const times: Record<string, number> = {
@@ -79,8 +122,9 @@ export const ShiftHandoverSummary: React.FC = () => {
     const generateAccomplishments = (): string[] => {
         const accomplishments: string[] = [];
 
-        if (metrics.throughput > 1800) {
-            accomplishments.push(`High throughput achieved: ${metrics.throughput.toFixed(0)} kg/hr`);
+        // High throughput: >1500 bags/hr (37.5t/hr)
+        if (metrics.throughput > 1500) {
+            accomplishments.push(`High throughput achieved: ${(metrics.throughput * BAG_WEIGHT_KG).toLocaleString()} kg/hr`);
         }
         if (metrics.quality >= 98) {
             accomplishments.push(`Quality target exceeded: ${metrics.quality.toFixed(1)}%`);
@@ -110,9 +154,8 @@ export const ShiftHandoverSummary: React.FC = () => {
             issues.push(`Machine availability: ${metrics.uptime.toFixed(0)}%`);
         }
 
-        const activeAlerts = alerts.filter(a => a.type === 'warning' || a.type === 'critical');
-        if (activeAlerts.length > 0) {
-            issues.push(`${activeAlerts.length} active alerts require attention`);
+        if (warningCount > 0) {
+            issues.push(`${warningCount} active alerts require attention`);
         }
 
         if (metrics.quality < 95) {
@@ -170,15 +213,20 @@ ${summary.handoverNotes.map(n => `  → ${n}`).join('\n')}
                 <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                    exit={{ opacity: 0, transition: { duration: 0.2 } }}
+                    className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
                     onClick={() => setShowSummary(false)}
                 >
                     <motion.div
-                        initial={{ scale: 0.9, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0.9, opacity: 0 }}
-                        className="bg-slate-900/95 rounded-xl border border-amber-500/30 shadow-2xl max-w-md w-full"
+                        initial={{ scale: 0.95, opacity: 0, y: 10 }}
+                        animate={{
+                            scale: 1,
+                            opacity: 1,
+                            y: 0,
+                            transition: { type: "spring", stiffness: 300, damping: 25 }
+                        }}
+                        exit={{ scale: 0.95, opacity: 0, y: 10, transition: { duration: 0.2 } }}
+                        className="bg-slate-900/95 rounded-xl border border-amber-500/30 shadow-2xl max-w-md w-full overflow-hidden" // Added overflow-hidden for border-radius clip
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Header */}
@@ -189,6 +237,32 @@ ${summary.handoverNotes.map(n => `  → ${n}`).join('\n')}
                                 <span className="text-xs text-amber-400 uppercase">{summary.shift}</span>
                             </div>
                             <div className="flex items-center gap-2">
+                                {/* Countdown indicator */}
+                                <div className="relative w-7 h-7 flex items-center justify-center">
+                                    <svg className="absolute inset-0 -rotate-90" viewBox="0 0 28 28">
+                                        <circle
+                                            cx="14"
+                                            cy="14"
+                                            r="12"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            className="text-slate-700"
+                                        />
+                                        <circle
+                                            cx="14"
+                                            cy="14"
+                                            r="12"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeDasharray={75.4}
+                                            strokeDashoffset={75.4 * (1 - countdown / 15)}
+                                            className="text-amber-400 transition-all duration-1000 ease-linear"
+                                        />
+                                    </svg>
+                                    <span className="text-[10px] font-mono text-amber-400">{countdown}</span>
+                                </div>
                                 <button
                                     onClick={handleCopy}
                                     className="p-1.5 hover:bg-slate-700/50 rounded transition-colors"

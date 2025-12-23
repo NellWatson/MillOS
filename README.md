@@ -285,6 +285,19 @@ Full industrial SCADA system with real-time process monitoring:
 
 See [SCADA_PLAN.md](docs/SCADA_PLAN.md) for complete API documentation.
 
+### Historical Playback
+
+Time-travel debugging with zero runtime overhead:
+
+| Feature | Description |
+|---------|-------------|
+| **SCADA History** | 24-hour tag value replay from IndexedDB |
+| **Decision Log** | Ring buffer of AI decisions (~500 entries) |
+| **Timeline Scrubber** | Visual slider with play/pause and speed control (1x-10x) |
+| **Decision Markers** | AI decisions displayed at their original timestamps |
+
+**Controls:** Use the "History/Replay" button (clock icon) in the Quick Actions bar to toggle replay mode.
+
 ---
 
 ## Quick Start
@@ -354,6 +367,10 @@ MODBUS_PORT=502
 | **Left-drag** | Orbit camera around scene |
 | **Right-drag** | Pan camera position |
 | **Scroll** | Zoom in/out |
+| **W/A/S/D** | Move camera forward/left/back/right |
+| **Q** | Move camera down |
+| **E** | Move camera up |
+| **Shift** | Sprint (3.6x faster movement) |
 | **Click machine** | Open machine detail panel |
 | **Click worker** | Open worker profile |
 
@@ -367,17 +384,37 @@ MODBUS_PORT=502
 | **Mouse** | Look around |
 | **Esc** | Exit first-person mode |
 
-### Global Shortcuts
+### Overlay & Panel Shortcuts
 
 | Input | Action |
 |-------|--------|
-| **Z** | Toggle safety zone visibility |
 | **I** | Toggle AI Command Center |
-| **S** | Toggle SCADA Panel |
-| **H** | Toggle heatmap view |
-| **M** | Toggle multiplayer lobby |
-| **F1-F4** | Graphics quality presets |
-| **Spacebar** | Emergency stop |
+| **O** | Toggle SCADA Panel |
+| **U** | Toggle Energy Dashboard |
+| **H** | Toggle Incident Heatmap |
+| **K** | Toggle Cascade Visualization |
+| **J** | Toggle Strategic Overlay |
+| **T** | Toggle Production Target |
+| **Y** | Toggle Multi-Objective Dashboard |
+| **$** | Toggle Cost Estimation Overlay |
+| **G** | Toggle GPS Mini-Map |
+| **Z** | Toggle Safety Zones |
+| **M** | Toggle Panel Minimize |
+
+
+### General Shortcuts
+
+| Input | Action |
+|-------|--------|
+| **P** | Pause/Resume production |
+| **Spacebar** | Emergency Stop (all forklifts) |
+| **C** | Toggle auto-rotation |
+| **F** | Toggle fullscreen |
+| **+/-** | Adjust production speed |
+| **0** | Reset camera to overview |
+| **1-5** | Camera presets by zone |
+| **F1-F4** | Graphics quality (Low/Medium/High/Ultra) |
+| **Esc** | Close open panels |
 | **?** | Show keyboard shortcuts |
 
 ---
@@ -556,11 +593,12 @@ A custom **PositionRegistry** singleton enables inter-entity awareness:
 
 ### Planned
 
-- [ ] Strategic priority influence on tactical scoring
-- [ ] VR mode with WebXR controls
-- [ ] Historical playback and time-travel debugging
-- [ ] Custom scenario editor
 - [ ] Integration with real SCADA historians (OSIsoft PI, Wonderware)
+
+### Recently Completed
+
+- [x] Strategic priority influence on tactical scoring
+- [x] Historical playback and time-travel debugging (Quick Actions UI)
 
 ---
 

@@ -20,6 +20,8 @@ import {
 import { useProductionStore } from '../../stores/productionStore';
 import { useAIConfigStore } from '../../stores/aiConfigStore';
 
+import { BAG_WEIGHT_KG } from '../../types';
+
 interface ObjectiveMetric {
     label: string;
     value: number;
@@ -37,9 +39,9 @@ export const MultiObjectiveDashboard: React.FC = () => {
 
     // Calculate metrics
     const objectives = useMemo<ObjectiveMetric[]>(() => {
-        // Production rate (from metrics)
-        const productionRate = metrics.throughput || 0;
-        const productionTarget = 2000; // kg/hr target
+        // Production rate (metrics.throughput is bags/hr)
+        const productionRate = (metrics.throughput || 0) * BAG_WEIGHT_KG; // kg/hr
+        const productionTarget = 30000; // Average for 2-3 packers (1200-1500 bags/hr * 25)
 
         // Quality (from metrics)
         const quality = metrics.quality || 95;

@@ -15,7 +15,7 @@ const PersonnelDoor: React.FC<{
   rotation?: number;
   label?: string;
   isEmergencyExit?: boolean;
-}> = ({ position, rotation = 0, label = 'ENTRANCE', isEmergencyExit = false }) => {
+}> = React.memo(({ position, rotation = 0, label = 'ENTRANCE', isEmergencyExit = false }) => {
   // Door dimensions - 50% of original (frame was 3 tall, now 1.5)
   const frameHeight = 1.5;
   const frameWidth = 0.9;
@@ -100,10 +100,10 @@ const PersonnelDoor: React.FC<{
       </mesh>
     </group>
   );
-};
+});
 
 // Break Room component - a small covered rest area for workers
-const BreakRoom: React.FC<{ position: [number, number, number] }> = ({ position }) => {
+const BreakRoom: React.FC<{ position: [number, number, number] }> = React.memo(({ position }) => {
   return (
     <group position={position}>
       {/* Floor/platform */}
@@ -205,10 +205,10 @@ const BreakRoom: React.FC<{ position: [number, number, number] }> = ({ position 
       <pointLight position={[0, 2.5, 0]} color="#fef3c7" intensity={0.5} distance={8} />
     </group>
   );
-};
+});
 
 // Wall clock that syncs with game time
-const WallClock: React.FC<{ position: [number, number, number] }> = ({ position }) => {
+const WallClock: React.FC<{ position: [number, number, number] }> = React.memo(({ position }) => {
   const gameTime = useGameSimulationStore((state) => state.gameTime);
   const hourAngle = (gameTime / 12) * Math.PI * 2 - Math.PI / 2;
   const minuteAngle = (((gameTime % 1) * 60) / 60) * Math.PI * 2 - Math.PI / 2;
@@ -258,10 +258,10 @@ const WallClock: React.FC<{ position: [number, number, number] }> = ({ position 
       </mesh>
     </group>
   );
-};
+});
 
 // Safety bulletin board with days since incident counter
-const BulletinBoard: React.FC<{ position: [number, number, number] }> = ({ position }) => {
+const BulletinBoard: React.FC<{ position: [number, number, number] }> = React.memo(({ position }) => {
   const daysSinceIncident = useSafetyStore((state) => state.safetyMetrics.daysSinceIncident);
 
   return (
@@ -317,10 +317,10 @@ const BulletinBoard: React.FC<{ position: [number, number, number] }> = ({ posit
       ))}
     </group>
   );
-};
+});
 
 // Locker Room component
-const LockerRoom: React.FC<{ position: [number, number, number] }> = ({ position }) => {
+const LockerRoom: React.FC<{ position: [number, number, number] }> = React.memo(({ position }) => {
   return (
     <group position={position}>
       {/* Floor */}
@@ -423,10 +423,10 @@ const LockerRoom: React.FC<{ position: [number, number, number] }> = ({ position
       <pointLight position={[0, 2.5, 0]} color="#fef3c7" intensity={0.4} distance={6} />
     </group>
   );
-};
+});
 
 // Portable toilet (blue porta-potty)
-const PortableToilet: React.FC<{ position: [number, number, number]; rotation?: number }> = ({
+const PortableToilet: React.FC<{ position: [number, number, number]; rotation?: number }> = React.memo(({
   position,
   rotation = 0,
 }) => {
@@ -491,10 +491,11 @@ const PortableToilet: React.FC<{ position: [number, number, number]; rotation?: 
       </mesh>
     </group>
   );
-};
+});
 
-// Indoor toilet block with multiple stalls
-const ToiletBlock: React.FC<{ position: [number, number, number] }> = ({ position }) => {
+// Indoor toilet block with corridor layout
+// Door on east wall (+X), stalls on west side (-X), sinks on east side (+X)
+const ToiletBlock: React.FC<{ position: [number, number, number] }> = React.memo(({ position }) => {
   return (
     <group position={position}>
       {/* Floor */}
@@ -503,122 +504,141 @@ const ToiletBlock: React.FC<{ position: [number, number, number] }> = ({ positio
         <meshBasicMaterial color="#e2e8f0" />
       </mesh>
 
-      {/* Back wall */}
+      {/* Back wall (north, -Z) */}
       <mesh position={[0, 1.5, -2.5]} receiveShadow castShadow>
         <boxGeometry args={[8, 3, 0.15]} />
         <meshBasicMaterial color="#f1f5f9" />
       </mesh>
 
-      {/* Side walls */}
+      {/* Front wall (south, +Z) - with entrance gap in the middle (door moved here, longer wall) */}
+      <mesh position={[-3, 1.5, 2.5]} receiveShadow castShadow>
+        <boxGeometry args={[2, 3, 0.15]} />
+        <meshBasicMaterial color="#f1f5f9" />
+      </mesh>
+      <mesh position={[3, 1.5, 2.5]} receiveShadow castShadow>
+        <boxGeometry args={[2, 3, 0.15]} />
+        <meshBasicMaterial color="#f1f5f9" />
+      </mesh>
+      {/* Header above entrance */}
+      <mesh position={[0, 2.7, 2.5]} receiveShadow castShadow>
+        <boxGeometry args={[4, 0.6, 0.15]} />
+        <meshBasicMaterial color="#f1f5f9" />
+      </mesh>
+
+      {/* West wall (-X) - solid behind stalls */}
       <mesh position={[-4, 1.5, 0]} receiveShadow castShadow>
         <boxGeometry args={[0.15, 3, 5]} />
         <meshBasicMaterial color="#f1f5f9" />
       </mesh>
+
+      {/* East wall (+X) - solid (moved entrance to south wall) */}
       <mesh position={[4, 1.5, 0]} receiveShadow castShadow>
         <boxGeometry args={[0.15, 3, 5]} />
         <meshBasicMaterial color="#f1f5f9" />
       </mesh>
 
-      {/* Front wall with entrance gap */}
-      <mesh position={[-2.5, 1.5, 2.5]} receiveShadow castShadow>
-        <boxGeometry args={[3, 3, 0.15]} />
-        <meshBasicMaterial color="#f1f5f9" />
-      </mesh>
-      <mesh position={[2.5, 1.5, 2.5]} receiveShadow castShadow>
-        <boxGeometry args={[3, 3, 0.15]} />
-        <meshBasicMaterial color="#f1f5f9" />
-      </mesh>
-      <mesh position={[0, 2.7, 2.5]} receiveShadow castShadow>
-        <boxGeometry args={[2, 0.6, 0.15]} />
-        <meshBasicMaterial color="#f1f5f9" />
+      {/* Restroom sign above entrance (on south wall) */}
+      <mesh position={[0, 2.8, 2.6]}>
+        <boxGeometry args={[1.5, 0.4, 0.05]} />
+        <meshBasicMaterial color="#1e40af" />
       </mesh>
 
-      {/* Toilet stalls - 3 stalls */}
-      {[-2.5, 0, 2.5].map((x, i) => (
-        <group key={i} position={[x, 0, -1.5]}>
-          {/* Stall divider */}
+      {/* === TOILET STALLS on west side (-X) === */}
+      {/* 3 stalls arranged along the west wall, facing east (+X) */}
+      {[-1.5, 0, 1.5].map((z, i) => (
+        <group key={i} position={[-2.5, 0, z]}>
+          {/* Stall back wall (against west wall) */}
+          <mesh position={[-0.7, 1, 0]} castShadow>
+            <boxGeometry args={[0.05, 2, 1.4]} />
+            <meshBasicMaterial color="#94a3b8" />
+          </mesh>
+          {/* Stall side dividers */}
           {i < 2 && (
-            <mesh position={[1.2, 1, 0]} castShadow>
-              <boxGeometry args={[0.05, 2, 1.5]} />
+            <mesh position={[0, 1, 0.75]} castShadow>
+              <boxGeometry args={[1.5, 2, 0.05]} />
+              <meshBasicMaterial color="#94a3b8" />
+            </mesh>
+          )}
+          {i === 0 && (
+            <mesh position={[0, 1, -0.75]} castShadow>
+              <boxGeometry args={[1.5, 2, 0.05]} />
               <meshBasicMaterial color="#94a3b8" />
             </mesh>
           )}
           {/* Toilet */}
-          <mesh position={[0, 0.3, -0.3]}>
+          <mesh position={[-0.4, 0.3, 0]}>
             <boxGeometry args={[0.5, 0.5, 0.6]} />
             <meshBasicMaterial color="#ffffff" />
           </mesh>
-          <mesh position={[0, 0.6, -0.55]}>
-            <boxGeometry args={[0.45, 0.5, 0.15]} />
+          <mesh position={[-0.55, 0.6, 0]}>
+            <boxGeometry args={[0.15, 0.5, 0.45]} />
             <meshBasicMaterial color="#ffffff" />
           </mesh>
-          {/* Stall door */}
-          <mesh position={[0, 1, 0.7]}>
-            <boxGeometry args={[0.8, 1.8, 0.05]} />
+          {/* Stall door (facing corridor, +X direction) */}
+          <mesh position={[0.55, 1, 0]}>
+            <boxGeometry args={[0.05, 1.8, 0.8]} />
             <meshBasicMaterial color="#64748b" />
           </mesh>
           {/* Door handle */}
-          <mesh position={[0.3, 1, 0.75]}>
-            <boxGeometry args={[0.06, 0.12, 0.04]} />
+          <mesh position={[0.6, 1, -0.3]}>
+            <boxGeometry args={[0.04, 0.12, 0.06]} />
             <meshBasicMaterial color="#1f2937" />
           </mesh>
         </group>
       ))}
 
-      {/* Sink area */}
-      <group position={[0, 0, 1.5]}>
-        {/* Sink counter */}
-        <mesh position={[0, 0.85, 0]} castShadow>
-          <boxGeometry args={[6, 0.1, 0.8]} />
+      {/* === SINK AREA on east side (+X), facing stalls === */}
+      <group position={[2.5, 0, 0]}>
+        {/* Sink counter (mounted on east wall, facing west) */}
+        <mesh position={[0.5, 0.85, 0]} castShadow>
+          <boxGeometry args={[0.8, 0.1, 4]} />
           <meshBasicMaterial color="#475569" />
         </mesh>
-        {/* Sinks - 3 basins */}
-        {[-2, 0, 2].map((x, i) => (
-          <group key={i} position={[x, 0.9, 0]}>
+        {/* Sinks - 3 basins along the counter */}
+        {[-1.2, 0, 1.2].map((z, i) => (
+          <group key={i} position={[0.5, 0.9, z]}>
             <mesh>
               <cylinderGeometry args={[0.25, 0.2, 0.15, 16]} />
               <meshBasicMaterial color="#e2e8f0" />
             </mesh>
             {/* Faucet */}
-            <mesh position={[0, 0.15, -0.2]}>
+            <mesh position={[0.2, 0.15, 0]}>
               <boxGeometry args={[0.08, 0.25, 0.08]} />
               <meshBasicMaterial color="#94a3b8" />
             </mesh>
-            <mesh position={[0, 0.25, -0.1]}>
-              <boxGeometry args={[0.06, 0.06, 0.2]} />
+            <mesh position={[0.1, 0.25, 0]}>
+              <boxGeometry args={[0.2, 0.06, 0.06]} />
               <meshBasicMaterial color="#94a3b8" />
             </mesh>
           </group>
         ))}
-        {/* Mirror */}
-        <mesh position={[0, 1.6, -0.35]}>
-          <boxGeometry args={[5.5, 1.2, 0.05]} />
-          <meshBasicMaterial color="#1e3a5f" />
+        {/* Mirror (on east wall, facing west toward corridor) - sheeny reflective surface */}
+        <mesh position={[0.9, 1.6, 0]}>
+          <boxGeometry args={[0.05, 1.2, 3.5]} />
+          <meshStandardMaterial
+            color="#93c5fd"
+            roughness={0.1}
+            metalness={0.6}
+            transparent
+            opacity={0.85}
+          />
         </mesh>
       </group>
 
-      {/* Hand dryers on wall */}
-      {[-3, 3].map((x, i) => (
-        <mesh key={i} position={[x, 1.3, 2.35]}>
-          <boxGeometry args={[0.4, 0.35, 0.25]} />
-          <meshBasicMaterial color="#e2e8f0" />
-        </mesh>
-      ))}
-
-      {/* Restroom sign above entrance */}
-      <mesh position={[0, 2.8, 2.6]}>
-        <boxGeometry args={[1.5, 0.4, 0.05]} />
-        <meshBasicMaterial color="#1e40af" />
+      {/* Hand dryers on south wall (+Z), accessible from corridor */}
+      <mesh position={[0, 1.3, 2.35]}>
+        <boxGeometry args={[0.4, 0.35, 0.25]} />
+        <meshBasicMaterial color="#e2e8f0" />
       </mesh>
 
       {/* Overhead light */}
       <pointLight position={[0, 2.8, 0]} color="#f8fafc" intensity={0.6} distance={8} />
     </group>
   );
-};
+});
 
 // Manager's Office component - glass-fronted office overlooking factory floor
-const ManagerOffice: React.FC<{ position: [number, number, number] }> = ({ position }) => {
+const ManagerOffice: React.FC<{ position: [number, number, number] }> = React.memo(({ position }) => {
   return (
     <group position={position}>
       {/* Floor - carpet */}
@@ -881,7 +901,7 @@ const ManagerOffice: React.FC<{ position: [number, number, number] }> = ({ posit
       <pointLight position={[-2, 2.8, -1]} color="#fef3c7" intensity={0.3} distance={5} />
     </group>
   );
-};
+});
 
 export const FactoryWalls: React.FC<FactoryWallsProps> = () => {
   const graphics = useGraphicsStore((state) => state.graphics);

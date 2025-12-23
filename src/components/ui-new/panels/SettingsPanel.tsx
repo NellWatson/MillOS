@@ -9,9 +9,11 @@ import {
   Activity,
   RotateCcw,
   Grid3X3,
+  History,
 } from 'lucide-react';
 import { useGraphicsStore, GraphicsQuality } from '../../../stores/graphicsStore';
 import { useGameSimulationStore } from '../../../stores/gameSimulationStore';
+import { useHistoricalPlaybackStore } from '../../../stores/historicalPlaybackStore';
 // Import optimized audio hook (uses useSyncExternalStore instead of forceUpdate)
 import { useAudioStateWithControls as useAudioState } from '../../../hooks/useAudioState';
 
@@ -143,17 +145,16 @@ export const SettingsPanel: React.FC<{
                 onClick={() => setGraphicsQuality(quality)}
                 aria-label={`Set graphics quality to ${quality}`}
                 aria-pressed={graphics.graphics.quality === quality}
-                className={`py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all ${
-                  graphics.graphics.quality === quality
-                    ? quality === 'low'
-                      ? 'bg-slate-600 text-white'
-                      : quality === 'medium'
-                        ? 'bg-yellow-600 text-white'
-                        : quality === 'high'
-                          ? 'bg-cyan-600 text-white'
-                          : 'bg-purple-600 text-white'
-                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                }`}
+                className={`py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all ${graphics.graphics.quality === quality
+                  ? quality === 'low'
+                    ? 'bg-slate-600 text-white'
+                    : quality === 'medium'
+                      ? 'bg-yellow-600 text-white'
+                      : quality === 'high'
+                        ? 'bg-cyan-600 text-white'
+                        : 'bg-purple-600 text-white'
+                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                  }`}
               >
                 {quality}
               </button>
@@ -188,6 +189,35 @@ export const SettingsPanel: React.FC<{
                 onChange={setShowZones}
               />
             )}
+          </div>
+
+          {/* Resolution Scale Slider */}
+          <div className="pt-2 border-t border-white/5">
+            <div className="flex justify-between items-center mb-2">
+              <div className="flex items-center gap-2">
+                <Monitor size={12} className="text-slate-400" />
+                <span className="text-xs text-slate-300">Resolution Scale</span>
+              </div>
+              <span className="text-cyan-400 font-mono font-bold text-[10px]">
+                {Math.round(graphics.graphics.resolutionScale * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0.25"
+              max="1"
+              step="0.05"
+              value={graphics.graphics.resolutionScale}
+              onChange={(e) => graphics.setGraphicsSetting('resolutionScale', parseFloat(e.target.value))}
+              aria-label="Resolution scale"
+              className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+            />
+            <div className="flex justify-between text-[9px] text-slate-500 mt-1">
+              <span>25%</span>
+              <span>50%</span>
+              <span>75%</span>
+              <span>100%</span>
+            </div>
           </div>
         </div>
       </section>

@@ -128,15 +128,15 @@ const DynamicBackground: React.FC = () => {
 
   // Use useFrame to continuously check and update fog color
   // This runs every frame and reads gameTime directly from the store
-  useFrame((state) => {
+  useFrame((_state) => {
     const gameTime = useGameSimulationStore.getState().gameTime;
     const targetColor = getSkyBackgroundColor(gameTime);
 
     // DEBUG: Log occasional updates to verify loop is running and time is changing
     // Log once per second (approx every 60 frames)
-    if (state.clock.elapsedTime % 1 < 0.02) {
-      console.log(`[DynamicBackground] Frame: ${state.clock.elapsedTime.toFixed(1)}, Time: ${gameTime.toFixed(2)}, Color: ${targetColor}`);
-    }
+    // if (state.clock.elapsedTime % 1 < 0.02) {
+    //   console.log(`[DynamicBackground] Frame: ${state.clock.elapsedTime.toFixed(1)}, Time: ${gameTime.toFixed(2)}, Color: ${targetColor}`);
+    // }
 
     // Only update if color actually changed
     if (targetColor === lastColorRef.current) return;
@@ -202,10 +202,11 @@ const App: React.FC = () => {
   const [autoRotate, setAutoRotate] = useState(true);
 
   // PERFORMANCE: Consolidated store subscriptions with useShallow to prevent unnecessary re-renders
-  const { currentQuality, enablePhysics } = useGraphicsStore(
+  const { currentQuality, enablePhysics, resolutionScale } = useGraphicsStore(
     useShallow((state) => ({
       currentQuality: state.graphics.quality,
       enablePhysics: state.graphics.enablePhysics,
+      resolutionScale: state.graphics.resolutionScale,
     }))
   );
   // Use currentQuality directly - Canvas key forces remount when quality changes
@@ -516,7 +517,7 @@ const App: React.FC = () => {
       >
         <ErrorBoundary fallback={WebGLErrorFallback}>
           <Canvas
-            key={`canvas-${canvasQuality}`} // Force remount when quality changes
+            key={`canvas-${canvasQuality}-${resolutionScale}`} // Force remount when quality or resolution changes
             shadows={canvasQuality !== 'low' ? { type: THREE.PCFShadowMap } : false}
             camera={{
               position: [70, 40, 70],
@@ -532,7 +533,7 @@ const App: React.FC = () => {
               preserveDrawingBuffer: false,
               failIfMajorPerformanceCaveat: false,
             }}
-            dpr={canvasQuality === 'low' ? 1 : Math.min(window.devicePixelRatio, 1.5)}
+            dpr={Math.max(0.5, Math.min(window.devicePixelRatio * resolutionScale, canvasQuality === 'low' ? 1 : 2))}
             onCreated={({ gl }) => {
               glRef.current = gl;
 
@@ -609,6 +610,7 @@ const App: React.FC = () => {
                       dampingFactor={0.05}
                       // On mobile, disable rotate (TouchLookHandler handles single-touch rotation)
                       enableRotate={!isMobile}
+                      makeDefault
                     />
                   )}
 
@@ -643,6 +645,7 @@ const App: React.FC = () => {
                       dampingFactor={0.05}
                       // On mobile, disable rotate (TouchLookHandler handles single-touch rotation)
                       enableRotate={!isMobile}
+                      makeDefault
                     />
                   )}
 

@@ -10,7 +10,7 @@
  * - Predicted events and decision outcomes
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   generateContextAwareDecision,
   trackDecisionOutcome,
@@ -50,6 +50,12 @@ vi.mock('../logger', () => ({
     warn: vi.fn(),
     error: vi.fn(),
     debug: vi.fn(),
+    ai: {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    },
   },
 }));
 
@@ -797,6 +803,55 @@ describe('aiEngine - Core Functions', () => {
     it('should return empty metric trends for new machines', () => {
       const trends = getMetricTrends();
       expect(trends).toBeInstanceOf(Map);
+    });
+  });
+
+  describe('Background Loop', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should start background loop on initialization', async () => {
+      const { initializeAIEngine } = await import('../aiEngine');
+      const cleanup = initializeAIEngine();
+
+      expect(typeof cleanup).toBe('function');
+
+      // Should have started an interval
+      // Note: precise count may vary if other internal timers exist, but at least one for the loop
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+      cleanup();
+    });
+
+    it('should clean up background loop on unmount', async () => {
+      const { initializeAIEngine } = await import('../aiEngine');
+      const cleanup = initializeAIEngine();
+
+      cleanup();
+
+      // Should clear the interval
+      expect(() => initializeAIEngine()).not.toThrow();
+    });
+
+    it('should prevent multiple loops from running', async () => {
+      const { initializeAIEngine } = await import('../aiEngine');
+
+      const cleanup1 = initializeAIEngine();
+      const initialTimerCount = vi.getTimerCount();
+
+      // Attempting to initialize again should not create a new interval if loopInterval is global
+      const cleanup2 = initializeAIEngine();
+
+      // Same number of timers implies no double-instantiation of the main loop
+      expect(vi.getTimerCount()).toBe(initialTimerCount);
+
+      cleanup1();
+      cleanup2();
     });
   });
 });

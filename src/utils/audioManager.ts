@@ -77,8 +77,9 @@ class AudioManager {
   private _musicEnabled: boolean = true;
   private _musicVolume: number = 0.3;
   private _currentTrackIndex: number = 0;
-  // Store bound event listener reference to properly remove it on cleanup
+  // Store bound event listener references to properly remove them on cleanup
   private musicEndedHandler: (() => void) | null = null;
+  private musicErrorHandler: ((e: Event) => void) | null = null;
 
   // Available music tracks (shuffled on init, excludes victory fanfare)
   // Music by Kevin MacLeod (incompetech.com) - Licensed under CC BY 3.0/4.0
@@ -566,6 +567,13 @@ class AudioManager {
         this.nextTrack();
       };
       this.musicAudio.addEventListener('ended', this.musicEndedHandler);
+
+      // Handle errors by advancing to next track (prevents silent music stops)
+      this.musicErrorHandler = (e: Event) => {
+        audioLog.warn('Music track failed to load, advancing to next track', e);
+        this.nextTrack();
+      };
+      this.musicAudio.addEventListener('error', this.musicErrorHandler);
     } else if (this.musicAudio.src !== window.location.origin + this.currentTrack.file) {
       this.musicAudio.src = this.currentTrack.file;
     }
@@ -577,10 +585,14 @@ class AudioManager {
 
   stopMusic(): void {
     if (this.musicAudio) {
-      // Remove event listener to prevent memory leak
+      // Remove event listeners to prevent memory leak
       if (this.musicEndedHandler) {
         this.musicAudio.removeEventListener('ended', this.musicEndedHandler);
         this.musicEndedHandler = null;
+      }
+      if (this.musicErrorHandler) {
+        this.musicAudio.removeEventListener('error', this.musicErrorHandler);
+        this.musicErrorHandler = null;
       }
       this.musicAudio.pause();
       this.musicAudio.currentTime = 0;
@@ -4914,10 +4926,18 @@ class AudioManager {
         }, 1500);
       };
       utterance.onerror = (e) => {
-        console.error('[MillOS TTS] Speech error:', e.error, e);
+        // "interrupted" error often happens when cancelling speech (e.g. before new announcement)
+        // This is usually expected behavior, so we log as info instead of error
+        if (e.error === 'interrupted') {
+          console.log('[MillOS TTS] Speech interrupted (expected behavior)');
+        } else {
+          console.error('[MillOS TTS] Speech error:', e.error, e);
+          audioLog.warn('TTS error', e);
+        }
+
         clearSafetyTimeout();
         this.stopSpeechReverb();
-        audioLog.warn('TTS error', e);
+
         // Even on error, continue processing queue after a short delay
         setTimeout(() => {
           this.processAnnouncementQueue();

@@ -6,36 +6,34 @@
  * It uses CSS and DOM elements for effects.
  */
 
-import React, { useMemo } from 'react';
+import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CloudRain, CloudLightning, Wind, Snowflake } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
+
 import { useUIStore } from '../../stores';
 
 type WeatherType = 'storm' | 'rain' | 'wind' | 'snow' | 'clear';
 
-interface WeatherAlert {
-    type: WeatherType;
-    severity: 'low' | 'medium' | 'high';
-}
-
 export const WeatherEffectsOverlay: React.FC = () => {
-    const alerts = useUIStore((state) => state.alerts);
+    // Optimized selector: Derived state inside useStore + useShallow
+    const weatherAlert = useUIStore(useShallow((state) => {
+        // Find first weather-related alert
+        const alert = state.alerts.find(a => {
+            const t = a.title?.toLowerCase() || '';
+            const m = a.message?.toLowerCase() || '';
+            const combined = t + ' ' + m;
+            return combined.includes('storm') ||
+                combined.includes('weather') ||
+                combined.includes('rain') ||
+                combined.includes('wind') ||
+                combined.includes('snow');
+        });
 
-    // Detect weather-related alerts
-    const weatherAlert = useMemo((): WeatherAlert | null => {
-        const weatherAlertData = alerts.find(a =>
-            a.title?.toLowerCase().includes('storm') ||
-            a.title?.toLowerCase().includes('weather') ||
-            a.title?.toLowerCase().includes('rain') ||
-            a.title?.toLowerCase().includes('wind') ||
-            a.message?.toLowerCase().includes('storm') ||
-            a.message?.toLowerCase().includes('weather')
-        );
-
-        if (!weatherAlertData) return null;
+        if (!alert) return null;
 
         // Determine weather type
-        const text = `${weatherAlertData.title} ${weatherAlertData.message}`.toLowerCase();
+        const text = `${alert.title} ${alert.message}`.toLowerCase();
         let type: WeatherType = 'storm';
         if (text.includes('rain')) type = 'rain';
         else if (text.includes('wind')) type = 'wind';
@@ -43,12 +41,12 @@ export const WeatherEffectsOverlay: React.FC = () => {
 
         // Determine severity
         let severity: 'low' | 'medium' | 'high' = 'medium';
-        if (weatherAlertData.type === 'critical') severity = 'high';
-        else if (weatherAlertData.type === 'warning') severity = 'medium';
+        if (alert.type === 'critical') severity = 'high';
+        else if (alert.type === 'warning') severity = 'medium';
         else severity = 'low';
 
         return { type, severity };
-    }, [alerts]);
+    }));
 
     if (!weatherAlert) return null;
 
@@ -111,8 +109,8 @@ export const WeatherEffectsOverlay: React.FC = () => {
                             {weatherAlert.type} Warning
                         </span>
                         <span className={`text-[10px] ${weatherAlert.severity === 'high' ? 'text-red-400' :
-                                weatherAlert.severity === 'medium' ? 'text-amber-400' :
-                                    'text-slate-400'
+                            weatherAlert.severity === 'medium' ? 'text-amber-400' :
+                                'text-slate-400'
                             }`}>
                             Severity: {weatherAlert.severity}
                         </span>

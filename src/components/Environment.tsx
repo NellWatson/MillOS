@@ -20,11 +20,12 @@ import { ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
 import { SkySystem } from './SkySystem';
 import { useGraphicsStore } from '../stores/graphicsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useProductionStore } from '../stores/productionStore';
 import { audioManager } from '../utils/audioManager';
 import { shouldRunThisFrame, incrementGlobalFrame } from '../utils/frameThrottle';
-import { useShallow } from 'zustand/react/shallow';
+
 import { FLOOR_LAYERS } from '../constants/renderLayers';
 
 // Animation registries extracted to separate file for Fast Refresh compatibility
@@ -42,6 +43,8 @@ import {
   splashPhysicsRegistry,
   dripSpawnRegistry,
   weatherParticlesRegistry,
+  windowGlowRefs,
+  lightShaftRefs,
   registerLensFlare,
   unregisterLensFlare,
   registerGameTime,
@@ -68,6 +71,10 @@ import {
   unregisterDripSpawn,
   registerWeatherParticles,
   unregisterWeatherParticles,
+  registerWindowGlow,
+  unregisterWindowGlow,
+  registerLightShaft,
+  unregisterLightShaft,
   type LensFlareData,
   type PowerFlickerStateType,
 } from '../utils/environmentRegistry';
@@ -473,6 +480,31 @@ const EnvironmentAnimationManager: React.FC = () => {
         }
       });
     }
+    // 15. Update Daylight (10fps - throttled to every 6th frame)
+    if ((windowGlowRefs.size > 0 || lightShaftRefs.size > 0) && shouldRunThisFrame(6)) {
+      // Calculate daylight properties once per frame
+      const gameTime = useGameSimulationStore.getState().gameTime;
+      const { color, intensity } = getDaylightProperties(gameTime);
+      const THREEColor = new THREE.Color(color);
+
+      windowGlowRefs.forEach(mat => {
+        mat.color.set(THREEColor);
+        mat.opacity = intensity * 0.6;
+      });
+
+      const enableLightShafts = useGraphicsStore.getState().graphics.enableLightShafts;
+      if (enableLightShafts && intensity >= 0.3) {
+        lightShaftRefs.forEach(mat => {
+          mat.color.set('#fef3c7'); // Keep warm color for shafts
+          mat.opacity = 0.02 * intensity;
+          mat.visible = true;
+        });
+      } else {
+        lightShaftRefs.forEach(mat => {
+          mat.visible = false;
+        });
+      }
+    }
   });
 
   return null;
@@ -480,10 +512,9 @@ const EnvironmentAnimationManager: React.FC = () => {
 
 // Consolidated lens flare system - manages multiple flares in ONE useFrame callback
 const LensFlareSystem: React.FC<{ flares: LensFlareData[] }> = memo(({ flares }) => {
-  const gameTime = useGameSimulationStore((state) => state.gameTime);
-
-  // Only show lens flares during bright daylight
-  const isDaytime = gameTime >= 8 && gameTime < 17;
+  const isDaytime = useGameSimulationStore(
+    useShallow((state) => state.gameTime >= 8 && state.gameTime < 17)
+  );
 
   // Register lens flare system with animation manager
   useEffect(() => {
@@ -634,7 +665,7 @@ const useWallRoughnessMap = (): THREE.CanvasTexture => {
 };
 
 // Calculate daylight color based on game time
-const getDaylightProperties = (hour: number) => {
+export const getDaylightProperties = (hour: number) => {
   // Night (8pm - 5am): dark blue, minimal glow
   if (hour >= 20 || hour < 5) {
     return { color: '#1e3a5f', intensity: 0.1, opacity: 0.2 };
@@ -670,14 +701,30 @@ const getDaylightProperties = (hour: number) => {
 // Physical glass window component that responds to game time daylight
 const DaylightWindow: React.FC<{ position: [number, number, number]; size: [number, number] }> =
   memo(({ position, size }) => {
-    const gameTime = useGameSimulationStore((state) => state.gameTime);
-    const { color, intensity } = getDaylightProperties(gameTime);
-
     // Guard against NaN/invalid dimensions
     const safeW = Number.isFinite(size[0]) && size[0] > 0 ? size[0] : 1;
     const safeH = Number.isFinite(size[1]) && size[1] > 0 ? size[1] : 1;
     const innerW = Math.max(0.1, safeW - 0.2);
     const innerH = Math.max(0.1, safeH - 0.2);
+
+    // Direct ref for material optimization
+    const glowMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
+
+    useEffect(() => {
+      if (glowMaterialRef.current) {
+        registerWindowGlow(glowMaterialRef.current);
+        // Set initial state immediately to prevent flash
+        const gameTime = useGameSimulationStore.getState().gameTime;
+        const { color, intensity } = getDaylightProperties(gameTime);
+        glowMaterialRef.current.color.set(color);
+        glowMaterialRef.current.opacity = intensity * 0.6;
+      }
+      return () => {
+        if (glowMaterialRef.current) {
+          unregisterWindowGlow(glowMaterialRef.current);
+        }
+      };
+    }, []);
 
     return (
       <group position={position}>
@@ -700,7 +747,7 @@ const DaylightWindow: React.FC<{ position: [number, number, number]; size: [numb
         {/* Daylight glow behind glass */}
         <mesh position={[0, 0, -0.1]}>
           <planeGeometry args={[innerW, innerH]} />
-          <meshBasicMaterial color={color} transparent opacity={intensity * 0.6} />
+          <meshBasicMaterial ref={glowMaterialRef} color="#7dd3fc" transparent opacity={0.3} />
         </mesh>
       </group>
     );
@@ -708,20 +755,35 @@ const DaylightWindow: React.FC<{ position: [number, number, number]; size: [numb
 
 // Light shaft component for volumetric effect from skylights
 const LightShaft: React.FC<{ position: [number, number, number] }> = memo(({ position }) => {
-  const gameTime = useGameSimulationStore((state) => state.gameTime);
   const enableLightShafts = useGraphicsStore((state) => state.graphics.enableLightShafts);
-  const { intensity } = getDaylightProperties(gameTime);
+  const shaftMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
 
-  // Check if light shafts are enabled and if it's bright enough
-  if (!enableLightShafts || intensity < 0.3) return null;
+  useEffect(() => {
+    if (shaftMaterialRef.current && enableLightShafts) {
+      registerLightShaft(shaftMaterialRef.current);
+      // Initial update
+      const gameTime = useGameSimulationStore.getState().gameTime;
+      const { intensity } = getDaylightProperties(gameTime);
+      shaftMaterialRef.current.opacity = 0.02 * intensity;
+    }
+    return () => {
+      if (shaftMaterialRef.current) {
+        unregisterLightShaft(shaftMaterialRef.current);
+      }
+    };
+  }, [enableLightShafts]);
+
+  // Check if light shafts are enabled
+  if (!enableLightShafts) return null;
 
   return (
     <mesh position={position} rotation={[0, 0, 0]}>
       <coneGeometry args={[6, 28, 8, 1, true]} />
       <meshBasicMaterial
+        ref={shaftMaterialRef}
         color="#fef3c7"
         transparent
-        opacity={0.02 * intensity}
+        opacity={0.01}
         side={THREE.DoubleSide}
         depthWrite={false}
       />

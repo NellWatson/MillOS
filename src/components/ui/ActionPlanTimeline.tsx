@@ -96,10 +96,14 @@ export const ActionPlanTimeline: React.FC = () => {
                     <span className="text-sm font-medium text-slate-200">Action Plan</span>
                 </div>
                 {isRunning && (
-                    <div className="flex items-center gap-1.5 bg-cyan-500/20 px-2 py-1 rounded-full">
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="flex items-center gap-1.5 bg-cyan-500/20 px-2 py-1 rounded-full"
+                    >
                         <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse" />
                         <span className="text-[10px] text-cyan-400 font-mono">{formatTime(countdown)}</span>
-                    </div>
+                    </motion.div>
                 )}
             </div>
 
@@ -111,9 +115,9 @@ export const ActionPlanTimeline: React.FC = () => {
                     return (
                         <motion.div
                             key={index}
-                            initial={{ opacity: 0, x: -10 }}
+                            initial={{ opacity: 0, x: -5 }}
                             animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: index * 0.1 }}
+                            transition={{ delay: index * 0.05, duration: 0.3 }}
                             className="flex items-start gap-3"
                         >
                             {/* Timeline indicator */}

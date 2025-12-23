@@ -1,4 +1,6 @@
 import React, { useMemo } from 'react';
+import * as THREE from 'three';
+import { Instances, Instance } from '@react-three/drei';
 import { useGraphicsStore } from '../../stores/graphicsStore';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 
@@ -9,7 +11,7 @@ interface FactoryLightingProps {
 
 type FixturePosition = { x: number; z: number };
 
-export const FactoryLighting: React.FC<FactoryLightingProps> = ({ floorWidth, floorDepth }) => {
+export const FactoryLighting: React.FC<FactoryLightingProps> = React.memo(({ floorWidth, floorDepth }) => {
   const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
   const weather = useGameSimulationStore((state) => state.weather);
 
@@ -63,8 +65,9 @@ export const FactoryLighting: React.FC<FactoryLightingProps> = ({ floorWidth, fl
 
   return (
     <group>
+      {/* Lights - kept as individual objects as they cannot be instanced */}
       {fixtures.map((fixture, index) => (
-        <group key={`fixture-${index}`} position={[fixture.x, fixtureHeight, fixture.z]}>
+        <group key={`light-${index}`} position={[fixture.x, fixtureHeight, fixture.z]}>
           {intensity > 0 && (
             <pointLight
               castShadow={false}
@@ -75,43 +78,67 @@ export const FactoryLighting: React.FC<FactoryLightingProps> = ({ floorWidth, fl
               color="#fef3c7"
             />
           )}
-
-          {/* Ceiling mount */}
-          <mesh position={[0, 0.6, 0]}>
-            <cylinderGeometry args={[0.14, 0.18, 1.2, 8]} />
-            <meshStandardMaterial color="#475569" metalness={0.7} roughness={0.35} />
-          </mesh>
-
-          {/* Housing */}
-          <mesh position={[0, -0.05, 0]}>
-            <cylinderGeometry args={[0.65, 0.95, 0.32, 10]} />
-            <meshStandardMaterial color="#0f172a" metalness={0.6} roughness={0.5} />
-          </mesh>
-
-          {/* Lens */}
-          <mesh position={[0, -0.25, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <circleGeometry args={[0.68, 20]} />
-            <meshStandardMaterial
-              color="#fef3c7"
-              emissive="#fef3c7"
-              emissiveIntensity={emissive * stormDimmer}
-              toneMapped={false}
-            />
-          </mesh>
-
-          {/* Cross braces to visually tie fixtures to roof trusses */}
-          {[-0.85, 0.85].map((offsetX) => (
-            <mesh
-              key={`brace-${index}-${offsetX}`}
-              position={[offsetX, 0.4, 0]}
-              rotation={[0, 0, Math.PI / 2]}
-            >
-              <cylinderGeometry args={[0.03, 0.03, 1.8, 6]} />
-              <meshStandardMaterial color="#334155" metalness={0.7} roughness={0.4} />
-            </mesh>
-          ))}
         </group>
       ))}
+
+      {/* INSTANCED: Ceiling mounts */}
+      <Instances range={fixtures.length}>
+        <cylinderGeometry args={[0.14, 0.18, 1.2, 8]} />
+        <meshStandardMaterial color="#475569" metalness={0.7} roughness={0.35} />
+        {fixtures.map((fixture, index) => (
+          <Instance key={`mount-${index}`} position={[fixture.x, fixtureHeight + 0.6, fixture.z]} />
+        ))}
+      </Instances>
+
+      {/* INSTANCED: Housing */}
+      <Instances range={fixtures.length}>
+        <cylinderGeometry args={[0.65, 0.95, 0.32, 10]} />
+        <meshStandardMaterial color="#0f172a" metalness={0.6} roughness={0.5} />
+        {fixtures.map((fixture, index) => (
+          <Instance
+            key={`housing-${index}`}
+            position={[fixture.x, fixtureHeight - 0.05, fixture.z]}
+          />
+        ))}
+      </Instances>
+
+      {/* INSTANCED: Lens */}
+      <Instances range={fixtures.length}>
+        <circleGeometry args={[0.68, 20]} />
+        <meshStandardMaterial
+          color="#fef3c7"
+          emissive="#fef3c7"
+          emissiveIntensity={emissive * stormDimmer}
+          toneMapped={false}
+          side={THREE.DoubleSide}
+        />
+        {fixtures.map((fixture, index) => (
+          <Instance
+            key={`lens-${index}`}
+            position={[fixture.x, fixtureHeight - 0.25, fixture.z]}
+            rotation={[-Math.PI / 2, 0, 0]}
+          />
+        ))}
+      </Instances>
+
+      {/* INSTANCED: Cross braces */}
+      {/* 2 braces per fixture, so range is 2x */}
+      <Instances range={fixtures.length * 2}>
+        <cylinderGeometry args={[0.03, 0.03, 1.8, 6]} />
+        <meshStandardMaterial color="#334155" metalness={0.7} roughness={0.4} />
+        {fixtures.map((fixture, index) => (
+          <React.Fragment key={`braces-${index}`}>
+            <Instance
+              position={[fixture.x - 0.85, fixtureHeight + 0.4, fixture.z]}
+              rotation={[0, 0, Math.PI / 2]}
+            />
+            <Instance
+              position={[fixture.x + 0.85, fixtureHeight + 0.4, fixture.z]}
+              rotation={[0, 0, Math.PI / 2]}
+            />
+          </React.Fragment>
+        ))}
+      </Instances>
     </group>
   );
-};
+});

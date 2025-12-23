@@ -11,40 +11,50 @@ import { useProductionStore } from '../stores/productionStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { Target, Clock, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { BAG_WEIGHT_KG } from '../types';
 
-const DAILY_TARGET = 45000; // kg
+const DAILY_TARGET_BAGS = 5000;
+const DAILY_TARGET_MASS = DAILY_TARGET_BAGS * BAG_WEIGHT_KG; // 125,000 kg = 125t
 const SHIFT_END_HOUR = 18;
-const SHIFT_START_HOUR = 6;
 
 export const ProductionTargetWidget: React.FC = () => {
     const showProductionTarget = useAIConfigStore((state) => state.showProductionTarget);
     const metrics = useProductionStore((state) => state.metrics);
+    const totalBagsProduced = useProductionStore((state) => state.totalBagsProduced);
     const gameTime = useGameSimulationStore((state) => state.gameTime);
 
     const targetData = useMemo(() => {
-        const currentThroughput = metrics.throughput || 0;
-        const hoursElapsed = Math.max(0, gameTime - SHIFT_START_HOUR);
-        const estimatedProduction = currentThroughput * hoursElapsed;
-        const remaining = Math.max(0, DAILY_TARGET - estimatedProduction);
-        const hoursRemaining = Math.max(0.5, SHIFT_END_HOUR - gameTime);
-        const requiredRate = remaining / hoursRemaining;
+        // Current throughput is bags/hr
+        const currentThroughputBags = metrics.throughput || 0;
+        const currentThroughputMass = currentThroughputBags * BAG_WEIGHT_KG; // kg/hr
 
-        const progress = Math.min(100, (estimatedProduction / DAILY_TARGET) * 100);
-        const isOnTrack = currentThroughput >= requiredRate * 0.9;
-        const isBehind = currentThroughput < requiredRate * 0.8;
+
+
+        // Use actual produced counts if available, otherwise estimate
+        const currentMass = totalBagsProduced * BAG_WEIGHT_KG;
+
+        const remainingMass = Math.max(0, DAILY_TARGET_MASS - currentMass);
+        const hoursRemaining = Math.max(0.5, SHIFT_END_HOUR - gameTime);
+        const requiredRateMass = remainingMass / hoursRemaining;
+
+        const progress = Math.min(100, (currentMass / DAILY_TARGET_MASS) * 100);
+
+        // Check if our current rate is enough to finish
+        const isOnTrack = currentThroughputMass >= requiredRateMass * 0.95;
+        const isBehind = currentThroughputMass < requiredRateMass * 0.8;
 
         const status: 'behind' | 'onTrack' | 'atRisk' = isBehind ? 'behind' : isOnTrack ? 'onTrack' : 'atRisk';
 
         return {
-            produced: estimatedProduction,
-            remaining,
+            producedMass: currentMass,
+            remainingMass,
             hoursRemaining,
-            requiredRate,
-            currentRate: currentThroughput,
+            requiredRateMass,
+            currentRateMass: currentThroughputMass,
             progress,
             status,
         };
-    }, [metrics.throughput, gameTime]);
+    }, [metrics.throughput, totalBagsProduced, gameTime]);
 
     if (!showProductionTarget) return null;
 
@@ -96,16 +106,16 @@ export const ProductionTargetWidget: React.FC = () => {
                 {/* Stats */}
                 <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="text-slate-400">
-                        Produced: <span className="text-white font-mono">{(targetData.produced / 1000).toFixed(1)}t</span>
+                        Produced: <span className="text-white font-mono">{(targetData.producedMass / 1000).toFixed(1)}t</span>
                     </div>
                     <div className="text-slate-400">
-                        Target: <span className="text-white font-mono">{(DAILY_TARGET / 1000).toFixed(0)}t</span>
+                        Target: <span className="text-white font-mono">{(DAILY_TARGET_MASS / 1000).toFixed(0)}t</span>
                     </div>
                     <div className="text-slate-400">
-                        Current: <span className="text-white font-mono">{targetData.currentRate.toFixed(0)} kg/hr</span>
+                        Rate: <span className="text-white font-mono">{(targetData.currentRateMass / 1000).toFixed(1)} t/hr</span>
                     </div>
                     <div className="text-slate-400">
-                        Required: <span className={`font-mono ${colors.text}`}>{targetData.requiredRate.toFixed(0)} kg/hr</span>
+                        Req: <span className={`font-mono ${colors.text}`}>{(targetData.requiredRateMass / 1000).toFixed(1)} t/hr</span>
                     </div>
                 </div>
 

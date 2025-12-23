@@ -112,7 +112,7 @@ class GeminiClient {
 
             // Configure model with high thinking level for strategic decisions
             this.model = this.genAI.getGenerativeModel({
-                model: 'gemini-2.0-flash',
+                model: 'gemini-3-flash-preview',
                 generationConfig: {
                     temperature: 0.7,
                     topP: 0.9,

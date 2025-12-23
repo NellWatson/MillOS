@@ -90,6 +90,9 @@ export const InstancedPlansifters: React.FC<InstancedPlansiftersProps> = ({
     [quality]
   );
 
+  // Determine if machines list has structurally changed
+  const machinesSignature = useMemo(() => machines.map(m => m.id).join(','), [machines]);
+
   // Initialize Static Parts (Frame)
   useEffect(() => {
     if (!frameRef.current) return;
@@ -109,7 +112,7 @@ export const InstancedPlansifters: React.FC<InstancedPlansiftersProps> = ({
     });
 
     frameRef.current.instanceMatrix.needsUpdate = true;
-  }, [machines, dummy]);
+  }, [machinesSignature, dummy]);
 
   // Apply per-instance color variation (medium+ quality)
   useEffect(() => {
@@ -152,7 +155,7 @@ export const InstancedPlansifters: React.FC<InstancedPlansiftersProps> = ({
     if (frameRef.current.instanceColor) {
       frameRef.current.instanceColor.needsUpdate = true;
     }
-  }, [machines, colorVariationEnabled]);
+  }, [machinesSignature, colorVariationEnabled]);
 
   // Pre-calculate cull distance squared
   const cullDistSq = useMemo(

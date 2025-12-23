@@ -5,6 +5,8 @@
  * Then call renderReport() in console to see which components render most
  */
 
+import { logger } from './logger';
+
 const renderCounts: Map<string, number> = new Map();
 const renderTimes: Map<string, number[]> = new Map();
 let profilingStartTime = Date.now();
@@ -68,8 +70,6 @@ export function resetRenderProfile() {
 if (typeof window !== 'undefined') {
   (window as any).renderReport = renderReport;
   (window as any).resetRenderProfile = resetRenderProfile;
-  console.log(
-    '%c[RenderProfiler] Ready. Use renderReport() to see render counts',
-    'color: #22c55e'
-  );
+  // Use debug level to hide by default
+  logger.perf.debug('[RenderProfiler] Ready. Use renderReport() to see render counts');
 }

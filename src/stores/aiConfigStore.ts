@@ -10,6 +10,7 @@ import { persist } from 'zustand/middleware';
 import { safeJSONStorage } from './storage';
 import { geminiClient } from '../utils/geminiClient';
 import { logger } from '../utils/logger';
+import type { StrategicPriority } from '../types';
 
 export type AIMode = 'heuristic' | 'gemini' | 'hybrid';
 
@@ -32,7 +33,8 @@ interface CostTracking {
 }
 
 interface StrategicState {
-    priorities: string[];             // Current strategic directives
+    priorities: StrategicPriority[];  // Structured strategic priorities
+    legacyPriorities: string[];       // Legacy string priorities for backward compat
     lastDecisionTime: number | null;  // Timestamp of last strategic decision
     isThinking: boolean;              // Strategic layer actively reasoning
     actionPlan?: string[];            // 3-step action plan (immediate, short-term, prep)
@@ -58,6 +60,21 @@ interface AIConfigState {
     strategicIntervalMs: number;
     setStrategicPriorities: (priorities: string[]) => void;
     setStrategicThinking: (thinking: boolean) => void;
+    // Tactical layer state
+    isTacticalThinking: boolean;
+    setTacticalThinking: (thinking: boolean) => void;
+    // System performance metrics (shared between background loop and UI)
+    systemStatus: {
+        cpu: number;
+        memory: number;
+        decisions: number;
+        successRate: number;
+    };
+    updateSystemStatus: (status: Partial<AIConfigState['systemStatus']>) => void;
+    // New structured priority management
+    addStrategicPriority: (priority: Omit<StrategicPriority, 'id' | 'createdAt'>) => void;
+    removeExpiredPriorities: () => void;
+    getActiveWeight: (machineId: string) => number;
 
     // Cost tracking
     costTracking: CostTracking;
@@ -109,6 +126,7 @@ export const useAIConfigStore = create<AIConfigState>()(
             // Strategic layer state
             strategic: {
                 priorities: [],
+                legacyPriorities: [],
                 lastDecisionTime: null,
                 isThinking: false,
             },
@@ -118,7 +136,7 @@ export const useAIConfigStore = create<AIConfigState>()(
                 set((state) => ({
                     strategic: {
                         ...state.strategic,
-                        priorities,
+                        legacyPriorities: priorities,
                         lastDecisionTime: Date.now(),
                     },
                 }));
@@ -131,6 +149,80 @@ export const useAIConfigStore = create<AIConfigState>()(
                         isThinking,
                     },
                 }));
+            },
+
+            // Tactical state
+            isTacticalThinking: false,
+            setTacticalThinking: (isThinking: boolean) => set({ isTacticalThinking: isThinking }),
+
+            // System status
+            systemStatus: {
+                cpu: 15,
+                memory: 35,
+                decisions: 0,
+                successRate: 0,
+            },
+            updateSystemStatus: (status) =>
+                set((state) => ({
+                    systemStatus: { ...state.systemStatus, ...status },
+                })),
+
+            // Add a new structured strategic priority
+            addStrategicPriority: (priority: Omit<StrategicPriority, 'id' | 'createdAt'>) => {
+                const newPriority: StrategicPriority = {
+                    ...priority,
+                    id: `sp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                    createdAt: Date.now(),
+                };
+                set((state) => ({
+                    strategic: {
+                        ...state.strategic,
+                        priorities: [...state.strategic.priorities, newPriority],
+                        lastDecisionTime: Date.now(),
+                    },
+                }));
+                logger.info(`[AIConfigStore] Added strategic priority: ${priority.priority} (weight: ${priority.weight})`);
+            },
+
+            // Remove expired priorities (called periodically by tactical layer)
+            removeExpiredPriorities: () => {
+                const now = Date.now();
+                set((state) => {
+                    const activePriorities = state.strategic.priorities.filter(p => p.expiresAt > now);
+                    if (activePriorities.length !== state.strategic.priorities.length) {
+                        logger.info(`[AIConfigStore] Removed ${state.strategic.priorities.length - activePriorities.length} expired priorities`);
+                    }
+                    return {
+                        strategic: {
+                            ...state.strategic,
+                            priorities: activePriorities,
+                        },
+                    };
+                });
+            },
+
+            // Calculate total active weight for a machine (used by tactical scoring)
+            getActiveWeight: (machineId: string): number => {
+                const now = Date.now();
+                const state = get();
+                let totalWeight = 0;
+
+                for (const p of state.strategic.priorities) {
+                    if (p.expiresAt <= now) continue; // Skip expired
+
+                    // Direct machine affinity match
+                    if (p.machineAffinities.includes(machineId)) {
+                        totalWeight += p.weight * 12; // 12/24/36/48/60 based on weight
+                    }
+
+                    // Fuzzy match for machine types (e.g., 'silo' matches 'silo-alpha')
+                    const machineType = machineId.split('-')[0].toLowerCase();
+                    if (p.machineAffinities.some(a => a.toLowerCase().includes(machineType))) {
+                        totalWeight += p.weight * 6; // Lower bonus for type match
+                    }
+                }
+
+                return Math.min(totalWeight, 100); // Cap at 100
             },
 
             // AI Visualization toggles - all default OFF

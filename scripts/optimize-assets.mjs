@@ -20,12 +20,35 @@ import { join, basename } from 'path';
 const MODELS_DIR = 'public/models';
 const BACKUP_SUFFIX = '.backup.glb';
 
-// Models to optimize (path relative to MODELS_DIR)
-const MODELS_TO_OPTIMIZE = [
-    'forklift/forklift.glb',
-    'worker/worker.glb',
-    // silo.glb is already tiny (23KB), skip it
-];
+// Recursively find all .glb files in a directory
+function findGlbFiles(dir, fileList = []) {
+    if (!existsSync(dir)) return fileList;
+
+    const files = readdirSync(dir);
+
+    files.forEach(file => {
+        const filePath = join(dir, file);
+        const stat = statSync(filePath);
+
+        if (stat.isDirectory()) {
+            findGlbFiles(filePath, fileList);
+        } else if (file.endsWith('.glb') && !file.includes('.backup') && !file.includes('.temp')) {
+            // Store relative path from MODELS_DIR
+            // filePath is public/models/subdir/file.glb
+            // we want subdir/file.glb
+            // join(MODELS_DIR) gives public/models
+            // path.relative is cleaner but we can just slice if we know the structure
+            // Let's use relative path logic for safety
+            const relativePath = filePath.substring(MODELS_DIR.length + 1); // +1 for separator
+            fileList.push(relativePath);
+        }
+    });
+
+    return fileList;
+}
+
+// Models to optimize (dynamically found)
+const MODELS_TO_OPTIMIZE = findGlbFiles(MODELS_DIR);
 
 // Minimum size to bother compressing (100KB)
 const MIN_SIZE_BYTES = 100 * 1024;

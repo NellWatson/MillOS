@@ -396,4 +396,5 @@ export const WorkerSystemNew: React.FC<WorkerSystemProps> = ({ onSelectWorker })
   );
 };
 
-export default WorkerSystemNew;
+// Memoize the entire system to prevent re-renders from parent updates
+export default React.memo(WorkerSystemNew);

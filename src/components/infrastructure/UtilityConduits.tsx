@@ -12,7 +12,7 @@ const CableTray: React.FC<{
   start: [number, number, number];
   end: [number, number, number];
   width?: number;
-}> = ({ start, end, width = 0.4 }) => {
+}> = React.memo(({ start, end, width = 0.4 }) => {
   const length = Math.sqrt(
     Math.pow(end[0] - start[0], 2) + Math.pow(end[1] - start[1], 2) + Math.pow(end[2] - start[2], 2)
   );
@@ -63,7 +63,7 @@ const CableTray: React.FC<{
       ))}
     </group>
   );
-};
+});
 
 // Conduit pipe running along surfaces
 const ConduitPipe: React.FC<{
@@ -71,7 +71,7 @@ const ConduitPipe: React.FC<{
   end: [number, number, number];
   radius?: number;
   color?: string;
-}> = ({ start, end, radius = 0.05, color = '#64748b' }) => {
+}> = React.memo(({ start, end, radius = 0.05, color = '#64748b' }) => {
   const length = Math.sqrt(
     Math.pow(end[0] - start[0], 2) + Math.pow(end[1] - start[1], 2) + Math.pow(end[2] - start[2], 2)
   );
@@ -102,9 +102,9 @@ const ConduitPipe: React.FC<{
       </mesh>
     </group>
   );
-};
+});
 
-export const UtilityConduits: React.FC<UtilityConduitsProps> = () => {
+export const UtilityConduits: React.FC<UtilityConduitsProps> = React.memo(() => {
   const graphics = useGraphicsStore((state) => state.graphics);
   const showCables = graphics.enableCableConduits;
 
@@ -136,4 +136,4 @@ export const UtilityConduits: React.FC<UtilityConduitsProps> = () => {
       )}
     </group>
   );
-};
+});

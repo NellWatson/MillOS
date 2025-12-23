@@ -10,8 +10,9 @@ export const incrementGlobalFrame = () => {
 
 // Check if we should run this frame based on throttle level
 // throttle: 1 = every frame, 2 = every 2nd frame, 3 = every 3rd, etc.
-export const shouldRunThisFrame = (throttle: number = 2): boolean => {
-  return globalFrameCount % throttle === 0;
+// offset: shift the frame check to distribute load (0 to throttle-1)
+export const shouldRunThisFrame = (throttle: number = 2, offset: number = 0): boolean => {
+  return (globalFrameCount + offset) % throttle === 0;
 };
 
 // Get current frame count for components that need their own tracking

@@ -76,10 +76,10 @@ const MaintenanceCountdown: React.FC<{
     <Html position={position} center distanceFactor={12}>
       <div
         className={`bg-slate-900/90 backdrop-blur px-2 py-1 rounded border ${isCritical
-            ? 'border-red-500/50 animate-pulse'
-            : isUrgent
-              ? 'border-amber-500/50'
-              : 'border-slate-700'
+          ? 'border-red-500/50 animate-pulse'
+          : isUrgent
+            ? 'border-amber-500/50'
+            : 'border-slate-700'
           }`}
       >
         <div className="text-[8px] text-slate-500 uppercase tracking-wider">Maintenance</div>
@@ -190,6 +190,10 @@ export const InstancedSilos: React.FC<InstancedSilosProps> = ({ machines, onSele
     }
   }, [textures]);
 
+  // Determine if machines list has structurally changed (added/removed/reordered)
+  // This prevents running expensive matrix updates on every SCADA tick (which returns new array references)
+  const machinesSignature = useMemo(() => machines.map(m => m.id).join(','), [machines]);
+
   // Initialize static positions (Body, Cones, Legs, Ladders)
   useEffect(() => {
     if (!bodyRef.current || !conesRef.current || !legsRef.current || !ladderRef.current) return;
@@ -261,7 +265,7 @@ export const InstancedSilos: React.FC<InstancedSilosProps> = ({ machines, onSele
     conesRef.current.instanceMatrix.needsUpdate = true;
     legsRef.current.instanceMatrix.needsUpdate = true;
     ladderRef.current.instanceMatrix.needsUpdate = true;
-  }, [machines, dummy]);
+  }, [machinesSignature, dummy]); // Depend on ID signature, not raw machines array
 
   // Apply per-instance color variation (medium+ quality)
   useEffect(() => {
@@ -298,7 +302,7 @@ export const InstancedSilos: React.FC<InstancedSilosProps> = ({ machines, onSele
     if (conesRef.current.instanceColor) {
       conesRef.current.instanceColor.needsUpdate = true;
     }
-  }, [machines, colorVariationEnabled]);
+  }, [machinesSignature, colorVariationEnabled]);
 
   // Pre-calculate cull distance squared (avoid recalculating each frame)
   const cullDistSq = useMemo(

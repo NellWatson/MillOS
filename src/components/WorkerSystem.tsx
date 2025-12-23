@@ -14,7 +14,7 @@ import { useBreakdownStore } from '../stores/breakdownStore';
 import { WorkerMoodOverlay } from './WorkerMoodOverlay';
 import { WorkerReactionOverlay } from './MaintenanceSystem';
 import { audioManager } from '../utils/audioManager';
-import { shouldRunThisFrame, getThrottleLevel } from '../utils/frameThrottle';
+import { shouldRunThisFrame, getThrottleLevel, getGlobalFrameCount } from '../utils/frameThrottle';
 import { useAIConfigStore } from '../stores/aiConfigStore';
 import * as THREE from 'three';
 import {
@@ -2058,7 +2058,7 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
     const celebrationTimerRef = useRef(0); // Timer for celebration duration
     const recordWorkerEvasion = useSafetyStore((state) => state.recordWorkerEvasion);
     const alerts = useUIStore((state) => state.alerts);
-    const productionEfficiency = useProductionStore((state) => state.metrics.efficiency);
+
     const recordHeatMapPoint = useProductionStore((state) => state.recordHeatMapPoint);
 
     // Strategic AI recommendation - highlight this worker if recommended
@@ -2164,6 +2164,16 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
       }
     }, []);
 
+    // Generate a consistent offset based on worker ID to distribute frame updates
+    // This prevents all workers from updating on the same frame, smoothing out CPU spikes
+    const throttleOffset = useMemo(() => {
+      let sum = 0;
+      for (let i = 0; i < data.id.length; i++) {
+        sum += data.id.charCodeAt(i);
+      }
+      return sum % 60; // Keep within 0-59 range
+    }, [data.id]);
+
     useFrame((state, delta) => {
       // PERFORMANCE: Skip all worker logic when tab hidden
       if (!ref.current || !isTabVisible) return;
@@ -2177,16 +2187,19 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
         ref.current.position.y = Math.abs(Math.sin(walkCycleRef.current)) * 0.025;
 
         // Update LOD based on camera distance
-        cameraDistanceRef.current = state.camera.position.distanceTo(ref.current.position);
-        const dist = cameraDistanceRef.current;
-        let newLod = lodRef.current;
-        if (lodRef.current === 'high' && dist > 30) newLod = 'medium';
-        else if (lodRef.current === 'medium' && dist < 25) newLod = 'high';
-        else if (lodRef.current === 'medium' && dist > 55) newLod = 'low';
-        else if (lodRef.current === 'low' && dist < 45) newLod = 'medium';
-        if (newLod !== lodRef.current) {
-          lodRef.current = newLod;
-          setLod(newLod);
+        // Distribute LOD checks using the offset (check every 10 frames)
+        if ((getGlobalFrameCount() + throttleOffset) % 10 === 0) {
+          cameraDistanceRef.current = state.camera.position.distanceTo(ref.current.position);
+          const dist = cameraDistanceRef.current;
+          let newLod = lodRef.current;
+          if (lodRef.current === 'high' && dist > 30) newLod = 'medium';
+          else if (lodRef.current === 'medium' && dist < 25) newLod = 'high';
+          else if (lodRef.current === 'medium' && dist > 55) newLod = 'low';
+          else if (lodRef.current === 'low' && dist < 45) newLod = 'medium';
+          if (newLod !== lodRef.current) {
+            lodRef.current = newLod;
+            setLod(newLod);
+          }
         }
 
         // Update rotation based on direction ref
@@ -2211,16 +2224,19 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
         }
 
         // Update position registry even during shift change
-        positionRegistry.register(
-          data.id,
-          ref.current.position.x,
-          ref.current.position.z,
-          'worker',
-          undefined,
-          undefined,
-          undefined,
-          ref.current.position.y
-        );
+        // Throttle registry updates slightly during shift change (every 2nd frame)
+        if ((getGlobalFrameCount() + throttleOffset) % 2 === 0) {
+          positionRegistry.register(
+            data.id,
+            ref.current.position.x,
+            ref.current.position.z,
+            'worker',
+            undefined,
+            undefined,
+            undefined,
+            ref.current.position.y
+          );
+        }
         return; // Skip normal behavior during shift change
       }
 
@@ -2263,16 +2279,19 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
         }
 
         // Update position registry during evacuation
-        positionRegistry.register(
-          data.id,
-          ref.current.position.x,
-          ref.current.position.z,
-          'worker',
-          undefined,
-          undefined,
-          undefined,
-          ref.current.position.y
-        );
+        // Throttle registry updates slightly (every 2nd frame)
+        if ((getGlobalFrameCount() + throttleOffset) % 2 === 0) {
+          positionRegistry.register(
+            data.id,
+            ref.current.position.x,
+            ref.current.position.z,
+            'worker',
+            undefined,
+            undefined,
+            undefined,
+            ref.current.position.y
+          );
+        }
         return; // Skip normal behavior during evacuation
       }
 
@@ -2333,17 +2352,19 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
               updateRepairProgress(assignedBreakdown.id, REPAIR_RATE * cappedDelta);
             }
 
-            // Update position registry
-            positionRegistry.register(
-              data.id,
-              ref.current.position.x,
-              ref.current.position.z,
-              'worker',
-              undefined,
-              undefined,
-              undefined,
-              ref.current.position.y
-            );
+            // Update position registry - throttled
+            if ((getGlobalFrameCount() + throttleOffset) % 2 === 0) {
+              positionRegistry.register(
+                data.id,
+                ref.current.position.x,
+                ref.current.position.z,
+                'worker',
+                undefined,
+                undefined,
+                undefined,
+                ref.current.position.y
+              );
+            }
             return; // Skip normal behavior during repair
           }
         }
@@ -2355,14 +2376,15 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
       }
 
       // Update cached settings every 60 frames (~1 second at 60fps)
-      if (workerSettingsCacheFrameRef.current % 60 === 0) {
+      // Use offset to distribute this check across frames for different workers
+      workerSettingsCacheFrameRef.current++;
+      if ((workerSettingsCacheFrameRef.current + throttleOffset) % 60 === 0) {
         const graphics = useGraphicsStore.getState().graphics;
         cachedThrottleLevelRef.current = getThrottleLevel(graphics.quality);
       }
-      workerSettingsCacheFrameRef.current++;
 
       // Frame throttling for performance - position updates don't need 60fps
-      if (!shouldRunThisFrame(cachedThrottleLevelRef.current)) {
+      if (!shouldRunThisFrame(cachedThrottleLevelRef.current, throttleOffset)) {
         return; // Skip this frame
       }
 
@@ -2501,7 +2523,9 @@ const Worker: React.FC<{ data: WorkerData; onSelect: () => void }> = React.memo(
 
       // Celebration: triggered when efficiency hits 100% (check every 2 seconds)
       if (frameCountRef.current % 120 === 0) {
-        if (productionEfficiency >= 100 && celebrationTimerRef.current <= 0) {
+        // PERF: Access store directly to avoid re-renders
+        const currentEfficiency = useProductionStore.getState().metrics.efficiency;
+        if (currentEfficiency >= 100 && celebrationTimerRef.current <= 0) {
           celebrationTimerRef.current = 3; // Celebrate for 3 seconds
         }
       }

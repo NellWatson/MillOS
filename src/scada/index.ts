@@ -33,6 +33,20 @@ export { RESTAdapter } from './adapters/RESTAdapter';
 export { MQTTAdapter } from './adapters/MQTTAdapter';
 export { WebSocketAdapter } from './adapters/WebSocketAdapter';
 
+// Historian Integration (OSIsoft PI, Wonderware/AVEVA)
+export { PIAdapter } from './adapters/PIAdapter';
+export { WonderwareAdapter } from './adapters/WonderwareAdapter';
+export { HistorianRouter } from './HistorianRouter';
+export type {
+  IHistorian,
+  InterpolationMode,
+  HistorianQueryOptions,
+  HistorianStatistics,
+  PIConnectionConfig,
+  WonderwareConnectionConfig,
+  HistorianConnectionConfig,
+} from './HistorianInterface';
+
 // React Hooks
 export { useSCADA, useSCADAMachine, useSCADATag, useSCADAAlarms } from './useSCADA';
 export type { UseSCADAReturn } from './useSCADA';

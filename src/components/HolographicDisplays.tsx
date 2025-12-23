@@ -1,6 +1,11 @@
 import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Text, Billboard, RoundedBox } from '@react-three/drei';
+
+// NOTE: The "unsupported GPOS table" warnings in the console are expected and harmless.
+// They originate from the font parser in the underlying Troika library used by @react-three/drei's Text component.
+// This occurs when using certain font files (like Google Fonts) that contain features not fully supported by the parser.
+// It does not affect the visual rendering of the text.
 import * as THREE from 'three';
 import { useProductionStore } from '../stores/productionStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
@@ -111,7 +116,7 @@ export const HolographicDisplays: React.FC = () => {
         position={[30, 10, -6]}
         title="ZONE 2: MILLING"
         value={`${machines.filter((m) => m.type === MachineType.ROLLER_MILL && m.status === 'running').length} Mills Running`}
-        subValue={`Output: ${zoneMetrics.throughput.toLocaleString()} T/hr`}
+        subValue={`Output: ${zoneMetrics.throughput.toLocaleString()} kg/hr`}
         color="#8b5cf6"
         size={[7, 2.8]}
       />
@@ -168,7 +173,7 @@ interface HoloPanelProps {
   size: [number, number];
 }
 
-const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue, color, size }) => {
+const HoloPanel: React.FC<HoloPanelProps> = React.memo(({ position, title, value, subValue, color, size }) => {
   const groupRef = useRef<THREE.Group>(null);
   const glowRef = useRef<THREE.Mesh>(null);
   const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
@@ -274,7 +279,7 @@ const HoloPanel: React.FC<HoloPanelProps> = ({ position, title, value, subValue,
       </Billboard>
     </group>
   );
-};
+});
 
 const DataParticles: React.FC = React.memo(() => {
   const particlesRef = useRef<THREE.Points>(null);

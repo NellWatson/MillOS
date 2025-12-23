@@ -92,6 +92,9 @@ export const InstancedPackers: React.FC<InstancedPackersProps> = ({ machines, on
     [quality]
   );
 
+  // Determine if machines list has structurally changed
+  const machinesSignature = useMemo(() => machines.map(m => m.id).join(','), [machines]);
+
   // Initialize Static Parts
   useEffect(() => {
     if (
@@ -177,7 +180,7 @@ export const InstancedPackers: React.FC<InstancedPackersProps> = ({ machines, on
     spoutRef.current.instanceMatrix.needsUpdate = true;
     conveyorRef.current.instanceMatrix.needsUpdate = true;
     panelRef.current.instanceMatrix.needsUpdate = true;
-  }, [machines, dummy]);
+  }, [machinesSignature, dummy]);
 
   // Apply per-instance color variation (medium+ quality)
   useEffect(() => {
@@ -222,7 +225,7 @@ export const InstancedPackers: React.FC<InstancedPackersProps> = ({ machines, on
     if (hopperRef.current.instanceColor) {
       hopperRef.current.instanceColor.needsUpdate = true;
     }
-  }, [machines, colorVariationEnabled]);
+  }, [machinesSignature, colorVariationEnabled]);
 
   // Pre-calculate cull distance squared
   const cullDistSq = useMemo(

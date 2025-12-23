@@ -1,6 +1,11 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useState, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+
+import Fireflies from './effects/Fireflies';
+import { HeartParticle } from './effects/HeartParticle';
+import { playCritterSound } from '../utils/critterAudio';
+import { Cat } from './scenery/Cat';
 
 // ============================================================
 // CUTE FARM AREA - North-West Corner (OPTIMIZED)
@@ -72,6 +77,16 @@ const SG = {
   windmillBladeArm: new THREE.BoxGeometry(0.15, 3, 0.05),
   windmillBladeSail: new THREE.BoxGeometry(0.5, 2.5, 0.02),
   windmillDoor: new THREE.BoxGeometry(0.6, 1.6, 0.1),
+  // Grain Field
+  cornStalk: new THREE.CylinderGeometry(0.05, 0.08, 1.8, 4),
+  cornLeaf: new THREE.ConeGeometry(0.1, 0.8, 3),
+  // Scarecrow
+  scarecrowPole: new THREE.CylinderGeometry(0.08, 0.08, 2.5, 5),
+  scarecrowArm: new THREE.CylinderGeometry(0.06, 0.06, 1.8, 5),
+  pumpkinHead: new THREE.SphereGeometry(0.35, 10, 10),
+  strawHat: new THREE.ConeGeometry(0.6, 0.4, 8),
+  crowBody: new THREE.ConeGeometry(0.1, 0.3, 4),
+  crowHead: new THREE.SphereGeometry(0.08, 4, 4),
 };
 
 // Shared Materials - created once at module load
@@ -134,6 +149,13 @@ const SM = {
     roughness: 0.7,
     side: THREE.DoubleSide,
   }),
+  // Grain Field & Scarecrow
+  cornGreen: new THREE.MeshStandardMaterial({ color: '#8bc34a', roughness: 0.9, side: THREE.DoubleSide }),
+  pumpkinOrange: new THREE.MeshStandardMaterial({ color: '#ff6f00', roughness: 0.8 }),
+  strawHat: new THREE.MeshStandardMaterial({ color: '#e6c229', roughness: 1 }),
+  denimBlue: new THREE.MeshStandardMaterial({ color: '#1565c0', roughness: 0.9 }),
+  plaidRed: new THREE.MeshStandardMaterial({ color: '#b71c1c', roughness: 0.9 }),
+  crowBlack: new THREE.MeshStandardMaterial({ color: '#212121', roughness: 0.6 }),
 };
 
 // Static components with React.memo
@@ -201,23 +223,22 @@ const ChickenCoop = React.memo<{ position: [number, number, number] }>(({ positi
       <boxGeometry args={[3, 1.6, 2.5]} />
       <primitive object={SM.coopBrown} attach="material" />
     </mesh>
-    <mesh position={[0, 2, 0]} castShadow>
-      <boxGeometry args={[3.5, 0.15, 3]} />
+    {/* A-Frame Roof */}
+    <mesh position={[0, 2.3, 0.75]} rotation={[Math.PI / 4, 0, 0]} castShadow>
+      <boxGeometry args={[3.5, 0.15, 2]} />
       <primitive object={SM.coopRoof} attach="material" />
     </mesh>
-    <mesh position={[0, 2.4, -0.6]} rotation={[0.5, 0, 0]} castShadow>
-      <boxGeometry args={[3.5, 0.15, 1.5]} />
+    <mesh position={[0, 2.3, -0.75]} rotation={[-Math.PI / 4, 0, 0]} castShadow>
+      <boxGeometry args={[3.5, 0.15, 2]} />
       <primitive object={SM.coopRoof} attach="material" />
     </mesh>
-    <mesh position={[0, 2.4, 0.6]} rotation={[-0.5, 0, 0]} castShadow>
-      <boxGeometry args={[3.5, 0.15, 1.5]} />
-      <primitive object={SM.coopRoof} attach="material" />
-    </mesh>
-    <mesh position={[1.51, 0.4, 0]}>
+    {/* Raised Door */}
+    <mesh position={[1.51, 0.68, 0]}>
       <boxGeometry args={[0.1, 0.6, 0.5]} />
       <primitive object={SM.black} attach="material" />
     </mesh>
-    <mesh position={[2.2, 0.2, 0]} rotation={[0, 0, 0.4]} castShadow>
+    {/* Ramp - Reversed slope */}
+    <mesh position={[2.2, 0.2, 0]} rotation={[0, 0, -0.4]} castShadow>
       <boxGeometry args={[1.5, 0.08, 0.4]} />
       <primitive object={SM.woodTan} attach="material" />
     </mesh>
@@ -407,9 +428,14 @@ const Tree = React.memo<{ position: [number, number, number] }>(({ position }) =
 ));
 Tree.displayName = 'Tree';
 
-const Sheep = React.memo<{ position: [number, number, number]; rotation?: number }>(
-  ({ position, rotation = 0 }) => (
-    <group position={position} rotation={[0, rotation, 0]}>
+const Sheep = React.memo<{ position: [number, number, number]; rotation?: number; onClick?: (e: any) => void; groupRef?: React.RefObject<THREE.Group | null> }>(
+  ({ position, rotation = 0, onClick, groupRef }) => (
+    <group ref={groupRef} position={position} rotation={[0, rotation, 0]} onClick={(e) => {
+      if (onClick) {
+        e.stopPropagation();
+        onClick(e);
+      }
+    }}>
       <mesh position={[0, 0.5, 0]} castShadow>
         <primitive object={SG.sheepBody} attach="geometry" />
         <primitive object={SM.sheepWool} attach="material" />
@@ -474,8 +500,11 @@ const Chicken: React.FC<{
   rotation?: number;
   groupRef: React.RefObject<THREE.Group | null>;
   animRef: React.RefObject<THREE.Group | null>;
-}> = ({ position, rotation = 0, groupRef, animRef }) => (
-  <group ref={groupRef} position={position} rotation={[0, rotation, 0]}>
+  onClick?: (e: any) => void;
+}> = ({ position, rotation = 0, groupRef, animRef, onClick }) => (
+  <group ref={groupRef} position={position} rotation={[0, rotation, 0]} onClick={(e) => {
+    if (onClick) { e.stopPropagation(); onClick(e); }
+  }}>
     <group ref={animRef}>
       <mesh position={[0, 0.25, 0]} castShadow>
         <primitive object={SG.chickenBody} attach="geometry" />
@@ -518,8 +547,11 @@ const Pig: React.FC<{
   rotation?: number;
   groupRef: React.RefObject<THREE.Group | null>;
   tailRef: React.RefObject<THREE.Mesh | null>;
-}> = ({ position, rotation = 0, groupRef, tailRef }) => (
-  <group ref={groupRef} position={position} rotation={[0, rotation, 0]}>
+  onClick?: (e: any) => void;
+}> = ({ position, rotation = 0, groupRef, tailRef, onClick }) => (
+  <group ref={groupRef} position={position} rotation={[0, rotation, 0]} onClick={(e) => {
+    if (onClick) { e.stopPropagation(); onClick(e); }
+  }}>
     <mesh position={[0, 0.35, 0]} castShadow>
       <primitive object={SG.pigBody} attach="geometry" />
       <primitive object={SM.pigPink} attach="material" />
@@ -579,8 +611,11 @@ const Cow: React.FC<{
   rotation?: number;
   groupRef: React.RefObject<THREE.Group | null>;
   headRef: React.RefObject<THREE.Group | null>;
-}> = ({ position, rotation = 0, groupRef, headRef }) => (
-  <group ref={groupRef} position={position} rotation={[0, rotation, 0]}>
+  onClick?: (e: any) => void;
+}> = ({ position, rotation = 0, groupRef, headRef, onClick }) => (
+  <group ref={groupRef} position={position} rotation={[0, rotation, 0]} onClick={(e) => {
+    if (onClick) { e.stopPropagation(); onClick(e); }
+  }}>
     <mesh position={[0, 0.6, 0]} scale={[1.3, 1, 1]} castShadow>
       <primitive object={SG.cowBody} attach="geometry" />
       <primitive object={SM.cowWhite} attach="material" />
@@ -663,9 +698,10 @@ const Cow: React.FC<{
 
 const WindmillComp: React.FC<{
   position: [number, number, number];
+  scale?: number;
   bladesRef: React.RefObject<THREE.Group | null>;
-}> = ({ position, bladesRef }) => (
-  <group position={position}>
+}> = ({ position, scale = 1, bladesRef }) => (
+  <group position={position} scale={scale}>
     <mesh position={[0, 3, 0]} castShadow>
       <primitive object={SG.windmillTower} attach="geometry" />
       <primitive object={SM.stone} attach="material" />
@@ -698,6 +734,370 @@ const WindmillComp: React.FC<{
     </mesh>
   </group>
 );
+
+// ===== HORSE (Adapted from VillageArea) =====
+const Horse = React.memo<{ position: [number, number, number]; rotation?: number; color?: string; isPaint?: boolean; onClick?: (e: any) => void }>(
+  ({ position, rotation = 0, color = '#8d6e63', isPaint = false, onClick }) => (
+    <group position={position} rotation={[0, rotation, 0]} scale={0.6} onClick={(e) => {
+      if (onClick) { e.stopPropagation(); onClick(e); }
+    }}>
+      {/* Main Body Group */}
+      <group position={[0, 1.4, 0]}>
+        {/* Torso */}
+        <mesh castShadow rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.55, 0.6, 1.2, 12]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        {/* Shoulders */}
+        <mesh position={[0, 0.1, 0.7]} castShadow>
+          <sphereGeometry args={[0.62, 12, 12]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        {/* Hindquarters */}
+        <mesh position={[0, 0.15, -0.7]} castShadow>
+          <sphereGeometry args={[0.65, 12, 12]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+
+        {/* Paint Spots (if isPaint is true) */}
+        {isPaint && (
+          <>
+            <mesh position={[0.4, 0.2, 0.3]} rotation={[0, 1, 0]}>
+              <sphereGeometry args={[0.3, 8, 8]} />
+              <meshStandardMaterial color="#f5f5f5" />
+            </mesh>
+            <mesh position={[-0.4, 0.1, -0.4]} rotation={[0, -1, 0]}>
+              <sphereGeometry args={[0.35, 8, 8]} />
+              <meshStandardMaterial color="#f5f5f5" />
+            </mesh>
+            <mesh position={[0, 0.5, 0]}>
+              <sphereGeometry args={[0.4, 8, 8]} />
+              <meshStandardMaterial color="#f5f5f5" />
+            </mesh>
+          </>
+        )}
+      </group>
+
+      {/* Neck - Max upright/proud */}
+      <group position={[0, 2.1, 0.9]} rotation={[0.4, 0, 0]}>
+        <mesh position={[0, 0.5, 0]} castShadow>
+          <cylinderGeometry args={[0.25, 0.45, 1.2, 12]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        {/* Paint Spot on Neck */}
+        {isPaint && (
+          <mesh position={[0.15, 0.6, 0.1]} rotation={[0, 0, -0.2]}>
+            <sphereGeometry args={[0.2, 8, 8]} />
+            <meshStandardMaterial color="#f5f5f5" />
+          </mesh>
+        )}
+        {/* Mane */}
+        <mesh position={[0, 0.4, -0.3]} rotation={[0, 0, 0]}>
+          <boxGeometry args={[0.1, 1.3, 0.2]} />
+          <meshStandardMaterial color="#3e2723" />
+        </mesh>
+      </group>
+
+      {/* Head */}
+      <group position={[0, 3.1, 1.6]} rotation={[0.3, 0, 0]}>
+        <mesh castShadow>
+          <boxGeometry args={[0.35, 0.35, 0.7]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[0, -0.05, 0.35]} castShadow>
+          <boxGeometry args={[0.25, 0.25, 0.4]} />
+          <meshStandardMaterial color="#5d4037" />
+        </mesh>
+        {/* Face Blaze (if paint) */}
+        {isPaint && (
+          <mesh position={[0, 0.18, 0.2]} rotation={[0.1, 0, 0]}>
+            <boxGeometry args={[0.15, 0.02, 0.4]} />
+            <meshStandardMaterial color="#f5f5f5" />
+          </mesh>
+        )}
+        {/* Ears - Larger and more prominent */}
+        {[-0.12, 0.12].map((x, i) => (
+          <mesh key={i} position={[x, 0.35, -0.2]} rotation={[0.2, 0, x > 0 ? -0.3 : 0.3]}>
+            <coneGeometry args={[0.08, 0.2, 4]} />
+            <meshStandardMaterial color={color} />
+          </mesh>
+        ))}
+        {/* Eyes - Moved to side of head */}
+        {[-0.16, 0.16].map((x, i) => (
+          <mesh key={i} position={[x, 0.1, 0.1]}>
+            <sphereGeometry args={[0.065, 8, 8]} />
+            <meshStandardMaterial color="black" />
+          </mesh>
+        ))}
+        {/* Forelock */}
+        <mesh position={[0, 0.2, 0.2]} rotation={[0.2, 0, 0]}>
+          <boxGeometry args={[0.05, 0.2, 0.3]} />
+          <meshStandardMaterial color="#3e2723" />
+        </mesh>
+      </group>
+
+      {/* Legs */}
+      {/* Front Left */}
+      <group position={[-0.35, 1.4, 0.7]}>
+        <mesh position={[0, -0.4, 0]}><cylinderGeometry args={[0.12, 0.15, 0.8, 8]} /><meshStandardMaterial color={color} /></mesh>
+        <mesh position={[0, -1.1, 0]}><cylinderGeometry args={[0.1, 0.11, 0.7, 8]} /><meshStandardMaterial color={isPaint ? "#f5f5f5" : color} /></mesh> {/* White sock */}
+        <mesh position={[0, -1.5, 0]}><cylinderGeometry args={[0.12, 0.15, 0.15, 8]} /><meshStandardMaterial color="#1a1110" /></mesh>
+      </group>
+      {/* Front Right */}
+      <group position={[0.35, 1.4, 0.7]}>
+        <mesh position={[0, -0.4, 0]}><cylinderGeometry args={[0.12, 0.15, 0.8, 8]} /><meshStandardMaterial color={color} /></mesh>
+        <mesh position={[0, -1.1, 0]}><cylinderGeometry args={[0.1, 0.11, 0.7, 8]} /><meshStandardMaterial color={color} /></mesh>
+        <mesh position={[0, -1.5, 0]}><cylinderGeometry args={[0.12, 0.15, 0.15, 8]} /><meshStandardMaterial color="#1a1110" /></mesh>
+      </group>
+      {/* Back Left */}
+      <group position={[-0.35, 1.4, -0.7]}>
+        <mesh position={[0, -0.3, 0]}><cylinderGeometry args={[0.14, 0.18, 0.8, 8]} /><meshStandardMaterial color={color} /></mesh>
+        <mesh position={[0, -1.0, 0]}><cylinderGeometry args={[0.1, 0.12, 0.8, 8]} /><meshStandardMaterial color={color} /></mesh>
+        <mesh position={[0, -1.5, 0]}><cylinderGeometry args={[0.12, 0.15, 0.15, 8]} /><meshStandardMaterial color="#1a1110" /></mesh>
+      </group>
+      {/* Back Right */}
+      <group position={[0.35, 1.4, -0.7]}>
+        <mesh position={[0, -0.3, 0]}><cylinderGeometry args={[0.14, 0.18, 0.8, 8]} /><meshStandardMaterial color={color} /></mesh>
+        <mesh position={[0, -1.0, 0]}><cylinderGeometry args={[0.1, 0.12, 0.8, 8]} /><meshStandardMaterial color={isPaint ? "#f5f5f5" : color} /></mesh> {/* White sock */}
+        <mesh position={[0, -1.5, 0]}><cylinderGeometry args={[0.12, 0.15, 0.15, 8]} /><meshStandardMaterial color="#1a1110" /></mesh>
+      </group>
+
+      {/* Tail */}
+      <group position={[0, 1.7, -1.0]} rotation={[0.2, 0, 0]}>
+        <mesh position={[0, -0.4, -0.2]} rotation={[-0.2, 0, 0]}>
+          <cylinderGeometry args={[0.08, 0.15, 1.2, 8]} />
+          <meshStandardMaterial color={isPaint ? "#f5f5f5" : "#3e2723"} /> {/* White tail tip option or mixed */}
+        </mesh>
+      </group>
+    </group>
+  )
+);
+Horse.displayName = 'Horse';
+
+
+
+const Crow = React.memo<{ position: [number, number, number]; rotation?: number }>(
+  ({ position, rotation = 0 }) => {
+    const [isExcited, setIsExcited] = useState(false);
+    const [hearts, setHearts] = useState<{ id: number; pos: [number, number, number] }[]>([]);
+
+    const handlePet = (e: any) => {
+      e.stopPropagation();
+      setIsExcited(true);
+      playCritterSound('crow');
+      const id = Date.now();
+      setHearts(prev => [...prev, { id, pos: [0, 1.0, 0] }]);
+    };
+
+    const removeHeart = (id: number) => {
+      setHearts(prev => prev.filter(h => h.id !== id));
+    };
+
+    useEffect(() => {
+      if (isExcited) {
+        const t = setTimeout(() => setIsExcited(false), 500);
+        return () => clearTimeout(t);
+      }
+    }, [isExcited]);
+
+    return (
+      <group position={position} rotation={[0, rotation, 0]} scale={0.6} onClick={handlePet}>
+        <group rotation={[isExcited ? 0.5 : 0, 0, 0]} position={[0, isExcited ? 0.2 : 0, 0]}>
+          <mesh position={[0, 0.15, 0]}>
+            <primitive object={SG.crowBody} attach="geometry" />
+            <primitive object={SM.crowBlack} attach="material" />
+          </mesh>
+          <mesh position={[0, 0.35, 0.1]}>
+            <primitive object={SG.crowHead} attach="geometry" />
+            <primitive object={SM.crowBlack} attach="material" />
+          </mesh>
+          {/* Beak */}
+          <mesh position={[0, 0.35, 0.18]} rotation={[1.5, 0, 0]}>
+            <coneGeometry args={[0.03, 0.1, 4]} />
+            <meshStandardMaterial color="#fb8c00" />
+          </mesh>
+          {/* Wings */}
+          <mesh position={[0.12, 0.2, 0]} rotation={[0, 0, -0.5]}>
+            <boxGeometry args={[0.05, 0.25, 0.15]} />
+            <primitive object={SM.crowBlack} attach="material" />
+          </mesh>
+          <mesh position={[-0.12, 0.2, 0]} rotation={[0, 0, 0.5]}>
+            <boxGeometry args={[0.05, 0.25, 0.15]} />
+            <primitive object={SM.crowBlack} attach="material" />
+          </mesh>
+          {/* Tail */}
+          <mesh position={[0, 0.1, -0.15]} rotation={[-0.5, 0, 0]}>
+            <boxGeometry args={[0.1, 0.2, 0.02]} />
+            <primitive object={SM.crowBlack} attach="material" />
+          </mesh>
+        </group>
+        {hearts.map(h => (
+          <HeartParticle key={h.id} position={h.pos} onComplete={() => removeHeart(h.id)} />
+        ))}
+      </group>
+    );
+  }
+);
+Crow.displayName = 'Crow';
+
+const Scarecrow = React.memo<{ position: [number, number, number]; rotation?: number }>(
+  ({ position, rotation = 0 }) => (
+    <group position={position} rotation={[0, rotation, 0]}>
+      {/* Pole */}
+      <mesh position={[0, 1.25, 0]} castShadow>
+        <primitive object={SG.scarecrowPole} attach="geometry" />
+        <primitive object={SM.woodBrown} attach="material" />
+      </mesh>
+      {/* Arms */}
+      <mesh position={[0, 1.8, 0]} rotation={[0, 0, 1.57]} castShadow>
+        <primitive object={SG.scarecrowArm} attach="geometry" />
+        <primitive object={SM.woodBrown} attach="material" />
+      </mesh>
+      {/* Shirt */}
+      <mesh position={[0, 1.8, 0]} castShadow>
+        <boxGeometry args={[0.55, 0.9, 0.3]} />
+        <primitive object={SM.plaidRed} attach="material" />
+      </mesh>
+      {/* Straw hands */}
+      <mesh position={[0.9, 1.8, 0]}>
+        <sphereGeometry args={[0.15, 8, 8]} />
+        <primitive object={SM.hay} attach="material" />
+      </mesh>
+      <mesh position={[-0.9, 1.8, 0]}>
+        <sphereGeometry args={[0.15, 8, 8]} />
+        <primitive object={SM.hay} attach="material" />
+      </mesh>
+      {/* Jeans */}
+      <group position={[0, 1.0, 0]}>
+        <mesh position={[-0.15, 0, 0]}>
+          <boxGeometry args={[0.18, 0.9, 0.22]} />
+          <primitive object={SM.denimBlue} attach="material" />
+        </mesh>
+        <mesh position={[0.15, 0, 0]}>
+          <boxGeometry args={[0.18, 0.9, 0.22]} />
+          <primitive object={SM.denimBlue} attach="material" />
+        </mesh>
+      </group>
+      {/* Scarf */}
+      <mesh position={[0, 2.25, 0]} rotation={[0.2, 0, 0]}>
+        <torusGeometry args={[0.2, 0.08, 8, 16]} />
+        <meshStandardMaterial color="#d32f2f" />
+      </mesh>
+      {/* Head */}
+      <mesh position={[0, 2.5, 0]} castShadow>
+        <primitive object={SG.pumpkinHead} attach="geometry" />
+        <primitive object={SM.pumpkinOrange} attach="material" />
+      </mesh>
+      {/* Eyes/Mouth */}
+      <mesh position={[0.12, 2.55, 0.28]} rotation={[0.2, 0.2, 0]}>
+        <coneGeometry args={[0.06, 0.05, 3]} />
+        <meshStandardMaterial color="#3e2723" />
+      </mesh>
+      <mesh position={[-0.12, 2.55, 0.28]} rotation={[0.2, -0.2, 0]}>
+        <coneGeometry args={[0.06, 0.05, 3]} />
+        <meshStandardMaterial color="#3e2723" />
+      </mesh>
+      <mesh position={[0, 2.45, 0.3]} rotation={[0, 0, 0]}>
+        <torusGeometry args={[0.08, 0.02, 3, 8, 3]} /> {/* Smile */}
+        <meshStandardMaterial color="#3e2723" />
+      </mesh>
+      {/* Hat */}
+      <mesh position={[0, 2.85, 0]} castShadow>
+        <primitive object={SG.strawHat} attach="geometry" />
+        <primitive object={SM.strawHat} attach="material" />
+      </mesh>
+      {/* Crow on Hat */}
+      <Crow position={[0.2, 3.05, 0]} rotation={0.5} />
+    </group>
+  )
+);
+Scarecrow.displayName = 'Scarecrow';
+
+const InstancedGrainField = React.memo(() => {
+  const stalksRef = useRef<THREE.InstancedMesh>(null);
+  const leaves1Ref = useRef<THREE.InstancedMesh>(null);
+  const leaves2Ref = useRef<THREE.InstancedMesh>(null);
+  const count = 15 * 20;
+
+  useEffect(() => {
+    if (!stalksRef.current || !leaves1Ref.current || !leaves2Ref.current) return;
+
+    // Temp objects for matrix calculations
+    const parent = new THREE.Object3D();
+    const leaf = new THREE.Object3D();
+    let idx = 0;
+
+    for (let r = 0; r < 15; r++) {
+      for (let c = 0; c < 20; c++) {
+        // Stable randomness based on grid position
+        const rnd = Math.sin(r * 20 + c) * 1000;
+        const rndScale = 0.8 + (Math.abs(rnd) % 0.4);
+        const rndRot = (Math.abs(rnd) % Math.PI);
+        const rndOffsetX = (Math.sin(rnd) * 0.5);
+        const rndOffsetZ = (Math.cos(rnd) * 0.5);
+
+        const x = (c - 10) * 1.5 + rndOffsetX;
+        const z = (r - 7) * 1.5 + rndOffsetZ;
+
+        // Set parent transform (Stalk base)
+        parent.position.set(x, 0, z);
+        parent.rotation.set(0, rndRot, 0);
+        parent.scale.set(rndScale, rndScale, rndScale);
+        parent.updateMatrix();
+
+        // Stalk mesh (offset locally by 0.9y)
+        leaf.position.set(0, 0.9, 0);
+        leaf.rotation.set(0, 0, 0);
+        leaf.scale.set(1, 1, 1);
+        leaf.updateMatrix();
+        leaf.matrix.premultiply(parent.matrix);
+        stalksRef.current.setMatrixAt(idx, leaf.matrix);
+
+        // Leaf 1
+        leaf.position.set(0, 1.2, 0.2);
+        leaf.rotation.set(0.5, 0, 0);
+        leaf.scale.set(1, 1, 1);
+        leaf.updateMatrix();
+        leaf.matrix.premultiply(parent.matrix);
+        leaves1Ref.current.setMatrixAt(idx, leaf.matrix);
+
+        // Leaf 2
+        leaf.position.set(0, 1.0, -0.2);
+        leaf.rotation.set(-0.5, 0, 0);
+        leaf.scale.set(1, 1, 1);
+        leaf.updateMatrix();
+        leaf.matrix.premultiply(parent.matrix);
+        leaves2Ref.current.setMatrixAt(idx, leaf.matrix);
+
+        idx++;
+      }
+    }
+
+    stalksRef.current.instanceMatrix.needsUpdate = true;
+    leaves1Ref.current.instanceMatrix.needsUpdate = true;
+    leaves2Ref.current.instanceMatrix.needsUpdate = true;
+  }, []);
+
+  return (
+    <group>
+      <instancedMesh ref={stalksRef} args={[undefined, undefined, count]} castShadow>
+        <primitive object={SG.cornStalk} attach="geometry" />
+        <primitive object={SM.cornGreen} attach="material" />
+      </instancedMesh>
+      <instancedMesh ref={leaves1Ref} args={[undefined, undefined, count]} castShadow>
+        <primitive object={SG.cornLeaf} attach="geometry" />
+        <primitive object={SM.cornGreen} attach="material" />
+      </instancedMesh>
+      <instancedMesh ref={leaves2Ref} args={[undefined, undefined, count]} castShadow>
+        <primitive object={SG.cornLeaf} attach="geometry" />
+        <primitive object={SM.cornGreen} attach="material" />
+      </instancedMesh>
+    </group>
+  );
+});
+InstancedGrainField.displayName = 'InstancedGrainField';
+
+// Main component with single useFrame for all animations
 
 // Main component with single useFrame for all animations
 export const FarmArea: React.FC = () => {
@@ -752,8 +1152,47 @@ export const FarmArea: React.FC = () => {
     }))
   );
 
+  const sheepRefs = useMemo(
+    () => Array.from({ length: 4 }, () => React.createRef<THREE.Group>()),
+    []
+  );
+
   const windmillBladesRef = useRef<THREE.Group>(null);
   const frameCountRef = useRef(0);
+
+  // Petting interaction state
+  const [hearts, setHearts] = React.useState<{ id: number, pos: [number, number, number], startTime: number }[]>([]);
+  const nextHeartId = useRef(0);
+
+  // Refs for jumping animation intensity (0 to 1)
+  const chickenJumpStates = useRef<number[]>(new Array(5).fill(0));
+  const pigJumpStates = useRef<number[]>(new Array(3).fill(0));
+  const cowJumpStates = useRef<number[]>(new Array(3).fill(0));
+  const sheepJumpStates = useRef<number[]>(new Array(4).fill(0)); // 4 sheep
+
+  const handlePet = React.useCallback((pos: [number, number, number], type: 'chicken' | 'pig' | 'cow' | 'sheep' | 'horse', index: number) => {
+    // Spawn heart
+    setHearts(prev => [...prev, {
+      id: nextHeartId.current++,
+      pos: [pos[0], pos[1] + 2, pos[2]],
+      startTime: Date.now()
+    }]);
+
+    // Trigger jump animation
+    if (type === 'chicken') chickenJumpStates.current[index] = 1.0;
+    if (type === 'pig') pigJumpStates.current[index] = 1.0;
+    // Cows are too heavy to jump, maybe just wiggle?
+    if (type === 'cow') cowJumpStates.current[index] = 1.0;
+    if (type === 'sheep') sheepJumpStates.current[index] = 1.0;
+
+    // Debug log to confirm click
+    console.log(`[FarmArea] Petting ${type} at index ${index}`);
+    playCritterSound(type);
+  }, []);
+
+  const removeHeart = React.useCallback((id: number) => {
+    setHearts(prev => prev.filter(h => h.id !== id));
+  }, []);
 
   // Animation offsets
   const chickenOffsets = useMemo(() => [0, 1.2, 2.4, 3.6, 4.8], []);
@@ -853,6 +1292,44 @@ export const FarmArea: React.FC = () => {
       });
     }
 
+    // Jump/Wiggle Animations for Petting (Every 2nd frame)
+    if (frameCountRef.current % 2 === 0) {
+      chickenJumpStates.current.forEach((val, i) => {
+        if (val > 0 && chickenRefs[i].current) {
+          chickenRefs[i].current.position.y = Math.sin(val * Math.PI) * 0.5;
+          chickenJumpStates.current[i] = Math.max(0, val - delta * 3);
+          if (chickenJumpStates.current[i] === 0) chickenRefs[i].current.position.y = 0;
+        }
+      });
+
+      pigJumpStates.current.forEach((val, i) => {
+        if (val > 0 && pigRefs[i].current) {
+          // Pigs wiggle
+          pigRefs[i].current.rotation.z = Math.sin(val * 20) * 0.1;
+          pigJumpStates.current[i] = Math.max(0, val - delta * 2);
+          if (pigJumpStates.current[i] === 0) pigRefs[i].current.rotation.z = 0;
+        }
+      });
+
+      // Cows just shake head vigorously?
+      cowJumpStates.current.forEach((val, i) => {
+        if (val > 0 && cowHeadRefs[i].current) {
+          cowHeadRefs[i].current.rotation.z = Math.sin(val * 15) * 0.2;
+          cowJumpStates.current[i] = Math.max(0, val - delta * 2);
+          if (cowJumpStates.current[i] === 0) cowHeadRefs[i].current.rotation.z = 0;
+        }
+      });
+
+      // Sheep Jump
+      sheepJumpStates.current.forEach((val, i) => {
+        if (val > 0 && sheepRefs[i].current) {
+          sheepRefs[i].current.position.y = Math.sin(val * Math.PI) * 0.5;
+          sheepJumpStates.current[i] = Math.max(0, val - delta * 3);
+          if (sheepJumpStates.current[i] === 0) sheepRefs[i].current.position.y = 0;
+        }
+      });
+    }
+
     // Body animations (Pecking, Wagging, Grazing)
     // Throttle to every 4th frame (15 FPS)
     if (frameCountRef.current % 4 !== 0) return;
@@ -908,6 +1385,8 @@ export const FarmArea: React.FC = () => {
     []
   );
 
+
+
   return (
     <group position={[75, 0, 120]} rotation={[0, Math.PI, 0]}>
       <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
@@ -926,6 +1405,7 @@ export const FarmArea: React.FC = () => {
           rotation={c.rot}
           groupRef={chickenRefs[i]}
           animRef={chickenAnimRefs[i]}
+          onClick={() => handlePet(c.pos, 'chicken', i)}
         />
       ))}
       <group position={[-12, 0, -5]}>
@@ -953,6 +1433,7 @@ export const FarmArea: React.FC = () => {
           rotation={p.rot}
           groupRef={pigRefs[i]}
           tailRef={pigTailRefs[i]}
+          onClick={() => handlePet(p.pos, 'pig', i)}
         />
       ))}
 
@@ -976,24 +1457,52 @@ export const FarmArea: React.FC = () => {
           rotation={c.rot}
           groupRef={cowRefs[i]}
           headRef={cowHeadRefs[i]}
+          onClick={() => handlePet(c.pos, 'cow', i)}
         />
       ))}
 
-      <WindmillComp position={[15, 0, -15]} bladesRef={windmillBladesRef} />
-      <Sheep position={[6, 0, -2]} rotation={0.6} />
-      <Sheep position={[7, 0, 1]} rotation={-0.4} />
-      <Sheep position={[5, 0, 3]} rotation={1.8} />
-      <Sheep position={[-6, 0, 3]} rotation={2.5} />
+      <WindmillComp position={[15, 0, -15]} scale={1.5} bladesRef={windmillBladesRef} />
+      <Sheep position={[6, 0, -2]} rotation={0.6} groupRef={sheepRefs[0]} onClick={() => handlePet([6, 0, -2], 'sheep', 0)} />
+      <Sheep position={[7, 0, 1]} rotation={-0.4} groupRef={sheepRefs[1]} onClick={() => handlePet([7, 0, 1], 'sheep', 1)} />
+      <Sheep position={[8, 0, 5]} rotation={1.8} groupRef={sheepRefs[2]} onClick={() => handlePet([8, 0, 5], 'sheep', 2)} />
+      <Sheep position={[-8, 0, 5]} rotation={2.5} groupRef={sheepRefs[3]} onClick={() => handlePet([-8, 0, 5], 'sheep', 3)} />
       <WaterTrough position={[0, 0, -4]} />
       <HayBale position={[6, 0, -2]} rotation={0.3} />
       <HayBale position={[6.5, 0, 0]} rotation={-0.2} />
       <HayBale position={[6.2, 0.8, -1]} rotation={0.5} />
+      {/* Sleeping Orange Cat between hay bales */}
+      <Cat position={[6.25, 0, -1]} rotation={0.5} color="#f97316" pose="sleeping" />
       <HayBale position={[-6, 0, 3]} rotation={1.2} />
-      <Tree position={[-20, 0, -15]} />
-      <Tree position={[18, 0, -12]} />
-      <Tree position={[-22, 0, 20]} />
-      <Tree position={[20, 0, 18]} />
-      <Tree position={[-15, 0, -18]} />
+      <Tree position={[-32, 0, -20]} />
+      <Tree position={[28, 0, -12]} />
+      <Tree position={[-35, 0, 25]} />
+      <Tree position={[32, 0, 22]} />
+      <Tree position={[-28, 0, -25]} />
+
+      {/* Grain Field Background */}
+      <group position={[0, 0, -42]}>
+        {/* Simple Grain Field - Instanced Loops */}
+        {/* Simple Grain Field - Instanced Loops */}
+        <InstancedGrainField />
+
+        {/* Cute Scarecrow in the middle */}
+        <Scarecrow position={[0, 0, 0]} rotation={0.2} />
+      </group>
+
+      {/* Paint Horse next to hay bales */}
+      <Horse position={[8, 0, -1]} rotation={-Math.PI / 2} color="#8d6e63" isPaint={true} onClick={() => handlePet([8, 0, -1], 'horse', 0)} />
+
+      {/* Render Active Hearts */}
+      {hearts.map(h => (
+        <HeartParticle key={h.id} position={h.pos} onComplete={() => removeHeart(h.id)} />
+      ))}
+
+      {/* Magical Nighttime Fireflies */}
+      <Fireflies
+        count={60}
+        bounds={{ minX: -20, maxX: 20, minY: 0.5, maxY: 4, minZ: -20, maxZ: 20 }}
+        color="#ccff66"
+      />
     </group>
   );
 };

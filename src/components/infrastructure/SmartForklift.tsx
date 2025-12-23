@@ -54,7 +54,6 @@ export const SmartForklift: React.FC<SmartForkliftProps> = ({
     id,
     startPosition,
     route,
-    cycleOffset = 0,
     otherForklifts,
 }) => {
     const groupRef = useRef<THREE.Group>(null);
@@ -69,10 +68,10 @@ export const SmartForklift: React.FC<SmartForkliftProps> = ({
     const velocityRef = useRef(new THREE.Vector3());
     const positionRef = useRef(new THREE.Vector3(...startPosition));
 
-    useFrame((state, delta) => {
+    useFrame((_state, delta) => {
         if (!groupRef.current || !forkRef.current) return;
 
-        const _time = state.clock.elapsedTime + cycleOffset;
+
         const currentWaypoint = waypoints[currentWaypointRef.current];
         const targetPos = new THREE.Vector3(...currentWaypoint.position);
 

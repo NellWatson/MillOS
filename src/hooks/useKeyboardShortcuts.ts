@@ -375,6 +375,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         return;
       }
 
+
       // 0 - Reset camera to default overview
       if (e.key === '0') {
         e.preventDefault();

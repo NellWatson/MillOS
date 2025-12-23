@@ -107,6 +107,9 @@ export const InstancedRollerMills: React.FC<InstancedRollerMillsProps> = ({
     [quality]
   );
 
+  // Determine if machines list has structurally changed
+  const machinesSignature = useMemo(() => machines.map(m => m.id).join(','), [machines]);
+
   // Initialize Static Parts
   useEffect(() => {
     if (
@@ -158,7 +161,7 @@ export const InstancedRollerMills: React.FC<InstancedRollerMillsProps> = ({
     upperHousingRef.current.instanceMatrix.needsUpdate = true;
     frameRef.current.instanceMatrix.needsUpdate = true;
     windowRef.current.instanceMatrix.needsUpdate = true;
-  }, [machines, dummy]);
+  }, [machinesSignature, dummy]);
 
   // Apply per-instance color variation (medium+ quality)
   useEffect(() => {
@@ -201,7 +204,7 @@ export const InstancedRollerMills: React.FC<InstancedRollerMillsProps> = ({
     if (upperHousingRef.current.instanceColor) {
       upperHousingRef.current.instanceColor.needsUpdate = true;
     }
-  }, [machines, colorVariationEnabled]);
+  }, [machinesSignature, colorVariationEnabled]);
 
   // Pre-calculate cull distance squared
   const cullDistSq = useMemo(

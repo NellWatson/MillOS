@@ -430,10 +430,17 @@ export function scadaToStoreMetrics(
     sync.status = 'critical';
   } else if (machineAlarms.some((a) => a.priority === 'HIGH' || a.priority === 'MEDIUM')) {
     sync.status = 'warning';
-  } else if (rpm !== undefined && rpm > 100) {
-    sync.status = 'running';
-  } else if (rpm !== undefined && rpm <= 100) {
-    sync.status = 'idle';
+  } else if (rpm !== undefined) {
+    // Check machine type specific thresholds
+    // Packers run at ~30-60 RPM, so the >100 check was forcing them to 'idle'
+    const isPacker = machineId.includes('packer');
+    const runningThreshold = isPacker ? 1 : 100;
+
+    if (rpm > runningThreshold) {
+      sync.status = 'running';
+    } else {
+      sync.status = 'idle';
+    }
   }
 
   return sync;

@@ -9,24 +9,29 @@ import {
   Package,
   Shield,
   Award,
-  Clock,
   Volume2,
   Map,
   X,
   ChevronUp,
   ChevronDown,
-  Play,
-  Pause,
+  AlertTriangle,
   SkipBack,
   SkipForward,
-  Download,
-  Image,
+  Play,
+  Pause,
   Star,
-  AlertTriangle,
+  Image,
+  Download,
+  History,
+  Clock,
+  Moon,
+  RotateCcw,
 } from 'lucide-react';
+import { useHistoricalPlaybackStore } from '../stores/historicalPlaybackStore';
 import { useProductionStore } from '../stores/productionStore';
 import { useUIStore } from '../stores/uiStore';
 import { useSafetyStore } from '../stores/safetyStore';
+
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useShallow } from 'zustand/react/shallow';
 import { positionRegistry, type EntityPosition } from '../utils/positionRegistry';
@@ -1412,139 +1417,139 @@ const DYNAMIC_TEMPLATES: Array<{
   type: 'general' | 'production' | 'safety' | 'emergency';
   chaosWeight: number;
 }> = [
-  // Worker-specific templates
-  {
-    template:
-      '{WORKER} has been spotted near the coffee machine. Again. For the third time this hour.',
-    type: 'general',
-    chaosWeight: 0.3,
-  },
-  {
-    template:
-      '{WORKER} would like everyone to know that {THEIR} area is clean. Suspiciously clean.',
-    type: 'general',
-    chaosWeight: 0.2,
-  },
-  {
-    template:
-      'Would {WORKER} please report to the supervisor office. You are not in trouble. Probably.',
-    type: 'general',
-    chaosWeight: 0.4,
-  },
-  {
-    template:
-      '{WORKER} has volunteered for the late shift. We appreciate {THEIR} sacrifice. Or desperation.',
-    type: 'general',
-    chaosWeight: 0.3,
-  },
-  {
-    template:
-      '{WORKER} has completed {THEIR} safety training. {THEY} only fell asleep twice. This is an improvement.',
-    type: 'safety',
-    chaosWeight: 0.3,
-  },
-  {
-    template:
-      'Happy birthday to {WORKER}. Cake is in the break room. First come, first served. Run.',
-    type: 'general',
-    chaosWeight: 0.2,
-  },
-  {
-    template:
-      '{WORKER} has found the missing clipboard. It was in the obvious place. The obvious place no one checked.',
-    type: 'general',
-    chaosWeight: 0.2,
-  },
-  {
-    template:
-      '{WORKER} is looking for {THEIR} safety goggles. They were last seen on {THEIR} head.',
-    type: 'safety',
-    chaosWeight: 0.3,
-  },
-  {
-    template:
-      'Congratulations to {WORKER} for zero incidents this week. The bar was low. {THEY} cleared it.',
-    type: 'general',
-    chaosWeight: 0.2,
-  },
-  {
-    template: '{WORKER} has submitted 17 maintenance requests today. We admire {THEIR} optimism.',
-    type: 'general',
-    chaosWeight: 0.5,
-  },
+    // Worker-specific templates
+    {
+      template:
+        '{WORKER} has been spotted near the coffee machine. Again. For the third time this hour.',
+      type: 'general',
+      chaosWeight: 0.3,
+    },
+    {
+      template:
+        '{WORKER} would like everyone to know that {THEIR} area is clean. Suspiciously clean.',
+      type: 'general',
+      chaosWeight: 0.2,
+    },
+    {
+      template:
+        'Would {WORKER} please report to the supervisor office. You are not in trouble. Probably.',
+      type: 'general',
+      chaosWeight: 0.4,
+    },
+    {
+      template:
+        '{WORKER} has volunteered for the late shift. We appreciate {THEIR} sacrifice. Or desperation.',
+      type: 'general',
+      chaosWeight: 0.3,
+    },
+    {
+      template:
+        '{WORKER} has completed {THEIR} safety training. {THEY} only fell asleep twice. This is an improvement.',
+      type: 'safety',
+      chaosWeight: 0.3,
+    },
+    {
+      template:
+        'Happy birthday to {WORKER}. Cake is in the break room. First come, first served. Run.',
+      type: 'general',
+      chaosWeight: 0.2,
+    },
+    {
+      template:
+        '{WORKER} has found the missing clipboard. It was in the obvious place. The obvious place no one checked.',
+      type: 'general',
+      chaosWeight: 0.2,
+    },
+    {
+      template:
+        '{WORKER} is looking for {THEIR} safety goggles. They were last seen on {THEIR} head.',
+      type: 'safety',
+      chaosWeight: 0.3,
+    },
+    {
+      template:
+        'Congratulations to {WORKER} for zero incidents this week. The bar was low. {THEY} cleared it.',
+      type: 'general',
+      chaosWeight: 0.2,
+    },
+    {
+      template: '{WORKER} has submitted 17 maintenance requests today. We admire {THEIR} optimism.',
+      type: 'general',
+      chaosWeight: 0.5,
+    },
 
-  // Machine-specific templates
-  {
-    template: '{MACHINE} is performing above expectations. We are suspicious but grateful.',
-    type: 'production',
-    chaosWeight: 0.2,
-  },
-  {
-    template:
-      '{MACHINE} would like a moment of silence for its previous self. The one that broke. RIP.',
-    type: 'general',
-    chaosWeight: 0.4,
-  },
-  {
-    template:
-      '{MACHINE} has been running for 72 hours straight. Unlike some of you, it does not complain.',
-    type: 'production',
-    chaosWeight: 0.3,
-  },
-  {
-    template:
-      'Maintenance scheduled for {MACHINE}. Please say your goodbyes. It will return. Changed.',
-    type: 'general',
-    chaosWeight: 0.4,
-  },
-  {
-    template:
-      '{MACHINE} is making the noise again. The concerning one. Engineering has been notified. They sighed.',
-    type: 'production',
-    chaosWeight: 0.6,
-  },
-  {
-    template: '{MACHINE} has achieved peak efficiency. Screenshot it. This will not last.',
-    type: 'production',
-    chaosWeight: 0.1,
-  },
-  {
-    template:
-      'Someone has left a coffee cup on {MACHINE}. {MACHINE} is not a table. {MACHINE} is hurt.',
-    type: 'general',
-    chaosWeight: 0.3,
-  },
-  {
-    template: '{MACHINE} update: Still running. Still reliable. Still underappreciated.',
-    type: 'production',
-    chaosWeight: 0.2,
-  },
+    // Machine-specific templates
+    {
+      template: '{MACHINE} is performing above expectations. We are suspicious but grateful.',
+      type: 'production',
+      chaosWeight: 0.2,
+    },
+    {
+      template:
+        '{MACHINE} would like a moment of silence for its previous self. The one that broke. R.I.P.',
+      type: 'general',
+      chaosWeight: 0.4,
+    },
+    {
+      template:
+        '{MACHINE} has been running for 72 hours straight. Unlike some of you, it does not complain.',
+      type: 'production',
+      chaosWeight: 0.3,
+    },
+    {
+      template:
+        'Maintenance scheduled for {MACHINE}. Please say your goodbyes. It will return. Changed.',
+      type: 'general',
+      chaosWeight: 0.4,
+    },
+    {
+      template:
+        '{MACHINE} is making the noise again. The concerning one. Engineering has been notified. They sighed.',
+      type: 'production',
+      chaosWeight: 0.6,
+    },
+    {
+      template: '{MACHINE} has achieved peak efficiency. Screenshot it. This will not last.',
+      type: 'production',
+      chaosWeight: 0.1,
+    },
+    {
+      template:
+        'Someone has left a coffee cup on {MACHINE}. {MACHINE} is not a table. {MACHINE} is hurt.',
+      type: 'general',
+      chaosWeight: 0.3,
+    },
+    {
+      template: '{MACHINE} update: Still running. Still reliable. Still underappreciated.',
+      type: 'production',
+      chaosWeight: 0.2,
+    },
 
-  // Combined worker + machine templates
-  {
-    template:
-      '{WORKER} has been assigned to {MACHINE}. {THEY} seem nervous. {MACHINE} seems indifferent.',
-    type: 'general',
-    chaosWeight: 0.3,
-  },
-  {
-    template: '{WORKER} and {MACHINE} have formed a bond. H.R. is unsure how to process this.',
-    type: 'general',
-    chaosWeight: 0.2,
-  },
-  {
-    template:
-      '{WORKER} claims {MACHINE} speaks to them. It does not. Unless it does. Please report any machine speech.',
-    type: 'general',
-    chaosWeight: 0.3,
-  },
-  {
-    template:
-      '{WORKER} has fixed {MACHINE} using, quote, "intuition." Maintenance would like a word.',
-    type: 'general',
-    chaosWeight: 0.5,
-  },
-];
+    // Combined worker + machine templates
+    {
+      template:
+        '{WORKER} has been assigned to {MACHINE}. {THEY} seem nervous. {MACHINE} seems indifferent.',
+      type: 'general',
+      chaosWeight: 0.3,
+    },
+    {
+      template: '{WORKER} and {MACHINE} have formed a bond. H.R. is unsure how to process this.',
+      type: 'general',
+      chaosWeight: 0.2,
+    },
+    {
+      template:
+        '{WORKER} claims {MACHINE} speaks to them. It does not. Unless it does. Please report any machine speech.',
+      type: 'general',
+      chaosWeight: 0.3,
+    },
+    {
+      template:
+        '{WORKER} has fixed {MACHINE} using, quote, "intuition." Maintenance would like a word.',
+      type: 'general',
+      chaosWeight: 0.5,
+    },
+  ];
 
 // Capitalize the first letter of a string
 const capitalize = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
@@ -2616,6 +2621,7 @@ export const ProductionTargetsWidget: React.FC = () => {
 // Achievements Panel
 export const AchievementsPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const achievements = useProductionStore((state) => state.achievements);
+  const resetAchievements = useProductionStore((state) => state.resetAchievements);
 
   const getCategoryColor = (category: string) => {
     switch (category) {
@@ -2644,6 +2650,12 @@ export const AchievementsPanel: React.FC<{ onClose: () => void }> = ({ onClose }
         return Users;
       case 'TrendingUp':
         return TrendingUp;
+      case 'Moon':
+        return Moon;
+      case 'Siren':
+        return AlertTriangle; // Using AlertTriangle as Siren fallback
+      case 'Boxes':
+        return Package; // Using Package as Boxes fallback
       default:
         return Trophy;
     }
@@ -2654,24 +2666,27 @@ export const AchievementsPanel: React.FC<{ onClose: () => void }> = ({ onClose }
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
-      className="fixed inset-4 md:inset-auto md:right-4 md:top-20 md:w-96 bg-slate-900/98 backdrop-blur-xl rounded-2xl border border-slate-700/50 shadow-2xl z-50 flex flex-col max-h-[80vh] pointer-events-auto"
+      drag
+      dragMomentum={false}
+      dragElastic={0}
+      className="fixed top-20 right-4 w-80 bg-slate-900/98 backdrop-blur-xl rounded-2xl border border-slate-700/50 shadow-2xl z-50 flex flex-col max-h-[70vh] pointer-events-auto overflow-hidden"
     >
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-slate-800">
+      {/* Header - draggable area */}
+      <div className="flex items-center justify-between p-3 border-b border-slate-800 cursor-move">
         <div className="flex items-center gap-2">
-          <Trophy className="w-5 h-5 text-yellow-400" />
-          <h2 className="text-lg font-bold text-white">Achievements</h2>
+          <Trophy className="w-5 h-5 text-yellow-400 flex-shrink-0" />
+          <h2 className="text-base font-bold text-white">Achievements</h2>
         </div>
         <button
           onClick={onClose}
-          className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
+          className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors flex-shrink-0"
         >
           <X className="w-4 h-4" />
         </button>
       </div>
 
       {/* Achievement list */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {achievements.map((achievement: any) => {
           const IconComponent = getIconComponent(achievement.icon);
           const isUnlocked = !!achievement.unlockedAt;
@@ -2716,6 +2731,18 @@ export const AchievementsPanel: React.FC<{ onClose: () => void }> = ({ onClose }
             </div>
           );
         })}
+      </div>
+
+      {/* Footer with reset button */}
+      <div className="p-2 border-t border-slate-800 flex justify-end">
+        <button
+          onClick={resetAchievements}
+          className="flex items-center gap-1.5 px-2 py-1 text-xs text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+          title="Reset all achievements"
+        >
+          <RotateCcw className="w-3 h-3" />
+          Reset
+        </button>
       </div>
     </motion.div>
   );
@@ -2800,10 +2827,13 @@ export const WorkerLeaderboard: React.FC<{ onClose: () => void }> = ({ onClose }
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
-      className="fixed inset-4 md:inset-auto md:right-4 md:top-20 md:w-80 bg-slate-900/98 backdrop-blur-xl rounded-2xl border border-slate-700/50 shadow-2xl z-50 flex flex-col max-h-[60vh] pointer-events-auto"
+      drag
+      dragMomentum={false}
+      dragElastic={0}
+      className="fixed top-24 right-4 w-80 bg-slate-900/98 backdrop-blur-xl rounded-2xl border border-slate-700/50 shadow-2xl z-50 flex flex-col max-h-[60vh] pointer-events-auto"
     >
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-slate-800">
+      {/* Header - draggable area */}
+      <div className="flex items-center justify-between p-4 border-b border-slate-800 cursor-move">
         <div className="flex items-center gap-2">
           <TrendingUp className="w-5 h-5 text-cyan-400" />
           <h2 className="text-lg font-bold text-white">Leaderboard</h2>
@@ -2847,7 +2877,12 @@ export const WorkerLeaderboard: React.FC<{ onClose: () => void }> = ({ onClose }
 
 // Mini-Map Component
 export const MiniMap: React.FC = () => {
-  const showMiniMap = useUIStore((state) => state.showMiniMap);
+  const { showMiniMap, setShowMiniMap } = useUIStore(
+    useShallow((state) => ({
+      showMiniMap: state.showMiniMap,
+      setShowMiniMap: state.setShowMiniMap,
+    }))
+  );
   const [positions, setPositions] = useState<{
     workers: EntityPosition[];
     forklifts: EntityPosition[];
@@ -2880,13 +2915,24 @@ export const MiniMap: React.FC = () => {
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="fixed bottom-4 right-4 z-40 pointer-events-auto"
+      drag
+      dragMomentum={false}
+      dragElastic={0}
+      className="fixed bottom-4 right-4 z-[100] pointer-events-auto cursor-move"
     >
       <div className="bg-slate-900/95 backdrop-blur-xl rounded-xl border border-cyan-500/30 overflow-hidden shadow-xl">
         {/* Header */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-800 bg-slate-800/50">
-          <Map className="w-4 h-4 text-cyan-400" />
-          <span className="text-xs font-medium text-white">GPS Tracking</span>
+        <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800 bg-slate-800/50">
+          <div className="flex items-center gap-2">
+            <Map className="w-4 h-4 text-cyan-400" />
+            <span className="text-xs font-medium text-white">GPS Tracking</span>
+          </div>
+          <button
+            onClick={() => setShowMiniMap(false)}
+            className="w-5 h-5 rounded flex items-center justify-center hover:bg-slate-700 transition-colors"
+          >
+            <X className="w-3 h-3 text-slate-400" />
+          </button>
         </div>
 
         {/* Map area */}
@@ -3229,11 +3275,10 @@ export const GamificationBar: React.FC = () => {
           {/* Achievements */}
           <button
             onClick={handleToggleAchievements}
-            className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors relative ${
-              showAchievements
-                ? 'bg-yellow-600 text-white'
-                : 'bg-slate-800 text-yellow-400 hover:bg-slate-700'
-            }`}
+            className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors relative ${showAchievements
+              ? 'bg-yellow-600 text-white'
+              : 'bg-slate-800 text-yellow-400 hover:bg-slate-700'
+              }`}
             title="Achievements"
           >
             <Trophy className="w-5 h-5" />
@@ -3247,24 +3292,41 @@ export const GamificationBar: React.FC = () => {
           {/* Leaderboard */}
           <button
             onClick={handleToggleLeaderboard}
-            className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${
-              showLeaderboard
-                ? 'bg-cyan-600 text-white'
-                : 'bg-slate-800 text-cyan-400 hover:bg-slate-700'
-            }`}
+            className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${showLeaderboard
+              ? 'bg-cyan-600 text-white'
+              : 'bg-slate-800 text-cyan-400 hover:bg-slate-700'
+              }`}
             title="Leaderboard"
           >
             <TrendingUp className="w-5 h-5" />
           </button>
 
+          {/* Replay/History - Moved here from 'R' key */}
+          <button
+            onClick={() => {
+              const playbackStore = useHistoricalPlaybackStore.getState();
+              if (playbackStore.isReplaying) {
+                playbackStore.exitReplayMode();
+              } else {
+                playbackStore.enterReplayMode();
+              }
+            }}
+            className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${useHistoricalPlaybackStore.getState().isReplaying
+              ? 'bg-red-600 text-white'
+              : 'bg-slate-800 text-red-400 hover:bg-slate-700'
+              }`}
+            title="Replay History"
+          >
+            <History className="w-5 h-5" />
+          </button>
+
           {/* Mini-map toggle */}
           <button
             onClick={handleToggleMiniMap}
-            className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${
-              showMiniMap
-                ? 'bg-green-600 text-white'
-                : 'bg-slate-800 text-green-400 hover:bg-slate-700'
-            }`}
+            className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${showMiniMap
+              ? 'bg-green-600 text-white'
+              : 'bg-slate-800 text-green-400 hover:bg-slate-700'
+              }`}
             title="GPS Map"
           >
             <Map className="w-5 h-5" />
