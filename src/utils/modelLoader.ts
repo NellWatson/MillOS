@@ -38,24 +38,25 @@ import { getDracoLoader, preloadDracoModel, useDracoGLTF, disposeDracoLoader } f
 // Re-export DRACO utilities for convenience
 export { getDracoLoader, preloadDracoModel, useDracoGLTF, disposeDracoLoader };
 
-// Model paths configuration
+// Model paths configuration - use BASE_URL for correct path at any deployment location
+const BASE = import.meta.env.BASE_URL;
 export const MODEL_PATHS = {
-  forklift: '/models/forklift/forklift.glb',
-  worker: '/models/worker/worker.glb',
-  silo: '/models/machines/silo.glb',
-  rollerMill: '/models/machines/mill.glb',
-  plansifter: '/models/machines/plansifter.glb',
-  packer: '/models/machines/packer.glb',
+  forklift: `${BASE}models/forklift/forklift.glb`,
+  worker: `${BASE}models/worker/worker.glb`,
+  silo: `${BASE}models/machines/silo.glb`,
+  rollerMill: `${BASE}models/machines/mill.glb`,
+  plansifter: `${BASE}models/machines/plansifter.glb`,
+  packer: `${BASE}models/machines/packer.glb`,
 } as const;
 
 // Worker character variants - Kenney Blocky Characters pack (CC0)
 // Download more from: https://kenney.nl/assets/blocky-characters
 export const WORKER_VARIANTS = {
-  default: '/models/worker/worker.glb',
-  character2: '/models/worker/character2.glb',
-  character3: '/models/worker/character3.glb',
-  character4: '/models/worker/character4.glb',
-  character5: '/models/worker/character5.glb',
+  default: `${BASE}models/worker/worker.glb`,
+  character2: `${BASE}models/worker/character2.glb`,
+  character3: `${BASE}models/worker/character3.glb`,
+  character4: `${BASE}models/worker/character4.glb`,
+  character5: `${BASE}models/worker/character5.glb`,
 } as const;
 
 export type WorkerVariant = keyof typeof WORKER_VARIANTS;

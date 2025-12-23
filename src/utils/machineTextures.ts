@@ -28,9 +28,9 @@ import {
 import { useGraphicsStore, GraphicsQuality } from '../stores/graphicsStore';
 import { isCompressionAvailable, loadCompressedTexture } from './textureCompression';
 
-// Texture base paths
-const TEXTURE_BASE_PATH = '/textures/machines';
-const COMPRESSED_PATH = '/textures/compressed';
+// Texture base paths - use BASE_URL for correct path at any deployment location
+const TEXTURE_BASE_PATH = `${import.meta.env.BASE_URL}textures/machines`;
+const COMPRESSED_PATH = `${import.meta.env.BASE_URL}textures/compressed`;
 
 // Resolution by quality level
 const RESOLUTION_BY_QUALITY: Record<GraphicsQuality, string> = {
