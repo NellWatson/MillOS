@@ -101,7 +101,7 @@ export const VCLDebugPanel: React.FC = () => {
                 <div className="flex items-center gap-3">
                     <div className="p-1 rounded-lg bg-gradient-to-br from-cyan-500/20 to-purple-500/20 border border-cyan-500/30 overflow-hidden">
                         <img
-                            src="/vcp-logo.png"
+                            src={`${import.meta.env.BASE_URL}vcp-logo.png`}
                             alt="VCP"
                             className="w-8 h-8 object-contain"
                         />
