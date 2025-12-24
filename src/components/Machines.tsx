@@ -14,6 +14,7 @@ import { MACHINE_MATERIALS, METAL_MATERIALS } from '../utils/sharedMaterials';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useBreakdownStore } from '../stores/breakdownStore';
 import { useProductionStore } from '../stores/productionStore';
+import { useWorkerMoodStore } from '../stores/workerMoodStore';
 import { BreakdownEffects } from './breakdown/BreakdownEffects';
 import { InstancedSilos } from './machines/InstancedSilos';
 import { InstancedRollerMills } from './machines/InstancedRollerMills';
@@ -3116,7 +3117,10 @@ export const MachineSimulationController: React.FC = () => {
 
   const lastUpdateRef = useRef(0);
   const frameCountRef = useRef(0);
-  const productionSpeed = useProductionStore((state) => state.productionSpeed); // Need production speed
+  const productionSpeed = useProductionStore((state) => state.productionSpeed);
+
+  // BILATERAL ALIGNMENT: Workforce productivity multiplier affects production output
+  const workforceProductivity = useWorkerMoodStore((state) => state.getWorkforceProductivityMultiplier());
 
   // Simulate realistic machine metric changes over time
   // Throttled to check every 30 frames (~0.5s at 60fps) instead of every frame
@@ -3156,11 +3160,13 @@ export const MachineSimulationController: React.FC = () => {
       };
       const machineBaseTemp = baseTemp[machine.type.toString()] || 30;
 
-      // LOAD: Responds to productionSpeed setting
+      // LOAD: Responds to productionSpeed * workforce productivity multiplier
+      // BILATERAL ALIGNMENT: High trust workers (1.15x) produce more, low trust (0.85x) drags
       let targetLoad = machine.metrics.load;
       if (isRunning) {
-        // Running machines adjust load toward productionSpeed * 80
-        targetLoad = 50 + (productionSpeed * 30); // 50-80% based on speed
+        // Running machines adjust load toward productionSpeed * 80 * workforce productivity
+        const baseLoad = 50 + (productionSpeed * 30); // 50-80% based on speed
+        targetLoad = baseLoad * workforceProductivity; // Apply trust/initiative multiplier (0.85-1.20x)
       } else if (isIdle) {
         targetLoad = 0; // Idle = no load
       }

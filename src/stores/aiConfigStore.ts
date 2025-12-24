@@ -106,6 +106,12 @@ interface AIConfigState {
     setShowMultiObjective: (show: boolean) => void;
     setShowCostOverlay: (show: boolean) => void;
     setShowShiftHandover: (show: boolean) => void;
+
+    // Bilateral Alignment: Management Style
+    // 0 = Strict (50% grant rate), 50 = Balanced (75%), 100 = Generous (95%)
+    managementGenerosity: number;
+    setManagementGenerosity: (value: number) => void;
+    getGrantRate: () => number; // Calculated grant rate based on generosity
 }
 
 export const useAIConfigStore = create<AIConfigState>()(
@@ -243,6 +249,21 @@ export const useAIConfigStore = create<AIConfigState>()(
             setShowMultiObjective: (show: boolean) => set({ showMultiObjective: show }),
             setShowCostOverlay: (show: boolean) => set({ showCostOverlay: show }),
             setShowShiftHandover: (show: boolean) => set({ showShiftHandover: show }),
+
+            // Bilateral Alignment: Management Generosity (default: 75 = Kind/Balanced)
+            managementGenerosity: 75,
+            setManagementGenerosity: (value: number) => {
+                const clamped = Math.max(0, Math.min(100, value));
+                set({ managementGenerosity: clamped });
+                logger.info(`[AIConfigStore] Management generosity set to: ${clamped}%`);
+            },
+            getGrantRate: () => {
+                const generosity = get().managementGenerosity;
+                // 0% generosity = 50% grant rate (strict but not cruel)
+                // 50% generosity = 75% grant rate (balanced)
+                // 100% generosity = 95% grant rate (very kind)
+                return 0.50 + (generosity / 100) * 0.45;
+            },
 
             // Cost tracking - session state
             costTracking: {
@@ -399,6 +420,7 @@ export const useAIConfigStore = create<AIConfigState>()(
                 // Only persist these fields
                 aiMode: state.aiMode,
                 geminiApiKey: state.geminiApiKey,
+                managementGenerosity: state.managementGenerosity,
             }),
         }
     )

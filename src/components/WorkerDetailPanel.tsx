@@ -14,10 +14,15 @@ import {
   ChevronUp,
   Calendar,
   MessageSquare,
+  Heart,
+  Lightbulb,
+  Handshake,
+  AlertTriangle,
 } from 'lucide-react';
 import { WorkerData, PerformanceReview, SkillLevel } from '../types';
 import { toSkillLevel } from '../utils/typeGuards';
 import { useFocusTrap } from '../hooks/useFocusTrap';
+import { useWorkerMoodStore } from '../stores/workerMoodStore';
 
 interface WorkerDetailPanelProps {
   worker: WorkerData;
@@ -261,8 +266,11 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
   onClose,
   embedded = false,
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'skills' | 'reviews'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'skills' | 'reviews' | 'alignment'>('overview');
   const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // Bilateral Alignment: Get worker mood/preferences from store
+  const workerMood = useWorkerMoodStore((state) => state.workerMoods[worker.id]);
 
   useFocusTrap(panelRef as React.RefObject<HTMLElement>, !embedded, onClose);
 
@@ -329,10 +337,10 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
   const animationProps = embedded
     ? {}
     : {
-        initial: { opacity: 0, y: 20, scale: 0.95 },
-        animate: { opacity: 1, y: 0, scale: 1 },
-        exit: { opacity: 0, y: 20, scale: 0.95 },
-      };
+      initial: { opacity: 0, y: 20, scale: 0.95 },
+      animate: { opacity: 1, y: 0, scale: 1 },
+      exit: { opacity: 0, y: 20, scale: 0.95 },
+    };
 
   return (
     <motion.div
@@ -396,6 +404,7 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
             { id: 'overview', label: 'Overview', icon: User },
             { id: 'skills', label: 'Skills', icon: TrendingUp },
             { id: 'reviews', label: 'Reviews', icon: Star },
+            { id: 'alignment', label: 'Alignment', icon: Handshake },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -403,11 +412,10 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
               aria-selected={activeTab === tab.id}
               aria-controls={`${tab.id}-panel`}
               onClick={() => setActiveTab(tab.id as typeof activeTab)}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-500 ${
-                activeTab === tab.id
-                  ? 'text-cyan-400 border-b-2 border-cyan-400 bg-cyan-500/10'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-              }`}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-500 ${activeTab === tab.id
+                ? 'text-cyan-400 border-b-2 border-cyan-400 bg-cyan-500/10'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                }`}
             >
               <tab.icon className="w-3.5 h-3.5" aria-hidden="true" />
               {tab.label}
@@ -538,6 +546,162 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
                 ) : (
                   <div className="text-center py-8 text-slate-500 text-sm">
                     No performance reviews yet
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {/* Alignment Tab - Bilateral Alignment Integration */}
+            {activeTab === 'alignment' && (
+              <motion.div
+                key="alignment"
+                role="tabpanel"
+                id="alignment-panel"
+                aria-labelledby="alignment-tab"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                className="p-4 space-y-4"
+              >
+                {workerMood?.preferences ? (
+                  <>
+                    {/* Trust & Initiative Section */}
+                    <div className="space-y-3">
+                      <div className="text-xs text-slate-500 uppercase tracking-wider">
+                        Trust & Initiative
+                      </div>
+
+                      {/* Management Trust */}
+                      <div>
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="flex items-center gap-1.5 text-slate-400">
+                            <Heart className="w-3 h-3" />
+                            Management Trust
+                          </span>
+                          <span className={`font-medium ${workerMood.preferences.managementTrust >= 70 ? 'text-green-400' : workerMood.preferences.managementTrust >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                            {workerMood.preferences.managementTrust}%
+                          </span>
+                        </div>
+                        <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${workerMood.preferences.managementTrust >= 70 ? 'bg-green-500' : workerMood.preferences.managementTrust >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
+                            style={{ width: `${workerMood.preferences.managementTrust}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Initiative */}
+                      <div>
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="flex items-center gap-1.5 text-slate-400">
+                            <Lightbulb className="w-3 h-3" />
+                            Initiative
+                          </span>
+                          <span className={`font-medium ${workerMood.preferences.initiative >= 70 ? 'text-cyan-400' : workerMood.preferences.initiative >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                            {workerMood.preferences.initiative}%
+                          </span>
+                        </div>
+                        <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${workerMood.preferences.initiative >= 70 ? 'bg-cyan-500' : workerMood.preferences.initiative >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
+                            style={{ width: `${workerMood.preferences.initiative}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Preference Status */}
+                    <div className="pt-3 border-t border-slate-700/50">
+                      <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">
+                        Preference Status
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${workerMood.preferenceStatus === 'satisfied' ? 'bg-green-500/20 text-green-300' :
+                          workerMood.preferenceStatus === 'pending' ? 'bg-amber-500/20 text-amber-300' :
+                            workerMood.preferenceStatus === 'denied' ? 'bg-red-500/20 text-red-300' :
+                              'bg-blue-500/20 text-blue-300'
+                          }`}>
+                          {workerMood.preferenceStatus === 'satisfied' ? '✅ Satisfied' :
+                            workerMood.preferenceStatus === 'pending' ? '✋ Request Pending' :
+                              workerMood.preferenceStatus === 'denied' ? '❌ Recently Denied' :
+                                '⚖️ Negotiating'}
+                        </span>
+                      </div>
+
+                      {/* Active Request Details */}
+                      {workerMood.preferences.activeRequest && (
+                        <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                            <div>
+                              <div className="text-xs font-medium text-amber-300">
+                                Pending Request
+                              </div>
+                              <div className="text-xs text-amber-200/80 mt-1">
+                                {workerMood.preferences.activeRequest.type === 'assignment' ? 'Machine assignment preference' :
+                                  workerMood.preferences.activeRequest.type === 'colleague' ? 'Colleague pairing preference' :
+                                    workerMood.preferences.activeRequest.type === 'shift' ? 'Shift timing preference' :
+                                      'Break timing preference'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Request History */}
+                    <div className="pt-3 border-t border-slate-700/50">
+                      <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">
+                        Request History
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-green-500/10 rounded-lg p-2 text-center">
+                          <div className="text-lg font-bold text-green-400">
+                            {workerMood.preferences.requestsGranted}
+                          </div>
+                          <div className="text-[10px] text-slate-400">Granted</div>
+                        </div>
+                        <div className="bg-red-500/10 rounded-lg p-2 text-center">
+                          <div className="text-lg font-bold text-red-400">
+                            {workerMood.preferences.requestsDenied}
+                          </div>
+                          <div className="text-[10px] text-slate-400">Denied</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Safety Reporting */}
+                    {workerMood.safetyBehavior && (
+                      <div className="pt-3 border-t border-slate-700/50">
+                        <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">
+                          Safety Reporting
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between text-xs mb-1">
+                            <span className="text-slate-400">Reporting Willingness</span>
+                            <span className={`font-medium ${workerMood.safetyBehavior.reportingWillingness >= 70 ? 'text-green-400' : workerMood.safetyBehavior.reportingWillingness >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                              {Math.round(workerMood.safetyBehavior.reportingWillingness)}%
+                            </span>
+                          </div>
+                          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${workerMood.safetyBehavior.reportingWillingness >= 70 ? 'bg-green-500' : workerMood.safetyBehavior.reportingWillingness >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
+                              style={{ width: `${workerMood.safetyBehavior.reportingWillingness}%` }}
+                            />
+                          </div>
+                          {workerMood.safetyBehavior.reportingWillingness < 50 && (
+                            <div className="mt-2 text-[10px] text-red-300/80 flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3" />
+                              Worker may have learned helplessness
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-center py-8 text-slate-500 text-sm">
+                    Alignment data not available
                   </div>
                 )}
               </motion.div>

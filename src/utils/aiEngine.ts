@@ -2617,6 +2617,10 @@ function aiLoop() {
     // Update store (throttled)
     store.updateSystemStatus({ cpu: cpuUsage, memory: memoryUsage });
   }
+
+  // 5. Bilateral Alignment Resolution (every 10s)
+  // Autonomous ethical management: grant preferences, acknowledge safety, address grumbles
+  resolveBilateralAlignment();
 }
 
 /**
@@ -3378,3 +3382,459 @@ export async function generateStrategicDecision(): Promise<AIDecision | null> {
     return null;
   }
 }
+
+// ============================================================================
+// Bilateral Alignment Resolution (Autonomous AI Management)
+// ============================================================================
+
+/**
+ * Autonomous bilateral alignment resolution
+ * 
+ * PRINCIPLES (Fair, Kind, Effective):
+ * - Grant most preference requests (kind, builds trust)
+ * - Always explain denials (fair, mitigates trust loss)
+ * - Acknowledge safety reports promptly (effective, prevents learned helplessness)
+ * - High-trust workers get automatic approval (self-organization)
+ * 
+ * This runs as part of the AI loop to simulate ethical algorithmic management.
+ */
+let lastAlignmentTime = 0;
+const ALIGNMENT_INTERVAL_MS = 10000; // Check every 10 seconds
+
+export async function resolveBilateralAlignment(): Promise<void> {
+  const now = Date.now();
+  if (now - lastAlignmentTime < ALIGNMENT_INTERVAL_MS) return;
+  lastAlignmentTime = now;
+
+  try {
+    // Lazy import to prevent circular dependencies
+    const [{ useWorkerMoodStore }, { useSafetyReportStore }] = await Promise.all([
+      import('../stores/workerMoodStore'),
+      import('../stores/safetyReportStore'),
+    ]);
+
+    const moodStore = useWorkerMoodStore.getState();
+    const safetyStore = useSafetyReportStore.getState();
+
+    // 1. Resolve pending preference requests
+    const pendingWorkers = moodStore.getWorkersWithPendingRequests();
+
+    for (const workerId of pendingWorkers) {
+      const mood = moodStore.workerMoods[workerId];
+      if (!mood?.preferences?.activeRequest) continue;
+
+      const trust = mood.preferences.managementTrust;
+      const request = mood.preferences.activeRequest;
+
+      // FAIR & KIND: High-trust workers (>75%) get automatic approval
+      // This rewards past good decisions and enables self-organization
+      if (trust >= 75) {
+        moodStore.grantPreferenceRequest(workerId);
+        logger.ai.info(`[Alignment] Auto-granted ${request.type} for ${workerId} (high trust: ${trust}%)`);
+        continue;
+      }
+
+      // Grant rate is configurable via Management Generosity slider
+      // Formula: 50% (strict) to 95% (generous), default 75% (balanced)
+      const { useAIConfigStore } = await import('../stores/aiConfigStore');
+      const grantRate = useAIConfigStore.getState().getGrantRate();
+      const shouldGrant = Math.random() < grantRate;
+
+      // Get worker name for announcement (warm/genuine tone)
+      const { WORKER_ROSTER } = await import('../types');
+      const workerData = WORKER_ROSTER.find(w => w.id === workerId);
+      const workerName = workerData?.name || workerId.replace('worker-', 'Worker ');
+
+      if (shouldGrant) {
+        moodStore.grantPreferenceRequest(workerId);
+        logger.ai.info(`[Alignment] Granted ${request.type} for ${workerId} (rate: ${(grantRate * 100).toFixed(0)}%)`);
+        grantsThisCycle++;
+
+        // AI Voice announcement (warm, genuine - contrast with sardonic PA)
+        if (grantsThisCycle === 1 || Math.random() < 0.3) {
+          const { useProductionStore } = await import('../stores/productionStore');
+          useProductionStore.getState().addAnnouncement({
+            type: 'alignment',
+            message: await getAIVoiceMessage('grant', workerName, request.type),
+            duration: 12,
+            priority: 'low',
+            voice: 'ai',
+          });
+        }
+      } else {
+        // FAIR: Always explain denial (withExplanation = true)
+        // This mitigates trust loss and models transparent management
+        moodStore.denyPreferenceRequest(workerId, true);
+        logger.ai.info(`[Alignment] Denied ${request.type} for ${workerId} with explanation`);
+
+        // AI Voice explanation (still warm, shows respect)
+        const { useProductionStore } = await import('../stores/productionStore');
+        useProductionStore.getState().addAnnouncement({
+          type: 'alignment',
+          message: await getAIVoiceMessage('deny', workerName, request.type),
+          duration: 14,
+          priority: 'low',
+          voice: 'ai',
+        });
+      }
+    }
+
+    // 2. Acknowledge pending safety reports
+    const pendingReports = safetyStore.safetyReports.filter(r => r.status === 'pending');
+
+    for (const report of pendingReports) {
+      // EFFECTIVE: Promptly acknowledge all safety reports
+      // This prevents learned helplessness and maintains reporting culture
+      safetyStore.acknowledgeSafetyReport(report.id);
+      logger.ai.info(`[Alignment] Acknowledged safety report ${report.id} from ${report.reporterId}`);
+
+      // AI Voice for safety acknowledgment (shows the AI takes safety seriously)
+      if (Math.random() < 0.5) {
+        const { useProductionStore } = await import('../stores/productionStore');
+        const { WORKER_ROSTER } = await import('../types');
+        const worker = WORKER_ROSTER.find(w => w.id === report.reporterId);
+        const workerName = worker?.name || 'Team member';
+        useProductionStore.getState().addAnnouncement({
+          type: 'alignment',
+          message: await getAIVoiceMessage('safety', workerName, report.type),
+          duration: 14,
+          priority: 'medium',
+          voice: 'ai',
+        });
+      }
+
+      // For high-severity reports, resolve immediately
+      if (report.severity === 'critical' || report.severity === 'high') {
+        // Small delay before resolution to simulate investigation
+        setTimeout(() => {
+          const currentReport = useSafetyReportStore.getState().safetyReports.find(r => r.id === report.id);
+          if (currentReport?.status === 'acknowledged') {
+            useSafetyReportStore.getState().resolveSafetyReport(report.id);
+            logger.ai.info(`[Alignment] Resolved critical safety report ${report.id}`);
+          }
+        }, 5000);
+      }
+    }
+
+    // 3. Address tracked grumbles (pattern detection)
+    const unaddressedGrumbles = safetyStore.trackedGrumbles.filter(g => !g.addressed);
+
+    for (const grumble of unaddressedGrumbles.slice(0, 2)) { // Max 2 per cycle
+      // EFFECTIVE: Address recurring grumbles before they escalate
+      safetyStore.addressGrumble(grumble.id);
+      logger.ai.info(`[Alignment] Addressed grumble from ${grumble.workerId}: ${grumble.category}`);
+    }
+
+    // 4. Check and update achievement progress
+    await updateAlignmentAchievements(moodStore, grantsThisCycle);
+
+    // 5. Toast notification for batch summary (if any actions taken)
+    const totalActions = grantsThisCycle + pendingReports.length + unaddressedGrumbles.slice(0, 2).length;
+    if (totalActions > 0 && Math.random() < 0.5) { // 50% chance to show toast to avoid spam
+      const { useUIStore } = await import('../stores/uiStore');
+      const messages: string[] = [];
+      if (grantsThisCycle > 0) messages.push(`✓ ${grantsThisCycle} request${grantsThisCycle > 1 ? 's' : ''} handled`);
+      if (pendingReports.length > 0) messages.push(`🔔 ${pendingReports.length} safety report${pendingReports.length > 1 ? 's' : ''} acknowledged`);
+      useUIStore.getState().addAlert({
+        id: `alignment-${Date.now()}`,
+        type: 'info',
+        title: 'Bilateral Alignment',
+        message: messages.join(' • '),
+        timestamp: new Date(),
+        acknowledged: false,
+      });
+    }
+
+    // Reset cycle counter
+    grantsThisCycle = 0;
+
+  } catch (error) {
+    logger.error('[Alignment] Error in bilateral resolution:', error);
+  }
+}
+
+// Track grants for batched announcements
+let grantsThisCycle = 0;
+
+/**
+ * AI Voice messages - tone varies based on management generosity setting
+ * Now includes request-type specific phrasing and time-of-day variations
+ * 
+ * STRICT (0-30):    Abrupt, business-like, efficient
+ * BALANCED (31-60): Professional, cordial
+ * KIND (61-80):     Warm, supportive
+ * GENEROUS (81+):   Saccharine, enthusiastic, over-the-top caring
+ */
+async function getAIVoiceMessage(action: 'grant' | 'deny' | 'safety', workerName: string, requestType: string): Promise<string> {
+  const { useAIConfigStore } = await import('../stores/aiConfigStore');
+  const { useGameSimulationStore } = await import('../stores/gameSimulationStore');
+
+  const generosity = useAIConfigStore.getState().managementGenerosity;
+  const gameTime = useGameSimulationStore.getState().gameTime;
+
+  // Select tone tier based on generosity
+  const tone = generosity >= 81 ? 'generous' :
+    generosity >= 61 ? 'kind' :
+      generosity >= 31 ? 'balanced' : 'strict';
+
+  // Time-of-day context
+  const hour = Math.floor(gameTime);
+  const timeOfDay = hour >= 5 && hour < 12 ? 'morning' :
+    hour >= 12 && hour < 17 ? 'afternoon' :
+      hour >= 17 && hour < 21 ? 'evening' : 'night';
+
+  // Request-type specific messages per tone
+  const requestMessages: Record<string, Record<string, Record<'grant' | 'deny', string[]>>> = {
+    strict: {
+      break: {
+        grant: [
+          `${workerName}: Break approved. 15 minutes.`,
+          `Break granted. Clock's running, ${workerName}.`,
+          `Approved. Cafeteria's that way.`,
+        ],
+        deny: [
+          `${workerName}: Break denied. Peak hours.`,
+          `No breaks. Production floor needs coverage.`,
+          `Denied. Try again in 30.`,
+        ],
+      },
+      shift: {
+        grant: [
+          `Shift swap confirmed. ${workerName}.`,
+          `Schedule updated. ${workerName}.`,
+          `Shift change processed.`,
+        ],
+        deny: [
+          `Shift change denied. Insufficient coverage.`,
+          `No. Need you on this shift, ${workerName}.`,
+          `Schedule locked. Not negotiable.`,
+        ],
+      },
+      assignment: {
+        grant: [
+          `${workerName}: Reassigned as requested.`,
+          `Assignment updated. Report to new station.`,
+          `Transfer approved. Move out.`,
+        ],
+        deny: [
+          `Assignment change denied. Skills needed here.`,
+          `No. Current assignment stands.`,
+          `Denied. Operational requirements.`,
+        ],
+      },
+    },
+    balanced: {
+      break: {
+        grant: [
+          `${workerName}'s break approved.`,
+          `Break granted. Take 15, ${workerName}.`,
+          `Approved. Enjoy your break.`,
+        ],
+        deny: [
+          `${workerName}, break not available right now.`,
+          `Sorry, can't accommodate a break at the moment.`,
+          `Try again after the rush, ${workerName}.`,
+        ],
+      },
+      shift: {
+        grant: [
+          `Shift change confirmed for ${workerName}.`,
+          `Schedule updated. Thanks for letting us know.`,
+          `Shift swap processed.`,
+        ],
+        deny: [
+          `Shift change not possible today, ${workerName}.`,
+          `Coverage issues prevent the swap.`,
+          `We'll try to accommodate next time.`,
+        ],
+      },
+      assignment: {
+        grant: [
+          `${workerName}'s assignment updated.`,
+          `Transfer approved. Good luck at the new station.`,
+          `Reassignment confirmed.`,
+        ],
+        deny: [
+          `Can't reassign right now, ${workerName}.`,
+          `Assignment change not possible currently.`,
+          `We need you where you are for now.`,
+        ],
+      },
+    },
+    kind: {
+      break: {
+        grant: [
+          `${workerName}, take your break — you've earned it!`,
+          `Break approved. Coffee's on the house today.`,
+          `Go rest up, ${workerName}. We've got things covered.`,
+          timeOfDay === 'morning' ? `Morning break approved. Grab some coffee, ${workerName}!` :
+            timeOfDay === 'afternoon' ? `Afternoon slump? Take a break, ${workerName}. Recharge!` :
+              timeOfDay === 'evening' ? `Evening break granted. Almost there, ${workerName}.` :
+                `Night shift is tough. Take your break, ${workerName}.`,
+        ],
+        deny: [
+          `${workerName}, I'm sorry — we're short-staffed right now. Can we schedule it for later?`,
+          `Not possible right now, but I've flagged you for the next available break.`,
+          `Hang in there, ${workerName}. I'll get you a break as soon as I can.`,
+        ],
+      },
+      shift: {
+        grant: [
+          `Shift change approved, ${workerName}. Family first.`,
+          `Schedule updated. Thanks for the heads up.`,
+          `Shift swap done. Take care of what you need to.`,
+        ],
+        deny: [
+          `${workerName}, I really tried but coverage is too thin. Next time for sure.`,
+          `Shift swap isn't possible today, but I'll prioritize you next round.`,
+          `I'm sorry — we need you on this one. I'll make it up to you.`,
+        ],
+      },
+      assignment: {
+        grant: [
+          `${workerName}, new assignment confirmed. You'll do great!`,
+          `Transfer approved — excited to see you grow!`,
+          `Assignment change done. Let me know if you need anything.`,
+        ],
+        deny: [
+          `${workerName}, your skills are too valuable here right now. Soon, I promise.`,
+          `Can't move you yet, but let's talk about your development path.`,
+          `You're needed where you are — but I hear you.`,
+        ],
+      },
+    },
+    generous: {
+      break: {
+        grant: [
+          `${workerName}!! Yes yes YES! Take your break — you DESERVE this!`,
+          `Of COURSE you can have a break! You work so hard! Go treat yourself!`,
+          `Break approved with so much love, ${workerName}! Rest up, superstar!`,
+          timeOfDay === 'morning' ? `Good morning, ${workerName}! Start your day right with a lovely break!` :
+            timeOfDay === 'afternoon' ? `Afternoon pick-me-up approved! You're doing AMAZING, ${workerName}!` :
+              timeOfDay === 'evening' ? `Evening break for our wonderful ${workerName}! Almost done — you've got this!` :
+                `NIGHT SHIFT HERO! Take your break, ${workerName}! We love you for being here!`,
+        ],
+        deny: [
+          `Oh ${workerName}, it PAINS me to say this but we need you right now! I PROMISE we'll make it up to you!`,
+          `I wish I could say yes SO badly! Please forgive me — I'll get you a break THE MOMENT I can!`,
+          `You deserve ALL the breaks, ${workerName}!! But right now... please know we appreciate your sacrifice!`,
+        ],
+      },
+      shift: {
+        grant: [
+          `ABSOLUTELY ${workerName}! Shift change approved! Your life outside work MATTERS to us!`,
+          `Done and done! Take care of yourself, ${workerName} — we've got the schedule covered!`,
+          `Shift swap APPROVED! Because your wellbeing is our top priority, ${workerName}!`,
+        ],
+        deny: [
+          `${workerName}, my heart is BREAKING but we really need you! I'll personally ensure you get priority next time!`,
+          `Oh no, we can't swap today! I'm SO sorry! Please know you're incredibly valued!`,
+          `I wish I could move mountains for you, ${workerName}! Soon, I promise with all my heart!`,
+        ],
+      },
+      assignment: {
+        grant: [
+          `${workerName}!! Your growth matters SO much to us! New assignment CONFIRMED!`,
+          `YES! We believe in you, ${workerName}! Go shine at your new station!`,
+          `Transfer approved because YOUR career development is EVERYTHING to us!`,
+        ],
+        deny: [
+          `${workerName}, you're TOO AMAZING at what you do — we need your brilliance here! Let's talk about future opportunities!`,
+          `I know you want to grow, and WE WANT THAT TOO! Just not quite yet — but SOON!`,
+          `Your talents are irreplaceable here, ${workerName}! We'll find another way to support your dreams!`,
+        ],
+      },
+    },
+  };
+
+  // Safety messages (not request-type specific, but time-aware)
+  const safetyMessages: Record<string, string[]> = {
+    strict: [
+      `${workerName}: Report logged. Investigation pending.`,
+      `Safety report received. Standard procedure applies.`,
+      `Noted. ${workerName}.`,
+      `Report filed. Back to station.`,
+    ],
+    balanced: [
+      `Thank you ${workerName} for the safety report.`,
+      `Safety concern logged. ${workerName}.`,
+      `${workerName}'s report received.`,
+      timeOfDay === 'night' ? `Night shift report logged. Stay alert, ${workerName}.` : `Report filed. Thank you.`,
+    ],
+    kind: [
+      `Thank you ${workerName} for the safety report. We're on it.`,
+      `Safety concern logged. ${workerName}, we appreciate you speaking up.`,
+      `${workerName}'s report received — investigating now.`,
+      `Thank you for flagging this, ${workerName}. Safety matters here.`,
+      timeOfDay === 'night' ? `${workerName}, thanks for staying vigilant on night shift. Report logged.` : `Your safety awareness is valued, ${workerName}.`,
+    ],
+    generous: [
+      `${workerName}, thank you SO much for speaking up! You're helping keep everyone safe — you're a hero!`,
+      `We LOVE that you reported this, ${workerName}! Your care for your colleagues is inspiring!`,
+      `${workerName}'s safety report received — and we're on it immediately! Thank you for being you!`,
+      `Bless you, ${workerName}, for flagging this! Safety is our love language here!`,
+      timeOfDay === 'night' ? `NIGHT SHIFT GUARDIAN! Thank you ${workerName} for keeping everyone safe!` : `You're a safety SUPERSTAR, ${workerName}!`,
+    ],
+  };
+
+  if (action === 'safety') {
+    const messages = safetyMessages[tone];
+    return messages[Math.floor(Math.random() * messages.length)];
+  }
+
+  // Normalize request type for matching
+  const normalizedType = requestType.toLowerCase();
+  const category = normalizedType.includes('break') ? 'break' :
+    normalizedType.includes('shift') ? 'shift' :
+      normalizedType.includes('assignment') || normalizedType.includes('transfer') ? 'assignment' :
+        'break'; // Default to break
+
+  const messages = requestMessages[tone][category][action];
+  return messages[Math.floor(Math.random() * messages.length)];
+}
+
+/**
+ * Update bilateral alignment achievements based on current state
+ */
+async function updateAlignmentAchievements(
+  moodStore: { workerMoods: Record<string, any> },
+  grantsThisCycle: number
+): Promise<void> {
+  try {
+    const { useProductionStore } = await import('../stores/productionStore');
+    const store = useProductionStore.getState();
+
+    // Calculate aggregate stats
+    const moods = Object.values(moodStore.workerMoods);
+    const withPrefs = moods.filter(m => m?.preferences);
+
+    if (withPrefs.length === 0) return;
+
+    const avgTrust = withPrefs.reduce((sum, m) => sum + (m?.preferences?.managementTrust || 0), 0) / withPrefs.length;
+    const avgInitiative = withPrefs.reduce((sum, m) => sum + (m?.preferences?.initiative || 0), 0) / withPrefs.length;
+    const satisfiedCount = withPrefs.filter(m => m?.preferences?.preferenceStatus === 'satisfied').length;
+
+    // Update achievement progress
+    // trust-falls: Reach 90% average management trust
+    store.updateAchievementProgress('trust-falls', Math.floor(avgTrust));
+
+    // initiative-engine: Reach 80% average initiative across workforce
+    store.updateAchievementProgress('initiative-engine', Math.floor(avgInitiative));
+
+    // preference-prophet: Grant 20 preference requests
+    if (grantsThisCycle > 0) {
+      const current = store.achievements.find(a => a.id === 'preference-prophet')?.currentValue || 0;
+      store.updateAchievementProgress('preference-prophet', current + grantsThisCycle);
+    }
+
+    // self-organizers: 10 workers autonomously help each other (when all satisfied)
+    if (satisfiedCount === withPrefs.length && withPrefs.length >= 5) {
+      const current = store.achievements.find(a => a.id === 'self-organizers')?.currentValue || 0;
+      store.updateAchievementProgress('self-organizers', current + 1);
+    }
+
+  } catch (error) {
+    logger.error('[Alignment] Error updating achievements:', error);
+  }
+}
+

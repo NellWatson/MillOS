@@ -19,6 +19,17 @@ import {
   CHAOS_EVENT_CONFIG,
   PLANT_NAMES,
   WORKER_ROSTER,
+  // Bilateral Alignment types
+  WorkerPreferences,
+  PreferenceRequest,
+  PreferenceRequestType,
+  PreferenceStatus,
+  DEFAULT_WORKER_PREFERENCES,
+  PREFERENCE_REQUEST_PHRASES,
+  PREFERENCE_RESPONSE_PHRASES,
+  // Safety Feedback Loop types
+  WorkerSafetyBehavior,
+  DEFAULT_WORKER_SAFETY_BEHAVIOR,
 } from '../types';
 
 // Helper to get random item from array
@@ -74,9 +85,41 @@ export interface WorkerReactionState {
 // Generate initial moods for all workers - deterministic based on worker index
 const generateInitialMoods = (): Record<string, WorkerMood> => {
   const moods: Record<string, WorkerMood> = {};
+
+  // Deterministic preference assignments based on worker role/index
+  const machinePreferencesByRole: Record<string, ('silo' | 'roller-mill' | 'plansifter' | 'packer')[]> = {
+    'Supervisor': ['roller-mill', 'plansifter', 'packer', 'silo'],
+    'Engineer': ['roller-mill', 'plansifter', 'silo', 'packer'],
+    'Operator': ['packer', 'silo', 'roller-mill', 'plansifter'],
+    'Safety Officer': ['silo', 'roller-mill', 'plansifter', 'packer'],
+    'Quality Control': ['plansifter', 'packer', 'roller-mill', 'silo'],
+    'Maintenance': ['roller-mill', 'silo', 'plansifter', 'packer'],
+  };
+
+  const shiftPreferences: ('morning' | 'afternoon' | 'night' | 'flexible')[] =
+    ['morning', 'afternoon', 'flexible', 'night', 'flexible'];
+
   WORKER_ROSTER.forEach((worker, index) => {
     // Deterministic mood values based on worker index (no Math.random)
     const indexFactor = (index % 5) / 5; // 0, 0.2, 0.4, 0.6, 0.8 cycling
+
+    // Deterministic colleague preferences (prefer workers with adjacent IDs)
+    const colleagueIds = WORKER_ROSTER
+      .filter((_, i) => Math.abs(i - index) === 1 || Math.abs(i - index) === 2)
+      .slice(0, 2)
+      .map(w => w.id);
+
+    // Create initial preferences
+    const preferences: WorkerPreferences = {
+      ...DEFAULT_WORKER_PREFERENCES,
+      preferredMachines: machinePreferencesByRole[worker.role] || ['packer'],
+      preferredColleagues: colleagueIds,
+      preferredShift: shiftPreferences[index % 5],
+      // Slight variation in trust/initiative based on experience
+      managementTrust: 70 + Math.min(worker.experience * 2, 25), // 70-95 based on experience
+      initiative: 55 + Math.min(worker.experience * 3, 40), // 55-95 based on experience
+    };
+
     moods[worker.id] = {
       workerId: worker.id,
       energy: 85 + indexFactor * 15,        // Deterministic: 85-100
@@ -86,6 +129,15 @@ const generateInitialMoods = (): Record<string, WorkerMood> => {
       lastBreak: 6, // Assume shift just started at 6am
       grumbleQueue: [],
       isSpeaking: false,
+      // Bilateral Alignment: Initialize preferences
+      preferences,
+      preferenceStatus: 'satisfied',
+      // Bilateral Alignment: Initialize safety behavior
+      safetyBehavior: {
+        ...DEFAULT_WORKER_SAFETY_BEHAVIOR,
+        reportingWillingness: 75 + Math.min(worker.experience * 2, 20),
+        reportAccuracy: 80 + Math.min(worker.experience * 1.5, 15),
+      },
     };
   });
   return moods;
@@ -125,6 +177,42 @@ interface WorkerMoodStore {
   workerReactions: Record<string, WorkerReactionState>;
   triggerWorkerReaction: (workerId: string, reaction: WorkerReaction, duration?: number) => void;
   clearWorkerReaction: (workerId: string) => void;
+
+  // =========================================================================
+  // BILATERAL ALIGNMENT: Preference Negotiation System
+  // =========================================================================
+
+  /** Create a preference request from a worker */
+  createPreferenceRequest: (
+    workerId: string,
+    type: PreferenceRequestType,
+    target: string,
+    urgency: 'low' | 'medium' | 'high'
+  ) => void;
+
+  /** Grant a worker's preference request */
+  grantPreferenceRequest: (workerId: string) => void;
+
+  /** Deny a worker's preference request */
+  denyPreferenceRequest: (workerId: string, withExplanation: boolean) => void;
+
+  /** Get workers with pending preference requests */
+  getWorkersWithPendingRequests: () => string[];
+
+  /** Get average management trust across all workers */
+  getAverageManagementTrust: () => number;
+
+  /** Get average initiative across workforce */
+  getAverageInitiative: () => number;
+
+  /** 
+   * BILATERAL ALIGNMENT: Get productivity multiplier based on trust/initiative
+   * Returns 0.85-1.20 depending on workforce morale
+   */
+  getWorkforceProductivityMultiplier: () => number;
+
+  /** Trigger a random preference request (for simulation) */
+  triggerRandomPreferenceRequest: () => void;
 
   // Chaos events
   chaosEvents: ChaosEvent[];
@@ -281,6 +369,232 @@ export const useWorkerMoodStore = create<WorkerMoodStore>((set, get) => ({
         [workerId]: { reaction: 'none', startTime: 0, duration: 0 },
       },
     }));
+  },
+
+  // =========================================================================
+  // BILATERAL ALIGNMENT: Preference Negotiation Implementation
+  // =========================================================================
+
+  createPreferenceRequest: (workerId, type, target, urgency) => {
+    const mood = get().workerMoods[workerId];
+    if (!mood?.preferences) return;
+
+    // Don't create request if one is already pending
+    if (mood.preferences.activeRequest?.status === 'pending') return;
+
+    const request: PreferenceRequest = {
+      id: `req-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      type,
+      target,
+      reason: randomFrom(PREFERENCE_REQUEST_PHRASES[type][urgency]),
+      urgency,
+      timestamp: Date.now(),
+      status: 'pending',
+    };
+
+    set((state) => ({
+      workerMoods: {
+        ...state.workerMoods,
+        [workerId]: {
+          ...state.workerMoods[workerId],
+          preferences: {
+            ...state.workerMoods[workerId].preferences!,
+            activeRequest: request,
+            lastRequestTime: Date.now(),
+          },
+          preferenceStatus: 'pending' as PreferenceStatus,
+        },
+      },
+    }));
+
+    // Show the request as speech
+    get().setWorkerSpeaking(workerId, request.reason);
+    const timeoutId = setTimeout(() => get().clearWorkerSpeech(workerId), 4000);
+    storeTimeout(`speech-${workerId}`, timeoutId);
+  },
+
+  grantPreferenceRequest: (workerId) => {
+    const mood = get().workerMoods[workerId];
+    if (!mood?.preferences?.activeRequest) return;
+
+    const request = mood.preferences.activeRequest;
+    if (request.status !== 'pending') return;
+
+    // Update request status and worker state
+    set((state) => {
+      const currentMood = state.workerMoods[workerId];
+      const currentPrefs = currentMood.preferences!;
+
+      return {
+        workerMoods: {
+          ...state.workerMoods,
+          [workerId]: {
+            ...currentMood,
+            satisfaction: Math.min(100, currentMood.satisfaction + 15), // Satisfaction boost
+            preferences: {
+              ...currentPrefs,
+              activeRequest: { ...request, status: 'granted' },
+              requestsGranted: currentPrefs.requestsGranted + 1,
+              managementTrust: Math.min(100, currentPrefs.managementTrust + 5), // Trust builds
+              initiative: Math.min(100, currentPrefs.initiative + 3), // Initiative grows
+            },
+            preferenceStatus: 'satisfied' as PreferenceStatus,
+          },
+        },
+      };
+    });
+
+    // Show gratitude
+    const phrase = randomFrom(PREFERENCE_RESPONSE_PHRASES.granted);
+    get().setWorkerSpeaking(workerId, phrase);
+    const timeoutId = setTimeout(() => get().clearWorkerSpeech(workerId), 3000);
+    storeTimeout(`speech-${workerId}`, timeoutId);
+  },
+
+  denyPreferenceRequest: (workerId, withExplanation) => {
+    const mood = get().workerMoods[workerId];
+    if (!mood?.preferences?.activeRequest) return;
+
+    const request = mood.preferences.activeRequest;
+    if (request.status !== 'pending') return;
+
+    // Denial with explanation has reduced penalty
+    const satisfactionPenalty = withExplanation ? 3 : 10;
+    const trustPenalty = withExplanation ? 2 : 8;
+    const initiativePenalty = withExplanation ? 1 : 5;
+
+    set((state) => {
+      const currentMood = state.workerMoods[workerId];
+      const currentPrefs = currentMood.preferences!;
+
+      return {
+        workerMoods: {
+          ...state.workerMoods,
+          [workerId]: {
+            ...currentMood,
+            satisfaction: Math.max(0, currentMood.satisfaction - satisfactionPenalty),
+            preferences: {
+              ...currentPrefs,
+              activeRequest: {
+                ...request,
+                status: 'denied',
+                denialExplained: withExplanation,
+              },
+              requestsDenied: currentPrefs.requestsDenied + 1,
+              managementTrust: Math.max(0, currentPrefs.managementTrust - trustPenalty),
+              initiative: Math.max(0, currentPrefs.initiative - initiativePenalty),
+            },
+            preferenceStatus: 'denied' as PreferenceStatus,
+          },
+        },
+      };
+    });
+
+    // Show response based on whether explanation was given
+    const phrases = withExplanation
+      ? PREFERENCE_RESPONSE_PHRASES.deniedWithExplanation
+      : PREFERENCE_RESPONSE_PHRASES.deniedWithoutExplanation;
+    const phrase = randomFrom(phrases);
+    get().setWorkerSpeaking(workerId, phrase);
+    const timeoutId = setTimeout(() => get().clearWorkerSpeech(workerId), 3000);
+    storeTimeout(`speech-${workerId}`, timeoutId);
+  },
+
+  getWorkersWithPendingRequests: () => {
+    const moods = get().workerMoods;
+    return Object.keys(moods).filter(
+      (id) => moods[id]?.preferences?.activeRequest?.status === 'pending'
+    );
+  },
+
+  getAverageManagementTrust: () => {
+    const moods = get().workerMoods;
+    const trusts = Object.values(moods)
+      .map((m) => m.preferences?.managementTrust ?? 75)
+      .filter((t) => t !== undefined);
+    return trusts.length > 0 ? trusts.reduce((a, b) => a + b, 0) / trusts.length : 75;
+  },
+
+  /**
+   * Get average initiative across workforce
+   */
+  getAverageInitiative: () => {
+    const moods = get().workerMoods;
+    const initiatives = Object.values(moods)
+      .map((m) => m.preferences?.initiative ?? 50)
+      .filter((i) => i !== undefined);
+    return initiatives.length > 0 ? initiatives.reduce((a, b) => a + b, 0) / initiatives.length : 50;
+  },
+
+  /**
+   * BILATERAL ALIGNMENT: Calculate workforce productivity multiplier based on trust
+   * 
+   * Trust affects both speed and quality:
+   * - Low trust (0-40):   0.85x productivity (workers drag feet, make mistakes)
+   * - Medium trust (41-70): 1.0x productivity (baseline)
+   * - High trust (71-90):  1.10x productivity (engaged, fewer errors)
+   * - Very high trust (91+): 1.15x productivity (discretionary effort)
+   */
+  getWorkforceProductivityMultiplier: () => {
+    const avgTrust = get().getAverageManagementTrust();
+    const avgInitiative = get().getAverageInitiative();
+
+    // Trust contribution (0.85 to 1.10)
+    const trustMultiplier = avgTrust <= 40 ? 0.85 :
+      avgTrust <= 70 ? 1.0 :
+        avgTrust <= 90 ? 1.10 : 1.15;
+
+    // Initiative contribution adds up to 0.05 bonus at 80+ initiative
+    const initiativeBonus = avgInitiative >= 80 ? 0.05 :
+      avgInitiative >= 60 ? 0.02 : 0;
+
+    return Math.min(1.20, trustMultiplier + initiativeBonus);
+  },
+
+  triggerRandomPreferenceRequest: () => {
+    const moods = get().workerMoods;
+    const eligibleWorkers = Object.keys(moods).filter((id) => {
+      const mood = moods[id];
+      // Only workers without pending requests who have some initiative
+      return (
+        mood.preferences &&
+        mood.preferences.activeRequest?.status !== 'pending' &&
+        mood.preferences.initiative > 30
+      );
+    });
+
+    if (eligibleWorkers.length === 0) return;
+
+    const workerId = randomFrom(eligibleWorkers);
+    const mood = moods[workerId];
+    if (!mood.preferences) return;
+
+    const types: PreferenceRequestType[] = ['assignment', 'break', 'colleague', 'shift'];
+    const type = randomFrom(types);
+
+    // Urgency based on current state
+    const urgency: 'low' | 'medium' | 'high' =
+      mood.energy < 30 ? 'high' :
+        mood.satisfaction < 50 ? 'medium' : 'low';
+
+    // Determine target based on type
+    let target = '';
+    switch (type) {
+      case 'assignment':
+        target = mood.preferences.preferredMachines[0] || 'packer';
+        break;
+      case 'break':
+        target = 'break-room';
+        break;
+      case 'colleague':
+        target = mood.preferences.preferredColleagues[0] || 'w1';
+        break;
+      case 'shift':
+        target = mood.preferences.preferredShift;
+        break;
+    }
+
+    get().createPreferenceRequest(workerId, type, target, urgency);
   },
 
   // Chaos events

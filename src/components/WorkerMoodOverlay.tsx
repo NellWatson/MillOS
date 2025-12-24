@@ -466,7 +466,11 @@ WorkerMoodOverlay.displayName = 'WorkerMoodOverlay';
 // which can cause re-renders on subscribers. Disabled on low quality or via perfDebug.
 export const useMoodSimulation = () => {
   const tickMoodSimulation = useWorkerMoodStore((state) => state.tickMoodSimulation);
+  const triggerRandomPreferenceRequest = useWorkerMoodStore(
+    (state) => state.triggerRandomPreferenceRequest
+  );
   const lastTickRef = useRef(Date.now());
+  const preferenceTickRef = useRef(0); // Counter for throttled preference requests
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   // Graphics store for quality and perfDebug checks
   const { graphicsQuality, disableWorkerMoods } = useGraphicsStore(
@@ -490,9 +494,61 @@ export const useMoodSimulation = () => {
       const deltaMinutes = deltaMs / 1000; // 1 real second = 1 game minute
       const gameTime = (Date.now() / 1000 / 60) % 24; // Simple game time based on real time
       tickMoodSimulation(gameTime, deltaMinutes);
+
+      // BILATERAL ALIGNMENT: Trigger random preference requests (throttled)
+      // Only every ~15 game minutes to avoid spam
+      preferenceTickRef.current += deltaMinutes;
+      if (preferenceTickRef.current >= 15) {
+        triggerRandomPreferenceRequest();
+        preferenceTickRef.current = 0;
+      }
+
+      lastTickRef.current = now;
+    }
+  });
+};
+
+/**
+ * Bilateral Alignment Simulation Hook
+ * 
+ * PERFORMANCE: Uses separate throttling (every 5 seconds) to avoid
+ * overloading the render loop with store updates.
+ * 
+ * Ticks:
+ * - Safety report store (report aging, willingness decay)
+ * - Emergent cooperation store (action completion, random triggers)
+ */
+export const useBilateralAlignmentSimulation = () => {
+  // Import stores lazily to avoid circular dependencies
+  const lastTickRef = useRef(Date.now());
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
+
+  useFrame(() => {
+    // PERFORMANCE: Skip on low quality
+    if (graphicsQuality === 'low') return;
+    if (!isTabVisible) return;
+
+    const now = Date.now();
+    const deltaMs = now - lastTickRef.current;
+
+    // PERFORMANCE: Tick only every 5 seconds to reduce store updates
+    if (deltaMs >= 5000) {
+      const deltaMinutes = deltaMs / 1000; // Convert to game minutes
+
+      // Lazy import to avoid circular deps and reduce initial bundle
+      import('../stores/safetyReportStore').then(({ useSafetyReportStore }) => {
+        useSafetyReportStore.getState().tickSafetySimulation(deltaMinutes);
+      });
+
+      import('../stores/emergentCooperationStore').then(({ useEmergentCooperationStore }) => {
+        useEmergentCooperationStore.getState().tickEmergentCooperation(deltaMinutes);
+      });
+
       lastTickRef.current = now;
     }
   });
 };
 
 export default WorkerMoodOverlay;
+

@@ -26,6 +26,7 @@ import {
   Clock,
   Moon,
   RotateCcw,
+  Heart,
 } from 'lucide-react';
 import { useHistoricalPlaybackStore } from '../stores/historicalPlaybackStore';
 import { useProductionStore } from '../stores/productionStore';
@@ -2481,6 +2482,29 @@ export const PAAnnouncementSystem: React.FC = () => {
     }
   };
 
+  // AI Voice styling is warm/cyan with heart, PA is sardonic/blue-slate with speaker
+  const getVoiceStyles = (voice?: 'pa' | 'ai', priority?: string) => {
+    if (voice === 'ai') {
+      // AI Voice: warm, genuine - cyan/green gradient
+      return 'bg-gradient-to-r from-cyan-700/95 to-emerald-700/95 border-cyan-400 text-white';
+    }
+    // PA Voice (default): sardonic observer - blue-slate
+    return getPriorityStyles(priority || 'medium');
+  };
+
+  const getVoiceIcon = (voice?: 'pa' | 'ai', type?: string) => {
+    if (voice === 'ai') {
+      // AI: heart icon (warm/genuine)
+      return <Heart className="w-5 h-5 text-pink-300" />;
+    }
+    // PA: type-based icon (observational)
+    return getTypeIcon(type || 'general');
+  };
+
+  const getVoiceLabel = (voice?: 'pa' | 'ai') => {
+    return voice === 'ai' ? 'MillOS-AI' : 'PA System';
+  };
+
   return (
     <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] space-y-2 pointer-events-auto max-w-[90vw]">
       <AnimatePresence>
@@ -2490,9 +2514,9 @@ export const PAAnnouncementSystem: React.FC = () => {
             initial={{ opacity: 0, y: -50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.9 }}
-            className={`flex items-start gap-3.5 px-5 py-4 rounded-xl border-2 backdrop-blur-xl shadow-2xl w-full max-w-lg ${getPriorityStyles(announcement.priority)}`}
+            className={`flex items-start gap-3.5 px-5 py-4 rounded-xl border-2 backdrop-blur-xl shadow-2xl w-full max-w-lg ${getVoiceStyles(announcement.voice, announcement.priority)}`}
           >
-            <div className="flex-shrink-0 mt-0.5">{getTypeIcon(announcement.type)}</div>
+            <div className="flex-shrink-0 mt-0.5">{getVoiceIcon(announcement.voice, announcement.type)}</div>
             <div className="flex-1 min-w-0 text-left space-y-2">
               <p className="font-medium text-[15px] leading-relaxed text-balance hyphens-auto">
                 {announcement.message}
@@ -2500,7 +2524,7 @@ export const PAAnnouncementSystem: React.FC = () => {
               <div className="flex items-center gap-2.5 opacity-50">
                 <div className="h-[1px] bg-current flex-1 opacity-70" />
                 <p className="text-[9px] uppercase tracking-[0.2em] font-semibold whitespace-nowrap">
-                  PA System
+                  {getVoiceLabel(announcement.voice)}
                 </p>
               </div>
             </div>

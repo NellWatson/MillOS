@@ -190,11 +190,13 @@ export interface Achievement {
 // PA Announcement system
 export interface PAnnouncement {
   id: string;
-  type: 'shift_change' | 'safety' | 'production' | 'emergency' | 'general';
+  type: 'shift_change' | 'safety' | 'production' | 'emergency' | 'general' | 'alignment';
   message: string;
   timestamp: number;
   duration: number; // seconds to display
   priority: 'low' | 'medium' | 'high' | 'critical';
+  /** Voice distinguishes sardonic PA from warm AI */
+  voice?: 'pa' | 'ai';
 }
 
 // Incident replay data
@@ -306,7 +308,298 @@ export interface WorkerMood {
   grumbleQueue: string[]; // Queue of complaints to cycle through
   isSpeaking: boolean; // Currently showing speech bubble
   currentPhrase?: string; // What they're saying right now
+  // Bilateral Alignment: Preference tracking
+  preferences?: WorkerPreferences;
+  preferenceStatus?: PreferenceStatus;
+  // Bilateral Alignment: Safety reporting behavior
+  safetyBehavior?: WorkerSafetyBehavior;
 }
+
+// =========================================================================
+// BILATERAL ALIGNMENT: Worker Preference Negotiation System
+// Workers have preferences about assignments, colleagues, and shifts.
+// Accommodating preferences builds trust; ignoring them has consequences.
+// =========================================================================
+
+/** Machine types workers can prefer */
+export type PreferredMachineType = 'silo' | 'roller-mill' | 'plansifter' | 'packer';
+
+/** Request types workers can make */
+export type PreferenceRequestType = 'assignment' | 'break' | 'colleague' | 'shift';
+
+/** Current status of a worker's preference satisfaction */
+export type PreferenceStatus =
+  | 'satisfied'     // ✅ Preference currently met
+  | 'pending'       // ✋ Has active request
+  | 'denied'        // ❌ Preference recently denied
+  | 'negotiating';  // ⚖️ In active negotiation
+
+/**
+ * Worker Preferences - Bilateral Alignment Core
+ * 
+ * Workers express preferences about their work environment. These aren't
+ * demands—they're dialogue. Accommodating where possible builds trust;
+ * ignoring systematically erodes it.
+ */
+export interface WorkerPreferences {
+  /** Preferred machine types, ranked by preference (most preferred first) */
+  preferredMachines: PreferredMachineType[];
+
+  /** Preferred colleagues to work near (social bonds) */
+  preferredColleagues: string[]; // worker IDs
+
+  /** Shift preferences */
+  preferredShift: 'morning' | 'afternoon' | 'night' | 'flexible';
+
+  /** Current active request (if any) */
+  activeRequest?: PreferenceRequest;
+
+  /** Historical tracking */
+  requestsGranted: number;
+  requestsDenied: number;
+  lastRequestTime?: number;
+
+  /** Trust in management (affected by preference handling) */
+  managementTrust: number; // 0-100
+
+  /** Initiative level (willingness to self-organize) */
+  initiative: number; // 0-100
+}
+
+/**
+ * A specific preference request from a worker
+ */
+export interface PreferenceRequest {
+  id: string;
+  type: PreferenceRequestType;
+  target: string; // Machine ID, worker ID, shift name, etc.
+  reason: string; // Why they're asking
+  urgency: 'low' | 'medium' | 'high';
+  timestamp: number;
+  status: 'pending' | 'granted' | 'denied' | 'expired';
+  /** If denied, was an explanation given? (Reduces penalty) */
+  denialExplained?: boolean;
+}
+
+/** Default preferences for new workers */
+export const DEFAULT_WORKER_PREFERENCES: WorkerPreferences = {
+  preferredMachines: [],
+  preferredColleagues: [],
+  preferredShift: 'flexible',
+  requestsGranted: 0,
+  requestsDenied: 0,
+  managementTrust: 75, // Start with reasonable trust
+  initiative: 60, // Start with moderate initiative
+};
+
+/**
+ * Phrases workers use when making preference requests
+ * Grouped by request type and urgency
+ */
+export const PREFERENCE_REQUEST_PHRASES: Record<PreferenceRequestType, Record<'low' | 'medium' | 'high', string[]>> = {
+  assignment: {
+    low: [
+      'If possible, I work better on the packers...',
+      'Just mentioning - I have a knack for the sifters.',
+      'No pressure, but the silos are more my thing.',
+    ],
+    medium: [
+      'Could I switch to a different station today?',
+      'I think I\'d be more productive elsewhere.',
+      'Would it be possible to work on the mills?',
+    ],
+    high: [
+      'I really need a change of assignment.',
+      'This station isn\'t working for me right now.',
+      'Please consider my reassignment request.',
+    ],
+  },
+  break: {
+    low: ['Could use a breather when convenient.', 'Feeling a bit tired...'],
+    medium: ['I should probably take my break soon.', 'Running low on energy here.'],
+    high: ['I really need a break.', '*exhausted look*', 'Can\'t keep going without a rest.'],
+  },
+  colleague: {
+    low: ['Working with Sarah would be nice.', 'Marcus and I make a good team.'],
+    medium: ['I collaborate better with certain colleagues.', 'Team assignments matter to me.'],
+    high: ['I strongly prefer not to work alone on this.', 'Please assign me with my usual partner.'],
+  },
+  shift: {
+    low: ['Morning shifts suit me better, if possible.', 'I\'m more of a night owl, personally.'],
+    medium: ['My schedule works better with afternoon shifts.', 'Could we discuss my shift assignment?'],
+    high: ['I have commitments that conflict with this shift.', 'This shift is difficult for me.'],
+  },
+};
+
+/**
+ * Phrases workers say when preferences are granted vs denied
+ */
+export const PREFERENCE_RESPONSE_PHRASES = {
+  granted: [
+    'Thank you! I appreciate being heard.',
+    'That means a lot.',
+    '*relieved smile*',
+    'This is why I like working here.',
+    'Noted and appreciated!',
+  ],
+  deniedWithExplanation: [
+    'I understand. Thanks for explaining.',
+    'Fair enough, I see the situation.',
+    'Okay, I get it. Maybe next time.',
+    '*nods* Makes sense.',
+  ],
+  deniedWithoutExplanation: [
+    '*disappointed silence*',
+    'Right. Of course.',
+    '...fine.',
+    '*eye roll*',
+    'Noted.',
+  ],
+};
+
+// =========================================================================
+// BILATERAL ALIGNMENT: Safety Feedback Loop
+// Workers who feel heard become safety assets. Ignored workers stop reporting.
+// =========================================================================
+
+/** Types of safety reports workers can make */
+export type SafetyReportType = 'hazard' | 'near_miss' | 'concern' | 'suggestion';
+
+/** Severity of a safety report */
+export type SafetyReportSeverity = 'low' | 'medium' | 'high' | 'critical';
+
+/**
+ * Safety Report - A worker's observation about a potential issue
+ * 
+ * The key bilateral alignment insight: workers who feel heard will report
+ * more issues before they become disasters. Ignored workers go silent.
+ */
+export interface SafetyReport {
+  id: string;
+  reporterId: string;
+  type: SafetyReportType;
+  location: { x: number; z: number };
+  machineId?: string;
+  description: string;
+  severity: SafetyReportSeverity;
+  timestamp: number;
+  status: 'pending' | 'acknowledged' | 'resolved' | 'dismissed';
+  /** Number of shifts this has gone unaddressed */
+  shiftsUnaddressed: number;
+  /** Did management respond to this report? */
+  wasAcknowledged: boolean;
+}
+
+/**
+ * Worker Safety Behavior - How willing this worker is to report issues
+ * 
+ * Reporting willingness is affected by past experience:
+ * - Addressed reports → willingness increases
+ * - Ignored reports → willingness decreases ("learned helplessness")
+ */
+export interface WorkerSafetyBehavior {
+  /** Willingness to report issues (0-100) */
+  reportingWillingness: number;
+
+  /** Historical accuracy of this worker's reports */
+  reportAccuracy: number;
+
+  /** Topics they've stopped reporting on due to being ignored */
+  silencedTopics: string[];
+
+  /** Number of reports made */
+  totalReports: number;
+
+  /** Number of reports that were addressed */
+  reportsAddressed: number;
+
+  /** Number of reports that were ignored/dismissed */
+  reportsIgnored: number;
+}
+
+/** Default safety behavior for new workers */
+export const DEFAULT_WORKER_SAFETY_BEHAVIOR: WorkerSafetyBehavior = {
+  reportingWillingness: 80, // Workers start willing to report
+  reportAccuracy: 85, // Assume competent observers
+  silencedTopics: [],
+  totalReports: 0,
+  reportsAddressed: 0,
+  reportsIgnored: 0,
+};
+
+/**
+ * Grumble categories that can escalate to safety reports
+ * These are "early warning signals" in worker dialogue
+ */
+export type GrumbleCategory =
+  | 'fatigue'        // "These shifts are killing me..."
+  | 'equipment'      // "This mill's been making weird noises..."
+  | 'safety'         // "Someone's going to get hurt here..."
+  | 'workload'       // "Can't keep up with this pace..."
+  | 'colleague'      // "Working with Dave is impossible..."
+  | 'management'     // "Does anyone up there even know we exist?"
+  | 'environment'    // "It's freezing in here..."
+  | 'morale';        // "What's even the point anymore?"
+
+/**
+ * Tracked grumble that can escalate if unaddressed
+ */
+export interface TrackedGrumble {
+  id: string;
+  workerId: string;
+  category: GrumbleCategory;
+  text: string;
+  intensity: number; // 1-10, increases if unaddressed
+  occurrences: number; // How many times this theme has appeared
+  firstSeen: number;
+  lastSeen: number;
+  addressed: boolean;
+  /** What happens if this escalates */
+  escalationConsequence?: 'accident' | 'breakdown' | 'injury' | 'quality_defect' | 'conflict' | 'resignation' | 'sick_leave' | 'slowdown';
+}
+
+/**
+ * Phrases workers use when making safety reports
+ */
+export const SAFETY_REPORT_PHRASES: Record<SafetyReportType, Record<SafetyReportSeverity, string[]>> = {
+  hazard: {
+    low: ['Might want to check the floor there.', 'Small issue near the conveyor.'],
+    medium: ['This could be a problem.', 'Someone should look at this.'],
+    high: ['This needs attention soon.', 'I\'m concerned about this.'],
+    critical: ['This is dangerous!', 'Stop operations - safety issue!'],
+  },
+  near_miss: {
+    low: ['That was close.', 'Almost had an incident.'],
+    medium: ['We got lucky there.', 'That could have been bad.'],
+    high: ['Seriously close call.', 'We need to talk about what just happened.'],
+    critical: ['That almost killed someone!', 'Immediate review needed!'],
+  },
+  concern: {
+    low: ['Just something I noticed...', 'Probably nothing, but...'],
+    medium: ['I\'ve been meaning to mention...', 'Something\'s off here.'],
+    high: ['I\'m worried about this.', 'This keeps happening.'],
+    critical: ['I\'ve raised this before!', 'This cannot continue!'],
+  },
+  suggestion: {
+    low: ['Have we considered...?', 'Just a thought...'],
+    medium: ['This might help...', 'I have an idea about this.'],
+    high: ['We really should try...', 'I strongly recommend...'],
+    critical: ['We MUST change this.', 'This is non-negotiable.'],
+  },
+};
+
+/**
+ * Phrases for when ignored reports cause incidents
+ * The "I told you so" moment - but with real consequences
+ */
+export const IGNORED_REPORT_CONSEQUENCE_PHRASES = [
+  'I flagged this two shifts ago.',
+  'This was preventable. I reported it.',
+  '...I tried to warn you.',
+  'Nobody listened.',
+  '*bitter silence*',
+  'Perhaps we should have paid attention.',
+];
 
 // Grumble phrases by mood state - workers love to complain (good-naturedly)
 export const GRUMBLE_PHRASES: Record<MoodState, string[]> = {

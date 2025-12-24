@@ -3523,8 +3523,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Tire inspection area - TESTING */}
         {/* <TireInspectionArea position={[25, 0, 35]} rotation={Math.PI / 2} /> */}
 
-        {/* Driver break room - relocated to east periphery */}
-        <DriverBreakRoom position={[100, 0, 100]} rotation={-Math.PI / 2} />
+        {/* Driver break room - MOVED to AMENITY BUILDINGS section below (outside dock offset) */}
 
 
         {/* Employee parking lot - TESTING */}
@@ -3569,6 +3568,9 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
       {/* Trailer drop yard - positioned away from dock */}
       <TrailerDropYard position={[-60, 0, 35]} rotation={0} />
+
+      {/* Driver break room - positioned east of shipping dock at world coordinates */}
+      <DriverBreakRoom position={[25, 0, 75]} rotation={-Math.PI / 2} />
 
       {/* Shipping truck */}
       <group ref={shippingTruckRef} position={[20, 0, 160]}>

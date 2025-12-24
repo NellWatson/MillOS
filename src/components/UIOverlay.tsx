@@ -67,6 +67,7 @@ import { KeyboardShortcutsModal } from './ui/KeyboardShortcutsModal';
 import { MultiplayerLobby } from './multiplayer';
 import { TruckScheduleWidget } from './ui/TruckScheduleWidget';
 import { PredictiveMaintenancePanel } from './ui/PredictiveMaintenancePanel';
+import { ManagementStylePanel } from './ui-new/widgets/ManagementStylePanel';
 
 // Lazy load ProductionMetrics to reduce initial bundle (Recharts is ~403KB)
 const ProductionMetrics = lazy(() =>
@@ -1927,6 +1928,11 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
       {/* PA Announcement System - displays at top center */}
       <PAAnnouncementSystem />
+
+      {/* Bilateral Alignment: Management Style Panel - top right below announcements */}
+      <div className="fixed top-20 right-4 z-40">
+        <ManagementStylePanel />
+      </div>
 
       {/* Gamification controls now integrated into CollapsibleLegend */}
 

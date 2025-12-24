@@ -31,7 +31,7 @@ const AmbientDetailsGroup = React.lazy(() =>
 import { VisibleChaos } from './VisibleChaos';
 import { FactoryEnvironmentSystem } from './FactoryEnvironment';
 import { MaintenanceSystem } from './MaintenanceSystem';
-import { useMoodSimulation } from './WorkerMoodOverlay';
+import { useMoodSimulation, useBilateralAlignmentSimulation } from './WorkerMoodOverlay';
 import { RemotePlayersGroup } from './multiplayer';
 import { MachineData, MachineType, WorkerData } from '../types';
 import { useGraphicsStore } from '../stores/graphicsStore';
@@ -315,6 +315,9 @@ export const MillScene: React.FC<MillSceneProps> = ({
 
   // Worker mood simulation - Theme Hospital inspired mood system
   useMoodSimulation();
+
+  // Bilateral Alignment simulation - preference requests, safety reports, emergent cooperation
+  useBilateralAlignmentSimulation();
 
   const machines = useMemo(() => {
     const _machines: MachineData[] = [];

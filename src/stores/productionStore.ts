@@ -749,6 +749,91 @@ export const useProductionStore = create<ProductionStore>()(
         currentValue: 0,
         progress: 0,
       },
+      // =====================================================
+      // BILATERAL ALIGNMENT ACHIEVEMENTS
+      // Teaching through gameplay: listening to workers matters
+      // =====================================================
+      {
+        id: 'floor-has-ears',
+        name: 'The Floor Has Ears',
+        description: 'Address 5 safety reports before they escalate',
+        icon: 'Ear',
+        category: 'safety',
+        requirement: 5,
+        currentValue: 0,
+        progress: 0,
+      },
+      {
+        id: 'trust-falls',
+        name: 'Trust Falls',
+        description: 'Reach 90% average management trust',
+        icon: 'Heart',
+        category: 'teamwork',
+        requirement: 90,
+        currentValue: 75, // Start at default trust
+        progress: 0,
+      },
+      {
+        id: 'zero-dismissals',
+        name: 'Zero Dismissals',
+        description: 'Complete a shift without dismissing any requests',
+        icon: 'CheckCircle',
+        category: 'teamwork',
+        requirement: 1,
+        currentValue: 0,
+        progress: 0,
+      },
+      {
+        id: 'self-organizers',
+        name: 'Self Starters',
+        description: '10 workers autonomously help each other',
+        icon: 'Sparkles',
+        category: 'teamwork',
+        requirement: 10,
+        currentValue: 0,
+        progress: 0,
+      },
+      {
+        id: 'preference-prophet',
+        name: 'Preference Prophet',
+        description: 'Grant 20 preference requests',
+        icon: 'Gift',
+        category: 'teamwork',
+        requirement: 20,
+        currentValue: 0,
+        progress: 0,
+      },
+      {
+        id: 'silent-floor',
+        name: 'Silent Floor',
+        description: 'Let 3 workers stop reporting (learned helplessness)',
+        icon: 'VolumeX',
+        category: 'safety',
+        requirement: 3,
+        currentValue: 0,
+        progress: 0,
+        // This is a "failure state" achievement - teaching what NOT to do
+      },
+      {
+        id: 'initiative-engine',
+        name: 'Initiative Engine',
+        description: 'Reach 80% average worker initiative',
+        icon: 'Lightbulb',
+        category: 'production',
+        requirement: 80,
+        currentValue: 60, // Start at default initiative
+        progress: 0,
+      },
+      {
+        id: 'explainer',
+        name: 'The Explainer',
+        description: 'Deny a request with explanation 5 times',
+        icon: 'MessageCircle',
+        category: 'teamwork',
+        requirement: 5,
+        currentValue: 0,
+        progress: 0,
+      },
     ] as Achievement[],
     unlockAchievement: (achievementId: string) =>
       set((state) => ({

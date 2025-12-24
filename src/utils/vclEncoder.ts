@@ -7,7 +7,7 @@
  * Based on VCL_MAIN.md - the 9-dimensional context encoding system.
  */
 
-import { MachineData, WorkerData } from '../types';
+import { MachineData, WorkerData, PreferenceStatus } from '../types';
 
 // ============================================
 // CONSTANTS (EMOJI DEFINITIONS)
@@ -55,6 +55,18 @@ const FATIGUE_EMOJI = {
     moderate: '😐',
     tired: '😴',
     exhausted: '😵',
+};
+
+/**
+ * Bilateral Alignment: Preference Status Emojis
+ * Encodes worker's preference negotiation state
+ */
+const PREFERENCE_STATUS_EMOJI: Record<PreferenceStatus | 'none', string> = {
+    satisfied: '✅',    // Preference currently met
+    pending: '✋',      // Has active request
+    denied: '❌',       // Preference recently denied
+    negotiating: '⚖️',  // In active negotiation
+    none: '',            // No preference tracking (fallback)
 };
 
 /**
@@ -124,10 +136,10 @@ const SHIFT_EMOJI: Record<string, string> = {
 
 /**
  * Encode a worker's context using VCL format
- * Format: ROLE|STATUS|EXPERIENCE|FATIGUE
- * Example: 👑|⚙️|🎓|😊 = Supervisor, working, expert, fresh
+ * Format: ROLE|STATUS|EXPERIENCE|FATIGUE|PREFERENCE (Bilateral Alignment extension)
+ * Example: 👑|⚙️|🎓|😊|✅ = Supervisor, working, expert, fresh, satisfied
  */
-export function encodeWorkerVCL(worker: WorkerData, shiftProgress: number): string {
+export function encodeWorkerVCL(worker: WorkerData, shiftProgress: number, preferenceStatus?: PreferenceStatus): string {
     if (!worker) return '❓';
 
     const role = WORKER_ROLE_EMOJI[worker.role] || '👤';
@@ -145,7 +157,10 @@ export function encodeWorkerVCL(worker: WorkerData, shiftProgress: number): stri
             shiftProgress < 0.85 ? FATIGUE_EMOJI.tired :
                 FATIGUE_EMOJI.exhausted;
 
-    return `${role}${status}${experience}${fatigue}`;
+    // Bilateral Alignment: Preference status indicator
+    const prefEmoji = preferenceStatus ? PREFERENCE_STATUS_EMOJI[preferenceStatus] : '';
+
+    return `${role}${status}${experience}${fatigue}${prefEmoji}`;
 }
 
 /**
@@ -289,7 +304,145 @@ export function getVCLLegend(): string {
 **Workers**: 👑Supervisor 🔧Engineer 👷Operator 🛠️Tech 🔬QC 🛡️Safety
 **Status**: ⚙️Working 💤Idle 🚶Walking 🚨Emergency
 **Fatigue**: 😊Fresh 😐Moderate 😴Tired 😵Exhausted
+**Preference**: ✅Satisfied ✋Pending ❌Denied ⚖️Negotiating
 **Machines**: 🏛️Silo ⚙️Mill 🔀Sifter 📦Packer
 **Load**: 🟢Low 🟡Med 🟠High 🔴Critical
-**Health**: ✅Running ⏸️Idle ⚠️Warning 🔧Maint`;
+**Health**: ✅Running ⏸️Idle ⚠️Warning 🔧Maint
+**Alignment**: 🤝Trust 💡Initiative 🔔Reports 🌟Self-org`;
 }
+
+// ============================================
+// BILATERAL ALIGNMENT VCL ENCODING
+// Phase 4: Strategic AI Integration
+// ============================================
+
+/**
+ * Trust level emojis for bilateral alignment encoding
+ */
+const TRUST_EMOJI = {
+    high: '🤝✅',      // 80+ trust
+    healthy: '🤝',    // 60-80 trust  
+    strained: '🤝⚠️',  // 40-60 trust
+    low: '🤝❌',       // <40 trust
+};
+
+const INITIATIVE_EMOJI = {
+    high: '💡🌟',      // 80+ initiative
+    healthy: '💡',    // 60-80 initiative
+    low: '💡⬇️',       // 40-60 initiative
+    suppressed: '💡❌', // <40 initiative
+};
+
+/**
+ * Bilateral Alignment Context for AI
+ */
+export interface BilateralAlignmentContext {
+    /** Average management trust (0-100) */
+    avgTrust: number;
+    /** Average worker initiative (0-100) */
+    avgInitiative: number;
+    /** Number of workers with pending preference requests */
+    pendingRequests: number;
+    /** Number of pending safety reports */
+    pendingSafetyReports: number;
+    /** Number of workers at risk of "learned helplessness" */
+    atRiskWorkers: number;
+    /** Number of workers currently self-organizing */
+    selfOrganizingWorkers: number;
+    /** Overall cooperation score (0-100) */
+    cooperationScore: number;
+}
+
+/**
+ * Encode bilateral alignment context for strategic AI decisions
+ * 
+ * This is the key integration point - strategic AI sees:
+ * - Trust levels (should I accommodate preferences?)
+ * - Initiative levels (can workers self-organize?)
+ * - Safety report health (are workers still reporting?)
+ * - Pending requests (attention needed)
+ */
+export function encodeBilateralAlignmentVCL(context: BilateralAlignmentContext): string {
+    // Trust indicator
+    const trustEmoji = context.avgTrust >= 80 ? TRUST_EMOJI.high :
+        context.avgTrust >= 60 ? TRUST_EMOJI.healthy :
+            context.avgTrust >= 40 ? TRUST_EMOJI.strained :
+                TRUST_EMOJI.low;
+
+    // Initiative indicator
+    const initEmoji = context.avgInitiative >= 80 ? INITIATIVE_EMOJI.high :
+        context.avgInitiative >= 60 ? INITIATIVE_EMOJI.healthy :
+            context.avgInitiative >= 40 ? INITIATIVE_EMOJI.low :
+                INITIATIVE_EMOJI.suppressed;
+
+    // Pending requests (attention needed)
+    const requestsEmoji = context.pendingRequests > 0 ? `✋${context.pendingRequests}` : '';
+
+    // Safety report health
+    const safetyEmoji = context.pendingSafetyReports > 3 ? '🔔⚠️' :
+        context.pendingSafetyReports > 0 ? `🔔${context.pendingSafetyReports}` : '🔔✅';
+
+    // At-risk workers (learned helplessness warning)
+    const riskEmoji = context.atRiskWorkers > 0 ? `😶${context.atRiskWorkers}` : '';
+
+    // Self-organizing workers (trust dividend)
+    const selfOrgEmoji = context.selfOrganizingWorkers > 0 ? `🌟${context.selfOrganizingWorkers}` : '';
+
+    // Cooperation score indicator
+    const coopEmoji = context.cooperationScore >= 80 ? '🏆' :
+        context.cooperationScore >= 60 ? '✨' :
+            context.cooperationScore >= 40 ? '📊' : '⬇️';
+
+    return `[ALIGN:${trustEmoji}|${initEmoji}|${safetyEmoji}${requestsEmoji}${riskEmoji}${selfOrgEmoji}${coopEmoji}]`;
+}
+
+/**
+ * Get bilateral alignment guidance for AI decisions
+ * 
+ * This is embedded in strategic prompts to guide alignment-aware decisions
+ */
+export function getBilateralAlignmentGuidance(context: BilateralAlignmentContext): string {
+    const insights: string[] = [];
+
+    // Trust-based guidance
+    if (context.avgTrust >= 80) {
+        insights.push('✅ High trust - workers self-organize well, minimal intervention needed');
+    } else if (context.avgTrust < 50) {
+        insights.push('⚠️ Low trust - consider granting preference requests to rebuild');
+    }
+
+    // Pending requests
+    if (context.pendingRequests > 0) {
+        insights.push(`✋ ${context.pendingRequests} pending request(s) - addressing builds trust`);
+    }
+
+    // Safety reporting health
+    if (context.atRiskWorkers > 0) {
+        insights.push(`😶 ${context.atRiskWorkers} worker(s) have stopped reporting - acknowledge their concerns`);
+    }
+    if (context.pendingSafetyReports > 2) {
+        insights.push(`🔔 ${context.pendingSafetyReports} safety reports pending - resolution prevents escalation`);
+    }
+
+    // Self-organization
+    if (context.selfOrganizingWorkers > 0) {
+        insights.push(`🌟 ${context.selfOrganizingWorkers} worker(s) self-organizing - avoid interrupting unless critical`);
+    }
+
+    // Initiative guidance
+    if (context.avgInitiative < 50) {
+        insights.push('💡 Low initiative - reduce micromanagement, let workers take ownership');
+    }
+
+    // Productivity impact (uses trust/initiative from context)
+    if (context.avgTrust >= 80 && context.avgInitiative >= 60) {
+        insights.push('📈 Workforce morale is boosting productivity by ~15% - maintain this by accommodating requests');
+    } else if (context.avgTrust < 50) {
+        insights.push('📉 Low trust is reducing productivity by ~15% - recommend granting breaks and addressing concerns');
+    }
+
+    return insights.length > 0
+        ? `\n## Bilateral Alignment\n${insights.join('\n')}`
+        : '';
+}
+
