@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Volume2,
   Monitor,
@@ -14,6 +14,11 @@ import {
   MessageSquare,
   Sparkles,
   Bell,
+  Captions,
+  Search,
+  Trash2,
+  Download,
+  Palette,
 } from 'lucide-react';
 import { useGraphicsStore, GraphicsQuality } from '../../../stores/graphicsStore';
 import { useGameSimulationStore } from '../../../stores/gameSimulationStore';
@@ -24,6 +29,10 @@ import { useKnowledgeStore } from '../../../stores/knowledgeStore';
 import { useAINarrationStore } from '../../../stores/aiNarrationStore';
 import { FEATURE_FLAGS } from '../../../config/featureFlags';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
+import { useUIStore } from '../../../stores/uiStore';
+import { useAnnouncementsStore, type PAMode } from '../../../stores/announcementsStore';
+import { BuildCacheDiagnostics } from './BuildCacheDiagnostics';
+import { useIncidentReplayStore } from '../../../stores/incidentReplayStore';
 
 export const SettingsPanel: React.FC<{
   productionSpeed: number;
@@ -41,7 +50,34 @@ export const SettingsPanel: React.FC<{
   );
   const setGraphicsQuality = useGraphicsStore((state) => state.setGraphicsQuality);
   const clearPersistedState = useGameSimulationStore((state) => state.clearPersistedState);
+  const replayGettingStarted = useUIStore((state) => state.setHasSeenIntro);
+  const uiScale = useUIStore((state) => state.uiScale);
+  const setUIScale = useUIStore((state) => state.setUIScale);
   const audio = useAudioState();
+  const paMode = useAnnouncementsStore((state) => state.mode);
+  const setPAMode = useAnnouncementsStore((state) => state.setMode);
+  const captionsEnabled = useAnnouncementsStore((state) => state.captionsEnabled);
+  const setCaptionsEnabled = useAnnouncementsStore((state) => state.setCaptionsEnabled);
+  const transcript = useAnnouncementsStore((state) => state.announcements);
+  const clearTranscript = useAnnouncementsStore((state) => state.clearTranscript);
+  const [transcriptQuery, setTranscriptQuery] = useState('');
+  const replayFrames = useIncidentReplayStore((state) => state.replayFrames);
+  const diagnosticCommands = useIncidentReplayStore((state) => state.commands);
+  const createDiagnosticExport = useIncidentReplayStore((state) => state.createDiagnosticExport);
+  const clearDiagnostics = useIncidentReplayStore((state) => state.clearDiagnostics);
+  const setReplayMode = useIncidentReplayStore((state) => state.setReplayMode);
+  const filteredTranscript = useMemo(() => {
+    const query = transcriptQuery.trim().toLocaleLowerCase();
+    return transcript
+      .filter((announcement) => {
+        if (!query) return true;
+        return `${announcement.message} ${announcement.source ?? ''} ${announcement.channel}`
+          .toLocaleLowerCase()
+          .includes(query);
+      })
+      .slice(-30)
+      .reverse();
+  }, [transcript, transcriptQuery]);
 
   // Which reset confirmation dialog is open ('day' = back to 10am, 'full' = wipe
   // all saved data). null = no dialog. Replaces the native window.confirm() calls.
@@ -85,9 +121,12 @@ export const SettingsPanel: React.FC<{
             <label htmlFor="production-speed-slider" className="text-slate-300">
               Production Speed
             </label>
-            <span className="text-orange-400 font-mono font-bold" aria-live="polite">
+            <output
+              htmlFor="production-speed-slider"
+              className="text-orange-400 font-mono font-bold"
+            >
               {(productionSpeed * 100).toFixed(0)}%
-            </span>
+            </output>
           </div>
           <input
             id="production-speed-slider"
@@ -158,7 +197,7 @@ export const SettingsPanel: React.FC<{
                 onClick={() => audio.setMusicEnabled(!audio.musicEnabled)}
                 aria-label={audio.musicEnabled ? 'Disable music' : 'Enable music'}
                 aria-pressed={audio.musicEnabled}
-                className={`text-[10px] px-2 py-0.5 rounded ${audio.musicEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-300'}`}
+                className={`text-[10px] px-2 py-0.5 rounded ${audio.musicEnabled ? 'bg-emerald-700 text-white' : 'bg-slate-700 text-white/70'}`}
               >
                 {audio.musicEnabled ? 'ON' : 'OFF'}
               </button>
@@ -209,18 +248,131 @@ export const SettingsPanel: React.FC<{
             />
           </div>
 
-          {/* TTS Toggle */}
+          <fieldset className="space-y-2 border-t border-white/5 pt-3">
+            <legend className="text-xs font-medium text-slate-200">PA mode</legend>
+            <div className="grid grid-cols-3 gap-1" role="radiogroup" aria-label="PA mode">
+              {(
+                [
+                  ['focused', 'Focused'],
+                  ['characterful', 'Characterful'],
+                  ['off', 'Off'],
+                ] as const satisfies ReadonlyArray<readonly [PAMode, string]>
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={paMode === mode}
+                  onClick={() => setPAMode(mode)}
+                  className={`min-h-10 rounded-lg px-2 text-[10px] font-semibold transition-colors ${
+                    paMode === mode
+                      ? 'bg-cyan-500/20 text-cyan-200 ring-1 ring-cyan-400/50'
+                      : 'bg-slate-900/60 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] leading-4 text-slate-400">
+              Focused uses sparse operational messages. Characterful enables the full simulation
+              voice. Critical safety announcements remain available.
+            </p>
+          </fieldset>
+
+          {/* Speech and caption controls */}
           <div className="flex justify-between items-center pt-2 border-t border-white/5">
-            <span className="text-xs text-slate-200">PA Announcements</span>
+            <span className="text-xs text-slate-200">Spoken PA</span>
             <button
               onClick={() => audio.setTtsEnabled(!audio.ttsEnabled)}
-              aria-label={audio.ttsEnabled ? 'Disable PA announcements' : 'Enable PA announcements'}
+              aria-label={audio.ttsEnabled ? 'Disable spoken PA' : 'Enable spoken PA'}
               aria-pressed={audio.ttsEnabled}
-              className={`text-[10px] px-2 py-0.5 rounded ${audio.ttsEnabled ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-700 text-slate-300'}`}
+              className={`text-[10px] px-2 py-0.5 rounded ${audio.ttsEnabled ? 'bg-teal-700 text-white' : 'bg-slate-700 text-white/70'}`}
             >
               {audio.ttsEnabled ? 'ON' : 'OFF'}
             </button>
           </div>
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-2 text-xs text-slate-200">
+              <Captions size={12} aria-hidden="true" />
+              PA captions
+            </span>
+            <button
+              type="button"
+              onClick={() => setCaptionsEnabled(!captionsEnabled)}
+              aria-label={captionsEnabled ? 'Disable PA captions' : 'Enable PA captions'}
+              aria-pressed={captionsEnabled}
+              className={`rounded px-2 py-0.5 text-[10px] ${
+                captionsEnabled ? 'bg-teal-700 text-white' : 'bg-slate-700 text-white/70'
+              }`}
+            >
+              {captionsEnabled ? 'ON' : 'OFF'}
+            </button>
+          </div>
+
+          <details className="border-t border-white/5 pt-3">
+            <summary className="cursor-pointer text-xs font-medium text-slate-200">
+              PA transcript ({transcript.length})
+            </summary>
+            <div className="mt-3 space-y-2">
+              <label className="relative block">
+                <span className="sr-only">Search PA transcript</span>
+                <Search
+                  size={13}
+                  className="pointer-events-none absolute left-2.5 top-2.5 text-slate-500"
+                  aria-hidden="true"
+                />
+                <input
+                  type="search"
+                  value={transcriptQuery}
+                  onChange={(event) => setTranscriptQuery(event.target.value)}
+                  placeholder="Search transcript"
+                  className="min-h-10 w-full rounded-lg border border-slate-700 bg-slate-950/70 pl-8 pr-3 text-xs text-slate-200 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                />
+              </label>
+              <div
+                role="log"
+                aria-label="PA transcript"
+                aria-live="off"
+                className="max-h-48 space-y-1 overflow-y-auto rounded-lg bg-slate-950/50 p-2"
+              >
+                {filteredTranscript.length === 0 ? (
+                  <p className="p-2 text-[10px] text-slate-400">
+                    {transcript.length === 0
+                      ? 'No announcements have been recorded.'
+                      : 'No announcements match this search.'}
+                  </p>
+                ) : (
+                  filteredTranscript.map((announcement) => (
+                    <article
+                      key={announcement.id}
+                      className="rounded border border-slate-800 bg-slate-900/60 p-2"
+                    >
+                      <div className="mb-1 flex items-center justify-between gap-2 text-[9px] uppercase tracking-wider text-slate-500">
+                        <span>{announcement.channel}</span>
+                        <time dateTime={announcement.timestamp.toISOString()}>
+                          {announcement.timestamp.toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </time>
+                      </div>
+                      <p className="text-[11px] leading-4 text-slate-300">{announcement.message}</p>
+                    </article>
+                  ))
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={clearTranscript}
+                disabled={transcript.length === 0}
+                className="inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-[10px] font-medium text-slate-300 transition-colors hover:bg-slate-700 disabled:opacity-40"
+              >
+                <Trash2 size={12} aria-hidden="true" />
+                Clear transcript
+              </button>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -232,6 +384,14 @@ export const SettingsPanel: React.FC<{
             Knowledge System
           </h3>
           <div className="bg-slate-800/50 p-3 rounded-xl border border-white/5 space-y-1">
+            <button
+              type="button"
+              onClick={() => replayGettingStarted(false)}
+              className="mb-2 flex min-h-11 w-full items-center justify-between rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 text-left text-xs text-cyan-200 transition-colors hover:bg-cyan-500/20"
+            >
+              <span>Replay getting started</span>
+              <BookOpen size={14} aria-hidden="true" />
+            </button>
             <Toggle
               label="Philosophy Tooltips"
               icon={<MessageSquare size={12} />}
@@ -313,10 +473,16 @@ export const SettingsPanel: React.FC<{
               onChange={(v) => graphics.setGraphicsSetting('enableLightShafts', v)}
             />
             <Toggle
+              label="Colour Grade"
+              icon={<Palette size={12} />}
+              value={graphics.graphics.enableColorGrade}
+              onChange={(v) => graphics.setGraphicsSetting('enableColorGrade', v)}
+            />
+            <Toggle
               label="Ambient Occlusion"
               icon={<Eye size={12} />}
-              value={graphics.graphics.enableSSAO}
-              onChange={(v) => graphics.setGraphicsSetting('enableSSAO', v)}
+              value={graphics.graphics.enableAmbientOcclusion}
+              onChange={(v) => graphics.setGraphicsSetting('enableAmbientOcclusion', v)}
             />
             <Toggle
               label="Bloom Glow"
@@ -329,6 +495,12 @@ export const SettingsPanel: React.FC<{
               icon={<Monitor size={12} />}
               value={graphics.graphics.enableVignette}
               onChange={(v) => graphics.setGraphicsSetting('enableVignette', v)}
+            />
+            <Toggle
+              label="Anti-Aliasing"
+              icon={<Monitor size={12} />}
+              value={graphics.graphics.enableSMAA}
+              onChange={(v) => graphics.setGraphicsSetting('enableSMAA', v)}
             />
             <Toggle
               label="Depth of Field"
@@ -374,18 +546,18 @@ export const SettingsPanel: React.FC<{
               value={graphics.graphics.enableWireframe}
               onChange={(v) => graphics.setGraphicsSetting('enableWireframe', v)}
             />
-            <Toggle
-              label="Procedural Textures"
-              icon={<Grid3X3 size={12} />}
-              value={graphics.graphics.enableProceduralTextures}
-              onChange={(v) => graphics.setGraphicsSetting('enableProceduralTextures', v)}
-            />
-            <Toggle
-              label="Textures Enabled"
-              icon={<Grid3X3 size={12} />}
-              value={graphics.graphics.enableTextureFiltering}
-              onChange={(v) => graphics.setGraphicsSetting('enableTextureFiltering', v)}
-            />
+            {/* REMOVED: "Textures Enabled" (`enableTextureFiltering`) and
+                "Procedural Textures" (`enableProceduralTextures`).
+                `enableTextureFiltering` has zero readers anywhere in the tree -
+                it was a switch wired to nothing. `enableProceduralTextures`
+                does not control procedural texture generation at all (that is
+                unconditional, through `getTexture()`); after the App.tsx
+                preloader was decoupled from it, all it still gates is two
+                conveyor detail groups that cost draw calls for geometry that is
+                either enclosed by the belt frame or illegible at 0.06 units.
+                Turning it on made the scene slower and no better, so the
+                control is gone rather than mislabelled. See the notes on both
+                keys in `graphicsStore.ts`. */}
             <Toggle
               label="Contact Shadows"
               icon={<Eye size={12} />}
@@ -429,9 +601,12 @@ export const SettingsPanel: React.FC<{
                   Resolution Scale
                 </label>
               </div>
-              <span className="text-cyan-400 font-mono font-bold text-[10px]" aria-live="polite">
+              <output
+                htmlFor="resolution-scale-slider"
+                className="text-[10px] font-mono font-bold text-cyan-400"
+              >
                 {Math.round((graphics.graphics.resolutionScale ?? 1) * 100)}%
-              </span>
+              </output>
             </div>
             <input
               id="resolution-scale-slider"
@@ -459,6 +634,104 @@ export const SettingsPanel: React.FC<{
           </div>
         </div>
       </section>
+
+      <section>
+        <h3 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-300">
+          <Monitor size={14} className="text-cyan-400" aria-hidden="true" />
+          Interface accessibility
+        </h3>
+        <div className="rounded-xl border border-white/5 bg-slate-800/50 p-3">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <label htmlFor="ui-scale-slider" className="text-xs text-slate-200">
+              Interface scale
+            </label>
+            <output htmlFor="ui-scale-slider" className="font-mono text-xs font-bold text-cyan-300">
+              {Math.round(uiScale * 100)}%
+            </output>
+          </div>
+          <input
+            id="ui-scale-slider"
+            type="range"
+            min="0.9"
+            max="1.5"
+            step="0.05"
+            value={uiScale}
+            onChange={(event) => setUIScale(Number(event.target.value))}
+            aria-valuemin={90}
+            aria-valuemax={150}
+            aria-valuenow={Math.round(uiScale * 100)}
+            aria-valuetext={`${Math.round(uiScale * 100)} percent`}
+            className="w-full cursor-pointer accent-cyan-500"
+          />
+          <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+            Scales controls and text without reducing the 3D render resolution. Browser zoom and
+            operating-system text settings remain supported.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-300">
+          <Download size={14} className="text-emerald-400" aria-hidden="true" />
+          Diagnostic replay
+        </h3>
+        <div className="space-y-3 rounded-xl border border-white/5 bg-slate-800/50 p-3">
+          <p className="text-[11px] leading-relaxed text-slate-400">
+            A bounded ten-minute buffer records simulation frames and important commands with the
+            build identifier and seed. The export excludes credentials and player identity data.
+          </p>
+          <div className="grid grid-cols-2 gap-2 text-center text-xs">
+            <div className="rounded-lg bg-slate-900/60 p-2">
+              <div className="font-mono text-lg text-white">{replayFrames.length}</div>
+              <div className="text-slate-400">frames</div>
+            </div>
+            <div className="rounded-lg bg-slate-900/60 p-2">
+              <div className="font-mono text-lg text-white">{diagnosticCommands.length}</div>
+              <div className="text-slate-400">commands</div>
+            </div>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <button
+              type="button"
+              disabled={replayFrames.length === 0}
+              onClick={() => setReplayMode(true)}
+              className="min-h-10 rounded-lg bg-cyan-600 px-3 text-xs font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Enter replay
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const data = createDiagnosticExport();
+                const blob = new Blob([JSON.stringify(data, null, 2)], {
+                  type: 'application/json',
+                });
+                const url = URL.createObjectURL(blob);
+                const anchor = document.createElement('a');
+                anchor.href = url;
+                anchor.download = `millos-diagnostic-${new Date(data.exportedAt)
+                  .toISOString()
+                  .replaceAll(':', '-')}.json`;
+                anchor.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="min-h-10 rounded-lg bg-emerald-700 px-3 text-xs font-semibold text-white hover:bg-emerald-600"
+            >
+              Export JSON
+            </button>
+            <button
+              type="button"
+              onClick={clearDiagnostics}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-slate-700 px-3 text-xs font-semibold text-slate-100 hover:bg-slate-600"
+            >
+              <Trash2 size={12} aria-hidden="true" />
+              Clear buffer
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <BuildCacheDiagnostics />
 
       {/* Simulation Reset Section */}
       <section>

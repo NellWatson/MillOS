@@ -7,11 +7,14 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useGameSimulationStore } from '../gameSimulationStore';
+import { useSafetyStore } from '../safetyStore';
+import { useAnnouncementsStore } from '../announcementsStore';
 
 describe('GameSimulationStore', () => {
   beforeEach(() => {
     // Reset store to initial state
     useGameSimulationStore.getState().resetGameState();
+    useAnnouncementsStore.getState().clearTranscript();
     vi.useFakeTimers();
   });
 
@@ -411,6 +414,12 @@ describe('GameSimulationStore', () => {
       const state = useGameSimulationStore.getState();
       expect(state.emergencyActive).toBe(true);
       expect(state.emergencyMachineId).toBe('rm-101');
+      expect(useSafetyStore.getState().forkliftEmergencyStop).toBe(true);
+      expect(state.safetyEvents.at(-1)).toMatchObject({
+        kind: 'facility_stop',
+        cause: 'rm-101',
+        stage: 'active',
+      });
     });
 
     it('should resolve emergency', () => {
@@ -421,6 +430,8 @@ describe('GameSimulationStore', () => {
       const state = useGameSimulationStore.getState();
       expect(state.emergencyActive).toBe(false);
       expect(state.emergencyMachineId).toBeNull();
+      expect(useSafetyStore.getState().forkliftEmergencyStop).toBe(false);
+      expect(state.safetyEvents.at(-1)?.stage).toBe('cleared');
     });
 
     it('should start emergency drill', () => {
@@ -433,6 +444,13 @@ describe('GameSimulationStore', () => {
       expect(state.emergencyDrillMode).toBe(true);
       expect(state.drillMetrics.active).toBe(true);
       expect(state.drillMetrics.totalWorkers).toBe(10);
+      expect(useSafetyStore.getState().forkliftEmergencyStop).toBe(true);
+      expect(useAnnouncementsStore.getState().announcements.at(-1)).toMatchObject({
+        message:
+          'This is a simulated fire drill. Evacuate through the nearest safe exit and report to the assembly point. Do not re-enter until the all clear.',
+        channel: 'safety',
+        tone: 'literal',
+      });
     });
 
     it('should end emergency drill', () => {
@@ -443,6 +461,25 @@ describe('GameSimulationStore', () => {
       const state = useGameSimulationStore.getState();
       expect(state.emergencyActive).toBe(false);
       expect(state.emergencyDrillMode).toBe(false);
+      expect(useSafetyStore.getState().forkliftEmergencyStop).toBe(false);
+      expect(state.safetyEvents.at(-1)?.stage).toBe('cleared');
+    });
+
+    it('records operator acknowledgement without clearing the active interlock', () => {
+      useGameSimulationStore.getState().triggerEmergency('E-STOP');
+      const event = useGameSimulationStore.getState().safetyEvents.at(-1);
+      expect(event).toBeDefined();
+
+      useGameSimulationStore
+        .getState()
+        .acknowledgeSafetyEvent(event!.id, 'Cause under investigation');
+
+      const state = useGameSimulationStore.getState();
+      expect(state.emergencyActive).toBe(true);
+      expect(state.safetyEvents.at(-1)).toMatchObject({
+        stage: 'acknowledged',
+        acknowledgementNote: 'Cause under investigation',
+      });
     });
   });
 
@@ -456,6 +493,8 @@ describe('GameSimulationStore', () => {
       expect(crisisState.type).toBe('fire');
       expect(crisisState.severity).toBe('high');
       expect(crisisState.affectedMachineId).toBe('rm-102');
+      expect(useGameSimulationStore.getState().emergencyActive).toBe(true);
+      expect(useSafetyStore.getState().forkliftEmergencyStop).toBe(true);
     });
 
     it('should not allow multiple simultaneous crises', () => {
@@ -474,6 +513,18 @@ describe('GameSimulationStore', () => {
 
       const { crisisState } = useGameSimulationStore.getState();
       expect(crisisState.active).toBe(false);
+      expect(useGameSimulationStore.getState().emergencyActive).toBe(false);
+      expect(useSafetyStore.getState().forkliftEmergencyStop).toBe(false);
+    });
+
+    it('does not assert a facility interlock for a monitored low-severity crisis', () => {
+      useGameSimulationStore.getState().triggerCrisis('inspection', 'low');
+
+      const state = useGameSimulationStore.getState();
+      expect(state.crisisState.active).toBe(true);
+      expect(state.emergencyActive).toBe(false);
+      expect(useSafetyStore.getState().forkliftEmergencyStop).toBe(false);
+      expect(state.safetyEvents.at(-1)?.response).toContain('interlock not required');
     });
 
     it('should support all crisis types', () => {
@@ -512,6 +563,24 @@ describe('GameSimulationStore', () => {
 
       const { celebrations } = useGameSimulationStore.getState();
       expect(celebrations.celebrationActive).toBe(true);
+    });
+
+    it('should recover from legacy persisted celebrations missing runtime fields', () => {
+      const legacyCelebrations = {
+        packerBellEnabled: false,
+        zeroIncidentStreak: 12,
+      } as unknown as ReturnType<typeof useGameSimulationStore.getState>['celebrations'];
+      useGameSimulationStore.setState({ celebrations: legacyCelebrations });
+
+      expect(() =>
+        useGameSimulationStore.getState().triggerCelebration('milestone', { value: 250 })
+      ).not.toThrow();
+
+      const { celebrations } = useGameSimulationStore.getState();
+      expect(celebrations.milestoneQueue).toHaveLength(1);
+      expect(celebrations.lastMilestone).toBe(250);
+      expect(celebrations.packerBellEnabled).toBe(false);
+      expect(celebrations.zeroIncidentStreak).toBe(12);
     });
 
     it('should clear celebration', () => {

@@ -2,7 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Volume2, Shield, AlertTriangle, Package } from 'lucide-react';
 // Use announcementsStore directly - productionStore.announcements is a stale snapshot
-import { useAnnouncementsStore } from '../../stores/announcementsStore';
+import {
+  useAnnouncementsStore,
+  type Announcement,
+  type PAChannel,
+} from '../../stores/announcementsStore';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
+import { useSafetyStore } from '../../stores/safetyStore';
 import { usePAScheduler, useEventAnnouncementScheduler } from './shared';
 import { useMobileDetection } from '../../hooks/useMobileDetection';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
@@ -14,6 +20,40 @@ import { logger } from '../../utils/logger';
 const FALLBACK_TIMEOUT_MS = 10000;
 // How often to check if TTS is done
 const TTS_CHECK_INTERVAL_MS = 300;
+
+const PA_CHANNEL_RANK: Record<PAChannel, number> = {
+  safety: 5,
+  operational: 4,
+  logistics: 3,
+  worker: 2,
+  flavor: 1,
+};
+
+/**
+ * Selects one deterministic PA item without mutating the stored transcript.
+ * Severity wins first, then operational channel, then FIFO order. During a
+ * safety state, any queued safety item becomes the only eligible class so a
+ * routine update cannot obscure evacuation or interlock guidance.
+ */
+export function selectAnnouncementForDisplay(
+  announcements: readonly Announcement[],
+  safetyStateActive: boolean
+): Announcement | null {
+  const active = announcements.filter((announcement) => !announcement.dismissed);
+  const safety = safetyStateActive
+    ? active.filter((announcement) => announcement.channel === 'safety')
+    : [];
+  const eligible = safety.length > 0 ? safety : active;
+  if (eligible.length === 0) return null;
+
+  return [...eligible].sort((left, right) => {
+    const priorityDifference = right.priority - left.priority;
+    if (priorityDifference !== 0) return priorityDifference;
+    const channelDifference = PA_CHANNEL_RANK[right.channel] - PA_CHANNEL_RANK[left.channel];
+    if (channelDifference !== 0) return channelDifference;
+    return left.timestamp.getTime() - right.timestamp.getTime();
+  })[0];
+}
 
 /**
  * Muted State Handling (Multi-Layer Defense)
@@ -28,8 +68,8 @@ const TTS_CHECK_INTERVAL_MS = 300;
  *   Check BOTH isMuted hook AND audioManager.muted directly (synchronous).
  *
  * Layer 3 - TTS GATE (this component):
- *   TTS effect checks both hook and direct property before processing.
- *   Extra guard right before speakAnnouncement call.
+ *   Speech is requested only after a user gesture has initialized and primed
+ *   audio. Captions remain available without audio initialization.
  *
  * Layer 4 - CLEANUP:
  *   Dismiss effect clears any announcements that slip through.
@@ -42,9 +82,16 @@ export const PAAnnouncementSystem: React.FC = () => {
   // productionStore.announcements is a static snapshot from store creation
   const announcements = useAnnouncementsStore((state) => state.announcements);
   const dismissAnnouncement = useAnnouncementsStore((state) => state.dismissAnnouncement);
-  const { isMobile } = useMobileDetection();
+  const captionsEnabled = useAnnouncementsStore((state) => state.captionsEnabled);
+  const setPAContext = useAnnouncementsStore((state) => state.setContext);
+  const { isCompactLayout } = useMobileDetection();
   const isMuted = useAudioMuted();
   const prefersReducedMotion = useReducedMotion();
+  const gameSafetyStateActive = useGameSimulationStore(
+    (state) => state.emergencyActive || state.emergencyDrillMode || state.crisisState.active
+  );
+  const forkliftEmergencyStop = useSafetyStore((state) => state.forkliftEmergencyStop);
+  const safetyOverlayActive = gameSafetyStateActive || forkliftEmergencyStop;
 
   // Track which announcement is currently being displayed
   const [currentAnnouncementId, setCurrentAnnouncementId] = useState<string | null>(null);
@@ -61,15 +108,40 @@ export const PAAnnouncementSystem: React.FC = () => {
     return () => clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    const updateInputContext = () => {
+      const active = document.activeElement;
+      const isUserInput =
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        active instanceof HTMLSelectElement ||
+        (active instanceof HTMLElement && active.isContentEditable);
+      setPAContext({ userInput: isUserInput });
+    };
+    document.addEventListener('focusin', updateInputContext);
+    document.addEventListener('focusout', updateInputContext);
+    return () => {
+      document.removeEventListener('focusin', updateInputContext);
+      document.removeEventListener('focusout', updateInputContext);
+      setPAContext({ userInput: false });
+    };
+  }, [setPAContext]);
+
+  useEffect(() => {
+    setPAContext({ safetyCritical: safetyOverlayActive });
+    return () => setPAContext({ safetyCritical: false });
+  }, [safetyOverlayActive, setPAContext]);
+
   // Schedule periodic announcements
   usePAScheduler();
 
   // Schedule event-triggered announcements (milestones, machine status changes)
   useEventAnnouncementScheduler();
 
-  // Get the next announcement to display (oldest undismissed one - FIFO queue)
+  // Severity-aware queue selection preserves FIFO order only within an equal
+  // priority and channel class.
   const activeAnnouncements = announcements.filter((a) => !a.dismissed);
-  const currentAnnouncement = activeAnnouncements.length > 0 ? activeAnnouncements[0] : null;
+  const currentAnnouncement = selectAnnouncementForDisplay(announcements, safetyOverlayActive);
 
   // When muted, immediately dismiss any active announcement to prevent visual flash
   useEffect(() => {
@@ -78,7 +150,8 @@ export const PAAnnouncementSystem: React.FC = () => {
     }
   }, [isMuted, currentAnnouncement, dismissAnnouncement]);
 
-  // Auto-dismiss: wait for TTS to finish, or fallback after 10s if something goes wrong
+  // Auto-dismiss: wait for accepted TTS work to finish. Without an initialized
+  // speech path, retain the visual caption for the full readable fallback.
   useEffect(() => {
     // Clear any existing timers
     if (fallbackTimerRef.current) {
@@ -96,7 +169,7 @@ export const PAAnnouncementSystem: React.FC = () => {
 
     // Track current announcement and trigger TTS when it changes
     if (currentAnnouncement.id !== currentAnnouncementId) {
-      // Final muted gate before TTS - synchronous check
+      // Final muted gate before TTS, synchronous to avoid a notification race.
       if (audioManager.muted) return;
 
       logger.debug(
@@ -106,29 +179,36 @@ export const PAAnnouncementSystem: React.FC = () => {
       );
       setCurrentAnnouncementId(currentAnnouncement.id);
 
-      // Speak this announcement via TTS
-      logger.debug('[PA] Calling speakAnnouncement...');
-      audioManager.speakAnnouncement(currentAnnouncement.message);
+      if (audioManager.canSpeakAnnouncements) {
+        logger.debug('[PA] Calling speakAnnouncement...');
+        audioManager.speakAnnouncement(currentAnnouncement.message, currentAnnouncement.priority);
+      } else {
+        logger.debug('[PA] Caption only: audio has not been initialized by user interaction');
+      }
     }
 
     const announcementId = currentAnnouncement.id;
 
-    // Poll for TTS completion - dismiss when TTS finishes
-    ttsCheckIntervalRef.current = setInterval(() => {
-      if (!audioManager.isTTSSpeaking) {
-        if (ttsCheckIntervalRef.current) {
-          clearInterval(ttsCheckIntervalRef.current);
-          ttsCheckIntervalRef.current = null;
+    if (audioManager.hasPendingAnnouncementSpeech) {
+      // Poll accepted TTS work until both active speech and its startup queue
+      // are empty. The former is briefly false while a voice is being loaded.
+      ttsCheckIntervalRef.current = setInterval(() => {
+        if (!audioManager.hasPendingAnnouncementSpeech) {
+          if (ttsCheckIntervalRef.current) {
+            clearInterval(ttsCheckIntervalRef.current);
+            ttsCheckIntervalRef.current = null;
+          }
+          if (fallbackTimerRef.current) {
+            clearTimeout(fallbackTimerRef.current);
+            fallbackTimerRef.current = null;
+          }
+          dismissAnnouncement(announcementId);
         }
-        if (fallbackTimerRef.current) {
-          clearTimeout(fallbackTimerRef.current);
-          fallbackTimerRef.current = null;
-        }
-        dismissAnnouncement(announcementId);
-      }
-    }, TTS_CHECK_INTERVAL_MS);
+      }, TTS_CHECK_INTERVAL_MS);
+    }
 
-    // Fallback: dismiss after 10s even if TTS hasn't finished (safety net)
+    // Fallback: a readable caption duration when speech is unavailable, and a
+    // safety net if the platform speech service stalls.
     fallbackTimerRef.current = setTimeout(() => {
       if (ttsCheckIntervalRef.current) {
         clearInterval(ttsCheckIntervalRef.current);
@@ -147,6 +227,7 @@ export const PAAnnouncementSystem: React.FC = () => {
     };
   }, [
     currentAnnouncement?.id,
+    currentAnnouncement?.priority,
     isStartupSuppressed,
     isMuted,
     dismissAnnouncement,
@@ -188,22 +269,29 @@ export const PAAnnouncementSystem: React.FC = () => {
   // Check BOTH hook (reactive) AND direct property (synchronous) to prevent race condition flash
   if (isMuted || audioManager.muted) return <>{liveRegion}</>;
   if (!currentAnnouncement) return <>{liveRegion}</>;
+  if (!captionsEnabled && !isUrgent) return <>{liveRegion}</>;
 
   // Mobile: Show compact ticker
-  if (isMobile) {
+  if (isCompactLayout) {
     return (
       <>
         {liveRegion}
         <div
           className="fixed top-0 left-0 right-0 z-[60] pointer-events-auto"
-          style={{ paddingTop: 'max(4px, env(safe-area-inset-top))' }}
+          data-safety-offset={safetyOverlayActive ? 'true' : 'false'}
+          style={{
+            paddingTop: safetyOverlayActive
+              ? 'max(56px, calc(env(safe-area-inset-top) + 52px))'
+              : 'max(4px, env(safe-area-inset-top))',
+          }}
         >
           <AnimatePresence mode="wait">
             <motion.div
               key={currentAnnouncement.id}
-              initial={{ opacity: 0, y: -20 }}
+              initial={prefersReducedMotion ? false : { opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
+              transition={prefersReducedMotion ? { duration: 0 } : undefined}
               className="mx-2 bg-slate-900/90 backdrop-blur-md rounded-lg border border-slate-700/50 px-3 py-1.5 flex items-center gap-2"
               onClick={() => dismissAnnouncement(currentAnnouncement.id)}
             >
@@ -231,7 +319,7 @@ export const PAAnnouncementSystem: React.FC = () => {
               <button
                 onClick={() => dismissAnnouncement(currentAnnouncement.id)}
                 aria-label="Dismiss announcement"
-                className="flex-shrink-0 w-5 h-5 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+                className="flex-shrink-0 w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
               >
                 <X className="w-3 h-3 text-slate-300" aria-hidden="true" />
               </button>
@@ -246,7 +334,9 @@ export const PAAnnouncementSystem: React.FC = () => {
   const getPriorityStyles = (priority: number) => {
     switch (priority) {
       case 4: // critical
-        return 'bg-red-600/95 border-red-400 text-white animate-pulse';
+        return `bg-red-600/95 border-red-400 text-white ${
+          prefersReducedMotion ? '' : 'animate-pulse'
+        }`;
       case 3: // high
         return 'bg-amber-600/95 border-amber-400 text-white';
       case 2: // medium
@@ -290,14 +380,20 @@ export const PAAnnouncementSystem: React.FC = () => {
   return (
     <>
       {liveRegion}
-      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] pointer-events-auto max-w-[90vw]">
+      <div
+        className={`fixed left-1/2 -translate-x-1/2 z-[60] pointer-events-auto max-w-[90vw] ${
+          safetyOverlayActive ? 'top-20' : 'top-4'
+        }`}
+        data-safety-offset={safetyOverlayActive ? 'true' : 'false'}
+      >
         <AnimatePresence mode="wait">
           {/* Show only ONE announcement at a time */}
           <motion.div
             key={currentAnnouncement.id}
-            initial={{ opacity: 0, y: -50, scale: 0.9 }}
+            initial={prefersReducedMotion ? false : { opacity: 0, y: -50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.9 }}
+            transition={prefersReducedMotion ? { duration: 0 } : undefined}
             className={`flex items-start gap-3.5 px-5 py-4 rounded-xl border-2 backdrop-blur-xl shadow-2xl w-full max-w-lg ${getVoiceStyles(currentAnnouncement.priority)}`}
           >
             <div className="flex-shrink-0 mt-0.5" aria-hidden="true">
@@ -317,7 +413,7 @@ export const PAAnnouncementSystem: React.FC = () => {
             <button
               onClick={() => dismissAnnouncement(currentAnnouncement.id)}
               aria-label="Dismiss announcement"
-              className="flex-shrink-0 w-6 h-6 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
+              className="flex-shrink-0 w-11 h-11 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
             >
               <X className="w-4 h-4" aria-hidden="true" />
             </button>

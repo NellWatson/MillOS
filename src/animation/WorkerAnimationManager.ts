@@ -16,6 +16,7 @@ import {
   WorkerAnimationData,
   WorkerAnimationConfig,
   WorkerPoseRefs,
+  WorkerSecondarySignals,
   LODLevel,
   IdleVariation,
   DEFAULT_ANIMATION_CONFIG,
@@ -23,14 +24,104 @@ import {
 } from './workerAnimationTypes';
 import { AnimationFeatures, GraphicsQuality, getFeaturesForQuality } from './animationFeatures';
 import { positionRegistry, EntityPosition } from '../utils/positionRegistry';
-import { shouldRunThisFrame, getThrottleLevel, incrementGlobalFrame } from '../utils/frameThrottle';
+import { getThrottleLevel } from '../utils/frameThrottle';
 import { calculateGaitPose, getGaitParamsForState } from './gaitAnimation';
+
+const WALK_STRIDE_METRES = 1.35;
+const RUN_STRIDE_METRES = 1.7;
+
+/** Seconds for a turn to converge; a 180 degree flip now takes ~0.4 s. */
+const YAW_SMOOTH_TIME = 0.13;
+
+/**
+ * Shortest-arc exponential damping for an angle. maath's `damp` is already
+ * imported here but does not wrap, so a turn from +3.0 to -3.0 rad would take
+ * the long way round through zero.
+ */
+export function dampAngle(
+  current: number,
+  target: number,
+  smoothTime: number,
+  delta: number
+): number {
+  let diff = target - current;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  if (Math.abs(diff) < 1e-5) return target;
+  const alpha = 1 - Math.exp(-Math.max(0, delta) / Math.max(1e-4, smoothTime));
+  return current + diff * alpha;
+}
+
+/** Shortest-arc signed error between two angles. */
+function angleError(current: number, target: number): number {
+  let diff = target - current;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  return diff;
+}
 
 // Fire drill exit type (matches gameSimulationStore)
 interface FireDrillExit {
   id: string;
   position: { x: number; z: number };
   label: string;
+}
+
+export interface ResolveWorkerLodOptions {
+  quality: GraphicsQuality;
+  current: LODLevel;
+  distance: number;
+  lodDistance: number;
+  config?: Pick<
+    typeof DEFAULT_ANIMATION_CONFIG,
+    'lodHighThreshold' | 'lodMediumThreshold' | 'lodHysteresis'
+  >;
+}
+
+/**
+ * Select the lightweight first-render representation for each graphics tier.
+ * Medium starts with the procedural model so the authored GLBs can stream
+ * after the first useful frame, then ordinary camera-driven LOD immediately
+ * promotes nearby personnel. High and Ultra retain eager close-detail models.
+ */
+export function getInitialWorkerLod(quality: GraphicsQuality): LODLevel {
+  if (quality === 'low') return 'low';
+  if (quality === 'medium') return 'medium';
+  return 'high';
+}
+
+/**
+ * Resolve a worker LOD with asymmetric thresholds so personnel do not pop
+ * between models near a boundary. Low remains a deliberate billboard preset;
+ * Medium and above may show the close model when the person is actually near.
+ */
+export function resolveWorkerLod({
+  quality,
+  current,
+  distance,
+  lodDistance,
+  config = DEFAULT_ANIMATION_CONFIG,
+}: ResolveWorkerLodOptions): LODLevel {
+  if (quality === 'low') return 'low';
+
+  const safeDistance = Number.isFinite(distance) ? Math.max(0, distance) : Number.POSITIVE_INFINITY;
+  const safeLodDistance = Number.isFinite(lodDistance) && lodDistance > 0 ? lodDistance : 1;
+  const highEntry = safeLodDistance * Math.max(0, config.lodHighThreshold - config.lodHysteresis);
+  const highExit = safeLodDistance * (config.lodHighThreshold + config.lodHysteresis);
+  const mediumEntry =
+    safeLodDistance *
+    Math.max(config.lodHighThreshold, config.lodMediumThreshold - config.lodHysteresis);
+  const mediumExit = safeLodDistance * (config.lodMediumThreshold + config.lodHysteresis);
+
+  if (current === 'high') {
+    return safeDistance > highExit ? 'medium' : 'high';
+  }
+  if (current === 'medium') {
+    if (safeDistance < highEntry) return 'high';
+    if (safeDistance > mediumExit) return 'low';
+    return 'medium';
+  }
+  return safeDistance < mediumEntry ? 'medium' : 'low';
 }
 
 /**
@@ -42,12 +133,15 @@ export class WorkerAnimationManager {
   private config = DEFAULT_ANIMATION_CONFIG;
   private features: AnimationFeatures;
   private frameCount = 0;
+  private pendingDelta = 0;
   private isTabVisible = true;
   private quality: GraphicsQuality = 'medium';
   private workerLodDistance = 100;
+  private simulationActive = true;
 
   // Fire drill state (injected from store)
   private emergencyDrillMode = false;
+  private safetyHoldActive = false;
   private getNearestExitFn: ((x: number, z: number) => FireDrillExit) | null = null;
   private markWorkerEvacuatedFn: ((id: string) => void) | null = null;
 
@@ -60,16 +154,27 @@ export class WorkerAnimationManager {
   }
 
   /**
-   * Register a worker with the manager (call once on mount)
+   * Register a worker with the manager (call once on mount).
+   *
+   * `signals` is optional so existing two-argument callers (and the personnel
+   * contract tests) keep working; when supplied it is the React-owned record
+   * WorkerModel reads, and the manager mutates it in place.
    */
-  register(config: WorkerAnimationConfig, refs: WorkerPoseRefs): () => void {
+  register(
+    config: WorkerAnimationConfig,
+    refs: WorkerPoseRefs,
+    signals?: WorkerSecondarySignals
+  ): () => void {
     // New worker - create fresh animation data
     const data = createWorkerAnimationData(config);
+    data.lodLevel = getInitialWorkerLod(this.quality);
     data.refs = refs;
+    if (signals) data.secondary = signals;
 
     // Set initial position on the group
     if (refs.group) {
       refs.group.position.set(...config.position);
+      refs.group.rotation.y = data.currentYaw;
     }
 
     this.workers.set(config.id, data);
@@ -132,7 +237,9 @@ export class WorkerAnimationManager {
     isTabVisible: boolean,
     quality: GraphicsQuality,
     workerLodDistance: number,
+    simulationActive: boolean,
     emergencyDrillMode: boolean,
+    safetyHoldActive: boolean,
     getNearestExit: (x: number, z: number) => FireDrillExit,
     markWorkerEvacuated: (id: string) => void
   ): void {
@@ -144,7 +251,9 @@ export class WorkerAnimationManager {
     }
 
     this.workerLodDistance = workerLodDistance;
+    this.simulationActive = simulationActive;
     this.emergencyDrillMode = emergencyDrillMode;
+    this.safetyHoldActive = safetyHoldActive;
     this.getNearestExitFn = getNearestExit;
     this.markWorkerEvacuatedFn = markWorkerEvacuated;
   }
@@ -176,15 +285,17 @@ export class WorkerAnimationManager {
     // Skip if tab not visible
     if (!this.isTabVisible) return;
 
-    // Frame throttling based on quality
+    // Throttle against this manager's own frame clock. The former shared
+    // counter could stall forever when no other mounted system advanced it.
+    this.pendingDelta += Math.min(delta, 0.1);
+    this.frameCount += 1;
     const throttle = getThrottleLevel(this.quality);
-    if (!shouldRunThisFrame(throttle)) {
-      this.frameCount++;
-      return;
-    }
+    if (this.frameCount % throttle !== 0) return;
 
-    // Cap delta to prevent large jumps
-    const cappedDelta = Math.min(delta, 0.1);
+    // Preserve real movement speed across skipped render frames while keeping
+    // a hard bound for tab resumes and debugger stalls.
+    const cappedDelta = Math.min(this.pendingDelta, 0.25);
+    this.pendingDelta = 0;
 
     // Process all workers
     this.workers.forEach((data) => {
@@ -195,8 +306,30 @@ export class WorkerAnimationManager {
         this.updateLOD(data, camera);
       }
 
-      // 2. Update position/movement
+      if (!this.simulationActive && !this.emergencyDrillMode) {
+        data.refs.group.position.y = 0;
+        data.secondary.groundSpeed = 0;
+        data.secondary.gait = 'idle';
+        positionRegistry.register(
+          data.id,
+          data.refs.group.position.x,
+          data.refs.group.position.z,
+          'worker'
+        );
+        return;
+      }
+
+      // 2. Update position/movement. Sample before and after so the authored
+      // model gets a real world ground speed instead of re-deriving it from
+      // per-frame world deltas, which spike by the throttle factor because this
+      // manager only advances every 2nd (high) or 3rd (medium) render frame.
+      const previousX = data.refs.group.position.x;
+      const previousZ = data.refs.group.position.z;
       this.updatePosition(data, cappedDelta);
+      const movedX = data.refs.group.position.x - previousX;
+      const movedZ = data.refs.group.position.z - previousZ;
+      data.secondary.groundSpeed = cappedDelta > 0 ? Math.hypot(movedX, movedZ) / cappedDelta : 0;
+      data.stateTransition = Math.min(1, data.stateTransition + cappedDelta * 4);
 
       // 3. Update limb animations (if not billboard LOD)
       if (data.lodLevel !== 'low') {
@@ -209,6 +342,9 @@ export class WorkerAnimationManager {
         this.updateTier3Features(data, cappedDelta);
       }
 
+      // 4b. Publish the secondary-animation channel for the authored model.
+      this.updateSecondarySignals(data, cappedDelta);
+
       // 5. Register position in registry
       positionRegistry.register(
         data.id,
@@ -217,9 +353,6 @@ export class WorkerAnimationManager {
         'worker'
       );
     });
-
-    this.frameCount++;
-    incrementGlobalFrame();
   }
 
   // =====================
@@ -233,6 +366,13 @@ export class WorkerAnimationManager {
     // Fire drill evacuation (highest priority)
     if (this.emergencyDrillMode && !data.hasEvacuated) {
       this.updateEvacuation(data, delta);
+      return;
+    }
+
+    if (this.safetyHoldActive) {
+      this.setAnimationState(data, 'idle');
+      group.position.y = 0;
+      data.isEvading = false;
       return;
     }
 
@@ -266,6 +406,10 @@ export class WorkerAnimationManager {
       }
     }
 
+    // Resolve the heading before moving, so the turn-in slowdown below sees the
+    // boundary flip on the same tick it happens rather than one tick later.
+    data.targetYaw = data.direction > 0 ? 0 : Math.PI;
+
     // Update animation state based on status
     this.updateAnimationState(data, delta);
 
@@ -273,6 +417,9 @@ export class WorkerAnimationManager {
     switch (data.currentState) {
       case 'idle':
         this.updateIdlePosition(data, delta);
+        break;
+      case 'working':
+        data.workPhase += delta;
         break;
       case 'walking':
         this.updateWalkingPosition(data, delta);
@@ -285,12 +432,23 @@ export class WorkerAnimationManager {
         break;
     }
 
-    // Apply bob height
-    const bobHeight = data.currentState === 'idle' ? 0 : Math.abs(Math.sin(data.walkCycle)) * 0.025;
+    // Apply bob height. The authored GLB carries its own 7.1 cm vertical Body
+    // travel in every locomotion clip, so adding a second oscillator at a
+    // different frequency reads as swimming and breaks foot contact. Only the
+    // procedural LODs, which have no baked bob, get it.
+    const isMoving =
+      data.currentState === 'walking' ||
+      data.currentState === 'running' ||
+      data.currentState === 'evacuating';
+    const bobHeight =
+      isMoving && data.lodLevel !== 'high' ? Math.abs(Math.sin(data.walkCycle)) * 0.018 : 0;
     group.position.y = bobHeight;
 
-    // Update rotation based on direction
-    group.rotation.y = data.direction > 0 ? 0 : Math.PI;
+    // Face the patrol heading, damped. This used to be a discrete assignment,
+    // so every boundary flip teleported the worker through a half turn in one
+    // frame while the walk clip kept cycling.
+    data.currentYaw = dampAngle(data.currentYaw, data.targetYaw, YAW_SMOOTH_TIME, delta);
+    group.rotation.y = data.currentYaw;
 
     // Boundary check - turn around at edges
     if (group.position.z > 25 || group.position.z < -25) {
@@ -329,12 +487,14 @@ export class WorkerAnimationManager {
     group.position.x += nx * RUN_SPEED * delta;
     group.position.z += nz * RUN_SPEED * delta;
 
-    // Face direction of movement
-    group.rotation.y = Math.atan2(nx, nz);
+    // Face direction of movement (damped, same as the patrol heading)
+    data.targetYaw = Math.atan2(nx, nz);
+    data.currentYaw = dampAngle(data.currentYaw, data.targetYaw, YAW_SMOOTH_TIME, delta);
+    group.rotation.y = data.currentYaw;
 
     // Update walk cycle for running animation
-    data.walkCycle += delta * this.config.runSpeed * 1.8;
-    data.currentState = 'running';
+    data.walkCycle += ((RUN_SPEED * delta) / RUN_STRIDE_METRES) * Math.PI * 2;
+    this.setAnimationState(data, 'running');
   }
 
   private checkForkliftProximity(data: WorkerAnimationData): void {
@@ -414,33 +574,54 @@ export class WorkerAnimationManager {
       group.position.x += Math.sign(diffX) * this.config.evasionSpeed * delta;
     }
 
-    // Slow walk cycle while evading
-    data.walkCycle += delta * 2;
+    const evasionDistance = this.config.evasionSpeed * delta;
+    data.walkCycle += (evasionDistance / WALK_STRIDE_METRES) * Math.PI * 2;
   }
 
   private updateAnimationState(data: WorkerAnimationData, delta: number): void {
-    // Priority: sitting > running > walking > idle
     if (data.status === 'break') {
-      data.currentState = 'sitting';
+      this.setAnimationState(data, 'sitting');
       return;
     }
 
-    // Check for running (Safety Officers responding to alerts, etc.)
-    // For now, default to walking/idle behavior
-    if (data.currentState === 'idle') {
-      data.idleTimer -= delta;
-      if (data.idleTimer <= 0) {
-        data.currentState = 'walking';
-      }
-    } else if (data.currentState === 'walking') {
-      // Random chance to pause and idle for 2-6 seconds. (Previously the
-      // pause length was written into idleDuration — a dead field nothing
-      // read — so idle stretches ran on a stale leftover idleTimer instead.)
-      if (Math.random() < 0.001) {
-        data.currentState = 'idle';
-        data.idleTimer = Math.random() * 4 + 2;
-      }
+    if (data.status === 'responding') {
+      this.setAnimationState(data, 'running');
+      return;
     }
+
+    if (data.status === 'idle') {
+      this.setAnimationState(data, 'idle');
+      return;
+    }
+
+    if (data.currentState !== 'walking' && data.currentState !== 'working') {
+      this.setAnimationState(data, 'walking');
+      data.workTimer = this.getWorkStateDuration(data, false);
+    }
+
+    data.workTimer -= delta;
+    if (data.workTimer <= 0) {
+      const startWorking = data.currentState !== 'working';
+      this.setAnimationState(data, startWorking ? 'working' : 'walking');
+      data.workTimer = this.getWorkStateDuration(data, startWorking);
+    }
+  }
+
+  private setAnimationState(
+    data: WorkerAnimationData,
+    nextState: WorkerAnimationData['currentState']
+  ): void {
+    if (data.currentState === nextState) return;
+    data.previousState = data.currentState;
+    data.currentState = nextState;
+    data.stateTransition = 0;
+  }
+
+  private getWorkStateDuration(data: WorkerAnimationData, working: boolean): number {
+    const identityOffset = data.id
+      .split('')
+      .reduce((total, character) => total + character.charCodeAt(0), 0);
+    return working ? 5 + (identityOffset % 4) : 8 + (identityOffset % 6);
   }
 
   private updateIdlePosition(data: WorkerAnimationData, delta: number): void {
@@ -448,20 +629,32 @@ export class WorkerAnimationManager {
     data.walkCycle += delta * 0.5;
   }
 
+  /**
+   * Scale forward travel down while the body is still swinging round to face
+   * the new heading, so a turn reads as a turn instead of a sideways slide.
+   */
+  private turnFactor(data: WorkerAnimationData): number {
+    const error = Math.abs(angleError(data.currentYaw, data.targetYaw));
+    if (error < 0.25) return 1;
+    return Math.max(0.25, 1 - error / Math.PI);
+  }
+
   private updateWalkingPosition(data: WorkerAnimationData, delta: number): void {
     if (!data.refs?.group) return;
 
     const group = data.refs.group;
-    group.position.z += data.speed * delta * data.direction;
-    data.walkCycle += delta * this.config.walkSpeed;
+    const distance = data.speed * this.turnFactor(data) * delta;
+    group.position.z += distance * data.direction;
+    data.walkCycle += (distance / WALK_STRIDE_METRES) * Math.PI * 2;
   }
 
   private updateRunningPosition(data: WorkerAnimationData, delta: number): void {
     if (!data.refs?.group) return;
 
     const group = data.refs.group;
-    group.position.z += data.speed * 1.5 * delta * data.direction;
-    data.walkCycle += delta * this.config.runSpeed;
+    const distance = data.speed * 1.5 * this.turnFactor(data) * delta;
+    group.position.z += distance * data.direction;
+    data.walkCycle += (distance / RUN_STRIDE_METRES) * Math.PI * 2;
   }
 
   // =====================
@@ -484,6 +677,11 @@ export class WorkerAnimationManager {
     if (isWaving && this.features.waving) {
       this.applyWavingAnimation(data, refs, delta);
       // Continue with normal lower body gait below
+    }
+
+    if (currentState === 'working' && !isWaving) {
+      this.applyWorkingPose(data, refs, delta);
+      return;
     }
 
     // =====================
@@ -557,6 +755,93 @@ export class WorkerAnimationManager {
       // Combine gait head bob with manual look target
       damp(refs.head.rotation, 'x', pose.headRotation.x, smoothing, delta);
       damp(refs.head.rotation, 'y', data.headTarget, smoothing, delta);
+    }
+  }
+
+  private applyWorkingPose(data: WorkerAnimationData, refs: WorkerPoseRefs, delta: number): void {
+    data.workPhase += delta * 2.4;
+    const motion = Math.sin(data.workPhase);
+    let leftArmX = -0.45;
+    let rightArmX = -0.35;
+    let leftArmZ = 0.08;
+    let rightArmZ = -0.08;
+    let torsoX = 0.03;
+    let headX = 0;
+    let headY = motion * 0.08;
+
+    switch (data.workAction) {
+      case 'supervise':
+        leftArmX = -0.78;
+        rightArmX = -0.22;
+        headY = motion * 0.18;
+        break;
+      case 'inspect':
+        leftArmX = -0.95;
+        rightArmX = -0.72;
+        torsoX = 0.08;
+        headX = 0.12;
+        headY = motion * 0.05;
+        break;
+      case 'operate':
+        leftArmX = -1.05 + motion * 0.04;
+        rightArmX = -1.05 - motion * 0.04;
+        leftArmZ = 0.16;
+        rightArmZ = -0.16;
+        torsoX = 0.05;
+        break;
+      case 'sample':
+        leftArmX = -0.92;
+        rightArmX = -1.18 + motion * 0.12;
+        leftArmZ = 0.14;
+        rightArmZ = -0.22;
+        torsoX = 0.12;
+        headX = 0.14;
+        break;
+      case 'repair':
+        leftArmX = -0.82;
+        rightArmX = -1.28 + motion * 0.22;
+        leftArmZ = 0.16;
+        rightArmZ = -0.28;
+        torsoX = 0.18;
+        headX = 0.16;
+        break;
+      case 'radio':
+        leftArmX = -0.35;
+        rightArmX = -2.05;
+        rightArmZ = -0.42;
+        headY = 0.12 + motion * 0.04;
+        break;
+      case 'none':
+      default:
+        break;
+    }
+
+    if (refs.leftLeg) {
+      damp(refs.leftLeg.rotation, 'x', 0, 0.16, delta);
+    }
+    if (refs.rightLeg) {
+      damp(refs.rightLeg.rotation, 'x', 0, 0.16, delta);
+    }
+    if (refs.leftArm) {
+      damp(refs.leftArm.rotation, 'x', leftArmX, 0.16, delta);
+      damp(refs.leftArm.rotation, 'z', leftArmZ, 0.16, delta);
+    }
+    if (refs.rightArm) {
+      damp(refs.rightArm.rotation, 'x', rightArmX, 0.16, delta);
+      damp(refs.rightArm.rotation, 'z', rightArmZ, 0.16, delta);
+    }
+    if (refs.torso) {
+      damp(refs.torso.rotation, 'x', torsoX, 0.18, delta);
+      damp(refs.torso.rotation, 'y', 0, 0.18, delta);
+      damp(refs.torso.rotation, 'z', 0, 0.18, delta);
+    }
+    if (refs.hips) {
+      damp(refs.hips.rotation, 'y', 0, 0.18, delta);
+      damp(refs.hips.position, 'x', 0, 0.18, delta);
+    }
+    if (refs.head) {
+      damp(refs.head.rotation, 'x', headX, 0.16, delta);
+      damp(refs.head.rotation, 'y', headY, 0.16, delta);
     }
   }
 
@@ -758,6 +1043,72 @@ export class WorkerAnimationManager {
   }
 
   // =====================
+  // SECONDARY ANIMATION CHANNEL (authored skinned model)
+  // =====================
+
+  /**
+   * Publish the behaviour layer for WorkerModel.
+   *
+   * Everything below already existed as a `damp()` write into `refs.*`, which
+   * is null whenever the authored GLB is mounted — so at the highest LOD the
+   * whole Tier 2/3 behaviour set was a silent no-op. These are the same
+   * behaviours expressed as joint-agnostic numbers that the skinned model
+   * applies to real bones after its mixer has run.
+   */
+  private updateSecondarySignals(data: WorkerAnimationData, delta: number): void {
+    const signals = data.secondary;
+
+    signals.gait =
+      data.currentState === 'running' || data.currentState === 'evacuating'
+        ? 'run'
+        : data.currentState === 'walking'
+          ? 'walk'
+          : 'idle';
+
+    // Startle and idle blends, so nothing snaps on a state edge.
+    const startleTarget = data.isStartled && this.features.startledReaction ? 1 : 0;
+    data.startleBlend += (startleTarget - data.startleBlend) * Math.min(1, delta * 9);
+    const idleTarget = data.currentState === 'idle' || data.currentState === 'working' ? 1 : 0;
+    data.idleBlend += (idleTarget - data.idleBlend) * Math.min(1, delta * 3.5);
+
+    // Head: look at whatever the manager last flagged, minus a fatigue droop,
+    // minus a startle recoil. Clamped well inside cervical range.
+    const lookYaw = THREE.MathUtils.clamp(data.headTarget, -1.05, 1.05);
+    signals.headYaw += (lookYaw - signals.headYaw) * Math.min(1, delta * 6);
+    const droop =
+      this.features.fatigue && data.currentState === 'idle'
+        ? Math.min(0.2, data.fatigueLevel * 0.18)
+        : 0;
+    const headTarget = droop - data.startleBlend * 0.24;
+    signals.headPitch += (headTarget - signals.headPitch) * Math.min(1, delta * 5);
+
+    // Chest: fatigue slouch forward, startle lean back.
+    const slouch =
+      this.features.fatigue && data.fatigueLevel > 0.3 ? (data.fatigueLevel - 0.3) * 0.16 : 0;
+    const chestTarget = slouch - data.startleBlend * 0.13;
+    signals.chestPitch += (chestTarget - signals.chestPitch) * Math.min(1, delta * 5);
+
+    // Hips carry no animation channel in any of the nine clips, so these are
+    // absolute writes: an asymmetric weight-bearing stance while standing, that
+    // fades out completely once the person is walking (otherwise it would
+    // persist through locomotion and fight the Torso's own run swing).
+    const stance = data.stanceSign * data.idleBlend;
+    const sway = Math.sin(data.walkCycle * 0.45) * 0.22;
+    signals.hipRoll = stance * 0.052 * (0.82 + sway);
+    signals.hipYaw = stance * 0.038;
+    const shifting =
+      this.features.idleVariations && data.idleVariation === 'shifting'
+        ? Math.sin(data.walkCycle * 0.8) * 0.014
+        : 0;
+    signals.hipShiftX = stance * 0.021 + shifting * data.idleBlend;
+
+    // Acknowledgement wave after a forklift has passed.
+    const waveTarget = data.isWaving && this.features.waving ? 1 : 0;
+    signals.waveAmount += (waveTarget - signals.waveAmount) * Math.min(1, delta * 7);
+    signals.wavePhase = data.wavePhase;
+  }
+
+  // =====================
   // LOD MANAGEMENT
   // =====================
 
@@ -767,33 +1118,13 @@ export class WorkerAnimationManager {
     const distance = camera.position.distanceTo(data.refs.group.position);
     data.distanceToCamera = distance;
 
-    const lodDist = this.workerLodDistance;
-    let newLod = data.lodLevel;
-
-    // With hysteresis to prevent flickering
-    const hysteresis = this.config.lodHysteresis;
-
-    if (
-      data.lodLevel === 'high' &&
-      distance > lodDist * (this.config.lodHighThreshold + hysteresis)
-    ) {
-      newLod = 'medium';
-    } else if (
-      data.lodLevel === 'medium' &&
-      distance < lodDist * (this.config.lodHighThreshold - hysteresis)
-    ) {
-      newLod = 'high';
-    } else if (
-      data.lodLevel === 'medium' &&
-      distance > lodDist * (this.config.lodMediumThreshold + hysteresis)
-    ) {
-      newLod = 'low';
-    } else if (
-      data.lodLevel === 'low' &&
-      distance < lodDist * (this.config.lodMediumThreshold - hysteresis)
-    ) {
-      newLod = 'medium';
-    }
+    const newLod = resolveWorkerLod({
+      quality: this.quality,
+      current: data.lodLevel,
+      distance,
+      lodDistance: this.workerLodDistance,
+      config: this.config,
+    });
 
     // Notify if LOD changed
     if (newLod !== data.lodLevel) {
@@ -817,7 +1148,9 @@ export function useWorkerAnimationManager(
   isTabVisible: boolean,
   quality: GraphicsQuality,
   workerLodDistance: number,
+  simulationActive: boolean,
   emergencyDrillMode: boolean,
+  safetyHoldActive: boolean,
   getNearestExit: (x: number, z: number) => FireDrillExit,
   markWorkerEvacuated: (id: string) => void
 ) {
@@ -835,7 +1168,9 @@ export function useWorkerAnimationManager(
     isTabVisible,
     quality,
     workerLodDistance,
+    simulationActive,
     emergencyDrillMode,
+    safetyHoldActive,
     getNearestExit,
     markWorkerEvacuated
   );
@@ -854,8 +1189,8 @@ export function useWorkerAnimationManager(
 
   // Memoized callbacks
   const register = useCallback(
-    (config: WorkerAnimationConfig, refs: WorkerPoseRefs) => {
-      return manager.register(config, refs);
+    (config: WorkerAnimationConfig, refs: WorkerPoseRefs, signals?: WorkerSecondarySignals) => {
+      return manager.register(config, refs, signals);
     },
     [manager]
   );

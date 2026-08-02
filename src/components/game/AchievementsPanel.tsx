@@ -159,7 +159,7 @@ export const AchievementsPanel: React.FC<{ onClose: () => void }> = ({ onClose }
             </button>
             <button
               onClick={() => setConfirmReset(false)}
-              className="px-2 py-1 text-xs text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors"
+              className="px-2 py-1 text-xs text-white/70 hover:text-white hover:bg-slate-700 rounded transition-colors"
               title="Cancel reset"
             >
               Cancel
@@ -168,7 +168,7 @@ export const AchievementsPanel: React.FC<{ onClose: () => void }> = ({ onClose }
         ) : (
           <button
             onClick={() => setConfirmReset(true)}
-            className="flex items-center gap-1.5 px-2 py-1 text-xs text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+            className="flex items-center gap-1.5 px-2 py-1 text-xs text-white/70 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors"
             title="Reset all achievements"
           >
             <RotateCcw className="w-3 h-3" />

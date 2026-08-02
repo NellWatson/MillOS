@@ -36,6 +36,12 @@ const sharedToolGeometries = {
     ring: new THREE.TorusGeometry(0.035, 0.006, 8, 24),
     lens: new THREE.CircleGeometry(0.032, 24),
   },
+  sampleKit: {
+    tray: new THREE.BoxGeometry(0.16, 0.025, 0.1),
+    vial: new THREE.CylinderGeometry(0.012, 0.012, 0.07, 10),
+    cap: new THREE.CylinderGeometry(0.014, 0.014, 0.012, 10),
+    scoop: new THREE.BoxGeometry(0.025, 0.09, 0.01),
+  },
 };
 
 const Clipboard: React.FC = React.memo(() => (
@@ -143,6 +149,35 @@ const Magnifier: React.FC = React.memo(() => (
 ));
 Magnifier.displayName = 'Magnifier';
 
+const SampleKit: React.FC = React.memo(() => (
+  <group position={[0.07, -0.02, 0.05]} rotation={[0.22, 0.1, 0.08]}>
+    <mesh
+      geometry={sharedToolGeometries.sampleKit.tray}
+      material={SHARED_WORKER_MATERIALS.offWhite}
+    />
+    {[-0.045, 0, 0.045].map((x) => (
+      <group key={x} position={[x, 0.045, 0]}>
+        <mesh
+          geometry={sharedToolGeometries.sampleKit.vial}
+          material={SHARED_WORKER_MATERIALS.sampleGlass}
+        />
+        <mesh
+          position={[0, 0.041, 0]}
+          geometry={sharedToolGeometries.sampleKit.cap}
+          material={SHARED_WORKER_MATERIALS.sampleCap}
+        />
+      </group>
+    ))}
+    <mesh
+      position={[0.07, 0.04, 0]}
+      rotation={[0, 0, -0.35]}
+      geometry={sharedToolGeometries.sampleKit.scoop}
+      material={SHARED_WORKER_MATERIALS.chrome}
+    />
+  </group>
+));
+SampleKit.displayName = 'SampleKit';
+
 export const ToolAccessory: React.FC<{ tool: ToolType }> = React.memo(({ tool }) => {
   switch (tool) {
     case 'clipboard':
@@ -155,6 +190,8 @@ export const ToolAccessory: React.FC<{ tool: ToolType }> = React.memo(({ tool })
       return <Wrench />;
     case 'magnifier':
       return <Magnifier />;
+    case 'sample-kit':
+      return <SampleKit />;
     default:
       return null;
   }

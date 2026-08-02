@@ -91,19 +91,19 @@ const getPanelIcon = (mode: DockMode) => {
 const getPanelTitle = (mode: DockMode) => {
   switch (mode) {
     case 'overview':
-      return 'Overview';
+      return 'Mill Overview';
     case 'ai':
-      return 'AI Command';
+      return 'AI Partner';
     case 'scada':
-      return 'SCADA System';
+      return 'Simulated SCADA';
     case 'workforce':
       return 'Workforce';
     case 'safety':
-      return 'Safety';
+      return 'Safety & Emergency';
     case 'settings':
       return 'Settings';
     case 'management':
-      return 'Management';
+      return 'Bilateral Autonomy';
     case 'multiplayer':
       return 'Multiplayer';
     default:
@@ -187,7 +187,7 @@ const OverviewContent: React.FC = () => {
             aria-label="Pause simulation"
             aria-pressed={gameSpeed === 0}
             className={`flex-1 py-1.5 rounded text-[10px] font-bold flex items-center justify-center gap-1 ${
-              gameSpeed === 0 ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-400'
+              gameSpeed === 0 ? 'bg-orange-700 text-white' : 'bg-slate-700 text-white/70'
             }`}
           >
             <Pause className="w-3 h-3" />
@@ -195,7 +195,7 @@ const OverviewContent: React.FC = () => {
           <button
             onClick={() => setGameSpeed(180)}
             className={`flex-1 py-1.5 rounded text-[10px] font-bold flex items-center justify-center gap-1 ${
-              gameSpeed === 180 ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-400'
+              gameSpeed === 180 ? 'bg-orange-700 text-white' : 'bg-slate-700 text-white/70'
             }`}
           >
             <Play className="w-3 h-3" />
@@ -204,7 +204,7 @@ const OverviewContent: React.FC = () => {
           <button
             onClick={() => setGameSpeed(1800)}
             className={`flex-1 py-1.5 rounded text-[10px] font-bold flex items-center justify-center gap-1 ${
-              gameSpeed === 1800 ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-400'
+              gameSpeed === 1800 ? 'bg-orange-700 text-white' : 'bg-slate-700 text-white/70'
             }`}
           >
             <FastForward className="w-3 h-3" />
@@ -213,7 +213,7 @@ const OverviewContent: React.FC = () => {
           <button
             onClick={() => setGameSpeed(10800)}
             className={`flex-1 py-1.5 rounded text-[10px] font-bold flex items-center justify-center gap-1 ${
-              gameSpeed === 10800 ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-400'
+              gameSpeed === 10800 ? 'bg-orange-700 text-white' : 'bg-slate-700 text-white/70'
             }`}
           >
             <FastForward className="w-3 h-3" />
@@ -480,7 +480,7 @@ const SettingsContent: React.FC = () => {
   );
 };
 
-// AI Command panel content
+// AI Partner panel content
 const AIContent: React.FC = () => {
   const aiDecisions = useProductionStore((s) => s.aiDecisions);
   const recentDecisions = aiDecisions.slice(0, 5);
@@ -526,7 +526,7 @@ const AIContent: React.FC = () => {
   );
 };
 
-// SCADA System panel content
+// Simulated SCADA panel content
 const SCADAContent: React.FC = () => {
   const metrics = useProductionStore((s) => s.metrics);
   const scadaLive = useProductionStore((s) => s.scadaLive);
@@ -560,7 +560,7 @@ const SCADAContent: React.FC = () => {
           className={`flex items-center gap-1 text-xs ${scadaLive ? 'text-green-400' : 'text-slate-500'}`}
         >
           {scadaLive ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-          <span>{scadaLive ? 'Live' : 'Offline'}</span>
+          <span>{scadaLive ? 'Telemetry on' : 'Telemetry off'}</span>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -638,6 +638,13 @@ const WorkforceContent: React.FC = () => {
 };
 
 // Multiplayer panel content
+const MultiplayerTrustNotice: React.FC = () => (
+  <p className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-2 text-[11px] leading-relaxed text-amber-100">
+    Trusted friends, experimental. The host owns the simulation state. Guest sessions end if the
+    host leaves.
+  </p>
+);
+
 const MultiplayerContent: React.FC = () => {
   const connectionState = useMultiplayerStore((s) => s.connectionState);
   const roomCode = useMultiplayerStore((s) => s.roomCode);
@@ -704,6 +711,7 @@ const MultiplayerContent: React.FC = () => {
           <Users className="w-4 h-4" />
           <span>Multiplayer</span>
         </div>
+        <MultiplayerTrustNotice />
         <button
           onClick={createRoom}
           className="w-full p-3 bg-cyan-600 hover:bg-cyan-500 rounded-lg flex items-center justify-center gap-2 text-white font-medium transition-colors"
@@ -727,6 +735,7 @@ const MultiplayerContent: React.FC = () => {
           <Users className="w-4 h-4" />
           <span>Multiplayer</span>
         </div>
+        <MultiplayerTrustNotice />
         <div className="bg-slate-800/50 rounded-lg p-3 text-center">
           <div className="flex items-center justify-center gap-2 text-yellow-400 text-xs">
             <Wifi className="w-4 h-4 animate-pulse" />
@@ -756,6 +765,7 @@ const MultiplayerContent: React.FC = () => {
           )}
         </button>
       </div>
+      <MultiplayerTrustNotice />
 
       <div className="bg-slate-800/50 rounded-lg p-2">
         <div className="text-xs text-slate-400 mb-2">
@@ -937,6 +947,7 @@ const getPanelContent = (mode: DockMode | null) => {
  * Shows simplified versions of sidebar content
  */
 export const MobilePanel: React.FC<MobilePanelProps> = ({ isVisible, content, onClose }) => {
+  const panelRef = React.useRef<HTMLElement>(null);
   const closeButtonRef = React.useRef<HTMLButtonElement>(null);
 
   // Modal behavior: Escape to dismiss, move focus into the panel on open,
@@ -951,6 +962,29 @@ export const MobilePanel: React.FC<MobilePanelProps> = ({ isVisible, content, on
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !panelRef.current) return;
+
+      const focusable = Array.from(
+        panelRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => !element.hidden && element.getClientRects().length > 0);
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) {
+        e.preventDefault();
+        closeButtonRef.current?.focus();
+      } else if (
+        e.shiftKey &&
+        (document.activeElement === first || !panelRef.current.contains(document.activeElement))
+      ) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -976,6 +1010,7 @@ export const MobilePanel: React.FC<MobilePanelProps> = ({ isVisible, content, on
 
           {/* Panel */}
           <motion.aside
+            ref={panelRef}
             variants={panelVariants}
             initial="hidden"
             animate="visible"

@@ -73,6 +73,9 @@ export const PhysicsWorker: React.FC<PhysicsWorkerProps> = ({
   // ExitZoneSensors.tsx.
   const drillActive = useGameSimulationStore((s) => s.drillMetrics.active);
   const emergencyDrillMode = useGameSimulationStore((s) => s.emergencyDrillMode);
+  const facilitySafetyHold = useGameSimulationStore(
+    (s) => s.emergencyActive && !s.emergencyDrillMode
+  );
   const markWorkerEvacuated = useGameSimulationStore((s) => s.markWorkerEvacuated);
   const isTabVisible = useGameSimulationStore((s) => s.isTabVisible);
 
@@ -171,6 +174,12 @@ export const PhysicsWorker: React.FC<PhysicsWorkerProps> = ({
         markWorkerEvacuated(data.id);
       }
 
+      updatePosition();
+      return;
+    }
+
+    if (facilitySafetyHold) {
+      rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
       updatePosition();
       return;
     }

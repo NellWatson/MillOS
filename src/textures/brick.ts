@@ -6,7 +6,14 @@
  */
 
 import * as THREE from 'three';
-import { getTexture, fbmNoise, hash, createDataTexture } from '../utils/textureGenerator';
+import {
+  getTexture,
+  fbmNoise,
+  fbmNoiseSigned,
+  hash,
+  createColorDataTexture,
+  createLinearDataTexture,
+} from '../utils/textureGenerator';
 
 export interface BrickOptions {
   brickWidth?: number; // Width of each brick in pixels
@@ -20,7 +27,11 @@ const DEFAULT_OPTIONS: Required<BrickOptions> = {
   brickWidth: 32,
   brickHeight: 16,
   mortarWidth: 2,
-  baseColor: '#8b4513', // Saddle brown
+  // Re-authored for correct sRGB decode. '#8b4513' decodes to linear
+  // (0.254, 0.061, 0.007) - a 37:9:1 channel ratio that reads as a fierce
+  // orange, because the old linear misread compressed the ratio to 7:4:1.
+  // '#8b5038' decodes to (0.254, 0.082, 0.038): same red, real brick chroma.
+  baseColor: '#8b5038',
   mortarColor: '#a0a0a0', // Gray mortar
 };
 
@@ -86,18 +97,27 @@ export const generateBrick = (
           const brickId = hash(brickCol, brickRow);
           const colorVar = (brickId - 0.5) * 0.2; // ±10% color variation
 
-          // Surface texture noise
+          // Surface texture noise - 5 octaves plus a pore octave so the face
+          // still has grit at close range instead of a smooth wash.
           const nx = x / size;
           const ny = y / size;
-          const surfaceNoise = fbmNoise(nx * 40, ny * 40, 3) * 0.08;
+          const surfaceNoise = fbmNoiseSigned(nx * 40, ny * 40, 5) * 0.14;
+          const pores = fbmNoiseSigned(nx * 160, ny * 160, 2) * 0.05;
 
           // Some bricks are darker (weathered)
           const weathered = hash(brickCol * 7, brickRow * 13) > 0.7 ? -0.1 : 0;
 
-          r = baseColor.r + colorVar + surfaceNoise + weathered;
-          g = baseColor.g + colorVar * 0.8 + surfaceNoise + weathered;
-          b = baseColor.b + colorVar * 0.5 + surfaceNoise + weathered;
+          r = baseColor.r + colorVar + surfaceNoise + pores + weathered;
+          g = baseColor.g + colorVar * 0.8 + surfaceNoise + pores + weathered;
+          b = baseColor.b + colorVar * 0.5 + surfaceNoise + pores + weathered;
         }
+
+        // Macro-scale soot/damp drift so a long wall does not show the tile
+        // beat. Sub-tile frequency, so per-brick contrast is untouched.
+        const macro = fbmNoiseSigned((x / size) * 2 + 3, (y / size) * 2 + 11, 2) * 0.08;
+        r += macro;
+        g += macro * 0.95;
+        b += macro * 0.85;
 
         data[i] = Math.floor(Math.max(0, Math.min(1, r)) * 255);
         data[i + 1] = Math.floor(Math.max(0, Math.min(1, g)) * 255);
@@ -106,7 +126,7 @@ export const generateBrick = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createColorDataTexture(data, size, size);
   });
 };
 
@@ -155,16 +175,19 @@ export const generateBrickNormal = (
           ny = 0.7 - ((brickHeight - brickY) / (mortarWidth * 2)) * 0.2;
         }
 
-        // Add surface roughness to brick faces
-        const surfaceNormal = fbmNoise((x / size) * 50, (y / size) * 50, 2) * 0.1;
+        // Signed, decorrelated per-axis perturbation. The previous unsigned
+        // `fbmNoise(...) * 0.1` added the SAME +0.05 mean to both channels,
+        // which is a constant diagonal tilt, not surface relief.
+        const surfaceX = fbmNoiseSigned((x / size) * 50, (y / size) * 50, 3) * 0.16;
+        const surfaceY = fbmNoiseSigned((x / size) * 50 + 41, (y / size) * 50 + 83, 3) * 0.16;
 
-        data[i] = Math.floor((nx + surfaceNormal) * 255);
-        data[i + 1] = Math.floor((ny + surfaceNormal) * 255);
+        data[i] = Math.floor(Math.max(0, Math.min(1, nx + surfaceX)) * 255);
+        data[i + 1] = Math.floor(Math.max(0, Math.min(1, ny + surfaceY)) * 255);
         data[i + 2] = 255; // Z always pointing out
         data[i + 3] = 255;
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
   });
 };

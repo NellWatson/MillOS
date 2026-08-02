@@ -18,6 +18,7 @@ import { useWorkerPersonalityStore } from '../../stores/workerPersonalityStore';
 import { useProductionStore } from '../../stores/productionStore';
 import { useGraphicsStore } from '../../stores/graphicsStore';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
+import { useMaterialFlowStore } from '../../stores/materialFlowStore';
 
 interface RelationshipLinesProps {
   minStrength?: number; // Only show lines above this threshold
@@ -86,14 +87,14 @@ export const RelationshipLines: React.FC<RelationshipLinesProps> = React.memo(
     useEffect(() => () => geometry.dispose(), [geometry]);
 
     // Shader material with pulse animation
-    const material = useMemo(
-      () =>
-        new THREE.ShaderMaterial({
-          uniforms: {
-            time: { value: 0 },
-            baseColor: { value: new THREE.Color('#60a5fa') },
-          },
-          vertexShader: `
+    const material = useMemo(() => {
+      const shaderMaterial = new THREE.ShaderMaterial({
+        name: 'MillOS Worker Relationship Lines',
+        uniforms: {
+          time: { value: 0 },
+          baseColor: { value: new THREE.Color('#60a5fa') },
+        },
+        vertexShader: `
         attribute float strength;
         varying float vStrength;
 
@@ -102,7 +103,7 @@ export const RelationshipLines: React.FC<RelationshipLinesProps> = React.memo(
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
-          fragmentShader: `
+        fragmentShader: `
         uniform float time;
         uniform vec3 baseColor;
         varying float vStrength;
@@ -115,14 +116,17 @@ export const RelationshipLines: React.FC<RelationshipLinesProps> = React.memo(
           float alpha = vStrength * pulse * 0.4;
 
           gl_FragColor = vec4(baseColor, alpha);
+          #include <colorspace_fragment>
         }
       `,
-          transparent: true,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-        }),
-      []
-    );
+        transparent: true,
+        toneMapped: false,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      shaderMaterial.customProgramCacheKey = () => 'millos-relationship-lines-v2';
+      return shaderMaterial;
+    }, []);
 
     // Dispose the ShaderMaterial on unmount. R3F does not auto-dispose objects
     // supplied via <primitive>, so without this the material's GPU program and
@@ -130,11 +134,11 @@ export const RelationshipLines: React.FC<RelationshipLinesProps> = React.memo(
     useEffect(() => () => material.dispose(), [material]);
 
     // Animate time uniform
-    useFrame((state) => {
+    useFrame(() => {
       if (!isTabVisible) return;
       if (quality === 'low') return;
       if (materialRef.current) {
-        materialRef.current.uniforms.time.value = state.clock.elapsedTime;
+        materialRef.current.uniforms.time.value = useMaterialFlowStore.getState().simulationTime;
       }
     });
 

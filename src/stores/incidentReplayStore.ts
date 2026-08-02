@@ -25,14 +25,45 @@ export interface ReplayFrame {
   }>;
 }
 
+export type DiagnosticCommandCategory = 'control' | 'safety' | 'alarm' | 'vehicle' | 'ai';
+
+export interface DiagnosticCommand {
+  timestamp: number;
+  category: DiagnosticCommandCategory;
+  action: string;
+  targetId?: string;
+  data?: Record<string, string | number | boolean | null>;
+}
+
+export interface DiagnosticReplayExport {
+  schemaVersion: 1;
+  buildId: string;
+  exportedAt: number;
+  sessionStartedAt: number;
+  simulationSeed: string;
+  privacy: {
+    credentialsIncluded: false;
+    personalDataIncluded: false;
+    bounded: true;
+  };
+  commands: DiagnosticCommand[];
+  frames: ReplayFrame[];
+}
+
 export interface IncidentReplayStore {
   replayMode: boolean;
   replayFrames: ReplayFrame[];
   currentReplayIndex: number;
+  sessionStartedAt: number;
+  simulationSeed: string;
+  commands: DiagnosticCommand[];
   setReplayMode: (mode: boolean) => void;
   recordReplayFrame: (frame: ReplayFrame) => void;
+  recordCommand: (command: DiagnosticCommand) => void;
   setReplayIndex: (index: number) => void;
   clearReplayFrames: () => void;
+  clearDiagnostics: () => void;
+  createDiagnosticExport: () => DiagnosticReplayExport;
   getCurrentFrame: () => ReplayFrame | null;
   getFrameCount: () => number;
   stepForward: () => void;
@@ -42,12 +73,27 @@ export interface IncidentReplayStore {
 }
 
 const MAX_REPLAY_FRAMES = 600; // 10 minutes at 1 frame/second
+const MAX_DIAGNOSTIC_COMMANDS = 1000;
+const BUILD_ID = typeof __MILLOS_BUILD_ID__ === 'string' ? __MILLOS_BUILD_ID__ : 'development';
+
+function getSimulationSeed(): string {
+  if (typeof window === 'undefined') return 'millos-v0.40-default';
+  const requested = new URLSearchParams(window.location.search).get('seed');
+  const sanitized = requested
+    ?.trim()
+    .replace(/[^a-zA-Z0-9_.:]/g, '')
+    .slice(0, 64);
+  return sanitized || 'millos-v0.40-default';
+}
 
 export const useIncidentReplayStore = create<IncidentReplayStore>()(
   subscribeWithSelector((set, get) => ({
     replayMode: false,
     replayFrames: [],
     currentReplayIndex: 0,
+    sessionStartedAt: Date.now(),
+    simulationSeed: getSimulationSeed(),
+    commands: [],
 
     setReplayMode: (mode: boolean) => set({ replayMode: mode }),
 
@@ -61,12 +107,44 @@ export const useIncidentReplayStore = create<IncidentReplayStore>()(
         };
       }),
 
+    recordCommand: (command: DiagnosticCommand) =>
+      set((state) => ({
+        commands: [...state.commands.slice(-(MAX_DIAGNOSTIC_COMMANDS - 1)), command],
+      })),
+
     setReplayIndex: (index: number) =>
       set((state) => ({
         currentReplayIndex: Math.max(0, Math.min(index, state.replayFrames.length - 1)),
       })),
 
     clearReplayFrames: () => set({ replayFrames: [], currentReplayIndex: 0 }),
+
+    clearDiagnostics: () =>
+      set({
+        replayFrames: [],
+        currentReplayIndex: 0,
+        commands: [],
+        sessionStartedAt: Date.now(),
+        simulationSeed: getSimulationSeed(),
+      }),
+
+    createDiagnosticExport: () => {
+      const state = get();
+      return {
+        schemaVersion: 1,
+        buildId: BUILD_ID,
+        exportedAt: Date.now(),
+        sessionStartedAt: state.sessionStartedAt,
+        simulationSeed: state.simulationSeed,
+        privacy: {
+          credentialsIncluded: false,
+          personalDataIncluded: false,
+          bounded: true,
+        },
+        commands: [...state.commands],
+        frames: [...state.replayFrames],
+      };
+    },
 
     getCurrentFrame: () => {
       const { replayFrames, currentReplayIndex } = get();

@@ -9,6 +9,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getStatusColor, getPulseSpeed, getGlowIntensity } from '../../utils/digitalTwinPalette';
 import { INDICATOR_HEIGHTS, POLYGON_OFFSET } from '../../constants/renderLayers';
+import { useMaterialFlowStore } from '../../stores/materialFlowStore';
 
 export type StatusType = 'running' | 'idle' | 'warning' | 'critical' | 'maintenance';
 
@@ -24,7 +25,7 @@ interface StatusRingProps {
  * Create the status ring shader material
  */
 const createStatusRingMaterial = (color: string, opacity: number): THREE.ShaderMaterial => {
-  return new THREE.ShaderMaterial({
+  const material = new THREE.ShaderMaterial({
     uniforms: {
       color: { value: new THREE.Color(color) },
       time: { value: 0 },
@@ -59,15 +60,19 @@ const createStatusRingMaterial = (color: string, opacity: number): THREE.ShaderM
 
         float alpha = ring * opacity * pulse * highlight;
         gl_FragColor = vec4(color, alpha);
+        #include <colorspace_fragment>
       }
     `,
     transparent: true,
+    toneMapped: false,
     side: THREE.DoubleSide,
     depthWrite: false,
     polygonOffset: true,
     polygonOffsetFactor: POLYGON_OFFSET.moderate.factor,
     polygonOffsetUnits: POLYGON_OFFSET.moderate.units,
   });
+  material.customProgramCacheKey = () => 'millos-status-ring-v2';
+  return material;
 };
 
 export const StatusRing: React.FC<StatusRingProps> = ({
@@ -103,9 +108,9 @@ export const StatusRing: React.FC<StatusRingProps> = ({
   }, [material]);
 
   // Update time uniform for animation
-  useFrame((state) => {
+  useFrame(() => {
     if (!isStatic && materialRef.current?.uniforms.time) {
-      materialRef.current.uniforms.time.value = state.clock.elapsedTime;
+      materialRef.current.uniforms.time.value = useMaterialFlowStore.getState().simulationTime;
     }
   });
 

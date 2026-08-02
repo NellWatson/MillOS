@@ -31,10 +31,6 @@ const benchSeatGeometry = new THREE.BoxGeometry(1.5, 0.08, 0.5);
 const benchBackGeometry = new THREE.BoxGeometry(1.5, 0.5, 0.08);
 const benchLegGeometry = new THREE.BoxGeometry(0.08, 0.4, 0.5);
 
-// Tree geometries (simplified for instancing)
-const treeTrunkGeometry = new THREE.CylinderGeometry(0.3, 0.4, 3, 8);
-const treeCanopyGeometry = new THREE.SphereGeometry(2, 8, 6);
-
 // Market stall geometries
 const stallTableGeometry = new THREE.BoxGeometry(2.8, 0.1, 1.8);
 const stallPostGeometry = new THREE.CylinderGeometry(0.04, 0.04, 1.6, 8);
@@ -63,20 +59,16 @@ const whiteMaterial = new THREE.MeshStandardMaterial({
   roughness: 0.75,
 });
 
-const brownBarkMaterial = new THREE.MeshStandardMaterial({
-  color: '#4a3728',
-  roughness: 0.9,
-});
-
-const greenLeafMaterial = new THREE.MeshStandardMaterial({
-  color: '#2d5a27',
-  roughness: 0.8,
-});
-
 const smokeMaterial = new THREE.MeshBasicMaterial({
   color: '#9ca3af',
   transparent: true,
   opacity: 0.4,
+});
+const lampGlassMaterial = new THREE.MeshStandardMaterial({
+  color: '#333333',
+  emissive: '#000000',
+  emissiveIntensity: 0,
+  roughness: 0.6,
 });
 
 // ============================================================
@@ -128,25 +120,15 @@ export const InstancedLamps: React.FC<{ isNight: boolean }> = React.memo(({ isNi
     if (glassRef.current) glassRef.current.instanceMatrix.needsUpdate = true;
   }, [dummy]);
 
-  // Glass material changes based on night/day
-  const glassMaterial = useMemo(() => {
-    if (isNight) {
-      return new THREE.MeshStandardMaterial({
-        color: '#ffaa00',
-        emissive: '#ffaa00',
-        emissiveIntensity: 2,
-        toneMapped: false,
-      });
-    }
-    return new THREE.MeshStandardMaterial({
-      color: '#333333',
-      roughness: 0.6,
-    });
+  // Keep one compiled material across the day/night boundary. Uniform changes
+  // are cheap; swapping material objects here used to trigger shader setup in
+  // the same frame as the wider atmosphere transition.
+  useEffect(() => {
+    lampGlassMaterial.color.set(isNight ? '#ffaa00' : '#333333');
+    lampGlassMaterial.emissive.set(isNight ? '#ffaa00' : '#000000');
+    lampGlassMaterial.emissiveIntensity = isNight ? 2 : 0;
+    lampGlassMaterial.roughness = isNight ? 0.35 : 0.6;
   }, [isNight]);
-
-  // Dispose the previous glass material when it is replaced on a day/night
-  // toggle, preventing an unbounded MeshStandardMaterial leak over long sessions.
-  useEffect(() => () => glassMaterial.dispose(), [glassMaterial]);
 
   return (
     <group>
@@ -158,26 +140,14 @@ export const InstancedLamps: React.FC<{ isNight: boolean }> = React.memo(({ isNi
       <instancedMesh ref={housingsRef} args={[lampHousingGeometry, blackMetalMaterial, count]} />
       {/* Material attached as a child primitive, NOT via args: a state-varying
           material in `args` changes the args array identity on every isNight
-          flip, making R3F tear down and rebuild the InstancedMesh - which
-          resets instanceMatrix to all-zeros while the matrix-population effect
-          (deps [dummy]) never re-runs, so all glass panes collapsed to the
-          origin after the first day/night transition. As a child primitive,
-          only the material swaps; the populated mesh persists. */}
+          flip, making R3F tear down and rebuild the InstancedMesh. The stable
+          child material keeps populated instance matrices and shader programs. */}
       <instancedMesh ref={glassRef} args={[lampGlassGeometry, undefined, count]}>
-        <primitive object={glassMaterial} attach="material" />
+        <primitive object={lampGlassMaterial} attach="material" />
       </instancedMesh>
-      {/* Point lights only at night - limit to reduce draw calls */}
-      {isNight &&
-        LAMP_POSITIONS.slice(0, 4).map(([x, z], i) => (
-          <pointLight
-            key={i}
-            position={[x, 4.3, z]}
-            color="#ffaa00"
-            intensity={0.5}
-            distance={15}
-            decay={2}
-          />
-        ))}
+      {/* The emissive glass supplies the night cue without adding point lights.
+          Changing the global light count at dusk recompiles every affected
+          scene material, which caused a visible whole-site hitch. */}
     </group>
   );
 });
@@ -247,73 +217,6 @@ export const InstancedBenches: React.FC = React.memo(() => {
   );
 });
 InstancedBenches.displayName = 'InstancedBenches';
-
-// ============================================================
-// TREE INSTANCE DATA
-// ============================================================
-
-interface TreeData {
-  position: [number, number, number];
-  scale: number;
-  type: 'oak' | 'birch';
-}
-
-const TREE_DATA: TreeData[] = [
-  { position: [-30, 0, -55], scale: 1.2, type: 'oak' },
-  { position: [30, 0, -60], scale: 1.0, type: 'birch' },
-  { position: [-30, 0, 55], scale: 1.3, type: 'oak' },
-  { position: [30, 0, 65], scale: 1.1, type: 'oak' },
-  { position: [-30, 0, 0], scale: 0.9, type: 'birch' },
-  { position: [30, 0, 20], scale: 1.2, type: 'oak' },
-  { position: [-30, 0, 25], scale: 1.0, type: 'birch' },
-];
-
-/**
- * Instanced village trees - 7 trees in 2 draw calls instead of 14+
- */
-export const InstancedTrees: React.FC = React.memo(() => {
-  const trunksRef = useRef<THREE.InstancedMesh>(null);
-  const canopiesRef = useRef<THREE.InstancedMesh>(null);
-
-  const count = TREE_DATA.length;
-  const dummy = useMemo(() => new THREE.Object3D(), []);
-
-  useEffect(() => {
-    TREE_DATA.forEach(({ position: [x, y, z], scale }, i) => {
-      // Trunk
-      dummy.position.set(x, y + 1.5 * scale, z);
-      dummy.scale.setScalar(scale);
-      dummy.updateMatrix();
-      trunksRef.current?.setMatrixAt(i, dummy.matrix);
-
-      // Canopy
-      dummy.position.set(x, y + 4 * scale, z);
-      dummy.scale.setScalar(scale);
-      dummy.updateMatrix();
-      canopiesRef.current?.setMatrixAt(i, dummy.matrix);
-    });
-
-    if (trunksRef.current) trunksRef.current.instanceMatrix.needsUpdate = true;
-    if (canopiesRef.current) canopiesRef.current.instanceMatrix.needsUpdate = true;
-  }, [dummy]);
-
-  return (
-    <group>
-      <instancedMesh
-        ref={trunksRef}
-        args={[treeTrunkGeometry, brownBarkMaterial, count]}
-        castShadow
-      />
-      <instancedMesh
-        ref={canopiesRef}
-        args={[treeCanopyGeometry, greenLeafMaterial, count]}
-        castShadow
-        receiveShadow
-      />
-    </group>
-  );
-});
-InstancedTrees.displayName = 'InstancedTrees';
 
 // ============================================================
 // MARKET STALL INSTANCE DATA
@@ -402,18 +305,18 @@ InstancedMarketStalls.displayName = 'InstancedMarketStalls';
 // EXPORTS
 // ============================================================
 
+// NOTE: the tree geometries/materials that used to live here are gone. They
+// backed a third, unreferenced tree implementation (solid sphere canopies on a
+// flat green) alongside scenery/Tree.tsx and exterior/ExteriorVegetation.tsx.
+// Vegetation now has one owner: components/scenery/InstancedFoliage.tsx.
 export {
   // Geometries for reuse
   lampPostGeometry,
   lampHousingGeometry,
   benchSeatGeometry,
-  treeTrunkGeometry,
-  treeCanopyGeometry,
   // Materials for reuse
   blackMetalMaterial,
   timberMaterial,
   whiteMaterial,
-  brownBarkMaterial,
-  greenLeafMaterial,
   smokeMaterial,
 };

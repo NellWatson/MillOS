@@ -524,15 +524,15 @@ export class SCADAService {
   /**
    * Acknowledge an alarm
    */
-  acknowledgeAlarm(alarmId: string, operator: string): boolean {
-    return this.alarmManager.acknowledge(alarmId, operator);
+  acknowledgeAlarm(alarmId: string, operator: string, note?: string): boolean {
+    return this.alarmManager.acknowledge(alarmId, operator, note);
   }
 
   /**
    * Acknowledge all alarms
    */
-  acknowledgeAllAlarms(operator: string): number {
-    return this.alarmManager.acknowledgeAll(operator);
+  acknowledgeAllAlarms(operator: string, note?: string): number {
+    return this.alarmManager.acknowledgeAll(operator, note);
   }
 
   /**
@@ -553,6 +553,14 @@ export class SCADAService {
    */
   suppressAlarms(tagId: string, operator: string, reason: string, durationMs?: number): void {
     this.alarmManager.suppress(tagId, operator, reason, durationMs);
+  }
+
+  shelveAlarms(tagId: string, operator: string, reason: string, durationMs?: number): void {
+    this.alarmManager.shelve(tagId, operator, reason, durationMs);
+  }
+
+  takeAlarmsOutOfService(tagId: string, operator: string, reason: string): void {
+    this.alarmManager.takeOutOfService(tagId, operator, reason);
   }
 
   /**

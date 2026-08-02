@@ -2,7 +2,7 @@
  * DecisionHistoryPanel Component
  *
  * Scrollable, paginated history of past strategic AI decisions.
- * Displays in the AI Command Center sidebar.
+ * Displays in the AI Partner sidebar.
  */
 
 import React, { useState, useMemo, useEffect } from 'react';

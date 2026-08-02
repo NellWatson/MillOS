@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { safeJSONStorage } from './storage';
 import { AlertData } from '../types';
+import { sanitizeUIState } from './persistenceMigrations';
 
 interface AlertIndices {
   alertsByPriority: Map<'info' | 'warning' | 'critical', AlertData[]>;
@@ -55,6 +56,10 @@ interface UIStore {
   // Theme
   theme: 'dark' | 'light';
   toggleTheme: () => void;
+
+  // Interface scale. Browser zoom remains supported independently.
+  uiScale: number;
+  setUIScale: (scale: number) => void;
 
   // Keyboard shortcuts modal
   showShortcuts: boolean;
@@ -174,6 +179,9 @@ export const useUIStore = create<UIStore>()(
       // Theme
       theme: 'dark' as const,
       toggleTheme: () => set((state) => ({ theme: state.theme === 'dark' ? 'light' : 'dark' })),
+      uiScale: 1,
+      setUIScale: (scale: number) =>
+        set({ uiScale: Math.min(1.5, Math.max(0.9, Number.isFinite(scale) ? scale : 1)) }),
 
       // Keyboard shortcuts modal
       showShortcuts: false,
@@ -216,12 +224,19 @@ export const useUIStore = create<UIStore>()(
     {
       name: 'millos-ui',
       storage: safeJSONStorage,
+      version: 1,
+      migrate: (persisted) => sanitizeUIState(persisted) as UIStore,
+      merge: (persisted, current) => ({
+        ...current,
+        ...sanitizeUIState(persisted),
+      }),
       partialize: (state) => ({
         hasSeenIntro: state.hasSeenIntro,
         showZones: state.showZones,
         showAIPanel: state.showAIPanel,
         panelMinimized: state.panelMinimized,
         theme: state.theme,
+        uiScale: state.uiScale,
         legendPosition: state.legendPosition,
         showMiniMap: state.showMiniMap,
         fpsMode: state.fpsMode,

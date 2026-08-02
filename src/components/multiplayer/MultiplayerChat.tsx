@@ -163,7 +163,7 @@ export const MultiplayerChat: React.FC = () => {
                 <button
                   onClick={handleSend}
                   disabled={!message.trim()}
-                  className="p-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded transition-colors"
+                  className="p-1.5 bg-blue-700 hover:bg-blue-600 disabled:bg-slate-700 disabled:text-white/40 text-white rounded transition-colors"
                 >
                   <Send className="w-4 h-4" />
                 </button>

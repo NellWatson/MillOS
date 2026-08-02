@@ -9,9 +9,35 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useSafetyStore } from '../../stores/safetyStore';
 import { useWorkerMoodStore } from '../../stores/workerMoodStore';
+import { useAINarrationStore } from '../../stores/aiNarrationStore';
+import { useFlourishingStore } from '../../stores/flourishingStore';
+import { useStabilityStore } from '../../stores/stabilityStore';
+import { useKnowledgeIntegration } from '../../hooks/useKnowledgeIntegration';
+
+function setFactoryFlourishingScore(score: number): void {
+  const workerFlourishing = useFlourishingStore.getState().workerFlourishing;
+  useFlourishingStore.setState({
+    workerFlourishing: Object.fromEntries(
+      Object.entries(workerFlourishing).map(([workerId, worker]) => [
+        workerId,
+        {
+          ...worker,
+          meaning: { ...worker.meaning, score },
+          mastery: { ...worker.mastery, score },
+          connection: { ...worker.connection, score },
+          joy: { ...worker.joy, score },
+          wholeness: { ...worker.wholeness, score },
+          agency: { ...worker.agency, score },
+          flourishingScore: score,
+        },
+      ])
+    ),
+  });
+}
 
 describe('Store Integration Tests', () => {
   beforeEach(() => {
@@ -21,6 +47,46 @@ describe('Store Integration Tests', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+  });
+
+  describe('Knowledge Integration Workflow', () => {
+    beforeEach(() => {
+      localStorage.setItem('millos-has-played', 'true');
+      useAINarrationStore.setState({ enabled: true, shownNarrations: new Set() });
+      useFlourishingStore.getState().resetToDefaults();
+      useStabilityStore.getState().resetToDefaults();
+      setFactoryFlourishingScore(65);
+    });
+
+    afterEach(() => {
+      localStorage.removeItem('millos-has-played');
+    });
+
+    it('does not classify an ordinary percentage score as all workers thriving', () => {
+      const onNarration = vi.fn();
+      const { unmount } = renderHook(() => useKnowledgeIntegration(onNarration));
+
+      expect(
+        onNarration.mock.calls.some(([narration]) => narration.trigger === 'all-workers-thriving')
+      ).toBe(false);
+      unmount();
+    });
+
+    it('rechecks wellbeing and narrates when flourishing later exceeds 80 percent', () => {
+      const onNarration = vi.fn();
+      const { unmount } = renderHook(() => useKnowledgeIntegration(onNarration));
+      onNarration.mockClear();
+
+      act(() => {
+        setFactoryFlourishingScore(85);
+        vi.advanceTimersByTime(30_000);
+      });
+
+      expect(
+        onNarration.mock.calls.some(([narration]) => narration.trigger === 'all-workers-thriving')
+      ).toBe(true);
+      unmount();
+    });
   });
 
   describe('Shift Change Workflow', () => {

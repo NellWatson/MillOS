@@ -1,33 +1,128 @@
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MachineData, MachineType } from '../types';
 import { audioManager } from '../utils/audioManager';
 import { PIPE_MATERIALS } from '../utils/sharedMaterials';
 import { shouldRunThisFrame } from '../utils/frameThrottle';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
-import { POLYGON_OFFSET } from '../constants/renderLayers';
+import { useGraphicsStore } from '../stores/graphicsStore';
+import { useShallow } from 'zustand/react/shallow';
+import { generateMachinePanelNormal } from '../textures/normalGenerator';
+import {
+  buildSpoutRoutes,
+  spoutMachineKey,
+  SPOUT_PIPE_RADIUS,
+  type PipeRouteFamily,
+} from './flow/spoutRoutes';
+
+const PIPE_RADIUS = SPOUT_PIPE_RADIUS;
+// 12 radial segments: an 8-sided 0.17 m pipe reads as a visible octagon at
+// interior camera distances. Instanced, so this is one geometry either way.
+const PIPE_FLANGE_GEOMETRY = new THREE.CylinderGeometry(
+  PIPE_RADIUS + 0.05,
+  PIPE_RADIUS + 0.05,
+  0.12,
+  12
+);
+const PIPE_SUPPORT_GEOMETRY = new THREE.CylinderGeometry(1, 1, 1, 8);
+const PIPE_FLANGE_MATERIAL = new THREE.MeshStandardMaterial({
+  // Machined joint faces read brighter and tighter than the tube body - that
+  // contrast is what makes a spouting run legible from across the mill.
+  color: '#8b9ca0',
+  metalness: 0.62,
+  roughness: 0.35,
+  envMapIntensity: 1.25,
+});
+
+interface PipeRouteMesh {
+  readonly family: PipeRouteFamily;
+  readonly geometry: THREE.BufferGeometry;
+}
+
+/**
+ * Family-specific route materials.
+ *
+ * These are CLONES of the shared `PIPE_MATERIALS`, not edits to them:
+ * `sharedMaterials.ts` is consumed by machines, forklifts and infrastructure,
+ * and the spouting network is the only place that wants sheet relief and a
+ * per-family roughness spread. The clone shares the source textures, so the
+ * only cost is three extra material objects.
+ *
+ * The `color` values are KEPT. These materials carry a `roughnessMap` but no
+ * albedo `map`, so `color` IS the albedo - it is not a tint compensating for
+ * the old linear/sRGB texture bug and must not be reset to white.
+ */
+let routeMaterialCache: Record<PipeRouteFamily, THREE.MeshStandardMaterial> | null = null;
+
+const getRouteMaterials = (): Record<PipeRouteFamily, THREE.MeshStandardMaterial> => {
+  if (routeMaterialCache) return routeMaterialCache;
+
+  // Cloned so the tiling below cannot leak into other consumers of the cached
+  // source texture.
+  const detailNormal = generateMachinePanelNormal(256, 4, 6).clone();
+  detailNormal.wrapS = THREE.RepeatWrapping;
+  detailNormal.wrapT = THREE.RepeatWrapping;
+  // u runs along the tube axis, v around the circumference: 8 sheet sections
+  // along the run, 2 seams around the bore.
+  detailNormal.repeat.set(8, 2);
+  detailNormal.needsUpdate = true;
+
+  const normalScale = new THREE.Vector2(0.28, 0.28);
+
+  const derive = (
+    source: THREE.MeshStandardMaterial,
+    roughness: number
+  ): THREE.MeshStandardMaterial => {
+    const material = source.clone();
+    material.roughness = roughness;
+    material.normalMap = detailNormal;
+    material.normalScale = normalScale;
+    material.envMapIntensity = 1.2;
+    return material;
+  };
+
+  routeMaterialCache = {
+    intake: derive(PIPE_MATERIALS.darkPipe, 0.46), // dusty raw-grain line
+    pneumatic: derive(PIPE_MATERIALS.whitePipe, 0.34), // painted lift line
+    finished: derive(PIPE_MATERIALS.lightPipe, 0.3), // polished product line
+  };
+  return routeMaterialCache;
+};
+
+function InstancedPipeFlanges({ matrices }: { readonly matrices: readonly THREE.Matrix4[] }) {
+  const ref = useRef<THREE.InstancedMesh>(null);
+
+  useLayoutEffect(() => {
+    if (!ref.current) return;
+    matrices.forEach((matrix, index) => ref.current?.setMatrixAt(index, matrix));
+    ref.current.instanceMatrix.needsUpdate = true;
+    ref.current.computeBoundingSphere();
+  }, [matrices]);
+
+  if (matrices.length === 0) return null;
+
+  return (
+    <instancedMesh
+      ref={ref}
+      args={[PIPE_FLANGE_GEOMETRY, PIPE_FLANGE_MATERIAL, matrices.length]}
+      castShadow
+      receiveShadow
+    />
+  );
+}
 
 export const SpoutingSystem = React.memo<{
   machines: MachineData[];
   enableAudio?: boolean;
 }>(({ machines, enableAudio = true }) => {
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
-  // Extract stable machine data to prevent unnecessary re-renders
-  // Only recompute when machine IDs or positions actually change
-  const machineKey = useMemo(() => {
-    return machines
-      .filter((m) =>
-        [
-          MachineType.SILO,
-          MachineType.ROLLER_MILL,
-          MachineType.PLANSIFTER,
-          MachineType.PACKER,
-        ].includes(m.type)
-      )
-      .map((m) => `${m.id}:${m.position.join(',')}:${m.size.join(',')}`)
-      .join('|');
-  }, [machines]);
+  const quality = useGraphicsStore(useShallow((state) => state.graphics.quality));
+  // Extract stable machine data to prevent unnecessary re-renders.
+  // Shared with GrainFlow through `spoutRoutes`, so both agree on when the
+  // layout has actually changed (and ignore per-tick status churn).
+  const machineKey = useMemo(() => spoutMachineKey(machines), [machines]);
 
   // Calculate spouting sound positions (midpoints of key pipe connections)
   const spoutPositions = useMemo(() => {
@@ -87,164 +182,85 @@ export const SpoutingSystem = React.memo<{
     });
   });
 
+  // Silhouette quality by tier. 8 radial segments on a 0.17 m pipe is a visible
+  // octagon at interior camera distance; the routes are merged into 3 draw
+  // calls either way, so this is vertex throughput only.
+  const radialSegments = quality === 'low' ? 6 : quality === 'medium' ? 8 : 12;
+
   const pipeData = useMemo(() => {
-    const pipeElements: React.ReactNode[] = [];
-    const geometries: THREE.BufferGeometry[] = [];
-    const materials: THREE.MeshStandardMaterial[] = [];
-    const tubeRadius = 0.18;
-
-    const silos = machines.filter((m) => m.type === MachineType.SILO);
-    const mills = machines.filter((m) => m.type === MachineType.ROLLER_MILL);
-    const sifters = machines.filter((m) => m.type === MachineType.PLANSIFTER);
-    const packers = machines.filter((m) => m.type === MachineType.PACKER);
-
-    const createConnection = (
-      start: THREE.Vector3,
-      end: THREE.Vector3,
-      key: string,
-      color: string = '#94a3b8'
-    ) => {
-      const mid1 = start.clone().lerp(end, 0.25);
-      mid1.y = Math.max(start.y, end.y) + 5;
-      const mid2 = start.clone().lerp(end, 0.75);
-      mid2.y = Math.max(start.y, end.y) + 5;
-
-      const curve = new THREE.CatmullRomCurve3([start, mid1, mid2, end]);
-      const geometry = new THREE.TubeGeometry(curve, 32, tubeRadius, 12, false);
-      const material = new THREE.MeshStandardMaterial({
-        color,
-        metalness: 0.85,
-        roughness: 0.15,
-      });
-
-      // Generate Flanges (Industrial detail)
-      const flangeElements: React.ReactNode[] = [];
-      const length = curve.getLength();
-      // Flange every 6 units
-      const flangeCount = Math.floor(length / 6);
-
-      if (flangeCount > 0) {
-        // Flange outer radius slightly larger than tube, with small radial offset to prevent z-fighting
-        const flangeOuterRadius = tubeRadius + 0.08; // Slightly larger gap from tube surface
-        // Reuse geometry/material for this pipe's flanges
-        const flangeGeo = new THREE.CylinderGeometry(
-          flangeOuterRadius,
-          flangeOuterRadius,
-          0.12,
-          12
-        );
-        const flangeMat = new THREE.MeshStandardMaterial({
-          color: '#64748b',
-          metalness: 0.9,
-          roughness: 0.3,
-          // Enable polygon offset to prevent z-fighting with tube surface
-          polygonOffset: true,
-          polygonOffsetFactor: POLYGON_OFFSET.exteriorBase.factor,
-          polygonOffsetUnits: POLYGON_OFFSET.exteriorBase.units,
-        });
-
-        geometries.push(flangeGeo);
-        materials.push(flangeMat);
-
-        const dummy = new THREE.Object3D();
-
-        for (let f = 1; f < flangeCount; f++) {
-          const t = f / flangeCount;
-          const pt = curve.getPointAt(t);
-          const tan = curve.getTangentAt(t);
-
-          dummy.position.copy(pt);
-          dummy.lookAt(pt.clone().add(tan));
-          dummy.rotateX(Math.PI / 2);
-
-          flangeElements.push(
-            <mesh
-              key={`${key}-flange-${f}`}
-              position={[pt.x, pt.y, pt.z]}
-              quaternion={dummy.quaternion}
-              geometry={flangeGeo}
-              material={flangeMat}
-              castShadow
-            />
-          );
-        }
-      }
-
-      geometries.push(geometry);
-      materials.push(material);
-
-      return (
-        <group key={key}>
-          <mesh geometry={geometry} material={material} castShadow />
-          {flangeElements}
-        </group>
-      );
+    const routeGeometries: Record<PipeRouteFamily, THREE.BufferGeometry[]> = {
+      intake: [],
+      pneumatic: [],
+      finished: [],
     };
+    const flangeMatrices: THREE.Matrix4[] = [];
+    const dummy = new THREE.Object3D();
+    const tangentTarget = new THREE.Vector3();
 
-    // Silos to Mills (grain flow)
-    mills.forEach((mill, i) => {
-      const silo = silos[i % silos.length];
-      if (!silo) return;
-      const start = new THREE.Vector3(silo.position[0], 3, silo.position[2]);
-      const end = new THREE.Vector3(
-        mill.position[0],
-        mill.position[1] + mill.size[1] + 1.5,
-        mill.position[2]
+    // Curves come from the shared route builder so GrainFlow puts product
+    // inside these exact pipes.
+    buildSpoutRoutes(machines).forEach(({ family, curve, length }) => {
+      routeGeometries[family].push(
+        new THREE.TubeGeometry(curve, 32, PIPE_RADIUS, radialSegments, false)
       );
-      pipeElements.push(createConnection(start, end, `pipe-s-m-${i}`, '#64748b'));
+
+      // Real spouting is bolted up roughly every 3-4 m. Flanges are instanced
+      // into one draw call, so density here is nearly free and it is what makes
+      // the run read as jointed pipework rather than an extruded noodle.
+      const flangeCount = Math.min(16, Math.max(2, Math.round(length / 4)));
+
+      for (let f = 1; f < flangeCount; f++) {
+        const t = f / flangeCount;
+        const pt = curve.getPointAt(t);
+        const tan = curve.getTangentAt(t);
+
+        dummy.position.copy(pt);
+        tangentTarget.copy(pt).add(tan);
+        dummy.lookAt(tangentTarget);
+        dummy.rotateX(Math.PI / 2);
+        dummy.updateMatrix();
+        flangeMatrices.push(dummy.matrix.clone());
+      }
     });
 
-    // Mills to Sifters (pneumatic lift)
-    mills.forEach((mill, i) => {
-      const sifter = sifters[i % sifters.length];
-      if (!sifter) return;
-      const start = new THREE.Vector3(
-        mill.position[0],
-        mill.position[1] + mill.size[1],
-        mill.position[2]
-      );
-      // Use deterministic offset based on index instead of random (prevents pipes jumping on re-render)
-      const offsetX = ((i % 3) - 1) * 1.5; // -1.5, 0, or 1.5 based on index
-      const end = new THREE.Vector3(
-        sifter.position[0] + offsetX,
-        sifter.position[1] + sifter.size[1] / 2,
-        sifter.position[2]
-      );
-      pipeElements.push(createConnection(start, end, `pipe-m-s-${i}`, '#cbd5e1'));
-    });
+    const routes = (Object.entries(routeGeometries) as [PipeRouteFamily, THREE.BufferGeometry[]][])
+      .map(([family, geometries]): PipeRouteMesh | null => {
+        if (geometries.length === 0) return null;
+        const geometry = mergeGeometries(geometries, false);
+        geometries.forEach((sourceGeometry) => sourceGeometry.dispose());
+        return geometry ? { family, geometry } : null;
+      })
+      .filter((route): route is PipeRouteMesh => route !== null);
 
-    // Sifters to Packers
-    packers.forEach((packer, i) => {
-      const sifter = sifters[i % sifters.length];
-      if (!sifter) return;
-      const start = new THREE.Vector3(
-        sifter.position[0],
-        sifter.position[1] - 2,
-        sifter.position[2]
-      );
-      const end = new THREE.Vector3(
-        packer.position[0],
-        packer.position[1] + packer.size[1] + 1,
-        packer.position[2]
-      );
-      pipeElements.push(createConnection(start, end, `pipe-s-p-${i}`, '#e2e8f0'));
-    });
+    return { routes, flangeMatrices };
+    // Stable layout key + tier, not the machines array (status ticks constantly).
+  }, [machineKey, radialSegments]);
 
-    return { pipeElements, geometries, materials };
-  }, [machineKey]); // Use stable key instead of full machines array
-
-  // Dispose geometries and materials on unmount or when dependencies change
+  // Dispose route geometries on unmount or when dependencies change. Module-level
+  // materials and instanced detail geometry remain shared for the application lifetime.
   useEffect(() => {
     return () => {
-      pipeData.geometries.forEach((geometry) => geometry.dispose());
-      pipeData.materials.forEach((material) => material.dispose());
+      pipeData.routes.forEach(({ geometry }) => geometry.dispose());
     };
   }, [pipeData]);
 
+  const routeMaterials = getRouteMaterials();
+
   return (
-    <group>
-      {pipeData.pipeElements}
-      {/* Pipe supports */}
+    <group name="process-spouting-network">
+      {pipeData.routes.map(({ family, geometry }) => (
+        // receiveShadow: without it the runs never darken under the roof
+        // structure or under each other, which is most of the "nothing is
+        // occluded at ceiling height" read.
+        <mesh
+          key={family}
+          geometry={geometry}
+          material={routeMaterials[family]}
+          castShadow
+          receiveShadow
+        />
+      ))}
+      <InstancedPipeFlanges matrices={pipeData.flangeMatrices} />
       <PipeSupports />
     </group>
   );
@@ -252,32 +268,53 @@ export const SpoutingSystem = React.memo<{
 
 // Pipe support positions (static, defined at module level)
 const PIPE_SUPPORT_POSITIONS: [number, number, number][] = [
-  [-15, 10, -12],
-  [0, 10, -12],
-  [15, 10, -12],
-  [-10, 12, 0],
-  [10, 12, 0],
-  [-8, 10, 10],
-  [8, 10, 10],
+  [-21, 10, -14],
+  [0, 10, -14],
+  [21, 10, -14],
+  [-18, 12, 7],
+  [18, 12, 7],
 ];
 
 const PipeSupports: React.FC = React.memo(() => {
+  const verticalRef = useRef<THREE.InstancedMesh>(null);
+  const crossBeamRef = useRef<THREE.InstancedMesh>(null);
+
+  useLayoutEffect(() => {
+    const object = new THREE.Object3D();
+    PIPE_SUPPORT_POSITIONS.forEach(([x, height, z], index) => {
+      object.position.set(x, height / 2, z);
+      object.rotation.set(0, 0, 0);
+      object.scale.set(0.1, height, 0.1);
+      object.updateMatrix();
+      verticalRef.current?.setMatrixAt(index, object.matrix);
+
+      object.position.set(x, height, z);
+      object.rotation.set(0, 0, Math.PI / 2);
+      object.scale.set(0.08, 3, 0.08);
+      object.updateMatrix();
+      crossBeamRef.current?.setMatrixAt(index, object.matrix);
+    });
+
+    [verticalRef.current, crossBeamRef.current].forEach((mesh) => {
+      if (!mesh) return;
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+    });
+  }, []);
+
   return (
-    <group>
-      {PIPE_SUPPORT_POSITIONS.map((pos, i) => (
-        <group key={i} position={pos}>
-          {/* Vertical support - main structure gets shadows */}
-          <mesh castShadow>
-            <cylinderGeometry args={[0.1, 0.1, pos[1] * 2]} />
-            <primitive object={PIPE_MATERIALS.supportGray} attach="material" />
-          </mesh>
-          {/* Cross beam - offset slightly on Y axis to prevent z-fighting with vertical support */}
-          <mesh position={[0, 0.02, 0]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.08, 0.08, 3]} />
-            <primitive object={PIPE_MATERIALS.supportSlate} attach="material" />
-          </mesh>
-        </group>
-      ))}
+    <group name="process-spouting-supports">
+      <instancedMesh
+        ref={verticalRef}
+        args={[PIPE_SUPPORT_GEOMETRY, PIPE_MATERIALS.supportGray, PIPE_SUPPORT_POSITIONS.length]}
+        castShadow
+        receiveShadow
+      />
+      <instancedMesh
+        ref={crossBeamRef}
+        args={[PIPE_SUPPORT_GEOMETRY, PIPE_MATERIALS.supportSlate, PIPE_SUPPORT_POSITIONS.length]}
+        receiveShadow
+      />
     </group>
   );
 });

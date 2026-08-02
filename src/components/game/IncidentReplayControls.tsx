@@ -5,28 +5,21 @@ import { useProductionStore } from '../../stores/productionStore';
 import { useShallow } from 'zustand/react/shallow';
 
 export const IncidentReplayControls: React.FC = () => {
-  const {
-    replayMode,
-    replayFrames,
-    currentReplayIndex,
-    setReplayMode,
-    setReplayIndex,
-    clearReplayFrames,
-  } = useProductionStore(
-    useShallow((state) => ({
-      replayMode: state.replayMode,
-      replayFrames: state.replayFrames,
-      currentReplayIndex: state.currentReplayIndex,
-      setReplayMode: state.setReplayMode,
-      setReplayIndex: state.setReplayIndex,
-      clearReplayFrames: state.clearReplayFrames,
-    }))
-  );
+  const { replayMode, replayFrames, currentReplayIndex, setReplayMode, setReplayIndex } =
+    useProductionStore(
+      useShallow((state) => ({
+        replayMode: state.replayMode,
+        replayFrames: state.replayFrames,
+        currentReplayIndex: state.currentReplayIndex,
+        setReplayMode: state.setReplayMode,
+        setReplayIndex: state.setReplayIndex,
+      }))
+    );
 
   const [isPlaying, setIsPlaying] = useState(false);
 
   useEffect(() => {
-    if (!isPlaying || !replayMode) return;
+    if (!isPlaying || !replayMode || replayFrames.length === 0) return;
 
     const interval = setInterval(() => {
       setReplayIndex((currentReplayIndex + 1) % replayFrames.length);
@@ -34,6 +27,13 @@ export const IncidentReplayControls: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [isPlaying, replayMode, currentReplayIndex, replayFrames.length, setReplayIndex]);
+
+  useEffect(() => {
+    if (replayMode && replayFrames.length === 0) {
+      setReplayMode(false);
+      setIsPlaying(false);
+    }
+  }, [replayFrames.length, replayMode, setReplayMode]);
 
   // Memoized handlers to prevent re-renders
   const handleSkipBack = useCallback(() => {
@@ -57,8 +57,8 @@ export const IncidentReplayControls: React.FC = () => {
 
   const handleExitReplay = useCallback(() => {
     setReplayMode(false);
-    clearReplayFrames();
-  }, [setReplayMode, clearReplayFrames]);
+    setIsPlaying(false);
+  }, [setReplayMode]);
 
   if (!replayMode) return null;
 

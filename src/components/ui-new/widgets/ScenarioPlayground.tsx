@@ -420,7 +420,7 @@ const EngagementMetricsDisplay: React.FC<EngagementMetricsDisplayProps> = ({
             ? 'Work feels like a game that produces something real'
             : engagementScore >= 50
               ? 'Engagement emerging - consider increasing autonomy or transparency'
-              : 'Work feels forced - BAMS configuration needs adjustment'}
+              : 'Work feels forced - BAS configuration needs adjustment'}
         </p>
       </div>
     </div>
@@ -1251,7 +1251,7 @@ export const ScenarioPlayground: React.FC = () => {
               <p className="text-[8px] text-slate-500 text-center">
                 {isEngagementScenario
                   ? 'Adjust Autonomy or Information Access to strengthen the engagement signature'
-                  : 'Adjust the Five Axes in the BAMS panel to respond to events'}
+                  : 'Adjust the Five Axes in the BAS panel to respond to events'}
               </p>
             </motion.div>
           )}

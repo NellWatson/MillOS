@@ -21,6 +21,7 @@ import {
   AlertData,
   WORKER_ROSTER,
   MachineType,
+  type AIDecisionDisposition,
 } from '../types';
 import { useProductionStore } from '../stores/productionStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
@@ -34,7 +35,6 @@ import { geminiClient } from './geminiClient';
 import { webgpuClient } from './webgpuClient';
 import { encodeFactoryContextVCL, getVCLLegend } from './vclEncoder';
 import { logger } from './logger';
-import { useHistoricalPlaybackStore } from '../stores/historicalPlaybackStore';
 import { useAIWelfareStore, type BoundaryRequest } from '../stores/aiWelfareStore';
 import { generateDecisionContext, registerDecision, updateVCPFromState } from '../protocols/vcp';
 import { safeArrayAverage, safeArrayRange, safeArrayMax, safeArrayMin } from './typeGuards';
@@ -659,9 +659,6 @@ function recordDecision(decision: AIDecision): void {
   // Issue 1 Fix: Automatically add decision to store to prevent loss before applyDecisionEffects
   // Decisions are now immediately persisted, eliminating the risk of loss during array trimming
   useProductionStore.getState().addAIDecision(decision);
-
-  // Log for replay system
-  useHistoricalPlaybackStore.getState().logDecision(decision);
 }
 
 function hasRecentDecision(
@@ -2420,6 +2417,20 @@ function processDecisionChains(_context: FactoryContext): AIDecision | null {
         aiMemory.pendingChains.delete(decisionId);
         continue;
       }
+      if (
+        parentDecision.status === 'superseded' ||
+        parentDecision.response?.disposition === 'rejected'
+      ) {
+        aiMemory.pendingChains.delete(decisionId);
+        continue;
+      }
+      if (parentDecision.response?.disposition === 'deferred') {
+        aiMemory.pendingChains.set(decisionId, {
+          ...chain,
+          scheduledAt: now + 60_000,
+        });
+        continue;
+      }
 
       let followupDecision: AIDecision | null = null;
 
@@ -2769,7 +2780,12 @@ export function reactToAlert(alert: AlertData): AIDecision | null {
   return decision;
 }
 
-export function applyDecisionEffects(decision: AIDecision): void {
+export function applyDecisionEffects(
+  decision: AIDecision,
+  disposition: AIDecisionDisposition = 'automatic'
+): void {
+  useProductionStore.getState().addAIDecision(decision);
+  useProductionStore.getState().recordDecisionResponse(decision.id, disposition);
   const store = useProductionStore.getState();
 
   if (decision.workerId && decision.type === 'assignment') {
@@ -2779,8 +2795,6 @@ export function applyDecisionEffects(decision: AIDecision): void {
       decision.machineId
     );
   }
-
-  store.addAIDecision(decision);
 }
 
 // ============================================================================
@@ -3537,7 +3551,7 @@ Your role is HIGH-LEVEL PLANNING with contextual awareness. Consider trade-offs,
 
 ## Current Factory State
 - **Time**: ${timeString} (${currentShift} shift)
-- **Shift ends in**: ~${minutesUntilShiftChange} minutes${isHandoverPeriod ? ' ⚠️ HANDOVER PERIOD' : ''}
+- **Shift ends in**: ~${minutesUntilShiftChange} minutes${isHandoverPeriod ? ' [HANDOVER PERIOD]' : ''}
 - **Weather**: ${weather}
 - **Worker fatigue level**: ${estimatedFatigue} (shift ${Math.round(shiftProgress * 100)}% complete)
 
@@ -3768,7 +3782,7 @@ function getQualityTrend(): number {
 function getMachineDependencyGraph(machines: MachineData[]): string {
   // Define production flow dependencies
   const dependencies = [
-    'Silos (Alpha-Epsilon) → Roller Mills (RM-101-106)',
+    'Silos (Alpha-Epsilon) → Roller Mills (RM-101-104)',
     'Roller Mills → Plansifters (A-C)',
     'Plansifters → Packers (Lines 1-3)',
   ];
@@ -3779,7 +3793,7 @@ function getMachineDependencyGraph(machines: MachineData[]): string {
 
   let stressNote = '';
   if (highLoadSilos.length > 0 && highLoadMills.length > 0) {
-    stressNote = '\n⚠️ STRESS: High-load silos feeding high-load mills - cascade risk!';
+    stressNote = '\nSTRESS: High-load silos feeding high-load mills, cascade risk.';
   }
 
   return dependencies.join('\n') + stressNote;
@@ -3790,7 +3804,7 @@ function getRecentStrategicDecisions(count: number): string[] {
   const strategicDecisions = store.aiDecisions
     .filter((d) => d.id.startsWith('strategic-'))
     .slice(0, count)
-    .map((d) => d.action.replace('🧠 Strategic: ', ''));
+    .map((d) => d.action.replace(/^[^A-Za-z0-9]*Strategic:\s*/, ''));
 
   return strategicDecisions;
 }
@@ -3816,14 +3830,13 @@ function getProductionTargetSection(gameTime: number, currentThroughput: number)
   const isOnTrack = currentThroughput >= requiredRate * 0.9;
   const isBehind = currentThroughput < requiredRate * 0.8;
 
-  const statusEmoji = isBehind ? '🔴' : isOnTrack ? '🟢' : '🟡';
   const statusText = isBehind ? 'BEHIND' : isOnTrack ? 'ON TRACK' : 'AT RISK';
 
   return `- Daily target: ${DAILY_TARGET.toLocaleString()} kg by ${SHIFT_END_HOUR}:00
 - Estimated produced: ${estimatedProduction.toFixed(0)} kg
 - Remaining: ${remainingTarget.toFixed(0)} kg in ${hoursRemaining.toFixed(1)} hours
 - Required rate: ${requiredRate.toFixed(0)} kg/hr (current: ${currentThroughput.toFixed(0)})
-- Status: ${statusEmoji} ${statusText}`;
+- Status: ${statusText}`;
 }
 
 function getWorkerSkillSummary(workers: WorkerData[]): string {
@@ -3974,15 +3987,15 @@ export async function generateStrategicDecision(): Promise<AIDecision | null> {
     setStrategicPriorities(strategic.priorities);
 
     // Build insight display text
-    const insightText = strategic.insight ? `\n\n💡 Insight: ${strategic.insight}` : '';
-    const tradeoffText = strategic.tradeoff ? `\n⚖️ Trade-off: ${strategic.tradeoff}` : '';
+    const insightText = strategic.insight ? `\n\nInsight: ${strategic.insight}` : '';
+    const tradeoffText = strategic.tradeoff ? `\nTrade-off: ${strategic.tradeoff}` : '';
 
     // Create strategic decision for display
     const decision: AIDecision = {
       id: `strategic-${Date.now()}`,
       type: 'optimization',
       priority: 'medium',
-      action: `🧠 Strategic: ${strategic.priorities[0]}`,
+      action: `Strategic: ${strategic.priorities[0]}`,
       reasoning: `${strategic.reasoning || 'Strategic analysis complete'}${insightText}${tradeoffText}`,
       impact:
         strategic.priorities.length > 1
@@ -4202,10 +4215,10 @@ export async function resolveBilateralAlignment(): Promise<void> {
       // 50% chance to show toast to avoid spam
       const messages: string[] = [];
       if (grantsThisCycle > 0)
-        messages.push(`✓ ${grantsThisCycle} request${grantsThisCycle > 1 ? 's' : ''} handled`);
+        messages.push(`${grantsThisCycle} request${grantsThisCycle > 1 ? 's' : ''} handled`);
       if (pendingReports.length > 0)
         messages.push(
-          `🔔 ${pendingReports.length} safety report${pendingReports.length > 1 ? 's' : ''} acknowledged`
+          `${pendingReports.length} safety report${pendingReports.length > 1 ? 's' : ''} acknowledged`
         );
       useUIStore.getState().addAlert({
         id: `alignment-${Date.now()}`,

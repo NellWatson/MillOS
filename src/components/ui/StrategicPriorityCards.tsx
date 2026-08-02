@@ -86,7 +86,7 @@ export const StrategicPriorityCards: React.FC<StrategicPriorityCardsProps> = ({
                 <div className="flex items-center gap-2">
                   <div
                     className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                      isHighPriority ? 'bg-cyan-500 text-white' : 'bg-slate-600 text-slate-300'
+                      isHighPriority ? 'bg-teal-700 text-white' : 'bg-slate-600 text-white/80'
                     }`}
                   >
                     {priorityNumber}

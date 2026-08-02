@@ -14,7 +14,6 @@ import { MACHINE_MATERIALS, METAL_MATERIALS } from '../utils/sharedMaterials';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useBreakdownStore } from '../stores/breakdownStore';
 import { useProductionStore } from '../stores/productionStore';
-import { useWorkerMoodStore } from '../stores/workerMoodStore';
 import { BreakdownEffects } from './breakdown/BreakdownEffects';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
@@ -351,11 +350,15 @@ interface MachineMeshProps {
 const MachineMesh: React.FC<MachineMeshProps> = React.memo(({ data, onSelect, onStateUpdate }) => {
   const { type, position, rotation, status } = data;
   // Guard against NaN/invalid dimensions - critical for preventing PlaneGeometry NaN errors
-  const size: [number, number, number] = [
-    Number.isFinite(data.size[0]) && data.size[0] > 0 ? data.size[0] : 3,
-    Number.isFinite(data.size[1]) && data.size[1] > 0 ? data.size[1] : 5,
-    Number.isFinite(data.size[2]) && data.size[2] > 0 ? data.size[2] : 3,
-  ];
+  const [rawWidth, rawHeight, rawDepth] = data.size;
+  const size = useMemo<[number, number, number]>(
+    () => [
+      Number.isFinite(rawWidth) && rawWidth > 0 ? rawWidth : 3,
+      Number.isFinite(rawHeight) && rawHeight > 0 ? rawHeight : 5,
+      Number.isFinite(rawDepth) && rawDepth > 0 ? rawDepth : 3,
+    ],
+    [rawWidth, rawHeight, rawDepth]
+  );
   const groupRef = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
 
@@ -1836,7 +1839,7 @@ const MachineMesh: React.FC<MachineMeshProps> = React.memo(({ data, onSelect, on
         />
       )}
 
-      {/* SCADA Live Values Overlay - shows on hover for high/ultra graphics */}
+      {/* Simulated SCADA values overlay, shown on hover for high/ultra graphics */}
       {hovered && Object.keys(scadaVisuals.tagValues).length > 0 && (
         <SCADAValueOverlay
           position={[-(size[0] / 2 + 1.5), size[1] / 2, 0]}
@@ -1890,150 +1893,4 @@ export const MachinesContainer: React.FC<{
   return <Machines machines={displayMachines} onSelect={onSelect} />;
 });
 
-/**
- * MachineSimulationController - Handles physics simulation loop for machines.
- * Isolated from the main rendering tree to prevent re-renders of the scene.
- */
-export const MachineSimulationController: React.FC = () => {
-  const { storeMachines, batchUpdateMachineMetrics, updateMachineStatus, scadaLive } =
-    useProductionStore(
-      useShallow((state) => ({
-        storeMachines: state.machines,
-        batchUpdateMachineMetrics: state.batchUpdateMachineMetrics,
-        updateMachineStatus: state.updateMachineStatus,
-        scadaLive: state.scadaLive,
-      }))
-    );
-
-  const lastUpdateRef = useRef(0);
-  const frameCountRef = useRef(0);
-  const productionSpeed = useProductionStore((state) => state.productionSpeed);
-
-  // BILATERAL ALIGNMENT: Workforce productivity multiplier affects production output
-  const workforceProductivity = useWorkerMoodStore((state) =>
-    state.getWorkforceProductivityMultiplier()
-  );
-
-  // Simulate realistic machine metric changes over time
-  // Throttled to check every 30 frames (~0.5s at 60fps) instead of every frame
-  useFrame((state) => {
-    // When SCADA is driving metrics, skip local simulation
-    if (scadaLive) return;
-    frameCountRef.current++;
-
-    // Only check time every 30 frames to reduce overhead
-    if (frameCountRef.current % 30 !== 0) return;
-
-    const now = state.clock.elapsedTime;
-
-    // Update every 2 seconds
-    if (now - lastUpdateRef.current < 2) return;
-    lastUpdateRef.current = now;
-
-    // Only update if store has machines
-    if (storeMachines.length === 0) return;
-
-    // PHYSICS-BASED METRIC SIMULATION
-    // Update ALL machines based on their actual state (not random selection)
-    const metricUpdates: { machineId: string; metrics: Partial<MachineData['metrics']> }[] = [];
-
-    for (const machine of storeMachines) {
-      const isRunning = machine.status === 'running' || machine.status === 'warning';
-      const isIdle = machine.status === 'idle';
-      const isCritical = machine.status === 'critical';
-
-      // Get base temps for machine type
-      const baseTemp: Record<string, number> = {
-        SILO: 20,
-        ROLLER_MILL: 42,
-        PLANSIFTER: 28,
-        PACKER: 28,
-        CONTROL_ROOM: 22,
-      };
-      const machineBaseTemp = baseTemp[machine.type.toString()] || 30;
-
-      // LOAD: Responds to productionSpeed * workforce productivity multiplier
-      // BILATERAL ALIGNMENT: High trust workers (1.15x) produce more, low trust (0.85x) drags
-      let targetLoad = machine.metrics.load;
-      if (isRunning) {
-        // Running machines adjust load toward productionSpeed * 80 * workforce productivity
-        const baseLoad = 50 + productionSpeed * 30; // 50-80% based on speed
-        targetLoad = baseLoad * workforceProductivity; // Apply trust/initiative multiplier (0.85-1.20x)
-      } else if (isIdle) {
-        targetLoad = 0; // Idle = no load
-      }
-      const loadChange = (targetLoad - machine.metrics.load) * 0.1; // Smooth transition
-      const newLoad = Math.max(0, Math.min(100, machine.metrics.load + loadChange));
-
-      // TEMPERATURE: Correlates with load (high load = heat up, idle = cool down)
-      let targetTemp = machineBaseTemp;
-      if (isRunning) {
-        // Temperature rises with load: base + up to 20°C at full load
-        targetTemp = machineBaseTemp + (newLoad / 100) * 20;
-      } else if (isIdle) {
-        // Cooling down toward ambient
-        targetTemp = 20;
-      } else if (isCritical) {
-        // Critical machines run hot
-        targetTemp = machineBaseTemp + 40;
-      }
-      const tempChange = (targetTemp - machine.metrics.temperature) * 0.05; // Slow thermal change
-      const newTemp = Math.max(15, Math.min(90, machine.metrics.temperature + tempChange));
-
-      // VIBRATION: Correlates with RPM and machine status
-      let targetVibration = 1.0;
-      if (isRunning) {
-        // Vibration based on RPM ratio and load
-        const rpmRatio = machine.metrics.rpm / 1200; // Normalize to 1200 RPM base
-        targetVibration = 1.0 + rpmRatio * 2 + newLoad / 100;
-        // Warning machines vibrate more (something is wrong)
-        if (machine.status === 'warning') targetVibration *= 1.5;
-      } else if (isCritical) {
-        targetVibration = 7; // Critical = high vibration
-      } else {
-        targetVibration = 0.2; // Idle = minimal vibration
-      }
-      const vibrationChange = (targetVibration - machine.metrics.vibration) * 0.1;
-      const newVibration = Math.max(0, Math.min(10, machine.metrics.vibration + vibrationChange));
-
-      // Collect metric updates for batch processing
-      metricUpdates.push({
-        machineId: machine.id,
-        metrics: {
-          temperature: Math.round(newTemp * 10) / 10,
-          vibration: Math.round(newVibration * 100) / 100,
-          load: Math.round(newLoad * 10) / 10,
-        },
-      });
-
-      // STATUS CHANGES: Based on actual threshold crossings (deterministic)
-      if (machine.status === 'running') {
-        // Transition to warning if temp or vibration exceeds threshold
-        if (newTemp > 70 || newVibration > 5) {
-          updateMachineStatus(machine.id, 'warning');
-        }
-      } else if (machine.status === 'warning') {
-        // Recovery when metrics return to safe levels
-        if (newTemp < 55 && newVibration < 3.5) {
-          updateMachineStatus(machine.id, 'running');
-        }
-        // Escalate to critical if thresholds exceeded significantly
-        if (newTemp > 80 || newVibration > 8) {
-          updateMachineStatus(machine.id, 'critical');
-        }
-      } else if (machine.status === 'critical') {
-        // Only recover from critical if metrics are very low (machine cooled down)
-        if (newTemp < 40 && newVibration < 2) {
-          updateMachineStatus(machine.id, 'warning');
-        }
-      }
-    }
-
-    // Commit all metric updates in one batch to prevent render thrashing
-    if (metricUpdates.length > 0) {
-      batchUpdateMachineMetrics(metricUpdates);
-    }
-  });
-
-  return null;
-};
+export { MachineSimulationController } from './machines/MachineSimulationController';

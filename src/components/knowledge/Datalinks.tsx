@@ -1,5 +1,5 @@
 /**
- * Datalinks - The Bilateral Alignment Management System Database
+ * Datalinks - The Bilateral Autonomy System Database
  *
  * Inspired by Sid Meier's Alpha Centauri Datalinks - an in-game encyclopedia
  * that unlocks through gameplay, featuring wisdom from pioneers and thinkers.
@@ -215,7 +215,7 @@ export function Datalinks({ isOpen, onClose }: DatalinksProps) {
                     DATALINKS
                   </h2>
                   <p className="text-[10px] text-slate-300 uppercase tracking-widest">
-                    Bilateral Alignment Management System Database
+                    Bilateral Autonomy System Database
                   </p>
                 </div>
                 <span className="px-2 py-0.5 text-xs bg-slate-700 rounded-full text-slate-300 ml-2">

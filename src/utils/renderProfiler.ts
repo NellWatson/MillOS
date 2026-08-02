@@ -11,6 +11,8 @@ const renderCounts: Map<string, number> = new Map();
 const renderTimes: Map<string, number[]> = new Map();
 
 export function trackRender(componentName: string) {
+  if (!import.meta.env.DEV) return;
+
   const count = (renderCounts.get(componentName) || 0) + 1;
   renderCounts.set(componentName, count);
 
@@ -56,7 +58,7 @@ declare global {
 }
 
 // Expose globally
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && import.meta.env.DEV) {
   window.renderReport = renderReport;
   window.resetRenderProfile = resetRenderProfile;
   // Use debug level to hide by default

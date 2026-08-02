@@ -4,19 +4,31 @@
  * Centralized animation management for workers using maath.
  */
 
-export { WorkerAnimationManager, useWorkerAnimationManager } from './WorkerAnimationManager';
+export {
+  dampAngle,
+  getInitialWorkerLod,
+  WorkerAnimationManager,
+  resolveWorkerLod,
+  useWorkerAnimationManager,
+} from './WorkerAnimationManager';
 
 export type {
   WorkerAnimationData,
   WorkerAnimationConfig,
   WorkerPoseRefs,
+  WorkerSecondarySignals,
   LODLevel,
   AnimationState,
   IdleVariation,
   AnimationManagerConfig,
 } from './workerAnimationTypes';
 
-export { createWorkerAnimationData, DEFAULT_ANIMATION_CONFIG } from './workerAnimationTypes';
+export {
+  createSecondarySignals,
+  createWorkerAnimationData,
+  DEFAULT_ANIMATION_CONFIG,
+  normalizeWorkerSpeed,
+} from './workerAnimationTypes';
 
 export type { AnimationFeatures, GraphicsQuality } from './animationFeatures';
 

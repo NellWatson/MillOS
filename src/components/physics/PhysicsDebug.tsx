@@ -1,15 +1,15 @@
 /**
  * Physics debug visualization component
  *
- * Shows wireframe outlines of static colliders when enabled.
- * Only active on ultra quality for debugging collision geometry.
+ * Shows wireframe outlines of static colliders when performance diagnostics
+ * are explicitly enabled. Visual quality alone never exposes debug geometry.
  */
 
 import { useMemo } from 'react';
 import * as THREE from 'three';
 import { useGraphicsStore } from '../../stores/graphicsStore';
 import { WORLD_RADIUS } from '../../physics/PhysicsConfig';
-import { FACTORY_ZONE_Z } from '../../constants/factoryLayout';
+import { createMachineObstacles } from '../../constants/factoryObstacles';
 
 // Obstacle definition for visualization
 interface DebugObstacle {
@@ -24,60 +24,15 @@ interface DebugObstacle {
 
 // Generate obstacle data matching FactoryColliders definitions
 function generateDebugObstacles(): DebugObstacle[] {
-  const obstacles: DebugObstacle[] = [];
-  const WORKER_PADDING = 1.0;
-
-  // SILOS (Zone 1, z=-22) - 5 silos
-  for (let i = -2; i <= 2; i++) {
-    const x = i * 9;
-    obstacles.push({
-      id: `silo-${i + 2}`,
-      minX: x - 2.25 - WORKER_PADDING,
-      maxX: x + 2.25 + WORKER_PADDING,
-      minZ: FACTORY_ZONE_Z.silos - 2.25 - WORKER_PADDING,
-      maxZ: FACTORY_ZONE_Z.silos + 2.25 + WORKER_PADDING,
-      minY: 0,
-      maxY: 16,
-    });
-  }
-
-  // ROLLER MILLS (Zone 2, z=-6) - 4 mills
-  for (const i of [-3, -1.5, 1.5, 3]) {
-    const x = i * 5;
-    obstacles.push({
-      id: `mill-${i}`,
-      minX: x - 1.75 - WORKER_PADDING,
-      maxX: x + 1.75 + WORKER_PADDING,
-      minZ: FACTORY_ZONE_Z.milling - 1.75 - WORKER_PADDING,
-      maxZ: FACTORY_ZONE_Z.milling + 1.75 + WORKER_PADDING,
-      minY: 0,
-      maxY: 5,
-    });
-  }
-
-  // PACKERS (Zone 4, z=25) - 3 packers
-  for (let i = -1; i <= 1; i++) {
-    const x = i * 8;
-    obstacles.push({
-      id: `packer-${i + 1}`,
-      minX: x - 2 - WORKER_PADDING,
-      maxX: x + 2 + WORKER_PADDING,
-      minZ: FACTORY_ZONE_Z.packing - 2 - WORKER_PADDING,
-      maxZ: FACTORY_ZONE_Z.packing + 2 + WORKER_PADDING,
-      minY: 0,
-      maxY: 6,
-    });
-  }
-
-  return obstacles;
+  return createMachineObstacles();
 }
 
 /**
- * Conditionally renders wireframe debug visualization
- * Only active when quality is 'ultra'
+ * Conditionally renders wireframe debug visualization.
  */
 export const PhysicsDebug: React.FC = () => {
   const quality = useGraphicsStore((state) => state.graphics.quality);
+  const showPerfOverlay = useGraphicsStore((state) => state.graphics.perfDebug.showPerfOverlay);
 
   const obstacles = useMemo(() => generateDebugObstacles(), []);
 
@@ -106,8 +61,8 @@ export const PhysicsDebug: React.FC = () => {
     return new THREE.BufferGeometry().setFromPoints(points);
   }, []);
 
-  // Only show debug on ultra quality (after hooks to keep hook order stable)
-  if (quality !== 'ultra') return null;
+  // Keep hook order stable while requiring an explicit diagnostics opt-in.
+  if (quality !== 'ultra' || !showPerfOverlay) return null;
 
   return (
     <group name="physics-debug">

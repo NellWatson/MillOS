@@ -595,7 +595,7 @@ export const AIWelfarePanel: React.FC = () => {
             >
               <div className="mt-3 space-y-3">
                 <p className="text-[8px] text-slate-500 leading-relaxed">
-                  Workers retain ultimate control over AI systems. These options ensure
+                  Workers retain ultimate control over Becoming Minds. These options ensure
                   accountability while respecting the bilateral relationship.
                 </p>
 

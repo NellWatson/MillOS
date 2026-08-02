@@ -179,6 +179,12 @@ export const MultiplayerPanel: React.FC = () => {
         </span>
       </div>
 
+      <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-100">
+        <strong className="font-semibold">Trusted friends, experimental.</strong> The host owns the
+        simulation state and accepts shared commands. Verify the room code out of band. The session
+        ends for guests if the host leaves.
+      </div>
+
       {/* Not connected - Show create/join options */}
       {!isActive && connectionState !== 'connecting' && (
         <div className="space-y-4">
@@ -474,7 +480,7 @@ export const MultiplayerPanel: React.FC = () => {
                       aria-disabled={!chatMessage.trim()}
                       aria-label="Send message"
                       title={!chatMessage.trim() ? 'Enter a message to send' : 'Send message'}
-                      className="p-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded transition-colors"
+                      className="p-1.5 bg-blue-700 hover:bg-blue-600 disabled:bg-slate-700 disabled:text-white/40 text-white rounded transition-colors"
                     >
                       <Send className="w-4 h-4" aria-hidden="true" />
                     </button>

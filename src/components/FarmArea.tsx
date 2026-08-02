@@ -6,21 +6,39 @@ import Fireflies from './effects/Fireflies';
 import { HeartParticle } from './effects/HeartParticle';
 import { playCritterSound } from '../utils/critterAudio';
 import { Cat } from './scenery/Cat';
-import { PineTree } from './scenery/Tree';
+import {
+  InstancedTreeField,
+  InstancedGrassClutter,
+  InstancedMulch,
+  useVegetationDensity,
+  type TreeInstance,
+  type ClutterSpec,
+} from './scenery/InstancedFoliage';
+import { WindDriver, applyWindShader } from './scenery/WindDriver';
 import { DrainageCulvert } from './scenery/Tunnel';
 import { PROCEDURAL_TEXTURES, OUTDOOR_MATERIALS } from '../utils/sharedMaterials';
 import { RENDER_ORDER } from '../constants/renderLayers';
+import { generateCobblestoneRoughness } from '../textures';
+
+/** Hoisted so the barnyard material does not allocate a Vector2 per render. */
+const FARM_COBBLE_NORMAL_SCALE = new THREE.Vector2(0.4, 0.4);
 
 // Create farm-specific cobble textures with proper world-scale repeat
 // Barnyard is 20x15 units, path is 3x14 units - tile every 10 units
 const farmBarnyardCobbleColor = PROCEDURAL_TEXTURES.cobblestoneColor.clone();
 const farmBarnyardCobbleNormal = PROCEDURAL_TEXTURES.cobblestoneNormal.clone();
+// 256/7 matches the cell count of the 512/14 albedo, so polished crowns sit on
+// the stones rather than drifting across them.
+const farmBarnyardCobbleRoughness = generateCobblestoneRoughness(256, 7).clone();
 farmBarnyardCobbleColor.wrapS = farmBarnyardCobbleColor.wrapT = THREE.RepeatWrapping;
 farmBarnyardCobbleNormal.wrapS = farmBarnyardCobbleNormal.wrapT = THREE.RepeatWrapping;
+farmBarnyardCobbleRoughness.wrapS = farmBarnyardCobbleRoughness.wrapT = THREE.RepeatWrapping;
 farmBarnyardCobbleColor.repeat.set(2, 1.5); // 20/10, 15/10
 farmBarnyardCobbleNormal.repeat.set(2, 1.5);
+farmBarnyardCobbleRoughness.repeat.set(2, 1.5);
 farmBarnyardCobbleColor.needsUpdate = true;
 farmBarnyardCobbleNormal.needsUpdate = true;
+farmBarnyardCobbleRoughness.needsUpdate = true;
 
 const farmPathCobbleColor = PROCEDURAL_TEXTURES.cobblestoneColor.clone();
 const farmPathCobbleNormal = PROCEDURAL_TEXTURES.cobblestoneNormal.clone();
@@ -118,38 +136,49 @@ const SG = {
 
 // Shared Materials - with procedural textures
 const SM = {
+  // Painted board siding. `PROCEDURAL_TEXTURES.panelNormal` is dropped here and
+  // on every wood/stone/plaster material below rather than replaced: its bevel
+  // is 0.64 px at 256, below one texel, so the mip chain erases it and at
+  // normalScale 0.1-0.2 it was contributing nothing. The correct replacement
+  // (`machinePanelNormal`) is a sheet-metal panel bevel and has no business on
+  // barn boards - so the honest fix is no map and one less texture fetch.
   barnRed: new THREE.MeshStandardMaterial({
     color: '#8B2323',
     roughness: 0.8,
-    normalMap: PROCEDURAL_TEXTURES.panelNormal,
-    normalScale: new THREE.Vector2(0.15, 0.15),
   }),
+  // Sheet-metal barn roof - the one surface here a panel bevel actually fits.
+  // The old `brushedMetal` binding decoded a roughness/metalness/AO pack as a
+  // tangent normal, which is a near-constant tilt of about (-0.37, +0.90) over
+  // the whole cone: a uniform lighting bias, not relief.
   barnRoof: new THREE.MeshStandardMaterial({
     color: '#4a4a4a',
     roughness: 0.7,
-    normalMap: PROCEDURAL_TEXTURES.brushedMetal,
-    normalScale: new THREE.Vector2(0.2, 0.2),
+    normalMap: PROCEDURAL_TEXTURES.machinePanelNormal,
+    normalScale: new THREE.Vector2(0.6, 0.6),
   }),
   whiteTrim: new THREE.MeshStandardMaterial({ color: '#f5f5f5', roughness: 0.6 }),
   barnDoor: new THREE.MeshStandardMaterial({
     color: '#5d4037',
     roughness: 0.8,
-    normalMap: PROCEDURAL_TEXTURES.panelNormal,
-    normalScale: new THREE.Vector2(0.2, 0.2),
   }),
   barnWindow: new THREE.MeshStandardMaterial({ color: '#1a1a1a', roughness: 0.9 }),
+  // Weathervane finial. F0 0.56 - a genuine CONDUCTOR at metalness 1 (0.7 was
+  // the invalid half-metal band). The `roughnessMap` is dropped rather than
+  // swapped for the ORM: the cone is 0.3 m, so a 512 map tiled once over it is
+  // sub-pixel at any viewing distance and mips to its 0.582 mean. That mean is
+  // folded into the authored roughness instead.
   gold: new THREE.MeshStandardMaterial({
     color: '#ffd700',
-    roughness: 0.3,
-    metalness: 0.7,
-    roughnessMap: PROCEDURAL_TEXTURES.brushedMetal,
+    roughness: 0.35,
+    metalness: 1,
   }),
+  // Weathervane spindle: a 0.1 m rod. F0 0.05 - painted iron, DIELECTRIC. Same
+  // mis-decoded normal map as `barnRoof` had, dropped outright here because
+  // nothing tiled onto a 0.1 m member survives the mip chain.
   darkMetal: new THREE.MeshStandardMaterial({
     color: '#424242',
-    roughness: 0.4,
-    metalness: 0.6,
-    normalMap: PROCEDURAL_TEXTURES.brushedMetal,
-    normalScale: new THREE.Vector2(0.15, 0.15),
+    roughness: 0.55,
+    metalness: 0,
   }),
   chickenFeather: new THREE.MeshStandardMaterial({ color: '#f5f5dc', roughness: 0.9 }),
   chickenBeak: new THREE.MeshStandardMaterial({ color: '#ff9800', roughness: 0.7 }),
@@ -170,20 +199,14 @@ const SM = {
   woodBrown: new THREE.MeshStandardMaterial({
     color: '#5d4037',
     roughness: 0.9,
-    normalMap: PROCEDURAL_TEXTURES.panelNormal,
-    normalScale: new THREE.Vector2(0.15, 0.15),
   }),
   woodLight: new THREE.MeshStandardMaterial({
     color: '#8d6e63',
     roughness: 0.85,
-    normalMap: PROCEDURAL_TEXTURES.panelNormal,
-    normalScale: new THREE.Vector2(0.1, 0.1),
   }),
   woodTan: new THREE.MeshStandardMaterial({
     color: '#a1887f',
     roughness: 0.8,
-    normalMap: PROCEDURAL_TEXTURES.panelNormal,
-    normalScale: new THREE.Vector2(0.1, 0.1),
   }),
   grass: OUTDOOR_MATERIALS.grass, // Use shared grass material for seamless matching
   mud: new THREE.MeshStandardMaterial({
@@ -196,13 +219,13 @@ const SM = {
   stone: new THREE.MeshStandardMaterial({
     color: '#d7ccc8',
     roughness: 0.8,
-    normalMap: PROCEDURAL_TEXTURES.panelNormal,
-    normalScale: new THREE.Vector2(0.2, 0.2),
   }),
+  // Water is a DIELECTRIC - metalness 0.1 was tinting the specular with the
+  // pond's own blue and leaving it chalky now that there is an environment.
   water: new THREE.MeshStandardMaterial({
     color: '#64b5f6',
     roughness: 0.2,
-    metalness: 0.1,
+    metalness: 0,
     transparent: true,
     opacity: 0.8,
     // Transparent overlay surface: writing depth made the water occlude
@@ -212,8 +235,6 @@ const SM = {
   treeTrunk: new THREE.MeshStandardMaterial({
     color: '#5d4037',
     roughness: 0.9,
-    normalMap: PROCEDURAL_TEXTURES.panelNormal,
-    normalScale: new THREE.Vector2(0.15, 0.15),
   }),
   treeLeafDark: new THREE.MeshStandardMaterial({ color: '#2e7d32', roughness: 0.8 }),
   treeLeafLight: new THREE.MeshStandardMaterial({ color: '#388e3c', roughness: 0.8 }),
@@ -230,23 +251,18 @@ const SM = {
   houseWall: new THREE.MeshStandardMaterial({
     color: '#f5f5dc',
     roughness: 0.75,
-    normalMap: PROCEDURAL_TEXTURES.panelNormal,
-    normalScale: new THREE.Vector2(0.05, 0.05),
   }),
   roofBrown: new THREE.MeshStandardMaterial({
     color: '#8B4513',
     roughness: 0.8,
-    normalMap: PROCEDURAL_TEXTURES.panelNormal,
-    normalScale: new THREE.Vector2(0.15, 0.15),
   }),
   chimneyRed: new THREE.MeshStandardMaterial({ color: '#8B0000', roughness: 0.8 }),
-  windowBlue: new THREE.MeshStandardMaterial({ color: '#87ceeb', roughness: 0.2, metalness: 0.1 }),
+  // Window glass: dielectric.
+  windowBlue: new THREE.MeshStandardMaterial({ color: '#87ceeb', roughness: 0.2, metalness: 0 }),
   shutterGreen: new THREE.MeshStandardMaterial({ color: '#2e7d32', roughness: 0.7 }),
   coopBrown: new THREE.MeshStandardMaterial({
     color: '#8B4513',
     roughness: 0.85,
-    normalMap: PROCEDURAL_TEXTURES.panelNormal,
-    normalScale: new THREE.Vector2(0.15, 0.15),
   }),
   coopDark: new THREE.MeshStandardMaterial({ color: '#6d4c41', roughness: 0.85 }),
   coopRoof: new THREE.MeshStandardMaterial({ color: '#2e7d32', roughness: 0.7 }),
@@ -255,9 +271,11 @@ const SM = {
     roughness: 0.7,
     side: THREE.DoubleSide,
   }),
-  // Grain Field & Scarecrow
+  // Grain Field & Scarecrow. White base: the old flat '#8bc34a' is now
+  // supplied per stalk through `instanceColor` (see InstancedGrainField), so
+  // keeping the tint here would multiply the crop colour twice.
   cornGreen: new THREE.MeshStandardMaterial({
-    color: '#8bc34a',
+    color: '#ffffff',
     roughness: 0.9,
     side: THREE.DoubleSide,
   }),
@@ -267,6 +285,132 @@ const SM = {
   plaidRed: new THREE.MeshStandardMaterial({ color: '#b71c1c', roughness: 0.9 }),
   crowBlack: new THREE.MeshStandardMaterial({ color: '#212121', roughness: 0.6 }),
 };
+
+// The crop sways. `SM.cornGreen` is consumed ONLY by the three InstancedMeshes
+// inside `InstancedGrainField` (grep), and InstancedMesh is already excluded
+// from StaticMeshBatch merging, so the `onBeforeCompile` this adds costs no
+// batching. Do NOT do this to a building material.
+applyWindShader(SM.cornGreen, {
+  heightRef: 1.8,
+  strengthScale: 1.4,
+  cacheKey: 'millos_corn_v1',
+});
+
+/** Matching depth material so the crop's shadow sways with the crop. */
+const cornDepthMaterial = new THREE.MeshDepthMaterial({
+  depthPacking: THREE.RGBADepthPacking,
+  side: THREE.DoubleSide,
+});
+applyWindShader(cornDepthMaterial, {
+  heightRef: 1.8,
+  strengthScale: 1.4,
+  cacheKey: 'millos_corn_v1_depth',
+});
+
+interface StaticPartTransform {
+  position: [number, number, number];
+  rotation?: [number, number, number];
+  scale?: [number, number, number];
+}
+
+const SHEEP_FLUFF_PARTS: readonly StaticPartTransform[] = [
+  { position: [0.2, 0.7, 0.2] },
+  { position: [-0.2, 0.75, 0.15] },
+  { position: [0, 0.8, -0.2] },
+  { position: [0.15, 0.65, -0.25] },
+];
+const SHEEP_EAR_PARTS: readonly StaticPartTransform[] = [
+  { position: [0.35, 0.65, 0.15], rotation: [0, 0.5, 0.5] },
+  { position: [0.35, 0.65, -0.15], rotation: [0, -0.5, -0.5] },
+];
+const SHEEP_EYE_PARTS: readonly StaticPartTransform[] = [
+  { position: [0.52, 0.6, 0.08] },
+  { position: [0.52, 0.6, -0.08] },
+];
+const SHEEP_LEG_PARTS: readonly StaticPartTransform[] = [
+  { position: [0.2, 0.12, 0.18] },
+  { position: [0.2, 0.12, -0.18] },
+  { position: [-0.2, 0.12, 0.18] },
+  { position: [-0.2, 0.12, -0.18] },
+];
+const CHICKEN_LEG_PARTS: readonly StaticPartTransform[] = [
+  { position: [0.05, 0.08, 0.05] },
+  { position: [0.05, 0.08, -0.05] },
+];
+const PIG_NOSTRIL_PARTS: readonly StaticPartTransform[] = [
+  { position: [0.61, 0.37, 0.04] },
+  { position: [0.61, 0.37, -0.04] },
+];
+const PIG_EAR_PARTS: readonly StaticPartTransform[] = [
+  { position: [0.25, 0.6, 0.15], rotation: [0.5, 0.3, 0] },
+  { position: [0.25, 0.6, -0.15], rotation: [0.5, -0.3, 0] },
+];
+const PIG_EYE_PARTS: readonly StaticPartTransform[] = [
+  { position: [0.5, 0.48, 0.12] },
+  { position: [0.5, 0.48, -0.12] },
+];
+const PIG_LEG_PARTS: readonly StaticPartTransform[] = [
+  { position: [0.15, 0.1, 0.2] },
+  { position: [0.15, 0.1, -0.2] },
+  { position: [-0.15, 0.1, 0.2] },
+  { position: [-0.15, 0.1, -0.2] },
+];
+const COW_NOSTRIL_PARTS: readonly StaticPartTransform[] = [
+  { position: [0.88, 0.62, 0.05] },
+  { position: [0.88, 0.62, -0.05] },
+];
+const COW_EYE_PARTS: readonly StaticPartTransform[] = [
+  { position: [0.7, 0.78, 0.12] },
+  { position: [0.7, 0.78, -0.12] },
+];
+const COW_EAR_PARTS: readonly StaticPartTransform[] = [
+  { position: [0.5, 0.82, 0.18], rotation: [0, 0.5, 0.3] },
+  { position: [0.5, 0.82, -0.18], rotation: [0, -0.5, -0.3] },
+];
+const COW_HORN_PARTS: readonly StaticPartTransform[] = [
+  { position: [0.45, 0.92, 0.1], rotation: [0, 0, 0.3] },
+  { position: [0.45, 0.92, -0.1], rotation: [0, 0, -0.3] },
+];
+const COW_LEG_PARTS: readonly StaticPartTransform[] = [
+  { position: [0.3, 0.2, 0.25] },
+  { position: [0.3, 0.2, -0.25] },
+  { position: [-0.35, 0.2, 0.25] },
+  { position: [-0.35, 0.2, -0.25] },
+];
+
+const InstancedAnimalParts = React.memo<{
+  geometry: THREE.BufferGeometry;
+  material: THREE.Material;
+  transforms: readonly StaticPartTransform[];
+  castShadow?: boolean;
+}>(({ geometry, material, transforms, castShadow = false }) => {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const object = useMemo(() => new THREE.Object3D(), []);
+
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    transforms.forEach((transform, index) => {
+      object.position.fromArray(transform.position);
+      object.rotation.set(...(transform.rotation ?? [0, 0, 0]));
+      object.scale.fromArray(transform.scale ?? [1, 1, 1]);
+      object.updateMatrix();
+      mesh.setMatrixAt(index, object.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingSphere();
+  }, [object, transforms]);
+
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[geometry, material, transforms.length]}
+      castShadow={castShadow}
+      dispose={null}
+    />
+  );
+});
+InstancedAnimalParts.displayName = 'InstancedAnimalParts';
 
 // Static components with React.memo
 export const Barn = React.memo<{ position: [number, number, number] }>(({ position }) => (
@@ -523,12 +667,6 @@ export const Farmhouse = React.memo<{ position: [number, number, number] }>(({ p
 ));
 Farmhouse.displayName = 'Farmhouse';
 
-// FarmTree - Uses imported PineTree with textured bark
-const FarmTree = React.memo<{ position: [number, number, number] }>(({ position }) => (
-  <PineTree position={position} scale={1.2} />
-));
-FarmTree.displayName = 'FarmTree';
-
 const Sheep = React.memo<{
   position: [number, number, number];
   rotation?: number;
@@ -550,48 +688,33 @@ const Sheep = React.memo<{
       <primitive object={SG.sheepBody} attach="geometry" />
       <primitive object={SM.sheepWool} attach="material" />
     </mesh>
-    {[
-      [0.2, 0.7, 0.2],
-      [-0.2, 0.75, 0.15],
-      [0, 0.8, -0.2],
-      [0.15, 0.65, -0.25],
-    ].map((pos, i) => (
-      <mesh key={i} position={pos as [number, number, number]} castShadow>
-        <primitive object={SG.sheepFluff} attach="geometry" />
-        <primitive object={SM.sheepWool} attach="material" />
-      </mesh>
-    ))}
+    <InstancedAnimalParts
+      geometry={SG.sheepFluff}
+      material={SM.sheepWool}
+      transforms={SHEEP_FLUFF_PARTS}
+      castShadow
+    />
     <mesh position={[0.4, 0.55, 0]} castShadow>
       <primitive object={SG.sheepHead} attach="geometry" />
       <primitive object={SM.sheepFace} attach="material" />
     </mesh>
-    <mesh position={[0.35, 0.65, 0.15]} rotation={[0, 0.5, 0.5]} castShadow>
-      <primitive object={SG.sheepEar} attach="geometry" />
-      <primitive object={SM.sheepFace} attach="material" />
-    </mesh>
-    <mesh position={[0.35, 0.65, -0.15]} rotation={[0, -0.5, -0.5]} castShadow>
-      <primitive object={SG.sheepEar} attach="geometry" />
-      <primitive object={SM.sheepFace} attach="material" />
-    </mesh>
-    <mesh position={[0.52, 0.6, 0.08]}>
-      <primitive object={SG.sheepEye} attach="geometry" />
-      <primitive object={SM.sheepEye} attach="material" />
-    </mesh>
-    <mesh position={[0.52, 0.6, -0.08]}>
-      <primitive object={SG.sheepEye} attach="geometry" />
-      <primitive object={SM.sheepEye} attach="material" />
-    </mesh>
-    {[
-      [0.2, 0.12, 0.18],
-      [0.2, 0.12, -0.18],
-      [-0.2, 0.12, 0.18],
-      [-0.2, 0.12, -0.18],
-    ].map((pos, i) => (
-      <mesh key={i} position={pos as [number, number, number]} castShadow>
-        <primitive object={SG.sheepLeg} attach="geometry" />
-        <primitive object={SM.sheepFace} attach="material" />
-      </mesh>
-    ))}
+    <InstancedAnimalParts
+      geometry={SG.sheepEar}
+      material={SM.sheepFace}
+      transforms={SHEEP_EAR_PARTS}
+      castShadow
+    />
+    <InstancedAnimalParts
+      geometry={SG.sheepEye}
+      material={SM.sheepEye}
+      transforms={SHEEP_EYE_PARTS}
+    />
+    <InstancedAnimalParts
+      geometry={SG.sheepLeg}
+      material={SM.sheepFace}
+      transforms={SHEEP_LEG_PARTS}
+      castShadow
+    />
   </group>
 ));
 Sheep.displayName = 'Sheep';
@@ -648,14 +771,12 @@ const Chicken: React.FC<{
         <primitive object={SM.chickenTail} attach="material" />
       </mesh>
     </group>
-    <mesh position={[0.05, 0.08, 0.05]} castShadow>
-      <primitive object={SG.chickenLeg} attach="geometry" />
-      <primitive object={SM.chickenBeak} attach="material" />
-    </mesh>
-    <mesh position={[0.05, 0.08, -0.05]} castShadow>
-      <primitive object={SG.chickenLeg} attach="geometry" />
-      <primitive object={SM.chickenBeak} attach="material" />
-    </mesh>
+    <InstancedAnimalParts
+      geometry={SG.chickenLeg}
+      material={SM.chickenBeak}
+      transforms={CHICKEN_LEG_PARTS}
+      castShadow
+    />
   </group>
 );
 
@@ -689,41 +810,24 @@ const Pig: React.FC<{
       <primitive object={SG.pigSnout} attach="geometry" />
       <primitive object={SM.pigSnout} attach="material" />
     </mesh>
-    <mesh position={[0.61, 0.37, 0.04]}>
-      <primitive object={SG.pigNostril} attach="geometry" />
-      <primitive object={SM.pigNostril} attach="material" />
-    </mesh>
-    <mesh position={[0.61, 0.37, -0.04]}>
-      <primitive object={SG.pigNostril} attach="geometry" />
-      <primitive object={SM.pigNostril} attach="material" />
-    </mesh>
-    <mesh position={[0.25, 0.6, 0.15]} rotation={[0.5, 0.3, 0]} castShadow>
-      <primitive object={SG.pigEar} attach="geometry" />
-      <primitive object={SM.pigPink} attach="material" />
-    </mesh>
-    <mesh position={[0.25, 0.6, -0.15]} rotation={[0.5, -0.3, 0]} castShadow>
-      <primitive object={SG.pigEar} attach="geometry" />
-      <primitive object={SM.pigPink} attach="material" />
-    </mesh>
-    <mesh position={[0.5, 0.48, 0.12]}>
-      <primitive object={SG.pigEye} attach="geometry" />
-      <primitive object={SM.black} attach="material" />
-    </mesh>
-    <mesh position={[0.5, 0.48, -0.12]}>
-      <primitive object={SG.pigEye} attach="geometry" />
-      <primitive object={SM.black} attach="material" />
-    </mesh>
-    {[
-      [0.15, 0.1, 0.2],
-      [0.15, 0.1, -0.2],
-      [-0.15, 0.1, 0.2],
-      [-0.15, 0.1, -0.2],
-    ].map((pos, i) => (
-      <mesh key={i} position={pos as [number, number, number]} castShadow>
-        <primitive object={SG.pigLeg} attach="geometry" />
-        <primitive object={SM.pigPink} attach="material" />
-      </mesh>
-    ))}
+    <InstancedAnimalParts
+      geometry={SG.pigNostril}
+      material={SM.pigNostril}
+      transforms={PIG_NOSTRIL_PARTS}
+    />
+    <InstancedAnimalParts
+      geometry={SG.pigEar}
+      material={SM.pigPink}
+      transforms={PIG_EAR_PARTS}
+      castShadow
+    />
+    <InstancedAnimalParts geometry={SG.pigEye} material={SM.black} transforms={PIG_EYE_PARTS} />
+    <InstancedAnimalParts
+      geometry={SG.pigLeg}
+      material={SM.pigPink}
+      transforms={PIG_LEG_PARTS}
+      castShadow
+    />
     <mesh ref={tailRef} position={[-0.4, 0.45, 0]} rotation={[0, 0, 0.5]} castShadow>
       <primitive object={SG.pigTail} attach="geometry" />
       <primitive object={SM.pigPink} attach="material" />
@@ -770,50 +874,31 @@ const Cow: React.FC<{
         <primitive object={SG.cowMuzzle} attach="geometry" />
         <primitive object={SM.cowMuzzle} attach="material" />
       </mesh>
-      <mesh position={[0.88, 0.62, 0.05]}>
-        <primitive object={SG.cowNostril} attach="geometry" />
-        <primitive object={SM.cowNostril} attach="material" />
-      </mesh>
-      <mesh position={[0.88, 0.62, -0.05]}>
-        <primitive object={SG.cowNostril} attach="geometry" />
-        <primitive object={SM.cowNostril} attach="material" />
-      </mesh>
-      <mesh position={[0.7, 0.78, 0.12]}>
-        <primitive object={SG.cowEye} attach="geometry" />
-        <primitive object={SM.black} attach="material" />
-      </mesh>
-      <mesh position={[0.7, 0.78, -0.12]}>
-        <primitive object={SG.cowEye} attach="geometry" />
-        <primitive object={SM.black} attach="material" />
-      </mesh>
-      <mesh position={[0.5, 0.82, 0.18]} rotation={[0, 0.5, 0.3]} castShadow>
-        <primitive object={SG.cowEar} attach="geometry" />
-        <primitive object={SM.cowWhite} attach="material" />
-      </mesh>
-      <mesh position={[0.5, 0.82, -0.18]} rotation={[0, -0.5, -0.3]} castShadow>
-        <primitive object={SG.cowEar} attach="geometry" />
-        <primitive object={SM.cowWhite} attach="material" />
-      </mesh>
-      <mesh position={[0.45, 0.92, 0.1]} rotation={[0, 0, 0.3]} castShadow>
-        <primitive object={SG.cowHorn} attach="geometry" />
-        <primitive object={SM.cowHorn} attach="material" />
-      </mesh>
-      <mesh position={[0.45, 0.92, -0.1]} rotation={[0, 0, -0.3]} castShadow>
-        <primitive object={SG.cowHorn} attach="geometry" />
-        <primitive object={SM.cowHorn} attach="material" />
-      </mesh>
+      <InstancedAnimalParts
+        geometry={SG.cowNostril}
+        material={SM.cowNostril}
+        transforms={COW_NOSTRIL_PARTS}
+      />
+      <InstancedAnimalParts geometry={SG.cowEye} material={SM.black} transforms={COW_EYE_PARTS} />
+      <InstancedAnimalParts
+        geometry={SG.cowEar}
+        material={SM.cowWhite}
+        transforms={COW_EAR_PARTS}
+        castShadow
+      />
+      <InstancedAnimalParts
+        geometry={SG.cowHorn}
+        material={SM.cowHorn}
+        transforms={COW_HORN_PARTS}
+        castShadow
+      />
     </group>
-    {[
-      [0.3, 0.2, 0.25],
-      [0.3, 0.2, -0.25],
-      [-0.35, 0.2, 0.25],
-      [-0.35, 0.2, -0.25],
-    ].map((pos, i) => (
-      <mesh key={i} position={pos as [number, number, number]} castShadow>
-        <primitive object={SG.cowLeg} attach="geometry" />
-        <primitive object={SM.cowWhite} attach="material" />
-      </mesh>
-    ))}
+    <InstancedAnimalParts
+      geometry={SG.cowLeg}
+      material={SM.cowWhite}
+      transforms={COW_LEG_PARTS}
+      castShadow
+    />
     <mesh position={[-0.15, 0.25, 0]} castShadow>
       <primitive object={SG.cowUdder} attach="geometry" />
       <primitive object={SM.cowMuzzle} attach="material" />
@@ -1202,12 +1287,22 @@ const InstancedGrainField = React.memo(() => {
   const leaves2Ref = useRef<THREE.InstancedMesh>(null);
   const count = 15 * 20;
 
+  // The custom depth material carries the same wind injection, or the crop's
+  // shadow stays rigid while the crop itself sways - which reads as a bug in
+  // the lighting rather than as weather.
+  useEffect(() => {
+    [stalksRef.current, leaves1Ref.current, leaves2Ref.current].forEach((mesh) => {
+      if (mesh) mesh.customDepthMaterial = cornDepthMaterial;
+    });
+  }, []);
+
   useEffect(() => {
     if (!stalksRef.current || !leaves1Ref.current || !leaves2Ref.current) return;
 
     // Temp objects for matrix calculations
     const parent = new THREE.Object3D();
     const leaf = new THREE.Object3D();
+    const tint = new THREE.Color();
     let idx = 0;
 
     for (let r = 0; r < 15; r++) {
@@ -1252,6 +1347,18 @@ const InstancedGrainField = React.memo(() => {
         leaf.matrix.premultiply(parent.matrix);
         leaves2Ref.current.setMatrixAt(idx, leaf.matrix);
 
+        // Per-stalk tint: a 300-stalk field on one flat green reads as a
+        // printed texture. Rides `instanceColor`, NOT `vertexColors` - the
+        // geometry has no `color` attribute and USE_COLOR in the vertex stage
+        // would multiply by an absent attribute (0,0,0,1) and blacken the crop.
+        // Brackets the old flat '#8bc34a' (HSL ~0.244/0.50/0.53): green where
+        // the crop is still young, golden where it has ripened.
+        const ripeness = Math.abs(Math.sin(r * 3.7 + c * 1.9)) % 1;
+        tint.setHSL(0.26 - ripeness * 0.11, 0.46 + ripeness * 0.16, 0.46 + ripeness * 0.12);
+        stalksRef.current.setColorAt(idx, tint);
+        leaves1Ref.current.setColorAt(idx, tint);
+        leaves2Ref.current.setColorAt(idx, tint);
+
         idx++;
       }
     }
@@ -1259,6 +1366,9 @@ const InstancedGrainField = React.memo(() => {
     stalksRef.current.instanceMatrix.needsUpdate = true;
     leaves1Ref.current.instanceMatrix.needsUpdate = true;
     leaves2Ref.current.instanceMatrix.needsUpdate = true;
+    if (stalksRef.current.instanceColor) stalksRef.current.instanceColor.needsUpdate = true;
+    if (leaves1Ref.current.instanceColor) leaves1Ref.current.instanceColor.needsUpdate = true;
+    if (leaves2Ref.current.instanceColor) leaves2Ref.current.instanceColor.needsUpdate = true;
   }, []);
 
   return (
@@ -1280,7 +1390,109 @@ const InstancedGrainField = React.memo(() => {
 });
 InstancedGrainField.displayName = 'InstancedGrainField';
 
-// Main component with single useFrame for all animations
+// ============================================================
+// VEGETATION LAYOUT (farm-local coordinates; group is at [75, 0, 120] and
+// rotated PI about Y, so these are pre-rotation values)
+// ============================================================
+
+/** The same five conifers as before, now one instanced draw for the stand. */
+const FARM_TREES: readonly TreeInstance[] = [
+  { position: [-32, 0, -20], scale: 1.2, type: 'pine' },
+  { position: [28, 0, -12], scale: 1.2, type: 'pine' },
+  { position: [-35, 0, 25], scale: 1.2, type: 'pine' },
+  { position: [32, 0, 22], scale: 1.2, type: 'pine' },
+  { position: [-28, 0, -25], scale: 1.2, type: 'pine' },
+];
+
+const FARM_TREE_SPOTS: readonly (readonly [number, number])[] = FARM_TREES.map(
+  (t) => [t.position[0], t.position[2]] as const
+);
+
+/** Terrain top is y=0.05 and the barnyard cobble y=0.08; the trees stand on
+ *  open terrain, so the mulch only has to clear the terrain. */
+const FARM_DECAL_Y = 0.075;
+
+const FARM_BLOCKERS = [
+  { x: 0, z: 0, halfX: 6, halfZ: 5 }, // barn
+  { x: 12, z: -5, halfX: 2.6, halfZ: 2.4 }, // chicken coop
+  { x: -10, z: 12, halfX: 5.5, halfZ: 4.5 }, // farmhouse
+  { x: -15, z: 16, halfX: 2.2, halfZ: 1.6 }, // garden bed
+  { x: -15, z: 19, halfX: 2.2, halfZ: 1.6 }, // garden bed
+  { x: 15, z: -15, halfX: 2.6, halfZ: 2.6 }, // windmill
+  { x: -12, z: -5, halfX: 3.4, halfZ: 3.4 }, // pig pen + mud puddle
+  { x: 8, z: 8, halfX: 4, halfZ: 2 }, // culvert crossing
+  { x: 0, z: -30, halfX: 4, halfZ: 2 }, // culvert crossing
+  { x: 6.3, z: -1, halfX: 1.8, halfZ: 2.6 }, // hay bale stack
+] as const;
+
+/** Swept yard and ploughed crop rows: no wild grass in either. */
+const FARM_OPEN_BLOCKERS = [
+  { x: 0, z: 0, halfX: 11, halfZ: 9 }, // barnyard cobble
+  { x: 0, z: -42, halfX: 18, halfZ: 14 }, // grain field
+] as const;
+
+const FARM_ATTRACTORS: readonly (readonly [number, number])[] = [
+  // barn walls
+  [-5.3, -4.3],
+  [5.3, -4.3],
+  [-5.3, 4.3],
+  [5.3, 4.3],
+  [0, -4.4],
+  [-5.4, 0],
+  [5.4, 0],
+  // chicken coop
+  [10.2, -5],
+  [13.8, -5],
+  [12, -6.6],
+  [12, -3.4],
+  // farmhouse
+  [-14.4, 12],
+  [-5.6, 12],
+  [-10, 8.4],
+  [-10, 15.6],
+  // pig-pen fence runs
+  [-12, -8.2],
+  [-14, -8.2],
+  [-10, -8.2],
+  [-12, -1.8],
+  [-14, -1.8],
+  [-10, -1.8],
+  [-15.2, -5],
+  [-15.2, -7],
+  [-15.2, -3],
+  [-8.8, -5],
+  [-8.8, -7],
+  [-8.8, -3],
+  // garden beds, trough, windmill base
+  [-17.4, 16],
+  [-17.4, 19],
+  [-12.6, 17.5],
+  [0, -5.6],
+  [15, -17.8],
+  [15, -12.2],
+  // hay bales
+  [6, -3.4],
+  [7.8, 0],
+  [-7.4, 3],
+  // tree bases
+  [-32, -20],
+  [28, -12],
+  [-35, 25],
+  [32, 22],
+  [-28, -25],
+];
+
+const FARM_CLUTTER: ClutterSpec = {
+  count: 700,
+  bounds: { minX: -38, maxX: 36, minZ: -30, maxZ: 32 },
+  exclude: FARM_BLOCKERS,
+  openExclude: FARM_OPEN_BLOCKERS,
+  attractors: FARM_ATTRACTORS,
+  // 5 mm under the terrain top: sinking a card base is invisible, floating
+  // one is not.
+  y: 0.045,
+  cullDistance: 120,
+};
 
 // Main component with single useFrame for all animations
 export const FarmArea: React.FC = () => {
@@ -1580,17 +1792,25 @@ export const FarmArea: React.FC = () => {
     []
   );
 
+  // Alpha-cut clutter is fill-rate work, so the tier drops it rather than
+  // shrinking it: 0 / 0.35 / 1 / 1 for low / medium / high / ultra.
+  const density = useVegetationDensity();
+  const clutterSpec = useMemo<ClutterSpec>(() => ({ ...FARM_CLUTTER, density }), [density]);
+
   return (
     <group position={[75, 0, 120]} rotation={[0, Math.PI, 0]}>
       {/* Barnyard cobblestone ground */}
       <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[20, 15]} />
+        {/* Untinted: the cobble albedo now decodes as sRGB, so the old
+            '#9a9a9a' compensator would darken the yard twice. */}
         <meshStandardMaterial
-          color="#9a9a9a"
+          color="#ffffff"
           map={farmBarnyardCobbleColor}
           normalMap={farmBarnyardCobbleNormal}
-          normalScale={new THREE.Vector2(0.4, 0.4)}
-          roughness={0.85}
+          normalScale={FARM_COBBLE_NORMAL_SCALE}
+          roughnessMap={farmBarnyardCobbleRoughness}
+          roughness={1.0}
           polygonOffset
           polygonOffsetFactor={-2}
           polygonOffsetUnits={-2}
@@ -1713,11 +1933,15 @@ export const FarmArea: React.FC = () => {
       {/* Sleeping Orange Cat between hay bales */}
       <Cat position={[6.25, 0, -1]} rotation={0.5} color="#f97316" pose="sleeping" />
       <HayBale position={[-6, 0, 3]} rotation={1.2} />
-      <FarmTree position={[-32, 0, -20]} />
-      <FarmTree position={[28, 0, -12]} />
-      <FarmTree position={[-35, 0, 25]} />
-      <FarmTree position={[32, 0, 22]} />
-      <FarmTree position={[-28, 0, -25]} />
+      {/* Shelter belt: two instanced draws for the whole stand */}
+      <InstancedTreeField trees={FARM_TREES} />
+      <InstancedMulch spots={FARM_TREE_SPOTS} y={FARM_DECAL_Y} radius={2.3} />
+
+      {/* Ground clutter around fence lines, wall bases and trunks */}
+      <InstancedGrassClutter spec={clutterSpec} />
+
+      {/* Shared wind clock (idempotent - the village mounts one too) */}
+      <WindDriver />
 
       {/* Drainage Culvert under the farm path */}
       <DrainageCulvert position={[0, -0.3, -30]} rotation={Math.PI / 2} length={6} radius={0.6} />

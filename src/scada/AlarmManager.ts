@@ -1,7 +1,7 @@
 /**
  * SCADA Alarm Manager for MillOS
  *
- * Implements ISA-18.2 compliant alarm management:
+ * Implements ISA-18.2-informed alarm behavior for the MillOS simulator:
  * - State machine: NORMAL -> UNACK -> ACKED -> RTN_UNACK -> NORMAL
  * - Priority levels: CRITICAL, HIGH, MEDIUM, LOW
  * - Deadband support to prevent alarm chattering
@@ -18,6 +18,8 @@ import {
   AlarmPriority,
   AlarmType,
   AlarmSuppression,
+  AlarmDisposition,
+  Quality,
 } from './types';
 
 export class AlarmManager {
@@ -101,7 +103,7 @@ export class AlarmManager {
 
     // Check quality alarm first
     if (tagValue.quality === 'BAD') {
-      this.raiseAlarm(tag, 'BAD_QUALITY', numValue, 0, 'HIGH');
+      this.raiseAlarm(tag, 'BAD_QUALITY', numValue, 0, 'HIGH', tagValue.quality);
       this.lastAlarmStates.set(tag.id, { inAlarm: true, type: 'BAD_QUALITY', value: numValue });
       return;
     }
@@ -160,7 +162,7 @@ export class AlarmManager {
       // Value is in alarm condition
       if (!lastState?.inAlarm || lastState.type !== alarmType) {
         // New alarm or alarm type changed
-        this.raiseAlarm(tag, alarmType, numValue, threshold, priority);
+        this.raiseAlarm(tag, alarmType, numValue, threshold, priority, tagValue.quality);
       }
       this.lastAlarmStates.set(tag.id, { inAlarm: true, type: alarmType, value: numValue });
     } else {
@@ -220,10 +222,12 @@ export class AlarmManager {
     type: AlarmType,
     value: number,
     threshold: number,
-    priority: AlarmPriority
+    priority: AlarmPriority,
+    quality: Quality
   ): void {
     const alarmId = `${tag.id}-${type}`;
     const existing = this.activeAlarms.get(alarmId);
+    const now = Date.now();
 
     if (!existing) {
       const alarm: Alarm = {
@@ -235,7 +239,16 @@ export class AlarmManager {
         priority,
         value,
         threshold,
-        timestamp: Date.now(),
+        timestamp: now,
+        lastOccurrenceAt: now,
+        occurrenceCount: 1,
+        unit: tag.engUnit,
+        quality,
+        condition:
+          type === 'BAD_QUALITY'
+            ? 'Source quality is BAD'
+            : `${type} threshold ${threshold} ${tag.engUnit}`,
+        disposition: 'IN_SERVICE',
         machineId: tag.machineId,
       };
 
@@ -248,6 +261,14 @@ export class AlarmManager {
     } else {
       // Update value in existing alarm
       existing.value = value;
+      existing.quality = quality;
+      existing.lastOccurrenceAt = now;
+      existing.occurrenceCount = (existing.occurrenceCount ?? 1) + 1;
+      if (existing.state === 'RTN_UNACK') {
+        existing.state = 'UNACK';
+        existing.clearedAt = undefined;
+      }
+      this.notifyListeners();
     }
   }
 
@@ -293,7 +314,7 @@ export class AlarmManager {
   /**
    * Acknowledge an alarm. Operator must acknowledge to clear RTN_UNACK alarms.
    */
-  acknowledge(alarmId: string, operator: string): boolean {
+  acknowledge(alarmId: string, operator: string, note?: string): boolean {
     const alarm = this.activeAlarms.get(alarmId);
     if (!alarm) {
       return false;
@@ -302,6 +323,7 @@ export class AlarmManager {
     const now = Date.now();
     alarm.acknowledgedBy = operator;
     alarm.acknowledgedAt = now;
+    alarm.acknowledgementNote = note?.trim() || undefined;
 
     if (alarm.state === 'UNACK') {
       // Active alarm - mark as acknowledged
@@ -321,12 +343,12 @@ export class AlarmManager {
   /**
    * Acknowledge all active alarms
    */
-  acknowledgeAll(operator: string): number {
+  acknowledgeAll(operator: string, note?: string): number {
     let count = 0;
     const alarmIds = Array.from(this.activeAlarms.keys());
 
     alarmIds.forEach((id) => {
-      if (this.acknowledge(id, operator)) {
+      if (this.acknowledge(id, operator, note)) {
         count++;
       }
     });
@@ -354,15 +376,39 @@ export class AlarmManager {
   /**
    * Suppress alarms for a tag (shelving)
    */
-  suppress(tagId: string, operator: string, reason: string, durationMs?: number): void {
+  setDisposition(
+    tagId: string,
+    disposition: Exclude<AlarmDisposition, 'IN_SERVICE'>,
+    operator: string,
+    reason: string,
+    durationMs?: number
+  ): void {
+    const now = Date.now();
     this.suppressions.set(tagId, {
       tagId,
-      suppressedAt: Date.now(),
+      disposition,
+      suppressedAt: now,
       suppressedBy: operator,
       reason,
-      expiresAt: durationMs ? Date.now() + durationMs : undefined,
+      expiresAt: durationMs ? now + durationMs : undefined,
     });
-    logger.scada.info(`[AlarmManager] Alarms suppressed for ${tagId}: ${reason}`);
+    this.activeAlarms.forEach((alarm) => {
+      if (alarm.tagId === tagId) alarm.disposition = disposition;
+    });
+    this.notifyListeners();
+    logger.scada.info(`[AlarmManager] ${disposition} for ${tagId}: ${reason}`);
+  }
+
+  suppress(tagId: string, operator: string, reason: string, durationMs?: number): void {
+    this.setDisposition(tagId, 'SUPPRESSED', operator, reason, durationMs);
+  }
+
+  shelve(tagId: string, operator: string, reason: string, durationMs?: number): void {
+    this.setDisposition(tagId, 'SHELVED', operator, reason, durationMs);
+  }
+
+  takeOutOfService(tagId: string, operator: string, reason: string): void {
+    this.setDisposition(tagId, 'OUT_OF_SERVICE', operator, reason);
   }
 
   /**
@@ -370,6 +416,12 @@ export class AlarmManager {
    */
   unsuppress(tagId: string): void {
     this.suppressions.delete(tagId);
+    this.activeAlarms.forEach((alarm) => {
+      if (alarm.tagId === tagId) alarm.disposition = 'IN_SERVICE';
+    });
+    const lastState = this.lastAlarmStates.get(tagId);
+    if (lastState) lastState.inAlarm = false;
+    this.notifyListeners();
     logger.scada.info(`[AlarmManager] Suppression removed for ${tagId}`);
   }
 
@@ -382,7 +434,7 @@ export class AlarmManager {
 
     // Check expiration
     if (suppression.expiresAt && Date.now() >= suppression.expiresAt) {
-      this.suppressions.delete(tagId);
+      this.unsuppress(tagId);
       return false;
     }
 
@@ -394,7 +446,7 @@ export class AlarmManager {
   // =========================================================================
 
   /**
-   * Get all active alarms, sorted by priority and time
+   * Get all active alarms, sorted by priority, attention state, and time.
    */
   getActiveAlarms(): Alarm[] {
     return Array.from(this.activeAlarms.values()).sort((a, b) => {
@@ -408,6 +460,19 @@ export class AlarmManager {
       // Sort by priority first
       if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
         return priorityOrder[a.priority] - priorityOrder[b.priority];
+      }
+
+      // Within one priority, alarms still awaiting an operator response stay
+      // above acknowledged conditions. This keeps a newer ACKED entry from
+      // visually burying an older UNACK or RTN_UNACK alarm.
+      const attentionOrder: Record<AlarmState, number> = {
+        UNACK: 0,
+        RTN_UNACK: 0,
+        ACKED: 1,
+        NORMAL: 2,
+      };
+      if (attentionOrder[a.state] !== attentionOrder[b.state]) {
+        return attentionOrder[a.state] - attentionOrder[b.state];
       }
 
       // Then by timestamp (newest first)
@@ -477,11 +542,13 @@ export class AlarmManager {
   }
 
   private cleanExpiredSuppressions(now: number): void {
+    const expired: string[] = [];
     this.suppressions.forEach((sup, tagId) => {
       if (sup.expiresAt && now >= sup.expiresAt) {
-        this.suppressions.delete(tagId);
+        expired.push(tagId);
       }
     });
+    expired.forEach((tagId) => this.unsuppress(tagId));
   }
 
   /**

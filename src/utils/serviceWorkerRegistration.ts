@@ -1,209 +1,240 @@
-/**
- * Service Worker Registration Utility
- *
- * Handles registering, updating, and communicating with the service worker.
- *
- * Usage:
- *   import { registerServiceWorker, unregisterServiceWorker } from './serviceWorkerRegistration';
- *
- *   // In your app initialization:
- *   registerServiceWorker();
- *
- *   // To force update:
- *   updateServiceWorker();
- *
- *   // To clear all caches:
- *   clearServiceWorkerCache();
- */
-
 type ServiceWorkerCallback = (registration: ServiceWorkerRegistration) => void;
 
-interface ServiceWorkerConfig {
+export interface ServiceWorkerConfig {
   onSuccess?: ServiceWorkerCallback;
   onUpdate?: ServiceWorkerCallback;
   onError?: (error: Error) => void;
 }
 
-/**
- * Check if service workers are supported
- */
-export function isServiceWorkerSupported(): boolean {
-  return 'serviceWorker' in navigator;
+export interface ServiceWorkerCacheEntry {
+  entries: number;
+  urls: string[];
+  truncated?: boolean;
 }
 
-/**
- * Register the service worker
- */
+export type ServiceWorkerCacheStats = Record<string, ServiceWorkerCacheEntry>;
+
+export interface ServiceWorkerBuildInfo {
+  buildId: string;
+  cacheVersion: string;
+  scope: string;
+  scopeKey: string;
+  caches: ServiceWorkerCacheStats;
+}
+
+export interface BuildCacheDiagnostics {
+  appBuildId: string;
+  appCacheVersion: string;
+  online: boolean;
+  supported: boolean;
+  controlled: boolean;
+  controllerScriptUrl: string | null;
+  registrationScope: string | null;
+  updateWaiting: boolean;
+  installing: boolean;
+  worker: ServiceWorkerBuildInfo | null;
+  cacheEntries: number;
+}
+
+export const APP_BUILD_ID =
+  typeof __MILLOS_BUILD_ID__ === 'string' ? __MILLOS_BUILD_ID__ : 'development';
+export const APP_CACHE_VERSION =
+  typeof __MILLOS_CACHE_VERSION__ === 'string' ? __MILLOS_CACHE_VERSION__ : 'development';
+
+function basePath(): string {
+  const configured = import.meta.env?.BASE_URL || '/';
+  return configured.endsWith('/') ? configured : `${configured}/`;
+}
+
+export function serviceWorkerScopeKey(scopePath = basePath()): string {
+  const normalized = scopePath.startsWith('/') ? scopePath : `/${scopePath}`;
+  const withTrailingSlash = normalized.endsWith('/') ? normalized : `${normalized}/`;
+  if (withTrailingSlash === '/') return 'root';
+  return withTrailingSlash.replace(/^\/|\/$/g, '').replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+export function serviceWorkerCachePrefix(scopePath = basePath()): string {
+  return `millos-${serviceWorkerScopeKey(scopePath)}-`;
+}
+
+export function isServiceWorkerSupported(): boolean {
+  return typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
+}
+
+function emitStatusChange(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('millos:service-worker-status'));
+  }
+}
+
 export async function registerServiceWorker(
   config?: ServiceWorkerConfig
 ): Promise<ServiceWorkerRegistration | null> {
-  if (!isServiceWorkerSupported()) {
-    return null;
-  }
+  if (!isServiceWorkerSupported()) return null;
 
-  // Only register in production or when explicitly enabled
   const isDev = import.meta.env?.DEV;
   const forceEnable = import.meta.env?.VITE_ENABLE_SW === 'true';
-
-  if (isDev && !forceEnable) {
-    return null;
-  }
+  if (isDev && !forceEnable) return null;
 
   try {
-    // Determine SW path based on base URL
-    const swUrl = `${import.meta.env?.BASE_URL || '/'}sw.js`;
-
-    const registration = await navigator.serviceWorker.register(swUrl, {
-      scope: import.meta.env?.BASE_URL || '/',
+    const scope = basePath();
+    const registration = await navigator.serviceWorker.register(`${scope}sw.js`, {
+      scope,
+      updateViaCache: 'none',
     });
 
-    // Handle updates
-    registration.onupdatefound = () => {
+    registration.addEventListener('updatefound', () => {
       const installingWorker = registration.installing;
       if (!installingWorker) return;
 
-      installingWorker.onstatechange = () => {
-        if (installingWorker.state === 'installed') {
-          if (navigator.serviceWorker.controller) {
-            // New service worker available
-            config?.onUpdate?.(registration);
-          } else {
-            // First-time install
-            config?.onSuccess?.(registration);
-          }
+      emitStatusChange();
+      installingWorker.addEventListener('statechange', () => {
+        emitStatusChange();
+        if (installingWorker.state !== 'installed') return;
+        if (navigator.serviceWorker.controller) {
+          config?.onUpdate?.(registration);
+        } else {
+          config?.onSuccess?.(registration);
         }
-      };
-    };
+      });
+    });
 
+    navigator.serviceWorker.addEventListener('controllerchange', emitStatusChange);
+    emitStatusChange();
     return registration;
   } catch (error) {
     config?.onError?.(error as Error);
+    emitStatusChange();
     return null;
   }
 }
 
-/**
- * Unregister all service workers
- */
 export async function unregisterServiceWorker(): Promise<boolean> {
-  if (!isServiceWorkerSupported()) {
+  if (!isServiceWorkerSupported()) return false;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration(basePath());
+    return registration ? registration.unregister() : true;
+  } catch {
     return false;
   }
+}
 
+export async function updateServiceWorker(): Promise<boolean> {
+  if (!isServiceWorkerSupported()) return false;
   try {
-    const registrations = await navigator.serviceWorker.getRegistrations();
-
-    for (const registration of registrations) {
-      await registration.unregister();
-    }
-
+    const registration = await navigator.serviceWorker.getRegistration(basePath());
+    if (!registration) return false;
+    await registration.update();
+    emitStatusChange();
     return true;
   } catch {
     return false;
   }
 }
 
-/**
- * Force update the service worker
- */
-export async function updateServiceWorker(): Promise<void> {
-  if (!isServiceWorkerSupported()) {
-    return;
-  }
-
-  try {
-    const registration = await navigator.serviceWorker.getRegistration();
-    if (registration) {
-      await registration.update();
-    }
-  } catch {
-    // Update check failed - silently continue
-  }
-}
-
-/**
- * Clear all service worker caches
- */
-export async function clearServiceWorkerCache(): Promise<boolean> {
-  const controller = navigator.serviceWorker?.controller;
-
-  if (!isServiceWorkerSupported() || !controller) {
-    // Fallback: clear caches directly
-    if ('caches' in window) {
-      const cacheNames = await caches.keys();
-      await Promise.all(
-        cacheNames.filter((name) => name.startsWith('millos-')).map((name) => caches.delete(name))
-      );
-      return true;
-    }
-    return false;
-  }
+export async function activateWaitingServiceWorker(): Promise<boolean> {
+  if (!isServiceWorkerSupported()) return false;
+  const registration = await navigator.serviceWorker.getRegistration(basePath());
+  const waiting = registration?.waiting;
+  if (!waiting) return false;
 
   return new Promise((resolve) => {
-    const messageChannel = new MessageChannel();
-
-    messageChannel.port1.onmessage = (event) => {
-      if (event.data?.success) {
-        resolve(true);
-      } else {
-        resolve(false);
-      }
+    let settled = false;
+    const finish = (result: boolean): void => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+      resolve(result);
     };
-
-    controller.postMessage({ type: 'CLEAR_CACHE' }, [messageChannel.port2]);
-
-    // Timeout after 5 seconds
-    setTimeout(() => resolve(false), 5000);
+    const onControllerChange = (): void => finish(true);
+    const timeout = window.setTimeout(() => finish(false), 5000);
+    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+    waiting.postMessage({ type: 'SKIP_WAITING' });
   });
 }
 
-/**
- * Get cache statistics from the service worker
- */
-export async function getServiceWorkerCacheStats(): Promise<Record<
-  string,
-  { entries: number; urls: string[] }
-> | null> {
-  if (!isServiceWorkerSupported()) {
-    return null;
-  }
+async function postMessageWithReply<T>(
+  type: 'CLEAR_CACHE' | 'GET_CACHE_SIZE' | 'GET_BUILD_INFO'
+): Promise<T | null> {
+  if (!isServiceWorkerSupported()) return null;
   const controller = navigator.serviceWorker.controller;
-  if (!controller) {
-    return null;
-  }
+  if (!controller) return null;
 
   return new Promise((resolve) => {
     const messageChannel = new MessageChannel();
-
-    messageChannel.port1.onmessage = (event) => {
-      resolve(event.data);
+    let settled = false;
+    const finish = (value: T | null): void => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      messageChannel.port1.close();
+      resolve(value);
     };
-
-    controller.postMessage({ type: 'GET_CACHE_SIZE' }, [messageChannel.port2]);
-
-    // Timeout after 5 seconds
-    setTimeout(() => resolve(null), 5000);
+    const timeout = window.setTimeout(() => finish(null), 5000);
+    messageChannel.port1.onmessage = (event: MessageEvent<T>) => finish(event.data);
+    controller.postMessage({ type }, [messageChannel.port2]);
   });
 }
 
-/**
- * Check if the app is running from service worker cache (offline)
- */
-export function isRunningOffline(): boolean {
-  return !navigator.onLine;
+async function clearDirectScopedCaches(): Promise<boolean> {
+  if (typeof window === 'undefined' || !('caches' in window)) return false;
+  const prefix = serviceWorkerCachePrefix();
+  const names = await caches.keys();
+  const results = await Promise.all(
+    names.filter((name) => name.startsWith(prefix)).map((name) => caches.delete(name))
+  );
+  return results.every(Boolean);
 }
 
-/**
- * Add listener for online/offline status changes
- */
-export function addConnectivityListener(callback: (online: boolean) => void): () => void {
-  const handleOnline = () => callback(true);
-  const handleOffline = () => callback(false);
+export async function clearServiceWorkerCache(): Promise<boolean> {
+  const response = await postMessageWithReply<{ success?: boolean }>('CLEAR_CACHE');
+  if (response) return response.success === true;
+  return clearDirectScopedCaches();
+}
 
+export async function getServiceWorkerCacheStats(): Promise<ServiceWorkerCacheStats | null> {
+  return postMessageWithReply<ServiceWorkerCacheStats>('GET_CACHE_SIZE');
+}
+
+export async function getServiceWorkerBuildInfo(): Promise<ServiceWorkerBuildInfo | null> {
+  return postMessageWithReply<ServiceWorkerBuildInfo>('GET_BUILD_INFO');
+}
+
+export async function getBuildCacheDiagnostics(): Promise<BuildCacheDiagnostics> {
+  const supported = isServiceWorkerSupported();
+  const registration = supported
+    ? await navigator.serviceWorker.getRegistration(basePath())
+    : undefined;
+  const worker = supported ? await getServiceWorkerBuildInfo() : null;
+  const cacheEntries = worker
+    ? Object.values(worker.caches).reduce((total, cache) => total + cache.entries, 0)
+    : 0;
+
+  return {
+    appBuildId: APP_BUILD_ID,
+    appCacheVersion: APP_CACHE_VERSION,
+    online: typeof navigator === 'undefined' ? true : navigator.onLine,
+    supported,
+    controlled: supported && Boolean(navigator.serviceWorker.controller),
+    controllerScriptUrl: supported ? (navigator.serviceWorker.controller?.scriptURL ?? null) : null,
+    registrationScope: registration?.scope ?? null,
+    updateWaiting: Boolean(registration?.waiting),
+    installing: Boolean(registration?.installing),
+    worker,
+    cacheEntries,
+  };
+}
+
+export function isRunningOffline(): boolean {
+  return typeof navigator !== 'undefined' && !navigator.onLine;
+}
+
+export function addConnectivityListener(callback: (online: boolean) => void): () => void {
+  const handleOnline = (): void => callback(true);
+  const handleOffline = (): void => callback(false);
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
-
-  // Return cleanup function
   return () => {
     window.removeEventListener('online', handleOnline);
     window.removeEventListener('offline', handleOffline);

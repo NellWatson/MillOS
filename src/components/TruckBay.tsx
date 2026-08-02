@@ -1,13 +1,16 @@
-import React, { useRef, useEffect, useMemo } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { SceneText as Text } from './shared/SceneText';
+import { SceneText } from './shared/SceneText';
 import * as THREE from 'three';
 // shouldRunThisFrame is used in the imported TruckAnimationManager from animationSystem
 import { audioManager } from '../utils/audioManager';
+import { useAudioInitialized } from '../hooks/useAudioState';
 import { useProductionStore } from '../stores/productionStore';
-import { useGameSimulationStore } from '../stores/gameSimulationStore';
+import { selectSafetyHoldActive, useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
+import { useMaterialFlowStore } from '../stores/materialFlowStore';
 import { FLOOR_LAYERS, POLYGON_OFFSET, RENDER_ORDER } from '../constants/renderLayers';
+import { SITE_LAYOUT } from '../constants/siteLayout';
 import {
   OptimizedTrafficConeInstances,
   OptimizedBollardInstances,
@@ -17,9 +20,17 @@ import {
 import {
   calculateShippingTruckState,
   calculateReceivingTruckState,
+  applyTruckSafetyHold,
+  getTruckBenchmarkControllerStart,
+  getTruckScheduleStatus,
+  isTruckDockedPhase,
+  isTruckGuidingPhase,
+  TRUCK_CYCLE_SECONDS,
   type TruckAnimState,
   type TruckPhase,
 } from './truckbay/useTruckPhysics';
+import { OptimizedTruckVisual, TRUCK_WHEEL_RADIUS } from './truckbay/OptimizedTruckBay';
+import { getRuntimeMode } from '../runtime/runtimeMode';
 // Import animation system functions and TruckAnimationManager
 import {
   TruckAnimationManager,
@@ -47,6 +58,145 @@ interface TruckBayProps {
 // effect (deps include workAreaBounds) on every parent re-render.
 const SHIPPING_WORKER_BOUNDS = { minX: -8, maxX: 8, minZ: -5, maxZ: 8 } as const;
 const RECEIVING_WORKER_BOUNDS = { minX: -8, maxX: 8, minZ: -8, maxZ: 5 } as const;
+// TRUCK_WHEEL_RADIUS is imported from OptimizedTruckBay, which owns the wheel
+// geometry. A second local copy here is how the divisor and the mesh drift
+// apart, and wheel slip is the classic tell that a vehicle is animated rather
+// than driven.
+const SHIPPING_YARD_ORIGIN_Z = 50;
+const MAINTENANCE_GARAGE_POSITION = [...SITE_LAYOUT.serviceYard.maintenanceGarage.position] as [
+  number,
+  number,
+  number,
+];
+const TRAILER_DROP_YARD_POSITION = [...SITE_LAYOUT.serviceYard.trailerDropYard.position] as [
+  number,
+  number,
+  number,
+];
+const DRIVER_LOUNGE_POSITION = [...SITE_LAYOUT.serviceYard.driverLounge.position] as [
+  number,
+  number,
+  number,
+];
+
+/**
+ * AUTHORED SIGNAGE, HIDDEN WHEN IT CANNOT BE READ.
+ *
+ * Every label in this file is a troika `Text`, and troika text is the one thing
+ * in the truck bay that `StaticMeshBatch` can never absorb: `isSupportedMaterial`
+ * only accepts the five built-in mesh materials, so each label survives batching
+ * as its own draw call (two, for the outlined ones). There are 33 of them, and
+ * the exterior benchmark cameras sit 116 to 190 m from the nearest dock, where a
+ * 0.5-unit glyph is under 4 px tall and a 2-unit one is a smudge.
+ *
+ * WHY `visible` AND NOT UNMOUNTING. `StaticMeshBatch` waits for the mesh count
+ * under its root to hold still across three polls before it batches anything.
+ * Mounting and unmounting labels as the camera moves would keep resetting that
+ * poll and could leave the WHOLE truck bay unbatched. Toggling `visible` on a
+ * parent group leaves every `Mesh.visible` flag untouched, so the count is
+ * stable, while `WebGLRenderer.projectObject` still skips the entire subtree.
+ *
+ * WHY A MODULE-LEVEL REGISTRY AND NOT REACT STATE. Threading the flag through
+ * context would re-render the whole ~500-element truck bay on every threshold
+ * crossing. The gate is instead applied by writing `Group.visible` directly, so
+ * a crossing costs one Set iteration and no React work at all.
+ */
+const LABEL_VISIBLE_DISTANCE = 95;
+const LABEL_HIDDEN_DISTANCE = 110;
+const LABEL_CHECK_INTERVAL_FRAMES = 15;
+/** Ground positions the label distance is measured from: the two dock centres. */
+const LABEL_ANCHORS = [
+  [0, 50],
+  [0, -50],
+] as const;
+
+/**
+ * DECORATIVE YARD LAMPS ARE A SCENE-WIDE FILL COST, NOT A LOCAL ONE.
+ *
+ * `NUM_POINT_LIGHTS` is a shader `#define`, so every lit fragment of every
+ * standard/physical material in the WHOLE scene runs the light loop once per
+ * point light, whatever that light's `distance` is. The truck bay mounts twelve
+ * of them at medium - eight pole lamps and four dock status lamps - and at the
+ * benchmark's noon they are invisible against the sun while still costing a loop
+ * iteration on every terrain, wall, machine and vehicle fragment in frame.
+ *
+ * They are therefore mounted only on `high` and `ultra`. This is a stated
+ * medium-and-below fidelity trade: the poles and the status housings still
+ * render (the status lens keeps its emissive), but at night on medium the yard
+ * loses the lamp pools on the asphalt.
+ *
+ * GATED ON QUALITY, NEVER ON TIME OF DAY. A light count that changed at dusk
+ * would change the program cache key of every material in the scene and
+ * recompile all of them mid-session - the exact hazard documented on the
+ * headlight beams in `truckbay/OptimizedTruckBay.tsx`. Quality changes already
+ * rebuild the graphics layer, so a count that moves with quality is safe.
+ */
+const useYardLampsEnabled = (): boolean => {
+  const quality = useGraphicsStore((state) => state.graphics.quality);
+  return quality === 'high' || quality === 'ultra';
+};
+
+const labelGroups = new Set<THREE.Group>();
+let labelsVisible = true;
+
+const setLabelsVisible = (next: boolean): void => {
+  if (next === labelsVisible) return;
+  labelsVisible = next;
+  labelGroups.forEach((group) => {
+    group.visible = next;
+  });
+};
+
+/**
+ * Drop-in replacement for `SceneText` inside the truck bay. Identical props;
+ * the only difference is the distance-gated parent group.
+ */
+const Text: React.FC<React.ComponentProps<typeof SceneText>> = (props) => {
+  const groupRef = useRef<THREE.Group>(null);
+
+  useLayoutEffect(() => {
+    const group = groupRef.current;
+    if (!group) return undefined;
+    group.visible = labelsVisible;
+    labelGroups.add(group);
+    return () => {
+      labelGroups.delete(group);
+    };
+  }, []);
+
+  return (
+    <group ref={groupRef}>
+      <SceneText {...props} />
+    </group>
+  );
+};
+
+interface YardDetailLODProps {
+  centre: readonly [number, number];
+  children: React.ReactNode;
+}
+
+/**
+ * Keeps the authored yard equipment available at Ultra while avoiding hundreds
+ * of distant meshes and animation hooks in overview shots. The decision uses
+ * camera distance and height, never the inside/outside factory state.
+ */
+const YardDetailLOD: React.FC<YardDetailLODProps> = ({ centre, children }) => {
+  const [isNearby, setIsNearby] = useState(false);
+  const frameRef = useRef(0);
+
+  useFrame(({ camera }) => {
+    frameRef.current += 1;
+    if (frameRef.current % 20 !== 0) return;
+
+    const dx = camera.position.x - centre[0];
+    const dz = camera.position.z - centre[1];
+    const nextIsNearby = camera.position.y <= 52 && dx * dx + dz * dz <= 150 * 150;
+    setIsNearby((current) => (current === nextIsNearby ? current : nextIsNearby));
+  });
+
+  return isNearby ? <>{children}</> : null;
+};
 
 // Exhaust particle system
 const ExhaustSmoke: React.FC<{
@@ -144,8 +294,8 @@ const WheelChock: React.FC<{
   }, [isDeployed]);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
-      <group ref={chockRef} position={[0.5, 0, 0]}>
+    <group position={position} rotation={[0, rotation, 0]}>
+      <group ref={chockRef} position={[0.5, 0, 0]} userData={{ noStaticBatch: true }}>
         {/* Wedge shape */}
         <mesh position={[0, 0.08, 0]} rotation={[0, 0, 0]}>
           <boxGeometry args={[0.25, 0.16, 0.35]} />
@@ -439,7 +589,7 @@ const TruckWashStation: React.FC<{ position: [number, number, number]; rotation?
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+    <group position={position} rotation={[0, rotation, 0]}>
       {/* Main structure - overhead frame */}
       <mesh position={[0, 5, 0]}>
         <boxGeometry args={[8, 0.4, 12]} />
@@ -558,7 +708,7 @@ export const DriverBreakRoom: React.FC<{
   position: [number, number, number];
   rotation?: number;
 }> = ({ position, rotation = 0 }) => (
-  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+  <group name="driver-break-room" position={position} rotation={[0, rotation, 0]}>
     {/* Main building */}
     <mesh position={[0, 2, 0]} castShadow>
       <boxGeometry args={[8, 4, 6]} />
@@ -668,7 +818,7 @@ export const EmployeeParking: React.FC<{
   position: [number, number, number];
   rotation?: number;
 }> = ({ position, rotation = 0 }) => (
-  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+  <group position={position} rotation={[0, rotation, 0]}>
     {/* Parking lot surface - raised above TerrainGround (y=0.05) */}
     <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
       <planeGeometry args={[25, 18]} />
@@ -839,7 +989,7 @@ export const PropaneTankCage: React.FC<{
   position: [number, number, number];
   rotation?: number;
 }> = ({ position, rotation = 0 }) => (
-  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+  <group position={position} rotation={[0, rotation, 0]}>
     {/* Concrete pad */}
     <mesh position={[0, 0.05, 0]}>
       <boxGeometry args={[3, 0.1, 2]} />
@@ -920,7 +1070,7 @@ const DumpsterArea: React.FC<{ position: [number, number, number]; rotation?: nu
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+  <group position={position} rotation={[0, rotation, 0]}>
     {/* Concrete pad */}
     <mesh position={[0, 0.03, 0]}>
       <boxGeometry args={[8, 0.06, 5]} />
@@ -1124,7 +1274,7 @@ const ManifestHolder: React.FC<{ position: [number, number, number]; rotation?: 
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+  <group position={position} rotation={[0, rotation, 0]}>
     {/* Wall-mounted box */}
     <mesh position={[0, 0, 0]}>
       <boxGeometry args={[0.5, 0.7, 0.12]} />
@@ -1182,7 +1332,7 @@ const TimeClockStation: React.FC<{ position: [number, number, number]; rotation?
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+    <group position={position} rotation={[0, rotation, 0]}>
       {/* Wall mount backing */}
       <mesh position={[0, 1.4, 0]}>
         <boxGeometry args={[0.8, 1, 0.08]} />
@@ -1267,7 +1417,7 @@ const DockPlate: React.FC<{ position: [number, number, number]; isDeployed: bool
   return (
     <group position={position}>
       {/* Dock plate */}
-      <mesh ref={plateRef} position={[0, 0, 1.5]}>
+      <mesh ref={plateRef} position={[0, 0, 1.5]} userData={{ noStaticBatch: true }}>
         <boxGeometry args={[3, 0.08, 3]} />
         <meshStandardMaterial color="#64748b" metalness={0.7} roughness={0.3} />
       </mesh>
@@ -1512,17 +1662,17 @@ const DockSpotter: React.FC<{
       ))}
 
       {/* Arms with wands */}
-      <mesh ref={leftArmRef} position={[-0.22, 1.4, 0]}>
+      <mesh ref={leftArmRef} position={[-0.22, 1.4, 0]} userData={{ noStaticBatch: true }}>
         <boxGeometry args={[0.08, 0.35, 0.08]} />
         <meshStandardMaterial color="#f97316" roughness={0.7} />
       </mesh>
-      <mesh ref={rightArmRef} position={[0.22, 1.4, 0]}>
+      <mesh ref={rightArmRef} position={[0.22, 1.4, 0]} userData={{ noStaticBatch: true }}>
         <boxGeometry args={[0.08, 0.35, 0.08]} />
         <meshStandardMaterial color="#f97316" roughness={0.7} />
       </mesh>
 
       {/* Signal wands (orange cones) */}
-      <group ref={wandRef}>
+      <group ref={wandRef} userData={{ noStaticBatch: true }}>
         <group position={[-0.22, 1.15, 0]}>
           <mesh rotation={[0, 0, 0.3]}>
             <coneGeometry args={[0.04, 0.35, 8]} />
@@ -1564,7 +1714,7 @@ const WeightScale: React.FC<{ position: [number, number, number]; rotation?: num
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+    <group position={position} rotation={[0, rotation, 0]}>
       {/* Scale platform */}
       <mesh position={[0, 0.1, 0]}>
         <boxGeometry args={[4, 0.2, 12]} />
@@ -1853,7 +2003,7 @@ const TireInspectionArea: React.FC<{ position: [number, number, number]; rotatio
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+  <group position={position} rotation={[0, rotation, 0]}>
     <mesh position={[0, 0.05, 0]}>
       <boxGeometry args={[4, 0.1, 8]} />
       <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
@@ -1922,7 +2072,7 @@ const FuelIsland: React.FC<{ position: [number, number, number]; rotation?: numb
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+  <group position={position} rotation={[0, rotation, 0]}>
     <mesh position={[0, 0.15, 0]}>
       <boxGeometry args={[3, 0.3, 8]} />
       <meshStandardMaterial color="#fbbf24" roughness={0.7} />
@@ -2004,7 +2154,7 @@ const GuardShack: React.FC<{ position: [number, number, number]; rotation?: numb
     return () => unregisterAnimation(id);
   }, []);
   return (
-    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+    <group position={position} rotation={[0, rotation, 0]}>
       <mesh position={[0, 1.4, 0]}>
         <boxGeometry args={[3, 2.8, 3]} />
         <meshStandardMaterial color="#e2e8f0" roughness={0.6} />
@@ -2085,7 +2235,7 @@ const NoIdlingSign: React.FC<{ position: [number, number, number]; rotation?: nu
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+  <group position={position} rotation={[0, rotation, 0]}>
     {/* Post */}
     <mesh position={[0, 1.2, 0]}>
       <cylinderGeometry args={[0.05, 0.05, 2.4, 8]} />
@@ -2329,7 +2479,7 @@ export const RollUpDoor: React.FC<{
         <meshStandardMaterial color="#374151" metalness={0.5} roughness={0.5} />
       </mesh>
       {/* Roll-up door */}
-      <mesh ref={doorRef} position={[0, 2, 0.1]}>
+      <mesh ref={doorRef} position={[0, 2, 0.1]} userData={{ noStaticBatch: true }}>
         <boxGeometry args={[9, 4, 0.15]} />
         <meshStandardMaterial color="#64748b" metalness={0.6} roughness={0.4} />
       </mesh>
@@ -2395,16 +2545,16 @@ export const DockShelter: React.FC<{
   return (
     <group position={position}>
       {/* Side curtains */}
-      <mesh ref={leftRef} position={[-2.2, 2, 1.5]}>
+      <mesh ref={leftRef} position={[-2.2, 2, 1.5]} userData={{ noStaticBatch: true }}>
         <boxGeometry args={[0.3, 3.5, 3]} />
         <meshStandardMaterial color="#1f2937" roughness={0.95} />
       </mesh>
-      <mesh ref={rightRef} position={[2.2, 2, 1.5]}>
+      <mesh ref={rightRef} position={[2.2, 2, 1.5]} userData={{ noStaticBatch: true }}>
         <boxGeometry args={[0.3, 3.5, 3]} />
         <meshStandardMaterial color="#1f2937" roughness={0.95} />
       </mesh>
       {/* Top curtain */}
-      <mesh ref={topRef} position={[0, 3.8, 1.5]}>
+      <mesh ref={topRef} position={[0, 3.8, 1.5]} userData={{ noStaticBatch: true }}>
         <boxGeometry args={[4.1, 0.3, 3]} />
         <meshStandardMaterial color="#1f2937" roughness={0.95} />
       </mesh>
@@ -2510,13 +2660,14 @@ const DockStatusLight: React.FC<{
   position: [number, number, number];
   isOccupied: boolean;
 }> = ({ position, isOccupied }) => {
+  const yardLampsEnabled = useYardLampsEnabled();
   return (
     <group position={position}>
       <mesh>
         <boxGeometry args={[0.4, 0.6, 0.2]} />
         <meshStandardMaterial color="#1f2937" metalness={0.6} roughness={0.4} />
       </mesh>
-      <mesh position={[0, 0, 0.11]}>
+      <mesh position={[0, 0, 0.11]} userData={{ noStaticBatch: true }}>
         <circleGeometry args={[0.15, 16]} />
         <meshStandardMaterial
           color={isOccupied ? '#22c55e' : '#ef4444'}
@@ -2524,12 +2675,14 @@ const DockStatusLight: React.FC<{
           emissiveIntensity={0.8}
         />
       </mesh>
-      <pointLight
-        position={[0, 0, 0.3]}
-        color={isOccupied ? '#22c55e' : '#ef4444'}
-        intensity={2}
-        distance={5}
-      />
+      {yardLampsEnabled && (
+        <pointLight
+          position={[0, 0, 0.3]}
+          color={isOccupied ? '#22c55e' : '#ef4444'}
+          intensity={2}
+          distance={5}
+        />
+      )}
     </group>
   );
 };
@@ -2558,7 +2711,7 @@ const DockLeveler: React.FC<{
 
   return (
     <group position={position}>
-      <mesh ref={levelerRef} position={[0, 0, 2]}>
+      <mesh ref={levelerRef} position={[0, 0, 2]} userData={{ noStaticBatch: true }}>
         <boxGeometry args={[8, 0.15, 4]} />
         <meshStandardMaterial color="#475569" metalness={0.7} roughness={0.3} />
       </mesh>
@@ -2571,14 +2724,38 @@ const DockLeveler: React.FC<{
 };
 
 export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
+  const runtimeMode = getRuntimeMode();
+  const benchmarkControllerStart = runtimeMode.benchmark
+    ? getTruckBenchmarkControllerStart(runtimeMode.benchmarkScene)
+    : null;
+  const initialControllerTime = benchmarkControllerStart ?? 0;
+  const initialShippingCycle = initialControllerTime % TRUCK_CYCLE_SECONDS;
+  const initialReceivingCycle =
+    (initialControllerTime + TRUCK_CYCLE_SECONDS / 2) % TRUCK_CYCLE_SECONDS;
+  const initialShippingState = calculateShippingTruckState(
+    initialShippingCycle,
+    initialControllerTime
+  );
+  const initialReceivingState = calculateReceivingTruckState(
+    initialReceivingCycle,
+    initialControllerTime
+  );
   const shippingTruckRef = useRef<THREE.Group>(null);
   const receivingTruckRef = useRef<THREE.Group>(null);
-  const shippingStateRef = useRef<TruckPhase>('entering');
-  const receivingStateRef = useRef<TruckPhase>('entering');
-  const shippingDockedRef = useRef(false);
-  const receivingDockedRef = useRef(false);
-  const shippingDoorsOpenRef = useRef(false);
-  const receivingDoorsOpenRef = useRef(false);
+  const shippingStateRef = useRef<TruckPhase>(initialShippingState.phase);
+  const receivingStateRef = useRef<TruckPhase>(initialReceivingState.phase);
+  const [shippingDockVisual, setShippingDockVisual] = useState(() => ({
+    docked: isTruckDockedPhase(initialShippingState.phase),
+    doorsOpen: initialShippingState.doorsOpen,
+    guiding: isTruckGuidingPhase(initialShippingState.phase),
+  }));
+  const [receivingDockVisual, setReceivingDockVisual] = useState(() => ({
+    docked: isTruckDockedPhase(initialReceivingState.phase),
+    doorsOpen: initialReceivingState.doorsOpen,
+    guiding: isTruckGuidingPhase(initialReceivingState.phase),
+  }));
+  const shippingDockVisualRef = useRef(shippingDockVisual);
+  const receivingDockVisualRef = useRef(receivingDockVisual);
   const backupBeeperRef = useRef<{ shipping: boolean; receiving: boolean }>({
     shipping: false,
     receiving: false,
@@ -2586,10 +2763,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
   const shippingWheelRotation = useRef(0);
   const receivingWheelRotation = useRef(0);
-  const shippingThrottleRef = useRef(0);
-  const receivingThrottleRef = useRef(0);
-  const shippingTrailerAngleRef = useRef(0);
-  const receivingTrailerAngleRef = useRef(0);
+  const labelFrameRef = useRef(0);
 
   // Dock status updates
   const updateDockStatus = useProductionStore((state) => state.updateDockStatus);
@@ -2597,64 +2771,124 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
   const lastDockUpdateRef = useRef({ receiving: '', shipping: '' });
   const lastDockedStateRef = useRef({ shipping: false, receiving: false });
 
-  // Single-clock truck state: the useFrame below drives truck position from
-  // state.clock.elapsedTime and stores each computed TruckAnimState in these
-  // refs; RealisticTruck's getTruckState reads them instead of recomputing
-  // from performance.now(), whose origin (page load) is offset from the
-  // three.js clock's (canvas start) - the two clocks put lights/doors out of
-  // phase with the truck's actual position.
-  const shippingTruckStateRef = useRef<TruckAnimState>(calculateShippingTruckState(0, 0));
-  const receivingTruckStateRef = useRef<TruckAnimState>(calculateReceivingTruckState(30, 0));
+  // Single-clock truck state: the conserved material-flow clock drives pose,
+  // phase, wheels, doors, lights, and dock events. RealisticTruck reads the
+  // same state refs, so pause and time scaling cannot put subsystems out of
+  // phase.
+  const shippingTruckStateRef = useRef<TruckAnimState>(initialShippingState);
+  const receivingTruckStateRef = useRef<TruckAnimState>(initialReceivingState);
+  const priorSimulationTimeRef = useRef(0);
+  const simulationTimeInitializedRef = useRef(false);
+  const controllerTimeRef = useRef(initialControllerTime);
 
   // PERFORMANCE: Consolidate store subscriptions with useShallow
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const safetyHoldActive = useGameSimulationStore(selectSafetyHoldActive);
   const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
+  const audioReady = useAudioInitialized();
   const showDecorativeAnimations = graphicsQuality === 'ultra';
+  const yardLampsEnabled = useYardLampsEnabled();
 
   useEffect(() => {
-    audioManager.startTruckEngine('shipping-truck', true);
-    audioManager.startTruckEngine('receiving-truck', true);
+    if (!audioReady) return undefined;
+    audioManager.startTruckEngine('shipping-truck', shippingTruckStateRef.current.speed !== 0);
+    audioManager.startTruckEngine('receiving-truck', receivingTruckStateRef.current.speed !== 0);
 
     return () => {
       audioManager.stopTruckEngine('shipping-truck');
       audioManager.stopTruckEngine('receiving-truck');
     };
-  }, []);
+  }, [audioReady]);
 
-  useFrame((state, delta) => {
+  useEffect(() => {
+    if (!audioReady) return;
+    const running = productionSpeed > 0 && !safetyHoldActive;
+    audioManager.updateTruckEngine(
+      'shipping-truck',
+      running && shippingTruckStateRef.current.speed !== 0
+    );
+    audioManager.updateTruckEngine(
+      'receiving-truck',
+      running && receivingTruckStateRef.current.speed !== 0
+    );
+    if (!running) {
+      audioManager.stopBackupBeeper?.('shipping-truck');
+      audioManager.stopBackupBeeper?.('receiving-truck');
+      backupBeeperRef.current = { shipping: false, receiving: false };
+    }
+  }, [audioReady, productionSpeed, safetyHoldActive]);
+
+  useFrame(({ camera }) => {
+    // Signage gate. Runs before the tab-visibility guard so a tab that comes
+    // back never spends a frame with 33 labels drawn from 180 m away.
+    labelFrameRef.current += 1;
+    if (labelFrameRef.current % LABEL_CHECK_INTERVAL_FRAMES === 0) {
+      let nearestSquared = Infinity;
+      for (const [anchorX, anchorZ] of LABEL_ANCHORS) {
+        const dx = camera.position.x - anchorX;
+        const dy = camera.position.y;
+        const dz = camera.position.z - anchorZ;
+        nearestSquared = Math.min(nearestSquared, dx * dx + dy * dy + dz * dz);
+      }
+      // Hysteresis band: a camera parked on the threshold must not flicker the
+      // whole sign set on and off every fifteenth frame.
+      const threshold = labelsVisible ? LABEL_HIDDEN_DISTANCE : LABEL_VISIBLE_DISTANCE;
+      setLabelsVisible(nearestSquared <= threshold * threshold);
+    }
+
     if (!isTabVisible) return;
-    const time = state.clock.elapsedTime;
-    const adjustedTime = time * (productionSpeed * 0.25 + 0.2);
-    const CYCLE_LENGTH = 60;
+    const simulationTime = useMaterialFlowStore.getState().simulationTime;
+    const simulationDelta = simulationTimeInitializedRef.current
+      ? Math.max(0, simulationTime - priorSimulationTimeRef.current)
+      : 0;
+    if (!simulationTimeInitializedRef.current) {
+      controllerTimeRef.current = benchmarkControllerStart ?? simulationTime * 0.45;
+    }
+    simulationTimeInitializedRef.current = true;
+    priorSimulationTimeRef.current = simulationTime;
+    const controllerDelta = safetyHoldActive ? 0 : simulationDelta * 0.45;
+    controllerTimeRef.current += controllerDelta;
+    const adjustedTime = controllerTimeRef.current;
 
     // Shipping truck animation
     if (shippingTruckRef.current) {
-      const cycle = adjustedTime % CYCLE_LENGTH;
-      const truckState = calculateShippingTruckState(cycle, time);
+      const cycle = adjustedTime % TRUCK_CYCLE_SECONDS;
+      const baseTruckState = calculateShippingTruckState(cycle, adjustedTime);
+      const truckState = safetyHoldActive ? applyTruckSafetyHold(baseTruckState) : baseTruckState;
       shippingTruckStateRef.current = truckState;
 
       shippingTruckRef.current.position.x = truckState.x;
       shippingTruckRef.current.position.z = truckState.z;
       shippingTruckRef.current.rotation.y = truckState.rotation;
+      shippingTruckRef.current.userData.phase = truckState.phase;
 
-      shippingWheelRotation.current += truckState.speed * delta * 5;
-      shippingThrottleRef.current = truckState.throttle;
-      shippingTrailerAngleRef.current = truckState.trailerAngle;
+      shippingWheelRotation.current += (truckState.speed * controllerDelta) / TRUCK_WHEEL_RADIUS;
 
-      shippingDockedRef.current =
-        truckState.phase === 'docked' ||
-        truckState.phase === 'final_adjustment' ||
-        truckState.phase === 'preparing_to_leave';
+      const shippingDocked = isTruckDockedPhase(truckState.phase);
 
       // Update store when docked state changes (for forklift speed boost)
-      if (shippingDockedRef.current !== lastDockedStateRef.current.shipping) {
-        lastDockedStateRef.current.shipping = shippingDockedRef.current;
-        setTruckDocked('shipping', shippingDockedRef.current);
+      if (shippingDocked !== lastDockedStateRef.current.shipping) {
+        lastDockedStateRef.current.shipping = shippingDocked;
+        setTruckDocked('shipping', shippingDocked);
       }
 
-      shippingDoorsOpenRef.current = truckState.doorsOpen;
+      const priorVisual = shippingDockVisualRef.current;
+      const shippingGuiding = isTruckGuidingPhase(truckState.phase);
+      if (
+        priorVisual.docked !== shippingDocked ||
+        priorVisual.doorsOpen !== truckState.doorsOpen ||
+        priorVisual.guiding !== shippingGuiding
+      ) {
+        const nextVisual = {
+          docked: shippingDocked,
+          doorsOpen: truckState.doorsOpen,
+          guiding: shippingGuiding,
+        };
+        shippingDockVisualRef.current = nextVisual;
+        setShippingDockVisual(nextVisual);
+      }
 
-      const shouldBeep = truckState.reverseLights;
+      const shouldBeep = productionSpeed > 0 && !safetyHoldActive && truckState.reverseLights;
       if (shouldBeep !== backupBeeperRef.current.shipping) {
         backupBeeperRef.current.shipping = shouldBeep;
         if (shouldBeep) {
@@ -2665,6 +2899,9 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
       }
 
       if (truckState.phase !== shippingStateRef.current) {
+        if (truckState.phase === 'final_adjustment' && shippingStateRef.current === 'backing') {
+          audioManager.playDockLevelerSound();
+        }
         if (truckState.phase === 'docked' && shippingStateRef.current === 'final_adjustment') {
           audioManager.playDoorOpen();
           audioManager.playTruckArrival();
@@ -2698,32 +2935,43 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
     // Receiving truck animation
     if (receivingTruckRef.current) {
-      const cycle = (adjustedTime + CYCLE_LENGTH / 2) % CYCLE_LENGTH;
-      const truckState = calculateReceivingTruckState(cycle, time);
+      const cycle = (adjustedTime + TRUCK_CYCLE_SECONDS / 2) % TRUCK_CYCLE_SECONDS;
+      const baseTruckState = calculateReceivingTruckState(cycle, adjustedTime);
+      const truckState = safetyHoldActive ? applyTruckSafetyHold(baseTruckState) : baseTruckState;
       receivingTruckStateRef.current = truckState;
 
       receivingTruckRef.current.position.x = truckState.x;
       receivingTruckRef.current.position.z = truckState.z;
       receivingTruckRef.current.rotation.y = truckState.rotation;
+      receivingTruckRef.current.userData.phase = truckState.phase;
 
-      receivingWheelRotation.current += truckState.speed * delta * 5;
-      receivingThrottleRef.current = truckState.throttle;
-      receivingTrailerAngleRef.current = truckState.trailerAngle;
+      receivingWheelRotation.current += (truckState.speed * controllerDelta) / TRUCK_WHEEL_RADIUS;
 
-      receivingDockedRef.current =
-        truckState.phase === 'docked' ||
-        truckState.phase === 'final_adjustment' ||
-        truckState.phase === 'preparing_to_leave';
+      const receivingDocked = isTruckDockedPhase(truckState.phase);
 
       // Update store when docked state changes (for forklift speed boost)
-      if (receivingDockedRef.current !== lastDockedStateRef.current.receiving) {
-        lastDockedStateRef.current.receiving = receivingDockedRef.current;
-        setTruckDocked('receiving', receivingDockedRef.current);
+      if (receivingDocked !== lastDockedStateRef.current.receiving) {
+        lastDockedStateRef.current.receiving = receivingDocked;
+        setTruckDocked('receiving', receivingDocked);
       }
 
-      receivingDoorsOpenRef.current = truckState.doorsOpen;
+      const priorVisual = receivingDockVisualRef.current;
+      const receivingGuiding = isTruckGuidingPhase(truckState.phase);
+      if (
+        priorVisual.docked !== receivingDocked ||
+        priorVisual.doorsOpen !== truckState.doorsOpen ||
+        priorVisual.guiding !== receivingGuiding
+      ) {
+        const nextVisual = {
+          docked: receivingDocked,
+          doorsOpen: truckState.doorsOpen,
+          guiding: receivingGuiding,
+        };
+        receivingDockVisualRef.current = nextVisual;
+        setReceivingDockVisual(nextVisual);
+      }
 
-      const shouldBeep = truckState.reverseLights;
+      const shouldBeep = productionSpeed > 0 && !safetyHoldActive && truckState.reverseLights;
       if (shouldBeep !== backupBeeperRef.current.receiving) {
         backupBeeperRef.current.receiving = shouldBeep;
         if (shouldBeep) {
@@ -2734,6 +2982,9 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
       }
 
       if (truckState.phase !== receivingStateRef.current) {
+        if (truckState.phase === 'final_adjustment' && receivingStateRef.current === 'backing') {
+          audioManager.playDockLevelerSound();
+        }
         if (truckState.phase === 'docked' && receivingStateRef.current === 'final_adjustment') {
           audioManager.playDoorOpen();
           audioManager.playTruckArrival();
@@ -2764,24 +3015,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         receivingStateRef.current = truckState.phase;
       }
 
-      // Update dock status for HolographicDisplays
-      // Receiving truck phases: 0-34 arriving, 34-50 docked/loading, 50-60 departing
-      const receivingCycle = (adjustedTime + CYCLE_LENGTH / 2) % CYCLE_LENGTH;
-      let receivingStatus: 'arriving' | 'loading' | 'departing' | 'clear';
-      let receivingEta: number;
-
-      if (receivingCycle < 34) {
-        receivingStatus = 'arriving';
-        // Convert cycle units to approximate minutes (cycle 34 = docked)
-        receivingEta = Math.ceil((34 - receivingCycle) / 3);
-      } else if (receivingCycle < 50) {
-        receivingStatus = 'loading';
-        // Time remaining for loading
-        receivingEta = Math.ceil((50 - receivingCycle) / 3);
-      } else {
-        receivingStatus = 'departing';
-        receivingEta = 0;
-      }
+      const receivingSchedule = getTruckScheduleStatus(cycle);
+      const { status: receivingStatus, etaMinutes: receivingEta } = receivingSchedule;
 
       // Only update store when status changes to avoid unnecessary re-renders
       const receivingKey = `${receivingStatus}-${receivingEta}`;
@@ -2791,23 +3026,9 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
       }
     }
 
-    // Shipping dock status for HolographicDisplays (independent of the receiving
-    // truck ref; uses only top-level adjustedTime/CYCLE_LENGTH).
-    // Shipping truck phases: 0-34 arriving, 34-50 docked/loading, 50-60 departing
-    const shippingCycle = adjustedTime % CYCLE_LENGTH;
-    let shippingStatus: 'arriving' | 'loading' | 'departing' | 'clear';
-    let shippingEta: number;
-
-    if (shippingCycle < 34) {
-      shippingStatus = 'arriving';
-      shippingEta = Math.ceil((34 - shippingCycle) / 3);
-    } else if (shippingCycle < 50) {
-      shippingStatus = 'loading';
-      shippingEta = Math.ceil((50 - shippingCycle) / 3);
-    } else {
-      shippingStatus = 'departing';
-      shippingEta = 0;
-    }
+    const shippingCycle = adjustedTime % TRUCK_CYCLE_SECONDS;
+    const { status: shippingStatus, etaMinutes: shippingEta } =
+      getTruckScheduleStatus(shippingCycle);
 
     const shippingKey = `${shippingStatus}-${shippingEta}`;
     if (shippingKey !== lastDockUpdateRef.current.shipping) {
@@ -2884,17 +3105,17 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         </group>
 
         {/* Single dock leveler - centered (at wall opening) */}
-        <DockLeveler position={[0, 2, -1.5]} isDeployed={shippingDockedRef.current} />
+        <DockLeveler position={[0, 2, -1.5]} isDeployed={shippingDockVisual.docked} />
 
         {/* Roll-up dock door - at wall opening */}
-        <RollUpDoor position={[0, 0, -1.8]} isOpen={shippingDockedRef.current} />
+        <RollUpDoor position={[0, 0, -1.8]} isOpen={shippingDockVisual.docked} />
 
         {/* Dock shelter - centered (in front of wall) */}
-        <DockShelter position={[0, 0, 1]} isCompressed={shippingDockedRef.current} />
+        <DockShelter position={[0, 0, 1]} isCompressed={shippingDockVisual.docked} />
 
         {/* Status lights for single bay */}
-        <DockStatusLight position={[-5, 4, -1.8]} isOccupied={shippingDockedRef.current} />
-        <DockStatusLight position={[5, 4, -1.8]} isOccupied={shippingDockedRef.current} />
+        <DockStatusLight position={[-5, 4, -1.8]} isOccupied={shippingDockVisual.docked} />
+        <DockStatusLight position={[5, 4, -1.8]} isOccupied={shippingDockVisual.docked} />
 
         {/* Concrete bollards around dock - single bay */}
         <OptimizedBollardInstances
@@ -2932,26 +3153,23 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         <PalletStaging position={[12, 0, 5]} />
 
         {/* Wheel chocks - deployed when truck is docked (centered bay) */}
-        <WheelChock position={[-1.5, 0, 10]} rotation={0} isDeployed={shippingDockedRef.current} />
-        <WheelChock position={[1.5, 0, 10]} rotation={0} isDeployed={shippingDockedRef.current} />
+        <WheelChock position={[-1.5, 0, 10]} rotation={0} isDeployed={shippingDockVisual.docked} />
+        <WheelChock position={[1.5, 0, 10]} rotation={0} isDeployed={shippingDockVisual.docked} />
         <WheelChock
           position={[-1.5, 0, 11]}
           rotation={Math.PI}
-          isDeployed={shippingDockedRef.current}
+          isDeployed={shippingDockVisual.docked}
         />
         <WheelChock
           position={[1.5, 0, 11]}
           rotation={Math.PI}
-          isDeployed={shippingDockedRef.current}
+          isDeployed={shippingDockVisual.docked}
         />
 
         {/* Dock spotter - guides truck while backing */}
         <DockSpotter
           position={[-5, 0, 8]}
-          isGuiding={
-            shippingStateRef.current === 'backing' ||
-            shippingStateRef.current === 'final_adjustment'
-          }
+          isGuiding={shippingDockVisual.guiding}
           rotation={Math.PI}
         />
       </group>
@@ -3067,7 +3285,9 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
               <boxGeometry args={[2, 0.4, 1]} />
               <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
             </mesh>
-            <pointLight position={[0, 14, 0]} intensity={30} distance={35} color="#fef3c7" />
+            {yardLampsEnabled && (
+              <pointLight position={[0, 14, 0]} intensity={30} distance={35} color="#fef3c7" />
+            )}
           </group>
         ))}
 
@@ -3097,10 +3317,10 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           <meshBasicMaterial color="#fbbf24" />
         </mesh>
 
-        {/* PERFORMANCE: Animated decorative components - only on ultra quality */}
-        {/* These components have useFrame hooks that add significant overhead */}
+        {/* Ultra yard equipment is distance-culled as one authored LOD cluster.
+            The objects reappear near the yard instead of burdening overview views. */}
         {showDecorativeAnimations && (
-          <>
+          <YardDetailLOD centre={[0, 100]}>
             {/* Weight scale at yard entrance */}
             <WeightScale position={[0, 0, 52]} rotation={0} />
 
@@ -3122,7 +3342,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             {/* Warehouse worker with pallet jack - centered dock */}
             <WarehouseWorkerWithPalletJack
               position={[10, 0, 5]}
-              isActive={shippingDoorsOpenRef.current}
+              isActive={shippingDockVisual.doorsOpen}
               workAreaBounds={SHIPPING_WORKER_BOUNDS}
             />
 
@@ -3140,17 +3360,24 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
                 MaintenanceBay is mounted OUTSIDE that group at world [85,0,30]. Local z=-20
                 therefore lands the crane over the bay at world z=30 (was local z=30 -> world
                 z=80, leaving it floating ~50 units north of the bay with no support). */}
-            <OverheadCrane position={[85, 5.5, -20]} spanWidth={10} />
+            <OverheadCrane
+              position={[
+                MAINTENANCE_GARAGE_POSITION[0],
+                5.5,
+                MAINTENANCE_GARAGE_POSITION[2] - SHIPPING_YARD_ORIGIN_Z,
+              ]}
+              spanWidth={10}
+            />
 
             {/* Stretch wrap machine - moved out of dock apron to staging side */}
-            <StretchWrapMachine position={[-28, 0, 24]} isActive={shippingDoorsOpenRef.current} />
+            <StretchWrapMachine position={[-28, 0, 24]} isActive={shippingDockVisual.doorsOpen} />
 
             {/* Pallet jack charging station - relocated to opposite staging lane */}
             <PalletJackChargingStation position={[26, 0, 24]} rotation={0} />
 
             {/* Truck alignment guides */}
             <TruckAlignmentGuides position={[0, 0, 4]} />
-          </>
+          </YardDetailLOD>
         )}
 
         {/* Static decorative components (no useFrame) - always render */}
@@ -3175,7 +3402,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         <ManifestHolder position={[5.5, 3, -1]} rotation={0} />
 
         {/* Dock plate - centered */}
-        <DockPlate position={[0, 2, 1]} isDeployed={shippingDockedRef.current} />
+        <DockPlate position={[0, 2, 1]} isDeployed={shippingDockVisual.docked} />
 
         {/* Driver restroom - DISABLED pending relocation */}
         {/* <DriverRestroom position={[70, 0, 65]} rotation={-Math.PI / 2} /> */}
@@ -3200,24 +3427,33 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
       {/* ========== AMENITY BUILDINGS (Outside FRONT TRUCK YARD to avoid z=50 offset) ========== */}
       {/* Maintenance bay - positioned at actual world coordinates */}
-      <MaintenanceBay position={[85, 0, 30]} rotation={-Math.PI / 2} />
+      <MaintenanceBay
+        position={MAINTENANCE_GARAGE_POSITION}
+        rotation={SITE_LAYOUT.serviceYard.maintenanceGarage.rotation}
+      />
 
       {/* Trailer drop yard - positioned away from dock */}
-      <TrailerDropYard position={[-60, 0, 35]} rotation={0} />
+      <TrailerDropYard
+        position={TRAILER_DROP_YARD_POSITION}
+        rotation={SITE_LAYOUT.serviceYard.trailerDropYard.rotation}
+      />
 
       {/* Driver break room - positioned east of shipping dock at world coordinates */}
-      <DriverBreakRoom position={[25, 0, 75]} rotation={-Math.PI / 2} />
+      <DriverBreakRoom
+        position={DRIVER_LOUNGE_POSITION}
+        rotation={SITE_LAYOUT.serviceYard.driverLounge.rotation}
+      />
 
       {/* Shipping truck */}
-      <group ref={shippingTruckRef} position={[20, 0, 160]}>
-        <RealisticTruck
-          color="#1e40af"
+      <group ref={shippingTruckRef} name="shipping-truck" position={[20, 0, 160]}>
+        <OptimizedTruckVisual
+          colour="#275d76"
           company="FLOUR EXPRESS"
           plateNumber="FLR 2847"
-          wheelRotation={shippingWheelRotation}
-          throttle={shippingThrottleRef}
-          trailerAngle={shippingTrailerAngleRef}
-          getTruckState={() => shippingTruckStateRef.current}
+          operatorName="Mara"
+          wheelRotationRef={shippingWheelRotation}
+          stateRef={shippingTruckStateRef}
+          grime={0.82}
         />
       </group>
 
@@ -3285,16 +3521,16 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           </mesh>
         </group>
 
-        <DockLeveler position={[0, 2, -1.5]} isDeployed={receivingDockedRef.current} />
+        <DockLeveler position={[0, 2, -1.5]} isDeployed={receivingDockVisual.docked} />
 
         {/* Roll-up dock door - at wall opening */}
-        <RollUpDoor position={[0, 0, -1.8]} isOpen={receivingDockedRef.current} />
+        <RollUpDoor position={[0, 0, -1.8]} isOpen={receivingDockVisual.docked} />
 
         {/* Dock shelter */}
-        <DockShelter position={[0, 0, 1]} isCompressed={receivingDockedRef.current} />
+        <DockShelter position={[0, 0, 1]} isCompressed={receivingDockVisual.docked} />
 
-        <DockStatusLight position={[-5, 4, -1.8]} isOccupied={receivingDockedRef.current} />
-        <DockStatusLight position={[5, 4, -1.8]} isOccupied={receivingDockedRef.current} />
+        <DockStatusLight position={[-5, 4, -1.8]} isOccupied={receivingDockVisual.docked} />
+        <DockStatusLight position={[5, 4, -1.8]} isOccupied={receivingDockVisual.docked} />
 
         {/* Concrete bollards around dock */}
         <OptimizedBollardInstances
@@ -3308,7 +3544,6 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
         <Text
           position={[0, 6, -1.5]}
-          rotation={[0, Math.PI, 0]}
           fontSize={1.2}
           color="#ffffff"
           anchorX="center"
@@ -3321,7 +3556,6 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
         <Text
           position={[0, 4.5, -1.5]}
-          rotation={[0, Math.PI, 0]}
           fontSize={0.5}
           color="#f97316"
           anchorX="center"
@@ -3334,26 +3568,23 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         <PalletStaging position={[12, 0, 5]} />
 
         {/* Wheel chocks - deployed when truck is docked */}
-        <WheelChock position={[-1.5, 0, 10]} rotation={0} isDeployed={receivingDockedRef.current} />
-        <WheelChock position={[1.5, 0, 10]} rotation={0} isDeployed={receivingDockedRef.current} />
+        <WheelChock position={[-1.5, 0, 10]} rotation={0} isDeployed={receivingDockVisual.docked} />
+        <WheelChock position={[1.5, 0, 10]} rotation={0} isDeployed={receivingDockVisual.docked} />
         <WheelChock
           position={[-1.5, 0, 11]}
           rotation={Math.PI}
-          isDeployed={receivingDockedRef.current}
+          isDeployed={receivingDockVisual.docked}
         />
         <WheelChock
           position={[1.5, 0, 11]}
           rotation={Math.PI}
-          isDeployed={receivingDockedRef.current}
+          isDeployed={receivingDockVisual.docked}
         />
 
         {/* Dock spotter - guides truck while backing */}
         <DockSpotter
           position={[-5, 0, 8]}
-          isGuiding={
-            receivingStateRef.current === 'backing' ||
-            receivingStateRef.current === 'final_adjustment'
-          }
+          isGuiding={receivingDockVisual.guiding}
           rotation={Math.PI}
         />
       </group>
@@ -3469,7 +3700,9 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
               <boxGeometry args={[2, 0.4, 1]} />
               <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
             </mesh>
-            <pointLight position={[0, 14, 0]} intensity={30} distance={35} color="#fef3c7" />
+            {yardLampsEnabled && (
+              <pointLight position={[0, 14, 0]} intensity={30} distance={35} color="#fef3c7" />
+            )}
           </group>
         ))}
 
@@ -3499,10 +3732,9 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           <meshBasicMaterial color="#fbbf24" />
         </mesh>
 
-        {/* PERFORMANCE: Animated decorative components - only on ultra quality */}
-        {/* These components have useFrame hooks that add significant overhead */}
+        {/* Receiving-yard counterpart to the shipping detail LOD above. */}
         {showDecorativeAnimations && (
-          <>
+          <YardDetailLOD centre={[0, -100]}>
             {/* Weight scale at yard entrance */}
             <WeightScale position={[0, 0, -52]} rotation={Math.PI} />
 
@@ -3530,7 +3762,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             {/* Warehouse worker with pallet jack - centered dock */}
             <WarehouseWorkerWithPalletJack
               position={[10, 0, -5]}
-              isActive={receivingDoorsOpenRef.current}
+              isActive={receivingDockVisual.doorsOpen}
               workAreaBounds={RECEIVING_WORKER_BOUNDS}
             />
 
@@ -3547,7 +3779,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             <StretchWrapMachine
               position={[28, 0, -24]}
               rotation={Math.PI}
-              isActive={receivingDoorsOpenRef.current}
+              isActive={receivingDockVisual.doorsOpen}
             />
 
             {/* Pallet jack charging station */}
@@ -3555,14 +3787,14 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
             {/* Truck alignment guides */}
             <TruckAlignmentGuides position={[0, 0, -4]} />
-          </>
+          </YardDetailLOD>
         )}
 
         {/* Manifest holder at dock - centered */}
         <ManifestHolder position={[5.5, 3, 1]} rotation={0} />
 
         {/* Dock plate - centered */}
-        <DockPlate position={[0, 2, -1]} isDeployed={receivingDockedRef.current} />
+        <DockPlate position={[0, 2, -1]} isDeployed={receivingDockVisual.docked} />
 
         {/* Dock bumpers with wear indicators - moved forward to avoid wall */}
         <DockBumperWithWear position={[-2, 1.2, 0]} wearLevel={0.5} />
@@ -3583,15 +3815,15 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
       </group>
 
       {/* Receiving truck */}
-      <group ref={receivingTruckRef} position={[-20, 0, -160]}>
-        <RealisticTruck
-          color="#991b1b"
+      <group ref={receivingTruckRef} name="receiving-truck" position={[-20, 0, -160]}>
+        <OptimizedTruckVisual
+          colour="#9a4e35"
           company="GRAIN CO"
           plateNumber="GRN 5921"
-          wheelRotation={receivingWheelRotation}
-          throttle={receivingThrottleRef}
-          trailerAngle={receivingTrailerAngleRef}
-          getTruckState={() => receivingTruckStateRef.current}
+          operatorName="Owen"
+          wheelRotationRef={receivingWheelRotation}
+          stateRef={receivingTruckStateRef}
+          grime={0.52}
         />
       </group>
     </group>
@@ -4483,7 +4715,7 @@ const AirHoseStation: React.FC<{ position: [number, number, number]; rotation?: 
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+    <group position={position} rotation={[0, rotation, 0]}>
       <mesh position={[0, 1.5, 0]}>
         <cylinderGeometry args={[0.1, 0.12, 3, 12]} />
         <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
@@ -4546,7 +4778,7 @@ const ScaleTicketKiosk: React.FC<{ position: [number, number, number]; rotation?
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+    <group position={position} rotation={[0, rotation, 0]}>
       <mesh position={[0, 1.5, 0]}>
         <boxGeometry args={[0.8, 1.8, 0.6]} />
         <meshStandardMaterial color="#374151" roughness={0.6} />
@@ -4598,7 +4830,7 @@ export const DriverRestroom: React.FC<{
   position: [number, number, number];
   rotation?: number;
 }> = ({ position, rotation = 0 }) => (
-  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+  <group position={position} rotation={[0, rotation, 0]}>
     <mesh position={[0, 1.5, 0]} castShadow>
       <boxGeometry args={[6, 3, 4]} />
       <meshStandardMaterial color="#78716c" roughness={0.8} />
@@ -4653,7 +4885,7 @@ const TrailerDropYard: React.FC<{ position: [number, number, number]; rotation?:
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+  <group position={position} rotation={[0, rotation, 0]}>
     <mesh position={[0, FLOOR_LAYERS.wornPrimary, 0]} rotation={[-Math.PI / 2, 0, 0]}>
       <planeGeometry args={[20, 30]} />
       <meshStandardMaterial color="#57534e" roughness={0.95} />
@@ -4728,11 +4960,41 @@ const MaintenanceBay: React.FC<{ position: [number, number, number]; rotation?: 
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
-    <mesh position={[0, 3, 0]} castShadow>
+  <group name="maintenance-garage" position={position} rotation={[0, rotation, 0]}>
+    <mesh position={[0, 3, 0]} castShadow receiveShadow>
       <boxGeometry args={[12, 6, 10]} />
-      <meshStandardMaterial color="#64748b" roughness={0.7} />
+      <meshStandardMaterial color="#536873" roughness={0.76} metalness={0.08} />
     </mesh>
+    <mesh position={[0, 0.38, 0]} castShadow receiveShadow>
+      <boxGeometry args={[12.3, 0.76, 10.3]} />
+      <meshStandardMaterial color="#31444c" roughness={0.84} />
+    </mesh>
+    {[-1, 1].map((side) => (
+      <mesh
+        key={`garage-roof-${side}`}
+        position={[side * 3.05, 6.25, 0]}
+        rotation={[0, 0, -side * 0.1]}
+        castShadow
+        receiveShadow
+      >
+        <boxGeometry args={[6.35, 0.3, 10.8]} />
+        <meshStandardMaterial color="#2d3d43" roughness={0.6} metalness={0.42} />
+      </mesh>
+    ))}
+    <mesh position={[0, 6.58, 0]} castShadow>
+      <boxGeometry args={[0.34, 0.28, 11]} />
+      <meshStandardMaterial color="#718087" roughness={0.48} metalness={0.58} />
+    </mesh>
+    <mesh position={[0, 5.36, 5.72]} castShadow>
+      <boxGeometry args={[11.2, 0.2, 1.5]} />
+      <meshStandardMaterial color="#33454d" roughness={0.58} metalness={0.38} />
+    </mesh>
+    {[-5.2, 5.2].map((x) => (
+      <mesh key={`garage-canopy-post-${x}`} position={[x, 2.64, 5.72]} castShadow>
+        <boxGeometry args={[0.16, 5.28, 0.16]} />
+        <meshStandardMaterial color="#435860" roughness={0.5} metalness={0.52} />
+      </mesh>
+    ))}
     {[-3, 3].map((x, i) => (
       <group key={i} position={[x, 2.5, 5.01]}>
         <mesh>
@@ -4749,29 +5011,91 @@ const MaintenanceBay: React.FC<{ position: [number, number, number]; rotation?: 
         )}
       </group>
     ))}
-    <mesh position={[-4.5, 2, 5.5]}>
-      <boxGeometry args={[3, 4, 1]} />
-      <meshStandardMaterial color="#78716c" roughness={0.6} />
-    </mesh>
-    <mesh position={[-4.5, 2.5, 6.01]}>
-      <boxGeometry args={[1.5, 2, 0.1]} />
-      <meshStandardMaterial color="#1e3a5f" metalness={0.7} roughness={0.2} />
-    </mesh>
+    {[-1, 1].map((side) => (
+      <mesh
+        key={`garage-side-window-${side}`}
+        position={[side * 6.01, 3.2, -1.1]}
+        rotation={[0, Math.PI / 2, 0]}
+      >
+        <planeGeometry args={[3.4, 1.5]} />
+        <meshStandardMaterial
+          color="#4f8ca1"
+          emissive="#163642"
+          emissiveIntensity={0.2}
+          roughness={0.2}
+          metalness={0.42}
+        />
+      </mesh>
+    ))}
+    <group position={[6.02, 1.35, 2.2]} rotation={[0, Math.PI / 2, 0]}>
+      <mesh>
+        <boxGeometry args={[2.3, 2.7, 0.12]} />
+        <meshStandardMaterial color="#29383e" roughness={0.6} metalness={0.3} />
+      </mesh>
+      <mesh position={[0.72, 0, 0.08]}>
+        <sphereGeometry args={[0.08, 8, 6]} />
+        <meshStandardMaterial color="#d8b64c" roughness={0.35} metalness={0.7} />
+      </mesh>
+    </group>
+    {/* Electrical service cabinet belongs on the side wall, clear of both bay doors. */}
+    <group position={[-6.3, 1.65, 2.6]} rotation={[0, -Math.PI / 2, 0]}>
+      <mesh castShadow>
+        <boxGeometry args={[1.8, 3.3, 0.58]} />
+        <meshStandardMaterial color="#68757a" roughness={0.58} metalness={0.28} />
+      </mesh>
+      <mesh position={[0, 0.25, 0.3]}>
+        <boxGeometry args={[1.18, 1.35, 0.05]} />
+        <meshStandardMaterial color="#173b50" metalness={0.58} roughness={0.24} />
+      </mesh>
+      <mesh position={[-0.48, 1.18, 0.31]}>
+        <circleGeometry args={[0.08, 12]} />
+        <meshStandardMaterial color="#35c98a" emissive="#177a57" emissiveIntensity={0.45} />
+      </mesh>
+      <mesh position={[0.48, 1.18, 0.31]}>
+        <circleGeometry args={[0.08, 12]} />
+        <meshStandardMaterial color="#d9a441" emissive="#7a5117" emissiveIntensity={0.35} />
+      </mesh>
+      <mesh position={[0, -1.78, 0]}>
+        <cylinderGeometry args={[0.11, 0.11, 0.32, 8]} />
+        <meshStandardMaterial color="#2d3d43" roughness={0.5} metalness={0.55} />
+      </mesh>
+    </group>
     <mesh position={[0, 0.05, 8]} rotation={[-Math.PI / 2, 0, 0]}>
       <planeGeometry args={[8, 3]} />
       <meshStandardMaterial color="#374151" metalness={0.5} roughness={0.5} />
     </mesh>
+    {[-3.7, 3.7].map((x) => (
+      <mesh
+        key={`garage-apron-guide-${x}`}
+        position={[x, 0.065, 8]}
+        rotation={[-Math.PI / 2, 0, 0]}
+      >
+        <planeGeometry args={[0.16, 3]} />
+        <meshBasicMaterial
+          color="#e6b93d"
+          polygonOffset
+          polygonOffsetFactor={POLYGON_OFFSET.exteriorOverlay.factor}
+          polygonOffsetUnits={POLYGON_OFFSET.exteriorOverlay.units}
+        />
+      </mesh>
+    ))}
     {[-5, -4, 4, 5].map((x, i) => (
       <mesh key={i} position={[x, 1, 4.5]}>
         <boxGeometry args={[0.8, 2, 0.5]} />
         <meshStandardMaterial color="#dc2626" roughness={0.5} />
       </mesh>
     ))}
-    <mesh position={[0, 6.5, 5]}>
-      <boxGeometry args={[5, 0.8, 0.1]} />
-      <meshStandardMaterial color="#fbbf24" />
+    <mesh position={[0, 5.55, 6.49]}>
+      <boxGeometry args={[5, 0.72, 0.1]} />
+      <meshStandardMaterial color="#dca736" roughness={0.48} metalness={0.16} />
     </mesh>
-    <Text position={[0, 6.5, 5.06]} fontSize={0.35} color="#1f2937" anchorX="center">
+    <Text
+      position={[0, 5.55, 6.55]}
+      fontSize={0.34}
+      color="#18252b"
+      anchorX="center"
+      anchorY="middle"
+    >
       MAINTENANCE
     </Text>
     {[-5, 5].map((x, i) => (
@@ -4780,6 +5104,16 @@ const MaintenanceBay: React.FC<{ position: [number, number, number]; rotation?: 
         <meshStandardMaterial color="#fef3c7" emissive="#fef3c7" emissiveIntensity={0.4} />
       </mesh>
     ))}
+    <group position={[2.8, 7.05, -1.2]}>
+      <mesh castShadow>
+        <cylinderGeometry args={[0.34, 0.42, 1.2, 10]} />
+        <meshStandardMaterial color="#617078" roughness={0.45} metalness={0.62} />
+      </mesh>
+      <mesh position={[0, 0.67, 0]} castShadow>
+        <cylinderGeometry args={[0.55, 0.38, 0.16, 10]} />
+        <meshStandardMaterial color="#38484f" roughness={0.52} metalness={0.52} />
+      </mesh>
+    </group>
   </group>
 );
 
@@ -4809,7 +5143,7 @@ const StretchWrapMachine: React.FC<{
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+    <group position={position} rotation={[0, rotation, 0]}>
       <mesh position={[0, 0.05, 0]}>
         <cylinderGeometry args={[1.2, 1.2, 0.1, 24]} />
         <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
@@ -5031,7 +5365,7 @@ const SafetyMirror: React.FC<{ position: [number, number, number]; rotation?: nu
   position,
   rotation = 0,
 }) => (
-  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+  <group position={position} rotation={[0, rotation, 0]}>
     <mesh position={[0, 0, -0.3]}>
       <boxGeometry args={[0.08, 0.08, 0.6]} />
       <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
@@ -5055,7 +5389,7 @@ const FireExtinguisherStation: React.FC<{
   position: [number, number, number];
   rotation?: number;
 }> = ({ position, rotation = 0 }) => (
-  <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+  <group position={position} rotation={[0, rotation, 0]}>
     <mesh position={[0, 1.2, 0]}>
       <boxGeometry args={[0.5, 0.8, 0.08]} />
       <meshStandardMaterial color="#dc2626" roughness={0.5} />
@@ -5232,7 +5566,7 @@ const PalletJackChargingStation: React.FC<{
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+    <group position={position} rotation={[0, rotation, 0]}>
       {/* Charging station base */}
       <mesh position={[0, 0.3, 0]}>
         <boxGeometry args={[1.5, 0.6, 1]} />
@@ -5531,7 +5865,7 @@ const CardboardCompactor: React.FC<{ position: [number, number, number]; rotatio
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+    <group position={position} rotation={[0, rotation, 0]}>
       {/* Main body/hopper */}
       <mesh position={[0, 1.2, 0]}>
         <boxGeometry args={[2.5, 2.4, 2]} />
@@ -5633,7 +5967,7 @@ const IntercomCallBox: React.FC<{ position: [number, number, number]; rotation?:
   }, []);
 
   return (
-    <group position={position} rotation={[0, rotation, 0]} matrixAutoUpdate={false}>
+    <group position={position} rotation={[0, rotation, 0]}>
       {/* Post */}
       <mesh position={[0, 0.75, 0]}>
         <cylinderGeometry args={[0.05, 0.06, 1.5, 8]} />

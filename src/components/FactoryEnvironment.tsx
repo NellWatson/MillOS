@@ -107,8 +107,8 @@ const PottedFern: React.FC<PlantProps> = React.memo(({ plant }) => {
       {/* Water needed indicator */}
       {plant.health < 40 && (
         <Billboard position={[0.2, 0.4, 0]}>
-          <Text fontSize={0.1} color="#3b82f6" anchorX="center">
-            {String.fromCharCode(128167)} {/* Water drop emoji workaround - use icon instead */}
+          <Text fontSize={0.06} color="#3b82f6" anchorX="center">
+            WATER
           </Text>
         </Billboard>
       )}

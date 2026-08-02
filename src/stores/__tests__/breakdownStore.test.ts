@@ -307,6 +307,43 @@ describe('BreakdownStore', () => {
 
       completeMaintenanceTask(task.id);
       expect(useBreakdownStore.getState().maintenanceSchedule[0].completed).toBe(true);
+      expect(useBreakdownStore.getState().partsInventory.bearings).toBe(9);
+    });
+
+    it('refuses completion when required parts are unavailable', () => {
+      useBreakdownStore.setState((state) => ({
+        partsInventory: { ...state.partsInventory, motors: 0 },
+      }));
+      const { scheduleMaintenanceTask, completeMaintenanceTask } = useBreakdownStore.getState();
+      scheduleMaintenanceTask({
+        machineId: 'rm-102',
+        machineName: 'Roller Mill 102',
+        scheduledTime: 15,
+        type: 'predictive',
+        priority: 'high',
+        partsNeeded: ['motors'],
+      });
+
+      const task = useBreakdownStore.getState().maintenanceSchedule[0];
+      completeMaintenanceTask(task.id);
+      expect(useBreakdownStore.getState().maintenanceSchedule[0].completed).toBe(false);
+      expect(useBreakdownStore.getState().partsInventory.motors).toBe(0);
+    });
+
+    it('keeps one pending maintenance task per machine', () => {
+      const schedule = useBreakdownStore.getState().scheduleMaintenanceTask;
+      const task = {
+        machineId: 'rm-103',
+        machineName: 'Roller Mill 103',
+        scheduledTime: 16,
+        type: 'predictive' as const,
+        priority: 'medium' as const,
+        partsNeeded: ['sensors' as const],
+      };
+
+      schedule(task);
+      schedule({ ...task, scheduledTime: 17 });
+      expect(useBreakdownStore.getState().maintenanceSchedule).toHaveLength(1);
     });
   });
 });

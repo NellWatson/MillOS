@@ -1,4 +1,4 @@
-import React, { useState, useCallback, Suspense, lazy } from 'react';
+import React, { useState, useCallback, Suspense, useMemo } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import {
   Activity,
@@ -22,13 +22,16 @@ import { useGameSimulationStore } from '../../../stores/gameSimulationStore';
 import { useSafetyStore } from '../../../stores/safetyStore';
 import { useUIStore } from '../../../stores/uiStore';
 import { useHistoricalPlaybackStore } from '../../../stores/historicalPlaybackStore';
+import { useMaterialFlowStore } from '../../../stores/materialFlowStore';
 import { useShallow } from 'zustand/react/shallow';
 import { AchievementsPanel, WorkerLeaderboard } from '../../GameFeatures';
 import { TimelinePlayback } from '../../ui/TimelinePlayback';
+import { recoverableLazy } from '../../../utils/recoverableLazy';
+import { RecoverableFeatureBoundary } from '../../ErrorBoundary';
 
 // Re-homed from ui/ (orphaned after the UIOverlay removal): live breakdown
 // mechanics — active breakdowns, predictive alerts, parts inventory, schedule.
-const PredictiveMaintenancePanel = lazy(() =>
+const PredictiveMaintenancePanel = recoverableLazy(() =>
   import('../../ui/PredictiveMaintenancePanel').then((m) => ({
     default: m.PredictiveMaintenancePanel,
   }))
@@ -129,6 +132,88 @@ const ShiftDisplay: React.FC = React.memo(() => {
       <div className="text-[10px] text-slate-500 uppercase tracking-wider">Current Shift</div>
       <div className="text-sm font-bold text-white capitalize">{currentShift}</div>
     </div>
+  );
+});
+
+const formatManifestTime = (simulationTime: number): string => {
+  const totalSeconds = Math.max(0, Math.floor(simulationTime));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `T+${hours.toString().padStart(2, '0')}:${minutes
+    .toString()
+    .padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+};
+
+const MaterialTraceabilitySection: React.FC = React.memo(() => {
+  const { manifests, receivedKg, shippedKg } = useMaterialFlowStore(
+    useShallow((state) => ({
+      manifests: state.manifests,
+      receivedKg: state.receivedKg,
+      shippedKg: state.shippedKg,
+    }))
+  );
+  const latestManifests = useMemo(() => manifests.slice(-3).reverse(), [manifests]);
+  const formatKg = (value: number): string =>
+    value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+
+  return (
+    <section className="bg-slate-800/50 border border-white/5 rounded-xl p-3">
+      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+        <History size={14} className="text-teal-400" aria-hidden="true" />
+        Material Traceability
+      </h3>
+      <dl className="grid grid-cols-2 gap-2 mb-3">
+        <div className="rounded-lg bg-slate-900/45 p-2">
+          <dt className="text-[10px] uppercase tracking-wider text-slate-500">Received</dt>
+          <dd className="text-sm font-mono font-bold text-cyan-300">{formatKg(receivedKg)} kg</dd>
+        </div>
+        <div className="rounded-lg bg-slate-900/45 p-2">
+          <dt className="text-[10px] uppercase tracking-wider text-slate-500">Shipped</dt>
+          <dd className="text-sm font-mono font-bold text-emerald-300">{formatKg(shippedKg)} kg</dd>
+        </div>
+      </dl>
+      {latestManifests.length === 0 ? (
+        <p className="text-xs text-slate-500 py-1">Awaiting first dock transfer</p>
+      ) : (
+        <ol className="space-y-2" aria-label="Latest material manifests">
+          {latestManifests.map((manifest) => (
+            <li
+              key={manifest.id}
+              className="rounded-lg border border-slate-700/60 bg-slate-900/35 p-2"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-[11px] font-semibold text-slate-200">
+                  {manifest.id.toUpperCase()}
+                </span>
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                    manifest.kind === 'receiving'
+                      ? 'bg-cyan-500/15 text-cyan-300'
+                      : 'bg-emerald-500/15 text-emerald-300'
+                  }`}
+                >
+                  {manifest.kind}
+                </span>
+              </div>
+              <div className="mt-1 flex items-end justify-between gap-2 text-[10px] text-slate-400">
+                <span className="min-w-0 truncate">
+                  {manifest.materials
+                    .map((material) => material.type.replaceAll('_', ' '))
+                    .join(', ')}
+                </span>
+                <span className="shrink-0 font-mono text-slate-300">
+                  {formatKg(manifest.actualKg)} / {formatKg(manifest.requestedKg)} kg
+                </span>
+              </div>
+              <time className="mt-1 block text-[9px] font-mono text-slate-500">
+                {formatManifestTime(manifest.simulationTime)}
+              </time>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
 });
 
@@ -334,17 +419,21 @@ export const OverviewPanel: React.FC = React.memo(() => {
         </div>
       </section>
 
+      <MaterialTraceabilitySection />
+
       {/* Maintenance (breakdowns, predictive alerts, parts, schedule) */}
       <section>
-        <Suspense
-          fallback={
-            <div className="h-20 bg-slate-800/30 rounded-lg animate-pulse" role="status">
-              <span className="sr-only">Loading maintenance panel...</span>
-            </div>
-          }
-        >
-          <PredictiveMaintenancePanel />
-        </Suspense>
+        <RecoverableFeatureBoundary featureName="Predictive maintenance">
+          <Suspense
+            fallback={
+              <div className="h-20 bg-slate-800/30 rounded-lg animate-pulse" role="status">
+                <span className="sr-only">Loading maintenance panel...</span>
+              </div>
+            }
+          >
+            <PredictiveMaintenancePanel />
+          </Suspense>
+        </RecoverableFeatureBoundary>
       </section>
 
       {/* Total Production */}

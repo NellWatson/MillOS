@@ -25,9 +25,12 @@ import type { MachineData } from '../types';
 // Tracks the receiving dock's docked state across ticks so a false->true
 // transition (a grain truck arriving) triggers exactly one silo delivery.
 let _lastReceivingDocked = false;
+let _lastShippingDocked = false;
 
 // One grain truck tops up ~15 t (silo capacity is 50 t)
 const GRAIN_DELIVERY_KG = 15000;
+// A shipping truck can load up to 5 t of finished flour or semolina.
+const FINISHED_GOODS_SHIPMENT_KG = 5000;
 
 // Shift-change phase timer. startShiftHandover() sets phase 'leaving' (workers
 // walk to the exit at z=-50, ~3 u/s, worst case ~27 s) but nothing ever
@@ -453,7 +456,16 @@ function unifiedGameTick(ctx: TickContext): void {
   }
   _lastReceivingDocked = receivingDocked;
 
-  // 4d. Shift-change completion (see _shiftPhaseElapsed above)
+  // 4d. Finished goods leave through the shipping dock. The material store
+  // records the actual loaded mass and manifest, so an under-filled truck does
+  // not make product appear or disappear.
+  const shippingDocked = useTruckScheduleStore.getState().truckSchedule.shipping.truckDocked;
+  if (shippingDocked && !_lastShippingDocked) {
+    flowStore.shipFinishedGoods(FINISHED_GOODS_SHIPMENT_KG);
+  }
+  _lastShippingDocked = shippingDocked;
+
+  // 4e. Shift-change completion (see _shiftPhaseElapsed above)
   const simStore = useGameSimulationStore.getState();
   if (simStore.shiftChangeActive) {
     _shiftPhaseElapsed += deltaSeconds;

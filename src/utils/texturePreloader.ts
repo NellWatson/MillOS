@@ -8,10 +8,14 @@
 import { generateBrushedMetal } from '../textures/brushedMetal';
 import { generatePaintedMetal } from '../textures/paintedMetal';
 import { generateConcrete, generateConcreteRoughness } from '../textures/concrete';
-import { generateGrainPattern } from '../textures/grain';
+import { generateGrainPattern, getFlourSackMaps } from '../textures/grain';
 import { generateRustPattern } from '../textures/rust';
 import { generateSafetyStripe } from '../textures/safetyStripe';
-import { generateProceduralNormal, generatePanelNormal } from '../textures/normalGenerator';
+import {
+  generateProceduralNormal,
+  generatePanelNormal,
+  generateMachinePanelNormal,
+} from '../textures/normalGenerator';
 import { logger } from './logger';
 
 /**
@@ -40,6 +44,10 @@ export const preloadGenerativeTextures = (): Promise<void> => {
       () => generateConcreteRoughness(512),
       // Specialty textures
       () => generateGrainPattern(256, 0.4),
+      // Flour-sack cloth (albedo + normal + roughness) for the conveyor bags.
+      // Requested through the shared preset helper so these cache keys are
+      // byte-identical to the ones ConveyorSystem asks for at mount.
+      () => getFlourSackMaps(),
       () => generateRustPattern(256, 0.3, 'down'),
       () => generateSafetyStripe(256, 32),
       // Normal maps
@@ -48,6 +56,9 @@ export const preloadGenerativeTextures = (): Promise<void> => {
       () => generateProceduralNormal(256, 0.5, 20),
       () => generatePanelNormal(256, 4, 0.02),
       () => generatePanelNormal(512, 8, 0.03),
+      // Sheet-metal relief for the spouting runs (SpoutingSystem clones this
+      // and re-tiles it; the cached source is shared).
+      () => generateMachinePanelNormal(256, 4, 6),
     ];
 
     const totalTasks = tasks.length;

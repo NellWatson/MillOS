@@ -57,7 +57,7 @@ const LEARNING_TYPE_CONFIG: Record<
   }
 > = {
   'bas-config': {
-    label: 'BAMS Config',
+    label: 'BAS Config',
     iconBg: 'bg-cyan-500/20',
     iconText: 'text-cyan-400',
     badge: 'bg-cyan-500/20 text-cyan-300',

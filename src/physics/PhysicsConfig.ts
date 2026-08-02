@@ -3,6 +3,7 @@
  *
  * Uses @react-three/rapier for physics simulation of workers, forklifts, and player
  */
+import { SITE_LAYOUT } from '../constants/siteLayout';
 
 // Physics world configuration
 export const PHYSICS_CONFIG = {
@@ -111,15 +112,15 @@ export const COLLISION_FILTERS = {
 } as const;
 
 // World boundary - circular at mountain base (mountains start at radius 260)
-export const WORLD_RADIUS = 255;
+export const WORLD_RADIUS = SITE_LAYOUT.world.radius;
 
 // Factory bounds for physics world (legacy - kept for debug visualization)
 export const FACTORY_BOUNDS = {
-  minX: -60,
-  maxX: 60,
-  minZ: -80,
-  maxZ: 80,
-  height: 35,
+  minX: SITE_LAYOUT.factory.bounds.minX,
+  maxX: SITE_LAYOUT.factory.bounds.maxX,
+  minZ: SITE_LAYOUT.factory.bounds.minZ,
+  maxZ: SITE_LAYOUT.factory.bounds.maxZ,
+  height: SITE_LAYOUT.factory.bounds.maxY,
 } as const;
 
 // Helper to create collision groups value for Rapier

@@ -1,0 +1,87 @@
+import { describe, expect, it } from 'vitest';
+import {
+  createRoundedForkliftRoute,
+  dampAngle,
+  isForkliftSimulationPaused,
+  moveTowards,
+  resolveForkliftMastTilt,
+  resolveForkliftSteeringAngle,
+  smoothOperationHeight,
+} from '../forkliftRoute';
+
+describe('forklift route motion', () => {
+  const path = [
+    [0, 0, 0],
+    [10, 0, 0],
+    [10, 0, 10],
+    [0, 0, 10],
+  ] as const;
+  const actions = [
+    { type: 'pickup', duration: 2 },
+    { type: 'none', duration: 0 },
+    { type: 'dropoff', duration: 2 },
+    { type: 'none', duration: 0 },
+  ] as const;
+
+  it('rounds travel corners while preserving exact operational poses', () => {
+    const route = createRoundedForkliftRoute(path, actions);
+
+    expect(route.path.length).toBeGreaterThan(path.length);
+    expect(route.path).toContainEqual(path[0]);
+    expect(route.path).toContainEqual(path[2]);
+    expect(route.actions).toHaveLength(route.path.length);
+    expect(route.actions.filter(({ type }) => type === 'pickup')).toHaveLength(1);
+    expect(route.actions.filter(({ type }) => type === 'dropoff')).toHaveLength(1);
+  });
+
+  it('rejects route and action arrays that can drift apart', () => {
+    expect(() => createRoundedForkliftRoute(path, actions.slice(1))).toThrow(/4 points.*3 actions/);
+  });
+
+  it('bounds acceleration and deceleration per step', () => {
+    expect(moveTowards(0, 3.5, 0.2)).toBeCloseTo(0.2);
+    expect(moveTowards(3.5, 0, 0.5)).toBeCloseTo(3);
+    expect(moveTowards(0.1, 0, 0.5)).toBe(0);
+  });
+
+  it('uses the shortest wrapped heading change', () => {
+    const result = dampAngle(Math.PI - 0.1, -Math.PI + 0.1, 8, 1 / 60);
+    expect(result).toBeGreaterThan(Math.PI - 0.1);
+    expect(result).toBeLessThan(Math.PI + 0.1);
+  });
+
+  it('maps the shortest heading error to a bounded steering pose', () => {
+    expect(resolveForkliftSteeringAngle(0, 0.2)).toBeCloseTo(0.2);
+    expect(resolveForkliftSteeringAngle(0, 1.2)).toBeCloseTo(0.48);
+    expect(resolveForkliftSteeringAngle(0, -1.2)).toBeCloseTo(-0.48);
+    expect(resolveForkliftSteeringAngle(Math.PI - 0.1, -Math.PI + 0.1)).toBeCloseTo(0.2);
+    expect(resolveForkliftSteeringAngle(Number.NaN, 0.2)).toBe(0);
+  });
+
+  it('uses a restrained rearward mast tilt for loaded travel', () => {
+    expect(resolveForkliftMastTilt('traveling', true)).toBeCloseTo(-0.055);
+    expect(resolveForkliftMastTilt('waiting', true)).toBeCloseTo(-0.04);
+    expect(resolveForkliftMastTilt('traveling', false)).toBe(0);
+  });
+
+  it('presents the mast neutrally for pickup and slightly forward for set-down', () => {
+    expect(resolveForkliftMastTilt('loading', false)).toBe(0);
+    expect(resolveForkliftMastTilt('loading', true)).toBe(0);
+    expect(resolveForkliftMastTilt('unloading', true)).toBeCloseTo(0.025);
+  });
+
+  it('uses a smooth, symmetric lift cycle', () => {
+    expect(smoothOperationHeight(0, 1.2)).toBe(0);
+    expect(smoothOperationHeight(0.5, 1.2)).toBe(1.2);
+    expect(smoothOperationHeight(1, 1.2)).toBe(0);
+    expect(smoothOperationHeight(0.25, 1.2)).toBeCloseTo(smoothOperationHeight(0.75, 1.2));
+  });
+
+  it('stops vehicle motion when either canonical simulation control is paused', () => {
+    expect(isForkliftSimulationPaused(0.8, 180)).toBe(false);
+    expect(isForkliftSimulationPaused(0, 180)).toBe(true);
+    expect(isForkliftSimulationPaused(0.8, 0)).toBe(true);
+    expect(isForkliftSimulationPaused(Number.NaN, 180)).toBe(true);
+    expect(isForkliftSimulationPaused(0.8, Number.NaN)).toBe(true);
+  });
+});

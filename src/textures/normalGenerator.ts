@@ -6,7 +6,12 @@
  */
 
 import * as THREE from 'three';
-import { getTexture, fbmNoise, createDataTexture } from '../utils/textureGenerator';
+import {
+  getTexture,
+  fbmNoise,
+  fbmNoiseSigned,
+  createLinearDataTexture,
+} from '../utils/textureGenerator';
 
 /**
  * Generate normal map from procedural height data.
@@ -64,7 +69,7 @@ export const generateProceduralNormal = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
   });
 };
 
@@ -119,6 +124,74 @@ export const generatePanelNormal = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
+  });
+};
+
+/**
+ * Generate a panel/grid normal map with a bevel specified in PIXELS.
+ *
+ * `generatePanelNormal(256, 8, 0.02)` produces a bevel 0.02 x (1/8) = 0.0025
+ * UV wide, which is 0.64 px at 256 - narrower than one texel, so the mipmap
+ * chain erases it outright and the map is a no-op. Specifying the bevel in
+ * pixels makes that failure impossible to author by accident.
+ *
+ * Intended normalScale for machines is 0.6-0.9, not 0.06.
+ */
+export const generateMachinePanelNormal = (
+  size: number = 512,
+  panelCount: number = 4,
+  bevelPixels: number = 6
+): THREE.DataTexture => {
+  const safeSize = Math.max(8, Math.floor(size));
+  const safePanels = Math.max(1, Math.floor(panelCount));
+  const panelPx = safeSize / safePanels;
+  // Clamp so the bevel can never exceed the panel or fall below the mip floor.
+  const bevelPx = Math.max(4, Math.min(panelPx * 0.4, bevelPixels));
+
+  return getTexture(`machine-panel-normal-${safeSize}-${safePanels}-${bevelPx}`, () => {
+    const data = new Uint8Array(safeSize * safeSize * 4);
+
+    for (let y = 0; y < safeSize; y++) {
+      for (let x = 0; x < safeSize; x++) {
+        const i = (y * safeSize + x) * 4;
+
+        const px = x % panelPx;
+        const py = y % panelPx;
+
+        let normalX = 0;
+        let normalY = 0;
+        const normalZ = 1;
+
+        // Smooth (cosine) bevel rather than a linear ramp - a linear ramp
+        // shades as a flat chamfer facet, a cosine reads as rolled sheet.
+        if (px < bevelPx) {
+          normalX = -Math.cos((px / bevelPx) * Math.PI * 0.5) * 0.65;
+        } else if (px > panelPx - bevelPx) {
+          normalX = Math.cos(((panelPx - px) / bevelPx) * Math.PI * 0.5) * 0.65;
+        }
+
+        if (py < bevelPx) {
+          normalY = -Math.cos((py / bevelPx) * Math.PI * 0.5) * 0.65;
+        } else if (py > panelPx - bevelPx) {
+          normalY = Math.cos(((panelPx - py) / bevelPx) * Math.PI * 0.5) * 0.65;
+        }
+
+        // Panel-face micro relief so a flat sheet still catches the sun.
+        const nx = x / safeSize;
+        const ny = y / safeSize;
+        normalX += fbmNoiseSigned(nx * 90, ny * 90, 2) * 0.08;
+        normalY += fbmNoiseSigned(nx * 90 + 37, ny * 90 + 71, 2) * 0.08;
+
+        const len = Math.sqrt(normalX * normalX + normalY * normalY + normalZ * normalZ);
+
+        data[i] = Math.floor(((normalX / len) * 0.5 + 0.5) * 255);
+        data[i + 1] = Math.floor(((normalY / len) * 0.5 + 0.5) * 255);
+        data[i + 2] = Math.floor(((normalZ / len) * 0.5 + 0.5) * 255);
+        data[i + 3] = 255;
+      }
+    }
+
+    return createLinearDataTexture(data, safeSize, safeSize);
   });
 };

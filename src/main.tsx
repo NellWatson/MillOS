@@ -5,14 +5,9 @@ import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
 import { registerServiceWorker } from './utils/serviceWorkerRegistration';
 import { logger } from './utils/logger';
+import { isBenchmarkRuntime } from './runtime/runtimeMode';
 
-// Pre-warm Rapier WASM - starts loading immediately instead of blocking on first Physics render
-// This runs in parallel with React initialization, reducing perceived startup time
-import('@dimforge/rapier3d-compat').then((RAPIER) => {
-  RAPIER.init().catch(() => {
-    // Silently ignore - will be initialized again when Physics mounts
-  });
-});
+performance.mark('millos:bootstrap');
 
 // Suppress harmless warnings from third-party libraries
 const originalWarn = console.warn;
@@ -54,16 +49,22 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   </ErrorBoundary>
 );
 
-// Register service worker for offline caching (production only by default)
-// Set VITE_ENABLE_SW=true in .env to enable during development
-registerServiceWorker({
-  onSuccess: () => {
-    // Service worker installed successfully
-  },
-  onUpdate: () => {
-    // New version available
-  },
-  onError: () => {
-    // Service worker registration failed
-  },
-});
+// A deterministic benchmark must never install or become controlled by the
+// production service worker. Reusing a preview origin across fixed-camera
+// captures can otherwise mix chunks from adjacent builds and invalidate both
+// visual and performance evidence.
+if (!isBenchmarkRuntime()) {
+  // Register service worker for offline caching (production only by default).
+  // Set VITE_ENABLE_SW=true in .env to enable during development.
+  registerServiceWorker({
+    onSuccess: () => {
+      // Service worker installed successfully
+    },
+    onUpdate: () => {
+      // New version available
+    },
+    onError: () => {
+      // Service worker registration failed
+    },
+  });
+}

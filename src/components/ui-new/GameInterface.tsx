@@ -5,41 +5,45 @@ import { StatusHUD } from './hud/StatusHUD';
 import { EmergencyOverlay } from '../EmergencyOverlay';
 import { AlertSystem } from '../AlertSystem';
 import { MachineData, WorkerData } from '../../types';
-import { PAAnnouncementSystem, GamificationBar, MiniMap } from '../GameFeatures';
+import {
+  PAAnnouncementSystem,
+  GamificationBar,
+  MiniMap,
+  IncidentReplayControls,
+} from '../GameFeatures';
 import { useMobileDetection } from '../../hooks/useMobileDetection';
-import { Datalinks, AINarrationModal, UnlockNotificationContainer } from '../knowledge';
+import { Datalinks, AINarration, UnlockNotificationContainer } from '../knowledge';
 import { FEATURE_FLAGS } from '../../config/featureFlags';
 import { useAINarrationStore } from '../../stores/aiNarrationStore';
 import type { NarrationEntry } from '../../stores/aiNarrationStore';
 import { useKnowledgeStore } from '../../stores/knowledgeStore';
 import { useKnowledgeIntegration } from '../../hooks/useKnowledgeIntegration';
 import { useUIStore } from '../../stores/uiStore';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
+import { useAnnouncementsStore } from '../../stores/announcementsStore';
+import { useMobileControlStore } from '../../stores/mobileControlStore';
 import { KeyboardShortcutsModal } from '../ui/KeyboardShortcutsModal';
 import { startVoteGenerator } from '../../stores/votingStore';
+import { OnboardingGuide, type OnboardingStep } from './onboarding/OnboardingGuide';
 
-// First-load onboarding: three short steps shown once, reusing the AI
-// narration modal so the intro speaks in the mill AI's voice.
-const INTRO_STEPS: NarrationEntry[] = [
+const INTRO_STEPS: OnboardingStep[] = [
   {
-    id: 'intro-orientation',
-    trigger: 'first-play',
-    content: `This is your mill.
-
-Grain flows from the silos at the back, through the roller mills, up into the sifters, and out through the packing lines. Everything you see is running right now - drag to look around, scroll to zoom.`,
+    title: 'Follow the process',
+    icon: 'factory',
+    content:
+      'Grain moves from the rear silos through milling and sifting, then reaches packing and shipping. Drag to orbit. Scroll or pinch to zoom.',
   },
   {
-    id: 'intro-goal',
-    trigger: 'first-play',
-    content: `Today's goal: hit the production target.
-
-Keep an eye on the target widget in the HUD - it tracks output against the day's quota. Machines that stall or overheat will cost you throughput.`,
+    title: 'Protect today’s target',
+    icon: 'goal',
+    content:
+      'The status bar compares output with the shift target. Alarms, stoppages, quality loss, and unsafe choices reduce throughput.',
   },
   {
-    id: 'intro-controls',
-    trigger: 'first-play',
-    content: `You decide how this place runs.
-
-Try the production speed slider, click any machine to inspect it, and press ? for the full list of shortcuts. The dock at the bottom opens everything else.`,
+    title: 'Inspect before acting',
+    icon: 'controls',
+    content:
+      'Select a machine to inspect it. The bottom dock opens production, safety, BAS, and simulated SCADA. Press ? for keyboard controls.',
   },
 ];
 
@@ -56,6 +60,7 @@ interface GameInterfaceProps {
   showSCADAPanel?: boolean;
   onAIPanelChange?: (show: boolean) => void;
   onSCADAPanelChange?: (show: boolean) => void;
+  onFocusMachine?: (machineId: string) => void;
 }
 
 export const GameInterface: React.FC<GameInterfaceProps> = ({
@@ -70,13 +75,16 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   showSCADAPanel,
   onAIPanelChange,
   onSCADAPanelChange,
+  onFocusMachine,
 }) => {
   // Mobile detection - hide complex desktop UI on mobile
-  const { isMobile } = useMobileDetection();
+  const { isCompactLayout } = useMobileDetection();
 
   // Local state for the Dock
   const [activeMode, setActiveMode] = React.useState<DockMode>('overview');
-  const [sidebarVisible, setSidebarVisible] = React.useState(true);
+  const mobilePanelVisible = useMobileControlStore((state) => state.mobilePanelVisible);
+  const [sidebarVisible, setSidebarVisible] = React.useState(false);
+  const sidebarTriggerRef = React.useRef<HTMLElement | null>(null);
 
   // Datalinks modal state
   const [datalinksOpen, setDatalinksOpen] = useState(false);
@@ -85,6 +93,12 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   // toggles uiStore.showShortcuts; this is the only consumer that renders it).
   const showShortcuts = useUIStore((s) => s.showShortcuts);
   const setShowShortcuts = useUIStore((s) => s.setShowShortcuts);
+  const hasCriticalAlert = useUIStore((s) => s.alerts.some((alert) => alert.type === 'critical'));
+  const fpsMode = useUIStore((s) => s.fpsMode);
+  const safetyStateActive = useGameSimulationStore(
+    (state) => state.emergencyActive || state.emergencyDrillMode || state.crisisState.active
+  );
+  const setPAContext = useAnnouncementsStore((state) => state.setContext);
 
   // First-load onboarding intro (persisted flag; shown once ever)
   const hasSeenIntro = useUIStore((s) => s.hasSeenIntro);
@@ -92,22 +106,54 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   const [introStep, setIntroStep] = useState<number | null>(null);
 
   useEffect(() => {
-    if (hasSeenIntro || isMobile) return;
-    // Small delay so the scene has loaded before the first intro card appears
-    const timer = setTimeout(() => setIntroStep(0), 2500);
-    return () => clearTimeout(timer);
-    // Intentionally keyed on hasSeenIntro only: once dismissed it never re-queues
-  }, [hasSeenIntro, isMobile]);
-
-  const handleIntroDismiss = () => {
-    setIntroStep((step) => {
-      const next = (step ?? 0) + 1;
-      if (next >= INTRO_STEPS.length) {
-        setHasSeenIntro(true);
-        return null;
-      }
-      return next;
+    setPAContext({
+      onboarding: introStep !== null,
+      scadaFocus: activeMode === 'scada',
+      safetyCritical: hasCriticalAlert || safetyStateActive,
     });
+    return () => {
+      setPAContext({ onboarding: false, scadaFocus: false, safetyCritical: false });
+    };
+  }, [activeMode, hasCriticalAlert, introStep, safetyStateActive, setPAContext]);
+
+  useEffect(() => {
+    if (hasSeenIntro) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const showWhenReady = () => {
+      timer = setTimeout(() => setIntroStep(0), 700);
+    };
+    if (document.documentElement.dataset.sceneReady === 'true') {
+      showWhenReady();
+    } else {
+      window.addEventListener('millos:first-frame', showWhenReady, { once: true });
+    }
+    return () => {
+      window.removeEventListener('millos:first-frame', showWhenReady);
+      if (timer) clearTimeout(timer);
+    };
+  }, [hasSeenIntro]);
+
+  const handleIntroNext = () => {
+    const next = (introStep ?? 0) + 1;
+    if (next >= INTRO_STEPS.length) {
+      setHasSeenIntro(true);
+      setIntroStep(null);
+      return;
+    }
+    setIntroStep(next);
+  };
+
+  const handleIntroBack = () => {
+    setIntroStep((step) => Math.max(0, (step ?? 0) - 1));
+  };
+
+  const handleIntroSkip = () => {
+    setHasSeenIntro(true);
+    setIntroStep(null);
+  };
+
+  const handleIntroClose = () => {
+    setIntroStep(null);
   };
 
   // Low-frequency worker-vote producer so Democratic Voting sees activity
@@ -120,10 +166,10 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   const [currentNarration, setCurrentNarration] = useState<ReturnType<typeof getNarration>>(null);
 
   // Knowledge system integration - handles unlock conditions and narrations
-  const knowledgeIntegration = useKnowledgeIntegration((narration) => {
-    // When the integration hook triggers a narration, show it
+  const handleKnowledgeNarration = React.useCallback((narration: NarrationEntry) => {
     setCurrentNarration(narration);
-  });
+  }, []);
+  const knowledgeIntegration = useKnowledgeIntegration(handleKnowledgeNarration);
 
   // Handle Datalinks opened event - trigger narration and unlock
   const handleDatalinksOpen = () => {
@@ -189,6 +235,11 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
 
   // Handler for Dock interactions
   const handleModeChange = (mode: DockMode) => {
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement) {
+      sidebarTriggerRef.current = activeElement;
+    }
+
     if (
       activeMode === mode &&
       (mode === 'ai' ||
@@ -199,6 +250,7 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
     ) {
       // Toggle off if clicking the same active mode for panels
       setActiveMode('overview');
+      setSidebarVisible(false);
       // Notify parent of panel state changes for keyboard shortcut sync
       if (mode === 'ai') onAIPanelChange?.(false);
       if (mode === 'scada') onSCADAPanelChange?.(false);
@@ -215,12 +267,15 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
 
     // Clear 3D selection when switching modes to show the correct panel
     // This ensures Home/Overview shows the OverviewPanel, not a stale selection
-    onCloseSelection();
+    if (mode !== 'scada') onCloseSelection();
   };
 
   const handleSidebarClose = () => {
+    const closingMode = activeMode;
+
     // Clear any selection first
     onCloseSelection();
+    setSidebarVisible(false);
 
     // If we are in a modal mode, go back to overview
     if (
@@ -234,19 +289,31 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
       if (activeMode === 'ai') onAIPanelChange?.(false);
       if (activeMode === 'scada') onSCADAPanelChange?.(false);
       setActiveMode('overview');
-    } else {
-      // If already in overview/workforce mode with no selection, hide the sidebar
-      setSidebarVisible(false);
     }
+
+    requestAnimationFrame(() => {
+      const rememberedTrigger = sidebarTriggerRef.current;
+      const fallbackTrigger = document.querySelector<HTMLElement>(
+        `[data-dock-mode="${closingMode}"]`
+      );
+      (rememberedTrigger?.isConnected ? rememberedTrigger : fallbackTrigger)?.focus();
+    });
   };
 
   // Determine if Sidebar should be visible
   const isSidebarVisible = sidebarVisible;
 
   return (
-    <div className="absolute inset-0 pointer-events-none select-none">
+    <div
+      className="absolute inset-0 pointer-events-none select-none"
+      data-testid="game-interface"
+      data-active-mode={activeMode}
+      data-sidebar-visible={isSidebarVisible}
+      aria-hidden={isCompactLayout && mobilePanelVisible ? true : undefined}
+      inert={isCompactLayout && mobilePanelVisible ? true : undefined}
+    >
       {/* 1. Top HUD Layer - Desktop only (draggable, complex interactions) */}
-      {!isMobile && <StatusHUD />}
+      {!isCompactLayout && <StatusHUD />}
 
       {/* 2. Emergency Flasher - Always visible */}
       <EmergencyOverlay />
@@ -261,8 +328,9 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
 
       {/* 4. Immersion Overlays - PA announcements work on mobile, others are desktop only */}
       <PAAnnouncementSystem />
-      {!isMobile && <GamificationBar />}
-      {!isMobile && <MiniMap />}
+      {!isCompactLayout && <GamificationBar />}
+      {!isCompactLayout && <MiniMap />}
+      <IncidentReplayControls />
 
       {/* 5. Bottom Dock - Always visible (adapts to mobile) */}
       <Dock
@@ -272,7 +340,7 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
       />
 
       {/* 7. Right Context Sidebar - Desktop only (MobilePanel handles this on mobile) */}
-      {!isMobile && (
+      {!isCompactLayout && (
         <ContextSidebar
           mode={activeMode}
           isVisible={isSidebarVisible}
@@ -283,6 +351,7 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
           setProductionSpeed={setProductionSpeed}
           showZones={showZones}
           setShowZones={setShowZones}
+          onFocusMachine={onFocusMachine}
         />
       )}
 
@@ -291,15 +360,33 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
         <Datalinks isOpen={datalinksOpen} onClose={() => setDatalinksOpen(false)} />
       )}
 
-      {/* 9. AI Narration Modal */}
-      {FEATURE_FLAGS.AI_NARRATION_ENABLED && currentNarration && (
-        <AINarrationModal narration={currentNarration} onDismiss={handleNarrationDismiss} />
-      )}
+      {/* 9. Quiet AI reflection card. It queues behind focused or safety-critical work. */}
+      {FEATURE_FLAGS.AI_NARRATION_ENABLED &&
+        currentNarration &&
+        introStep === null &&
+        activeMode === 'overview' &&
+        !fpsMode &&
+        !hasCriticalAlert &&
+        !safetyStateActive && (
+          <aside
+            aria-label="AI reflection"
+            className="pointer-events-auto fixed bottom-24 right-4 z-40 w-[min(24rem,calc(100vw-2rem))]"
+          >
+            <AINarration narration={currentNarration} onDismiss={handleNarrationDismiss} />
+          </aside>
+        )}
 
-      {/* 9b. First-load onboarding intro - waits for any active narration
-          (e.g. the one-time welcome) to be dismissed before stepping through */}
-      {!currentNarration && introStep !== null && INTRO_STEPS[introStep] && (
-        <AINarrationModal narration={INTRO_STEPS[introStep]} onDismiss={handleIntroDismiss} />
+      {/* The tour owns the quiet onboarding slot. Narration remains queued until it closes. */}
+      {introStep !== null && INTRO_STEPS[introStep] && (
+        <OnboardingGuide
+          step={INTRO_STEPS[introStep]}
+          stepIndex={introStep}
+          stepCount={INTRO_STEPS.length}
+          onNext={handleIntroNext}
+          onBack={handleIntroBack}
+          onSkip={handleIntroSkip}
+          onClose={handleIntroClose}
+        />
       )}
 
       {/* 10. Keyboard Shortcuts Help (? key) */}

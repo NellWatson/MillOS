@@ -34,6 +34,11 @@
 }
 
 @layer base {
+  html {
+    --ui-scale: 1;
+    font-size: calc(16px * var(--ui-scale));
+  }
+
   html,
   body,
   #root {
@@ -45,7 +50,6 @@
       system-ui,
       -apple-system,
       sans-serif;
-    font-size: 16px;
   }
 
   body {

@@ -1,21 +1,26 @@
 import { test, expect, Page } from '@playwright/test';
 
 /**
- * E2E tests for the AI Command Center, accessed through the live ui-new shell
+ * E2E tests for the AI Partner workspace, accessed through the live ui-new shell
  * (GameInterface -> Dock -> ContextSidebar embeds <AICommandCenter embedded />).
  *
  * The legacy UIOverlay shell (and its ai-panel-toggle / ai-success-rate testids)
- * was removed; the canonical surface is the bottom Dock's "AI Command" button.
+ * was removed; the canonical surface is the bottom Dock's "AI Partner" button.
  * The embedded panel renders compact CPU / MEM / DEC metrics (integer percents),
  * tagged with data-testids: ai-cpu-value, ai-memory-value, ai-decisions-count,
  * and a container ai-command-center.
  */
 
-/** Dismiss the first-run "AI Reflection" onboarding modal if present. Its blur
- *  backdrop intercepts pointer events, so the dock can't be clicked until closed. */
+/** Dismiss the current first-run tour, with a legacy reflection fallback. */
 async function dismissOnboarding(page: Page) {
-  // First-run onboarding is a QUEUE of narration steps: closing one surfaces
-  // the next after a short delay, so keep dismissing until none remain.
+  const currentTour = page.getByRole('region', { name: /Getting started, step \d+ of \d+/ });
+  if (await currentTour.isVisible().catch(() => false)) {
+    await currentTour.getByRole('button', { name: 'Skip tour' }).click();
+    await expect(currentTour).toBeHidden();
+    return;
+  }
+
+  // Older builds queued reflection cards, so retain a bounded compatibility path.
   for (let i = 0; i < 5; i++) {
     const reflection = page.getByText('AI Reflection', { exact: false });
     if (!(await reflection.isVisible().catch(() => false))) break;
@@ -29,69 +34,51 @@ async function dismissOnboarding(page: Page) {
   }
 }
 
-/** Open the AI Command Center via the dock and wait for its metrics to mount. */
+/** Open the AI Partner workspace via the dock and wait for its metrics to mount. */
 async function openAIPanel(page: Page) {
   await dismissOnboarding(page);
-  await page.getByRole('button', { name: 'AI Command' }).click();
+  await page.getByRole('button', { name: 'AI Partner', exact: true }).click();
   await expect(page.getByTestId('ai-command-center')).toBeVisible({ timeout: 5000 });
   await expect(page.getByTestId('ai-cpu-value')).toBeVisible({ timeout: 5000 });
 }
 
-test.describe('AI Command Center (ui-new dock)', () => {
+test.describe('AI Partner workspace (ui-new dock)', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    // Wait for the loading overlay (drei useProgress) to clear.
+    await page.waitForFunction(
+      () => document.documentElement.dataset.sceneReady === 'true',
+      undefined,
+      { timeout: 240_000 }
+    );
     await page
-      .waitForSelector('text=INITIALIZING DIGITAL TWIN', { state: 'detached', timeout: 60000 })
-      .catch(() => {});
-    // Dock + status bar present once the shell has mounted. Headless
-    // chromium renders WebGL in software: procedural texture generation
-    // alone takes ~155s, and the shell mounts only after it completes.
+      .getByRole('progressbar', { name: 'Loading MillOS' })
+      .waitFor({ state: 'detached', timeout: 60_000 });
+    // Dock + status bar present once the staged core scene has mounted.
+    // CI can still use software WebGL, so retain a generous cross-platform
+    // timeout without forcing every local run to wait.
     await page.getByRole('button', { name: 'Mill Overview' }).waitFor({ timeout: 240000 });
     await page.waitForTimeout(2000);
   });
 
-  test('opens the AI Command Center panel from the dock', async ({ page }) => {
+  test('opens the AI Partner and keeps all compact metrics valid', async ({ page }) => {
     await openAIPanel(page);
     await expect(page.getByTestId('ai-command-center')).toBeVisible();
-  });
-
-  test('displays a valid CPU percentage', async ({ page }) => {
-    await openAIPanel(page);
     const cpu = page.getByTestId('ai-cpu-value');
+    const mem = page.getByTestId('ai-memory-value');
+    const dec = page.getByTestId('ai-decisions-count');
+
     await expect(cpu).toBeVisible();
     await expect(cpu).toHaveText(/^\d+%$/);
-  });
-
-  test('displays a valid memory percentage', async ({ page }) => {
-    await openAIPanel(page);
-    const mem = page.getByTestId('ai-memory-value');
     await expect(mem).toBeVisible();
     await expect(mem).toHaveText(/^\d+%$/);
-  });
-
-  test('displays an integer decisions count', async ({ page }) => {
-    await openAIPanel(page);
-    const dec = page.getByTestId('ai-decisions-count');
     await expect(dec).toBeVisible();
     await expect(dec).toHaveText(/^\d+$/);
-  });
 
-  test('metrics format remains valid over time and decisions count never decreases', async ({
-    page,
-  }) => {
-    await openAIPanel(page);
-    const cpu = page.getByTestId('ai-cpu-value');
-    const dec = page.getByTestId('ai-decisions-count');
     const initialDecisions = parseInt((await dec.textContent()) ?? '0', 10);
 
-    // Metrics refresh on an interval; poll instead of a fixed sleep. The CPU
-    // value must stay a valid integer percent throughout.
     await expect
       .poll(async () => (await cpu.textContent()) ?? '', { timeout: 10_000 })
       .toMatch(/^\d+%$/);
-
-    // Decisions are a cumulative counter: monotonically non-decreasing.
     await expect
       .poll(async () => parseInt((await dec.textContent()) ?? '0', 10), { timeout: 10_000 })
       .toBeGreaterThanOrEqual(initialDecisions);

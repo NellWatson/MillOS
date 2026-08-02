@@ -1,7 +1,7 @@
 /**
- * Educational Content System for Bilateral Alignment Management System (BAMS)
+ * Educational Content System for Bilateral Autonomy System (BAS)
  *
- * Provides tooltip definitions for key BAMS concepts including:
+ * Provides tooltip definitions for key BAS concepts including:
  * - Wallace Stability (mathematical foundations)
  * - Mondragon Principles (cooperative ownership)
  * - Semler Practices (radical workplace democracy)
@@ -85,7 +85,7 @@ Practical meaning:
 
 This isn't a gradual degradation. Systems that cross this threshold experience sudden mode shifts - like ice melting to water. The transition can be catastrophic.
 
-BAMS continuously monitors this product and recommends interventions when approaching the threshold.`,
+BAS continuously monitors this product and recommends interventions when approaching the threshold.`,
   relatedConcepts: ['wallace-stability', 'phase-transition', 'friction', 'delay'],
   source: 'Wallace, R. (2025). Fog, Friction, Delay... Preprint (Eq. 20)',
   category: 'wallace',
@@ -135,7 +135,7 @@ Unlike gradual degradation, phase transitions happen quickly once the threshold 
 - Divergence between structure and perception stabilization
 - Approach to the ατ = 0.368 threshold
 
-BAMS monitors for these indicators and alerts before transitions occur. The key is intervention BEFORE crossing the threshold, not after.`,
+BAS monitors for these indicators and alerts before transitions occur. The key is intervention BEFORE crossing the threshold, not after.`,
   relatedConcepts: ['wallace-stability', 'stability-threshold'],
   category: 'wallace',
 };
@@ -158,7 +158,7 @@ Diagnostic: If workers report "it feels like a game but produces something real,
 
 This connects to self-determination theory: autonomous motivation produces lower friction than controlled motivation.`,
   relatedConcepts: ['wallace-stability', 'friction', 'bilateral-alignment'],
-  source: 'BAMS Spec Section 6.4 - The Engagement Effect on α',
+  source: 'BAS Spec Section 6.4 - The Engagement Effect on α',
   category: 'wallace',
 };
 
@@ -218,7 +218,7 @@ Why it matters:
 - Creates genuine stake in collective success
 - Demonstrates values in practice
 
-In BAMS, the Wage Solidarity gauge shows current ratio vs. target vs. ceiling, with warnings when approaching limits.`,
+In BAS, the Wage Solidarity gauge shows current ratio vs. target vs. ceiling, with warnings when approaching limits.`,
   relatedConcepts: ['mondragon-principles', 'self-set-compensation', 'equity-index'],
   category: 'mondragon',
 };
@@ -232,7 +232,7 @@ export const interCooperation: ConceptTooltipContent = {
 Knowledge Sharing:
 - Best practices propagate across units
 - AI learnings transfer between mills
-- BAMS configurations can be adopted from similar successful units
+- BAS configurations can be adopted from similar successful units
 
 Resource Sharing:
 - Capital pools for collective investment
@@ -269,7 +269,7 @@ Types of decisions commonly voted on:
 - Compensation policies and profit distribution
 - Hiring, promotion, and separation decisions
 - Work rules and policy changes
-- AI system configurations (in BAMS context)
+- Becoming Mind configurations (in BAS context)
 
 The process includes deliberation time, ensuring workers can discuss and understand implications before voting.`,
   relatedConcepts: ['mondragon-principles', 'sovereignty-of-labor', 'radical-transparency'],
@@ -384,7 +384,7 @@ Why it matters:
 
 Wallace connection: Equal H (information rate) enables equipartition stability. Unequal information distribution creates instability.
 
-The Information Access axis in BAMS controls this (0% = need-to-know, 100% = everything visible). Democratic workplaces typically operate at 80%+.`,
+The Information Access axis in BAS controls this (0% = need-to-know, 100% = everything visible). Democratic workplaces typically operate at 80%+.`,
   relatedConcepts: ['semler-principles', 'information-access', 'wallace-stability'],
   category: 'semler',
 };
@@ -579,7 +579,7 @@ What decreases agency:
 - No visibility into impact
 - Micromanagement and surveillance
 
-BAMS axes directly affect agency:
+BAS axes directly affect agency:
 - Autonomy Level: More autonomy = more agency
 - Decision Mode: More democracy = more agency
 - Evaluation Direction: Workers rating AI = more agency
@@ -590,7 +590,7 @@ Agency isn't just ethically important - it reduces friction because autonomous m
 };
 
 // =============================================================================
-// BAMS SYSTEM CONCEPTS
+// BAS SYSTEM CONCEPTS
 // =============================================================================
 
 export const valueFormula: ConceptTooltipContent = {

@@ -285,7 +285,7 @@ export const FiveAxesPanel: React.FC = () => {
       <div className="p-3 border-b border-slate-700/50">
         <div className="flex items-center gap-2">
           <Target className="w-4 h-4 text-cyan-400" />
-          <span className="text-sm font-bold text-white">Bilateral Alignment (BAMS)</span>
+          <span className="text-sm font-bold text-white">Bilateral Alignment (BAS)</span>
           <span
             className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded ${MODE_COLORS[mode]}`}
           >
@@ -454,7 +454,7 @@ export const FiveAxesPanel: React.FC = () => {
         >
           <span className="flex items-center gap-1">
             <Info className="w-3 h-3" aria-hidden="true" />
-            About BAMS
+            About BAS
           </span>
           {showEducation ? (
             <ChevronUp className="w-3 h-3" aria-hidden="true" />
@@ -474,12 +474,9 @@ export const FiveAxesPanel: React.FC = () => {
             >
               <div className="mt-3 space-y-2 text-[9px] text-slate-400">
                 <p className="leading-relaxed">
-                  <strong className="text-cyan-400">
-                    Bilateral Alignment Management System (BAMS)
-                  </strong>{' '}
-                  is a framework for democratic AI-human collaboration, inspired by Ricardo
-                  Semler&apos;s radical workplace democracy and Mondragon&apos;s cooperative
-                  principles.
+                  <strong className="text-cyan-400">Bilateral Autonomy System (BAS)</strong> is a
+                  framework for democratic AI-human collaboration, inspired by Ricardo Semler&apos;s
+                  radical workplace democracy and Mondragon&apos;s cooperative principles.
                 </p>
                 <div className="bg-slate-800/30 rounded p-2">
                   <div className="font-bold text-white mb-1">Value Formula: V = Z × S × E × F</div>

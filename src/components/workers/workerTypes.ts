@@ -1,18 +1,36 @@
 /**
- * Worker Model Types
- * Shared types for worker appearance and refs
+ * Canonical personnel model contract.
+ *
+ * The ten named workers use explicit identity profiles rather than pseudo-random
+ * colours derived from their IDs. The profiles are shared by every LOD so a
+ * person keeps the same silhouette, PPE, and role cues at every distance.
  */
 
 import * as THREE from 'three';
 
-// Hair style options
 export type HairStyle = 'bald' | 'short' | 'medium' | 'curly' | 'ponytail';
+export type WorkerBodyType = 'masculine' | 'feminine';
 
-// Tool types workers can hold
-export type ToolType = 'clipboard' | 'tablet' | 'radio' | 'wrench' | 'magnifier' | 'none';
+export type ToolType =
+  | 'clipboard'
+  | 'tablet'
+  | 'radio'
+  | 'wrench'
+  | 'magnifier'
+  | 'sample-kit'
+  | 'none';
 
-// Worker appearance configuration
+export type WorkerWorkAction =
+  | 'supervise'
+  | 'inspect'
+  | 'operate'
+  | 'sample'
+  | 'repair'
+  | 'radio'
+  | 'none';
+
 export interface WorkerAppearance {
+  bodyType: WorkerBodyType;
   uniformColor: string;
   skinTone: string;
   hatColor: string;
@@ -21,10 +39,21 @@ export interface WorkerAppearance {
   hairColor: string;
   hairStyle: HairStyle;
   tool: ToolType;
+  eyeColor: string;
+  accentColor: string;
+  heightScale: number;
+  bodyScale: number;
+  headScale: number;
+  hasHardHat: boolean;
+  hasSafetyGlasses: boolean;
+  hasHearingProtection: boolean;
+  hasGloves: boolean;
+  hasLabCoat: boolean;
+  hasToolBelt: boolean;
+  hasRadio: boolean;
+  workAction: WorkerWorkAction;
 }
 
-// Refs for animatable body parts (passed to DetailedWorker)
-// Allow null since refs start as null before mounting
 export interface WorkerPoseRefs {
   torso: React.RefObject<THREE.Group | null>;
   head: React.RefObject<THREE.Group | null>;
@@ -40,7 +69,6 @@ export interface WorkerPoseRefs {
   rightFingers: React.RefObject<THREE.Mesh | null>;
 }
 
-// Simplified refs for medium LOD
 export interface SimplifiedPoseRefs {
   leftArm: React.RefObject<THREE.Group | null>;
   rightArm: React.RefObject<THREE.Group | null>;
@@ -48,7 +76,6 @@ export interface SimplifiedPoseRefs {
   rightLeg: React.RefObject<THREE.Group | null>;
 }
 
-// Skin tone options for variety
 export const SKIN_TONES = [
   '#f5d0c5',
   '#d4a574',
@@ -58,103 +85,271 @@ export const SKIN_TONES = [
   '#ffdbac',
   '#f1c27d',
   '#cd8c52',
-];
+] as const;
 
-// Hair color options
 export const HAIR_COLORS = [
-  '#1a1a1a',
-  '#3d2314',
-  '#8b4513',
-  '#d4a574',
-  '#4a3728',
+  '#151312',
   '#2d1810',
-  '#654321',
-  '#8b0000',
-];
+  '#4a2b1a',
+  '#6b4423',
+  '#a06a3b',
+  '#c59a5b',
+  '#5a1f18',
+] as const;
 
-// Hair styles
 export const HAIR_STYLES: HairStyle[] = ['bald', 'short', 'medium', 'curly', 'ponytail'];
 
-/**
- * Get worker appearance based on role and ID (for deterministic variety)
- */
+const ROLE_DEFAULTS: Record<string, WorkerAppearance> = {
+  Supervisor: {
+    bodyType: 'masculine',
+    uniformColor: '#1d4ed8',
+    skinTone: '#d4a574',
+    hatColor: '#2563eb',
+    hasVest: true,
+    pantsColor: '#172033',
+    hairColor: '#151312',
+    hairStyle: 'short',
+    tool: 'clipboard',
+    eyeColor: '#3b2a20',
+    accentColor: '#60a5fa',
+    heightScale: 1.03,
+    bodyScale: 1.02,
+    headScale: 1,
+    hasHardHat: true,
+    hasSafetyGlasses: false,
+    hasHearingProtection: false,
+    hasGloves: false,
+    hasLabCoat: false,
+    hasToolBelt: false,
+    hasRadio: true,
+    workAction: 'supervise',
+  },
+  Engineer: {
+    bodyType: 'feminine',
+    uniformColor: '#334155',
+    skinTone: '#f1c27d',
+    hatColor: '#f8fafc',
+    hasVest: false,
+    pantsColor: '#1e293b',
+    hairColor: '#4a2b1a',
+    hairStyle: 'ponytail',
+    tool: 'tablet',
+    eyeColor: '#456174',
+    accentColor: '#38bdf8',
+    heightScale: 1,
+    bodyScale: 0.97,
+    headScale: 1,
+    hasHardHat: true,
+    hasSafetyGlasses: true,
+    hasHearingProtection: false,
+    hasGloves: false,
+    hasLabCoat: false,
+    hasToolBelt: false,
+    hasRadio: false,
+    workAction: 'inspect',
+  },
+  Operator: {
+    bodyType: 'masculine',
+    uniformColor: '#475569',
+    skinTone: '#c68642',
+    hatColor: '#eab308',
+    hasVest: true,
+    pantsColor: '#1e3a5f',
+    hairColor: '#151312',
+    hairStyle: 'short',
+    tool: 'none',
+    eyeColor: '#3b2a20',
+    accentColor: '#facc15',
+    heightScale: 1,
+    bodyScale: 1,
+    headScale: 1,
+    hasHardHat: true,
+    hasSafetyGlasses: false,
+    hasHearingProtection: true,
+    hasGloves: true,
+    hasLabCoat: false,
+    hasToolBelt: false,
+    hasRadio: false,
+    workAction: 'operate',
+  },
+  'Safety Officer': {
+    bodyType: 'feminine',
+    uniformColor: '#166534',
+    skinTone: '#d4a574',
+    hatColor: '#22c55e',
+    hasVest: true,
+    pantsColor: '#173b2b',
+    hairColor: '#4a2b1a',
+    hairStyle: 'ponytail',
+    tool: 'radio',
+    eyeColor: '#425c4c',
+    accentColor: '#4ade80',
+    heightScale: 0.98,
+    bodyScale: 0.96,
+    headScale: 1,
+    hasHardHat: true,
+    hasSafetyGlasses: true,
+    hasHearingProtection: false,
+    hasGloves: true,
+    hasLabCoat: false,
+    hasToolBelt: false,
+    hasRadio: true,
+    workAction: 'radio',
+  },
+  'Quality Control': {
+    bodyType: 'feminine',
+    uniformColor: '#f8fafc',
+    skinTone: '#f5d0c5',
+    hatColor: '#f8fafc',
+    hasVest: false,
+    pantsColor: '#312e81',
+    hairColor: '#5a1f18',
+    hairStyle: 'medium',
+    tool: 'sample-kit',
+    eyeColor: '#536b7a',
+    accentColor: '#8b5cf6',
+    heightScale: 0.97,
+    bodyScale: 0.95,
+    headScale: 1.01,
+    hasHardHat: true,
+    hasSafetyGlasses: true,
+    hasHearingProtection: false,
+    hasGloves: true,
+    hasLabCoat: true,
+    hasToolBelt: false,
+    hasRadio: false,
+    workAction: 'sample',
+  },
+  Maintenance: {
+    bodyType: 'masculine',
+    uniformColor: '#9a3412',
+    skinTone: '#e0ac69',
+    hatColor: '#f97316',
+    hasVest: true,
+    pantsColor: '#3f2a22',
+    hairColor: '#151312',
+    hairStyle: 'short',
+    tool: 'wrench',
+    eyeColor: '#3b2a20',
+    accentColor: '#fb923c',
+    heightScale: 1.01,
+    bodyScale: 1.04,
+    headScale: 1,
+    hasHardHat: true,
+    hasSafetyGlasses: true,
+    hasHearingProtection: false,
+    hasGloves: true,
+    hasLabCoat: false,
+    hasToolBelt: true,
+    hasRadio: false,
+    workAction: 'repair',
+  },
+};
+
+const NAMED_PERSONNEL_PROFILES: Record<string, Partial<WorkerAppearance>> = {
+  w1: {
+    bodyType: 'masculine',
+    skinTone: '#d4a574',
+    hairColor: '#151312',
+    hairStyle: 'short',
+    eyeColor: '#33251f',
+    heightScale: 1.06,
+    bodyScale: 1.04,
+  },
+  w2: {
+    bodyType: 'feminine',
+    skinTone: '#f1c27d',
+    hairColor: '#6b4423',
+    hairStyle: 'ponytail',
+    eyeColor: '#44677d',
+    heightScale: 0.99,
+    bodyScale: 0.96,
+  },
+  w3: {
+    bodyType: 'masculine',
+    skinTone: '#c68642',
+    hairColor: '#151312',
+    hairStyle: 'curly',
+    eyeColor: '#35231b',
+    heightScale: 1.03,
+    bodyScale: 1.02,
+  },
+  w4: {
+    bodyType: 'feminine',
+    skinTone: '#f5d0c5',
+    hairColor: '#5a1f18',
+    hairStyle: 'medium',
+    eyeColor: '#4e6678',
+    heightScale: 0.96,
+    bodyScale: 0.94,
+  },
+  w5: {
+    bodyType: 'masculine',
+    skinTone: '#e0ac69',
+    hairColor: '#151312',
+    hairStyle: 'short',
+    eyeColor: '#2e2923',
+    heightScale: 1.01,
+    bodyScale: 1.05,
+  },
+  w6: {
+    bodyType: 'feminine',
+    skinTone: '#d4a574',
+    hairColor: '#4a2b1a',
+    hairStyle: 'ponytail',
+    eyeColor: '#385445',
+    heightScale: 0.98,
+    bodyScale: 0.96,
+  },
+  w7: {
+    bodyType: 'masculine',
+    skinTone: '#8d5524',
+    hairColor: '#151312',
+    hairStyle: 'curly',
+    eyeColor: '#2c211b',
+    heightScale: 1.05,
+    bodyScale: 1.03,
+  },
+  w8: {
+    bodyType: 'feminine',
+    skinTone: '#f5d0c5',
+    hairColor: '#c59a5b',
+    hairStyle: 'ponytail',
+    eyeColor: '#506f83',
+    heightScale: 1.02,
+    bodyScale: 0.95,
+  },
+  w9: {
+    bodyType: 'masculine',
+    skinTone: '#d4a574',
+    hairColor: '#2d1810',
+    hairStyle: 'bald',
+    eyeColor: '#3d3026',
+    heightScale: 1.08,
+    bodyScale: 1.06,
+  },
+  w10: {
+    bodyType: 'feminine',
+    skinTone: '#e0ac69',
+    hairColor: '#151312',
+    hairStyle: 'medium',
+    eyeColor: '#3c3029',
+    heightScale: 0.95,
+    bodyScale: 0.94,
+  },
+};
+
 export function getWorkerAppearance(role: string, color: string, id: string): WorkerAppearance {
-  // Use ID characters for deterministic randomization
-  const skinIndex = id.charCodeAt(id.length - 1) % SKIN_TONES.length;
-  const hairColorIndex = id.charCodeAt(0) % HAIR_COLORS.length;
-  const hairStyleIndex = (id.charCodeAt(1) || 0) % HAIR_STYLES.length;
+  const base = ROLE_DEFAULTS[role] ?? ROLE_DEFAULTS.Operator;
+  const namedProfile = NAMED_PERSONNEL_PROFILES[id] ?? {};
 
-  const skinTone = SKIN_TONES[skinIndex];
-  const hairColor = HAIR_COLORS[hairColorIndex];
-  const hairStyle = HAIR_STYLES[hairStyleIndex];
+  return {
+    ...base,
+    uniformColor: role === 'Operator' && color ? color : base.uniformColor,
+    ...namedProfile,
+  };
+}
 
-  switch (role) {
-    case 'Supervisor':
-      return {
-        uniformColor: '#1e40af',
-        skinTone,
-        hatColor: '#1e40af',
-        hasVest: false,
-        pantsColor: '#1e293b',
-        hairColor,
-        hairStyle,
-        tool: 'clipboard',
-      };
-    case 'Engineer':
-      return {
-        uniformColor: '#374151',
-        skinTone,
-        hatColor: '#ffffff',
-        hasVest: false,
-        pantsColor: '#1f2937',
-        hairColor,
-        hairStyle,
-        tool: 'tablet',
-      };
-    case 'Safety Officer':
-      return {
-        uniformColor: '#166534',
-        skinTone,
-        hatColor: '#22c55e',
-        hasVest: true,
-        pantsColor: '#14532d',
-        hairColor,
-        hairStyle,
-        tool: 'radio',
-      };
-    case 'Quality Control':
-      return {
-        uniformColor: '#7c3aed',
-        skinTone,
-        hatColor: '#ffffff',
-        hasVest: false,
-        pantsColor: '#1e1b4b',
-        hairColor,
-        hairStyle,
-        tool: 'magnifier',
-      };
-    case 'Maintenance':
-      return {
-        uniformColor: '#9a3412',
-        skinTone,
-        hatColor: '#f97316',
-        hasVest: true,
-        pantsColor: '#431407',
-        hairColor,
-        hairStyle,
-        tool: 'wrench',
-      };
-    case 'Operator':
-    default:
-      return {
-        uniformColor: color || '#475569',
-        skinTone,
-        hatColor: '#eab308',
-        hasVest: id.charCodeAt(2) % 2 === 0,
-        pantsColor: '#1e3a5f',
-        hairColor,
-        hairStyle,
-        tool: 'none',
-      };
-  }
+export function getPersonnelProfileIds(): string[] {
+  return Object.keys(NAMED_PERSONNEL_PROFILES);
 }

@@ -10,7 +10,13 @@
  */
 
 import * as THREE from 'three';
-import { getTexture, fbmNoise, createDataTexture } from '../utils/textureGenerator';
+import {
+  getTexture,
+  fbmNoise,
+  fbmNoiseSigned,
+  createColorDataTexture,
+  createLinearDataTexture,
+} from '../utils/textureGenerator';
 
 export interface StuccoOptions {
   roughness?: number;
@@ -34,11 +40,16 @@ export const generateStucco = (
   options: StuccoOptions = {}
 ): THREE.DataTexture => {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const cacheKey = `stucco-v2-${size}-${opts.weathering}-${opts.contrast}`;
+  const cacheKey = `stucco-v3-${size}-${opts.weathering}-${opts.contrast}`;
 
   return getTexture(cacheKey, () => {
     const data = new Uint8Array(size * size * 4);
-    const baseLevel = 0.88;
+    // Authored in sRGB now that the texture is decoded correctly. 0.94 sRGB
+    // decodes to ~0.87 linear, which is the multiplier the wall tints were
+    // originally written against. The old 0.88 was applied as raw linear, and
+    // because all three noise terms were UNSIGNED the effective mean sat near
+    // 0.99 with heavy clipping - the walls were flat clipped white.
+    const baseLevel = 0.94;
 
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
@@ -47,14 +58,18 @@ export const generateStucco = (
         const nx = x / size;
         const ny = y / size;
 
-        const plasterNoise = fbmNoise(nx * 35, ny * 35, 3) * opts.contrast;
-        const grainNoise = fbmNoise(nx * 100, ny * 100, 2) * opts.contrast * 0.4;
-        const patchNoise = fbmNoise(nx * 4, ny * 4, 2) * opts.contrast * 0.5;
+        // Signed, so the mean stays at baseLevel and the full +/- contrast
+        // range survives instead of clipping off the top.
+        const plasterNoise = fbmNoiseSigned(nx * 35, ny * 35, 4) * opts.contrast * 2;
+        const grainNoise = fbmNoiseSigned(nx * 100, ny * 100, 3) * opts.contrast * 0.8;
+        const patchNoise = fbmNoiseSigned(nx * 4, ny * 4, 2) * opts.contrast;
+        // Macro drift so a long terrace of houses does not beat at tile size.
+        const macroNoise = fbmNoiseSigned(nx * 1.5 + 5, ny * 1.5 + 13, 2) * opts.contrast * 0.6;
 
         const weatherStreak = fbmNoise(nx * 6, ny * 2, 2);
         const weathering = weatherStreak > 0.65 ? (weatherStreak - 0.65) * opts.weathering : 0;
 
-        const variation = plasterNoise + grainNoise + patchNoise - weathering;
+        const variation = plasterNoise + grainNoise + patchNoise + macroNoise - weathering;
 
         const value = baseLevel + variation;
         const clamped = Math.max(0, Math.min(1, value));
@@ -67,7 +82,7 @@ export const generateStucco = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createColorDataTexture(data, size, size);
   });
 };
 
@@ -105,7 +120,7 @@ export const generateStuccoNormal = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
   });
 };
 
@@ -138,6 +153,6 @@ export const generateStuccoRoughness = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
   });
 };

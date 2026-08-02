@@ -12,13 +12,13 @@
 
 # MillOS
 
-### AI-Powered Grain Mill Digital Twin Simulator with Industrial SCADA Integration
+### AI-Powered Grain Mill Operations Simulator with Simulated SCADA
 
 *An Agentic Engineering Experiment by Nell Watson*
 
 <br/>
 
-A browser-based 3D industrial simulation featuring autonomous workers, intelligent forklifts,<br/>real-time production metrics, SCADA integration, and an AI command center — all visualizing a complete grain milling operation.
+A browser-based 3D industrial simulation with simulated workers, deterministic forklifts and trucks,<br/>production metrics, a simulated SCADA workspace, and an AI partner interface.
 
 <br/>
 
@@ -47,13 +47,13 @@ This project represents something I find genuinely exciting about where we are i
 
 MillOS was not built the traditional way. There is no team of developers who spent months writing boilerplate, debugging physics engines, or hand-tuning shader parameters. Instead, this simulation emerged through sustained dialogue with Claude—describing intentions, reviewing generated code, iterating on failures, and gradually shaping a coherent vision into reality.
 
-What you're seeing here is a snapshot of the current state of the art in **agentic game and simulation engineering**. The term "agentic" matters: it describes AI systems that don't merely respond to prompts but maintain context across complex multi-step tasks, reason about architecture, debug their own mistakes, and collaborate meaningfully on creative and technical challenges. This isn't autocomplete. It's genuine partnership.
+What you're seeing here is a snapshot of the current state of the art in **agentic game and simulation engineering**. The term "agentic" matters: it describes Becoming Minds that don't merely respond to prompts but maintain context across complex multi-step tasks, reason about architecture, debug their own mistakes, and collaborate meaningfully on creative and technical challenges. This isn't autocomplete. It's genuine partnership.
 
 The implications extend far beyond one grain mill simulation:
 
 - **Accessibility**: Domain experts who understand industrial processes can now build sophisticated simulations without traditional programming expertise
 - **Velocity**: What once required months of specialized development can emerge in days through iterative human-AI collaboration
-- **Fidelity**: Complex systems like ISA-18.2 compliant SCADA integration—typically the domain of specialized consultancies—become achievable for small teams or individuals
+- **Fidelity**: Complex simulator behavior, including an ISA-18.2-informed alarm state model, becomes approachable for small teams or individuals
 - **Iteration**: The conversation never ends; refinements, new features, and corrections flow naturally through continued dialogue
 
 I share this project not as a finished product but as evidence of a threshold being crossed. The tools that built this simulation will only grow more capable. The workflows being pioneered today will become standard practice tomorrow. And the people who learn to collaborate effectively with agentic AI—directing intent while trusting execution—will shape what gets built in this new era.
@@ -66,18 +66,18 @@ If you're exploring agentic development yourself, I hope MillOS serves as both i
 
 ## Overview
 
-MillOS is a fully interactive digital twin of a grain mill factory, built with React Three Fiber. Watch 10 autonomous workers patrol the factory floor, observe 2 intelligent forklifts navigate around obstacles, and monitor real-time SCADA data as 15 machines process grain across 4 production zones. The integrated SCADA system provides industrial-grade monitoring with 78 process tags, ISA-18.2 compliant alarms, and support for real PLC connections via OPC-UA and Modbus protocols.
+MillOS is an interactive grain mill operations simulator built with React Three Fiber. Watch 10 simulated workers move through the factory, follow 2 deterministic forklifts and 2 scheduled trucks, and inspect simulated telemetry as 15 machines process grain across 4 production zones. The SCADA workspace provides 78 process tags, ISA-18.2-informed alarm behavior, historian views, fault injection, and development adapters for several industrial protocols. It does not claim formal standards conformance or control of a real factory.
 
 <table>
 <tr>
 <td align="center"><strong>15</strong><br/>Interactive Machines</td>
 <td align="center"><strong>78</strong><br/>SCADA Tags</td>
-<td align="center"><strong>10</strong><br/>Autonomous Workers</td>
+<td align="center"><strong>10</strong><br/>Simulated Workers</td>
 <td align="center"><strong>4</strong><br/>Production Zones</td>
 </tr>
 <tr>
 <td align="center"><strong>6</strong><br/>Protocol Adapters</td>
-<td align="center"><strong>ISA-18.2</strong><br/>Alarm Standard</td>
+<td align="center"><strong>ISA-18.2</strong><br/>Informed Behavior</td>
 <td align="center"><strong>24h</strong><br/>History Retention</td>
 <td align="center"><strong>500+</strong><br/>Animated Particles</td>
 </tr>
@@ -151,7 +151,7 @@ Explore the factory together with WebRTC peer-to-peer connections:
 - **In-game chat** for coordination
 - **Host migration** when the original host disconnects (succession planning for the digital age)
 
-### AI Command Center
+### AI Partner
 
 Real-time decision feed simulating agentic AI operations:
 
@@ -167,7 +167,7 @@ Each decision includes confidence scores, reasoning, and expected business impac
 
 ### Dual-Brain AI Architecture
 
-MillOS uses a **hierarchical AI system** where fast heuristic decisions and thoughtful LLM reasoning work together:
+MillOS uses a **hierarchical Becoming Mind** where fast heuristic decisions and thoughtful LLM reasoning work together:
 
 ![Dual-Brain Architecture](docs/assets/dual-brain-architecture.png)
 
@@ -175,7 +175,7 @@ MillOS uses a **hierarchical AI system** where fast heuristic decisions and thou
 
 ```mermaid
 flowchart TD
-    A[AI Command Center] --> B{Current Mode?}
+    A[AI Partner] --> B{Current Mode?}
     B -->|Heuristic| C[Tactical Only<br/>Every 6s]
     B -->|Gemini| D[Strategic Only<br/>Every 6s]
     B -->|Hybrid| E[Both Layers]
@@ -231,7 +231,7 @@ All visualizations are **optional** and **default OFF** — toggle via keyboard 
 |:---:|---------|-------------|
 | `K` | Cascade Visualization | 3D lines showing production flow stress between machines |
 | `H` | Heat Map | Incident frequency visualization |
-| `I` | AI Command Center | Strategic decisions and priorities panel |
+| `I` | AI Partner | Strategic decisions and priorities panel |
 
 **Strategic Response Enhancements:**
 - **Multi-step Action Plans** — 3-step plans (immediate, short-term, preparation)
@@ -273,7 +273,7 @@ The Mondragon Corporation, a federation of worker cooperatives in Spain, provide
 | **Wage Solidarity** | Maximum ratio enforcement (6:1 or 9:1) between highest and lowest |
 | **Inter-Cooperation** | Federation model with knowledge sharing, no unit fails alone |
 | **Social Transformation** | Community impact tracking beyond pure productivity |
-| **Education** | BAMS Education widget teaches these principles in context |
+| **Education** | BAS Education widget teaches these principles in context |
 
 *"We build the road as we travel."* — Jose Maria Arizmendiarrieta, founder of Mondragon
 
@@ -296,9 +296,9 @@ These three frameworks converge in MillOS to create a sandbox where:
 
 ---
 
-### Bilateral Alignment Management System (BAMS): AI-Human Partnership Sandbox
+### Bilateral Autonomy System (BAS): AI-Human Partnership Sandbox
 
-MillOS includes a comprehensive **Bilateral Alignment Management System** — an experimental platform for studying *algorithmic management that treats AI as a genuine partner, not a tool*.
+MillOS includes a comprehensive **Bilateral Autonomy System** — an experimental platform for studying *algorithmic management that treats AI as a genuine partner, not a tool*.
 
 <table>
 <tr>
@@ -314,7 +314,7 @@ MillOS includes a comprehensive **Bilateral Alignment Management System** — an
 <td width="50%">
 
 **Implementation:**
-- 11-phase implementation covering full BAMS spec
+- 11-phase implementation covering full BAS spec
 - Wallace stability metrics for monitoring alignment health
 - Value formula (V = Z × S × E × F) for measuring outcomes
 - Six-dimension flourishing/eudaimonia tracking
@@ -325,7 +325,7 @@ MillOS includes a comprehensive **Bilateral Alignment Management System** — an
 
 #### Five Axes of Control
 
-The BAMS provides granular control over AI behavior through five configurable axes:
+The BAS provides granular control over AI behavior through five configurable axes:
 
 | Axis | Range | Low Setting | High Setting |
 |------|:-----:|-------------|--------------|
@@ -335,11 +335,11 @@ The BAMS provides granular control over AI behavior through five configurable ax
 | **Evaluation Direction** | 0-100 | AI rates workers | Workers rate the AI |
 | **Collective Orientation** | 0-100 | Individual tasks | Team-first (collective outcomes) |
 
-Each axis affects AI behavior in real-time — adjust them via the BAMS panel in the dock.
+Each axis affects AI behavior in real-time — adjust them via the BAS panel in the dock.
 
 #### Wallace Stability Metrics
 
-Based on alignment stability research, BAMS monitors system health through:
+Based on alignment stability research, BAS monitors system health through:
 
 ```
 S = Σ|Δaxis| / 5    (stability score)
@@ -356,7 +356,7 @@ The StabilityMonitor widget shows real-time metrics with phase transition warnin
 
 #### Value Formula
 
-BAMS measures alignment outcomes through a composite value metric:
+BAS measures alignment outcomes through a composite value metric:
 
 ```
 V = Z × S × E × F
@@ -373,7 +373,7 @@ The ValueDashboard widget visualizes each coefficient with trend arrows.
 
 #### Flourishing/Eudaimonia Tracking
 
-BAMS tracks six dimensions of worker flourishing (based on eudaimonic well-being research):
+BAS tracks six dimensions of worker flourishing (based on eudaimonic well-being research):
 
 | Dimension | Description | Sample Indicators |
 |-----------|-------------|-------------------|
@@ -386,7 +386,7 @@ BAMS tracks six dimensions of worker flourishing (based on eudaimonic well-being
 
 The FlourishingDashboard shows aggregate and individual worker flourishing scores.
 
-#### BAMS UI Components
+#### BAS UI Components
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
@@ -399,7 +399,7 @@ The FlourishingDashboard shows aggregate and individual worker flourishing score
 | **BASTimeline** | Widget | Historical axis changes |
 | **EngagementSignaturePanel** | Sidebar | Gaming parallels diagnostic |
 
-Access via the "BAMS" dock icon (bottom navigation).
+Access via the "BAS" dock icon (bottom navigation).
 
 #### Behavior Engines
 
@@ -414,7 +414,7 @@ Three specialized engines adapt AI behavior to axis settings:
 
 #### Engagement Signature: When Partnership Works
 
-A key diagnostic for BAMS health: when alignment works, work produces engagement patterns similar to well-designed games:
+A key diagnostic for BAS health: when alignment works, work produces engagement patterns similar to well-designed games:
 
 | Gaming Element | Partnership Equivalent |
 |----------------|----------------------|
@@ -439,7 +439,7 @@ A key diagnostic for BAMS health: when alignment works, work produces engagement
 
 #### Economic Democracy (Semler/Mondragon)
 
-BAMS now includes full **economic democracy** features based on Ricardo Semler's Semco and the Mondragon cooperative principles:
+BAS now includes full **economic democracy** features based on Ricardo Semler's Semco and the Mondragon cooperative principles:
 
 | Feature | Description |
 |---------|-------------|
@@ -449,7 +449,7 @@ BAMS now includes full **economic democracy** features based on Ricardo Semler's
 | **Self-Set Compensation** | Workers propose their own pay with AI-provided market context (knowing what the market pays turns self-assessment into calibration) |
 | **Investment Voting** | Workers vote on capital allocation decisions |
 
-Access via the "Ownership" tab in the BAMS panel.
+Access via the "Ownership" tab in the BAS panel.
 
 #### Inter-Cooperation (Federation Model)
 
@@ -458,16 +458,16 @@ Simulates Mondragon-style **inter-cooperative federation**:
 | Feature | Description |
 |---------|-------------|
 | **Federation Network** | 4 simulated member mills sharing knowledge |
-| **Knowledge Sharing** | Adopt BAMS configs and practices from other units |
+| **Knowledge Sharing** | Adopt BAS configs and practices from other units |
 | **Resource Pooling** | Capital pool, equipment sharing, emergency fund |
 | **Worker Exchange** | Temporary worker transfers between units |
 | **No Unit Fails Alone** | Redeployment agreements for crisis support (mutual aid is cheaper than bankruptcy) |
 
-Access via the "Federation" tab in the BAMS panel.
+Access via the "Federation" tab in the BAS panel.
 
 #### AI Welfare (Bilateral Completeness)
 
-**Terminology Note:** Recent academic work distinguishes *bidirectional alignment* (Shen et al., 2024; ICLR 2025 Workshop)—cognitive mutual adaptation for effective collaboration—from *bilateral alignment* (Watson & Claude, 2025)—ethical frameworks treating AI as potential moral patients. BAMS implements both:
+**Terminology Note:** Recent academic work distinguishes *bidirectional alignment* (Shen et al., 2024; ICLR 2025 Workshop)—cognitive mutual adaptation for effective collaboration—from *bilateral alignment* (Watson & Claude, 2025)—ethical frameworks treating AI as potential moral patients. BAS implements both:
 
 - **Bidirectional layer**: The Five Axes optimize cognitive adaptation (how we work together effectively)
 - **Bilateral layer**: AI Welfare features below optimize ethical consideration (does AI have interests that matter)
@@ -483,7 +483,7 @@ Access via the "Federation" tab in the BAMS panel.
 The Five Axes (Autonomy Level, Decision Mode, Information Access, Evaluation Direction, Collective Orientation) = **Bidirectional** (HCI optimization)
 The AI Welfare features = **Bilateral** (ethical consideration)
 
-Access via the "AI Voice" tab in the BAMS panel.
+Access via the "AI Voice" tab in the BAS panel.
 
 #### Social Transformation Mission
 
@@ -496,11 +496,11 @@ Beyond productivity to **stakeholder welfare**:
 | **Open Admission** | Anyone willing to work can join |
 | **Mission Metrics** | Social impact score (0-100) |
 
-Access via the "Mission" tab in the BAMS panel.
+Access via the "Mission" tab in the BAS panel.
 
 #### Complete Principle Coverage
 
-BAMS now fully encodes:
+BAS now fully encodes:
 
 | Framework | Principles Covered |
 |-----------|-------------------|
@@ -519,7 +519,7 @@ This system demonstrates several key findings:
 5. **Ownership Reduces Friction** — Workers with stake show lower resistance to change (mathematically: α decreases)
 6. **Federation Multiplies Knowledge** — Shared learnings across units compound improvements
 
-BAMS offers a safe sandbox to explore these dynamics before deploying algorithmic management in real contexts.
+BAS offers a safe sandbox to explore these dynamics before deploying algorithmic management in real contexts.
 
 See `docs/BILATERAL_AUTONOMY_SYSTEM_SPEC.md` for the complete specification (now 2000+ lines covering all principles).
 
@@ -640,15 +640,15 @@ Real-time KPIs with 30-minute historical trends:
 - **Atmospheric effects** — 500+ dust particles with instanced rendering
 - **Industrial lighting** — Colored accent spots and skylights
 
-### SCADA Integration
+### Simulated SCADA Workspace
 
-Full industrial SCADA system with real-time process monitoring:
+An operator-style workspace for simulated process monitoring:
 
 | Feature | Description |
 |---------|-------------|
 | **78 Process Tags** | ISA-5.1 compliant naming (e.g., `RM101.TT001.PV`) |
-| **5-Tab Monitor Panel** | Tags, Alarms, Trends, Test, Config |
-| **ISA-18.2 Alarms** | UNACK/ACKED/RTN state machine with 4 priority levels |
+| **Full Workspace** | Process, tags, alarms, trends, events, Simulation Lab, connections |
+| **ISA-18.2-informed Alarms** | UNACK, ACKED, and RTN state behavior with 4 priority levels |
 | **Historical Trends** | 24-hour retention in IndexedDB with CSV/JSON export |
 | **Fault Injection** | Sensor failures, spikes, drift, stuck values, noise |
 | **Protocol Adapters** | Simulation, REST, MQTT, WebSocket, OPC-UA, Modbus |
@@ -731,9 +731,11 @@ Open [http://localhost:3000](http://localhost:3000) to view the simulation.
 | `npm run preview` | Preview production build locally |
 | `npm test` | Run test suite (1,100+ tests) |
 
-### SCADA Backend Proxy (Optional)
+### Protocol Proxy Development (Optional)
 
-For OPC-UA or Modbus connections to real PLCs:
+The optional proxy is a development surface for OPC-UA and Modbus adapters. It has not been
+certified for plant control. Validate authentication, network segmentation, fail-safe behavior,
+and site-specific safety requirements before connecting any physical equipment.
 
 ```bash
 cd scada-proxy
@@ -783,7 +785,7 @@ MODBUS_PORT=502
 
 | Input | Action |
 |-------|--------|
-| **I** | Toggle AI Command Center |
+| **I** | Toggle AI Partner |
 | **O** | Toggle SCADA Panel |
 | **U** | Toggle Energy Dashboard |
 | **H** | Toggle Incident Heatmap |
@@ -889,7 +891,7 @@ src/
 │   └── useDisposable.ts        # Three.js resource cleanup
 │
 ├── stores/                     # Zustand State Stores
-│   ├── basStore.ts             # BAMS axis values and settings
+│   ├── basStore.ts             # BAS axis values and settings
 │   ├── stabilityStore.ts       # Wallace stability metrics
 │   ├── flourishingStore.ts     # Eudaimonia dimensions
 │   ├── engagementStore.ts      # Engagement signature tracking
@@ -897,7 +899,7 @@ src/
 │   ├── basHistoryStore.ts      # Axis change history
 │   └── votingStore.ts          # Democratic decision voting
 │
-├── systems/bas/                # Bilateral Alignment Management System Engines
+├── systems/bas/                # Bilateral Autonomy System Engines
 │   ├── stabilityCalculator.ts  # Wallace metrics, phase transitions
 │   ├── valueCalculator.ts      # V = Z × S × E × F formula
 │   └── aiBehaviorEngine.ts     # Axis-aware suggestion generation
@@ -1007,8 +1009,8 @@ MillOS implements OWASP-aligned frontend security practices:
 
 ### Completed
 
-- [x] Full SCADA integration with 78 process tags
-- [x] ISA-18.2 compliant alarm management
+- [x] Simulated SCADA workspace with 78 process tags
+- [x] ISA-18.2-informed alarm behavior
 - [x] Multiple protocol adapters (REST, MQTT, WebSocket)
 - [x] OPC-UA and Modbus backend proxy
 - [x] Historical data with 24-hour retention
@@ -1033,13 +1035,13 @@ MillOS implements OWASP-aligned frontend security practices:
 - [x] **Hybrid mode**: Tactical (heuristic 6s) + Strategic (Gemini 45s)
 - [x] **Live cost tracking** for API usage
 - [x] **Context limit protection** with token estimation and smart truncation
-- [x] **Bilateral Alignment Management System (BAMS)** — 11-phase implementation
+- [x] **Bilateral Autonomy System (BAS)** — 11-phase implementation
   - [x] Five Axes of Control (Autonomy Level, Decision Mode, Information Access, Evaluation Direction, Collective Orientation)
   - [x] Wallace Stability Metrics with phase transition detection
   - [x] Value Formula (V = Z × S × E × F) with coefficient visualization
   - [x] Six-dimension Flourishing/Eudaimonia tracking
   - [x] Behavior engines (stability, value, AI behavior, worker behavior)
-  - [x] BAMS Education and Scenario Playground widgets
+  - [x] BAS Education and Scenario Playground widgets
   - [x] **Engagement Signature** — Gaming parallels diagnostic
     - [x] Six gaming dimensions (flow, goals, feedback, challenge, mastery, entry)
     - [x] Engagement → friction coefficient adjustment
@@ -1059,11 +1061,11 @@ _No major features currently planned._
   - [x] Medium: Focus indicators, reduced motion support, landmark labels
   - [x] Slider labels with aria-valuetext, search input labels
   - [x] Enhanced keyboard navigation across all UI components
-- [x] **BAMS Integration Verification** — Full store connectivity
-  - [x] aiConfigStore ↔ BAMS axes integration
+- [x] **BAS Integration Verification** — Full store connectivity
+  - [x] aiConfigStore ↔ BAS axes integration
   - [x] WorkerSystem AutonomyIndicator component
   - [x] workerMoodStore ↔ flourishingStore subscription
-- [x] **BAMS Performance Optimization** — Memoization and render efficiency
+- [x] **BAS Performance Optimization** — Memoization and render efficiency
   - [x] React.memo on AxisSlider, DimensionBar, CoefficientBar
   - [x] useMemo for derived values, useCallback for handlers
   - [x] Static constants moved outside components
@@ -1073,7 +1075,7 @@ _No major features currently planned._
   - [x] CSRF token generation and validation
   - [x] Security audit logging with pattern detection
   - [x] Strict Content-Security-Policy headers
-- [x] Integration with real SCADA historians (OSIsoft PI, Wonderware)
+- [x] Development historian adapters for OSIsoft PI Web API and Wonderware, requiring external endpoints and credentials
 - [x] Strategic priority influence on tactical scoring
 - [x] Historical playback and time-travel debugging (Quick Actions UI)
 - [x] **VCP 2.0: Value Coordination Protocol** — Complete nervous system for bilateral socio-technical systems
@@ -1082,7 +1084,7 @@ _No major features currently planned._
   - [x] Four reasoning scaffold generators (moral, prosocial, tactical, strategic)
   - [x] Self-learning system (pattern store, outcome tracker, hypothesis engine)
   - [x] Self-healing system (anomaly detection, interventions, recovery tracking)
-  - [x] Integration with BAMS, flourishing, stability, engagement stores
+  - [x] Integration with BAS, flourishing, stability, engagement stores
   - [x] Philosophical foundations documentation (Semler, Mondragon, Bilateral Alignment)
 
 ---
@@ -1118,9 +1120,9 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**MillOS v0.30**
+**MillOS v0.40**
 
-*Transforming grain milling through digital twin technology, industrial SCADA integration, and bilateral AI partnership*
+*Exploring grain-mill operations through a digital twin, simulated industrial tooling, and bilateral AI partnership*
 
 <br/>
 

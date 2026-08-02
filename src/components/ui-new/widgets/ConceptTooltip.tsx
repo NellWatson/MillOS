@@ -125,7 +125,7 @@ const CATEGORY_CONFIG: Record<
   },
   bams: {
     icon: BookOpen,
-    label: 'BAMS System',
+    label: 'Bilateral Autonomy System',
     headerBg: 'bg-violet-500/10',
     iconColor: 'text-violet-400',
     labelColor: 'text-violet-400',

@@ -1,19 +1,28 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
 import { shouldRunThisFrame } from '../utils/frameThrottle';
 import { SceneText as Text } from './shared/SceneText';
 import * as THREE from 'three';
-import { useShallow } from 'zustand/react/shallow';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import Fireflies from './effects/Fireflies';
 import { Cat } from './scenery/Cat';
-import { Tree, OakTree, BirchTree } from './scenery/Tree';
+import {
+  InstancedTreeField,
+  InstancedGrassClutter,
+  InstancedMulch,
+  useVegetationDensity,
+  type TreeInstance,
+  type ClutterSpec,
+} from './scenery/InstancedFoliage';
+import { WindDriver } from './scenery/WindDriver';
 import { HeartParticle } from './effects/HeartParticle';
 import { playCritterSound } from '../utils/critterAudio';
 import { audioManager } from '../utils/audioManager';
 import { PROCEDURAL_TEXTURES } from '../utils/sharedMaterials';
 import { InstancedLamps } from './village/InstancedVillageComponents';
+import { POLYGON_OFFSET } from '../constants/renderLayers';
+import { generateCobblestoneRoughness } from '../textures';
 
 // ============================================================
 // CHARMING EUROPEAN VILLAGE - West of Canal
@@ -54,12 +63,18 @@ import { OUTDOOR_MATERIALS } from '../utils/sharedMaterials';
 // Clone shared textures (same as farmyard), repeat (1,1) - UV divisor controls stone size
 const villageCobbleColor = PROCEDURAL_TEXTURES.cobblestoneColor.clone();
 const villageCobbleNormal = PROCEDURAL_TEXTURES.cobblestoneNormal.clone();
+// Roughness at 256/7 has the same cell count as the 512/14 albedo, so the
+// polished crowns line up with the stones instead of drifting across them.
+const villageCobbleRoughness = generateCobblestoneRoughness(256, 7).clone();
 villageCobbleColor.wrapS = villageCobbleColor.wrapT = THREE.RepeatWrapping;
 villageCobbleNormal.wrapS = villageCobbleNormal.wrapT = THREE.RepeatWrapping;
+villageCobbleRoughness.wrapS = villageCobbleRoughness.wrapT = THREE.RepeatWrapping;
 villageCobbleColor.repeat.set(1, 1);
 villageCobbleNormal.repeat.set(1, 1);
+villageCobbleRoughness.repeat.set(1, 1);
 villageCobbleColor.needsUpdate = true;
 villageCobbleNormal.needsUpdate = true;
+villageCobbleRoughness.needsUpdate = true;
 
 // Create roof textures with tiling for building scale (fewer repeats = larger tiles)
 const clayTileColor = PROCEDURAL_TEXTURES.clayTilesColor.clone();
@@ -94,41 +109,52 @@ stuccoNormalTex.repeat.set(2, 2);
 const SM = {
   grass: OUTDOOR_MATERIALS.grass, // Use shared grass material for seamless matching
   cobble: new THREE.MeshStandardMaterial({
-    color: '#9a9a9a', // Tint to correct washed-out texture
+    // Untinted: the cobble albedo is now decoded as sRGB, so the old '#9a9a9a'
+    // "correct washed-out texture" tint would multiply the same darkening twice.
+    color: '#ffffff',
     roughness: 0.85,
     map: villageCobbleColor,
     normalMap: villageCobbleNormal,
     normalScale: new THREE.Vector2(0.4, 0.4),
+    roughnessMap: villageCobbleRoughness,
   }),
   stone: new THREE.MeshStandardMaterial({
-    color: '#a08070', // Warmer brick-like stone color
+    // Untinted: '#a08070' was desaturating a brick map that only looked washed
+    // out because it was decoded as linear. The map now carries its own hue.
+    color: '#ffffff',
     roughness: 0.85,
     map: PROCEDURAL_TEXTURES.brickColor,
     normalMap: PROCEDURAL_TEXTURES.brickNormal,
     normalScale: new THREE.Vector2(0.3, 0.3),
   }),
+  // Half-timbering. The old `PROCEDURAL_TEXTURES.panelNormal` binding is
+  // dropped, not replaced: that map's bevel is 0.64 px at 256, below one texel,
+  // so the mip chain erases it and at normalScale 0.15 it contributed nothing.
+  // Its correct replacement is a sheet-metal panel bevel, which is wrong for
+  // oak beams - so the honest fix is no normal map and one less texture fetch.
   timber: new THREE.MeshStandardMaterial({
     color: COLORS.timber,
     roughness: 0.8,
-    normalMap: PROCEDURAL_TEXTURES.panelNormal,
-    normalScale: new THREE.Vector2(0.15, 0.15),
   }),
+  // The three roof maps already bake terracotta / slate-grey / straw. Their old
+  // tints named the colour the map itself carries, so post-sRGB-decode they
+  // multiplied the same hue twice.
   roofTile: new THREE.MeshStandardMaterial({
-    color: '#d4a090', // Tint for terracotta tiles
+    color: '#ffffff',
     roughness: 0.7,
     map: clayTileColor,
     normalMap: clayTileNormal,
     normalScale: new THREE.Vector2(0.4, 0.4),
   }),
   roofSlate: new THREE.MeshStandardMaterial({
-    color: '#8090a0', // Tint for slate gray
+    color: '#ffffff',
     roughness: 0.5,
     map: slateColor,
     normalMap: slateNormal,
     normalScale: new THREE.Vector2(0.35, 0.35),
   }),
   thatch: new THREE.MeshStandardMaterial({
-    color: '#c0a080', // Tint for golden straw
+    color: '#ffffff',
     roughness: 0.95,
     map: thatchColor,
     normalMap: thatchNormal,
@@ -169,13 +195,14 @@ const SM = {
     normalMap: stuccoNormalTex,
     normalScale: new THREE.Vector2(0.3, 0.3),
   }),
+  // Painted timber shutters - inert panel normal dropped (see `timber`).
   shutterGreen: new THREE.MeshStandardMaterial({
     color: COLORS.green,
     roughness: 0.7,
-    normalMap: PROCEDURAL_TEXTURES.panelNormal,
-    normalScale: new THREE.Vector2(0.1, 0.1),
   }),
-  water: new THREE.MeshStandardMaterial({ color: COLORS.water, roughness: 0.2, metalness: 0.3 }),
+  // Water is a DIELECTRIC. metalness 0.3 tinted the specular with the albedo
+  // and drained the blue; the look lives in roughness and the environment.
+  water: new THREE.MeshStandardMaterial({ color: COLORS.water, roughness: 0.2, metalness: 0 }),
   white: new THREE.MeshStandardMaterial({
     color: '#e8e8e8', // Slight tint for white stucco
     roughness: 0.75,
@@ -183,26 +210,59 @@ const SM = {
     normalMap: stuccoNormalTex,
     normalScale: new THREE.Vector2(0.25, 0.25),
   }),
+  // Painted ironwork: hinges, lamp posts, window bars, animal eyes. The old
+  // `normalMap: PROCEDURAL_TEXTURES.brushedMetal` fed a roughness/metalness/AO
+  // pack to the normal decoder, which is a near-constant tilt of about
+  // (-0.37, +0.90) across the whole surface - a uniform lighting bias on every
+  // one of these parts rather than relief. Dropped; these are all well under
+  // 0.25 m, where any tiled detail map mips to a constant anyway.
   black: new THREE.MeshStandardMaterial({
     color: '#1a1a1a',
     roughness: 0.5,
-    normalMap: PROCEDURAL_TEXTURES.brushedMetal,
-    normalScale: new THREE.Vector2(0.1, 0.1),
   }),
   red: new THREE.MeshStandardMaterial({ color: '#dc2626', roughness: 0.6 }),
+  // Gilded trim: church cross, rose-window tracery, weathervane. F0 0.38, so a
+  // genuine CONDUCTOR at metalness 1 (0.6 was the invalid half-metal band).
+  // The `roughnessMap` is dropped rather than swapped for the ORM: every
+  // consumer is a 0.04-0.3 m member, so a 512 map tiled once over it is below
+  // one screen pixel and mips straight to its 0.582 mean. That mean is folded
+  // into the authored roughness instead - same result, one less fetch.
   gold: new THREE.MeshStandardMaterial({
     color: '#d4af37',
-    roughness: 0.4,
-    metalness: 0.6,
-    roughnessMap: PROCEDURAL_TEXTURES.brushedMetal,
+    roughness: 0.32,
+    metalness: 1,
   }),
   glass: new THREE.MeshStandardMaterial({
     color: '#93c5fd',
     roughness: 0.1,
-    metalness: 0.2,
+    metalness: 0,
     transparent: true,
     opacity: 0.7,
     depthWrite: false, // transparent pane: avoid occluding interiors/sort flicker
+  }),
+  windowGlass: new THREE.MeshStandardMaterial({
+    color: '#93c5fd',
+    emissive: '#000000',
+    emissiveIntensity: 0,
+    roughness: 0.18,
+    metalness: 0,
+    transparent: true,
+    opacity: 0.72,
+    depthWrite: false,
+  }),
+  clockFace: new THREE.MeshStandardMaterial({
+    color: '#1e293b',
+    emissive: '#000000',
+    emissiveIntensity: 0,
+    roughness: 0.5,
+  }),
+  // Gilded by day (F0 0.38, CONDUCTOR), repainted near-black at night by the
+  // day/night effect below - and a conductor with a 0.01 albedo is a black
+  // mirror, so the night state has to flip to metalness 0. Binary either way.
+  clockHands: new THREE.MeshStandardMaterial({
+    color: '#d4af37',
+    roughness: 0.4,
+    metalness: 1,
   }),
   smoke: new THREE.MeshBasicMaterial({
     color: '#9ca3af',
@@ -213,30 +273,42 @@ const SM = {
 };
 
 // ===== CHIMNEY SMOKE =====
-// PERF FIX: Pre-create smoke materials at module level to avoid clone() in render
-const smokeMaterials = [SM.smoke.clone(), SM.smoke.clone(), SM.smoke.clone()];
+// Shared geometry; the materials are per-chimney because opacity is animated
+// per puff and a module-level singleton would make every chimney in the
+// village pulse in lockstep.
+const smokePuffGeometry = new THREE.SphereGeometry(0.3, 8, 6);
 
+/**
+ * Three rising puffs per chimney.
+ *
+ * The animation used to be commented out for a perf test, which left three
+ * COINCIDENT grey spheres frozen over every roof - visibly worse than no
+ * smoke at all. Re-enabled behind the shared 1-in-3 frame throttle: at ~20 Hz
+ * a drifting puff is indistinguishable from a 60 Hz one.
+ */
 const ChimneySmoke: React.FC<{ position: [number, number, number]; offset?: number }> = ({
   position,
+  offset = 0,
 }) => {
   const smokeRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const materials = useMemo(() => [SM.smoke.clone(), SM.smoke.clone(), SM.smoke.clone()], []);
 
-  // PERF TEST: Disable animation completely
-  // useFrame((state) => {
-  //   // Throttle smoke animation to every 3rd frame (~20 FPS)
-  //   frameCount.current++;
-  //   if (frameCount.current % 3 !== 0) return;
-  //
-  //   const time = state.clock.elapsedTime + offset;
-  //   smokeRefs.current.forEach((mesh, i) => {
-  //     if (mesh) {
-  //       const phase = (time * 0.5 + i * 0.3) % 2;
-  //       mesh.position.y = phase * 2;
-  //       mesh.scale.setScalar(0.3 + phase * 0.4);
-  //       (mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.5 - phase * 0.25);
-  //     }
-  //   });
-  // });
+  useEffect(() => () => materials.forEach((m) => m.dispose()), [materials]);
+
+  useFrame((state) => {
+    if (!shouldRunThisFrame(3)) return;
+    const time = state.clock.elapsedTime + offset;
+    for (let i = 0; i < smokeRefs.current.length; i++) {
+      const mesh = smokeRefs.current[i];
+      if (!mesh) continue;
+      const phase = (time * 0.5 + i * 0.67) % 2;
+      mesh.position.y = phase * 2;
+      // Drift downwind as it rises, so the smoke agrees with the foliage.
+      mesh.position.x = phase * phase * 0.35;
+      mesh.scale.setScalar(0.3 + phase * 0.45);
+      materials[i].opacity = Math.max(0, 0.42 - phase * 0.21);
+    }
+  });
 
   return (
     <group position={position}>
@@ -246,10 +318,9 @@ const ChimneySmoke: React.FC<{ position: [number, number, number]; offset?: numb
           ref={(el) => {
             smokeRefs.current[i] = el;
           }}
-        >
-          <sphereGeometry args={[0.3, 8, 6]} />
-          <primitive object={smokeMaterials[i]} attach="material" />
-        </mesh>
+          geometry={smokePuffGeometry}
+          material={materials[i]}
+        />
       ))}
     </group>
   );
@@ -262,112 +333,100 @@ export const Cottage = React.memo<{
   wallColor?: keyof typeof SM;
   roofType?: 'tile' | 'thatch' | 'slate';
   hasGarden?: boolean;
-  isNight?: boolean;
-}>(
-  ({
-    position,
-    rotation = 0,
-    wallColor = 'cream',
-    roofType = 'tile',
-    hasGarden = true,
-    isNight = false,
-  }) => {
-    const wallMat = SM[wallColor] || SM.cream;
-    const roofMat =
-      roofType === 'thatch' ? SM.thatch : roofType === 'slate' ? SM.roofSlate : SM.roofTile;
+}>(({ position, rotation = 0, wallColor = 'cream', roofType = 'tile', hasGarden = true }) => {
+  const wallMat = SM[wallColor] || SM.cream;
+  const roofMat =
+    roofType === 'thatch' ? SM.thatch : roofType === 'slate' ? SM.roofSlate : SM.roofTile;
 
-    return (
-      <group position={position} rotation={[0, rotation, 0]}>
-        {/* Main building */}
-        <mesh position={[0, 2, 0]} castShadow receiveShadow>
-          <boxGeometry args={[5, 4, 4]} />
-          <primitive object={wallMat} attach="material" />
-        </mesh>
-        {/* Cute cone roof - Lego style */}
-        <mesh position={[0, 5.5, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
-          <coneGeometry args={[4, 3, 4]} />
-          <primitive object={roofMat} attach="material" />
-        </mesh>
-        {/* Chimney */}
-        <mesh position={[1.5, 6, 0]} castShadow>
-          <boxGeometry args={[0.6, 1.5, 0.6]} />
-          <primitive object={SM.stone} attach="material" />
-        </mesh>
-        {/* Chimney smoke */}
-        <ChimneySmoke position={[1.5, 7, 0]} offset={Math.random() * 10} />
-        {/* Door */}
-        <mesh position={[0, 1.2, 2.01]}>
-          <boxGeometry args={[1, 2.2, 0.1]} />
-          <primitive object={SM.timber} attach="material" />
-        </mesh>
-        {/* Windows */}
-        {[
-          [-1.5, 2.5],
-          [1.5, 2.5],
-        ].map(([x, y], i) => (
-          <group key={i} position={[x, y, 2.01]}>
-            <mesh>
-              <boxGeometry args={[0.8, 1, 0.05]} />
-              {isNight ? (
-                <meshBasicMaterial color="#fbbf24" />
-              ) : (
-                <primitive object={SM.glass} attach="material" />
-              )}
-            </mesh>
-            <mesh position={[0, 0, 0.03]}>
-              <boxGeometry args={[0.1, 1.1, 0.02]} />
-              <primitive object={SM.white} attach="material" />
-            </mesh>
-            <mesh position={[0, 0, 0.03]}>
-              <boxGeometry args={[0.9, 0.1, 0.02]} />
-              <primitive object={SM.white} attach="material" />
-            </mesh>
-          </group>
-        ))}
-        {/* Shutters */}
-        {[
-          [-2, 2.5],
-          [2, 2.5],
-        ].map(([x, y], i) => (
-          <mesh key={`shutter-${i}`} position={[x, y, 2.01]}>
-            <boxGeometry args={[0.25, 1, 0.05]} />
-            <primitive object={SM.shutterGreen} attach="material" />
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      {/* Main building */}
+      <mesh position={[0, 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[5, 4, 4]} />
+        <primitive object={wallMat} attach="material" />
+      </mesh>
+      {/* Cute cone roof - Lego style */}
+      <mesh position={[0, 5.5, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
+        <coneGeometry args={[4, 3, 4]} />
+        <primitive object={roofMat} attach="material" />
+      </mesh>
+      {/* Chimney */}
+      <mesh position={[1.5, 6, 0]} castShadow>
+        <boxGeometry args={[0.6, 1.5, 0.6]} />
+        <primitive object={SM.stone} attach="material" />
+      </mesh>
+      {/* Chimney smoke */}
+      {/* Deterministic phase from the cottage's own position: Math.random()
+          here re-rolled the smoke every remount and defeated memoisation. */}
+      <ChimneySmoke position={[1.5, 7, 0]} offset={position[0] * 0.31 + position[2] * 0.17} />
+      {/* Door */}
+      <mesh position={[0, 1.2, 2.01]}>
+        <boxGeometry args={[1, 2.2, 0.1]} />
+        <primitive object={SM.timber} attach="material" />
+      </mesh>
+      {/* Windows */}
+      {[
+        [-1.5, 2.5],
+        [1.5, 2.5],
+      ].map(([x, y], i) => (
+        <group key={i} position={[x, y, 2.01]}>
+          <mesh userData={{ dynamic: true }}>
+            <boxGeometry args={[0.8, 1, 0.05]} />
+            <primitive object={SM.windowGlass} attach="material" />
           </mesh>
-        ))}
-        {/* Flower boxes - under windows (split to avoid door) */}
-        {[-1.5, 1.5].map((x, i) => (
-          <group key={`flowerbox-${i}`} position={[x, 1.8, 2.1]}>
-            <mesh castShadow>
-              <boxGeometry args={[1, 0.2, 0.3]} />
-              <primitive object={SM.timber} attach="material" />
+          <mesh position={[0, 0, 0.03]}>
+            <boxGeometry args={[0.1, 1.1, 0.02]} />
+            <primitive object={SM.white} attach="material" />
+          </mesh>
+          <mesh position={[0, 0, 0.03]}>
+            <boxGeometry args={[0.9, 0.1, 0.02]} />
+            <primitive object={SM.white} attach="material" />
+          </mesh>
+        </group>
+      ))}
+      {/* Shutters */}
+      {[
+        [-2, 2.5],
+        [2, 2.5],
+      ].map(([x, y], i) => (
+        <mesh key={`shutter-${i}`} position={[x, y, 2.01]}>
+          <boxGeometry args={[0.25, 1, 0.05]} />
+          <primitive object={SM.shutterGreen} attach="material" />
+        </mesh>
+      ))}
+      {/* Flower boxes - under windows (split to avoid door) */}
+      {[-1.5, 1.5].map((x, i) => (
+        <group key={`flowerbox-${i}`} position={[x, 1.8, 2.1]}>
+          <mesh castShadow>
+            <boxGeometry args={[1, 0.2, 0.3]} />
+            <primitive object={SM.timber} attach="material" />
+          </mesh>
+          {/* Flowers */}
+          {[-0.3, 0, 0.3].map((off, j) => (
+            <mesh key={`flower-${j}`} position={[off, 0.25, 0]} castShadow>
+              <sphereGeometry args={[0.12, 8, 8]} />
+              <meshStandardMaterial
+                color={['#f472b6', '#fbbf24', '#f87171'][(i + j) % 3]}
+                roughness={0.8}
+              />
             </mesh>
-            {/* Flowers */}
-            {[-0.3, 0, 0.3].map((off, j) => (
-              <mesh key={`flower-${j}`} position={[off, 0.25, 0]} castShadow>
-                <sphereGeometry args={[0.12, 8, 8]} />
-                <meshStandardMaterial
-                  color={['#f472b6', '#fbbf24', '#f87171'][(i + j) % 3]}
-                  roughness={0.8}
-                />
-              </mesh>
-            ))}
-          </group>
-        ))}
-        {/* Garden fence */}
-        {hasGarden && (
-          <group position={[0, 0, 4]}>
-            {[-2, 0, 2].map((x, i) => (
-              <mesh key={i} position={[x, 0.4, 0]} castShadow>
-                <boxGeometry args={[2, 0.8, 0.1]} />
-                <primitive object={SM.white} attach="material" />
-              </mesh>
-            ))}
-          </group>
-        )}
-      </group>
-    );
-  }
-);
+          ))}
+        </group>
+      ))}
+      {/* Garden fence */}
+      {hasGarden && (
+        <group position={[0, 0, 4]}>
+          {[-2, 0, 2].map((x, i) => (
+            <mesh key={i} position={[x, 0.4, 0]} castShadow>
+              <boxGeometry args={[2, 0.8, 0.1]} />
+              <primitive object={SM.white} attach="material" />
+            </mesh>
+          ))}
+        </group>
+      )}
+    </group>
+  );
+});
 Cottage.displayName = 'Cottage';
 
 // ===== SHOP BUILDING =====
@@ -377,7 +436,6 @@ const ShopBuilding = React.memo<{
   wallColor?: keyof typeof SM;
   signText?: string;
   awningColor?: string;
-  isNight?: boolean;
 }>(
   ({
     position,
@@ -385,7 +443,6 @@ const ShopBuilding = React.memo<{
     wallColor = 'yellow',
     signText = 'SHOP',
     awningColor = '#dc2626',
-    isNight = false,
   }) => {
     const wallMat = SM[wallColor] || SM.yellow;
 
@@ -402,13 +459,9 @@ const ShopBuilding = React.memo<{
           <primitive object={SM.roofTile} attach="material" />
         </mesh>
         {/* Shop window - resized and moved to avoid door */}
-        <mesh position={[1.2, 1.5, 2.6]}>
+        <mesh position={[1.2, 1.5, 2.6]} userData={{ dynamic: true }}>
           <boxGeometry args={[2.8, 2.5, 0.1]} />
-          {isNight ? (
-            <meshBasicMaterial color="#fbbf24" />
-          ) : (
-            <primitive object={SM.glass} attach="material" />
-          )}
+          <primitive object={SM.windowGlass} attach="material" />
         </mesh>
         {/* Door */}
         <mesh position={[-2, 1.2, 2.6]}>
@@ -489,7 +542,12 @@ const ChurchBuilding = React.memo<{
       </mesh>
       {/* Main glass segments - radiating colors */}
       {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
-        <mesh key={i} position={[0, 0, 0.01]} rotation={[0, 0, (i * Math.PI) / 4]}>
+        <mesh
+          key={i}
+          position={[0, 0, 0.01]}
+          rotation={[0, 0, (i * Math.PI) / 4]}
+          userData={{ dynamic: true }}
+        >
           <circleGeometry args={[1.3, 3, (i * Math.PI) / 4, Math.PI / 4]} />
           <meshStandardMaterial
             color={
@@ -505,7 +563,7 @@ const ChurchBuilding = React.memo<{
               ][i]
             }
             roughness={0.2}
-            metalness={0.1}
+            metalness={0}
             transparent
             opacity={0.9}
             emissive={
@@ -569,31 +627,13 @@ const ChurchBuilding = React.memo<{
     {/* Side windows */}
     {[-3, 0, 3].map((z, i) => (
       <React.Fragment key={i}>
-        <mesh position={[5.01, 4, z]}>
+        <mesh position={[5.01, 4, z]} userData={{ dynamic: true }}>
           <boxGeometry args={[0.1, 3, 1.5]} />
-          {isNight ? (
-            <meshStandardMaterial
-              color="#fef3c7"
-              emissive="#fef3c7"
-              emissiveIntensity={2}
-              toneMapped={false}
-            />
-          ) : (
-            <primitive object={SM.glass} attach="material" />
-          )}
+          <primitive object={SM.windowGlass} attach="material" />
         </mesh>
-        <mesh position={[-5.01, 4, z]}>
+        <mesh position={[-5.01, 4, z]} userData={{ dynamic: true }}>
           <boxGeometry args={[0.1, 3, 1.5]} />
-          {isNight ? (
-            <meshStandardMaterial
-              color="#fef3c7"
-              emissive="#fef3c7"
-              emissiveIntensity={2}
-              toneMapped={false}
-            />
-          ) : (
-            <primitive object={SM.glass} attach="material" />
-          )}
+          <primitive object={SM.windowGlass} attach="material" />
         </mesh>
       </React.Fragment>
     ))}
@@ -602,8 +642,8 @@ const ChurchBuilding = React.memo<{
 ChurchBuilding.displayName = 'ChurchBuilding';
 
 // Isolated clock component to prevent full building re-renders
-const TownHallClock: React.FC<{ position: [number, number, number]; isNight: boolean }> =
-  React.memo(({ position, isNight }) => {
+const TownHallClock: React.FC<{ position: [number, number, number] }> = React.memo(
+  ({ position }) => {
     const gameTime = useGameSimulationStore((state) => state.gameTime);
     const lastChimeHourRef = useRef(-1);
 
@@ -622,7 +662,7 @@ const TownHallClock: React.FC<{ position: [number, number, number]; isNight: boo
     const minuteAngle = (((gameTime % 1) * 60) / 60) * Math.PI * 2;
 
     return (
-      <group position={position}>
+      <group position={position} userData={{ dynamic: true }}>
         {/* Clock face */}
         <mesh position={[0, 0, 0]}>
           <circleGeometry args={[1.2, 16]} />
@@ -630,53 +670,28 @@ const TownHallClock: React.FC<{ position: [number, number, number]; isNight: boo
         </mesh>
         <mesh position={[0, 0, 0.01]}>
           <circleGeometry args={[1.1, 16]} />
-          {isNight ? (
-            <meshStandardMaterial
-              color="#ffffff"
-              emissive="#ffffff"
-              emissiveIntensity={1.5}
-              toneMapped={false}
-            />
-          ) : (
-            <meshStandardMaterial color="#1e293b" roughness={0.5} />
-          )}
+          <primitive object={SM.clockFace} attach="material" />
         </mesh>
         {/* Hour hand - arrow shaped */}
         <group position={[0, 0, 0.05]} rotation={[0, 0, -hourAngle + Math.PI / 2]}>
           <mesh position={[0.2, 0, 0]}>
             <boxGeometry args={[0.5, 0.1, 0.02]} />
-            {isNight ? (
-              <primitive object={SM.black} attach="material" />
-            ) : (
-              <primitive object={SM.gold} attach="material" />
-            )}
+            <primitive object={SM.clockHands} attach="material" />
           </mesh>
           <mesh position={[0.5, 0, 0]} rotation={[Math.PI / 2, 0, Math.PI / 2]}>
             <coneGeometry args={[0.12, 0.2, 4]} />
-            {isNight ? (
-              <primitive object={SM.black} attach="material" />
-            ) : (
-              <primitive object={SM.gold} attach="material" />
-            )}
+            <primitive object={SM.clockHands} attach="material" />
           </mesh>
         </group>
         {/* Minute hand - arrow shaped, longer */}
         <group position={[0, 0, 0.06]} rotation={[0, 0, -minuteAngle + Math.PI / 2]}>
           <mesh position={[0.3, 0, 0]}>
             <boxGeometry args={[0.7, 0.08, 0.02]} />
-            {isNight ? (
-              <primitive object={SM.black} attach="material" />
-            ) : (
-              <primitive object={SM.gold} attach="material" />
-            )}
+            <primitive object={SM.clockHands} attach="material" />
           </mesh>
           <mesh position={[0.7, 0, 0]} rotation={[Math.PI / 2, 0, Math.PI / 2]}>
             <coneGeometry args={[0.1, 0.18, 4]} />
-            {isNight ? (
-              <primitive object={SM.black} attach="material" />
-            ) : (
-              <primitive object={SM.gold} attach="material" />
-            )}
+            <primitive object={SM.clockHands} attach="material" />
           </mesh>
         </group>
         {/* Clock center cap */}
@@ -686,17 +701,13 @@ const TownHallClock: React.FC<{ position: [number, number, number]; isNight: boo
         </mesh>
       </group>
     );
-  });
+  }
+);
 TownHallClock.displayName = 'TownHallClock';
 
 // ===== TOWN HALL =====
 export const TownHall = React.memo<{ position: [number, number, number]; rotation?: number }>(
   ({ position, rotation = 0 }) => {
-    // PERF: Use shallow equality to only re-render on day/night switch, not every tick
-    const isNight = useGameSimulationStore(
-      useShallow((state) => state.gameTime >= 20 || state.gameTime < 6)
-    );
-
     return (
       <group position={position} rotation={[0, rotation, 0]}>
         {/* Main building */}
@@ -708,18 +719,9 @@ export const TownHall = React.memo<{ position: [number, number, number]; rotatio
         {/* Office Windows (Added for night emissives) */}
         {/* Front Windows (flanking entrance) */}
         {[-4, 4].map((x, i) => (
-          <mesh key={`win-front-${i}`} position={[x, 3.5, 5.01]}>
+          <mesh key={`win-front-${i}`} position={[x, 3.5, 5.01]} userData={{ dynamic: true }}>
             <boxGeometry args={[1.5, 2.5, 0.1]} />
-            {isNight ? (
-              <meshStandardMaterial
-                color="#fef3c7"
-                emissive="#fef3c7"
-                emissiveIntensity={2}
-                toneMapped={false}
-              />
-            ) : (
-              <primitive object={SM.glass} attach="material" />
-            )}
+            <primitive object={SM.windowGlass} attach="material" />
           </mesh>
         ))}
         {/* Side Windows */}
@@ -730,18 +732,10 @@ export const TownHall = React.memo<{ position: [number, number, number]; rotatio
                 key={`win-side-${i}-${j}`}
                 position={[x, 3.5, zOffset * 3]}
                 rotation={[0, Math.PI / 2, 0]}
+                userData={{ dynamic: true }}
               >
                 <boxGeometry args={[1.5, 2.5, 0.1]} />
-                {isNight ? (
-                  <meshStandardMaterial
-                    color="#fef3c7"
-                    emissive="#fef3c7"
-                    emissiveIntensity={2}
-                    toneMapped={false}
-                  />
-                ) : (
-                  <primitive object={SM.glass} attach="material" />
-                )}
+                <primitive object={SM.windowGlass} attach="material" />
               </mesh>
             ))}
           </React.Fragment>
@@ -764,7 +758,7 @@ export const TownHall = React.memo<{ position: [number, number, number]; rotatio
         </mesh>
 
         {/* Clock Face & Hands - Isolated Component */}
-        <TownHallClock position={[0, 12, 2.01]} isNight={isNight} />
+        <TownHallClock position={[0, 12, 2.01]} />
 
         {/* Grand entrance - raised to meet steps */}
         <mesh position={[0, 2.4, 5.01]}>
@@ -811,8 +805,7 @@ TownHall.displayName = 'TownHall';
 const Pub = React.memo<{
   position: [number, number, number];
   rotation?: number;
-  isNight?: boolean;
-}>(({ position, rotation = 0, isNight = false }) => (
+}>(({ position, rotation = 0 }) => (
   <group position={position} rotation={[0, rotation, 0]}>
     {/* Main building - timber frame style */}
     <mesh position={[0, 2.5, 0]} castShadow receiveShadow>
@@ -856,13 +849,9 @@ const Pub = React.memo<{
     </mesh>
     {/* Windows */}
     {[-2.5, 2.5].map((x, i) => (
-      <mesh key={i} position={[x, 2, 3.02]}>
+      <mesh key={i} position={[x, 2, 3.02]} userData={{ dynamic: true }}>
         <boxGeometry args={[1.2, 1.2, 0.05]} />
-        {isNight ? (
-          <meshBasicMaterial color="#fbbf24" />
-        ) : (
-          <primitive object={SM.glass} attach="material" />
-        )}
+        <primitive object={SM.windowGlass} attach="material" />
       </mesh>
     ))}
     {/* Hanging sign */}
@@ -907,8 +896,7 @@ Pub.displayName = 'Pub';
 const School = React.memo<{
   position: [number, number, number];
   rotation?: number;
-  isNight?: boolean;
-}>(({ position, rotation = 0, isNight = false }) => (
+}>(({ position, rotation = 0 }) => (
   <group position={position} rotation={[0, rotation, 0]}>
     {/* Main building */}
     <mesh position={[0, 3, 0]} castShadow receiveShadow>
@@ -999,13 +987,9 @@ const School = React.memo<{
     </mesh>
     {/* Windows - row */}
     {[-3, -1, 1, 3].map((x, i) => (
-      <mesh key={i} position={[x, 3.5, 3.51]}>
+      <mesh key={i} position={[x, 3.5, 3.51]} userData={{ dynamic: true }}>
         <boxGeometry args={[1.2, 2, 0.05]} />
-        {isNight ? (
-          <meshBasicMaterial color="#fef3c7" />
-        ) : (
-          <primitive object={SM.glass} attach="material" />
-        )}
+        <primitive object={SM.windowGlass} attach="material" />
       </mesh>
     ))}
     {/* Door */}
@@ -1073,36 +1057,22 @@ const WishingWell = React.memo<{ position: [number, number, number] }>(({ positi
 WishingWell.displayName = 'WishingWell';
 
 // ===== STREET LAMP =====
-const VillageLamp = React.memo<{ position: [number, number, number]; isNight?: boolean }>(
-  ({ position, isNight = false }) => (
-    <group position={position}>
-      <mesh position={[0, 2, 0]} castShadow>
-        <cylinderGeometry args={[0.08, 0.12, 4, 8]} />
-        <primitive object={SM.black} attach="material" />
-      </mesh>
-      <mesh position={[0, 4.3, 0]}>
-        <boxGeometry args={[0.5, 0.6, 0.5]} />
-        <primitive object={SM.black} attach="material" />
-      </mesh>
-      <mesh position={[0, 4.3, 0]}>
-        <boxGeometry args={[0.35, 0.45, 0.35]} />
-        {isNight ? (
-          <>
-            <meshStandardMaterial
-              color="#ffaa00"
-              emissive="#ffaa00"
-              emissiveIntensity={2}
-              toneMapped={false}
-            />
-            <pointLight color="#ffaa00" intensity={1} distance={15} decay={2} castShadow={false} />
-          </>
-        ) : (
-          <meshStandardMaterial color="#333333" roughness={0.6} />
-        )}
-      </mesh>
-    </group>
-  )
-);
+const VillageLamp = React.memo<{ position: [number, number, number] }>(({ position }) => (
+  <group position={position}>
+    <mesh position={[0, 2, 0]} castShadow>
+      <cylinderGeometry args={[0.08, 0.12, 4, 8]} />
+      <primitive object={SM.black} attach="material" />
+    </mesh>
+    <mesh position={[0, 4.3, 0]}>
+      <boxGeometry args={[0.5, 0.6, 0.5]} />
+      <primitive object={SM.black} attach="material" />
+    </mesh>
+    <mesh position={[0, 4.3, 0]} userData={{ dynamic: true }}>
+      <boxGeometry args={[0.35, 0.45, 0.35]} />
+      <primitive object={SM.windowGlass} attach="material" />
+    </mesh>
+  </group>
+));
 VillageLamp.displayName = 'VillageLamp';
 
 // ===== DUCK COMPONENT =====
@@ -1110,28 +1080,29 @@ const Duck = React.memo<{
   position: [number, number, number];
   delay: number;
   onClick: (pos: [number, number, number]) => void;
-}>(({ position, delay: _delay, onClick }) => {
+}>(({ position, delay, onClick }) => {
   const groupRef = useRef<THREE.Group>(null);
   const [isExcited, setIsExcited] = React.useState(false);
 
-  // PERF TEST: Disable animation
-  // useFrame((state) => {
-  //   if (!groupRef.current) return;
-  //   const time = state.clock.elapsedTime;
-  //
-  //   // Base bobbing
-  //   let yOffset = Math.sin(time * 2 + delay) * 0.02;
-  //   let rotOffset = Math.sin(time * 0.5 + delay) * 0.1;
-  //
-  //   // Excitement override
-  //   if (isExcited) {
-  //     yOffset += Math.abs(Math.sin(time * 15)) * 0.1; // Rapid hop
-  //     rotOffset += Math.sin(time * 20) * 0.2; // Wiggle
-  //   }
-  //
-  //   groupRef.current.position.y = position[1] + yOffset;
-  //   groupRef.current.rotation.y = rotOffset;
-  // });
+  // Restored: a pond of perfectly still ducks beside animated water reads as
+  // broken. Runs on the shared 1-in-4 throttle (~15 Hz), which is plenty for a
+  // 2 cm bob - and it drops to every frame's worth of work only when petted.
+  useFrame((state) => {
+    if (!groupRef.current) return;
+    if (!isExcited && !shouldRunThisFrame(4)) return;
+    const time = state.clock.elapsedTime;
+
+    let yOffset = Math.sin(time * 2 + delay) * 0.02;
+    let rotOffset = Math.sin(time * 0.5 + delay) * 0.1;
+
+    if (isExcited) {
+      yOffset += Math.abs(Math.sin(time * 15)) * 0.1; // Rapid hop
+      rotOffset += Math.sin(time * 20) * 0.2; // Wiggle
+    }
+
+    groupRef.current.position.y = position[1] + yOffset;
+    groupRef.current.rotation.y = rotOffset;
+  });
 
   // Reset excitement
   React.useEffect(() => {
@@ -1201,7 +1172,9 @@ const DuckPond = React.memo<{ position: [number, number, number] }>(({ position 
         <meshStandardMaterial
           color="#3b82f6"
           roughness={0.1}
-          metalness={0.6}
+          // Water is a dielectric. At metalness 0.6 the pond was reflecting
+          // its own blue albedo as specular and reading as chalky enamel.
+          metalness={0}
           polygonOffset
           polygonOffsetFactor={-4}
           polygonOffsetUnits={-4}
@@ -1417,7 +1390,7 @@ const fountainWaterMaterial = new THREE.MeshStandardMaterial({
   transparent: true,
   opacity: 0.85,
   roughness: 0.15,
-  metalness: 0.2,
+  metalness: 0, // dielectric - see the pond material
 });
 
 // Narrow additive falling-water sheath (transparent overlay - depthWrite off is correct)
@@ -1544,17 +1517,20 @@ const Horse = React.memo<{ position: [number, number, number]; rotation?: number
       setHearts((prev) => prev.filter((h) => h.id !== id));
     };
 
-    // PERF TEST: Disable animation
-    // useFrame((state) => {
-    //   if (groupRef.current && isExcited) {
-    //     const t = state.clock.elapsedTime * 15;
-    //     groupRef.current.rotation.z = Math.sin(t) * 0.05; // Shake
-    //     groupRef.current.position.y = Math.abs(Math.sin(t * 0.5)) * 0.1; // Rear up slightly
-    //   } else if (groupRef.current) {
-    //     groupRef.current.rotation.z = 0;
-    //     groupRef.current.position.y = 0;
-    //   }
-    // });
+    // Restored. Only does work while the animal is actually excited, so the
+    // steady-state cost is one ref check per frame.
+    useFrame((state) => {
+      const group = groupRef.current;
+      if (!group) return;
+      if (isExcited) {
+        const t = state.clock.elapsedTime * 15;
+        group.rotation.z = Math.sin(t) * 0.05; // Shake
+        group.position.y = Math.abs(Math.sin(t * 0.5)) * 0.1; // Rear up slightly
+      } else if (group.position.y !== 0 || group.rotation.z !== 0) {
+        group.rotation.z = 0;
+        group.position.y = 0;
+      }
+    });
 
     React.useEffect(() => {
       if (isExcited) {
@@ -1801,15 +1777,19 @@ uvAttr.needsUpdate = true;
 // Uses module-level villageCobbleColor and villageCobbleNormal textures
 // polygonOffset with NEGATIVE values pushes toward camera, preventing z-fighting with TerrainGround
 const villageCobbleMaterial = new THREE.MeshStandardMaterial({
-  color: '#9a9a9a', // Tint to correct washed-out texture appearance
+  // Was '#9a9a9a' to "correct washed-out texture appearance" - that wash was
+  // the linear-decode bug, now fixed in the texture layer. Tinting on top of a
+  // correctly decoded albedo double-darkens the square.
+  color: '#ffffff',
   map: villageCobbleColor,
   normalMap: villageCobbleNormal,
   normalScale: new THREE.Vector2(0.4, 0.4),
-  roughness: 0.85,
+  roughnessMap: villageCobbleRoughness,
+  roughness: 1.0,
   transparent: true,
   polygonOffset: true,
-  polygonOffsetFactor: -2,
-  polygonOffsetUnits: -2,
+  polygonOffsetFactor: POLYGON_OFFSET.moderate.factor,
+  polygonOffsetUnits: POLYGON_OFFSET.moderate.units,
 });
 
 // Inject feathering into the shader based on world position
@@ -1822,7 +1802,8 @@ villageCobbleMaterial.onBeforeCompile = (shader) => {
   shader.vertexShader = shader.vertexShader.replace(
     '#include <worldpos_vertex>',
     `#include <worldpos_vertex>
-    vLocalPos = worldPosition.xz + vec2(190.0, 0.0);`
+    vec4 millosVillageWorldPosition = modelMatrix * vec4(transformed, 1.0);
+    vLocalPos = millosVillageWorldPosition.xz + vec2(190.0, 0.0);`
   );
   shader.fragmentShader = shader.fragmentShader.replace(
     '#include <common>',
@@ -1843,10 +1824,168 @@ villageCobbleMaterial.onBeforeCompile = (shader) => {
 // identical params (which would render without the edge feathering).
 villageCobbleMaterial.customProgramCacheKey = () => 'villageCobble_feather_v1';
 
+// ============================================================
+// VEGETATION LAYOUT (village-local coordinates; group sits at [-190, 0, 0])
+// ============================================================
+
+/** Same seven trees as before, now drawn by the instanced card-canopy field. */
+const VILLAGE_TREES: readonly TreeInstance[] = [
+  { position: [-30, 0, -55], scale: 1.2, type: 'oak' },
+  { position: [30, 0, -60], scale: 1.0, type: 'birch' },
+  { position: [-30, 0, 55], scale: 1.3, type: 'oak' },
+  { position: [30, 0, 65], scale: 1.1, type: 'oak' },
+  { position: [-30, 0, 0], scale: 0.9, type: 'birch' },
+  { position: [30, 0, 20], scale: 1.2, type: 'oak' },
+  { position: [-30, 0, 25], scale: 1.0, type: 'birch' },
+];
+
+const VILLAGE_TREE_SPOTS: readonly (readonly [number, number])[] = VILLAGE_TREES.map(
+  (t) => [t.position[0], t.position[2]] as const
+);
+
+/**
+ * Decal height. The village square is its own cobble sheet at local y=0.12
+ * (see the ground mesh below), so a mulch ring has to sit just above THAT,
+ * not above the terrain. Sitting proud is safe here because the material never
+ * writes depth and carries an `exteriorOverlay` polygon offset.
+ */
+const VILLAGE_DECAL_Y = 0.145;
+
+/** Building and water footprints no tuft may grow inside. */
+const VILLAGE_BLOCKERS = [
+  { x: 0, z: -40, halfX: 6.5, halfZ: 7.5 }, // church nave
+  { x: 0, z: -45, halfX: 3, halfZ: 3 }, // bell tower
+  { x: 0, z: 20, halfX: 6.5, halfZ: 6.5 }, // town hall
+  { x: -25, z: -15, halfX: 5, halfZ: 5 }, // pub
+  { x: 22, z: 40, halfX: 5.5, halfZ: 5.5 }, // school
+  { x: -22, z: -55, halfX: 5, halfZ: 5 }, // forge
+  { x: 20, z: 5, halfX: 4, halfZ: 3.5 }, // baker
+  { x: 20, z: -10, halfX: 4, halfZ: 3.5 }, // butcher
+  { x: -20, z: 30, halfX: 4, halfZ: 3.5 }, // general store
+  { x: -25, z: -35, halfX: 3.5, halfZ: 3.5 },
+  { x: 25, z: -35, halfX: 3.5, halfZ: 3.5 },
+  { x: 25, z: -50, halfX: 3.5, halfZ: 3.5 },
+  { x: -25, z: 45, halfX: 3.5, halfZ: 3.5 },
+  { x: 25, z: 55, halfX: 3.5, halfZ: 3.5 },
+  { x: -10, z: -5, halfX: 2.2, halfZ: 2.2 }, // wishing well
+  { x: 0, z: 6, halfX: 3.2, halfZ: 3.2 }, // fountain
+  { x: 20, z: 25, halfX: 6, halfZ: 6 }, // duck pond
+  { x: 0, z: 6, halfX: 10, halfZ: 10 }, // market square walking space
+] as const;
+
+/** The swept, paved core. Verge grass stops here; wall weeds do not. */
+const VILLAGE_PAVED_CORE = { x: 0, z: 0, halfX: 24, halfZ: 54 } as const;
+
+/** Wall bases, rims and trunks: the junctions that read as a razor edge with
+ *  nothing growing at them. */
+const VILLAGE_WALL_BASES: readonly (readonly [number, number])[] = [
+  [-5.6, -34],
+  [5.6, -34],
+  [-5.6, -46],
+  [5.6, -46],
+  [0, -33.4],
+  [-2.6, -47.6],
+  [2.6, -47.6],
+  [-5.2, 26],
+  [5.2, 26],
+  [-5.2, 14],
+  [5.2, 14],
+  [-29, -15],
+  [-21, -15],
+  [-25, -19],
+  [-25, -11],
+  [17, 40],
+  [27, 40],
+  [22, 35],
+  [22, 45],
+  [-26, -55],
+  [-18, -55],
+  [-22, -59],
+  [17, 5],
+  [23, 5],
+  [17, -10],
+  [23, -10],
+  [-23, 30],
+  [-17, 30],
+  [-27.6, -35],
+  [-22.4, -35],
+  [-25, -37.6],
+  [22.4, -35],
+  [27.6, -35],
+  [25, -37.6],
+  [22.4, -50],
+  [27.6, -50],
+  [25, -52.6],
+  [-27.6, 45],
+  [-22.4, 45],
+  [-25, 42.4],
+  [22.4, 55],
+  [27.6, 55],
+  [25, 57.6],
+  [-10, -7.2],
+  [-12.2, -5],
+  [0, 8.6],
+  [2.6, 6],
+  [-30, -55],
+  [30, -60],
+  [-30, 55],
+  [30, 65],
+  [-30, 0],
+  [30, 20],
+  [-30, 25],
+];
+
+/**
+ * Weeds in the joints at the base of every wall, well rim and trunk.
+ * `openExclude` covers the whole area, so only attractor-pulled tufts survive
+ * and the paved square itself stays clear.
+ */
+const VILLAGE_WEEDS: ClutterSpec = {
+  count: 360,
+  bounds: { minX: -34, maxX: 34, minZ: -64, maxZ: 64 },
+  exclude: VILLAGE_BLOCKERS,
+  openExclude: [{ x: 0, z: 0, halfX: 40, halfZ: 70 }],
+  attractors: VILLAGE_WALL_BASES,
+  // Sits just under the cobble sheet: sinking a card base is invisible,
+  // floating one is not.
+  y: 0.115,
+  cullDistance: 95,
+};
+
+/** Rough verge grass in the ring outside the paved core. */
+const VILLAGE_VERGE: ClutterSpec = {
+  count: 620,
+  bounds: { minX: -34, maxX: 34, minZ: -64, maxZ: 64 },
+  exclude: [...VILLAGE_BLOCKERS, VILLAGE_PAVED_CORE],
+  // Terrain top is y=0.05; 0.045 sinks the blade roots by 5 mm.
+  y: 0.045,
+  cullDistance: 130,
+};
+
 // ===== MAIN VILLAGE COMPONENT =====
 export const VillageArea: React.FC = () => {
   // Selector optimization: Only re-render when night status CHANGES
   const isNight = useGameSimulationStore((state) => state.gameTime >= 20 || state.gameTime < 6);
+
+  useEffect(() => {
+    SM.windowGlass.color.set(isNight ? '#fef3c7' : '#93c5fd');
+    SM.windowGlass.emissive.set(isNight ? '#f59e0b' : '#000000');
+    SM.windowGlass.emissiveIntensity = isNight ? 1.8 : 0;
+    SM.windowGlass.opacity = isNight ? 0.92 : 0.72;
+    SM.clockFace.color.set(isNight ? '#ffffff' : '#1e293b');
+    SM.clockFace.emissive.set(isNight ? '#ffffff' : '#000000');
+    SM.clockFace.emissiveIntensity = isNight ? 1.5 : 0;
+    SM.clockHands.color.set(isNight ? '#111827' : '#d4af37');
+    // Binary, not a dimmer. '#111827' is F0 0.01 - far too dark to be a
+    // conductor, so the night state is painted iron and the day state is gilt.
+    SM.clockHands.metalness = isNight ? 0 : 1;
+  }, [isNight]);
+
+  // Clutter budget follows the graphics tier: cut-out cards are fill-rate
+  // work, so 'low' drops them entirely rather than shrinking them.
+  const density = useVegetationDensity();
+  const weedSpec = useMemo<ClutterSpec>(() => ({ ...VILLAGE_WEEDS, density }), [density]);
+  const vergeSpec = useMemo<ClutterSpec>(() => ({ ...VILLAGE_VERGE, density }), [density]);
 
   return (
     <group position={[-190, 0, 0]}>
@@ -1863,10 +2002,10 @@ export const VillageArea: React.FC = () => {
       <TownHall position={[0, 0, 20]} rotation={Math.PI} />
 
       {/* === PUB === */}
-      <Pub position={[-25, 0, -15]} rotation={Math.PI / 2} isNight={isNight} />
+      <Pub position={[-25, 0, -15]} rotation={Math.PI / 2} />
 
       {/* === SCHOOL === */}
-      <School position={[22, 0, 40]} rotation={-Math.PI / 2} isNight={isNight} />
+      <School position={[22, 0, 40]} rotation={-Math.PI / 2} />
 
       {/* === FORGE === */}
       <Forge position={[-22, 0, -55]} rotation={Math.PI / 2} />
@@ -1878,7 +2017,6 @@ export const VillageArea: React.FC = () => {
         wallColor="pink"
         signText="BAKER"
         awningColor="#f472b6"
-        isNight={isNight}
       />
       <ShopBuilding
         position={[20, 0, -10]}
@@ -1886,7 +2024,6 @@ export const VillageArea: React.FC = () => {
         wallColor="terracotta"
         signText="BUTCHER"
         awningColor="#dc2626"
-        isNight={isNight}
       />
       <ShopBuilding
         position={[-20, 0, 30]}
@@ -1894,7 +2031,6 @@ export const VillageArea: React.FC = () => {
         wallColor="blue"
         signText="GENERAL STORE"
         awningColor="#3b82f6"
-        isNight={isNight}
       />
 
       {/* === COTTAGES === */}
@@ -1903,37 +2039,17 @@ export const VillageArea: React.FC = () => {
         rotation={Math.PI / 2}
         wallColor="cream"
         roofType="thatch"
-        isNight={isNight}
       />
-      <Cottage
-        position={[25, 0, -35]}
-        rotation={-Math.PI / 2}
-        wallColor="pink"
-        roofType="slate"
-        isNight={isNight}
-      />
-      <Cottage
-        position={[25, 0, -50]}
-        rotation={-Math.PI / 2}
-        wallColor="blue"
-        roofType="thatch"
-        isNight={isNight}
-      />
+      <Cottage position={[25, 0, -35]} rotation={-Math.PI / 2} wallColor="pink" roofType="slate" />
+      <Cottage position={[25, 0, -50]} rotation={-Math.PI / 2} wallColor="blue" roofType="thatch" />
       <Cottage
         position={[-25, 0, 45]}
         rotation={Math.PI / 2}
         wallColor="terracotta"
         roofType="tile"
         hasGarden={false}
-        isNight={isNight}
       />
-      <Cottage
-        position={[25, 0, 55]}
-        rotation={-Math.PI / 2}
-        wallColor="cream"
-        roofType="slate"
-        isNight={isNight}
-      />
+      <Cottage position={[25, 0, 55]} rotation={-Math.PI / 2} wallColor="cream" roofType="slate" />
 
       {/* === WISHING WELL === */}
       <WishingWell position={[-10, 0, -5]} />
@@ -1983,14 +2099,17 @@ export const VillageArea: React.FC = () => {
         </group>
       ))}
 
-      {/* === TREES === Using textured tree components */}
-      <OakTree position={[-30, 0, -55]} scale={1.2} />
-      <BirchTree position={[30, 0, -60]} scale={1.0} />
-      <OakTree position={[-30, 0, 55]} scale={1.3} />
-      <Tree type="oak" position={[30, 0, 65]} scale={1.1} />
-      <BirchTree position={[-30, 0, 0]} scale={0.9} />
-      <OakTree position={[30, 0, 20]} scale={1.2} />
-      <Tree type="birch" position={[-30, 0, 25]} scale={1.0} />
+      {/* === TREES === One instanced draw per species per part (4 total) */}
+      <InstancedTreeField trees={VILLAGE_TREES} />
+      <InstancedMulch spots={VILLAGE_TREE_SPOTS} y={VILLAGE_DECAL_Y} radius={2.1} />
+
+      {/* === GROUND CLUTTER === weeds at wall bases, verge grass off the cobble */}
+      <InstancedGrassClutter spec={weedSpec} />
+      <InstancedGrassClutter spec={vergeSpec} />
+
+      {/* Advances the one shared wind clock. Idempotent per frame, so the
+          farm mounting its own driver does not double the wind speed. */}
+      <WindDriver />
 
       {/* Magical Nighttime Fireflies for Village */}
       <Fireflies

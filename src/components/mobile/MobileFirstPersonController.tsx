@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useCallback } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { FACTORY_ZONE_Z } from '../../constants/factoryLayout';
+import { WORLD_RADIUS } from '../../constants/siteLayout';
 import { useMobileControlStore } from '../../stores/mobileControlStore';
 
 // Movement configuration (same as desktop FPS)
@@ -13,9 +14,6 @@ const FPS_FOV = 75; // Reduced FOV for mobile to reduce fish-eye effect
 const ORBIT_FOV = 65;
 const LOOK_SENSITIVITY = 0.006; // Fine-tuned for smooth mobile experience
 const LOOK_SMOOTHING = 0.15; // Lerp factor for smooth camera movement
-
-// World boundary
-const WORLD_RADIUS = 255;
 
 // Module-level reusable vectors to avoid per-frame allocation (GC pressure on mobile)
 const _forward = new THREE.Vector3();

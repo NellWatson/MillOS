@@ -6,6 +6,9 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './e2e',
+  /* Keep browser-runner lifecycle cleanup away from persistent native,
+   * performance, and visual evidence stored elsewhere under test-results. */
+  outputDir: './test-results/playwright',
   /* Each test boots the full 3D app; parallel instances saturate the GPU and
    * time out. Run serially everywhere. */
   fullyParallel: false,
@@ -24,6 +27,11 @@ export default defineConfig({
      * suite silently tested a Grafana login page. 5180 + --strictPort makes
      * the suite fail loudly instead of testing the wrong app. */
     baseURL: 'http://localhost:5180',
+
+    /* A stale or obscured control should fail quickly enough to preserve the
+     * interaction state that caused the problem. The longer test timeout still
+     * accommodates the initial 3D boot on software WebGL. */
+    actionTimeout: 20_000,
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',

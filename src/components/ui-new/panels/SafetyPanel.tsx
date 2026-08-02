@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import {
   Shield,
   Cloud,
@@ -12,21 +12,24 @@ import {
 import { useGameSimulationStore, useProductionStore } from '../../../stores';
 import { useShallow } from 'zustand/react/shallow';
 import { audioManager } from '../../../utils/audioManager';
+import { ConfirmDialog } from '../../ui/ConfirmDialog';
+import { recoverableLazy } from '../../../utils/recoverableLazy';
+import { RecoverableFeatureBoundary } from '../../ErrorBoundary';
 
 // Re-homed safety widgets (formerly orphaned in ui/ after the UIOverlay removal)
-const SafetyMetricsDisplay = lazy(() =>
+const SafetyMetricsDisplay = recoverableLazy(() =>
   import('../../ui/SafetyMetricsDisplay').then((m) => ({ default: m.SafetyMetricsDisplay }))
 );
-const SafetyAnalyticsPanel = lazy(() =>
+const SafetyAnalyticsPanel = recoverableLazy(() =>
   import('../../ui/SafetyAnalyticsPanel').then((m) => ({ default: m.SafetyAnalyticsPanel }))
 );
-const IncidentHistoryPanel = lazy(() =>
+const IncidentHistoryPanel = recoverableLazy(() =>
   import('../../ui/IncidentHistoryPanel').then((m) => ({ default: m.IncidentHistoryPanel }))
 );
-const SafetyConfigPanel = lazy(() =>
+const SafetyConfigPanel = recoverableLazy(() =>
   import('../../ui/SafetyConfigPanel').then((m) => ({ default: m.SafetyConfigPanel }))
 );
-const ZoneCustomizationPanel = lazy(() =>
+const ZoneCustomizationPanel = recoverableLazy(() =>
   import('../../ui/ZoneCustomizationPanel').then((m) => ({ default: m.ZoneCustomizationPanel }))
 );
 
@@ -44,9 +47,11 @@ const TabLoader = () => (
 
 export const SafetyPanel: React.FC = () => {
   const [tab, setTab] = useState<SafetyTab>('controls');
+  const [confirmEmergencyStop, setConfirmEmergencyStop] = useState(false);
   const {
     emergencyActive,
     emergencyDrillMode,
+    crisisActive,
     startEmergencyDrill,
     endEmergencyDrill,
     shiftChangeActive,
@@ -54,10 +59,14 @@ export const SafetyPanel: React.FC = () => {
     startShiftHandover,
     weather,
     setWeather,
+    safetyEvents,
+    activeSafetyEventId,
+    acknowledgeSafetyEvent,
   } = useGameSimulationStore(
     useShallow((state) => ({
       emergencyActive: state.emergencyActive,
       emergencyDrillMode: state.emergencyDrillMode,
+      crisisActive: state.crisisState.active,
       startEmergencyDrill: state.startEmergencyDrill,
       endEmergencyDrill: state.endEmergencyDrill,
       shiftChangeActive: state.shiftChangeActive,
@@ -67,8 +76,12 @@ export const SafetyPanel: React.FC = () => {
       startShiftHandover: state.startShiftHandover,
       weather: state.weather,
       setWeather: state.setWeather,
+      safetyEvents: state.safetyEvents,
+      activeSafetyEventId: state.activeSafetyEventId,
+      acknowledgeSafetyEvent: state.acknowledgeSafetyEvent,
     }))
   );
+  const activeSafetyEvent = safetyEvents.find((event) => event.id === activeSafetyEventId);
 
   const { showHeatMap, setShowHeatMap, clearHeatMap, workerCount } = useProductionStore(
     useShallow((state) => ({
@@ -121,26 +134,36 @@ export const SafetyPanel: React.FC = () => {
 
       {tab === 'analytics' && (
         <div className="space-y-4">
-          <Suspense fallback={<TabLoader />}>
-            <SafetyMetricsDisplay />
-          </Suspense>
-          <Suspense fallback={<TabLoader />}>
-            <SafetyAnalyticsPanel />
-          </Suspense>
-          <Suspense fallback={<TabLoader />}>
-            <IncidentHistoryPanel />
-          </Suspense>
+          <RecoverableFeatureBoundary featureName="Safety metrics">
+            <Suspense fallback={<TabLoader />}>
+              <SafetyMetricsDisplay />
+            </Suspense>
+          </RecoverableFeatureBoundary>
+          <RecoverableFeatureBoundary featureName="Safety analytics">
+            <Suspense fallback={<TabLoader />}>
+              <SafetyAnalyticsPanel />
+            </Suspense>
+          </RecoverableFeatureBoundary>
+          <RecoverableFeatureBoundary featureName="Incident history">
+            <Suspense fallback={<TabLoader />}>
+              <IncidentHistoryPanel />
+            </Suspense>
+          </RecoverableFeatureBoundary>
         </div>
       )}
 
       {tab === 'config' && (
         <div className="space-y-4">
-          <Suspense fallback={<TabLoader />}>
-            <SafetyConfigPanel />
-          </Suspense>
-          <Suspense fallback={<TabLoader />}>
-            <ZoneCustomizationPanel />
-          </Suspense>
+          <RecoverableFeatureBoundary featureName="Safety configuration">
+            <Suspense fallback={<TabLoader />}>
+              <SafetyConfigPanel />
+            </Suspense>
+          </RecoverableFeatureBoundary>
+          <RecoverableFeatureBoundary featureName="Zone customization">
+            <Suspense fallback={<TabLoader />}>
+              <ZoneCustomizationPanel />
+            </Suspense>
+          </RecoverableFeatureBoundary>
         </div>
       )}
 
@@ -154,6 +177,43 @@ export const SafetyPanel: React.FC = () => {
             </h3>
 
             <div className="space-y-3">
+              {activeSafetyEvent && (
+                <div
+                  className={`rounded-xl border p-3 ${
+                    activeSafetyEvent.simulated
+                      ? 'border-amber-500/50 bg-amber-500/10'
+                      : 'border-red-500/50 bg-red-500/10'
+                  }`}
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wide text-white">
+                      {activeSafetyEvent.simulated ? 'Simulated safety event' : 'Safety interlock'}
+                    </span>
+                    <span className="rounded border border-white/20 px-2 py-0.5 text-[10px] uppercase text-slate-200">
+                      {activeSafetyEvent.stage}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-200">{activeSafetyEvent.cause}</p>
+                  <p className="mt-1 text-[11px] text-slate-400">{activeSafetyEvent.response}</p>
+                  {activeSafetyEvent.stage === 'active' && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        acknowledgeSafetyEvent(
+                          activeSafetyEvent.id,
+                          'Acknowledged in the Safety workspace'
+                        )
+                      }
+                      className="mt-3 min-h-9 rounded-lg bg-slate-700 px-3 text-xs font-semibold text-white hover:bg-slate-600"
+                    >
+                      Acknowledge event
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Drill Button */}
               <div className="bg-slate-800/50 p-3 rounded-xl border border-white/5">
                 <div className="flex justify-between items-center mb-2">
@@ -178,7 +238,7 @@ export const SafetyPanel: React.FC = () => {
                   }
                   className={`w-full py-2 rounded-lg font-bold text-xs transition-colors flex items-center justify-center gap-2 ${
                     emergencyDrillMode
-                      ? 'bg-red-500 hover:bg-red-600 text-white'
+                      ? 'bg-red-700 hover:bg-red-800 text-white'
                       : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
                   }`}
                 >
@@ -193,36 +253,37 @@ export const SafetyPanel: React.FC = () => {
 
               {/* E-Stop Button */}
               <button
+                type="button"
+                disabled={crisisActive}
+                aria-disabled={crisisActive}
+                title={
+                  crisisActive
+                    ? 'Resolve the active crisis before clearing its interlock'
+                    : undefined
+                }
                 onClick={() => {
-                  if (emergencyActive && !emergencyDrillMode) {
+                  if (emergencyActive && !emergencyDrillMode && !crisisActive) {
                     // If already in emergency, resolve it
                     useGameSimulationStore.getState().resolveEmergency();
                     audioManager.stopEmergencyStopAlarm();
                   } else if (!emergencyActive) {
-                    // Confirm before this facility-wide halt (most disruptive action).
-                    if (
-                      !window.confirm(
-                        'Trigger a facility-wide emergency stop? All machines will halt and the alarm will sound.'
-                      )
-                    ) {
-                      return;
-                    }
-                    // Trigger emergency stop on all machines
-                    useGameSimulationStore.getState().triggerEmergency('E-STOP');
-                    audioManager.playEmergencyStop();
-                    audioManager.startEmergencyStopAlarm();
+                    setConfirmEmergencyStop(true);
                   }
                 }}
                 className={`w-full py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${
-                  emergencyActive && !emergencyDrillMode
-                    ? 'bg-green-600 hover:bg-green-500 text-white animate-pulse'
-                    : 'bg-red-900/30 border border-red-500/50 hover:bg-red-900/50 text-red-400'
+                  crisisActive
+                    ? 'cursor-not-allowed border border-amber-500/50 bg-amber-900/30 text-amber-200'
+                    : emergencyActive && !emergencyDrillMode
+                      ? 'bg-green-600 hover:bg-green-500 text-white animate-pulse'
+                      : 'bg-red-900/30 border border-red-500/50 hover:bg-red-900/50 text-red-400'
                 }`}
               >
                 <AlertTriangle size={16} />
-                {emergencyActive && !emergencyDrillMode
-                  ? 'CLEAR EMERGENCY'
-                  : 'TRIGGER EMERGENCY STOP'}
+                {crisisActive
+                  ? 'CRISIS INTERLOCK ACTIVE'
+                  : emergencyActive && !emergencyDrillMode
+                    ? 'CLEAR EMERGENCY'
+                    : 'TRIGGER EMERGENCY STOP'}
               </button>
             </div>
           </section>
@@ -303,7 +364,7 @@ export const SafetyPanel: React.FC = () => {
                     aria-pressed={showHeatMap}
                     aria-label="Toggle worker heatmap"
                     className={`px-3 py-1 rounded-full text-[10px] font-bold transition-colors ${
-                      showHeatMap ? 'bg-purple-600 text-white' : 'bg-slate-700 text-slate-400'
+                      showHeatMap ? 'bg-teal-700 text-white' : 'bg-slate-700 text-white/70'
                     }`}
                   >
                     {showHeatMap ? 'ON' : 'OFF'}
@@ -314,6 +375,21 @@ export const SafetyPanel: React.FC = () => {
           </section>
         </>
       )}
+
+      <ConfirmDialog
+        isOpen={confirmEmergencyStop}
+        title="Trigger facility emergency stop?"
+        message="All machines and mobile equipment will stop. The emergency alarm will remain active until the interlock is cleared."
+        confirmLabel="Trigger emergency stop"
+        tone="red"
+        onCancel={() => setConfirmEmergencyStop(false)}
+        onConfirm={() => {
+          setConfirmEmergencyStop(false);
+          useGameSimulationStore.getState().triggerEmergency('E-STOP');
+          audioManager.playEmergencyStop();
+          audioManager.startEmergencyStopAlarm();
+        }}
+      />
     </div>
   );
 };

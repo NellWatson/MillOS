@@ -12,7 +12,7 @@ import {
   createCollisionGroups,
   WORLD_RADIUS,
 } from '../../physics/PhysicsConfig';
-import { FACTORY_ZONE_Z } from '../../constants/factoryLayout';
+import { createMachineObstacles } from '../../constants/factoryObstacles';
 
 // Circular world boundary - matches mountains at radius 260 (WORLD_RADIUS from PhysicsConfig)
 const BOUNDARY_SEGMENTS = 32; // Number of wall segments forming the circle
@@ -33,72 +33,7 @@ interface ObstacleData {
 
 // Generate obstacle data matching MillScene.tsx definitions
 function generateObstacles(): ObstacleData[] {
-  const obstacles: ObstacleData[] = [];
-  const WORKER_PADDING = 1.0;
-
-  // SILOS (Zone 1, z=-22) - 5 silos with size [4.5, 16, 4.5]
-  for (let i = -2; i <= 2; i++) {
-    const x = i * 9;
-    obstacles.push({
-      id: `silo-${i + 2}`,
-      minX: x - 2.25 - WORKER_PADDING,
-      maxX: x + 2.25 + WORKER_PADDING,
-      minZ: FACTORY_ZONE_Z.silos - 2.25 - WORKER_PADDING,
-      maxZ: FACTORY_ZONE_Z.silos + 2.25 + WORKER_PADDING,
-      minY: 0,
-      maxY: 16,
-    });
-  }
-
-  // ROLLER MILLS (Zone 2, z=-6) - 4 mills with size [3.5, 5, 3.5]
-  for (const i of [-3, -1.5, 1.5, 3]) {
-    const x = i * 5;
-    obstacles.push({
-      id: `mill-${i}`,
-      minX: x - 1.75 - WORKER_PADDING,
-      maxX: x + 1.75 + WORKER_PADDING,
-      minZ: FACTORY_ZONE_Z.milling - 1.75 - WORKER_PADDING,
-      maxZ: FACTORY_ZONE_Z.milling + 1.75 + WORKER_PADDING,
-      minY: 0,
-      maxY: 5,
-    });
-  }
-
-  // PLANSIFTERS (Zone 3, z=6) - Cable anchor points only (elevated machines)
-  for (let i = -1; i <= 1; i++) {
-    const x = i * 14;
-    const cablePositions = [
-      [-3.2, -3.2],
-      [-3.2, 3.2],
-      [3.2, -3.2],
-      [3.2, 3.2],
-    ];
-    cablePositions.forEach(([dx, dz], idx) => {
-      obstacles.push({
-        id: `sifter-cable-${i}-${idx}`,
-        minX: x + dx - 0.5,
-        maxX: x + dx + 0.5,
-        minZ: FACTORY_ZONE_Z.sifting + dz - 0.5,
-        maxZ: FACTORY_ZONE_Z.sifting + dz + 0.5,
-        minY: 0,
-        maxY: 9, // Cable runs to elevated sifter
-      });
-    });
-  }
-
-  // PACKERS (Zone 4, z=25) - 3 packers with size [4, 6, 4]
-  for (let i = -1; i <= 1; i++) {
-    const x = i * 8;
-    obstacles.push({
-      id: `packer-${i + 1}`,
-      minX: x - 2 - WORKER_PADDING,
-      maxX: x + 2 + WORKER_PADDING,
-      minZ: FACTORY_ZONE_Z.packing - 2 - WORKER_PADDING,
-      maxZ: FACTORY_ZONE_Z.packing + 2 + WORKER_PADDING,
-      minY: 0,
-      maxY: 6,
-    });
-  }
+  const obstacles: ObstacleData[] = [...createMachineObstacles()];
 
   // CONVEYOR SYSTEM
   obstacles.push({

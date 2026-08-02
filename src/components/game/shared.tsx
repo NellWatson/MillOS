@@ -7,6 +7,7 @@ import { useSafetyStore } from '../../stores/safetyStore';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { WorkerGender, getPronouns } from '../../types';
 import { audioManager } from '../../utils/audioManager';
+import { useAnnouncementsStore } from '../../stores/announcementsStore';
 
 // ============================================================================
 // CAMERA FEED CONTEXT
@@ -2484,6 +2485,39 @@ const ALL_ANNOUNCEMENTS: AnnouncementConfig[] = [
   ...SAFETY_ANNOUNCEMENTS,
 ];
 
+const FOCUSED_ANNOUNCEMENTS: AnnouncementConfig[] = [
+  {
+    message: 'Operations check: verify guards, walkways, and material flow before changing speed.',
+    type: 'safety',
+    category: 'safety',
+    chaosWeight: 0.2,
+  },
+  {
+    message: 'Production check: review the current constraint before adjusting the line.',
+    type: 'production',
+    category: 'production',
+    chaosWeight: 0.3,
+  },
+  {
+    message: 'Logistics check: keep dock approaches and marked pedestrian routes clear.',
+    type: 'safety',
+    category: 'equipment',
+    chaosWeight: 0.3,
+  },
+  {
+    message: 'Quality check: confirm the active batch and hold status before dispatch.',
+    type: 'production',
+    category: 'production',
+    chaosWeight: 0.2,
+  },
+  {
+    message: 'Handover reminder: record current alarms, constraints, and unfinished work.',
+    type: 'general',
+    category: 'calm',
+    chaosWeight: 0.1,
+  },
+];
+
 // ==========================================================================
 // DYNAMIC CONTENT INJECTION SYSTEM
 // ==========================================================================
@@ -3037,13 +3071,14 @@ const MACHINE_STATUS_ANNOUNCEMENTS = {
   critical: [
     {
       template:
-        'CRITICAL ALERT: {MACHINE} needs immediate attention. Not eventual attention. Immediate.',
+        'Critical machine alarm: {MACHINE}. Stop affected work and follow the response procedure.',
       type: 'emergency' as const,
       priority: 'critical' as const,
       duration: 30,
     },
     {
-      template: '{MACHINE} has entered critical state. This is not a suggestion. This is a demand.',
+      template:
+        'Critical machine state at {MACHINE}. Keep clear until an authorized operator confirms the area is safe.',
       type: 'emergency' as const,
       priority: 'critical' as const,
       duration: 30,
@@ -3066,24 +3101,61 @@ const MACHINE_STATUS_ANNOUNCEMENTS = {
   ],
 };
 
+const FOCUSED_MACHINE_STATUS_ANNOUNCEMENTS = {
+  warning: [
+    {
+      template: 'Warning at {MACHINE}. Maintenance review is required.',
+      type: 'production' as const,
+      priority: 'high' as const,
+      duration: 16,
+    },
+  ],
+  critical: [
+    {
+      template:
+        'Critical machine alarm at {MACHINE}. Stop affected work and follow the response procedure.',
+      type: 'emergency' as const,
+      priority: 'critical' as const,
+      duration: 30,
+    },
+  ],
+  running: [
+    {
+      template: '{MACHINE} is back online. Normal production may resume.',
+      type: 'production' as const,
+      priority: 'medium' as const,
+      duration: 14,
+    },
+  ],
+};
+
+const FOCUSED_MILESTONE_MESSAGES: Record<number, string> = {
+  25: 'Production has reached 25% of the current target.',
+  50: 'Production has reached 50% of the current target.',
+  75: 'Production has reached 75% of the current target.',
+  90: 'Production has reached 90% of the current target.',
+  100: 'Production target achieved.',
+};
+
 // Safety incident announcements (exported for use by safety systems)
 export const SAFETY_INCIDENT_ANNOUNCEMENTS: EventAnnouncementConfig[] = [
   {
-    message: 'Safety incident reported. Everyone is fine. But let us learn from this. Please.',
+    message:
+      'Safety incident reported. Stop affected work, keep the area clear, and follow the incident response procedure.',
     type: 'safety',
     priority: 'high',
     duration: 20,
   },
   {
     message:
-      'Near-miss recorded. A miss is as good as a mile. Unless you are playing darts. This is not darts.',
+      'Near miss reported. Pause the affected task and preserve the scene for safety review.',
     type: 'safety',
     priority: 'high',
     duration: 20,
   },
   {
     message:
-      'Safety event detected. Forklift and human have disagreed on who has right of way. Forklift won. As always.',
+      'Vehicle proximity safety event. Mobile equipment is stopped. Drivers and pedestrians must wait for the all clear.',
     type: 'safety',
     priority: 'high',
     duration: 24,
@@ -3091,98 +3163,56 @@ export const SAFETY_INCIDENT_ANNOUNCEMENTS: EventAnnouncementConfig[] = [
 ];
 
 // ==========================================================================
-// FIRE DRILL ANNOUNCEMENTS - When the alarm sounds and chaos ensues
+// FIRE DRILL ANNOUNCEMENTS
 // ==========================================================================
 export const FIRE_DRILL_ANNOUNCEMENTS: EventAnnouncementConfig[] = [
   {
     message:
-      'Attention all personnel. This is a fire drill. Please proceed to the nearest exit in an orderly fashion. Yes, Dave, that means you too.',
+      'This is a simulated fire drill. Evacuate through the nearest safe exit and report to the assembly point.',
     type: 'emergency',
     priority: 'critical',
     duration: 20,
   },
   {
     message:
-      'Fire drill initiated. Remember, this is practice for if flour becomes sentient and combustible. Stranger things have happened.',
+      'Simulated fire drill in progress. Leave work in a safe condition, use the nearest safe exit, and do not re-enter.',
     type: 'emergency',
     priority: 'critical',
     duration: 20,
   },
   {
     message:
-      'Emergency evacuation drill in progress. The last person out does NOT win a prize. Please move with purpose.',
+      'This is a drill. Move calmly to the assembly point and remain there until the simulated all clear.',
     type: 'emergency',
     priority: 'critical',
     duration: 20,
-  },
-  {
-    message:
-      'Fire drill. Please leave your workstations immediately. The flour will be fine. It has survived worse than your absence.',
-    type: 'emergency',
-    priority: 'critical',
-    duration: 20,
-  },
-  {
-    message:
-      'This is a drill. Repeat, this is a drill. If this were an actual emergency, you would already be running. Take notes.',
-    type: 'emergency',
-    priority: 'critical',
-    duration: 20,
-  },
-  {
-    message:
-      'Evacuation drill commencing. Fun fact: the average worker can exit the building in ninety seconds. Let us see if we can beat that.',
-    type: 'emergency',
-    priority: 'critical',
-    duration: 22,
   },
 ];
 
 // ==========================================================================
-// EMERGENCY STOP ANNOUNCEMENTS - When someone hits the big red button
+// EMERGENCY STOP ANNOUNCEMENTS
 // ==========================================================================
 export const EMERGENCY_STOP_ANNOUNCEMENTS: EventAnnouncementConfig[] = [
   {
     message:
-      'Emergency stop activated. All forklift operations have ceased. Please remain calm while we figure out what prompted this.',
+      'Emergency stop activated. Machines and mobile equipment are stopped. Keep clear of the affected area.',
     type: 'emergency',
     priority: 'critical',
     duration: 20,
   },
   {
     message:
-      'E-stop engaged. Forklifts are now stationary. If you pressed this by accident, we understand. The button is very tempting.',
+      'Facility emergency stop engaged. Do not restart equipment until the cause is resolved and the interlock is cleared.',
     type: 'emergency',
     priority: 'critical',
     duration: 20,
   },
   {
     message:
-      'All forklift movement halted. Whoever pressed the emergency stop, please report to the control room. Bring snacks. This might take a while.',
+      'All mobile equipment is stationary. Drivers must secure their vehicles and await the all clear.',
     type: 'emergency',
     priority: 'critical',
     duration: 22,
-  },
-  {
-    message:
-      'Emergency stop triggered. Do not worry, the forklifts were probably going to stop eventually anyway. We have just accelerated the process.',
-    type: 'emergency',
-    priority: 'critical',
-    duration: 22,
-  },
-  {
-    message:
-      'E-stop active. Operations paused. Remember, the big red button is for emergencies only. Not for winning arguments with forklifts.',
-    type: 'emergency',
-    priority: 'critical',
-    duration: 22,
-  },
-  {
-    message:
-      'Forklift emergency stop engaged. All mobile equipment is now doing its best impression of furniture. Please stand by.',
-    type: 'emergency',
-    priority: 'critical',
-    duration: 20,
   },
 ];
 
@@ -3234,9 +3264,14 @@ const checkEventAnnouncements = (
     message: string;
     priority: number;
     source?: string;
+    channel?: 'operational' | 'safety' | 'logistics' | 'worker' | 'flavor';
+    tone?: 'literal' | 'reassuring' | 'characterful';
+    cooldownMs?: number;
   }) => void
 ): void => {
   const state = useProductionStore.getState();
+  const paMode = useAnnouncementsStore.getState().mode;
+  if (paMode === 'off') return;
 
   // Check production milestones
   const productionTarget = state.productionTarget;
@@ -3254,9 +3289,15 @@ const checkEventAnnouncements = (
           const announcement = announcements[Math.floor(Math.random() * announcements.length)];
           addAnnouncement({
             type: mapAnnouncementType(announcement.type),
-            message: announcement.message,
+            message:
+              paMode === 'focused'
+                ? (FOCUSED_MILESTONE_MESSAGES[milestone] ?? announcement.message)
+                : announcement.message,
             priority: mapPriorityToNumber(announcement.priority),
             source: 'PA',
+            channel: paMode === 'focused' ? 'operational' : 'flavor',
+            tone: paMode === 'focused' ? 'literal' : 'characterful',
+            cooldownMs: paMode === 'focused' ? 180000 : 90000,
           });
         }
       }
@@ -3282,8 +3323,11 @@ const checkEventAnnouncements = (
 
       // Only announce if cooldown has passed for this status type
       if (timeSinceLastAnnouncement >= MACHINE_STATUS_COOLDOWN_MS) {
-        const statusAnnouncements =
-          MACHINE_STATUS_ANNOUNCEMENTS[currentStatus as keyof typeof MACHINE_STATUS_ANNOUNCEMENTS];
+        const corpus =
+          paMode === 'focused'
+            ? FOCUSED_MACHINE_STATUS_ANNOUNCEMENTS
+            : MACHINE_STATUS_ANNOUNCEMENTS;
+        const statusAnnouncements = corpus[currentStatus as keyof typeof corpus];
         if (statusAnnouncements) {
           const template =
             statusAnnouncements[Math.floor(Math.random() * statusAnnouncements.length)];
@@ -3293,6 +3337,9 @@ const checkEventAnnouncements = (
             message: template.template.replace('{MACHINE}', machineName),
             priority: mapPriorityToNumber(template.priority),
             source: 'PA',
+            channel: paMode === 'focused' ? 'operational' : 'flavor',
+            tone: paMode === 'focused' ? 'literal' : 'characterful',
+            cooldownMs: paMode === 'focused' ? 180000 : 90000,
           });
           // Update cooldown timer for this status type
           lastMachineStatusAnnouncementTime[currentStatus] = now;
@@ -3457,6 +3504,11 @@ const usePAScheduler = () => {
           timeoutRef = scheduleNext();
           return;
         }
+        const paMode = useAnnouncementsStore.getState().mode;
+        if (paMode === 'off') {
+          timeoutRef = scheduleNext();
+          return;
+        }
 
         const gameTime = useGameSimulationStore.getState().gameTime;
 
@@ -3474,29 +3526,30 @@ const usePAScheduler = () => {
             source: 'PA',
           });
         } else {
-          // Enhanced selection: Try dynamic, time-based, then fall back to static
+          // Focused Operations uses a small literal corpus. Characterful
+          // Simulation retains the broader contextual collection.
           let announcement: AnnouncementConfig | null = null;
-
-          // 1. Try dynamic announcement with worker/machine names (30% chance)
-          announcement = generateDynamicAnnouncement();
-
-          // 2. Try time-of-day specific announcement (20% chance if no dynamic)
-          if (!announcement) {
-            announcement = getTimeBasedAnnouncement(gameTime);
-          }
-
-          // 3. Fall back to regular context-aware announcement
-          if (!announcement) {
-            announcement = selectAnnouncement();
+          if (paMode === 'focused') {
+            announcement =
+              FOCUSED_ANNOUNCEMENTS[Math.floor(Math.random() * FOCUSED_ANNOUNCEMENTS.length)];
+          } else {
+            announcement = generateDynamicAnnouncement();
+            if (!announcement) announcement = getTimeBasedAnnouncement(gameTime);
+            if (!announcement) announcement = selectAnnouncement();
           }
 
           // Avoid repeating the same announcement twice in a row
           let attempts = 0;
           while (announcement.message === lastAnnouncementRef.current && attempts < 5) {
             // Regenerate - try dynamic first, then time-based, then static
-            const newDynamic = generateDynamicAnnouncement();
-            const newTimeBased = getTimeBasedAnnouncement(gameTime);
-            announcement = newDynamic || newTimeBased || selectAnnouncement();
+            if (paMode === 'focused') {
+              announcement =
+                FOCUSED_ANNOUNCEMENTS[Math.floor(Math.random() * FOCUSED_ANNOUNCEMENTS.length)];
+            } else {
+              const newDynamic = generateDynamicAnnouncement();
+              const newTimeBased = getTimeBasedAnnouncement(gameTime);
+              announcement = newDynamic || newTimeBased || selectAnnouncement();
+            }
             attempts++;
           }
           lastAnnouncementRef.current = announcement.message;
@@ -3519,6 +3572,17 @@ const usePAScheduler = () => {
             message: announcement.message,
             priority: mapPriorityToNumber(priority),
             source: 'PA',
+            channel:
+              paMode === 'focused'
+                ? announcement.category === 'equipment'
+                  ? 'logistics'
+                  : announcement.type === 'safety'
+                    ? 'safety'
+                    : 'operational'
+                : 'flavor',
+            tone: paMode === 'focused' ? 'literal' : 'characterful',
+            audience: announcement.category === 'equipment' ? 'drivers' : 'all',
+            cooldownMs: paMode === 'focused' ? 180000 : 90000,
           });
         }
         timeoutRef = scheduleNext();

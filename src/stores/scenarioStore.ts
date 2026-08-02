@@ -12,6 +12,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { safeJSONStorage } from './storage';
+import { sanitizeScenarioState } from './persistenceMigrations';
 import type { FiveAxes } from '../types/bas';
 
 // =============================================================================
@@ -570,7 +571,7 @@ const PRESET_SCENARIOS: Scenario[] = [
     ],
     duration: 660, // 11 minutes (leaving buffer for the 15 min display)
     learningObjectives: [
-      'Engagement is a diagnostic - forcing work signals misconfigured BAMS',
+      'Engagement is a diagnostic - forcing work signals misconfigured BAS',
       'Reducing friction enables natural engagement to emerge',
       'Gaming feel + generative output = healthy engagement signature',
       'Autonomy and transparency both reduce entry friction differently',
@@ -1672,7 +1673,7 @@ export const useScenarioStore = create<ScenarioState>()(
             if (grade !== 'A' && grade !== 'B') grade = 'B';
           } else {
             summary =
-              'The engagement signature remained weak. When work feels like forcing, BAMS configuration needs adjustment.';
+              'The engagement signature remained weak. When work feels like forcing, BAS configuration needs adjustment.';
           }
         } else if (grade === 'A') {
           summary =
@@ -1782,6 +1783,12 @@ export const useScenarioStore = create<ScenarioState>()(
     {
       name: 'millos-scenario',
       storage: safeJSONStorage,
+      version: 1,
+      migrate: (persisted) => sanitizeScenarioState(persisted) as unknown as ScenarioState,
+      merge: (persisted, current) => ({
+        ...current,
+        ...(sanitizeScenarioState(persisted) as unknown as Partial<ScenarioState>),
+      }),
       partialize: (state) => ({
         completedScenarios: state.completedScenarios,
         scenarioHistory: state.scenarioHistory,

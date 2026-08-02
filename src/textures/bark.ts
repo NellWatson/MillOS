@@ -6,7 +6,14 @@
  */
 
 import * as THREE from 'three';
-import { getTexture, fbmNoise, hash, createDataTexture } from '../utils/textureGenerator';
+import {
+  getTexture,
+  fbmNoise,
+  fbmNoiseSigned,
+  hash,
+  createColorDataTexture,
+  createLinearDataTexture,
+} from '../utils/textureGenerator';
 
 export type BarkType = 'oak' | 'birch' | 'pine';
 
@@ -93,23 +100,32 @@ export const generateBark = (size: number = 256, barkType: BarkType = 'oak'): TH
 
         // Add micro detail
         const detail = (hash(x, y) - 0.5) * 0.04;
+        // Fine vertical fissure detail so the trunk still has structure when
+        // the camera is close (bark is the most-approached surface in the
+        // village and the base grain is only 4 octaves).
+        const fissure = fbmNoiseSigned(nx * 30, ny * 150, 2) * 0.05;
 
-        data[i] = Math.floor(Math.max(0, Math.min(1, r + detail)) * 255);
-        data[i + 1] = Math.floor(Math.max(0, Math.min(1, g + detail)) * 255);
-        data[i + 2] = Math.floor(Math.max(0, Math.min(1, b + detail)) * 255);
+        data[i] = Math.floor(Math.max(0, Math.min(1, r + detail + fissure)) * 255);
+        data[i + 1] = Math.floor(Math.max(0, Math.min(1, g + detail + fissure * 0.9)) * 255);
+        data[i + 2] = Math.floor(Math.max(0, Math.min(1, b + detail + fissure * 0.8)) * 255);
         data[i + 3] = 255;
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createColorDataTexture(data, size, size);
   });
 };
 
 /**
  * Generates tree bark normal map.
+ *
+ * The perturbation is SIGNED. The previous `0.5 + ridge * 0.3` with an
+ * unsigned [0,1] ridge never dropped below 0.5, so every ridge was lit as if
+ * it faced the same way - the relief cancelled and trunks read as smooth
+ * cylinders. Bark fissures run vertically, so X carries the detail.
  */
 export const generateBarkNormal = (size: number = 256): THREE.DataTexture => {
-  return getTexture(`bark-normal-${size}`, () => {
+  return getTexture(`bark-normal-v2-${size}`, () => {
     const data = new Uint8Array(size * size * 4);
 
     for (let y = 0; y < size; y++) {
@@ -118,20 +134,69 @@ export const generateBarkNormal = (size: number = 256): THREE.DataTexture => {
         const nx = x / size;
         const ny = y / size;
 
-        // Vertical ridges
-        const ridge = fbmNoise(nx * 15, ny * 60, 3);
+        // Vertical ridges (coarse)
+        const ridge = fbmNoiseSigned(nx * 15, ny * 60, 3);
+        // Second, higher-frequency fissure octave - X only.
+        const fissure = fbmNoiseSigned(nx * 45, ny * 180, 2);
 
-        // Normal perturbation based on ridge position
-        const normalX = 0.5 + ridge * 0.3;
-        const normalY = 0.5 + fbmNoise(nx * 20, ny * 20, 2) * 0.1;
+        const normalX = 0.5 + ridge * 0.6 + fissure * 0.3;
+        const normalY = 0.5 + fbmNoiseSigned(nx * 20, ny * 20, 2) * 0.25;
 
-        data[i] = Math.floor(normalX * 255);
-        data[i + 1] = Math.floor(normalY * 255);
+        data[i] = Math.floor(Math.max(0, Math.min(1, normalX)) * 255);
+        data[i + 1] = Math.floor(Math.max(0, Math.min(1, normalY)) * 255);
         data[i + 2] = 255;
         data[i + 3] = 255;
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
+  });
+};
+
+/**
+ * Generates a tree bark roughness map.
+ *
+ * Keyed off the same vertical `grain` term the colour generator uses, so
+ * roughness stays registered with the ridge/crevice pattern: exposed ridges
+ * are worn smoother (0.75), crevices hold dust and moss (0.98).
+ *
+ * Written to R, G and B - three samples `roughnessMap.g`.
+ */
+export const generateBarkRoughness = (
+  size: number = 256,
+  barkType: BarkType = 'oak'
+): THREE.DataTexture => {
+  return getTexture(`bark-roughness-${size}-${barkType}`, () => {
+    const data = new Uint8Array(size * size * 4);
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const i = (y * size + x) * 4;
+        const nx = x / size;
+        const ny = y / size;
+
+        // Same grain term as generateBark, so colour and roughness register.
+        const grain = fbmNoise(nx * 8, ny * 40, 4);
+        const largeScale = fbmNoise(nx * 2, ny * 2, 2) * 0.3;
+        const blend = grain * 0.5 + 0.5 + largeScale;
+
+        // blend high = ridge (worn smooth), blend low = crevice (rough).
+        const ridgeAmount = Math.max(0, Math.min(1, (blend - 0.3) / 0.5));
+        let roughness = 0.98 - ridgeAmount * 0.23;
+
+        // Birch bark is papery and noticeably smoother than oak/pine.
+        if (barkType === 'birch') roughness -= 0.12;
+
+        roughness += fbmNoiseSigned(nx * 60, ny * 60, 2) * 0.06;
+
+        const val = Math.floor(Math.max(0.55, Math.min(1, roughness)) * 255);
+        data[i] = val;
+        data[i + 1] = val;
+        data[i + 2] = val;
+        data[i + 3] = 255;
+      }
+    }
+
+    return createLinearDataTexture(data, size, size);
   });
 };

@@ -38,6 +38,7 @@ describe('UIStore', () => {
       showAIPanel: true,
       panelMinimized: false,
       theme: 'dark',
+      uiScale: 1,
       showShortcuts: false,
       legendPosition: { x: -1, y: -1 },
       showGamificationBar: false,
@@ -297,6 +298,19 @@ describe('UIStore', () => {
 
       toggleTheme();
       expect(useUIStore.getState().theme).toBe('dark');
+    });
+  });
+
+  describe('Interface Scale', () => {
+    it('sets and bounds the interface scale', () => {
+      const { setUIScale } = useUIStore.getState();
+
+      setUIScale(1.25);
+      expect(useUIStore.getState().uiScale).toBe(1.25);
+      setUIScale(4);
+      expect(useUIStore.getState().uiScale).toBe(1.5);
+      setUIScale(0.1);
+      expect(useUIStore.getState().uiScale).toBe(0.9);
     });
   });
 

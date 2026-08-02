@@ -408,19 +408,48 @@ export const useBreakdownStore = create<BreakdownStore>()(
     getPartsForBreakdown: (type) => PARTS_FOR_BREAKDOWN[type],
 
     scheduleMaintenanceTask: (task) =>
-      set((state) => ({
-        maintenanceSchedule: [
-          ...state.maintenanceSchedule,
-          { ...task, id: generateId('maint'), completed: false },
-        ],
-      })),
+      set((state) => {
+        const alreadyScheduled = state.maintenanceSchedule.some(
+          (candidate) => candidate.machineId === task.machineId && !candidate.completed
+        );
+        if (alreadyScheduled) return {};
+        return {
+          maintenanceSchedule: [
+            ...state.maintenanceSchedule,
+            { ...task, id: generateId('maint'), completed: false },
+          ],
+        };
+      }),
 
     completeMaintenanceTask: (taskId) =>
-      set((state) => ({
-        maintenanceSchedule: state.maintenanceSchedule.map((t) =>
-          t.id === taskId ? { ...t, completed: true } : t
-        ),
-      })),
+      set((state) => {
+        const task = state.maintenanceSchedule.find((candidate) => candidate.id === taskId);
+        if (!task || task.completed) return {};
+
+        const requiredParts = task.partsNeeded.reduce<
+          Partial<Record<keyof PartsInventory, number>>
+        >((counts, part) => {
+          counts[part] = (counts[part] ?? 0) + 1;
+          return counts;
+        }, {});
+        const hasAllParts = (
+          Object.entries(requiredParts) as [keyof PartsInventory, number][]
+        ).every(([part, count]) => state.partsInventory[part] >= count);
+        if (!hasAllParts) return {};
+
+        const partsInventory = { ...state.partsInventory };
+        (Object.entries(requiredParts) as [keyof PartsInventory, number][]).forEach(
+          ([part, count]) => {
+            partsInventory[part] -= count;
+          }
+        );
+        return {
+          partsInventory,
+          maintenanceSchedule: state.maintenanceSchedule.map((candidate) =>
+            candidate.id === taskId ? { ...candidate, completed: true } : candidate
+          ),
+        };
+      }),
 
     tickBreakdownSimulation: (_gameTime, machines) => {
       const state = get();

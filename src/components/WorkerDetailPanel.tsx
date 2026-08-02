@@ -398,7 +398,7 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
       case 'Supervisor':
         return 'from-blue-500 to-blue-700';
       case 'Engineer':
-        return 'from-purple-500 to-purple-700';
+        return 'from-teal-600 to-blue-700';
       case 'Operator':
         return 'from-orange-500 to-orange-700';
       case 'Safety Officer':
@@ -574,7 +574,7 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
                 {/* Worker Dialogue - philosophical comment */}
                 {workerDialogue && FEATURE_FLAGS.WORKER_DIALOGUE_ENABLED && (
                   <div className="px-4 pb-4">
-                    <div className="bg-gradient-to-r from-amber-500/10 to-transparent border-l-2 border-amber-500/50 rounded-r-lg p-3">
+                    <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-3">
                       <div className="flex items-start gap-2">
                         <MessageSquare className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
                         <div className="flex-1">

@@ -48,8 +48,8 @@ export default tseslint.config(
       'react-hooks': reactHooksPlugin,
     },
     rules: {
-      // React hooks rules - disabled as TypeScript and runtime catch real issues
-      'react-hooks/rules-of-hooks': 'off',
+      // Hook call order is a runtime invariant that TypeScript cannot enforce.
+      'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'off', // React Three Fiber patterns use refs in effects
 
       // TypeScript handles these
@@ -69,6 +69,8 @@ export default tseslint.config(
 
       // 3D animation code often has intentional patterns that look like bugs
       'no-constant-binary-expression': 'off', // Intentional in animation state machines
+      'no-useless-assignment': 'off', // State-machine branches intentionally overwrite provisional values
+      'preserve-caught-error': 'off', // Existing adapter errors are deliberately converted at boundaries
       'prefer-const': 'warn', // Warning only - valid reasons to use let exist
     },
   }

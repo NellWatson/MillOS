@@ -6,16 +6,18 @@
  * Clicking a worker shows their detail view inline with a back button.
  */
 
-import React, { useState, Suspense, lazy } from 'react';
+import React, { useState, Suspense } from 'react';
 import { Zap, Heart, Briefcase, ArrowLeft } from 'lucide-react';
 import { WORKER_ROSTER, WorkerData } from '../../../types';
 import { useProductionStore } from '../../../stores/productionStore';
 import { useWorkerMoodStore } from '../../../stores/workerMoodStore';
 import { useShallow } from 'zustand/react/shallow';
 import { getWorkerPortrait } from '../../../utils/workerPortraits';
+import { recoverableLazy } from '../../../utils/recoverableLazy';
+import { RecoverableFeatureBoundary } from '../../ErrorBoundary';
 
 // Lazy load the heavy worker detail panel
-const WorkerDetailPanel = lazy(() =>
+const WorkerDetailPanel = recoverableLazy(() =>
   import('../../WorkerDetailPanel').then((m) => ({ default: m.WorkerDetailPanel }))
 );
 
@@ -73,19 +75,25 @@ export const WorkforcePanel: React.FC = () => {
 
         {/* Worker detail content */}
         <div className="flex-1 overflow-y-auto">
-          <Suspense
-            fallback={
-              <div className="flex items-center justify-center h-32 text-cyan-500 animate-pulse">
-                Loading...
-              </div>
-            }
+          <RecoverableFeatureBoundary
+            featureName="Worker detail"
+            onDismiss={() => setSelectedWorker(null)}
+            resetKeys={[selectedWorker.id]}
           >
-            <WorkerDetailPanel
-              worker={selectedWorker}
-              onClose={() => setSelectedWorker(null)}
-              embedded={true}
-            />
-          </Suspense>
+            <Suspense
+              fallback={
+                <div className="flex items-center justify-center h-32 text-cyan-500 animate-pulse">
+                  Loading...
+                </div>
+              }
+            >
+              <WorkerDetailPanel
+                worker={selectedWorker}
+                onClose={() => setSelectedWorker(null)}
+                embedded={true}
+              />
+            </Suspense>
+          </RecoverableFeatureBoundary>
         </div>
       </div>
     );

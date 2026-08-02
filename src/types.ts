@@ -220,6 +220,41 @@ export interface AlertData {
   acknowledged: boolean;
 }
 
+export type AIDecisionDisposition = 'accepted' | 'modified' | 'rejected' | 'deferred' | 'automatic';
+
+export interface AIDecisionObservation {
+  label: string;
+  value: string | number;
+  unit?: string;
+  source: 'simulation' | 'scada' | 'operator' | 'schedule' | 'prediction';
+  quality: 'good' | 'uncertain' | 'stale' | 'bad';
+  capturedAt: number;
+}
+
+export interface AIDecisionProvenance {
+  capturedAt: number;
+  observations: AIDecisionObservation[];
+  assumptions: string[];
+  affectedPeople: string[];
+  affectedEquipment: string[];
+  expectedEffect: string;
+  alternatives: { action: string; tradeoff: string }[];
+  inputSnapshot: Record<string, string | number | boolean | null>;
+}
+
+export interface AIDecisionResponse {
+  disposition: AIDecisionDisposition;
+  recordedAt: number;
+  note?: string;
+  modifiedAction?: string;
+}
+
+export interface AIDecisionMeasuredOutcome {
+  recordedAt: number;
+  summary: string;
+  measurements: Record<string, string | number | boolean | null>;
+}
+
 export interface AIDecision {
   id: string;
   timestamp: Date;
@@ -243,6 +278,9 @@ export interface AIDecision {
   // Priority and urgency
   priority: 'low' | 'medium' | 'high' | 'critical';
   expiresAt?: Date;
+  provenance?: AIDecisionProvenance;
+  response?: AIDecisionResponse;
+  measuredOutcome?: AIDecisionMeasuredOutcome;
 }
 
 // =========================================================================
@@ -968,18 +1006,26 @@ export const WORKER_ROSTER: Omit<WorkerData, 'position' | 'direction'>[] = [
 ];
 
 export function createInitialWorkers(): WorkerData[] {
-  // Side aisles only - the centre (x=0) is the central spine conveyor, so workers must
-  // not spawn on it (the central-conveyor-belt obstacle also blocks that lane).
-  const aisles = [10, -10];
+  // Stable side-aisle starts keep named personnel reproducible for replay,
+  // camera composition, path validation, and visual review. The centre remains
+  // clear for the spine conveyor and vehicle crossing.
+  const starts: ReadonlyArray<readonly [number, number]> = [
+    [10, -18],
+    [-10, -14],
+    [10, -10],
+    [-10, -6],
+    [10, -2],
+    [-10, 2],
+    [10, 6],
+    [-10, 10],
+    [10, 14],
+    [-10, 18],
+  ];
 
   return WORKER_ROSTER.map((roster, i) => ({
     ...roster,
-    position: [
-      aisles[i % aisles.length] + (Math.random() - 0.5) * 4,
-      0,
-      Math.random() * 40 - 20,
-    ] as [number, number, number],
-    direction: (Math.random() > 0.5 ? 1 : -1) as 1 | -1,
+    position: [starts[i]?.[0] ?? 10, 0, starts[i]?.[1] ?? 0] as [number, number, number],
+    direction: (i % 2 === 0 ? 1 : -1) as 1 | -1,
   }));
 }
 

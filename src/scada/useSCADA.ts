@@ -582,8 +582,11 @@ export function useSCADATag(tagId: string): {
 export function useSCADAAlarms(): {
   alarms: Alarm[];
   summary: { total: number; unacknowledged: number; critical: number; high: number };
-  acknowledge: (alarmId: string) => void;
-  acknowledgeAll: () => void;
+  acknowledge: (alarmId: string, operator?: string, note?: string) => void;
+  acknowledgeAll: (operator?: string, note?: string) => void;
+  shelve: (tagId: string, operator: string, reason: string, durationMs?: number) => void;
+  suppress: (tagId: string, operator: string, reason: string, durationMs?: number) => void;
+  takeOutOfService: (tagId: string, operator: string, reason: string) => void;
   suppressed: AlarmSuppression[];
   unsuppress: (tagId: string) => void;
   hasCritical: boolean;
@@ -609,15 +612,49 @@ export function useSCADAAlarms(): {
     return { total: alarms.length, unacknowledged, critical, high };
   }, [alarms]);
 
-  const acknowledge = useCallback((alarmId: string) => {
+  const acknowledge = useCallback(
+    (alarmId: string, operator = 'Simulation operator', note?: string) => {
+      if (!sharedState.isConnected) return;
+      getSCADAService().acknowledgeAlarm(alarmId, operator, note);
+    },
+    []
+  );
+
+  const acknowledgeAll = useCallback((operator = 'Simulation operator', note?: string) => {
     if (!sharedState.isConnected) return;
-    getSCADAService().acknowledgeAlarm(alarmId, 'operator');
+    getSCADAService().acknowledgeAllAlarms(operator, note);
   }, []);
 
-  const acknowledgeAll = useCallback(() => {
-    if (!sharedState.isConnected) return;
-    getSCADAService().acknowledgeAllAlarms('operator');
+  const refreshSuppressed = useCallback(() => {
+    setSuppressed(getSCADAService().getSuppressedAlarms());
   }, []);
+
+  const shelve = useCallback(
+    (tagId: string, operator: string, reason: string, durationMs?: number) => {
+      if (!sharedState.isConnected) return;
+      getSCADAService().shelveAlarms(tagId, operator, reason, durationMs);
+      refreshSuppressed();
+    },
+    [refreshSuppressed]
+  );
+
+  const suppress = useCallback(
+    (tagId: string, operator: string, reason: string, durationMs?: number) => {
+      if (!sharedState.isConnected) return;
+      getSCADAService().suppressAlarms(tagId, operator, reason, durationMs);
+      refreshSuppressed();
+    },
+    [refreshSuppressed]
+  );
+
+  const takeOutOfService = useCallback(
+    (tagId: string, operator: string, reason: string) => {
+      if (!sharedState.isConnected) return;
+      getSCADAService().takeAlarmsOutOfService(tagId, operator, reason);
+      refreshSuppressed();
+    },
+    [refreshSuppressed]
+  );
 
   useEffect(() => {
     if (!sharedState.isConnected) {
@@ -638,6 +675,9 @@ export function useSCADAAlarms(): {
     summary,
     acknowledge,
     acknowledgeAll,
+    shelve,
+    suppress,
+    takeOutOfService,
     suppressed,
     unsuppress,
     hasCritical: summary.critical > 0,

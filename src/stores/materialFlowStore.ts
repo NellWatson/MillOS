@@ -36,6 +36,28 @@ export interface MaterialAmount {
   amount: number; // kg
 }
 
+export interface MaterialManifest {
+  id: string;
+  kind: 'receiving' | 'shipping';
+  dock: 'receiving' | 'shipping';
+  requestedKg: number;
+  actualKg: number;
+  materials: MaterialAmount[];
+  simulationTime: number;
+}
+
+export interface MaterialBalance {
+  initialKg: number;
+  receivedKg: number;
+  inventoryKg: number;
+  inTransitKg: number;
+  wasteKg: number;
+  shippedKg: number;
+  expectedKg: number;
+  accountedKg: number;
+  errorKg: number;
+}
+
 // =============================================================================
 // MACHINE BUFFERS - Input/Output storage for each machine
 // =============================================================================
@@ -107,6 +129,14 @@ export interface MaterialFlowState {
   currentFlowRate: number; // kg/sec instantaneous (summed across ALL stages)
   currentPackerFlowRate: number; // kg/sec processed at the final packing stage only
 
+  // Conserved material ledger
+  initialInventoryKg: number;
+  receivedKg: number;
+  wasteKg: number;
+  shippedKg: number;
+  manifests: MaterialManifest[];
+  manifestSequence: number;
+
   // Time tracking for transit
   simulationTime: number; // seconds elapsed
 
@@ -121,7 +151,13 @@ export interface MaterialFlowState {
    * A receiving truck delivers grain: tops up the emptiest silo (wheat for
    * even silo indices, corn for odd, matching the initial fill pattern).
    */
-  receiveGrainDelivery: (amountKg: number) => void;
+  receiveGrainDelivery: (amountKg: number) => number;
+  /**
+   * A shipping truck removes completed flour or semolina from packer output.
+   * Returns the amount actually loaded, which may be lower than requested.
+   */
+  shipFinishedGoods: (amountKg: number) => number;
+  getMaterialBalance: () => MaterialBalance;
   getMachineBuffer: (machineId: string) => MachineBuffer | undefined;
   getConveyorLoad: (segmentId: string) => number;
   getTotalInputBuffer: (machineId: string) => number;
@@ -241,6 +277,17 @@ function createInitialMachineBuffers(): Map<string, MachineBuffer> {
   return buffers;
 }
 
+function sumMachineInventory(buffers: ReadonlyMap<string, MachineBuffer>): number {
+  let total = 0;
+  buffers.forEach((buffer) => {
+    total += buffer.inputBuffer.reduce((sum, material) => sum + material.amount, 0);
+    total += buffer.outputBuffer.reduce((sum, material) => sum + material.amount, 0);
+  });
+  return total;
+}
+
+const INITIAL_INVENTORY_KG = sumMachineInventory(createInitialMachineBuffers());
+
 function createInitialNetwork(): NetworkTopology {
   const segments: ConveyorSegment[] = [];
   const downstreamMap = new Map<string, string[]>();
@@ -316,12 +363,31 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
     totalFlourProduced: 0,
     currentFlowRate: 0,
     currentPackerFlowRate: 0,
+    initialInventoryKg: INITIAL_INVENTORY_KG,
+    receivedKg: 0,
+    wasteKg: 0,
+    shippedKg: 0,
+    manifests: [],
+    manifestSequence: 0,
     simulationTime: 0,
 
     tickMaterialFlow: (deltaSeconds: number, productionSpeed: number) => {
-      if (productionSpeed === 0 || deltaSeconds <= 0) return;
+      if (
+        !Number.isFinite(deltaSeconds) ||
+        !Number.isFinite(productionSpeed) ||
+        deltaSeconds <= 0
+      ) {
+        return;
+      }
 
       const state = get();
+      if (productionSpeed <= 0) {
+        if (state.currentFlowRate !== 0 || state.currentPackerFlowRate !== 0) {
+          set({ currentFlowRate: 0, currentPackerFlowRate: 0 });
+        }
+        return;
+      }
+
       const effectiveDelta = deltaSeconds * productionSpeed;
       const newTime = state.simulationTime + effectiveDelta;
 
@@ -344,34 +410,57 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
       let instantFlowRate = 0;
       let instantPackerFlowRate = 0;
       let flourProducedThisTick = 0;
+      let wasteThisTick = 0;
 
       // 1. Process each machine: convert input -> output
       newBuffers.forEach((buffer) => {
         if (!buffer.isProcessing) return;
 
-        const processAmount = buffer.processingRate * effectiveDelta;
+        // The processing rate is a machine-level budget. Sharing it across
+        // material types prevents a multi-material buffer from multiplying
+        // the machine's rated throughput.
+        let remainingProcessCapacity = buffer.processingRate * effectiveDelta;
 
         // Process each input material type
         buffer.inputBuffer.forEach((inputMaterial) => {
-          if (inputMaterial.amount <= 0) return;
+          if (inputMaterial.amount <= 0 || remainingProcessCapacity <= 0) return;
 
           const conversion = buffer.conversionRatios.find(
             (c) => c.inputType === inputMaterial.type
           );
           if (!conversion) return;
 
+          const declaredOutputRatio = conversion.outputs.reduce(
+            (sum, output) => sum + Math.max(0, output.ratio),
+            0
+          );
+          if (declaredOutputRatio <= 0) return;
+
+          // Defensive normalization prevents malformed ratios above 100%
+          // from creating material. Ratios below 100% become recorded waste.
+          const outputScale = declaredOutputRatio > 1 ? 1 / declaredOutputRatio : 1;
+          const effectiveOutputRatio = Math.min(1, declaredOutputRatio);
+          const existingOutputKg = buffer.outputBuffer.reduce(
+            (sum, material) => sum + material.amount,
+            0
+          );
+          const outputSpaceKg = Math.max(0, buffer.outputCapacity - existingOutputKg);
+          const capacityLimitedInput =
+            effectiveOutputRatio > 0 ? outputSpaceKg / effectiveOutputRatio : 0;
+
           // Calculate how much we can process
           const available = inputMaterial.amount;
-          const toProcess = Math.min(available, processAmount);
+          const toProcess = Math.min(available, remainingProcessCapacity, capacityLimitedInput);
 
           if (toProcess <= 0) return;
 
           // Subtract from input
           inputMaterial.amount -= toProcess;
+          remainingProcessCapacity -= toProcess;
 
           // Add to output based on conversion ratios
           conversion.outputs.forEach(({ type, ratio }) => {
-            const outputAmount = toProcess * ratio;
+            const outputAmount = toProcess * Math.max(0, ratio) * outputScale;
             const existingOutput = buffer.outputBuffer.find((o) => o.type === type);
             if (existingOutput) {
               existingOutput.amount += outputAmount;
@@ -384,6 +473,7 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
               flourProducedThisTick += outputAmount;
             }
           });
+          wasteThisTick += toProcess * (1 - effectiveOutputRatio);
 
           // Defensive check: avoid division by zero (early return already guards this,
           // but add explicit check at point of use for safety)
@@ -431,7 +521,7 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
             } else {
               toBuffer.inputBuffer.push({ type: arrived.type, amount: toAdd });
             }
-            segment.currentLoad -= toAdd;
+            segment.currentLoad = Math.max(0, segment.currentLoad - toAdd);
           }
 
           const remainder = arrived.amount - toAdd;
@@ -481,6 +571,7 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
         totalFlourProduced: state.totalFlourProduced + flourProducedThisTick,
         currentFlowRate: instantFlowRate,
         currentPackerFlowRate: instantPackerFlowRate,
+        wasteKg: state.wasteKg + wasteThisTick,
       });
     },
 
@@ -506,7 +597,7 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
     },
 
     receiveGrainDelivery: (amountKg: number) => {
-      if (amountKg <= 0) return;
+      if (!Number.isFinite(amountKg) || amountKg <= 0) return 0;
       const state = get();
 
       // Find the emptiest silo (least total stored grain)
@@ -520,7 +611,7 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
           emptiest = buffer;
         }
       });
-      if (!emptiest) return;
+      if (!emptiest) return 0;
 
       const target: MachineBuffer = emptiest;
       // Even silo indices store wheat, odd store corn (matches initial fill)
@@ -528,7 +619,7 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
       const grainType: MaterialType = siloIndex % 2 === 0 ? 'wheat_grain' : 'corn_grain';
       const space = target.outputCapacity - emptiestTotal;
       const toAdd = Math.max(0, Math.min(amountKg, space));
-      if (toAdd <= 0) return;
+      if (toAdd <= 0) return 0;
 
       const newBuffers = new Map(state.machineBuffers);
       const newOutput = target.outputBuffer.map((m) => ({ ...m }));
@@ -539,7 +630,99 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
         newOutput.push({ type: grainType, amount: toAdd });
       }
       newBuffers.set(target.machineId, { ...target, outputBuffer: newOutput });
-      set({ machineBuffers: newBuffers });
+      const manifestSequence = state.manifestSequence + 1;
+      const manifest: MaterialManifest = {
+        id: `receiving-${String(manifestSequence).padStart(4, '0')}`,
+        kind: 'receiving',
+        dock: 'receiving',
+        requestedKg: amountKg,
+        actualKg: toAdd,
+        materials: [{ type: grainType, amount: toAdd }],
+        simulationTime: state.simulationTime,
+      };
+      set({
+        machineBuffers: newBuffers,
+        receivedKg: state.receivedKg + toAdd,
+        manifests: [...state.manifests, manifest],
+        manifestSequence,
+      });
+      return toAdd;
+    },
+
+    shipFinishedGoods: (amountKg: number) => {
+      if (!Number.isFinite(amountKg) || amountKg <= 0) return 0;
+      const state = get();
+      const newBuffers = new Map(state.machineBuffers);
+      const materials = new Map<MaterialType, number>();
+      let remaining = amountKg;
+
+      // Stable machine and material order makes manifests replayable.
+      for (const machineId of ['packer-0', 'packer-1', 'packer-2']) {
+        if (remaining <= 0) break;
+        const buffer = newBuffers.get(machineId);
+        if (!buffer) continue;
+
+        const outputBuffer = buffer.outputBuffer.map((material) => ({ ...material }));
+        for (const materialType of ['flour', 'semolina'] as const) {
+          if (remaining <= 0) break;
+          const material = outputBuffer.find((entry) => entry.type === materialType);
+          if (!material || material.amount <= 0) continue;
+          const toShip = Math.min(material.amount, remaining);
+          material.amount -= toShip;
+          remaining -= toShip;
+          materials.set(materialType, (materials.get(materialType) ?? 0) + toShip);
+        }
+
+        newBuffers.set(machineId, {
+          ...buffer,
+          outputBuffer: outputBuffer.filter((material) => material.amount > 0.01),
+        });
+      }
+
+      const actualKg = amountKg - remaining;
+      if (actualKg <= 0) return 0;
+
+      const manifestSequence = state.manifestSequence + 1;
+      const manifest: MaterialManifest = {
+        id: `shipping-${String(manifestSequence).padStart(4, '0')}`,
+        kind: 'shipping',
+        dock: 'shipping',
+        requestedKg: amountKg,
+        actualKg,
+        materials: [...materials.entries()].map(([type, amount]) => ({ type, amount })),
+        simulationTime: state.simulationTime,
+      };
+      set({
+        machineBuffers: newBuffers,
+        shippedKg: state.shippedKg + actualKg,
+        manifests: [...state.manifests, manifest],
+        manifestSequence,
+      });
+      return actualKg;
+    },
+
+    getMaterialBalance: () => {
+      const state = get();
+      const inventoryKg = sumMachineInventory(state.machineBuffers);
+      // currentLoad is the conserved mass represented by inTransit parcels.
+      // Summing both would double-count the same material.
+      const inTransitKg = state.network.segments.reduce(
+        (sum, segment) => sum + segment.currentLoad,
+        0
+      );
+      const expectedKg = state.initialInventoryKg + state.receivedKg;
+      const accountedKg = inventoryKg + inTransitKg + state.wasteKg + state.shippedKg;
+      return {
+        initialKg: state.initialInventoryKg,
+        receivedKg: state.receivedKg,
+        inventoryKg,
+        inTransitKg,
+        wasteKg: state.wasteKg,
+        shippedKg: state.shippedKg,
+        expectedKg,
+        accountedKg,
+        errorKg: expectedKg - accountedKg,
+      };
     },
 
     getMachineBuffer: (machineId: string) => {
@@ -571,6 +754,12 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
         totalFlourProduced: 0,
         currentFlowRate: 0,
         currentPackerFlowRate: 0,
+        initialInventoryKg: INITIAL_INVENTORY_KG,
+        receivedKg: 0,
+        wasteKg: 0,
+        shippedKg: 0,
+        manifests: [],
+        manifestSequence: 0,
         simulationTime: 0,
       });
     },

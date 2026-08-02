@@ -245,11 +245,10 @@ const SpeechBubble: React.FC<SpeechBubbleProps> = React.memo(({ text, position, 
                 bottom: '-8px',
                 left: '50%',
                 transform: 'translateX(-50%)',
-                width: 0,
-                height: 0,
-                borderLeft: '6px solid transparent',
-                borderRight: '6px solid transparent',
-                borderTop: `8px solid ${bubbleColor}`,
+                width: '12px',
+                height: '8px',
+                background: bubbleColor,
+                clipPath: 'polygon(0 0, 100% 0, 50% 100%)',
               }}
             />
             <div
@@ -258,11 +257,10 @@ const SpeechBubble: React.FC<SpeechBubbleProps> = React.memo(({ text, position, 
                 bottom: '-5px',
                 left: '50%',
                 transform: 'translateX(-50%)',
-                width: 0,
-                height: 0,
-                borderLeft: '5px solid transparent',
-                borderRight: '5px solid transparent',
-                borderTop: '6px solid white',
+                width: '10px',
+                height: '6px',
+                background: 'white',
+                clipPath: 'polygon(0 0, 100% 0, 50% 100%)',
               }}
             />
           </div>

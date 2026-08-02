@@ -22,11 +22,17 @@ import {
   Texture,
   RepeatWrapping,
   LinearFilter,
-  NearestFilter,
+  LinearMipmapLinearFilter,
+  SRGBColorSpace,
   MeshStandardMaterial,
+  type ColorSpace,
 } from 'three';
 import { useGraphicsStore, GraphicsQuality } from '../stores/graphicsStore';
-import { isCompressionAvailable, loadCompressedTexture } from './textureCompression';
+import {
+  isCompressionAvailable,
+  loadCompressedTexture,
+  resolveAnisotropy,
+} from './textureCompression';
 
 // Texture base paths - use BASE_URL for correct path at any deployment location
 const TEXTURE_BASE_PATH = `${import.meta.env.BASE_URL}textures/machines`;
@@ -61,6 +67,46 @@ export interface MachineTextures {
   color?: Texture | null; // Some models have color maps
 }
 
+/**
+ * WHICH MAPS ACTUALLY EXIST ON DISK.
+ *
+ * Mirrors `public/textures/machines/{256,512}/` and
+ * `public/textures/compressed/`. Every model ships `_roughness` and `_normal`;
+ * only `_ao` and `_color` vary, so only the exceptions are listed.
+ *
+ * Requesting a map that is not there is not free and not silent: each miss
+ * costs a `.ktx2` request AND its `.jpg` fallback, both 404, on every mount of
+ * every consumer - and the failing `Texture` object has already been handed to
+ * the caller by the time the error callback nulls the cache slot.
+ *
+ * Verified against the three directories; keep in sync if assets are added.
+ */
+const MODELS_WITHOUT_AO: ReadonlySet<ModelType> = new Set([
+  'worker',
+  'conveyor',
+  'pallet',
+  'water',
+]);
+
+/**
+ * Models whose `_color` map exists AND is safe to bind as `material.map`.
+ *
+ * `worker` is deliberately absent even though `worker_color` ships. The
+ * authored character UV unwrap spans roughly U/V [-1.0, 1.5] with no atlas
+ * intent, so an albedo map smears unrelated colour across the body - see the
+ * HARD CONSTRAINT in `components/workers/SharedWorkerMaterials.ts`, the only
+ * consumer of `getModelTextures('worker')`, which binds roughness/normal/ao
+ * and never `.color`. Fetching it was a download nothing could ever use.
+ */
+const MODELS_WITH_COLOR: ReadonlySet<ModelType> = new Set([
+  'conveyor',
+  'pallet',
+  'grass',
+  'concrete',
+  'brick',
+  'water',
+]);
+
 // Cache for loaded textures to prevent reloading
 const textureCache = new Map<string, Texture | null>();
 
@@ -70,8 +116,17 @@ const pendingKtx2Loads = new Map<string, Promise<Texture | null>>();
 /**
  * Safely load a texture with KTX2 priority
  * Tries KTX2 from compressed folder first, falls back to JPG
+ *
+ * `colorSpace` must be supplied for albedo. `KTX2Loader` reads the transfer
+ * function out of the file's DFD and sets `SRGBColorSpace` itself, but
+ * `THREE.TextureLoader` sets nothing at all (three r182 `TextureLoader.load`
+ * only assigns `image` and `needsUpdate`), so a `Texture` from the JPG path
+ * keeps the constructor default of `NoColorSpace`. Left alone, the same
+ * logical albedo decodes differently depending on which loader won the race
+ * here - and the JPG branch renders washed out, because its sRGB bytes are
+ * consumed as if they were already linear.
  */
-function safeLoadTexture(jpgPath: string): Texture | null {
+function safeLoadTexture(jpgPath: string, colorSpace?: ColorSpace): Texture | null {
   // Check cache first
   if (textureCache.has(jpgPath)) {
     return textureCache.get(jpgPath) ?? null;
@@ -88,7 +143,12 @@ function safeLoadTexture(jpgPath: string): Texture | null {
   if (isCompressionAvailable()) {
     // Start async KTX2 load if not already pending
     if (!pendingKtx2Loads.has(ktx2Path)) {
-      const loadPromise = loadCompressedTexture(ktx2Path, jpgPath, `machine-${textureName}`)
+      const loadPromise = loadCompressedTexture(
+        ktx2Path,
+        jpgPath,
+        `machine-${textureName}`,
+        colorSpace
+      )
         .then((tex) => {
           // Dispose the immediate JPG fallback if it raced into the cache first,
           // otherwise replacing the slot with the KTX2 texture leaks the JPG's
@@ -102,7 +162,7 @@ function safeLoadTexture(jpgPath: string): Texture | null {
         .catch(() => {
           pendingKtx2Loads.delete(ktx2Path);
           // Fall back to JPG via standard loader
-          return loadJpgTexture(jpgPath);
+          return loadJpgTexture(jpgPath, colorSpace);
         });
       pendingKtx2Loads.set(ktx2Path, loadPromise);
     }
@@ -113,17 +173,38 @@ function safeLoadTexture(jpgPath: string): Texture | null {
     if (cached) return cached;
 
     // Start JPG load as immediate fallback (will be replaced by KTX2 when ready)
-    return loadJpgTexture(jpgPath);
+    return loadJpgTexture(jpgPath, colorSpace);
   }
 
   // No KTX2 support - load JPG directly
-  return loadJpgTexture(jpgPath);
+  return loadJpgTexture(jpgPath, colorSpace);
 }
 
 /**
  * Load JPG texture (fallback when KTX2 not available)
+ *
+ * SAMPLER STATE IS THE WHOLE POINT OF THIS FUNCTION.
+ *
+ * This used to set `magFilter = NearestFilter` with `generateMipmaps = false`,
+ * commented "perf optimization". It is the opposite of one. Point sampling with
+ * no mip chain means every minified texel is a single unfiltered sample, so any
+ * surface in motion or at a grazing angle aliases: the 55 m conveyor belt runs
+ * its texture past the camera continuously and would crawl and sparkle the
+ * entire time. Mip generation is a one-off ~33% memory cost at load; the
+ * shimmer it removes is per-frame and unmissable.
+ *
+ * Note that all three values below are simply three's own `Texture`
+ * constructor defaults (r182: `magFilter = LinearFilter`,
+ * `minFilter = LinearMipmapLinearFilter`, `generateMipmaps = true`) - the old
+ * code was actively downgrading them. They are written out explicitly anyway so
+ * the intent survives the next person who reads this callback.
+ *
+ * Mutating in `onLoad` is safe: `TextureLoader` assigns `image` and
+ * `needsUpdate` and then calls `onLoad` synchronously in the same
+ * `ImageLoader` callback, so no render - and therefore no GPU upload, which is
+ * where sampler state is actually read - can interleave.
  */
-function loadJpgTexture(path: string): Texture | null {
+function loadJpgTexture(path: string, colorSpace?: ColorSpace): Texture | null {
   if (textureCache.has(path)) {
     return textureCache.get(path) ?? null;
   }
@@ -135,9 +216,10 @@ function loadJpgTexture(path: string): Texture | null {
       // On success
       (tex) => {
         tex.wrapS = tex.wrapT = RepeatWrapping;
-        tex.minFilter = LinearFilter;
-        tex.magFilter = NearestFilter;
-        tex.generateMipmaps = false; // Perf optimization
+        tex.minFilter = LinearMipmapLinearFilter;
+        tex.magFilter = LinearFilter;
+        tex.generateMipmaps = true;
+        tex.anisotropy = resolveAnisotropy();
         textureCache.set(path, tex);
       },
       // On progress (unused)
@@ -147,6 +229,17 @@ function loadJpgTexture(path: string): Texture | null {
         textureCache.set(path, null);
       }
     );
+    // Set synchronously, NOT in the callback above, unlike the sampler state.
+    // `TextureLoader.load` returns its `Texture` immediately and only fills in
+    // `image` later, so this object reaches the consumer - and can be bound to
+    // a material - before `onLoad` ever runs. Filtering and mip settings are
+    // safe to defer because three reads them at upload, which cannot precede
+    // the image; `colorSpace` is read there too (`WebGLTextures.uploadTexture`
+    // passes it to `getInternalFormat`, which picks `SRGB8_ALPHA8` over
+    // `RGBA8`), but it is also part of `getTextureCacheKey` and is the one
+    // property a consumer might reasonably read off the texture itself. Doing
+    // it here costs nothing and removes the ordering question entirely.
+    if (colorSpace) texture.colorSpace = colorSpace;
     textureCache.set(path, texture);
     return texture;
   } catch {
@@ -172,14 +265,16 @@ export function getModelTextures(
   const base = `${TEXTURE_BASE_PATH}/${resolution}/${modelType}`;
 
   return {
+    // Roughness and normal ship for every model type.
     roughness: safeLoadTexture(`${base}_roughness.jpg`),
     normal: safeLoadTexture(`${base}_normal.jpg`),
-    ao: safeLoadTexture(`${base}_ao.jpg`),
-    // Color maps exist for some models
-    color: ['worker', 'conveyor', 'pallet', 'grass', 'concrete', 'brick', 'water'].includes(
-      modelType
-    )
-      ? safeLoadTexture(`${base}_color.jpg`)
+    // AO and colour are requested only where the file exists (see the tables
+    // above). Consumers already treat every field as nullable.
+    ao: MODELS_WITHOUT_AO.has(modelType) ? null : safeLoadTexture(`${base}_ao.jpg`),
+    // Albedo is the only sRGB-encoded map here; roughness/normal/AO are data
+    // and must stay on three's default (no colour space).
+    color: MODELS_WITH_COLOR.has(modelType)
+      ? safeLoadTexture(`${base}_color.jpg`, SRGBColorSpace)
       : null,
   };
 }

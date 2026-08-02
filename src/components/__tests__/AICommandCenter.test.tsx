@@ -71,6 +71,9 @@ vi.mock('lucide-react', () => ({
   TrendingUp: () => null,
   Target: () => null,
   Settings: () => null,
+  CheckCircle2: () => null,
+  Clock3: () => null,
+  XCircle: () => null,
 }));
 
 // Mock Framer Motion to avoid animation complications in tests
@@ -159,6 +162,7 @@ describe('AICommandCenter', () => {
       averageEnergy: 75,
       averageSatisfaction: 80,
     },
+    recordDecisionResponse: vi.fn(),
   };
 
   const mockUIState = {
@@ -210,8 +214,7 @@ describe('AICommandCenter', () => {
     it('should render when isOpen is true', () => {
       render(<AICommandCenter isOpen={true} onClose={vi.fn()} embedded />);
 
-      // Embedded mode uses 'AI Engine' instead of 'AI Command Center'
-      expect(screen.getByText('AI Engine')).toBeInTheDocument();
+      expect(screen.getByText('AI Partner')).toBeInTheDocument();
     });
 
     it('should display initial system status', () => {
@@ -416,8 +419,7 @@ describe('AICommandCenter', () => {
     it('should show empty state when no decisions exist', () => {
       render(<AICommandCenter isOpen={true} onClose={vi.fn()} embedded />);
 
-      // Embedded mode shows "AI analyzing factory state..."
-      expect(screen.getByText(/AI analyzing factory state/i)).toBeInTheDocument();
+      expect(screen.getByText(/No recommendations have been recorded/i)).toBeInTheDocument();
     });
 
     // Updated: Embedded mode limits to 15 decisions, not 20

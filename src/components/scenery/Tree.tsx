@@ -1,123 +1,76 @@
 /**
- * Simple Tree Component
+ * Tree components for village and farm areas.
  *
- * Procedurally textured trees for village and farm areas.
+ * These are thin single-tree wrappers over `InstancedTreeField`, which owns
+ * the geometry, the alpha-cut leaf material and the wind injection. Prefer
+ * `<InstancedTreeField trees={[...]} />` directly when placing more than one
+ * or two trees - a whole stand then costs two draw calls instead of two per
+ * tree.
+ *
+ * The previous implementation built canopies from solid `sphereGeometry`
+ * blobs on a flat green material. That is the loudest "prototype" tell in an
+ * exterior frame and is gone; see InstancedFoliage.tsx for what replaced it.
  */
 
-import React from 'react';
-import { TREE_MATERIALS } from '../../utils/sharedMaterials';
+import React, { useMemo } from 'react';
+import { InstancedTreeField, type TreeInstance, type TreeSpecies } from './InstancedFoliage';
 
-// Tree types with different characteristics
-export type TreeType = 'oak' | 'pine' | 'birch';
+export type TreeType = TreeSpecies;
 
 interface TreeProps {
   position: [number, number, number];
   type?: TreeType;
   scale?: number;
-  rotation?: number;
 }
 
 /**
- * Oak Tree - Deciduous tree with round canopy
+ * Memoised on the position COMPONENTS rather than the array identity: callers
+ * write `position={[x, y, z]}` inline, which is a fresh array every render and
+ * would otherwise rebuild the instance matrices on each parent update.
  */
-export const OakTree: React.FC<TreeProps> = React.memo(({ position, scale = 1, rotation = 0 }) => {
-  return (
-    <group position={position} scale={scale} rotation={[0, rotation, 0]}>
-      {/* Trunk */}
-      <mesh position={[0, 1.2, 0]} castShadow>
-        <cylinderGeometry args={[0.15, 0.25, 2.4, 8]} />
-        <primitive object={TREE_MATERIALS.trunk} attach="material" />
-      </mesh>
-
-      {/* Main canopy (multiple spheres for organic look) */}
-      <mesh position={[0, 3, 0]} castShadow>
-        <sphereGeometry args={[1.2, 8, 6]} />
-        <primitive object={TREE_MATERIALS.leaves} attach="material" />
-      </mesh>
-      <mesh position={[0.4, 2.6, 0.3]} castShadow>
-        <sphereGeometry args={[0.8, 8, 6]} />
-        <primitive object={TREE_MATERIALS.leaves} attach="material" />
-      </mesh>
-      <mesh position={[-0.5, 2.8, -0.2]} castShadow>
-        <sphereGeometry args={[0.7, 8, 6]} />
-        <primitive object={TREE_MATERIALS.leaves} attach="material" />
-      </mesh>
-    </group>
+const useSingleTree = (
+  position: [number, number, number],
+  scale: number | undefined,
+  type: TreeType
+): TreeInstance[] => {
+  const [x, y, z] = position;
+  return useMemo(
+    () => [{ position: [x, y, z] as [number, number, number], scale, type }],
+    [x, y, z, scale, type]
   );
-});
+};
+
+const SingleTree: React.FC<Required<Pick<TreeProps, 'type'>> & TreeProps> = ({
+  position,
+  scale,
+  type,
+}) => {
+  const trees = useSingleTree(position, scale, type);
+  return <InstancedTreeField trees={trees} />;
+};
+
+/** Broadleaf tree with a rounded card canopy. */
+export const OakTree: React.FC<TreeProps> = React.memo((props) => (
+  <SingleTree {...props} type="oak" />
+));
 OakTree.displayName = 'OakTree';
 
-/**
- * Pine Tree - Coniferous tree with cone-shaped canopy
- */
-export const PineTree: React.FC<TreeProps> = React.memo(({ position, scale = 1, rotation = 0 }) => {
-  return (
-    <group position={position} scale={scale} rotation={[0, rotation, 0]}>
-      {/* Trunk */}
-      <mesh position={[0, 1.5, 0]} castShadow>
-        <cylinderGeometry args={[0.12, 0.2, 3, 8]} />
-        <primitive object={TREE_MATERIALS.trunk} attach="material" />
-      </mesh>
-
-      {/* Cone-shaped canopy (stacked cones) */}
-      <mesh position={[0, 2.5, 0]} castShadow>
-        <coneGeometry args={[1.2, 1.5, 6]} />
-        <primitive object={TREE_MATERIALS.pineNeedles} attach="material" />
-      </mesh>
-      <mesh position={[0, 3.5, 0]} castShadow>
-        <coneGeometry args={[0.9, 1.2, 6]} />
-        <primitive object={TREE_MATERIALS.pineNeedles} attach="material" />
-      </mesh>
-      <mesh position={[0, 4.3, 0]} castShadow>
-        <coneGeometry args={[0.5, 0.8, 6]} />
-        <primitive object={TREE_MATERIALS.pineNeedles} attach="material" />
-      </mesh>
-    </group>
-  );
-});
+/** Conifer: tapered card cage on the needle atlas. */
+export const PineTree: React.FC<TreeProps> = React.memo((props) => (
+  <SingleTree {...props} type="pine" />
+));
 PineTree.displayName = 'PineTree';
 
-/**
- * Birch Tree - White-barked deciduous tree
- */
-export const BirchTree: React.FC<TreeProps> = React.memo(
-  ({ position, scale = 1, rotation = 0 }) => {
-    return (
-      <group position={position} scale={scale} rotation={[0, rotation, 0]}>
-        {/* White trunk */}
-        <mesh position={[0, 1.5, 0]} castShadow>
-          <cylinderGeometry args={[0.1, 0.15, 3, 8]} />
-          <primitive object={TREE_MATERIALS.birchTrunk} attach="material" />
-        </mesh>
-
-        {/* Delicate canopy */}
-        <mesh position={[0, 3.2, 0]} castShadow>
-          <sphereGeometry args={[0.9, 8, 6]} />
-          <meshStandardMaterial color="#3d6b35" roughness={0.8} />
-        </mesh>
-        <mesh position={[0.3, 2.8, 0.2]} castShadow>
-          <sphereGeometry args={[0.5, 8, 6]} />
-          <meshStandardMaterial color="#4a7a42" roughness={0.8} />
-        </mesh>
-      </group>
-    );
-  }
-);
+/** White-barked broadleaf, narrower canopy. */
+export const BirchTree: React.FC<TreeProps> = React.memo((props) => (
+  <SingleTree {...props} type="birch" />
+));
 BirchTree.displayName = 'BirchTree';
 
-/**
- * Generic Tree component that selects type
- */
-export const Tree: React.FC<TreeProps> = React.memo(({ type = 'oak', ...props }) => {
-  switch (type) {
-    case 'pine':
-      return <PineTree {...props} />;
-    case 'birch':
-      return <BirchTree {...props} />;
-    default:
-      return <OakTree {...props} />;
-  }
-});
+/** Generic tree that selects a species. */
+export const Tree: React.FC<TreeProps> = React.memo(({ type = 'oak', ...props }) => (
+  <SingleTree {...props} type={type} />
+));
 Tree.displayName = 'Tree';
 
 export default Tree;

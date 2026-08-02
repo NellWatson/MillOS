@@ -5,7 +5,7 @@
  * - Simulation mode (physics-based value generation)
  * - Live mode (real SCADA data via REST, MQTT, OPC-UA)
  * - 90+ industrial tags with ISA naming convention
- * - ISA-18.2 compliant alarm management
+ * - ISA-18.2-informed alarm behavior
  * - 24-hour rolling history with IndexedDB persistence
  */
 

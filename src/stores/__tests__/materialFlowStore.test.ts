@@ -32,6 +32,16 @@ describe('MaterialFlowStore', () => {
       expect(state.totalMaterialProcessed).toBe(0);
       expect(state.totalFlourProduced).toBe(0);
       expect(state.simulationTime).toBe(0);
+      expect(state.initialInventoryKg).toBe(103500);
+      expect(state.receivedKg).toBe(0);
+      expect(state.wasteKg).toBe(0);
+      expect(state.shippedKg).toBe(0);
+      expect(state.manifests).toEqual([]);
+    });
+
+    it('should create one unique physical segment per network connection', () => {
+      const segmentIds = useMaterialFlowStore.getState().network.segments.map(({ id }) => id);
+      expect(new Set(segmentIds).size).toBe(segmentIds.length);
     });
   });
 
@@ -43,6 +53,21 @@ describe('MaterialFlowStore', () => {
       const state = useMaterialFlowStore.getState();
       expect(state.simulationTime).toBe(0);
       expect(state.totalMaterialProcessed).toBe(0);
+    });
+
+    it('should report zero live flow while production is paused', () => {
+      const { tickMaterialFlow } = useMaterialFlowStore.getState();
+      tickMaterialFlow(1, 1);
+      expect(useMaterialFlowStore.getState().currentFlowRate).toBeGreaterThan(0);
+      expect(useMaterialFlowStore.getState().currentPackerFlowRate).toBeGreaterThan(0);
+
+      const simulationTime = useMaterialFlowStore.getState().simulationTime;
+      tickMaterialFlow(1, 0);
+
+      const paused = useMaterialFlowStore.getState();
+      expect(paused.simulationTime).toBe(simulationTime);
+      expect(paused.currentFlowRate).toBe(0);
+      expect(paused.currentPackerFlowRate).toBe(0);
     });
 
     it('should be a no-op for non-positive delta', () => {
@@ -98,6 +123,8 @@ describe('MaterialFlowStore', () => {
 
       // 3 sifters process 80 kg/s each at 95% flour pass-through = 228 kg
       expect(useMaterialFlowStore.getState().totalFlourProduced).toBeCloseTo(228, 5);
+      // The remaining 5% is explicitly accounted for as dust extraction waste.
+      expect(useMaterialFlowStore.getState().wasteKg).toBeCloseTo(12, 5);
     });
 
     it('should move material onto conveyors and deliver it after transit time', () => {
@@ -163,6 +190,23 @@ describe('MaterialFlowStore', () => {
         after.getMachineBuffer('packer-0')!.inputCapacity + 0.001
       );
     });
+
+    it.each([
+      { delta: 1 / 60, speed: 0.25, ticks: 240 },
+      { delta: 0.1, speed: 1, ticks: 120 },
+      { delta: 0.5, speed: 2, ticks: 40 },
+      { delta: 1, speed: 4, ticks: 20 },
+    ])(
+      'should conserve material across ticks at $speed times speed and $delta second steps',
+      ({ delta, speed, ticks }) => {
+        for (let index = 0; index < ticks; index += 1) {
+          useMaterialFlowStore.getState().tickMaterialFlow(delta, speed);
+          expect(
+            Math.abs(useMaterialFlowStore.getState().getMaterialBalance().errorKg)
+          ).toBeLessThan(0.001);
+        }
+      }
+    );
   });
 
   describe('syncMachineProcessing', () => {
@@ -224,9 +268,10 @@ describe('MaterialFlowStore', () => {
 
     it('should clamp delivery to silo capacity', () => {
       const { receiveGrainDelivery } = useMaterialFlowStore.getState();
-      receiveGrainDelivery(1_000_000); // Way over the 50-ton capacity
+      const received = receiveGrainDelivery(1_000_000); // Way over the 50-ton capacity
 
       expect(useMaterialFlowStore.getState().getTotalOutputBuffer('silo-0')).toBe(50000);
+      expect(received).toBe(30000);
     });
 
     it('should ignore non-positive amounts', () => {
@@ -234,6 +279,65 @@ describe('MaterialFlowStore', () => {
       receiveGrainDelivery(0);
       receiveGrainDelivery(-100);
       expect(getTotalOutputBuffer('silo-0')).toBe(20000);
+    });
+
+    it('should record actual delivery mass in a deterministic manifest and ledger', () => {
+      const actual = useMaterialFlowStore.getState().receiveGrainDelivery(5000);
+      const state = useMaterialFlowStore.getState();
+
+      expect(actual).toBe(5000);
+      expect(state.receivedKg).toBe(5000);
+      expect(state.manifests).toEqual([
+        expect.objectContaining({
+          id: 'receiving-0001',
+          kind: 'receiving',
+          dock: 'receiving',
+          requestedKg: 5000,
+          actualKg: 5000,
+          materials: [{ type: 'wheat_grain', amount: 5000 }],
+          simulationTime: 0,
+        }),
+      ]);
+      expect(Math.abs(state.getMaterialBalance().errorKg)).toBeLessThan(0.001);
+    });
+  });
+
+  describe('shipFinishedGoods', () => {
+    it('should remove only available packer output and record the actual shipment', () => {
+      useMaterialFlowStore.getState().tickMaterialFlow(1, 1);
+      const shipped = useMaterialFlowStore.getState().shipFinishedGoods(100);
+      const state = useMaterialFlowStore.getState();
+
+      // Three packers make 25 kg each during the first second.
+      expect(shipped).toBeCloseTo(75, 5);
+      expect(state.shippedKg).toBeCloseTo(75, 5);
+      expect(state.manifests.at(-1)).toEqual(
+        expect.objectContaining({
+          id: 'shipping-0001',
+          kind: 'shipping',
+          dock: 'shipping',
+          requestedKg: 100,
+          actualKg: 75,
+          materials: [{ type: 'flour', amount: 75 }],
+          simulationTime: 1,
+        })
+      );
+      expect(Math.abs(state.getMaterialBalance().errorKg)).toBeLessThan(0.001);
+    });
+
+    it('should preserve conservation across receiving, production, waste, and shipping', () => {
+      expect(useMaterialFlowStore.getState().receiveGrainDelivery(8000)).toBe(8000);
+      for (let index = 0; index < 90; index += 1) {
+        useMaterialFlowStore.getState().tickMaterialFlow(0.25, 1.5);
+      }
+      const shipped = useMaterialFlowStore.getState().shipFinishedGoods(2500);
+      const balance = useMaterialFlowStore.getState().getMaterialBalance();
+
+      expect(shipped).toBeGreaterThan(0);
+      expect(balance.receivedKg).toBe(8000);
+      expect(balance.wasteKg).toBeGreaterThan(0);
+      expect(balance.shippedKg).toBeCloseTo(shipped, 5);
+      expect(Math.abs(balance.errorKg)).toBeLessThan(0.001);
     });
   });
 
@@ -250,8 +354,13 @@ describe('MaterialFlowStore', () => {
       expect(state.simulationTime).toBe(0);
       expect(state.totalMaterialProcessed).toBe(0);
       expect(state.totalFlourProduced).toBe(0);
+      expect(state.receivedKg).toBe(0);
+      expect(state.wasteKg).toBe(0);
+      expect(state.shippedKg).toBe(0);
+      expect(state.manifests).toEqual([]);
       expect(state.getTotalOutputBuffer('silo-0')).toBe(20000);
       expect(state.network.segments.every((s) => s.currentLoad === 0)).toBe(true);
+      expect(Math.abs(state.getMaterialBalance().errorKg)).toBeLessThan(0.001);
     });
   });
 });

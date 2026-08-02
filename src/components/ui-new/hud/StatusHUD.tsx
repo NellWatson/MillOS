@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  Wifi,
+  Database,
   ShieldCheck,
   ShieldAlert,
   Bell,
@@ -12,13 +12,32 @@ import {
 import { useSafetyStore } from '../../../stores/safetyStore';
 import { useFPSStore } from '../../FPSMonitor';
 import { useUIStore } from '../../../stores/uiStore';
+import { useProductionStore } from '../../../stores/productionStore';
+import { useGameSimulationStore } from '../../../stores/gameSimulationStore';
+import { useGraphicsStore } from '../../../stores/graphicsStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export const StatusHUD: React.FC = () => {
   const safetyMetrics = useSafetyStore((state) => state.safetyMetrics);
   const fps = useFPSStore((state) => state.fps);
   const alerts = useUIStore((state) => state.alerts);
+  const showFPSCounter = useUIStore((state) => state.showFPSCounter);
   const acknowledgeAlert = useUIStore((state) => state.acknowledgeAlert);
   const removeAlert = useUIStore((state) => state.removeAlert);
+  const { throughput, dailyBagsProduced, targetBags } = useProductionStore(
+    useShallow((state) => ({
+      throughput: state.metrics.throughput,
+      dailyBagsProduced: state.dailyBagsProduced,
+      targetBags: state.productionTarget?.targetBags ?? 0,
+    }))
+  );
+  const { gameTime, currentShift } = useGameSimulationStore(
+    useShallow((state) => ({
+      gameTime: state.gameTime,
+      currentShift: state.currentShift,
+    }))
+  );
+  const scadaEnabled = useGraphicsStore((state) => state.graphics.enableSCADA);
 
   const [showNotifications, setShowNotifications] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -168,15 +187,61 @@ export const StatusHUD: React.FC = () => {
           <GripVertical className="w-3 h-3 text-slate-500" aria-hidden="true" />
         </div>
 
-        <div className="flex items-center gap-4 px-3 py-1.5" role="status" aria-live="polite">
-          {/* FPS - excluded from the live region so the constantly-changing
-              value does not flood screen readers */}
+        <div
+          className="flex items-center gap-4 px-3 py-1.5"
+          role="group"
+          aria-label="Live operational metrics"
+        >
+          {/* Metrics remain readable in the accessibility tree without becoming
+              live announcements every time the simulation updates. */}
+          {showFPSCounter && (
+            <>
+              <div
+                className="flex items-center gap-1.5 text-[10px] text-slate-300 font-mono"
+                aria-label={`${fps} frames per second`}
+              >
+                <ActivityIcon size={12} aria-hidden="true" />
+                <span>{fps} FPS</span>
+              </div>
+              <div className="w-px h-3 bg-white/10" aria-hidden="true"></div>
+            </>
+          )}
+
           <div
-            className="flex items-center gap-1.5 text-[10px] text-slate-400 font-mono"
-            aria-hidden="true"
+            className="flex items-center gap-1.5 text-[10px] text-cyan-300 font-mono"
+            aria-label={`Throughput ${throughput} bags per hour`}
           >
-            <ActivityIcon size={12} aria-hidden="true" />
-            <span>{fps} FPS</span>
+            <span>{throughput.toLocaleString()} BAGS/H</span>
+          </div>
+
+          <div className="w-px h-3 bg-white/10" aria-hidden="true"></div>
+
+          <div
+            className="flex items-center gap-1.5 text-[10px] text-orange-300 font-mono"
+            aria-label={`Daily target ${dailyBagsProduced} of ${targetBags} bags`}
+          >
+            <span>
+              TARGET {dailyBagsProduced.toLocaleString()}/{targetBags.toLocaleString()}
+            </span>
+          </div>
+
+          <div className="w-px h-3 bg-white/10" aria-hidden="true"></div>
+
+          <div
+            className="flex items-center gap-1.5 text-[10px] text-slate-200"
+            aria-label={`${currentShift} shift, simulation time ${Math.floor(gameTime)
+              .toString()
+              .padStart(2, '0')}:${Math.floor((gameTime % 1) * 60)
+              .toString()
+              .padStart(2, '0')}`}
+          >
+            <span className="uppercase">{currentShift}</span>
+            <time>
+              {Math.floor(gameTime).toString().padStart(2, '0')}:
+              {Math.floor((gameTime % 1) * 60)
+                .toString()
+                .padStart(2, '0')}
+            </time>
           </div>
 
           <div className="w-px h-3 bg-white/10" aria-hidden="true"></div>
@@ -192,13 +257,17 @@ export const StatusHUD: React.FC = () => {
 
           <div className="w-px h-3 bg-white/10" aria-hidden="true"></div>
 
-          {/* Network / Connectivity */}
+          {/* SCADA mode. Connection health lives in the SCADA workspace. */}
           <div
-            className="flex items-center gap-1.5 text-[10px] text-cyan-400"
-            aria-label="Network status: Connected"
+            className={`flex items-center gap-1.5 text-[10px] ${
+              scadaEnabled ? 'text-cyan-300' : 'text-slate-400'
+            }`}
+            aria-label={
+              scadaEnabled ? 'Simulated SCADA telemetry enabled' : 'SCADA telemetry disabled'
+            }
           >
-            <Wifi size={12} aria-hidden="true" />
-            <span>LINKED</span>
+            <Database size={12} aria-hidden="true" />
+            <span>{scadaEnabled ? 'SCADA SIMULATED' : 'SCADA DISABLED'}</span>
           </div>
         </div>
       </div>
@@ -214,7 +283,7 @@ export const StatusHUD: React.FC = () => {
         >
           <Bell size={14} />
           {unacknowledgedCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 rounded-full border-2 border-slate-950 flex items-center justify-center text-[9px] font-bold text-white">
+            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-700 rounded-full border-2 border-slate-950 flex items-center justify-center text-[9px] font-bold text-white">
               {unacknowledgedCount > 9 ? '9+' : unacknowledgedCount}
             </span>
           )}

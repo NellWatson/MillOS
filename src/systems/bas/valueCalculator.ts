@@ -142,13 +142,16 @@ export function calculateEquityIndex(
   axes: FiveAxes,
   workerMetrics?: WorkerEquityMetrics[]
 ): number {
-  // Calculate base equity from axis settings
-  let baseEquity = 0;
-
-  for (const [axis, weight] of Object.entries(EQUITY_AXIS_WEIGHTS)) {
-    const axisValue = axes[axis as keyof FiveAxes] / 100;
-    baseEquity += axisValue * weight;
-  }
+  // Keep this hot simulation path allocation-free. Object.entries() created a
+  // fresh iterator payload for every calculation even though the five axes are
+  // a fixed typed contract.
+  const baseEquity =
+    (axes.autonomyLevel * EQUITY_AXIS_WEIGHTS.autonomyLevel +
+      axes.decisionMode * EQUITY_AXIS_WEIGHTS.decisionMode +
+      axes.informationAccess * EQUITY_AXIS_WEIGHTS.informationAccess +
+      axes.evaluationDirection * EQUITY_AXIS_WEIGHTS.evaluationDirection +
+      axes.collectiveOrientation * EQUITY_AXIS_WEIGHTS.collectiveOrientation) /
+    100;
 
   // If no worker metrics, return base equity
   if (!workerMetrics || workerMetrics.length === 0) {

@@ -29,6 +29,7 @@ export const HeatShimmer: React.FC<{
   // Create material ONCE
   useEffect(() => {
     const shaderMaterial = new THREE.ShaderMaterial({
+      name: 'MillOS Machine Heat Shimmer',
       uniforms: {
         time: { value: 0 },
         intensity: { value: intensity }, // Initial value
@@ -50,12 +51,15 @@ export const HeatShimmer: React.FC<{
           float alpha = (1.0 - vUv.y) * 0.08 * intensity;
           alpha *= sin(vUv.x * 3.14159);
           gl_FragColor = vec4(1.0, 0.95, 0.9, alpha);
+          #include <colorspace_fragment>
         }
       `,
       transparent: true,
+      toneMapped: false,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
+    shaderMaterial.customProgramCacheKey = () => 'millos-heat-shimmer-v2';
 
     materialRef.current = shaderMaterial;
 
