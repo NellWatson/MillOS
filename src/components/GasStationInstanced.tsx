@@ -36,7 +36,9 @@ const SHOP_WALL_SURFACE = {
 const GEOMETRIES = {
   shelfProduct: new THREE.BoxGeometry(0.15, 0.25, 0.2),
   drinkBottle: new THREE.CylinderGeometry(0.1, 0.1, 0.4, 8),
-  canopyColumn: new THREE.CylinderGeometry(0.25, 0.25, 5, 8),
+  // 5 m columns standing free against the sky and passed close by on the
+  // forecourt, where 8 sides read as a faceted post rather than a steel pillar.
+  canopyColumn: new THREE.CylinderGeometry(0.25, 0.25, 5, 16),
   magazine: new THREE.BoxGeometry(0.6, 0.35, 0.02),
   // Pump hose/handle geometries
   hoseSegment: new THREE.CylinderGeometry(0.025, 0.025, 0.6, 6),

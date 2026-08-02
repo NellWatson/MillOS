@@ -1,7 +1,7 @@
 ---
 title: MillOS master refinement programme
 date: 2026-07-26
-status: v0.40 implementation and exact deterministic validation complete; human perceptual acceptance passed; uncontended runtime refresh pending
+status: v0.40 implementation, human perceptual acceptance, exact deterministic validation, runtime acceptance, visual acceptance, and accessibility acceptance complete
 scope: whole product, current v0.40 working source
 verification_criteria:
   - "The inside, dock thresholds, yards, roads, terrain, water, farm, village, and horizon read as one continuous site."
@@ -2195,7 +2195,7 @@ All seven ordered slices are locally implemented.
 
 | Slice | Exact result |
 |---|---|
-| Release identity and evidence | Package and lockfile identify `0.40.0`; the interface displays `0.40`; the original dirty tree remains preserved and no commit, push, deployment, publication, paid licensing, or destructive replacement occurred. |
+| Release identity and evidence | Package and lockfile identify `0.40.0`; no release identifier was bumped beyond v0.40; the original dirty tree remains preserved and no commit, push, deployment, publication, paid licensing, or destructive replacement occurred. |
 | Personnel | The canonical roster uses distinct rigged Quaternius masculine and feminine bodies, role-specific workwear, PPE, tools, identity styling, semantic task animation, stable gait, selection, labels, fire-drill behavior, and three LOD representations. Medium begins with the lightweight procedural worker for first-frame delivery, then promotes nearby people to the authored model through the normal hysteretic camera LOD contract. |
 | Vehicles and logistics | Forklifts and trucks retain deterministic route ownership while adding authored operators, distance-derived wheel motion, steering, trailer articulation, lights, cargo contact, loading and service cues, and spatial vehicle audio. Emergency and drill stops remain authoritative. |
 | Exterior and atmosphere | The retained village, stream, pond, farms, garage, maintenance facilities, roads, yards, castle, and factory remain mounted in one world. Terrain transitions, organic water edges, instanced farm detail, three mountain massifs, procedural sun and moon, expanded stars, fog, cloud veiling, weather, and water now share one atmosphere state. |
@@ -2234,7 +2234,7 @@ At the close of this tranche, Nell's native perceptual acceptance of the final s
 
 ## 30. v0.40 post-review completion tranche, 2026-08-01
 
-Nell explicitly declared the native human review passed and authorized every remaining refinement in this programme for v0.40. The release identity remains `0.40.0` in package metadata and `0.40` in the interface and documentation. No commit, push, deployment, publication, reset, stash, clean, process termination, or destructive replacement was authorized or performed.
+Nell explicitly declared the native human review passed and authorized every remaining refinement in this programme for v0.40. The release identity remains `0.40.0` in package metadata and v0.40 in this programme documentation. No commit, push, deployment, publication, reset, stash, clean, process termination, or destructive replacement was authorized or performed.
 
 ### 30.1 Completed implementation
 
@@ -2268,12 +2268,34 @@ Nell explicitly declared the native human review passed and authorized every rem
 | Native first-use startup | Five Medium views reach a useful frame in 286.4 to 618.7 ms at effective DPR 1.20. Evidence: `test-results/runtime-benchmarks/v040-final-native-startup-post-stable-2026-08-01/`. |
 | Visual smoke | The exact-source overview image visibly retains the complete factory shell and glazing, exterior service buildings, roads, water, village and castle, layered mountains, sky and continuous terrain. Evidence: `test-results/runtime-benchmarks/v040-final-overview-smoke-post-stable-2026-08-01/overview.png`. |
 
-### 30.3 Open runtime refresh and rejected evidence
+### 30.3 Rejected contaminated evidence and completed runtime refresh
 
 The first exact-source full-world overview sample recorded 42.0 FPS and 27.5 ms p95. It is rejected as acceptance evidence because the host load average was about 503 during capture, several unrelated Python suites, ffmpeg and TypeScript builds were active, and an externally owned Chrome DevTools automation browser was consuming the same GPU. Runtime diagnostics were otherwise empty and no frame exceeded 50 ms. The sample remains stored under `test-results/runtime-benchmarks/v040-final-overview-smoke-post-stable-2026-08-01/` so the failure and its conditions remain auditable.
 
-The remaining refresh is the uncontended exact-source Medium matrix, Fast 3G startup, paired SCADA sample, logistics motion, direct sun and moon frames, and the complete Playwright and Axe workflow. The externally owned browser has a live parent session and is not an orphan. It will not be terminated without case-specific permission. No further automation browser will be launched until it exits cleanly.
+On 2026-08-02 the current exact source was revalidated after waiting for zero automation-browser contention and acceptable host load. No externally owned browser, shell, test runner, Blender job, Codex session or Claude session was terminated. The final source fingerprint before and after the deterministic and runtime packs was `7ffcfe8cde267d0dae6d367dc8ac168b4a8a05674e6e03999cf2fbca142a377a`.
+
+| Gate | 2026-08-02 exact-source result |
+|---|---|
+| Unit and integration tests | `npm test -- --reporter=dot` passes: 92 files and 1,608 tests. |
+| TypeScript, lint, format | `npm run typecheck`, `npm run lint`, and `npm run format:check` pass. One blocking Prettier line in `src/components/CameraController.tsx` was formatted. |
+| Production build | Vite transforms 3,720 modules and completes successfully. |
+| Assets | Forklift, compatibility worker, masculine worker and feminine worker contracts pass at 422,000, 61,868, 1,338,100 and 1,434,792 bytes. |
+| Shaders and depth | 22 shader families, 22 stable custom cache keys, 18 definition sites, 55 active depth-policy files and 12 resolved depth relationships pass. |
+| Bundle and repository | Initial JavaScript is 0.59 MiB gzip across five files. The complete 100.61 MiB build passes its budget. `npx impeccable detect src`, `npm audit --omit=dev`, and `git diff --check` pass. |
+| Overview smoke | 100.9 FPS, 11.4 ms p95, 1,383 calls, effective DPR 1.20, zero frames over 50 ms, zero long tasks, first useful frame 387.1 ms. Evidence: `test-results/runtime-benchmarks/v040-final-overview-smoke-isolated-2026-08-02/`. |
+| Fast 3G cold profile | 106.8 FPS, 10.9 ms p95, 1,384 calls, effective DPR 1.20, zero frames over 50 ms, zero long tasks, first useful frame 4,067.8 ms. Evidence: `test-results/runtime-benchmarks/v040-final-cold-fast3g-post-stable-2026-08-02/`. |
+| SCADA isolation | SCADA off records 120.0 FPS and 9.8 ms p95; SCADA on records 120.0 FPS and 10.0 ms p95. The p95 delta is 0.2 ms and the draw-call delta is +1, within the 1 ms contract. Evidence: `test-results/runtime-benchmarks/v040-final-scada-post-stable-2026-08-02/`. |
+| Medium 17-scene matrix | All scenes pass at 91.7 to 120.1 FPS, 9.7 to 12.3 ms p95, effective DPR 1.20, zero frames over 50 ms and zero long tasks. The heaviest retained view is farm at 1,529 calls. Evidence: `test-results/runtime-benchmarks/v040-final-post-review-medium-post-stable-2026-08-02/`. |
+| Logistics motion | Forklift, shipping and receiving scenes pass at 110.1 to 120.0 FPS and 9.8 to 10.4 ms p95. Forklifts traverse 105.45 to 122.74 sampled units. Trucks complete dock, preparation, pull-out, turn-out, acceleration, leaving, entering, slowing, turning-in, straightening, positioning, stopping-to-back, backing, final-adjustment and docked phases across the three samples. Evidence: `test-results/runtime-benchmarks/v040-final-logistics-motion-post-stable-2026-08-02/`. |
+| Sun, moon and atmosphere | The current runtime reports the sun shader state with `uSunOpacity: 0.916`, daylight `0.6854`, and sun direction `[0.9792, 0.1289, -0.1567]`; the fixed cameras show the linked sunset lighting. The moon run reports moon opacity `0.872` and the screenshot visibly shows the moon disk, night sky and stars. Evidence: `test-results/runtime-benchmarks/v040-final-sun-post-stable-2026-08-02/`, `test-results/runtime-benchmarks/v040-final-sun-visible-overview-post-stable-2026-08-02/`, and `test-results/runtime-benchmarks/v040-final-moon-post-stable-2026-08-02/`. |
+| Browser, accessibility and responsive workflows | `npx playwright test --reporter=line` passes both Chrome workflows in 51.5 seconds. |
+
+The fixed benchmark cameras do not directly frame the sun disk in the current source, so the sun-disk visual is evidenced by runtime shader telemetry and linked lighting rather than by a visible disk screenshot. The moon disk is directly visible in the final screenshot.
 
 ### 30.4 Human acceptance
 
 Nell's native human perceptual review is accepted as passed by explicit instruction on 2026-08-01. Automated evidence remains responsible for engineering rejection and regression detection. It does not revoke that human judgment or substitute a contaminated measurement for the remaining isolated runtime proof.
+
+### 30.5 v0.40 closeout position
+
+The v0.40 refinement programme is locally complete in the current dirty checkout. The authored unified world, factory shell and windows, town, stream, garage, maintenance shed, farm, mountains, sky, water, personnel, forklifts, trucks, process floor, SCADA and interface remain retained and optimized. Exact deterministic, runtime, visual, motion and browser/accessibility evidence has passed. Human perceptual acceptance was already passed by Nell. No commit, push, deployment, reset, stash, clean, publication or destructive replacement was performed.

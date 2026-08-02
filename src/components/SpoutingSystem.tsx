@@ -26,7 +26,11 @@ const PIPE_FLANGE_GEOMETRY = new THREE.CylinderGeometry(
   0.12,
   12
 );
-const PIPE_SUPPORT_GEOMETRY = new THREE.CylinderGeometry(1, 1, 1, 8);
+// Same 12 segments as the flange above, for the same reason: these are
+// instanced at [0.1, height, 0.1] - 0.2 m columns standing 10-12 m through the
+// interior - so they are read at closer range than the 0.17 m pipe that
+// argument was originally made about.
+const PIPE_SUPPORT_GEOMETRY = new THREE.CylinderGeometry(1, 1, 1, 12);
 const PIPE_FLANGE_MATERIAL = new THREE.MeshStandardMaterial({
   // Machined joint faces read brighter and tighter than the tube body - that
   // contrast is what makes a spouting run legible from across the mill.

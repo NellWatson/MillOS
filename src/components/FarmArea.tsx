@@ -116,9 +116,18 @@ const SG = {
   sheepEar: new THREE.BoxGeometry(0.1, 0.05, 0.08),
   sheepEye: new THREE.SphereGeometry(0.025, 6, 6),
   sheepLeg: new THREE.CylinderGeometry(0.04, 0.035, 0.25, 6),
-  windmillTower: new THREE.CylinderGeometry(0.8, 1.2, 6, 8),
-  windmillCap: new THREE.ConeGeometry(1, 1.5, 8),
-  windmillHub: new THREE.CylinderGeometry(0.2, 0.2, 0.3, 8),
+  // The windmill is a 6 m landmark read against open sky, and at 2.4 m across
+  // an 8-sided tower showed its facets and a polygonal top rim from anywhere in
+  // the farm. A masonry tower should read smooth, so these carry more segments
+  // than the surrounding props. The cap matches the tower's count so their
+  // facet boundaries line up at the eave.
+  //
+  // Deliberately NOT applied to the trees below: their faceting reads as the
+  // site's stylization rather than as a defect, and a smooth cone is no more
+  // tree-like than a hexagonal one.
+  windmillTower: new THREE.CylinderGeometry(0.8, 1.2, 6, 20),
+  windmillCap: new THREE.ConeGeometry(1, 1.5, 20),
+  windmillHub: new THREE.CylinderGeometry(0.2, 0.2, 0.3, 12),
   windmillBladeArm: new THREE.BoxGeometry(0.15, 3, 0.05),
   windmillBladeSail: new THREE.BoxGeometry(0.5, 2.5, 0.02),
   windmillDoor: new THREE.BoxGeometry(0.6, 1.6, 0.1),

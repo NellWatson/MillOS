@@ -109,14 +109,89 @@ function raycastSiloShell(
   }
 }
 
-const SILO_ROOF = new THREE.ConeGeometry(1, 1, 16);
-const SILO_OUTLET = new THREE.CylinderGeometry(0.42, 1, 1, 12);
-const SILO_RING = new THREE.CylinderGeometry(1.03, 1.03, 0.08, 16);
-const HOPPER = new THREE.CylinderGeometry(0.45, 1, 1, 8);
-const ROLLER = new THREE.CylinderGeometry(1, 1, 1, 12);
-const INLET = new THREE.CylinderGeometry(1, 1, 1, 12);
-const BEACON = new THREE.SphereGeometry(1, 8, 6);
-const FAN_GRILLE = new THREE.TorusGeometry(1, 0.1, 6, 16);
+/**
+ * Bin roof for the silo drums.
+ *
+ * The roof is instanced at [2.35, 1.65, 2.35] - 4.7 m across - and the previous
+ * `ConeGeometry(1, 1, 16)` was a bare 16-sided spike sitting on the 32-sided
+ * corrugated shell: too steep to read as a bin, and faceted on a silhouette
+ * that is visible from anywhere on the site. A real bin roof has three features
+ * that carry at distance, and all three are in this profile: a rolled eave lip
+ * at the rim, a shallower pitch, and a fill collar at the peak.
+ *
+ * The envelope is deliberately identical to the cone it replaces - radius 1.0
+ * at the base, y in [-0.5, 0.5] - so the roof keeps overhanging the 2.25 m
+ * shell by exactly the same 0.1 m and no instance matrix needs retuning.
+ *
+ * Segment count matches the shell's 32 so the eave and the drum wall share
+ * facet boundaries instead of beating against each other.
+ *
+ * Radial rib seams were built and previewed too (scripts/blender/
+ * machine_part_preview.py, `ribbed` variant) and rejected on the evidence:
+ * at the real viewing distance they were indistinguishable from this profile
+ * for double the vertices.
+ */
+function createSiloRoofGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -0.5), // underside cap centre
+    new THREE.Vector2(1.0, -0.5), // eave rim - envelope max radius
+    new THREE.Vector2(0.985, -0.425), // rolled drip lip
+    new THREE.Vector2(0.115, 0.33), // slope up to the collar
+    new THREE.Vector2(0.105, 0.395), // collar shoulder
+    new THREE.Vector2(0.105, 0.5), // collar top - envelope max y
+    new THREE.Vector2(0.0, 0.5),
+  ];
+  return new THREE.LatheGeometry(profile, 32);
+}
+
+const SILO_ROOF = createSiloRoofGeometry();
+
+/**
+ * Segment counts below are set from the diameter each part is actually
+ * instanced at, not from a uniform default. Every one of these is a single
+ * shared geometry drawn across the whole machine bank, so the added vertices
+ * are a one-off scene cost (measured: 629 -> 1385 across every part here,
+ * +756 for the entire machine bank at any instance count) rather than a
+ * per-instance one, and none of these meshes carries pointer handlers - the
+ * four `InteractiveInstances` use `ROUNDED_BOX` and `SILO_SHELL` - so none of
+ * them needs a picking proxy the way the corrugated shell does.
+ */
+const SILO_OUTLET = new THREE.CylinderGeometry(0.42, 1, 1, 24); // 4.1 m across
+const SILO_RING = new THREE.CylinderGeometry(1.03, 1.03, 0.08, 32); // matches shell
+const HOPPER = new THREE.CylinderGeometry(0.45, 1, 1, 24); // 3.7 m across
+const ROLLER = new THREE.CylinderGeometry(1, 1, 1, 20);
+const INLET = new THREE.CylinderGeometry(1, 1, 1, 20);
+const BEACON = new THREE.SphereGeometry(1, 12, 8);
+/**
+ * Instanced at [0.78, 0.52, 0.09]: an ellipse pressed flat against the mill
+ * body, so the ring OUTLINE is what reads and the tube is nearly invisible.
+ * The segments go to `tubularSegments` accordingly. Raising `radialSegments`
+ * from 6 to 8 rounds the tube to its true circular section, which grows the
+ * part by 1.2 mm on the squashed Z axis - the axis buried in the body panel.
+ */
+const FAN_GRILLE = new THREE.TorusGeometry(1, 0.1, 8, 32);
+
+/**
+ * The shared machine part geometry, exposed so the unit-envelope contract can
+ * be asserted against the geometry the app actually draws.
+ *
+ * Each of these is instanced with a hand-tuned non-uniform scale and sits
+ * against its neighbours - the stiffener rings standing proud of the shell at
+ * radius 1.03, the roof eave overhanging it by 0.1 m. Reshaping a part is only
+ * safe while its unit half-extents stay put, so that is what the test pins.
+ * Previews and design work live in scripts/blender/machine_part_preview.py.
+ */
+export const MACHINE_PART_GEOMETRY = {
+  siloShell: SILO_SHELL,
+  siloRoof: SILO_ROOF,
+  siloOutlet: SILO_OUTLET,
+  siloRing: SILO_RING,
+  hopper: HOPPER,
+  roller: ROLLER,
+  inlet: INLET,
+  beacon: BEACON,
+  fanGrille: FAN_GRILLE,
+} as const;
 const STATUS_COLOUR = new THREE.Color();
 const STARVED_COLOUR = new THREE.Color('#d9a441');
 const BLOCKED_COLOUR = new THREE.Color('#d86735');

@@ -313,7 +313,8 @@ export const CameraController: React.FC<CameraControllerProps> = ({
       // Apply movement if there's any
       if (moveDirection.current.length() > 0) {
         // Apply sprint multiplier if shift is held
-        const speedMultiplier = pressedKeys.has('ShiftLeft') || pressedKeys.has('ShiftRight') ? SPRINT_MULTIPLIER : 1;
+        const speedMultiplier =
+          pressedKeys.has('ShiftLeft') || pressedKeys.has('ShiftRight') ? SPRINT_MULTIPLIER : 1;
 
         // Normalize horizontal movement but keep vertical separate
         const verticalMove = moveDirection.current.y;

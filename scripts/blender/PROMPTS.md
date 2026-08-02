@@ -61,6 +61,19 @@ inspect_forklift.py reports per-object vertex counts. silo_profile_preview.py
 renders a geometry comparison. forklift_lod.py is the round-trip reproducer
 for constraint 1 — keep it, do not "fix" it into the pipeline.
 
+machine_part_preview.py is the general version of silo_profile_preview and the
+one to reach for first: `--part <name>` (or `--all`) rebuilds a part exactly as
+three.js would, next to a proposal, at the part's real instance scale and
+viewing distance. It prints vertex/triangle counts and per-axis half-extents,
+and flags any envelope DRIFT in millimetres on the axis that moved. Add new
+parts to its PARTS table rather than writing another one-off script.
+
+Two traps it exists to catch, both of which produced a wrong answer first time:
+three.js orients a torus with the ring in XY and the tube along Z (so building
+it in XZ applies a squashed instance scale to the wrong axis), and a part's
+envelope must be compared per axis — scaling a drift by the largest scale
+component reported a 1.2 mm change as 10.5 mm.
+
 Verify before claiming done, and show the output:
   npm run validate:assets     # asset gate: bounds, budgets, required nodes/clips
   npm run typecheck && npm run lint
