@@ -1,0 +1,73 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import { unifiedGameTick } from '../UnifiedGameTick';
+import type { TickContext } from '../CentralTickSystem';
+import { useMaterialFlowStore } from '../../stores/materialFlowStore';
+import { useQCLabStore } from '../../stores/qcLabStore';
+import { useTruckScheduleStore } from '../../stores/truckScheduleStore';
+import { useUIStore } from '../../stores/uiStore';
+
+const tickContext: TickContext = {
+  deltaSeconds: 0.1,
+  gameTime: 0,
+  gameSpeed: 1,
+  elapsedTime: 0,
+  tickCount: 0,
+};
+
+describe('UnifiedGameTick shipping quality interlock', () => {
+  beforeEach(() => {
+    useMaterialFlowStore.getState().resetMaterialFlow();
+    useTruckScheduleStore.getState().resetTruckSchedule();
+    useQCLabStore.setState((state) => ({
+      qcLab: {
+        ...state.qcLab,
+        isRunning: false,
+        currentTest: null,
+        testHistory: [],
+        certificationStatus: 'valid',
+        contaminationAlerts: [],
+      },
+    }));
+    useUIStore.setState({ alerts: [] });
+
+    // Synchronize the module-level dock edge detector to an undocked state.
+    unifiedGameTick(tickContext);
+
+    const flow = useMaterialFlowStore.getState();
+    const buffers = new Map(flow.machineBuffers);
+    const packer = buffers.get('packer-0');
+    if (!packer) throw new Error('packer-0 missing from material flow fixture');
+    buffers.set('packer-0', {
+      ...packer,
+      outputBuffer: [{ type: 'flour', amount: 1000 }],
+    });
+    useMaterialFlowStore.setState({ machineBuffers: buffers });
+  });
+
+  it('holds a docked shipping truck when certification has expired', () => {
+    useQCLabStore.setState((state) => ({
+      qcLab: { ...state.qcLab, certificationStatus: 'expired' },
+    }));
+    useTruckScheduleStore.getState().setTruckDocked('shipping', true);
+
+    unifiedGameTick(tickContext);
+
+    expect(useMaterialFlowStore.getState().shippedKg).toBe(0);
+    expect(useUIStore.getState().alerts[0]).toMatchObject({
+      type: 'warning',
+      title: 'Dispatch Quality Hold',
+    });
+  });
+
+  it('loads released goods after the quality condition clears', () => {
+    useTruckScheduleStore.getState().setTruckDocked('shipping', true);
+
+    unifiedGameTick(tickContext);
+
+    expect(useMaterialFlowStore.getState().shippedKg).toBeGreaterThan(0);
+    expect(useMaterialFlowStore.getState().manifests.at(-1)).toMatchObject({
+      kind: 'shipping',
+      dock: 'shipping',
+    });
+  });
+});

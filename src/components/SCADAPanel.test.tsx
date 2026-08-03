@@ -138,6 +138,9 @@ describe('SCADAPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'rm-101' }));
     expect(onFocusMachine).toHaveBeenCalledWith('rm-101');
+    expect(screen.getByRole('heading', { name: 'Live material ledger' })).toBeInTheDocument();
+    expect(screen.getByText(/Maintenance stock:/)).toBeInTheDocument();
+    expect(screen.getByText('Dispatch quality: hold')).toBeInTheDocument();
   });
 
   it('supports roving keyboard focus across the full workspace tabs', async () => {

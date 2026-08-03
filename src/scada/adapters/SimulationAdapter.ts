@@ -47,6 +47,7 @@ export class SimulationAdapter implements IProtocolAdapter {
   private connectTime = 0;
   private machineStates: Map<string, MachineState> = new Map();
   private activeFaults: Map<string, ActiveFault> = new Map();
+  private operationalValues: Map<string, number> = new Map();
 
   // Statistics
   private stats = {
@@ -262,6 +263,22 @@ export class SimulationAdapter implements IProtocolAdapter {
   }
 
   /**
+   * Publish conserved plant values from the material and maintenance stores.
+   * These stay inside the simulation adapter, so live protocol modes can never
+   * be overwritten by local game state.
+   */
+  updateOperationalValues(values: Readonly<Record<string, number>>): void {
+    Object.entries(values).forEach(([tagId, value]) => {
+      if (this.tags.has(tagId) && Number.isFinite(value)) {
+        this.operationalValues.set(tagId, value);
+      }
+    });
+    // The adapter's 1 Hz sampler publishes the latest snapshot. Running a
+    // complete 87-tag tick for every material-flow update would move simulation
+    // work onto the render-critical path and oversample historian data.
+  }
+
+  /**
    * Get current overall plant load (average of all running machines)
    */
   getPlantLoad(): number {
@@ -366,6 +383,11 @@ export class SimulationAdapter implements IProtocolAdapter {
         const faultResult = this.applyFault(activeFault, tag, newValue);
         newValue = faultResult.value;
         quality = faultResult.quality;
+      }
+      // Exact conserved telemetry takes precedence over synthetic drift and
+      // noise. Injected faults above still exercise the complete alarm path.
+      else if (this.operationalValues.has(id)) {
+        newValue = Math.max(tag.engLow, Math.min(tag.engHigh, this.operationalValues.get(id)!));
       }
       // Status-dependent tags
       else if (sim.statusDependent && !isRunning) {

@@ -661,6 +661,13 @@ export class SCADAService {
     }
   }
 
+  /** Publish plant-level material and maintenance values in simulation mode. */
+  updateOperationalValues(values: Readonly<Record<string, number>>): void {
+    if (this.adapter instanceof SimulationAdapter) {
+      this.adapter.updateOperationalValues(values);
+    }
+  }
+
   /**
    * Inject a fault for testing
    */

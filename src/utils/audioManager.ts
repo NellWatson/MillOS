@@ -1,6 +1,59 @@
 // Audio manager for realistic factory sounds using Web Audio API
 import { logger } from './logger';
 
+export type AmbientWeather = 'clear' | 'cloudy' | 'rain' | 'storm';
+
+export interface OutdoorAmbientMix {
+  birds: number;
+  wind: number;
+  traffic: number;
+  water: number;
+  ducks: number;
+  pigs: number;
+  cows: number;
+}
+
+const proximity = (x: number, z: number, targetX: number, targetZ: number, range: number): number =>
+  Math.max(0, 1 - Math.hypot(x - targetX, z - targetZ) / range);
+
+/** Pure spatial and weather mix, kept testable outside Web Audio. */
+export function calculateOutdoorAmbientMix(
+  camera: { x: number; z: number },
+  timeOfDay: 'day' | 'night',
+  weather: AmbientWeather
+): OutdoorAmbientMix {
+  const insideFactory = camera.x > -60 && camera.x < 60 && camera.z > -50 && camera.z < 50;
+  const exterior = insideFactory ? 0.12 : 1;
+  const weatherMix = {
+    clear: { birds: 1, wind: 1, water: 1, animals: 1 },
+    cloudy: { birds: 0.75, wind: 1.25, water: 1, animals: 0.85 },
+    rain: { birds: 0.16, wind: 1.7, water: 1.35, animals: 0.25 },
+    storm: { birds: 0, wind: 2.8, water: 1.75, animals: 0.08 },
+  }[weather];
+  const daylight = timeOfDay === 'day' ? 1 : 0.25;
+  const waterProximity = Math.max(
+    proximity(camera.x, camera.z, -190, 0, 70),
+    proximity(camera.x, camera.z, -125, 105, 70),
+    proximity(camera.x, camera.z, 120, 120, 80),
+    proximity(camera.x, camera.z, 0, -145, 75)
+  );
+  const farmProximity = proximity(camera.x, camera.z, 75, 120, 75);
+  const villagePondProximity = Math.max(
+    proximity(camera.x, camera.z, -190, 0, 55),
+    proximity(camera.x, camera.z, -125, 105, 45)
+  );
+
+  return {
+    birds: 0.002 * exterior * daylight * weatherMix.birds,
+    wind: 0.012 * exterior * (timeOfDay === 'night' ? 1.5 : 1) * weatherMix.wind,
+    traffic: 0.015 * exterior * (timeOfDay === 'night' ? 0.53 : 1),
+    water: 0.004 * exterior * waterProximity * weatherMix.water,
+    ducks: 0.0008 * exterior * villagePondProximity * daylight * weatherMix.animals,
+    pigs: 0.0012 * exterior * farmProximity * weatherMix.animals,
+    cows: 0.0008 * exterior * farmProximity * weatherMix.animals,
+  };
+}
+
 // Use centralized audio logger
 const audioLog = {
   debug: (message: string, ...args: unknown[]) => {
@@ -97,6 +150,7 @@ class AudioManager {
     pigs?: { source: AudioBufferSourceNode; gain: GainNode };
     cows?: { source: AudioBufferSourceNode; gain: GainNode };
   } = {};
+  private lastOutdoorTargets: Partial<OutdoorAmbientMix> = {};
 
   // Camera position for spatial audio (updated externally)
   private cameraPosition: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
@@ -2033,6 +2087,7 @@ class AudioManager {
     this.cameraPosition = { x, y, z };
     // Update ambient factory sounds based on distance from factory
     this.updateAmbientSpatialVolumes();
+    this.adjustAmbientForTimeOfDay();
   }
 
   /**
@@ -2394,6 +2449,7 @@ class AudioManager {
 
   private currentTimeOfDay: 'day' | 'night' = 'day';
   private isDuskCricketTime: boolean = false;
+  private currentWeather: AmbientWeather = 'clear';
 
   // Update ambient sounds based on game time (0-24)
   updateTimeOfDay(gameTime: number) {
@@ -2419,33 +2475,27 @@ class AudioManager {
     }
   }
 
+  updateWeather(weather: AmbientWeather): void {
+    if (weather === this.currentWeather) return;
+    this.currentWeather = weather;
+    this.adjustAmbientForTimeOfDay();
+  }
+
   private adjustAmbientForTimeOfDay() {
     if (!this.audioContext) return;
     const currentTime = this.audioContext.currentTime;
-
-    // Adjust outdoor sounds for day/night
-    if (this.outdoorNodes.birds) {
-      // Birds quieter at night (base volume is now 0.002)
-      const birdVolume =
-        (this.currentTimeOfDay === 'night' ? 0.0005 : 0.002) * this.getSpeechDuckFactor();
-      this.outdoorNodes.birds.gain.gain.setTargetAtTime(birdVolume, currentTime, 2);
-    }
-
-    if (this.outdoorNodes.wind) {
-      // Wind slightly louder at night (quieter environment makes it more noticeable)
-      const windVolume =
-        (this.currentTimeOfDay === 'night' ? 0.018 : 0.012) * this.getSpeechDuckFactor();
-      this.outdoorNodes.wind.gain.gain.setTargetAtTime(windVolume, currentTime, 2);
-    }
-
-    if (this.outdoorNodes.traffic) {
-      // Less traffic at night
-      const trafficVolume =
-        (this.currentTimeOfDay === 'night' ? 0.008 : 0.015) * this.getSpeechDuckFactor();
-      this.outdoorNodes.traffic.gain.gain.setTargetAtTime(trafficVolume, currentTime, 2);
-    }
-
-    // Note: Cricket sounds are now handled separately by isDuskCricketTime logic
+    const mix = calculateOutdoorAmbientMix(
+      this.cameraPosition,
+      this.currentTimeOfDay,
+      this.currentWeather
+    );
+    const duck = this.getSpeechDuckFactor();
+    (Object.keys(mix) as Array<keyof OutdoorAmbientMix>).forEach((key) => {
+      const target = mix[key] * duck;
+      if (Math.abs((this.lastOutdoorTargets[key] ?? -1) - target) < 0.00001) return;
+      this.lastOutdoorTargets[key] = target;
+      this.outdoorNodes[key]?.gain.gain.setTargetAtTime(target, currentTime, 0.8);
+    });
   }
 
   private nightAmbientInterval: NodeJS.Timeout | number | null = null;
@@ -3529,6 +3579,9 @@ class AudioManager {
 
         this.outdoorNodes.cows = { source, gain };
       }
+
+      // Apply camera, time and weather weighting after every layer exists.
+      this.adjustAmbientForTimeOfDay();
     } catch (e) {
       audioLog.warn('Outdoor ambient sound start failed', e);
     }
@@ -3545,6 +3598,7 @@ class AudioManager {
       }
     });
     this.outdoorNodes = {};
+    this.lastOutdoorTargets = {};
   }
 
   // === TOWN HALL CLOCK CHIME ===

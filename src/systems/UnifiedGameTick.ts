@@ -15,7 +15,7 @@ import { centralTick, TICK_PRIORITY } from './CentralTickSystem';
 import type { TickContext } from './CentralTickSystem';
 import { useGameSimulationStore, getShiftForHour } from '../stores/gameSimulationStore';
 import { useProductionStore, DAILY_TARGET_BAGS } from '../stores/productionStore';
-import { useQCLabStore } from '../stores/qcLabStore';
+import { getDispatchQualityStatus, useQCLabStore } from '../stores/qcLabStore';
 import { useMaterialFlowStore } from '../stores/materialFlowStore';
 import { useTruckScheduleStore } from '../stores/truckScheduleStore';
 import { useBreakdownStore } from '../stores/breakdownStore';
@@ -461,7 +461,25 @@ function unifiedGameTick(ctx: TickContext): void {
   // not make product appear or disappear.
   const shippingDocked = useTruckScheduleStore.getState().truckSchedule.shipping.truckDocked;
   if (shippingDocked && !_lastShippingDocked) {
-    flowStore.shipFinishedGoods(FINISHED_GOODS_SHIPMENT_KG);
+    const qualityStatus = getDispatchQualityStatus(useQCLabStore.getState().qcLab);
+    if (qualityStatus.released) {
+      flowStore.shipFinishedGoods(FINISHED_GOODS_SHIPMENT_KG);
+    } else {
+      const reason =
+        qualityStatus.reason === 'certification_expired'
+          ? 'quality certification is expired'
+          : qualityStatus.reason === 'unresolved_contamination'
+            ? 'a contamination alert is unresolved'
+            : 'the latest laboratory result failed';
+      useUIStore.getState().addAlert({
+        id: `dispatch-quality-hold-${Date.now()}`,
+        type: 'warning',
+        title: 'Dispatch Quality Hold',
+        message: `Shipping truck held at the dock because ${reason}. Clear the quality condition before release.`,
+        timestamp: new Date(),
+        acknowledged: false,
+      });
+    }
   }
   _lastShippingDocked = shippingDocked;
 

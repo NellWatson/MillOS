@@ -6,12 +6,54 @@
  */
 
 import * as THREE from 'three';
-import {
-  getTexture,
-  fbmNoise,
-  fbmNoiseSigned,
-  createLinearDataTexture,
-} from '../utils/textureGenerator';
+import { getTexture, createLinearDataTexture } from '../utils/textureGenerator';
+
+/**
+ * Fast deterministic value noise for normal maps.
+ *
+ * Normal generation was the largest measured main-thread startup cost. The
+ * shared texture noise uses a sine hash, which is useful when a texture's
+ * authored identity depends on it, but a 512 px normal map called that hash
+ * millions of times. Normal maps only need stable, smooth, unbiased relief,
+ * so this local integer hash preserves the visual contract without paying for
+ * trigonometry in every octave and texel.
+ */
+const normalHash = (x: number, y: number): number => {
+  let value = Math.imul(x, 0x1f123bb5) ^ Math.imul(y, 0x5f356495);
+  value = Math.imul(value ^ (value >>> 15), 0x2c1b3c6d);
+  value = Math.imul(value ^ (value >>> 12), 0x297a2d39);
+  return ((value ^ (value >>> 15)) >>> 0) / 0xffffffff;
+};
+
+const fastSmoothNoise = (x: number, y: number): number => {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const n00 = normalHash(ix, iy);
+  const n10 = normalHash(ix + 1, iy);
+  const n01 = normalHash(ix, iy + 1);
+  const n11 = normalHash(ix + 1, iy + 1);
+  const nx0 = n00 + (n10 - n00) * sx;
+  const nx1 = n01 + (n11 - n01) * sx;
+  return nx0 + (nx1 - nx0) * sy;
+};
+
+const fastFbmNoise = (x: number, y: number, octaves: number): number => {
+  let value = 0;
+  let amplitude = 0.5;
+  let frequency = 1;
+  let weight = 0;
+  for (let octave = 0; octave < octaves; octave++) {
+    value += fastSmoothNoise(x * frequency, y * frequency) * amplitude;
+    weight += amplitude;
+    amplitude *= 0.5;
+    frequency *= 2;
+  }
+  return value / weight;
+};
 
 /**
  * Generate normal map from procedural height data.
@@ -22,7 +64,7 @@ export const generateProceduralNormal = (
   bumpScale: number = 1.0,
   noiseScale: number = 10
 ): THREE.DataTexture => {
-  return getTexture(`procedural-normal-${size}-${bumpScale}-${noiseScale}`, () => {
+  return getTexture(`procedural-normal-v2-${size}-${bumpScale}-${noiseScale}`, () => {
     const data = new Uint8Array(size * size * 4);
 
     // First pass: generate height map
@@ -31,7 +73,7 @@ export const generateProceduralNormal = (
       for (let x = 0; x < size; x++) {
         const nx = x / size;
         const ny = y / size;
-        heights[y * size + x] = fbmNoise(nx * noiseScale, ny * noiseScale, 4);
+        heights[y * size + x] = fastFbmNoise(nx * noiseScale, ny * noiseScale, 4);
       }
     }
 
@@ -149,7 +191,7 @@ export const generateMachinePanelNormal = (
   // Clamp so the bevel can never exceed the panel or fall below the mip floor.
   const bevelPx = Math.max(4, Math.min(panelPx * 0.4, bevelPixels));
 
-  return getTexture(`machine-panel-normal-${safeSize}-${safePanels}-${bevelPx}`, () => {
+  return getTexture(`machine-panel-normal-v2-${safeSize}-${safePanels}-${bevelPx}`, () => {
     const data = new Uint8Array(safeSize * safeSize * 4);
 
     for (let y = 0; y < safeSize; y++) {
@@ -180,8 +222,8 @@ export const generateMachinePanelNormal = (
         // Panel-face micro relief so a flat sheet still catches the sun.
         const nx = x / safeSize;
         const ny = y / safeSize;
-        normalX += fbmNoiseSigned(nx * 90, ny * 90, 2) * 0.08;
-        normalY += fbmNoiseSigned(nx * 90 + 37, ny * 90 + 71, 2) * 0.08;
+        normalX += (fastFbmNoise(nx * 90, ny * 90, 2) - 0.5) * 0.08;
+        normalY += (fastFbmNoise(nx * 90 + 37, ny * 90 + 71, 2) - 0.5) * 0.08;
 
         const len = Math.sqrt(normalX * normalX + normalY * normalY + normalZ * normalZ);
 

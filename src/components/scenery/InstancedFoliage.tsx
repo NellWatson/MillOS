@@ -261,6 +261,10 @@ const createClutterTuft = (width: number, tall: number): THREE.BufferGeometry =>
 /** Base level stays binary at this threshold; the atlas writes a
  *  sub-threshold halo so mip reduction does not erode the canopy. */
 const FOLIAGE_ALPHA_TEST = 0.4;
+// A 384 px broadleaf atlas keeps 192 px per authored cell, well above the
+// feature and mip floor, while avoiding 44% of the synchronous texel work and
+// memory of the former 512 px map during first-world hydration.
+const BROADLEAF_ATLAS_SIZE = 384;
 
 const leafRoughness = generateLeafRoughness(256);
 
@@ -275,7 +279,7 @@ export const createFoliageMaterial = (
   kind: FoliageKind,
   tint: string = '#ffffff'
 ): THREE.MeshStandardMaterial => {
-  const atlasSize = kind === 'needle' ? 256 : 512;
+  const atlasSize = kind === 'needle' ? 256 : BROADLEAF_ATLAS_SIZE;
   const material = new THREE.MeshStandardMaterial({
     color: tint,
     map: generateLeafAtlas(atlasSize, kind),

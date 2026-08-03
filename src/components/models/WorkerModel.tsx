@@ -17,7 +17,6 @@ import { useGraphicsStore } from '../../stores/graphicsStore';
 import type { WorkerAppearance, WorkerBodyType, WorkerWorkAction } from '../workers/workerTypes';
 import { ToolAccessory } from '../workers/WorkerTools';
 import {
-  SHARED_WORKER_MATERIALS,
   getSkinSoftMaterial,
   getWorkerDetailMapVariant,
   requestWorkerDetailMaps,
@@ -477,11 +476,9 @@ const WorkerAccessories: React.FC<{
         name="worker-authored-face"
         scale={[appearance.headScale, appearance.headScale, appearance.headScale]}
       >
-        {/* Both authored bodies already contain correctly skinned eyes and the
-            masculine body includes brows and a moustache. Layering a second
-            complete face over that geometry produced the bead-like double eyes
-            visible in close review. The runtime layer supplies only anatomy the
-            source lacks plus eyelids for the shared blink channel. */}
+        {/* Both authored bodies already contain complete skinned faces. The
+            runtime layer only supplies eyelids for the shared blink channel;
+            a second nose and mouth floated above the authored profile. */}
         <mesh
           ref={leftEyelidRef}
           position={[-0.047, 0.067, 0.124]}
@@ -494,18 +491,6 @@ const WorkerAccessories: React.FC<{
           geometry={SHARED_WORKER_GEOMETRY.eyelid}
           material={faceSkinMaterial}
         />
-        <mesh
-          position={[0, 0.018, 0.111]}
-          scale={[0.72, 0.72, 0.72]}
-          geometry={SHARED_WORKER_GEOMETRY.nose}
-          material={faceSkinMaterial}
-        />
-        <mesh
-          position={[0, -0.028, 0.119]}
-          scale={[0.62, 0.5, 0.55]}
-          geometry={SHARED_WORKER_GEOMETRY.mouth}
-          material={SHARED_WORKER_MATERIALS.lips}
-        />
       </BoneMount>
 
       {appearance.hasSafetyGlasses && (
@@ -514,13 +499,16 @@ const WorkerAccessories: React.FC<{
             <mesh
               key={x}
               position={[x, 0, 0]}
-              geometry={UNIT_BOX}
+              geometry={SHARED_WORKER_GEOMETRY.glassesLens}
               material={materials.glasses}
-              scale={[0.078, 0.038, 0.008]}
               renderOrder={4}
             />
           ))}
-          <mesh geometry={UNIT_BOX} material={materials.dark} scale={[0.02, 0.009, 0.009]} />
+          <mesh
+            rotation={[0, 0, Math.PI / 2]}
+            geometry={SHARED_WORKER_GEOMETRY.glassesBridge}
+            material={materials.dark}
+          />
           {[-0.084, 0.084].map((x) => (
             <mesh
               key={`temple-${x}`}

@@ -68,6 +68,7 @@ import type {
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { processTrendHistory, TREND_QUALITY_SUFFIX, type TrendRow } from '../scada/trendProcessing';
+import { OPERATION_TAG_IDS } from '../scada/tagDatabase';
 
 interface SCADAPanelProps {
   isOpen: boolean;
@@ -299,6 +300,24 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
       ] as const,
     [tagsByMachine]
   );
+
+  const operationalTelemetry = useMemo(() => {
+    const read = (tagId: string): number => {
+      const value = values.get(tagId)?.value;
+      return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    };
+    return {
+      rawInventory: read(OPERATION_TAG_IDS.rawInventory),
+      inProcess: read(OPERATION_TAG_IDS.inProcess),
+      finishedGoods: read(OPERATION_TAG_IDS.finishedGoods),
+      packerFlow: read(OPERATION_TAG_IDS.packerFlow),
+      balanceError: read(OPERATION_TAG_IDS.materialBalanceError),
+      lastReceiving: read(OPERATION_TAG_IDS.lastReceiving),
+      lastShipping: read(OPERATION_TAG_IDS.lastShipping),
+      partsStock: read(OPERATION_TAG_IDS.partsStock),
+      shippingReleased: read(OPERATION_TAG_IDS.shippingReleased) >= 0.5,
+    };
+  }, [values]);
 
   const eventTimeline = useMemo(
     () =>
@@ -1028,6 +1047,74 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                   </div>
                 </div>
               </div>
+
+              <section className="mb-4" aria-labelledby="scada-material-ledger-heading">
+                <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+                  <div>
+                    <h3
+                      id="scada-material-ledger-heading"
+                      className="text-sm font-semibold text-white"
+                    >
+                      Live material ledger
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Conserved simulation values sampled into SCADA history.
+                    </p>
+                  </div>
+                  <div
+                    className={`rounded border px-2 py-1 text-[10px] ${
+                      Math.abs(operationalTelemetry.balanceError) <= 0.01
+                        ? 'border-emerald-500/40 text-emerald-200'
+                        : 'border-amber-500/50 text-amber-200'
+                    }`}
+                  >
+                    Balance {operationalTelemetry.balanceError >= 0 ? '+' : ''}
+                    {operationalTelemetry.balanceError.toFixed(2)} kg
+                  </div>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {[
+                    ['Raw grain', operationalTelemetry.rawInventory, 't'],
+                    ['In process', operationalTelemetry.inProcess, 't'],
+                    ['Finished goods', operationalTelemetry.finishedGoods, 't'],
+                    ['Final flow', operationalTelemetry.packerFlow, 't/h'],
+                  ].map(([label, value, unit]) => (
+                    <div
+                      key={label as string}
+                      className="rounded-lg border border-slate-700/60 bg-slate-950/35 p-2.5"
+                    >
+                      <div className="text-[10px] uppercase tracking-wide text-slate-400">
+                        {label}
+                      </div>
+                      <div className="mt-1 font-mono text-lg text-cyan-200">
+                        {(value as number).toFixed(2)}{' '}
+                        <span className="text-xs text-slate-400">{unit}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 grid gap-2 text-xs text-slate-300 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded border border-slate-700/50 px-2.5 py-2">
+                    Last intake: {operationalTelemetry.lastReceiving.toFixed(2)} t
+                  </div>
+                  <div className="rounded border border-slate-700/50 px-2.5 py-2">
+                    Last dispatch: {operationalTelemetry.lastShipping.toFixed(2)} t
+                  </div>
+                  <div className="rounded border border-slate-700/50 px-2.5 py-2">
+                    Maintenance stock: {Math.round(operationalTelemetry.partsStock)} items
+                  </div>
+                  <div
+                    className={`rounded border px-2.5 py-2 ${
+                      operationalTelemetry.shippingReleased
+                        ? 'border-emerald-500/40 text-emerald-200'
+                        : 'border-amber-500/50 text-amber-200'
+                    }`}
+                    role="status"
+                  >
+                    Dispatch quality: {operationalTelemetry.shippingReleased ? 'released' : 'hold'}
+                  </div>
+                </div>
+              </section>
 
               <div className="mb-2 flex items-center justify-between">
                 <div>
