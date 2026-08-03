@@ -17,7 +17,9 @@ export type BenchmarkScene =
   | 'water'
   | 'village'
   | 'farm'
-  | 'garage';
+  | 'garage'
+  | 'sun'
+  | 'moon';
 
 export type RuntimeWeather = 'clear' | 'cloudy' | 'rain' | 'storm';
 export type RuntimePAMode = 'focused' | 'characterful' | 'off';
@@ -60,6 +62,8 @@ const BENCHMARK_SCENES: ReadonlySet<string> = new Set<BenchmarkScene>([
   'village',
   'farm',
   'garage',
+  'sun',
+  'moon',
 ]);
 
 const GRAPHICS_QUALITIES: ReadonlySet<string> = new Set<GraphicsQuality>([

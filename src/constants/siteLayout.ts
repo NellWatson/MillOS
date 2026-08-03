@@ -32,6 +32,16 @@ export interface ServiceAssetAnchor {
   readonly clearance: number;
 }
 
+export interface LandmarkAnchor {
+  readonly id: string;
+  readonly position: Vec3Tuple;
+  readonly rotation: Vec3Tuple;
+  readonly scale: number;
+  /** Conservative X/Z footprint used by placement and regression checks. */
+  readonly footprint: readonly [number, number];
+  readonly height: number;
+}
+
 export const SITE_LAYOUT = {
   units: 'metres',
   axes: {
@@ -165,6 +175,32 @@ export const SITE_LAYOUT = {
       clearance: 3,
     },
   } satisfies Record<string, ServiceAssetAnchor>,
+  landmarks: {
+    castle: {
+      id: 'castle',
+      position: [45, 0, -200],
+      rotation: [0, -Math.PI / 4, 0],
+      scale: 1.5,
+      footprint: [72, 72],
+      height: 58,
+    },
+    farm: {
+      id: 'farm',
+      position: [75, 0, 120],
+      rotation: [0, Math.PI, 0],
+      scale: 1,
+      footprint: [82, 78],
+      height: 20,
+    },
+    village: {
+      id: 'village',
+      position: [-190, 0, 0],
+      rotation: [0, 0, 0],
+      scale: 1,
+      footprint: [64, 124],
+      height: 26,
+    },
+  } satisfies Record<string, LandmarkAnchor>,
   machines: {
     silos: [
       { id: 'silo-0', position: [-18, 0, -22] },
@@ -204,8 +240,12 @@ export const SITE_LAYOUT = {
     sifting: { position: [34, 20, 18], target: [0, 9, 6] },
     packing: { position: [-34, 14, 34], target: [0, 3, 25] },
     personnel: { position: [22, 5.5, -14], target: [0, 1.15, -14] },
-    personnelClose: { position: [7.2, 2.05, -15.8], target: [10, 1.05, -18] },
-    personnelFeminine: { position: [-7.2, 2.05, -11.8], target: [-10, 1.05, -14] },
+    personnelClose: { position: [8.6, 1.72, -16.55], target: [10, 1.25, -18], fov: 42 },
+    personnelFeminine: {
+      position: [-8.6, 1.72, -15.7],
+      target: [-10, 1.25, -14],
+      fov: 42,
+    },
     forklift: { position: [48, 3.8, 33], target: [40, 1.15, 24] },
     shipping: { position: [34, 9, 104], target: [5, 2.5, 82] },
     receiving: { position: [-34, 9, -104], target: [-5, 2.5, -82] },
@@ -214,6 +254,7 @@ export const SITE_LAYOUT = {
     village: { position: [-142, 28, 64], target: [-190, 5, 0] },
     farm: { position: [128, 26, 174], target: [75, 4, 120] },
     garage: { position: [69, 6.5, 30], target: [85, 3, 30] },
+    celestial: { position: [90, 12, 72], target: [0, 12, 0] },
   },
   renderCells: {
     interior: {
@@ -344,6 +385,23 @@ export function getServiceAssetBounds(
     maxY: anchor.position[1] + 16,
     minZ: anchor.position[2] - depth / 2 - clearance,
     maxZ: anchor.position[2] + depth / 2 + clearance,
+  };
+}
+
+export function getLandmarkBounds(anchor: LandmarkAnchor): SiteBounds {
+  const quarterTurn = Math.abs(Math.sin(anchor.rotation[1])) > 0.5;
+  const scaledWidth = anchor.footprint[0] * anchor.scale;
+  const scaledDepth = anchor.footprint[1] * anchor.scale;
+  const width = quarterTurn ? scaledDepth : scaledWidth;
+  const depth = quarterTurn ? scaledWidth : scaledDepth;
+
+  return {
+    minX: anchor.position[0] - width / 2,
+    maxX: anchor.position[0] + width / 2,
+    minY: anchor.position[1],
+    maxY: anchor.position[1] + anchor.height * anchor.scale,
+    minZ: anchor.position[2] - depth / 2,
+    maxZ: anchor.position[2] + depth / 2,
   };
 }
 

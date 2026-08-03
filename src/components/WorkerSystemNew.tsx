@@ -116,7 +116,7 @@ const Worker: React.FC<WorkerProps> = React.memo(
     // Behaviour channel written by the manager and read by the authored model.
     // A plain mutable record rather than React state: it changes every tick and
     // must never trigger a re-render.
-    const secondarySignals = useMemo(() => createSecondarySignals(), []);
+    const secondarySignals = useMemo(() => createSecondarySignals(data.id), [data.id]);
 
     // Get appearance config
     const appearance = useMemo(

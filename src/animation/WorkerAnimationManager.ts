@@ -21,6 +21,7 @@ import {
   IdleVariation,
   DEFAULT_ANIMATION_CONFIG,
   createWorkerAnimationData,
+  workerDeterministicFraction,
 } from './workerAnimationTypes';
 import { AnimationFeatures, GraphicsQuality, getFeaturesForQuality } from './animationFeatures';
 import { positionRegistry, EntityPosition } from '../utils/positionRegistry';
@@ -169,7 +170,10 @@ export class WorkerAnimationManager {
     const data = createWorkerAnimationData(config);
     data.lodLevel = getInitialWorkerLod(this.quality);
     data.refs = refs;
-    if (signals) data.secondary = signals;
+    if (signals) {
+      data.secondary = signals;
+      signals.animationPhase = data.secondary.animationPhase || data.walkCycle;
+    }
 
     // Set initial position on the group
     if (refs.group) {
@@ -998,29 +1002,31 @@ export class WorkerAnimationManager {
 
   private updateBlinking(data: WorkerAnimationData, delta: number): void {
     const { refs } = data;
-    if (!refs?.leftEyelid || !refs?.rightEyelid) return;
 
     data.blinkTimer -= delta;
 
     if (data.blinkTimer <= 0) {
       // Start blink
       data.blinkPhase = 0.15;
-      data.blinkTimer = Math.random() * 4 + 2;
+      data.blinkCount += 1;
+      data.blinkTimer = workerDeterministicFraction(data.id, 100 + data.blinkCount) * 4 + 2;
     }
 
+    let blinkAmount = 0;
     if (data.blinkPhase > 0) {
       data.blinkPhase -= delta;
 
       // Calculate blink amount (close then open)
-      const blinkAmount =
+      blinkAmount =
         data.blinkPhase > 0.075
           ? (0.15 - data.blinkPhase) / 0.075 // Closing
           : data.blinkPhase / 0.075; // Opening
 
       const scaleY = 0.3 + (1 - blinkAmount) * 0.7;
-      refs.leftEyelid.scale.y = scaleY;
-      refs.rightEyelid.scale.y = scaleY;
+      if (refs?.leftEyelid) refs.leftEyelid.scale.y = scaleY;
+      if (refs?.rightEyelid) refs.rightEyelid.scale.y = scaleY;
     }
+    data.secondary.blinkAmount = THREE.MathUtils.clamp(blinkAmount, 0, 1);
   }
 
   private updateSecondaryMotion(data: WorkerAnimationData, delta: number): void {
@@ -1106,6 +1112,8 @@ export class WorkerAnimationManager {
     const waveTarget = data.isWaving && this.features.waving ? 1 : 0;
     signals.waveAmount += (waveTarget - signals.waveAmount) * Math.min(1, delta * 7);
     signals.wavePhase = data.wavePhase;
+    signals.breathAmount =
+      data.idleBlend * Math.sin(data.walkCycle * 0.42 + signals.animationPhase) * 0.5;
   }
 
   // =====================

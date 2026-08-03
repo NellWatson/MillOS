@@ -184,12 +184,14 @@ async function stopPreview() {
 
 function evaluateBudgets(snapshot) {
   const longestTask = Math.max(0, ...snapshot.longTasks.map((task) => task.duration));
+  const enforceWorldIntegrity = options.disabledSystems.length === 0;
   const checks = {
     firstFrame: snapshot.firstFrameAt !== null && snapshot.firstFrameAt <= budgets.firstFrameMs,
     averageFps: snapshot.averageFps >= budgets.averageFps,
     p95Frame: snapshot.p95FrameMs <= budgets.p95FrameMs,
     effectiveDpr: snapshot.canvas.effectiveDpr >= budgets.effectiveDpr,
     longTasks: longestTask <= budgets.maximumLongTaskMs,
+    worldIntegrity: !enforceWorldIntegrity || snapshot.worldIntegrity?.passed === true,
   };
   return {
     checks,
@@ -276,6 +278,16 @@ async function waitForRuntimeStage(page, label, predicate, timeoutMs, diagnostic
 }
 
 function summarizeMotion(samples) {
+  const numericTelemetryKeys = [
+    'speed',
+    'steeringAngle',
+    'wheelRotation',
+    'forkHeight',
+    'mastTilt',
+    'trailerAngle',
+    'doorOpenAmount',
+    'landingGearAmount',
+  ];
   const entities = new Map();
   for (const sample of samples) {
     for (const entity of sample.entities) {
@@ -284,6 +296,8 @@ function summarizeMotion(samples) {
         type: entity.type,
         distance: 0,
         phases: [],
+        cargoStates: [],
+        telemetry: {},
         lastPosition: null,
       };
       if (current.lastPosition) {
@@ -296,6 +310,23 @@ function summarizeMotion(samples) {
       if (entity.phase && current.phases.at(-1) !== entity.phase) {
         current.phases.push(entity.phase);
       }
+      if (entity.cargo && current.cargoStates.at(-1) !== entity.cargo) {
+        current.cargoStates.push(entity.cargo);
+      }
+      for (const key of numericTelemetryKeys) {
+        const value = entity[key];
+        if (!Number.isFinite(value)) continue;
+        const metric = current.telemetry[key] ?? {
+          first: value,
+          last: value,
+          min: value,
+          max: value,
+        };
+        metric.last = value;
+        metric.min = Math.min(metric.min, value);
+        metric.max = Math.max(metric.max, value);
+        current.telemetry[key] = metric;
+      }
       current.lastPosition = entity.position;
       entities.set(entity.id, current);
     }
@@ -303,6 +334,16 @@ function summarizeMotion(samples) {
   return [...entities.values()].map(({ lastPosition: _lastPosition, ...entity }) => ({
     ...entity,
     distance: Number(entity.distance.toFixed(2)),
+    telemetry: Object.fromEntries(
+      Object.entries(entity.telemetry).map(([key, metric]) => [
+        key,
+        {
+          min: Number(metric.min.toFixed(4)),
+          max: Number(metric.max.toFixed(4)),
+          delta: Number((metric.last - metric.first).toFixed(4)),
+        },
+      ])
+    ),
   }));
 }
 
@@ -691,7 +732,7 @@ async function main() {
       );
     } else {
       console.log(
-        `${result.scene}${options.compareScada ? ` (${result.variant})` : ''}: ${metric.averageFps.toFixed(1)} FPS, p95 ${metric.p95FrameMs.toFixed(1)} ms, ${metric.renderer.calls} calls, DPR ${metric.canvas.effectiveDpr.toFixed(2)}, ${result.budget.passed ? 'PASS' : 'FAIL'}`
+        `${result.scene}${options.compareScada ? ` (${result.variant})` : ''}: ${metric.averageFps.toFixed(1)} FPS, p95 ${metric.p95FrameMs.toFixed(1)} ms, ${metric.renderer.calls} calls, DPR ${metric.canvas.effectiveDpr.toFixed(2)}, world ${metric.worldIntegrity?.passed ? 'continuous' : options.disabledSystems.length > 0 ? 'isolated' : 'BROKEN'}, ${result.budget.passed ? 'PASS' : 'FAIL'}`
       );
     }
   }

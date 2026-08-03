@@ -8,9 +8,10 @@ import {
 /**
  * Camera Position Store
  *
- * Tracks whether the camera is inside or outside the factory bounds.
- * Used for performance optimization - interior components are hidden when
- * camera is outside, and vice versa.
+ * Tracks the camera's relationship to the factory and nearby spatial cells.
+ * Consumers may use this for controls, diagnostics, quality hints, and local
+ * effects. It must never decide whether an authored world district exists or
+ * is visible: MillOS is one continuous interior and exterior scene.
  *
  * Factory bounds (from Environment.tsx walls):
  * - X: -60 to +60 (left/right walls)
@@ -44,7 +45,7 @@ interface CameraPositionStore {
   isCameraInside: boolean;
   /** Whether the camera is in a dock transition zone (show both interior + exterior) */
   isCameraInDockZone: boolean;
-  /** Spatial cells mounted around the current camera, including preload margin */
+  /** Spatial cells near the current view, for diagnostics and quality hints only. */
   visibleCells: string[];
   /** Update the camera inside/outside state */
   setIsCameraInside: (inside: boolean) => void;

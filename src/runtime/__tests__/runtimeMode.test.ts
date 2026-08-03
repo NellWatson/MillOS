@@ -70,6 +70,8 @@ describe('parseRuntimeMode', () => {
     expect(parseRuntimeMode('?benchmark=true&scene=village').benchmarkScene).toBe('village');
     expect(parseRuntimeMode('?benchmark=true&scene=farm').benchmarkScene).toBe('farm');
     expect(parseRuntimeMode('?benchmark=true&scene=garage').benchmarkScene).toBe('garage');
+    expect(parseRuntimeMode('?benchmark=true&scene=sun').benchmarkScene).toBe('sun');
+    expect(parseRuntimeMode('?benchmark=true&scene=moon').benchmarkScene).toBe('moon');
   });
 
   it('parses explicit SCADA isolation states without changing the default', () => {

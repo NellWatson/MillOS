@@ -18,6 +18,7 @@ import { WindDriver, applyWindShader } from './scenery/WindDriver';
 import { DrainageCulvert } from './scenery/Tunnel';
 import { PROCEDURAL_TEXTURES, OUTDOOR_MATERIALS } from '../utils/sharedMaterials';
 import { RENDER_ORDER } from '../constants/renderLayers';
+import { SITE_LAYOUT } from '../constants/siteLayout';
 import { generateCobblestoneRoughness } from '../textures';
 
 /** Hoisted so the barnyard material does not allocate a Vector2 per render. */
@@ -1807,7 +1808,12 @@ export const FarmArea: React.FC = () => {
   const clutterSpec = useMemo<ClutterSpec>(() => ({ ...FARM_CLUTTER, density }), [density]);
 
   return (
-    <group position={[75, 0, 120]} rotation={[0, Math.PI, 0]}>
+    <group
+      name="authored-farm-site"
+      position={SITE_LAYOUT.landmarks.farm.position}
+      rotation={SITE_LAYOUT.landmarks.farm.rotation}
+      scale={SITE_LAYOUT.landmarks.farm.scale}
+    >
       {/* Barnyard cobblestone ground */}
       <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[20, 15]} />

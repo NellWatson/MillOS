@@ -13,6 +13,8 @@ import { useTruckScheduleStore } from '../stores/truckScheduleStore';
 import { useAnnouncementsStore } from '../stores/announcementsStore';
 import { getRuntimeMode, type BenchmarkScene, type RuntimeMode } from '../runtime/runtimeMode';
 import { SITE_LAYOUT, type Vec3Tuple } from '../constants/siteLayout';
+import { inspectWorldIntegrity, type WorldIntegrityReport } from '../constants/worldContract';
+import { sampleAtmosphere, sampleCelestial } from '../simulation/atmosphere';
 import { audioManager } from '../utils/audioManager';
 
 interface RuntimeRendererStats {
@@ -73,7 +75,20 @@ interface RuntimeTextureIssue {
   texture: string;
 }
 
-interface RuntimeMotionEntity {
+export interface RuntimeMotionTelemetry {
+  speed?: number;
+  steeringAngle?: number;
+  wheelRotation?: number;
+  forkHeight?: number;
+  mastTilt?: number;
+  trailerAngle?: number;
+  doorOpenAmount?: number;
+  landingGearAmount?: number;
+  cargo?: 'pallet' | 'empty';
+  stopped?: boolean;
+}
+
+interface RuntimeMotionEntity extends RuntimeMotionTelemetry {
   id: string;
   type: 'forklift' | 'truck';
   position: [number, number, number];
@@ -119,6 +134,7 @@ export interface RuntimeTelemetrySnapshot {
   diagnosticRays: Record<string, RuntimeRayHit[]>;
   shaderStates: RuntimeShaderState[];
   textureIssues: RuntimeTextureIssue[];
+  worldIntegrity: WorldIntegrityReport;
   motion: RuntimeMotionState;
   audio: ReturnType<typeof audioManager.getDiagnostics>;
   sceneChildren: number;
@@ -152,7 +168,13 @@ interface OrbitLikeControls {
   update?: () => void;
 }
 
-const BENCHMARK_CAMERAS: Record<BenchmarkScene, { position: Vec3Tuple; target: Vec3Tuple }> = {
+interface BenchmarkCameraPose {
+  position: Vec3Tuple;
+  target: Vec3Tuple;
+  fov?: number;
+}
+
+const BENCHMARK_CAMERAS: Record<BenchmarkScene, BenchmarkCameraPose> = {
   overview: SITE_LAYOUT.cameras.overview,
   interior: SITE_LAYOUT.cameras.interior,
   silos: SITE_LAYOUT.cameras.silos,
@@ -170,7 +192,30 @@ const BENCHMARK_CAMERAS: Record<BenchmarkScene, { position: Vec3Tuple; target: V
   village: SITE_LAYOUT.cameras.village,
   farm: SITE_LAYOUT.cameras.farm,
   garage: SITE_LAYOUT.cameras.garage,
+  sun: SITE_LAYOUT.cameras.celestial,
+  moon: SITE_LAYOUT.cameras.celestial,
 };
+
+export function resolveBenchmarkCamera(
+  scene: BenchmarkScene,
+  gameTime: number,
+  weather: RuntimeMode['weather']
+): BenchmarkCameraPose {
+  const camera = BENCHMARK_CAMERAS[scene];
+  if (scene !== 'sun' && scene !== 'moon') return camera;
+
+  const celestial = sampleCelestial(sampleAtmosphere(0, gameTime, weather));
+  const direction = scene === 'sun' ? celestial.sunDirection : celestial.moonDirection;
+  // The sky group follows the camera and places each disk along this world
+  // direction. A tiny horizontal nudge avoids a degenerate lookAt basis when
+  // the requested time puts a body at the exact zenith or nadir.
+  const target: Vec3Tuple = [
+    camera.position[0] + direction[0] * 180 + (Math.abs(direction[1]) > 0.98 ? 0.2 : 0),
+    camera.position[1] + direction[1] * 180,
+    camera.position[2] + direction[2] * 180,
+  ];
+  return { ...camera, target };
+}
 
 function percentile(sortedValues: number[], fraction: number): number {
   if (sortedValues.length === 0) return 0;
@@ -184,6 +229,31 @@ function percentile(sortedValues: number[], fraction: number): number {
 function rounded(value: number, precision: number = 2): number {
   const scale = 10 ** precision;
   return Math.round(value * scale) / scale;
+}
+
+const MOTION_NUMBER_KEYS = [
+  'speed',
+  'steeringAngle',
+  'wheelRotation',
+  'forkHeight',
+  'mastTilt',
+  'trailerAngle',
+  'doorOpenAmount',
+  'landingGearAmount',
+] as const satisfies ReadonlyArray<keyof RuntimeMotionTelemetry>;
+
+/** Read only deliberately published, finite vehicle telemetry from scene userData. */
+export function readRuntimeMotionTelemetry(
+  userData: Record<string, unknown>
+): RuntimeMotionTelemetry {
+  const telemetry: RuntimeMotionTelemetry = {};
+  MOTION_NUMBER_KEYS.forEach((key) => {
+    const value = userData[key];
+    if (typeof value === 'number' && Number.isFinite(value)) telemetry[key] = rounded(value, 4);
+  });
+  if (userData.cargo === 'pallet' || userData.cargo === 'empty') telemetry.cargo = userData.cargo;
+  if (typeof userData.stopped === 'boolean') telemetry.stopped = userData.stopped;
+  return telemetry;
 }
 
 /**
@@ -361,9 +431,16 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
     game.setGameSpeed(mode.motionCapture ? 180 : 0);
     game.setWeather(mode.weather);
 
-    const benchmarkCamera = BENCHMARK_CAMERAS[mode.benchmarkScene];
+    const benchmarkCamera = resolveBenchmarkCamera(
+      mode.benchmarkScene,
+      mode.gameTime,
+      mode.weather
+    );
+    const perspectiveCamera = camera instanceof THREE.PerspectiveCamera ? camera : null;
+    const previousFov = perspectiveCamera?.fov;
     camera.position.set(...benchmarkCamera.position);
     camera.lookAt(...benchmarkCamera.target);
+    if (perspectiveCamera && benchmarkCamera.fov) perspectiveCamera.fov = benchmarkCamera.fov;
     camera.updateProjectionMatrix();
 
     const orbitControls = controls as OrbitLikeControls | null;
@@ -378,6 +455,10 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       // overwrites the next normal visit.
       useGraphicsStore.setState({ graphics: previousGraphics });
       useAnnouncementsStore.getState().setMode(previousPAMode);
+      if (perspectiveCamera && previousFov !== undefined) {
+        perspectiveCamera.fov = previousFov;
+        perspectiveCamera.updateProjectionMatrix();
+      }
       const currentGame = useGameSimulationStore.getState();
       currentGame.setGameTime(previousGameInputs.gameTime);
       currentGame.setGameSpeed(previousGameInputs.gameSpeed);
@@ -447,6 +528,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
           ],
           rotationY: rounded(motionEuler.y, 4),
           ...(phase ? { phase } : {}),
+          ...readRuntimeMotionTelemetry(object.userData),
         };
       });
       entities.sort((left, right) => left.id.localeCompare(right.id));
@@ -536,6 +618,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
 
       scene.updateMatrixWorld(true);
       const motion = motionSnapshot();
+      const worldIntegrity = inspectWorldIntegrity(scene);
       const diagnosticRays = Object.fromEntries(
         [
           ['centre', 0, 0],
@@ -670,6 +753,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
         diagnosticRays,
         shaderStates,
         textureIssues,
+        worldIntegrity,
         motion,
         audio: audioManager.getDiagnostics(),
         sceneChildren: scene.children.length,

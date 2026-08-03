@@ -771,31 +771,18 @@ export const MillScene: React.FC<MillSceneProps> = ({
         ? 64
         : 1;
   const terrainEnableRiverChannel = graphicsQuality !== 'low';
-  const { isCameraInside, isCameraInDockZone, visibleCells } = useCameraPositionStore(
+  const { isCameraInside, isCameraInDockZone } = useCameraPositionStore(
     useShallow((state) => ({
       isCameraInside: state.isCameraInside,
       isCameraInDockZone: state.isCameraInDockZone,
-      visibleCells: state.visibleCells,
     }))
   );
-  const renderExteriorDetail = !isCameraInside || isCameraInDockZone;
-  const showEastLandscape =
-    renderExteriorDetail &&
-    (visibleCells.includes('eastYard') || visibleCells.includes('shipping'));
-  const showWestLandscape =
-    renderExteriorDetail &&
-    (visibleCells.includes('westYard') || visibleCells.includes('shipping'));
-  const showReceivingLandscape =
-    renderExteriorDetail &&
-    (visibleCells.includes('receiving') || visibleCells.includes('eastYard'));
-  const showLogisticsSite =
-    renderExteriorDetail && visibleCells.some((cell) => cell !== 'interior');
 
   // AI Visualization toggles (all default OFF)
   const showCascadeVisualization = useAIConfigStore((state) => state.showCascadeVisualization);
 
   return (
-    <group>
+    <group name="world-root">
       {/* Wireframe mode controller - responds to enableWireframe toggle */}
       <WireframeController />
 
@@ -848,44 +835,56 @@ export const MillScene: React.FC<MillSceneProps> = ({
       {/* OLD: <CoreGameTimeSystem /> - disabled, replaced by CentralTickProvider */}
 
       {/* Environment & Lighting */}
-      {!perfDebug?.disableEnvironment && <OptimizedFactoryEnvironment />}
+      <group name="world-environment">
+        {!perfDebug?.disableEnvironment && <OptimizedFactoryEnvironment />}
+      </group>
 
       {/* Camera bounds remain useful to controls and UI, but never gate scene existence. */}
       <CameraBoundsTracker />
 
       {/* Main Systems - Respect perfDebug toggles for A/B testing */}
-      {!perfDebug?.disableMachines && (
-        <MachinesContainer initialMachines={displayMachines} onSelect={onSelectMachine} />
-      )}
-      {!isLowGraphics && !perfDebug?.disableMachines && (
-        <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
-          <Suspense fallback={null}>
-            <HighDetailSpoutingSystem machines={displayMachines} />
-          </Suspense>
-        </ErrorBoundary>
-      )}
-      {!isLowGraphics && <ProductionFlowVisualization />}
-      <OptimizedFactoryInfrastructure showZones={showZones} />
+      <group name="world-factory-process">
+        {!perfDebug?.disableMachines && (
+          <MachinesContainer initialMachines={displayMachines} onSelect={onSelectMachine} />
+        )}
+        {!isLowGraphics && !perfDebug?.disableMachines && (
+          <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
+            <Suspense fallback={null}>
+              <HighDetailSpoutingSystem machines={displayMachines} />
+            </Suspense>
+          </ErrorBoundary>
+        )}
+        {!isLowGraphics && <ProductionFlowVisualization />}
+      </group>
+      <group name="world-factory-infrastructure">
+        <OptimizedFactoryInfrastructure showZones={showZones} />
+      </group>
 
       {/* Dynamic Elements - Respect perfDebug toggles */}
-      {authoredSiteReady && !perfDebug?.disableConveyorSystem && (
-        <OperationalConveyors productionSpeed={productionSpeed} />
-      )}
-      {authoredSiteReady && !perfDebug?.disableWorkerSystem && (
-        <OperationalPersonnel onSelectWorker={onSelectWorker} />
-      )}
+      <group name="world-conveyors">
+        {authoredSiteReady && !perfDebug?.disableConveyorSystem && (
+          <OperationalConveyors productionSpeed={productionSpeed} />
+        )}
+      </group>
+      <group name="world-personnel">
+        {authoredSiteReady && !perfDebug?.disableWorkerSystem && (
+          <OperationalPersonnel onSelectWorker={onSelectWorker} />
+        )}
+      </group>
       {/* Worker Personality Visualization - mood auras, thoughts, relationships */}
       {useEnhancedQualityLayers && (
         <WorkerPersonalityLayer showAuras={true} showThoughts={true} showRelationships={false} />
       )}
       {/* Remote multiplayer players */}
-      {authoredSiteReady && <OperationalRemotePlayers />}
-      {authoredSiteReady && !perfDebug?.disableForkliftSystem && (
-        <OperationalForklifts showSpeedZones={showZones} onSelectForklift={onSelectForklift} />
-      )}
+      <group name="world-forklifts">
+        {authoredSiteReady && !perfDebug?.disableForkliftSystem && (
+          <OperationalForklifts showSpeedZones={showZones} onSelectForklift={onSelectForklift} />
+        )}
+      </group>
       {/* The authored truck bay includes the garage, service yard, docks, and trucks. */}
-      {authoredSiteReady && !isLowGraphics && !perfDebug?.disableTruckBay && (
-        <group visible={showLogisticsSite}>
+      <group name="world-logistics">
+        {authoredSiteReady && <OperationalRemotePlayers />}
+        {authoredSiteReady && !isLowGraphics && !perfDebug?.disableTruckBay && (
           <StaticMeshBatch name="authored-truck-yard" revision={staticBatchRevision}>
             <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
               <Suspense fallback={null}>
@@ -893,42 +892,38 @@ export const MillScene: React.FC<MillSceneProps> = ({
               </Suspense>
             </ErrorBoundary>
           </StaticMeshBatch>
-        </group>
-      )}
+        )}
+      </group>
 
       {/* The complete authored exterior remains present from every camera position. */}
-      {authoredSiteReady && !perfDebug?.disableTerrain && (
-        <AuthoredTerrain
-          debug={false}
-          resolution={terrainResolution}
-          segments={terrainSegments}
-          enableRiverChannel={terrainEnableRiverChannel}
-        />
-      )}
+      <group name="world-terrain">
+        {authoredSiteReady && !perfDebug?.disableTerrain && (
+          <AuthoredTerrain
+            debug={false}
+            resolution={terrainResolution}
+            segments={terrainSegments}
+            enableRiverChannel={terrainEnableRiverChannel}
+          />
+        )}
+      </group>
       {authoredSiteReady && (
         <>
           <StaticMeshBatch name="authored-factory-exterior" revision={staticBatchRevision}>
             <AuthoredFactoryExterior showFactoryShell={false} />
           </StaticMeshBatch>
-          <group visible={showReceivingLandscape}>
-            <StaticMeshBatch name="authored-castle" revision={staticBatchRevision}>
-              <AuthoredCastle
-                position={[45, 0, -200]}
-                scale={1.5}
-                rotation={[0, -Math.PI / 4, 0]}
-              />
-            </StaticMeshBatch>
-          </group>
-          <group visible={showEastLandscape}>
-            <StaticMeshBatch name="authored-farm" revision={staticBatchRevision}>
-              <AuthoredFarm />
-            </StaticMeshBatch>
-          </group>
-          <group visible={showWestLandscape}>
-            <StaticMeshBatch name="authored-village" revision={staticBatchRevision}>
-              <AuthoredVillage />
-            </StaticMeshBatch>
-          </group>
+          <StaticMeshBatch name="authored-castle" revision={staticBatchRevision}>
+            <AuthoredCastle
+              position={SITE_LAYOUT.landmarks.castle.position}
+              scale={SITE_LAYOUT.landmarks.castle.scale}
+              rotation={SITE_LAYOUT.landmarks.castle.rotation}
+            />
+          </StaticMeshBatch>
+          <StaticMeshBatch name="authored-farm" revision={staticBatchRevision}>
+            <AuthoredFarm />
+          </StaticMeshBatch>
+          <StaticMeshBatch name="authored-village" revision={staticBatchRevision}>
+            <AuthoredVillage />
+          </StaticMeshBatch>
         </>
       )}
 

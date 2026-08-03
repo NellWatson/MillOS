@@ -73,13 +73,19 @@ export interface WorkerSecondarySignals {
   waveAmount: number;
   /** Oscillator phase for the acknowledgement wave. */
   wavePhase: number;
+  /** 0-1 eyelid closure shared by procedural and authored faces. */
+  blinkAmount: number;
+  /** Small signed chest expansion signal for idle breathing. */
+  breathAmount: number;
+  /** Stable identity phase used to desynchronise authored clips. */
+  animationPhase: number;
   /** Authoritative world ground speed in m/s (survives manager frame throttling). */
   groundSpeed: number;
   /** Locomotion intent chosen by the manager. */
   gait: 'idle' | 'walk' | 'run';
 }
 
-export function createSecondarySignals(): WorkerSecondarySignals {
+export function createSecondarySignals(id: string = ''): WorkerSecondarySignals {
   return {
     headYaw: 0,
     headPitch: 0,
@@ -89,6 +95,9 @@ export function createSecondarySignals(): WorkerSecondarySignals {
     hipShiftX: 0,
     waveAmount: 0,
     wavePhase: 0,
+    blinkAmount: 0,
+    breathAmount: 0,
+    animationPhase: id ? workerDeterministicFraction(id, 17) * Math.PI * 2 : 0,
     groundSpeed: 0,
     gait: 'idle',
   };
@@ -149,6 +158,7 @@ export interface WorkerAnimationData {
   // Blinking (Tier 3)
   blinkTimer: number;
   blinkPhase: number;
+  blinkCount: number;
 
   // Fatigue (Tier 2)
   fatigueLevel: number;
@@ -236,7 +246,7 @@ export function normalizeWorkerSpeed(rosterSpeed: number): number {
   return THREE.MathUtils.clamp(rosterSpeed * 0.22, 1, 1.8);
 }
 
-function deterministicFraction(id: string, salt: number): number {
+export function workerDeterministicFraction(id: string, salt: number): number {
   let hash = 2166136261 ^ salt;
   for (let index = 0; index < id.length; index += 1) {
     hash ^= id.charCodeAt(index);
@@ -260,7 +270,7 @@ export function createWorkerAnimationData(config: WorkerAnimationConfig): Worker
 
     currentYaw: config.direction > 0 ? 0 : Math.PI,
     targetYaw: config.direction > 0 ? 0 : Math.PI,
-    stanceSign: deterministicFraction(config.id, 7) > 0.5 ? 1 : -1,
+    stanceSign: workerDeterministicFraction(config.id, 7) > 0.5 ? 1 : -1,
 
     startleBlend: 0,
     idleBlend: 0,
@@ -269,15 +279,16 @@ export function createWorkerAnimationData(config: WorkerAnimationConfig): Worker
     previousState: 'walking',
     stateTransition: 1,
 
-    walkCycle: deterministicFraction(config.id, 1) * Math.PI * 2,
-    idleTimer: deterministicFraction(config.id, 2) * 4 + 3,
+    walkCycle: workerDeterministicFraction(config.id, 1) * Math.PI * 2,
+    idleTimer: workerDeterministicFraction(config.id, 2) * 4 + 3,
     idleVariation: 'breathing',
-    idleVariationTimer: deterministicFraction(config.id, 3) * 3 + 3,
-    workTimer: deterministicFraction(config.id, 4) * 6 + 6,
-    workPhase: deterministicFraction(config.id, 5) * Math.PI * 2,
+    idleVariationTimer: workerDeterministicFraction(config.id, 3) * 3 + 3,
+    workTimer: workerDeterministicFraction(config.id, 4) * 6 + 6,
+    workPhase: workerDeterministicFraction(config.id, 5) * Math.PI * 2,
 
-    blinkTimer: deterministicFraction(config.id, 6) * 4 + 2,
+    blinkTimer: workerDeterministicFraction(config.id, 6) * 4 + 2,
     blinkPhase: 0,
+    blinkCount: 0,
 
     fatigueLevel: 0,
     shiftStartTime: Date.now(),
@@ -302,7 +313,7 @@ export function createWorkerAnimationData(config: WorkerAnimationConfig): Worker
     distanceToCamera: 0,
 
     refs: null,
-    secondary: createSecondarySignals(),
+    secondary: createSecondarySignals(config.id),
 
     status: config.status,
   };

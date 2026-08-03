@@ -2860,9 +2860,17 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
       shippingTruckRef.current.position.x = truckState.x;
       shippingTruckRef.current.position.z = truckState.z;
       shippingTruckRef.current.rotation.y = truckState.rotation;
-      shippingTruckRef.current.userData.phase = truckState.phase;
-
       shippingWheelRotation.current += (truckState.speed * controllerDelta) / TRUCK_WHEEL_RADIUS;
+      Object.assign(shippingTruckRef.current.userData, {
+        phase: truckState.phase,
+        speed: truckState.speed,
+        steeringAngle: truckState.steeringAngle,
+        wheelRotation: shippingWheelRotation.current,
+        trailerAngle: truckState.trailerAngle,
+        doorOpenAmount: truckState.doorOpenAmount,
+        landingGearAmount: truckState.landingGearAmount,
+        stopped: Math.abs(truckState.speed) <= 0.01,
+      });
 
       const shippingDocked = isTruckDockedPhase(truckState.phase);
 
@@ -2943,9 +2951,17 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
       receivingTruckRef.current.position.x = truckState.x;
       receivingTruckRef.current.position.z = truckState.z;
       receivingTruckRef.current.rotation.y = truckState.rotation;
-      receivingTruckRef.current.userData.phase = truckState.phase;
-
       receivingWheelRotation.current += (truckState.speed * controllerDelta) / TRUCK_WHEEL_RADIUS;
+      Object.assign(receivingTruckRef.current.userData, {
+        phase: truckState.phase,
+        speed: truckState.speed,
+        steeringAngle: truckState.steeringAngle,
+        wheelRotation: receivingWheelRotation.current,
+        trailerAngle: truckState.trailerAngle,
+        doorOpenAmount: truckState.doorOpenAmount,
+        landingGearAmount: truckState.landingGearAmount,
+        stopped: Math.abs(truckState.speed) <= 0.01,
+      });
 
       const receivingDocked = isTruckDockedPhase(truckState.phase);
 

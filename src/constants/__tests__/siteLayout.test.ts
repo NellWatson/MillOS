@@ -7,6 +7,7 @@ import {
   boundsOverlapXZ,
   containsPoint,
   getServiceAssetBounds,
+  getLandmarkBounds,
   getVisibleSiteCells,
   getVisibleSiteCellsForView,
   isPointInPortalTransition,
@@ -72,6 +73,34 @@ describe('canonical site layout', () => {
 
     const lounge = getServiceAssetBounds(SITE_LAYOUT.serviceYard.driverLounge);
     expect(lounge.minX).toBeGreaterThan(SITE_LAYOUT.docks.shipping.apron.maxX);
+  });
+
+  it('keeps authored landscape districts separated from the factory and service yard', () => {
+    const landmarks = Object.values(SITE_LAYOUT.landmarks).map((landmark) => ({
+      id: landmark.id,
+      bounds: getLandmarkBounds(landmark),
+    }));
+    const factory = SITE_LAYOUT.factory.bounds;
+    const serviceAssets = Object.values(SITE_LAYOUT.serviceYard).map((asset) => ({
+      id: asset.id,
+      bounds: getServiceAssetBounds(asset),
+    }));
+
+    for (let left = 0; left < landmarks.length; left += 1) {
+      expect(boundsOverlapXZ(landmarks[left].bounds, factory), landmarks[left].id).toBe(false);
+      for (let right = left + 1; right < landmarks.length; right += 1) {
+        expect(
+          boundsOverlapXZ(landmarks[left].bounds, landmarks[right].bounds),
+          `${landmarks[left].id} overlaps ${landmarks[right].id}`
+        ).toBe(false);
+      }
+      for (const asset of serviceAssets) {
+        expect(
+          boundsOverlapXZ(landmarks[left].bounds, asset.bounds),
+          `${landmarks[left].id} overlaps ${asset.id}`
+        ).toBe(false);
+      }
+    }
   });
 
   it('models portal transition volumes on both sides of each opening', () => {
@@ -152,6 +181,28 @@ describe('canonical site layout', () => {
     expect(target[1]).toBe(SITE_LAYOUT.datum.water);
     expect(Math.hypot(position[0], position[2])).toBeLessThan(SITE_LAYOUT.world.radius);
     expect(Math.hypot(position[0] - target[0], position[2] - target[2])).toBeGreaterThan(24);
+  });
+
+  it('frames both authored body types from their facing side at conversational distance', () => {
+    const close = SITE_LAYOUT.cameras.personnelClose;
+    const feminine = SITE_LAYOUT.cameras.personnelFeminine;
+    const closeDistance = Math.hypot(
+      close.position[0] - close.target[0],
+      close.position[1] - close.target[1],
+      close.position[2] - close.target[2]
+    );
+    const feminineDistance = Math.hypot(
+      feminine.position[0] - feminine.target[0],
+      feminine.position[1] - feminine.target[1],
+      feminine.position[2] - feminine.target[2]
+    );
+
+    expect(close.position[2]).toBeGreaterThan(-18);
+    expect(feminine.position[2]).toBeLessThan(-14);
+    expect(closeDistance).toBeGreaterThan(1.5);
+    expect(closeDistance).toBeLessThan(2.5);
+    expect(feminineDistance).toBeGreaterThan(1.5);
+    expect(feminineDistance).toBeLessThan(2.5);
   });
 
   it('uses one declared water surface datum', () => {

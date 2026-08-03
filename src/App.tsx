@@ -903,8 +903,20 @@ const App: React.FC = () => {
                     ) : (
                       <OrbitControls
                         ref={orbitControlsRef}
-                        maxPolarAngle={Math.PI / 2 - 0.05}
-                        minPolarAngle={0.2}
+                        maxPolarAngle={
+                          runtimeMode.benchmark &&
+                          (runtimeMode.benchmarkScene === 'sun' ||
+                            runtimeMode.benchmarkScene === 'moon')
+                            ? Math.PI - 0.001
+                            : Math.PI / 2 - 0.05
+                        }
+                        minPolarAngle={
+                          runtimeMode.benchmark &&
+                          (runtimeMode.benchmarkScene === 'sun' ||
+                            runtimeMode.benchmarkScene === 'moon')
+                            ? 0.001
+                            : 0.2
+                        }
                         minDistance={
                           runtimeMode.benchmark &&
                           (runtimeMode.benchmarkScene === 'personnel-close' ||

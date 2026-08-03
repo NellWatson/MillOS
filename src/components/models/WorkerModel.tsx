@@ -17,9 +17,12 @@ import { useGraphicsStore } from '../../stores/graphicsStore';
 import type { WorkerAppearance, WorkerBodyType, WorkerWorkAction } from '../workers/workerTypes';
 import { ToolAccessory } from '../workers/WorkerTools';
 import {
+  SHARED_WORKER_MATERIALS,
+  getSkinSoftMaterial,
   getWorkerDetailMapVariant,
   requestWorkerDetailMaps,
 } from '../workers/SharedWorkerMaterials';
+import { SHARED_WORKER_GEOMETRY } from '../workers/SharedWorkerGeometries';
 import type { WorkerSecondarySignals } from '../../animation';
 
 export interface WorkerModelProps {
@@ -128,7 +131,7 @@ function createAccessoryMaterials(appearance: WorkerAppearance): AccessoryMateri
       roughness: 0.12,
       metalness: 0,
       transparent: true,
-      opacity: 0.58,
+      opacity: 0.28,
       depthWrite: false,
     }),
     dark: new THREE.MeshStandardMaterial({
@@ -455,14 +458,56 @@ const WorkerAccessories: React.FC<{
   appearance: WorkerAppearance;
   model: THREE.Group;
   materials: AccessoryMaterials;
-}> = ({ appearance, model, materials }) => {
+  leftEyelidRef: React.RefObject<THREE.Mesh | null>;
+  rightEyelidRef: React.RefObject<THREE.Mesh | null>;
+}> = ({ appearance, model, materials, leftEyelidRef, rightEyelidRef }) => {
   const head = model.getObjectByName('Head') ?? null;
   const chest = model.getObjectByName('Chest') ?? null;
   const hips = model.getObjectByName('Hips') ?? null;
   const wrist = model.getObjectByName('Wrist.L') ?? null;
+  const faceSkinMaterial = useMemo(
+    () => getSkinSoftMaterial(appearance.skinTone),
+    [appearance.skinTone]
+  );
 
   return (
     <>
+      <BoneMount
+        bone={head}
+        name="worker-authored-face"
+        scale={[appearance.headScale, appearance.headScale, appearance.headScale]}
+      >
+        {/* Both authored bodies already contain correctly skinned eyes and the
+            masculine body includes brows and a moustache. Layering a second
+            complete face over that geometry produced the bead-like double eyes
+            visible in close review. The runtime layer supplies only anatomy the
+            source lacks plus eyelids for the shared blink channel. */}
+        <mesh
+          ref={leftEyelidRef}
+          position={[-0.047, 0.067, 0.124]}
+          geometry={SHARED_WORKER_GEOMETRY.eyelid}
+          material={faceSkinMaterial}
+        />
+        <mesh
+          ref={rightEyelidRef}
+          position={[0.047, 0.067, 0.124]}
+          geometry={SHARED_WORKER_GEOMETRY.eyelid}
+          material={faceSkinMaterial}
+        />
+        <mesh
+          position={[0, 0.018, 0.111]}
+          scale={[0.72, 0.72, 0.72]}
+          geometry={SHARED_WORKER_GEOMETRY.nose}
+          material={faceSkinMaterial}
+        />
+        <mesh
+          position={[0, -0.028, 0.119]}
+          scale={[0.62, 0.5, 0.55]}
+          geometry={SHARED_WORKER_GEOMETRY.mouth}
+          material={SHARED_WORKER_MATERIALS.lips}
+        />
+      </BoneMount>
+
       {appearance.hasSafetyGlasses && (
         <BoneMount bone={head} name="worker-safety-glasses" position={[0, 0.055, 0.12]}>
           {[-0.047, 0.047].map((x) => (
@@ -593,6 +638,8 @@ export const WorkerModel: React.FC<WorkerModelProps> = ({ appearance, activity, 
   const currentWorldPosition = useRef(new THREE.Vector3());
   const hasWorldSample = useRef(false);
   const actionsRef = useRef<Partial<Record<WorkerClipName, THREE.AnimationAction>>>({});
+  const leftEyelidRef = useRef<THREE.Mesh>(null);
+  const rightEyelidRef = useRef<THREE.Mesh>(null);
   const actionWeights = useRef<Record<WorkerClipName, number>>(
     Object.fromEntries(
       WORKER_CLIPS.map((clip) => [clip, clip === 'worker-idle' ? 1 : 0])
@@ -743,6 +790,8 @@ export const WorkerModel: React.FC<WorkerModelProps> = ({ appearance, activity, 
       if (!clip) continue;
       const action = mixer.clipAction(clip);
       action.reset().setLoop(THREE.LoopRepeat, Number.POSITIVE_INFINITY).play();
+      const normalizedPhase = ((signals?.animationPhase ?? 0) / (Math.PI * 2) + 1) % 1;
+      action.time = clip.duration * normalizedPhase;
       action.setEffectiveWeight(clipName === 'worker-idle' ? 1 : 0);
       actions[clipName] = action;
       actionWeights.current[clipName] = clipName === 'worker-idle' ? 1 : 0;
@@ -755,7 +804,7 @@ export const WorkerModel: React.FC<WorkerModelProps> = ({ appearance, activity, 
       mixer.stopAllAction();
       mixer.uncacheRoot(prepared.model);
     };
-  }, [animations, mixer, prepared.model]);
+  }, [animations, mixer, prepared.model, signals]);
 
   useEffect(
     () => () => {
@@ -853,6 +902,10 @@ export const WorkerModel: React.FC<WorkerModelProps> = ({ appearance, activity, 
     if (!signals) return;
     const { head, chest, hips, upperArmL } = prepared.bones;
 
+    const eyelidScale = 0.18 + (1 - THREE.MathUtils.clamp(signals.blinkAmount, 0, 1)) * 0.82;
+    if (leftEyelidRef.current) leftEyelidRef.current.scale.y = eyelidScale;
+    if (rightEyelidRef.current) rightEyelidRef.current.scale.y = eyelidScale;
+
     if (head) {
       _euler.set(signals.headPitch, signals.headYaw, 0, 'XYZ');
       _quat.setFromEuler(_euler);
@@ -861,8 +914,9 @@ export const WorkerModel: React.FC<WorkerModelProps> = ({ appearance, activity, 
       head.quaternion.premultiply(_quat);
     }
 
-    if (chest && Math.abs(signals.chestPitch) > 1e-4) {
-      _euler.set(signals.chestPitch, 0, 0, 'XYZ');
+    const chestPitch = signals.chestPitch + signals.breathAmount * 0.008;
+    if (chest && Math.abs(chestPitch) > 1e-4) {
+      _euler.set(chestPitch, 0, 0, 'XYZ');
       _quat.setFromEuler(_euler);
       chest.quaternion.premultiply(_quat);
     }
@@ -902,6 +956,8 @@ export const WorkerModel: React.FC<WorkerModelProps> = ({ appearance, activity, 
         appearance={appearance}
         model={prepared.model}
         materials={accessoryMaterials}
+        leftEyelidRef={leftEyelidRef}
+        rightEyelidRef={rightEyelidRef}
       />
     </group>
   );

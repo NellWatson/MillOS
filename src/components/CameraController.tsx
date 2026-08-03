@@ -414,10 +414,10 @@ export const CameraController: React.FC<CameraControllerProps> = ({
 /**
  * Camera Bounds Tracker
  *
- * Tracks whether the camera is inside or outside the factory bounds.
- * Also tracks if camera is in a dock transition zone (near open dock openings).
- * Used to conditionally render interior vs exterior components for performance.
- * Throttled to every 10 frames (~6 checks/second at 60fps) to minimize overhead.
+ * Tracks whether the camera is inside the factory, near an open dock, and
+ * which site cells intersect its view. This informs controls, diagnostics,
+ * quality hints, and local effects. It never hides authored world districts.
+ * Throttled to every 10 frames (about 6 checks/second at 60fps).
  */
 export const CameraBoundsTracker: React.FC = () => {
   const { camera } = useThree();

@@ -23,6 +23,7 @@ import { PROCEDURAL_TEXTURES } from '../utils/sharedMaterials';
 import { InstancedLamps } from './village/InstancedVillageComponents';
 import { POLYGON_OFFSET } from '../constants/renderLayers';
 import { generateCobblestoneRoughness } from '../textures';
+import { SITE_LAYOUT } from '../constants/siteLayout';
 
 // ============================================================
 // CHARMING EUROPEAN VILLAGE - West of Canal
@@ -1988,7 +1989,12 @@ export const VillageArea: React.FC = () => {
   const vergeSpec = useMemo<ClutterSpec>(() => ({ ...VILLAGE_VERGE, density }), [density]);
 
   return (
-    <group position={[-190, 0, 0]}>
+    <group
+      name="authored-village-site"
+      position={SITE_LAYOUT.landmarks.village.position}
+      rotation={SITE_LAYOUT.landmarks.village.rotation}
+      scale={SITE_LAYOUT.landmarks.village.scale}
+    >
       {/* Rounded cobblestone ground - positioned well above TerrainGround (y=0.05) to prevent z-fighting */}
       <mesh position={[0, 0.12, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <primitive object={villageGroundGeometry} attach="geometry" />

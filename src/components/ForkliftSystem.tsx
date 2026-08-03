@@ -771,6 +771,19 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       visualDelta
     );
 
+    const publishMotionTelemetry = (): void => {
+      if (!ref.current) return;
+      Object.assign(ref.current.userData, {
+        phase: operationRef.current,
+        speed: currentSpeedRef.current,
+        steeringAngle: steeringAngleRef.current,
+        forkHeight: forkHeightRef.current,
+        mastTilt: mastTiltRef.current,
+        cargo: hasCargoRef.current ? 'pallet' : 'empty',
+        stopped: simulationPaused || effectiveStopped || currentSpeedRef.current <= 0.01,
+      });
+    };
+
     // When physics is enabled, skip all movement - physics handles position
     // But still update LOD and wheel animations
     if (enablePhysics) {
@@ -785,6 +798,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       } else if (distanceTier === 'far' && cameraDistanceRef.current < FORKLIFT_LOD_CLOSE_METRES) {
         setDistanceTier('close');
       }
+      publishMotionTelemetry();
       return; // Skip all legacy movement code
     }
 
@@ -812,6 +826,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
         true,
         pos.y
       );
+      publishMotionTelemetry();
       return;
     }
 
@@ -1019,6 +1034,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
         pathIndexRef.current = (pathIndexRef.current + 1) % data.path.length;
         currentTarget.current.set(...data.path[pathIndexRef.current]);
       }
+      publishMotionTelemetry();
       return; // Don't move while operating
     }
 
@@ -1033,6 +1049,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       if (pathIndexRef.current >= data.pathActions.length) {
         pathIndexRef.current = (pathIndexRef.current + 1) % data.path.length;
         currentTarget.current.set(...data.path[pathIndexRef.current]);
+        publishMotionTelemetry();
         return;
       }
       const action = data.pathActions[pathIndexRef.current];
@@ -1044,6 +1061,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
         operationDurationRef.current = action.duration;
         operationRef.current = 'loading';
         setCurrentOperation('loading');
+        publishMotionTelemetry();
         return;
       } else if (action.type === 'dropoff' && currentlyHasCargo) {
         // Start unloading operation
@@ -1051,6 +1069,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
         operationDurationRef.current = action.duration;
         operationRef.current = 'unloading';
         setCurrentOperation('unloading');
+        publishMotionTelemetry();
         return;
       } else {
         // No action or action not applicable, move to next waypoint
@@ -1097,6 +1116,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       ref.current.rotation.x += (0 - ref.current.rotation.x) * poseResponse;
       ref.current.rotation.z += (0 - ref.current.rotation.z) * poseResponse;
     }
+    publishMotionTelemetry();
   });
 
   // Handle click on forklift

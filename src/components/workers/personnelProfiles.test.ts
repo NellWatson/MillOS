@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import {
   createWorkerAnimationData,
+  createSecondarySignals,
   normalizeWorkerSpeed,
   WorkerAnimationManager,
 } from '../../animation';
@@ -31,6 +32,17 @@ describe('canonical personnel profiles', () => {
     });
 
     expect(new Set(signatures).size).toBe(WORKER_ROSTER.length);
+  });
+
+  it('desynchronises authored personnel clips with stable identity phases', () => {
+    const phases = WORKER_ROSTER.map((worker) => createSecondarySignals(worker.id).animationPhase);
+
+    expect(new Set(phases).size).toBe(WORKER_ROSTER.length);
+    phases.forEach((phase) => {
+      expect(Number.isFinite(phase)).toBe(true);
+      expect(phase).toBeGreaterThanOrEqual(0);
+      expect(phase).toBeLessThan(Math.PI * 2);
+    });
   });
 
   it('maps the roster body presentation to the authored runtime bodies', () => {
@@ -153,5 +165,52 @@ describe('personnel locomotion contract', () => {
     manager.updateSettings(true, 'high', 100, true, false, false, nearestExit, () => {});
     for (let frame = 0; frame < 20; frame += 1) manager.update(0.05, camera);
     expect(group.position.z).toBeGreaterThan(4);
+  });
+
+  it('publishes deterministic blinks for the authored face without procedural eyelid refs', () => {
+    const manager = new WorkerAnimationManager('high');
+    const group = new THREE.Group();
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(10, 2, 4);
+    const signals = createSecondarySignals('w6');
+    const config = {
+      id: 'w6',
+      position: [10, 0, 4] as [number, number, number],
+      speed: 6,
+      direction: 1 as const,
+      role: 'Safety Officer',
+      workAction: 'radio' as const,
+      task: 'Safety inspection',
+      status: 'working' as const,
+    };
+    manager.register(
+      config,
+      {
+        group,
+        torso: null,
+        head: null,
+        leftArm: null,
+        rightArm: null,
+        leftLeg: null,
+        rightLeg: null,
+        hips: null,
+      },
+      signals
+    );
+    const nearestExit = () => ({
+      id: 'east',
+      label: 'East exit',
+      position: { x: 55, z: 0 },
+    });
+    manager.updateSettings(true, 'high', 100, true, false, false, nearestExit, () => {});
+
+    let maximumBlink = 0;
+    for (let frame = 0; frame < 320; frame += 1) {
+      manager.update(0.05, camera);
+      maximumBlink = Math.max(maximumBlink, signals.blinkAmount);
+    }
+
+    expect(maximumBlink).toBeGreaterThan(0.2);
+    expect(Number.isFinite(signals.breathAmount)).toBe(true);
   });
 });

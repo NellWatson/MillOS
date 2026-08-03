@@ -27,8 +27,10 @@ const ZONE_COLORS = {
 
 type ZoneKey = keyof typeof ZONE_COLORS;
 
-interface FlowConnection {
+export interface FlowConnection {
   id: string;
+  fromMachineId: string;
+  toMachineId: string;
   from: [number, number, number];
   to: [number, number, number];
   zone: ZoneKey;
@@ -42,66 +44,89 @@ const anchor = (m: MachineData): [number, number, number] => [
   m.position[2],
 ];
 
+export function buildProcessFlowConnections(machines: MachineData[]): FlowConnection[] {
+  if (machines.length === 0) return [];
+
+  const silos = machines.filter((m) => m.type === MachineType.SILO);
+  const mills = machines.filter((m) => m.type === MachineType.ROLLER_MILL);
+  const sifters = machines.filter((m) => m.type === MachineType.PLANSIFTER);
+  const packers = machines.filter((m) => m.type === MachineType.PACKER);
+  const connections: FlowConnection[] = [];
+
+  if (silos.length > 0) {
+    mills.forEach((mill, index) => {
+      const silo = silos[index % silos.length];
+      if (!silo) return;
+      connections.push({
+        id: `flow-${silo.id}-${mill.id}`,
+        fromMachineId: silo.id,
+        toMachineId: mill.id,
+        from: anchor(silo),
+        to: anchor(mill),
+        zone: 'silos-to-mills',
+      });
+    });
+  }
+
+  if (sifters.length > 0) {
+    mills.forEach((mill, index) => {
+      const sifter = sifters[index % sifters.length];
+      if (!sifter) return;
+      connections.push({
+        id: `flow-${mill.id}-${sifter.id}`,
+        fromMachineId: mill.id,
+        toMachineId: sifter.id,
+        from: anchor(mill),
+        to: anchor(sifter),
+        zone: 'mills-to-sifters',
+      });
+    });
+
+    packers.forEach((packer, index) => {
+      const sifter = sifters[index % sifters.length];
+      if (!sifter) return;
+      connections.push({
+        id: `flow-${sifter.id}-${packer.id}`,
+        fromMachineId: sifter.id,
+        toMachineId: packer.id,
+        from: anchor(sifter),
+        to: anchor(packer),
+        zone: 'sifters-to-packers',
+      });
+    });
+  }
+
+  return connections;
+}
+
+export function isProcessFlowActive(
+  connection: Pick<FlowConnection, 'fromMachineId' | 'toMachineId'>,
+  statusByMachine: ReadonlyMap<string, MachineData['status']>,
+  productionSpeed: number
+): boolean {
+  return (
+    Number.isFinite(productionSpeed) &&
+    productionSpeed > 0 &&
+    statusByMachine.get(connection.fromMachineId) === 'running' &&
+    statusByMachine.get(connection.toMachineId) === 'running'
+  );
+}
+
 export const ProductionFlowVisualization: React.FC = () => {
   const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
-  const machines = useProductionStore(useShallow((state) => state.machines));
+  const { machines, productionSpeed } = useProductionStore(
+    useShallow((state) => ({
+      machines: state.machines,
+      productionSpeed: state.productionSpeed,
+    }))
+  );
 
   // Build connections from the real machines, mirroring SpoutingSystem's pairing.
-  const connections = useMemo<FlowConnection[]>(() => {
-    if (machines.length === 0) return [];
-
-    const silos = machines.filter((m) => m.type === MachineType.SILO);
-    const mills = machines.filter((m) => m.type === MachineType.ROLLER_MILL);
-    const sifters = machines.filter((m) => m.type === MachineType.PLANSIFTER);
-    const packers = machines.filter((m) => m.type === MachineType.PACKER);
-
-    const conns: FlowConnection[] = [];
-
-    // Silos -> Mills: each mill is fed by silo[i % silos.length] (matches SpoutingSystem)
-    if (silos.length > 0) {
-      mills.forEach((mill, i) => {
-        const silo = silos[i % silos.length];
-        if (!silo) return;
-        conns.push({
-          id: `flow-${silo.id}-${mill.id}`,
-          from: anchor(silo),
-          to: anchor(mill),
-          zone: 'silos-to-mills',
-        });
-      });
-    }
-
-    // Mills -> Sifters: each mill lifts to sifter[i % sifters.length]
-    if (sifters.length > 0) {
-      mills.forEach((mill, i) => {
-        const sifter = sifters[i % sifters.length];
-        if (!sifter) return;
-        conns.push({
-          id: `flow-${mill.id}-${sifter.id}`,
-          from: anchor(mill),
-          to: anchor(sifter),
-          zone: 'mills-to-sifters',
-        });
-      });
-
-      // Sifters -> Packers: each packer is fed by sifter[i % sifters.length]
-      packers.forEach((packer, i) => {
-        const sifter = sifters[i % sifters.length];
-        if (!sifter) return;
-        conns.push({
-          id: `flow-${sifter.id}-${packer.id}`,
-          from: anchor(sifter),
-          to: anchor(packer),
-          zone: 'sifters-to-packers',
-        });
-      });
-    }
-
-    return conns;
-  }, [machines]);
-
-  // Active whenever any machine is running
-  const hasRunningMachine = useMemo(() => machines.some((m) => m.status === 'running'), [machines]);
+  const connections = useMemo(() => buildProcessFlowConnections(machines), [machines]);
+  const statusByMachine = useMemo(
+    () => new Map(machines.map((machine) => [machine.id, machine.status] as const)),
+    [machines]
+  );
 
   // Skip on low quality
   if (graphicsQuality === 'low') return null;
@@ -113,7 +138,7 @@ export const ProductionFlowVisualization: React.FC = () => {
           key={conn.id}
           start={conn.from}
           end={conn.to}
-          active={hasRunningMachine}
+          active={isProcessFlowActive(conn, statusByMachine, productionSpeed)}
           color={ZONE_COLORS[conn.zone]}
           segments={24}
         />

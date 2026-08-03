@@ -715,7 +715,7 @@ const FenceSection: React.FC<{
   }, [postCount, start, dx, dz, dummy]);
 
   return (
-    <group>
+    <group name="factory-exterior-content">
       {/* Fence posts - instanced */}
       <instancedMesh ref={meshRef} args={[undefined, undefined, postCount]} castShadow>
         <boxGeometry args={[0.15, 2.4, 0.15]} />
