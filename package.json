@@ -7,6 +7,7 @@
     "dev": "vite --port 3000",
     "build": "vite build",
     "build:archives": "node scripts/package-static-archives.mjs",
+    "build:pages-staging": "node scripts/build-pages-staging.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

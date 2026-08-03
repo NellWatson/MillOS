@@ -17,8 +17,12 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      V030_SOURCE_SHA: 20bcbe044fc6d7ca7275999fec63ddce83fd49d0
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -36,77 +40,20 @@ jobs:
           npm run format:check
           npm test
 
-      - name: Resolve current release path
+      - name: Rebuild the deployed v0.30 release for preservation
         run: |
-          VERSION_NUMBER=$(node -p "require('./package.json').version")
-          echo "CURRENT_VERSION=v${VERSION_NUMBER%.*}" >> "$GITHUB_ENV"
+          git worktree add --detach "$RUNNER_TEMP/millos-v030" "$V030_SOURCE_SHA"
+          npm ci --force --ignore-scripts --prefix "$RUNNER_TEMP/millos-v030"
+          VERSION=v0.30 npm run build --prefix "$RUNNER_TEMP/millos-v030"
 
       - name: Build current release
-        run: VERSION="${CURRENT_VERSION}" npm run build
+        run: VERSION="v$(node -p "require('./package.json').version.split('.').slice(0, 2).join('.')")" npm run build
 
       - name: Stage current and archived releases
         run: |
-          rm -rf staging
-          mkdir -p "staging/${CURRENT_VERSION}"
-          find dist -mindepth 1 -maxdepth 1 -type d -name 'v[0-9]*.[0-9]*' -exec rm -rf {} +
-          cp -R dist/. "staging/${CURRENT_VERSION}/"
-          for archive in public/v*.*; do
-            if [ -d "$archive" ]; then
-              cp -R "$archive" staging/
-            fi
-          done
-
-      - name: Preserve legacy music backports
-        run: |
-          for version in v0.10 v0.20; do
-            if [ -d "staging/${version}" ]; then
-              cp public/*.mp3 "staging/${version}/"
-            fi
-          done
-
-      - name: Create canonical root redirect
-        run: |
-          cat > staging/index.html << EOF
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <meta http-equiv="refresh" content="0;url=/${CURRENT_VERSION}/">
-            <title>MillOS | 3D Grain Mill Operations Simulator</title>
-            <meta name="description" content="Explore MillOS, a browser-based 3D grain mill operations simulator with simulated workers, deterministic logistics, production metrics, and a simulated SCADA workspace." />
-            <link rel="canonical" href="https://www.millos.net/" />
-            <meta property="og:type" content="website" />
-            <meta property="og:url" content="https://www.millos.net/" />
-            <meta property="og:title" content="MillOS | 3D Grain Mill Operations Simulator" />
-            <meta property="og:description" content="Explore a browser-based grain mill simulator with deterministic logistics, production metrics, and a simulated SCADA workspace." />
-            <meta property="og:image" content="https://www.millos.net/og-image.png" />
-            <meta property="og:image:alt" content="MillOS grain mill digital twin interface" />
-            <meta property="og:image:width" content="3456" />
-            <meta property="og:image:height" content="1993" />
-            <meta property="og:site_name" content="MillOS" />
-            <meta property="og:locale" content="en_GB" />
-            <meta name="twitter:card" content="summary_large_image" />
-            <meta name="twitter:url" content="https://www.millos.net/" />
-            <meta name="twitter:title" content="MillOS | 3D Grain Mill Operations Simulator" />
-            <meta name="twitter:description" content="A browser-based 3D grain mill simulator with simulated workers, deterministic logistics, production metrics, and simulated SCADA." />
-            <meta name="twitter:image" content="https://www.millos.net/og-image.png" />
-            <meta name="twitter:image:alt" content="MillOS grain mill digital twin interface" />
-            <meta name="twitter:creator" content="@NellWatson" />
-          </head>
-          <body>
-            <p>Redirecting to <a href="/${CURRENT_VERSION}/">MillOS ${CURRENT_VERSION}</a>...</p>
-          </body>
-          </html>
-          EOF
-
-      - name: Copy root metadata and custom domain
-        run: |
-          cp public/robots.txt staging/robots.txt
-          cp public/sitemap.xml staging/sitemap.xml
-          cp public/og-image.png staging/og-image.png
-          cp CNAME staging/CNAME
-          touch staging/.nojekyll
+          npm run build:pages-staging -- \
+            --archive-build "v0.30=$RUNNER_TEMP/millos-v030/dist" \
+            --archive-source "v0.30=$V030_SOURCE_SHA"
 
       - name: Setup Pages
         uses: actions/configure-pages@v6
