@@ -10,9 +10,10 @@
  * - Refs managed centrally by animation manager
  */
 
-import React, { useRef, useMemo, useState, useEffect, useCallback } from 'react';
+import React, { Suspense, useRef, useMemo, useState, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
-import { Html, Billboard, Text } from '@react-three/drei';
+import { Html, Billboard } from '@react-three/drei';
+import { SceneText as Text } from './shared/SceneText';
 import { Briefcase, FlaskConical, HardHat, Shield, User, Wrench as WrenchIcon } from 'lucide-react';
 
 // Types
@@ -22,21 +23,29 @@ import { WorkerData } from '../types';
 import { useProductionStore } from '../stores/productionStore';
 
 // Animation manager
-import { useWorkerAnimationManager, WorkerAnimationConfig, LODLevel } from '../animation';
+import {
+  createSecondarySignals,
+  getInitialWorkerLod,
+  useWorkerAnimationManager,
+  WorkerAnimationConfig,
+  LODLevel,
+} from '../animation';
 
 // Worker models
 import {
   DetailedWorker,
   SimplifiedWorker,
   WorkerBillboard,
+  WorkerContactShadow,
   WorkerPoseRefs,
   SimplifiedPoseRefs,
   getWorkerAppearance,
 } from './workers';
+import { WorkerModel } from './models/WorkerModel';
 
 // Stores
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
-import { useGraphicsStore } from '../stores/graphicsStore';
+import { isPostProcessingActive, useGraphicsStore } from '../stores/graphicsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { audioManager } from '../utils/audioManager';
 
@@ -84,27 +93,39 @@ interface WorkerProps {
   data: WorkerData;
   onSelect: (worker: WorkerData) => void;
   manager: ReturnType<typeof useWorkerAnimationManager>;
+  initialLod: LODLevel;
+  showDetails: boolean;
+  /** True when a composer is mounted, so >1.0 emissive resolves instead of clipping. */
+  composerActive: boolean;
 }
 
 const Worker: React.FC<WorkerProps> = React.memo(
-  ({ data, onSelect, manager }) => {
+  ({ data, onSelect, manager, initialLod, showDetails, composerActive }) => {
     // Stable click handler that passes worker data
     const handleClick = useCallback(() => {
       onSelect(data);
     }, [onSelect, data]);
     const groupRef = useRef<THREE.Group>(null);
     const [hovered, setHovered] = useState(false);
-    const [lod, setLod] = useState<LODLevel>('high');
+    const [lod, setLod] = useState<LODLevel>(initialLod);
 
     // Create refs for body parts
     const poseRefs = usePoseRefs();
     const simplifiedRefs = useSimplifiedRefs();
+
+    // Behaviour channel written by the manager and read by the authored model.
+    // A plain mutable record rather than React state: it changes every tick and
+    // must never trigger a re-render.
+    const secondarySignals = useMemo(() => createSecondarySignals(data.id), [data.id]);
 
     // Get appearance config
     const appearance = useMemo(
       () => getWorkerAppearance(data.role, data.color, data.id),
       [data.role, data.color, data.id]
     );
+    const statusHeight = 2.08 * appearance.heightScale + 0.08;
+    const nameHeight = statusHeight + 0.25;
+    const tooltipHeight = statusHeight + 0.45;
 
     // Register with animation manager ONCE on mount (no LOD in deps!)
     useEffect(() => {
@@ -116,6 +137,8 @@ const Worker: React.FC<WorkerProps> = React.memo(
         speed: data.speed,
         direction: data.direction,
         role: data.role,
+        workAction: appearance.workAction,
+        task: data.currentTask,
         status: data.status,
       };
 
@@ -135,7 +158,7 @@ const Worker: React.FC<WorkerProps> = React.memo(
         rightFingers: poseRefs.rightFingers.current,
       };
 
-      const unregister = manager.register(config, initialRefs);
+      const unregister = manager.register(config, initialRefs, secondarySignals);
 
       return unregister;
     }, [data.id, manager]); // Only re-register if worker ID changes
@@ -228,37 +251,53 @@ const Worker: React.FC<WorkerProps> = React.memo(
         }}
       >
         {/* Worker Model - 3-tier LOD system */}
-        {lod === 'high' && <DetailedWorker appearance={appearance} poseRefs={poseRefs} />}
+        {lod === 'high' && (
+          <Suspense fallback={<DetailedWorker appearance={appearance} poseRefs={poseRefs} />}>
+            <WorkerModel
+              appearance={appearance}
+              activity={data.status}
+              signals={secondarySignals}
+            />
+          </Suspense>
+        )}
         {lod === 'medium' && <SimplifiedWorker appearance={appearance} poseRefs={simplifiedRefs} />}
         {lod === 'low' && <WorkerBillboard appearance={appearance} />}
 
-        {/* Status indicator above head */}
-        <group position={[0, 2.15, 0]}>
+        {/* Ambient contact patch, at every LOD - it is what stops the figure
+            reading as a decal hovering above the floor. */}
+        <WorkerContactShadow />
+
+        {/* Status indicator above head. Emissive above 1.0 linear only resolves
+            inside the composer; with toneMapped={false} and no composer it
+            clamps to a flat white blob, so the 'low' tier gets a lower value. */}
+        <group position={[0, statusHeight, 0]}>
           <mesh>
             <sphereGeometry args={[0.055]} />
             <meshStandardMaterial
               color={statusColor}
               emissive={statusColor}
-              emissiveIntensity={2.5}
+              emissiveIntensity={composerActive ? 2.5 : 1}
               toneMapped={false}
             />
           </mesh>
-          <mesh rotation={[Math.PI / 2, 0, 0]}>
-            <ringGeometry args={[0.07, 0.085, 20]} />
-            <meshStandardMaterial
-              color={statusColor}
-              emissive={statusColor}
-              emissiveIntensity={1.5}
-              transparent
-              opacity={0.6}
-              toneMapped={false}
-            />
-          </mesh>
+          {showDetails && (
+            <mesh rotation={[Math.PI / 2, 0, 0]}>
+              <ringGeometry args={[0.07, 0.085, 20]} />
+              <meshStandardMaterial
+                color={statusColor}
+                emissive={statusColor}
+                emissiveIntensity={composerActive ? 1.5 : 0.8}
+                transparent
+                opacity={0.6}
+                toneMapped={false}
+              />
+            </mesh>
+          )}
         </group>
 
         {/* Hover tooltip */}
         {hovered && (
-          <Html position={[0, 2.6, 0]} center distanceFactor={12}>
+          <Html position={[0, tooltipHeight, 0]} center distanceFactor={12}>
             <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-500/50 px-4 py-3 rounded-xl shadow-2xl pointer-events-none min-w-[220px]">
               <div className="flex items-center gap-3 mb-2">
                 {getRoleIcon()}
@@ -292,34 +331,20 @@ const Worker: React.FC<WorkerProps> = React.memo(
         )}
 
         {/* Always visible name badge */}
-        <Billboard position={[0, 2.4, 0]}>
-          <Text
-            fontSize={0.14}
-            color="white"
-            anchorX="center"
-            anchorY="middle"
-            outlineWidth={0.012}
-            outlineColor="#000000"
-          >
-            {data.name.split(' ')[0]}
-          </Text>
-        </Billboard>
-
-        {/* ID badge on chest */}
-        <group position={[0.12, 1.28, 0.125]} rotation={[0, 0, 0]}>
-          <mesh>
-            <planeGeometry args={[0.09, 0.06]} />
-            <meshStandardMaterial color="#ffffff" />
-          </mesh>
-          <mesh position={[0, 0.012, 0.001]}>
-            <planeGeometry args={[0.07, 0.015]} />
-            <meshStandardMaterial color="#1e40af" />
-          </mesh>
-          <mesh position={[0, -0.012, 0.001]}>
-            <planeGeometry args={[0.06, 0.008]} />
-            <meshStandardMaterial color="#94a3b8" />
-          </mesh>
-        </group>
+        {showDetails && (
+          <Billboard position={[0, nameHeight, 0]}>
+            <Text
+              fontSize={0.14}
+              color="white"
+              anchorX="center"
+              anchorY="middle"
+              outlineWidth={0.012}
+              outlineColor="#000000"
+            >
+              {data.name.split(' ')[0]}
+            </Text>
+          </Billboard>
+        )}
       </group>
     );
   },
@@ -328,7 +353,10 @@ const Worker: React.FC<WorkerProps> = React.memo(
     return (
       prevProps.data.id === nextProps.data.id &&
       prevProps.data.status === nextProps.data.status &&
-      prevProps.onSelect === nextProps.onSelect
+      prevProps.onSelect === nextProps.onSelect &&
+      prevProps.initialLod === nextProps.initialLod &&
+      prevProps.showDetails === nextProps.showDetails &&
+      prevProps.composerActive === nextProps.composerActive
     );
   }
 );
@@ -342,19 +370,28 @@ Worker.displayName = 'Worker';
 export const WorkerSystemNew: React.FC<WorkerSystemProps> = ({ onSelectWorker }) => {
   // Get store state
   // PERFORMANCE: Consolidated store subscriptions to prevent unnecessary re-renders
-  const { isTabVisible, emergencyDrillMode, getNearestExit, markWorkerEvacuated } =
-    useGameSimulationStore(
-      useShallow((state) => ({
-        isTabVisible: state.isTabVisible,
-        emergencyDrillMode: state.emergencyDrillMode,
-        getNearestExit: state.getNearestExit,
-        markWorkerEvacuated: state.markWorkerEvacuated,
-      }))
-    );
-  const { quality, workerLodDistance } = useGraphicsStore(
+  const {
+    isTabVisible,
+    gameSpeed,
+    emergencyDrillMode,
+    safetyHoldActive,
+    getNearestExit,
+    markWorkerEvacuated,
+  } = useGameSimulationStore(
+    useShallow((state) => ({
+      isTabVisible: state.isTabVisible,
+      gameSpeed: state.gameSpeed,
+      emergencyDrillMode: state.emergencyDrillMode,
+      safetyHoldActive: state.emergencyActive && !state.emergencyDrillMode,
+      getNearestExit: state.getNearestExit,
+      markWorkerEvacuated: state.markWorkerEvacuated,
+    }))
+  );
+  const { quality, workerLodDistance, composerActive } = useGraphicsStore(
     useShallow((state) => ({
       quality: state.graphics.quality,
       workerLodDistance: state.graphics.workerLodDistance,
+      composerActive: isPostProcessingActive(state.graphics),
     }))
   );
 
@@ -363,7 +400,9 @@ export const WorkerSystemNew: React.FC<WorkerSystemProps> = ({ onSelectWorker })
     isTabVisible,
     quality as 'low' | 'medium' | 'high' | 'ultra',
     workerLodDistance,
+    Number.isFinite(gameSpeed) && gameSpeed > 0,
     emergencyDrillMode,
+    safetyHoldActive,
     getNearestExit,
     markWorkerEvacuated
   );
@@ -379,9 +418,17 @@ export const WorkerSystemNew: React.FC<WorkerSystemProps> = ({ onSelectWorker })
   );
 
   return (
-    <group>
+    <group name="worker-system">
       {workers.map((w) => (
-        <Worker key={w.id} data={w} onSelect={handleSelectWorker} manager={manager} />
+        <Worker
+          key={w.id}
+          data={w}
+          onSelect={handleSelectWorker}
+          manager={manager}
+          initialLod={getInitialWorkerLod(quality)}
+          showDetails={quality === 'high' || quality === 'ultra'}
+          composerActive={composerActive}
+        />
       ))}
     </group>
   );

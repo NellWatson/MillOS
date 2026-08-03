@@ -137,6 +137,7 @@ interface BreakdownStore {
   // Parts inventory
   consumePart: (partType: keyof PartsInventory) => boolean;
   restockPart: (partType: keyof PartsInventory, quantity: number) => void;
+  restockDelivery: () => void;
   getPartsForBreakdown: (type: BreakdownType) => (keyof PartsInventory)[];
 
   // Maintenance scheduling
@@ -392,22 +393,63 @@ export const useBreakdownStore = create<BreakdownStore>()(
         },
       })),
 
+    // Each receiving truck carries a small maintenance resupply alongside the
+    // grain: every part type is topped up by 2, never beyond its default stock
+    // level, so inventory recovers from maintenance without growing unbounded.
+    restockDelivery: () =>
+      set((state) => {
+        const next = { ...state.partsInventory };
+        (Object.keys(DEFAULT_PARTS_INVENTORY) as (keyof PartsInventory)[]).forEach((part) => {
+          next[part] = Math.min(DEFAULT_PARTS_INVENTORY[part], next[part] + 2);
+        });
+        return { partsInventory: next };
+      }),
+
     getPartsForBreakdown: (type) => PARTS_FOR_BREAKDOWN[type],
 
     scheduleMaintenanceTask: (task) =>
-      set((state) => ({
-        maintenanceSchedule: [
-          ...state.maintenanceSchedule,
-          { ...task, id: generateId('maint'), completed: false },
-        ],
-      })),
+      set((state) => {
+        const alreadyScheduled = state.maintenanceSchedule.some(
+          (candidate) => candidate.machineId === task.machineId && !candidate.completed
+        );
+        if (alreadyScheduled) return {};
+        return {
+          maintenanceSchedule: [
+            ...state.maintenanceSchedule,
+            { ...task, id: generateId('maint'), completed: false },
+          ],
+        };
+      }),
 
     completeMaintenanceTask: (taskId) =>
-      set((state) => ({
-        maintenanceSchedule: state.maintenanceSchedule.map((t) =>
-          t.id === taskId ? { ...t, completed: true } : t
-        ),
-      })),
+      set((state) => {
+        const task = state.maintenanceSchedule.find((candidate) => candidate.id === taskId);
+        if (!task || task.completed) return {};
+
+        const requiredParts = task.partsNeeded.reduce<
+          Partial<Record<keyof PartsInventory, number>>
+        >((counts, part) => {
+          counts[part] = (counts[part] ?? 0) + 1;
+          return counts;
+        }, {});
+        const hasAllParts = (
+          Object.entries(requiredParts) as [keyof PartsInventory, number][]
+        ).every(([part, count]) => state.partsInventory[part] >= count);
+        if (!hasAllParts) return {};
+
+        const partsInventory = { ...state.partsInventory };
+        (Object.entries(requiredParts) as [keyof PartsInventory, number][]).forEach(
+          ([part, count]) => {
+            partsInventory[part] -= count;
+          }
+        );
+        return {
+          partsInventory,
+          maintenanceSchedule: state.maintenanceSchedule.map((candidate) =>
+            candidate.id === taskId ? { ...candidate, completed: true } : candidate
+          ),
+        };
+      }),
 
     tickBreakdownSimulation: (_gameTime, machines) => {
       const state = get();

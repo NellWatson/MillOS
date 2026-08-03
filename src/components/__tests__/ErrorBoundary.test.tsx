@@ -14,7 +14,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import ErrorBoundary from '../ErrorBoundary';
+import { Suspense } from 'react';
+import ErrorBoundary, { RecoverableFeatureBoundary } from '../ErrorBoundary';
+import { recoverableLazy } from '../../utils/recoverableLazy';
 
 // Component that throws an error
 const ThrowError = ({ shouldThrow }: { shouldThrow: boolean }) => {
@@ -454,6 +456,80 @@ describe('ErrorBoundary', () => {
       const icon = button.querySelector('svg');
 
       expect(icon).toBeInTheDocument();
+    });
+  });
+
+  describe('Recoverable feature isolation', () => {
+    it('resets a failed boundary when its recovery key changes', () => {
+      const { rerender } = render(
+        <ErrorBoundary
+          resetKeys={['failed']}
+          fallbackRender={({ error }) => <div>{error?.message}</div>}
+        >
+          <ThrowError shouldThrow={true} />
+        </ErrorBoundary>
+      );
+
+      expect(screen.getByText('Test error message')).toBeInTheDocument();
+
+      rerender(
+        <ErrorBoundary
+          resetKeys={['recovered']}
+          fallbackRender={({ error }) => <div>{error?.message}</div>}
+        >
+          <ThrowError shouldThrow={false} />
+        </ErrorBoundary>
+      );
+
+      expect(screen.getByText('Child component')).toBeInTheDocument();
+    });
+
+    it('keeps an optional feature failure local and retries it in place', () => {
+      let featureAvailable = false;
+      const OptionalFeature = () => {
+        if (!featureAvailable) throw new Error('Optional chunk unavailable');
+        return <div>Recovered feature</div>;
+      };
+
+      render(
+        <RecoverableFeatureBoundary featureName="SCADA">
+          <OptionalFeature />
+        </RecoverableFeatureBoundary>
+      );
+
+      expect(screen.getByRole('alert', { name: 'SCADA unavailable' })).toBeInTheDocument();
+      featureAvailable = true;
+      fireEvent.click(screen.getByRole('button', { name: 'Retry feature' }));
+
+      expect(screen.getByText('Recovered feature')).toBeInTheDocument();
+    });
+
+    it('creates a fresh lazy payload when retrying an exhausted chunk import', async () => {
+      let importAttempt = 0;
+      const importer = vi.fn(async () => {
+        importAttempt += 1;
+        if (importAttempt <= 2) throw new Error('Chunk still unavailable');
+        return { default: () => <div>Recovered lazy feature</div> };
+      });
+      const LazyFeature = recoverableLazy(importer, {
+        attempts: 2,
+        attemptTimeoutMs: 50,
+        retryDelayMs: 0,
+      });
+
+      render(
+        <RecoverableFeatureBoundary featureName="SCADA">
+          <Suspense fallback={<div>Loading SCADA</div>}>
+            <LazyFeature />
+          </Suspense>
+        </RecoverableFeatureBoundary>
+      );
+
+      expect(await screen.findByRole('alert', { name: 'SCADA unavailable' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Retry feature' }));
+
+      expect(await screen.findByText('Recovered lazy feature')).toBeInTheDocument();
+      expect(importer).toHaveBeenCalledTimes(3);
     });
   });
 });

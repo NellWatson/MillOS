@@ -5,7 +5,15 @@
  * Features aggregate particles, crack patterns, and oil stains.
  */
 import * as THREE from 'three';
-import { getTexture, createDataTexture, fbmNoise, hash, voronoi } from '../utils/textureGenerator';
+import {
+  getTexture,
+  createColorDataTexture,
+  createLinearDataTexture,
+  fbmNoise,
+  fbmNoiseSigned,
+  hash,
+  voronoi,
+} from '../utils/textureGenerator';
 
 export interface TarmacOptions {
   baseColor?: [number, number, number]; // Base asphalt color (R, G, B 0-1)
@@ -23,13 +31,19 @@ export const generateTarmac = (
   options: TarmacOptions = {}
 ): THREE.DataTexture => {
   const {
-    baseColor = [0.15, 0.16, 0.18], // Dark asphalt gray
+    // Authored in sRGB. 0.26 sRGB decodes to ~0.055 linear, which is the
+    // measured reflectance of weathered asphalt. The previous 0.15 was written
+    // to look right when the byte was (incorrectly) consumed as raw linear;
+    // decoded properly it would be ~0.019 linear - near-black tarmac.
+    baseColor = [0.26, 0.27, 0.29],
     aggregateAmount = 0.4,
     wearAmount = 0.3,
     oilStains = true,
   } = options;
 
-  const cacheKey = `tarmac-${size}-${baseColor.join(',')}-${aggregateAmount}-${wearAmount}-${oilStains}`;
+  // v3: aggregate cell size doubled (see the hash call below). Bumped so the
+  // module-level texture cache cannot serve a v2 texture across an HMR reload.
+  const cacheKey = `tarmac-v3-${size}-${baseColor.join(',')}-${aggregateAmount}-${wearAmount}-${oilStains}`;
 
   return getTexture(cacheKey, () => {
     const data = new Uint8Array(size * size * 4);
@@ -45,17 +59,41 @@ export const generateTarmac = (
         let g = baseColor[1];
         let b = baseColor[2];
 
-        // Fine noise for base texture
-        const fineNoise = fbmNoise(u * 40, v * 40, 3);
-        r += (fineNoise - 0.5) * 0.06;
-        g += (fineNoise - 0.5) * 0.06;
-        b += (fineNoise - 0.5) * 0.06;
+        // Fine noise for base texture (4 octaves - the binder needs grit)
+        const fineNoise = fbmNoise(u * 40, v * 40, 4);
+        r += (fineNoise - 0.5) * 0.07;
+        g += (fineNoise - 0.5) * 0.07;
+        b += (fineNoise - 0.5) * 0.07;
 
-        // Aggregate particles (small stones)
-        const aggregateNoise = hash(Math.floor(u * size * 0.5), Math.floor(v * size * 0.5));
+        // Aggregate particles (small stones). Brightness re-authored in sRGB:
+        // 0.32-0.54 sRGB = 0.084-0.25 linear, the correct light-stone-in-dark-
+        // binder ratio. The old 0.2-0.4 was tuned against the linear misread.
+        //
+        // CELL SIZE IS A SAMPLING DECISION, NOT A LOOK DECISION.
+        //
+        // `u * size` is just `x`, so this factor sets the aggregate cell edge
+        // in pixels: 0.5 gave 2 px cells, 0.25 gives 4 px. Measured offline at
+        // size=512 (the only size this is ever called at - sharedMaterials.ts),
+        // taking the variance of the aggregate mask through successive 2x box
+        // downsamples, which is exactly what mip generation does:
+        //
+        //            mip0     mip1 (2x)   mip2 (4x)
+        //   2 px     100%       100%        24.9%
+        //   4 px     100%       100%       100.0%
+        //
+        // A cell survives intact only while one output texel still covers at
+        // most one cell; past that it averages neighbours and the contrast
+        // collapses. At 2 px that wall is mip2, where three quarters of the
+        // aggregate's variance is gone and the surface flattens to its mean.
+        // At 4 px the same wall moves out one full mip level, so the stones
+        // stay readable to roughly twice the viewing distance.
+        //
+        // Coverage is unchanged - measured 28.3% at 2 px vs 27.9% at 4 px,
+        // since the threshold and blend below are untouched. Only grain size
+        // differs, which is the entire point.
+        const aggregateNoise = hash(Math.floor(u * size * 0.25), Math.floor(v * size * 0.25));
         if (aggregateNoise > 1 - aggregateAmount * 0.7) {
-          // Lighter aggregate particles
-          const brightness = 0.2 + aggregateNoise * 0.2;
+          const brightness = 0.32 + aggregateNoise * 0.22;
           const blend = (aggregateNoise - (1 - aggregateAmount * 0.7)) * 4;
           r = r * (1 - blend) + brightness * blend;
           g = g * (1 - blend) + brightness * blend;
@@ -65,7 +103,7 @@ export const generateTarmac = (
         // Larger aggregate (occasional big stones)
         const bigAggregate = hash(Math.floor(u * 30), Math.floor(v * 30));
         if (bigAggregate > 0.93) {
-          const stoneColor = 0.22 + hash(Math.floor(u * 30) + 100, Math.floor(v * 30)) * 0.1;
+          const stoneColor = 0.34 + hash(Math.floor(u * 30) + 100, Math.floor(v * 30)) * 0.14;
           r = stoneColor;
           g = stoneColor;
           b = stoneColor * 0.95;
@@ -108,9 +146,17 @@ export const generateTarmac = (
 
         // Medium-scale color variation
         const mediumNoise = fbmNoise(u * 10, v * 10, 2);
-        r += (mediumNoise - 0.5) * 0.03;
-        g += (mediumNoise - 0.5) * 0.03;
-        b += (mediumNoise - 0.5) * 0.03;
+        r += (mediumNoise - 0.5) * 0.035;
+        g += (mediumNoise - 0.5) * 0.035;
+        b += (mediumNoise - 0.5) * 0.035;
+
+        // Macro drift (patching, sun-bleaching). Tarmac is tiled 25x across
+        // the yard, so a sub-tile-frequency term is the cheapest way to stop
+        // the eye locking onto the repeat.
+        const macro = fbmNoiseSigned(u * 1.7 + 23, v * 1.7 + 41, 2) * 0.055;
+        r += macro;
+        g += macro;
+        b += macro * 0.9;
 
         data[i] = Math.floor(Math.max(0, Math.min(1, r)) * 255);
         data[i + 1] = Math.floor(Math.max(0, Math.min(1, g)) * 255);
@@ -119,7 +165,7 @@ export const generateTarmac = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createColorDataTexture(data, size, size);
   });
 };
 
@@ -170,7 +216,7 @@ export const generateTarmacRoughness = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
   });
 };
 
@@ -232,6 +278,6 @@ export const generateRoadMarkings = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createColorDataTexture(data, size, size);
   });
 };

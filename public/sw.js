@@ -1,266 +1,250 @@
 /**
- * MillOS Service Worker v2
+ * MillOS version isolated service worker.
  *
- * Provides offline caching for faster loads and offline support.
- *
- * Cache Strategy:
- * - Static assets (JS, CSS, fonts, images): Cache-first with network fallback
- * - Audio files: Cache-first (large files benefit most from caching)
- * - 3D models (GLB, GLTF, KTX2): Cache-first
- * - HDRI files: Cache-first
- * - API calls: Network-first with cache fallback
- * - HTML: Network-first (always get latest)
- *
- * Important: Only HTTP 200 responses are cached. Partial responses (206) from
- * range requests (common for audio/video seeking) cannot be stored in the Cache API.
- * This is by design - full resources are cached on initial load, and subsequent
- * range requests work normally but don't update the cache.
+ * Every deployment scope and build receives its own cache namespace. Navigation
+ * uses a network first strategy, while immutable assets use cache first.
  */
 
-// Cache version - bump this to invalidate all caches on deploy
-const CACHE_VERSION = 'v4';
-const STATIC_CACHE = `millos-static-${CACHE_VERSION}`;
-const AUDIO_CACHE = `millos-audio-${CACHE_VERSION}`;
-const MODEL_CACHE = `millos-models-${CACHE_VERSION}`;
-
-// Assets to precache on install - critical for offline functionality
-// Use relative paths (./) so they work at any base URL (/, /v0.20/, etc.)
-const PRECACHE_ASSETS = [
-  './',
-  './index.html',
-  './hdri/warehouse.hdr',
-  './fonts/MedievalSharp.ttf', // Village 3D text font
-];
-
-// File extensions by caching strategy
-const CACHE_FIRST_EXTENSIONS = new Set([
-  '.js', '.css',
-  '.woff', '.woff2', '.ttf', '.otf',
-  '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico',
+const GENERATED_BUILD_ID = '__MILLOS_BUILD_ID__';
+const GENERATED_CACHE_VERSION = '__MILLOS_CACHE_VERSION__';
+const BUILD_ID = GENERATED_BUILD_ID.startsWith('__') ? 'development' : GENERATED_BUILD_ID;
+const CACHE_VERSION = GENERATED_CACHE_VERSION.startsWith('__')
+  ? 'development'
+  : GENERATED_CACHE_VERSION;
+const SCOPE_URL = new URL(self.registration.scope);
+const SCOPE_PATH = SCOPE_URL.pathname.endsWith('/')
+  ? SCOPE_URL.pathname
+  : `${SCOPE_URL.pathname}/`;
+const SCOPE_KEY =
+  SCOPE_PATH === '/'
+    ? 'root'
+    : SCOPE_PATH.replace(/^\/|\/$/g, '').replace(/[^a-zA-Z0-9._-]/g, '_');
+const CACHE_PREFIX = `millos-${SCOPE_KEY}-`;
+const CACHE_NAMES = {
+  shell: `${CACHE_PREFIX}shell-${CACHE_VERSION}`,
+  world: `${CACHE_PREFIX}world-${CACHE_VERSION}`,
+  optional: `${CACHE_PREFIX}optional-${CACHE_VERSION}`,
+  archive: `${CACHE_PREFIX}archive-${CACHE_VERSION}`,
+};
+const CURRENT_CACHES = new Set(Object.values(CACHE_NAMES));
+const LEGACY_ROOT_CACHES = new Set([
+  'millos-static-v4',
+  'millos-audio-v4',
+  'millos-models-v4',
 ]);
+const PRECACHE_URLS = [
+  new URL('./', SCOPE_URL).href,
+  new URL('index.html', SCOPE_URL).href,
+];
+const WORLD_EXTENSIONS = new Set(['.glb', '.gltf', '.bin', '.hdr', '.ktx2']);
+const OPTIONAL_EXTENSIONS = new Set(['.mp3', '.ogg', '.wav', '.m4a']);
+const OPTIONAL_CHUNK_PATTERN =
+  /(rapier|recharts|charts?|peerjs|multiplayer|postprocessing|web[._-]?llm|webgpu|scada)/i;
+const HASHED_ASSET_PATTERN = /\/assets\/.+-[a-zA-Z0-9_-]{6,}\.[a-zA-Z0-9]+$/;
+const ARCHIVE_PATH_PATTERN = /^\/v\d+\.\d+(?:\/|$)/;
 
-const AUDIO_EXTENSIONS = new Set(['.mp3', '.ogg', '.wav', '.m4a']);
-const MODEL_EXTENSIONS = new Set(['.glb', '.gltf', '.bin', '.hdr', '.ktx2']);
-
-/**
- * Get file extension from URL pathname
- */
 function getExtension(url) {
   const pathname = new URL(url).pathname;
-  const lastDot = pathname.lastIndexOf('.');
-  return lastDot !== -1 ? pathname.substring(lastDot) : '';
+  const filename = pathname.substring(pathname.lastIndexOf('/') + 1);
+  const lastDot = filename.lastIndexOf('.');
+  return lastDot >= 0 ? filename.substring(lastDot).toLocaleLowerCase() : '';
 }
 
-/**
- * Get the appropriate cache name for a URL based on file type
- */
-function getCacheName(url) {
-  const ext = getExtension(url);
-  if (AUDIO_EXTENSIONS.has(ext)) return AUDIO_CACHE;
-  if (MODEL_EXTENSIONS.has(ext)) return MODEL_CACHE;
-  return STATIC_CACHE;
-}
-
-/**
- * Determine if URL should use cache-first strategy
- */
-function shouldCacheFirst(url) {
-  const ext = getExtension(url);
-  return CACHE_FIRST_EXTENSIONS.has(ext) ||
-         AUDIO_EXTENSIONS.has(ext) ||
-         MODEL_EXTENSIONS.has(ext);
-}
-
-/**
- * Check if a response is cacheable
- * Only cache complete (200) responses - partial (206) responses from range
- * requests are not supported by the Cache API
- */
 function isCacheable(response) {
-  return response.status === 200;
+  return response.status === 200 && response.type !== 'error';
 }
 
-/**
- * Install event - precache essential assets
- */
+function isRequestWithinScope(requestUrl) {
+  return requestUrl.pathname.startsWith(SCOPE_PATH);
+}
+
+function cacheNameFor(requestUrl) {
+  const extension = getExtension(requestUrl.href);
+  if (ARCHIVE_PATH_PATTERN.test(requestUrl.pathname)) return CACHE_NAMES.archive;
+  if (
+    WORLD_EXTENSIONS.has(extension) ||
+    /\/(?:models|textures|hdri|draco)\//i.test(requestUrl.pathname)
+  ) {
+    return CACHE_NAMES.world;
+  }
+  if (OPTIONAL_EXTENSIONS.has(extension) || OPTIONAL_CHUNK_PATTERN.test(requestUrl.pathname)) {
+    return CACHE_NAMES.optional;
+  }
+  return CACHE_NAMES.shell;
+}
+
 self.addEventListener('install', (event) => {
-  console.log('[SW] Installing service worker...');
-
   event.waitUntil(
-    caches.open(STATIC_CACHE).then((cache) => {
-      console.log('[SW] Precaching essential assets:', PRECACHE_ASSETS);
-      return cache.addAll(PRECACHE_ASSETS).catch((err) => {
-        // Log but don't fail - some assets may be unavailable during dev
-        console.warn('[SW] Some assets failed to precache:', err);
-      });
-    })
-  );
-
-  // Immediately take control (don't wait for old SW to stop)
-  self.skipWaiting();
-});
-
-/**
- * Activate event - clean up old caches
- */
-self.addEventListener('activate', (event) => {
-  console.log('[SW] Activating service worker...');
-
-  const currentCaches = [STATIC_CACHE, AUDIO_CACHE, MODEL_CACHE];
-
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames
-          .filter((name) => name.startsWith('millos-') && !currentCaches.includes(name))
-          .map((name) => {
-            console.log('[SW] Deleting old cache:', name);
-            return caches.delete(name);
+    caches.open(CACHE_NAMES.shell).then(async (cache) => {
+      const results = await Promise.allSettled(
+        PRECACHE_URLS.map((url) =>
+          fetch(url, { cache: 'no-store' }).then((response) => {
+            if (!isCacheable(response)) {
+              throw new Error(`Precache failed with status ${response.status}`);
+            }
+            return cache.put(url, response);
           })
+        )
       );
+      const failures = results.filter((result) => result.status === 'rejected');
+      if (failures.length > 0) {
+        console.warn(`[SW] ${failures.length} shell resources were unavailable during install.`);
+      }
     })
   );
-
-  // Take control of all pages immediately
-  self.clients.claim();
 });
 
-/**
- * Fetch event - route requests to appropriate caching strategy
- */
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((names) =>
+        Promise.all(
+          names
+            .filter(
+              (name) =>
+                (name.startsWith(CACHE_PREFIX) && !CURRENT_CACHES.has(name)) ||
+                (SCOPE_PATH === '/' && LEGACY_ROOT_CACHES.has(name))
+            )
+            .map((name) => caches.delete(name))
+        )
+      )
+      .then(() => self.clients.claim())
+  );
+});
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  const url = request.url;
-
-  // Skip non-GET requests (POST, PUT, DELETE, etc.)
   if (request.method !== 'GET') return;
 
-  // Skip cross-origin requests (except allowlisted CDNs)
-  const requestUrl = new URL(url);
-  if (requestUrl.origin !== self.location.origin) {
-    // Allow DRACO decoder from Google CDN
-    if (!url.includes('gstatic.com/draco')) return;
+  const requestUrl = new URL(request.url);
+  if (requestUrl.origin !== self.location.origin || !isRequestWithinScope(requestUrl)) return;
+  if (
+    requestUrl.pathname.endsWith('/sw.js') ||
+    requestUrl.pathname.includes('/__vite') ||
+    requestUrl.pathname.includes('/@')
+  ) {
+    return;
   }
 
-  // Skip development/tooling requests
-  if (url.includes('sw.js') || url.includes('__vite') || url.includes('/@')) return;
+  if (request.headers.has('range')) {
+    event.respondWith(fetch(request));
+    return;
+  }
 
-  // Route to appropriate strategy
-  if (shouldCacheFirst(url)) {
-    event.respondWith(cacheFirst(request));
-  } else {
-    event.respondWith(networkFirst(request));
+  const extension = getExtension(request.url);
+  if (request.mode === 'navigate' || extension === '.html' || extension === '.json') {
+    event.respondWith(networkFirst(request, CACHE_NAMES.shell));
+    return;
+  }
+
+  const cacheName = cacheNameFor(requestUrl);
+  if (
+    HASHED_ASSET_PATTERN.test(requestUrl.pathname) ||
+    cacheName !== CACHE_NAMES.shell ||
+    extension
+  ) {
+    event.respondWith(cacheFirst(request, cacheName));
   }
 });
 
-/**
- * Cache-first strategy: Serve from cache, fall back to network
- * Best for static assets that rarely change
- */
-async function cacheFirst(request) {
-  const cacheName = getCacheName(request.url);
+async function cacheFirst(request, cacheName) {
+  const cache = await caches.open(cacheName);
+  const cachedResponse = await cache.match(request);
+  if (cachedResponse) return cachedResponse;
 
   try {
-    // Check cache first
-    const cachedResponse = await caches.match(request);
-    if (cachedResponse) {
-      return cachedResponse;
-    }
-
-    // Not in cache - fetch from network
     const networkResponse = await fetch(request);
-
-    // Cache if it's a complete response (not partial/206)
     if (isCacheable(networkResponse)) {
-      const cache = await caches.open(cacheName);
-      // Don't await - cache in background
-      cache.put(request, networkResponse.clone());
+      await cache.put(request, networkResponse.clone());
     }
-
     return networkResponse;
-  } catch (error) {
-    console.warn('[SW] Cache-first failed:', request.url, error.message);
-
-    // Try stale cache as last resort
-    const staleResponse = await caches.match(request);
-    if (staleResponse) {
-      console.log('[SW] Serving stale cache for:', request.url);
-      return staleResponse;
-    }
-
-    return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
+  } catch {
+    return new Response('Offline', {
+      status: 503,
+      statusText: 'Service Unavailable',
+    });
   }
 }
 
-/**
- * Network-first strategy: Fetch from network, fall back to cache
- * Best for HTML and dynamic content
- */
-async function networkFirst(request) {
+async function networkFirst(request, cacheName) {
+  const cache = await caches.open(cacheName);
   try {
-    const networkResponse = await fetch(request);
-
-    // Cache complete responses for offline fallback
+    const networkResponse = await fetch(request, { cache: 'no-store' });
     if (isCacheable(networkResponse)) {
-      const cache = await caches.open(STATIC_CACHE);
-      cache.put(request, networkResponse.clone());
+      await cache.put(request, networkResponse.clone());
     }
-
     return networkResponse;
-  } catch (error) {
-    console.warn('[SW] Network-first falling back to cache:', request.url);
+  } catch {
+    const cachedResponse = await cache.match(request);
+    if (cachedResponse) return cachedResponse;
 
-    const cachedResponse = await caches.match(request);
-    if (cachedResponse) {
-      return cachedResponse;
-    }
-
-    // For navigation, return cached index.html (SPA fallback)
     if (request.mode === 'navigate') {
-      const indexResponse = await caches.match('/index.html');
+      const indexResponse = await cache.match(new URL('index.html', SCOPE_URL).href);
       if (indexResponse) return indexResponse;
     }
-
-    return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
+    return new Response('Offline', {
+      status: 503,
+      statusText: 'Service Unavailable',
+    });
   }
 }
 
-/**
- * Message handler - cache management commands from main thread
- */
 self.addEventListener('message', (event) => {
+  if (!event.data || typeof event.data !== 'object') return;
   const { type } = event.data;
+
+  if (type === 'SKIP_WAITING') {
+    event.waitUntil(self.skipWaiting());
+    return;
+  }
 
   if (type === 'CLEAR_CACHE') {
     event.waitUntil(
-      caches.keys()
-        .then((names) => Promise.all(
-          names.filter((n) => n.startsWith('millos-')).map((n) => caches.delete(n))
-        ))
-        .then(() => event.ports[0]?.postMessage({ success: true }))
+      clearScopedCaches().then((success) => event.ports[0]?.postMessage({ success }))
     );
+    return;
   }
 
   if (type === 'GET_CACHE_SIZE') {
     event.waitUntil(getCacheStats().then((stats) => event.ports[0]?.postMessage(stats)));
+    return;
+  }
+
+  if (type === 'GET_BUILD_INFO') {
+    event.waitUntil(
+      getCacheStats().then((cachesForScope) =>
+        event.ports[0]?.postMessage({
+          buildId: BUILD_ID,
+          cacheVersion: CACHE_VERSION,
+          scope: SCOPE_URL.href,
+          scopeKey: SCOPE_KEY,
+          caches: cachesForScope,
+        })
+      )
+    );
   }
 });
 
-/**
- * Get cache statistics for debugging
- */
+async function clearScopedCaches() {
+  const names = await caches.keys();
+  const results = await Promise.all(
+    names.filter((name) => name.startsWith(CACHE_PREFIX)).map((name) => caches.delete(name))
+  );
+  return results.every(Boolean);
+}
+
 async function getCacheStats() {
   const stats = {};
   const names = await caches.keys();
-
-  for (const name of names.filter((n) => n.startsWith('millos-'))) {
+  for (const name of names.filter((candidate) => candidate.startsWith(CACHE_PREFIX)).sort()) {
     const cache = await caches.open(name);
     const requests = await cache.keys();
     stats[name] = {
       entries: requests.length,
-      urls: requests.map((r) => new URL(r.url).pathname),
+      urls: requests.slice(0, 100).map((request) => new URL(request.url).pathname),
+      truncated: requests.length > 100,
     };
   }
-
   return stats;
 }

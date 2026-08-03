@@ -5,7 +5,7 @@
  * Allows users to understand what the factory looked like when AI made a decision.
  */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -19,6 +19,7 @@ import {
   CheckCircle,
 } from 'lucide-react';
 import { AIDecision } from '../../types';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface DecisionReplayProps {
   decision: AIDecision | null;
@@ -26,6 +27,9 @@ interface DecisionReplayProps {
 }
 
 export const DecisionReplay: React.FC<DecisionReplayProps> = ({ decision, onClose }) => {
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(modalRef as React.RefObject<HTMLElement>, !!decision, onClose);
+
   if (!decision) return null;
 
   const formatTime = (date: Date) => {
@@ -76,6 +80,10 @@ export const DecisionReplay: React.FC<DecisionReplayProps> = ({ decision, onClos
         onClick={onClose}
       >
         <motion.div
+          ref={modalRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Decision replay"
           initial={{ scale: 0.95, opacity: 0, y: 15 }}
           animate={{
             scale: 1,
@@ -94,10 +102,12 @@ export const DecisionReplay: React.FC<DecisionReplayProps> = ({ decision, onClos
               <span className="font-medium text-white">Decision Replay</span>
             </div>
             <button
+              type="button"
               onClick={onClose}
+              aria-label="Close"
               className="p-1 hover:bg-slate-700/50 rounded transition-colors"
             >
-              <X className="w-5 h-5 text-slate-400" />
+              <X className="w-5 h-5 text-slate-400" aria-hidden="true" />
             </button>
           </div>
 
@@ -134,7 +144,12 @@ export const DecisionReplay: React.FC<DecisionReplayProps> = ({ decision, onClos
                   <Gauge className="w-3.5 h-3.5" />
                   <span className="text-[10px] uppercase">Confidence</span>
                 </div>
-                <p className="text-sm text-white font-mono">{decision.confidence}%</p>
+                <p className="text-sm text-white font-mono">
+                  {Math.round(
+                    decision.confidence <= 1 ? decision.confidence * 100 : decision.confidence
+                  )}
+                  %
+                </p>
               </div>
             </div>
 
@@ -168,6 +183,150 @@ export const DecisionReplay: React.FC<DecisionReplayProps> = ({ decision, onClos
                 <p className="text-sm text-emerald-400 font-mono">{decision.workerId}</p>
               </div>
             )}
+
+            {decision.provenance && (
+              <>
+                <section
+                  className="rounded-lg border border-cyan-500/20 bg-cyan-950/15 p-3"
+                  aria-labelledby={`decision-evidence-${decision.id}`}
+                >
+                  <div className="mb-2 flex items-center gap-2 text-cyan-300">
+                    <Gauge className="h-3.5 w-3.5" aria-hidden="true" />
+                    <h3
+                      id={`decision-evidence-${decision.id}`}
+                      className="text-[10px] uppercase tracking-wider"
+                    >
+                      Evidence snapshot
+                    </h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-[10px]">
+                      <thead className="text-slate-500">
+                        <tr>
+                          <th className="pb-1 pr-2 font-medium">Observation</th>
+                          <th className="pb-1 pr-2 font-medium">Value</th>
+                          <th className="pb-1 font-medium">Source and quality</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {decision.provenance.observations.map((observation, index) => (
+                          <tr key={`${observation.label}-${index}`}>
+                            <th className="py-1.5 pr-2 font-normal text-slate-300">
+                              {observation.label}
+                            </th>
+                            <td className="py-1.5 pr-2 font-mono text-white">
+                              {observation.value}
+                              {observation.unit ? ` ${observation.unit}` : ''}
+                            </td>
+                            <td className="py-1.5 text-slate-400">
+                              {observation.source}, {observation.quality}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <section className="rounded-lg bg-slate-800/30 p-3">
+                  <h3 className="mb-2 text-[10px] uppercase tracking-wider text-slate-400">
+                    Assumptions
+                  </h3>
+                  <ul className="space-y-1 text-xs text-slate-300">
+                    {decision.provenance.assumptions.map((assumption) => (
+                      <li key={assumption} className="flex gap-2">
+                        <span className="text-amber-400" aria-hidden="true">
+                          •
+                        </span>
+                        <span>{assumption}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+
+                <section className="rounded-lg bg-slate-800/30 p-3">
+                  <h3 className="mb-2 text-[10px] uppercase tracking-wider text-slate-400">
+                    Alternatives considered
+                  </h3>
+                  <div className="space-y-2">
+                    {decision.provenance.alternatives.map((alternative) => (
+                      <div key={`${alternative.action}-${alternative.tradeoff}`}>
+                        <p className="text-xs font-medium text-slate-200">{alternative.action}</p>
+                        <p className="text-[10px] text-slate-400">{alternative.tradeoff}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-slate-800/30 p-3">
+                    <div className="mb-1 text-[10px] uppercase text-slate-400">Affected people</div>
+                    <p className="text-xs text-slate-200">
+                      {decision.provenance.affectedPeople.join(', ')}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-slate-800/30 p-3">
+                    <div className="mb-1 text-[10px] uppercase text-slate-400">
+                      Affected equipment
+                    </div>
+                    <p className="text-xs text-slate-200">
+                      {decision.provenance.affectedEquipment.join(', ')}
+                    </p>
+                  </div>
+                </div>
+              </>
+            )}
+
+            <section className="rounded-lg border border-slate-700/60 bg-slate-800/30 p-3">
+              <h3 className="mb-2 text-[10px] uppercase tracking-wider text-slate-400">
+                Decision response
+              </h3>
+              {decision.response ? (
+                <div className="space-y-1">
+                  <p className="text-xs font-medium capitalize text-slate-200">
+                    {decision.response.disposition}
+                  </p>
+                  {decision.response.note && (
+                    <p className="text-[10px] text-slate-400">{decision.response.note}</p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400">
+                  Awaiting an operator or automatic response.
+                </p>
+              )}
+            </section>
+
+            <section
+              className={`rounded-lg border p-3 ${
+                decision.measuredOutcome
+                  ? 'border-emerald-500/20 bg-emerald-950/15'
+                  : 'border-slate-700/60 bg-slate-800/30'
+              }`}
+            >
+              <h3 className="mb-2 text-[10px] uppercase tracking-wider text-slate-400">
+                Measured outcome
+              </h3>
+              {decision.measuredOutcome ? (
+                <>
+                  <p className="mb-2 text-xs text-emerald-200">
+                    {decision.measuredOutcome.summary}
+                  </p>
+                  <dl className="grid grid-cols-2 gap-2">
+                    {Object.entries(decision.measuredOutcome.measurements).map(([label, value]) => (
+                      <div key={label} className="rounded bg-slate-950/35 p-2">
+                        <dt className="text-[9px] capitalize text-slate-500">{label}</dt>
+                        <dd className="font-mono text-[10px] text-slate-200">{String(value)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </>
+              ) : (
+                <p className="text-xs text-slate-400">
+                  No measured result has been recorded for this simulated decision.
+                </p>
+              )}
+            </section>
           </div>
 
           {/* Footer */}
@@ -198,9 +357,14 @@ export const DecisionReplayTrigger: React.FC<{
 
   return (
     <>
-      <div onClick={() => setShowReplay(true)} className="cursor-pointer">
+      <button
+        type="button"
+        onClick={() => setShowReplay(true)}
+        aria-label="View decision details"
+        className="cursor-pointer w-full text-left bg-transparent border-0 p-0 m-0"
+      >
         {children}
-      </div>
+      </button>
       <DecisionReplay
         decision={showReplay ? decision : null}
         onClose={() => setShowReplay(false)}

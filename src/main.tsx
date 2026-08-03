@@ -1,17 +1,13 @@
+import { Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-import AssetPrototypePage from './prototypes/AssetPrototypePage';
 import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
 import { registerServiceWorker } from './utils/serviceWorkerRegistration';
+import { logger } from './utils/logger';
+import { isBenchmarkRuntime } from './runtime/runtimeMode';
 
-// Pre-warm Rapier WASM - starts loading immediately instead of blocking on first Physics render
-// This runs in parallel with React initialization, reducing perceived startup time
-import('@dimforge/rapier3d-compat').then((RAPIER) => {
-  RAPIER.init().catch(() => {
-    // Silently ignore - will be initialized again when Physics mounts
-  });
-});
+performance.mark('millos:bootstrap');
 
 // Suppress harmless warnings from third-party libraries
 const originalWarn = console.warn;
@@ -30,41 +26,45 @@ console.warn = (...args: unknown[]): void => {
   originalWarn.apply(console, args);
 };
 
+// Global async error logging. React's ErrorBoundary only catches render-phase
+// errors; it does NOT see unhandled promise rejections (e.g. the Rapier prewarm
+// above, dynamic imports, audio resume) or errors thrown outside the React tree.
+// Without these listeners such failures are completely silent in the field.
+window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent): void => {
+  logger.error('[unhandledrejection]', event.reason);
+});
+window.addEventListener('error', (event: ErrorEvent): void => {
+  logger.error('[window.error]', event.error ?? event.message);
+});
+
 // StrictMode disabled for 3D app - causes double-renders that tank performance in dev
 // Production builds are unaffected (StrictMode only runs in development)
-const isPrototypeRoute = (): boolean => {
-  const url = new URL(window.location.href);
-  const normalizedPath = url.pathname.replace(/\/+$/, '') || '/';
-  const normalizedBase = import.meta.env.BASE_URL.replace(/\/+$/, '') || '/';
-  const prototypePath = normalizedBase === '/' ? '/prototypes' : `${normalizedBase}/prototypes`;
-  const prototypeIndexPath = `${prototypePath}/index.html`;
-
-  return (
-    normalizedPath === prototypePath ||
-    normalizedPath === prototypeIndexPath ||
-    url.searchParams.get('view') === 'prototypes' ||
-    url.hash === '#prototypes'
-  );
-};
-
-const RootComponent = isPrototypeRoute() ? AssetPrototypePage : App;
+const RootComponent = App;
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <ErrorBoundary>
-    <RootComponent />
+    <Suspense fallback={null}>
+      <RootComponent />
+    </Suspense>
   </ErrorBoundary>
 );
 
-// Register service worker for offline caching (production only by default)
-// Set VITE_ENABLE_SW=true in .env to enable during development
-registerServiceWorker({
-  onSuccess: () => {
-    // Service worker installed successfully
-  },
-  onUpdate: () => {
-    // New version available
-  },
-  onError: () => {
-    // Service worker registration failed
-  },
-});
+// A deterministic benchmark must never install or become controlled by the
+// production service worker. Reusing a preview origin across fixed-camera
+// captures can otherwise mix chunks from adjacent builds and invalidate both
+// visual and performance evidence.
+if (!isBenchmarkRuntime()) {
+  // Register service worker for offline caching (production only by default).
+  // Set VITE_ENABLE_SW=true in .env to enable during development.
+  registerServiceWorker({
+    onSuccess: () => {
+      // Service worker installed successfully
+    },
+    onUpdate: () => {
+      // New version available
+    },
+    onError: () => {
+      // Service worker registration failed
+    },
+  });
+}

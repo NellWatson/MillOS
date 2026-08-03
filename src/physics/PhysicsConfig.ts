@@ -3,6 +3,7 @@
  *
  * Uses @react-three/rapier for physics simulation of workers, forklifts, and player
  */
+import { SITE_LAYOUT } from '../constants/siteLayout';
 
 // Physics world configuration
 export const PHYSICS_CONFIG = {
@@ -73,10 +74,16 @@ export const COLLISION_FILTERS = {
   },
 
   // Workers collide with static and player, not other workers or forklifts
-  // This prevents crowding issues and improves performance
+  // This prevents crowding issues and improves performance.
+  // SENSOR is included because Rapier requires BOTH colliders' filters to
+  // accept each other before intersection events fire: without it the
+  // fire-drill exit sensors (memberships=SENSOR, filter=WORKER) could never
+  // detect a worker, so physics-mode evacuations were never registered by
+  // the sensors. Sensors are non-physical (intersection events only), so
+  // this adds no collision response.
   worker: {
     memberships: COLLISION_GROUPS.WORKER,
-    filter: COLLISION_GROUPS.STATIC | COLLISION_GROUPS.PLAYER,
+    filter: COLLISION_GROUPS.STATIC | COLLISION_GROUPS.PLAYER | COLLISION_GROUPS.SENSOR,
   },
 
   // Forklifts collide with static and player only
@@ -105,15 +112,15 @@ export const COLLISION_FILTERS = {
 } as const;
 
 // World boundary - circular at mountain base (mountains start at radius 260)
-export const WORLD_RADIUS = 255;
+export const WORLD_RADIUS = SITE_LAYOUT.world.radius;
 
 // Factory bounds for physics world (legacy - kept for debug visualization)
 export const FACTORY_BOUNDS = {
-  minX: -60,
-  maxX: 60,
-  minZ: -80,
-  maxZ: 80,
-  height: 35,
+  minX: SITE_LAYOUT.factory.bounds.minX,
+  maxX: SITE_LAYOUT.factory.bounds.maxX,
+  minZ: SITE_LAYOUT.factory.bounds.minZ,
+  maxZ: SITE_LAYOUT.factory.bounds.maxZ,
+  height: SITE_LAYOUT.factory.bounds.maxY,
 } as const;
 
 // Helper to create collision groups value for Rapier

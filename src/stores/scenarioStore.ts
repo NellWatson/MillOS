@@ -12,6 +12,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { safeJSONStorage } from './storage';
+import { sanitizeScenarioState } from './persistenceMigrations';
 import type { FiveAxes } from '../types/bas';
 
 // =============================================================================
@@ -155,6 +156,14 @@ interface ScenarioState {
   engagementReadings: number[];
   triggeredEvents: string[];
   axisChangeCount: number;
+  /** Choice ids selected at choice_point events during the active scenario */
+  choicesMade: string[];
+  /** Accumulated BAS effect deltas from choices and BAS events */
+  basEffectDeltas: {
+    solidarity: number;
+    relationshipHealth: number;
+    federationTrust: number;
+  };
 
   // Actions
   startScenario: (id: string) => void;
@@ -168,6 +177,8 @@ interface ScenarioState {
   recordStability: (stability: number) => void;
   recordEngagement: (engagement: number) => void;
   recordAxisChange: () => void;
+  recordChoice: (choiceId: string, effects?: ScenarioChoice['effects']) => void;
+  recordBASEffect: (effects: ScenarioChoice['effects']) => void;
   markEventTriggered: (eventIndex: number) => void;
   calculateResults: (finalAxes: FiveAxes, finalStability: number) => void;
 
@@ -560,7 +571,7 @@ const PRESET_SCENARIOS: Scenario[] = [
     ],
     duration: 660, // 11 minutes (leaving buffer for the 15 min display)
     learningObjectives: [
-      'Engagement is a diagnostic - forcing work signals misconfigured BAMS',
+      'Engagement is a diagnostic - forcing work signals misconfigured BAS',
       'Reducing friction enables natural engagement to emerge',
       'Gaming feel + generative output = healthy engagement signature',
       'Autonomy and transparency both reduce entry friction differently',
@@ -1434,6 +1445,8 @@ export const useScenarioStore = create<ScenarioState>()(
       engagementReadings: [],
       triggeredEvents: [],
       axisChangeCount: 0,
+      choicesMade: [],
+      basEffectDeltas: { solidarity: 0, relationshipHealth: 0, federationTrust: 0 },
 
       // Actions
       startScenario: (id) => {
@@ -1451,6 +1464,8 @@ export const useScenarioStore = create<ScenarioState>()(
           engagementReadings: [],
           triggeredEvents: [],
           axisChangeCount: 0,
+          choicesMade: [],
+          basEffectDeltas: { solidarity: 0, relationshipHealth: 0, federationTrust: 0 },
         });
       },
 
@@ -1476,6 +1491,8 @@ export const useScenarioStore = create<ScenarioState>()(
           engagementReadings: [],
           triggeredEvents: [],
           axisChangeCount: 0,
+          choicesMade: [],
+          basEffectDeltas: { solidarity: 0, relationshipHealth: 0, federationTrust: 0 },
         });
       },
 
@@ -1521,20 +1538,55 @@ export const useScenarioStore = create<ScenarioState>()(
       },
 
       recordStability: (stability) => {
-        set((state) => ({
-          stabilityReadings: [...state.stabilityReadings.slice(-500), stability],
-        }));
+        // Append with a single bounded copy per tick (driven at 10Hz during
+        // active scenarios). slice() always allocates a fresh array, preserving
+        // Zustand's new-reference-per-update contract while avoiding the prior
+        // slice(-500)+spread double-copy regardless of array length.
+        set((state) => {
+          const readings =
+            state.stabilityReadings.length >= 500
+              ? state.stabilityReadings.slice(1)
+              : state.stabilityReadings.slice();
+          readings.push(stability);
+          return { stabilityReadings: readings };
+        });
       },
 
       recordEngagement: (engagement) => {
-        set((state) => ({
-          engagementReadings: [...state.engagementReadings.slice(-500), engagement],
-        }));
+        // Same bounded single-copy append pattern as recordStability.
+        set((state) => {
+          const readings =
+            state.engagementReadings.length >= 500
+              ? state.engagementReadings.slice(1)
+              : state.engagementReadings.slice();
+          readings.push(engagement);
+          return { engagementReadings: readings };
+        });
       },
 
       recordAxisChange: () => {
         set((state) => ({
           axisChangeCount: state.axisChangeCount + 1,
+        }));
+      },
+
+      recordChoice: (choiceId, effects) => {
+        set((state) => ({
+          choicesMade: [...state.choicesMade, choiceId],
+        }));
+        if (effects) {
+          get().recordBASEffect(effects);
+        }
+      },
+
+      recordBASEffect: (effects) => {
+        set((state) => ({
+          basEffectDeltas: {
+            solidarity: state.basEffectDeltas.solidarity + (effects.solidarity ?? 0),
+            relationshipHealth:
+              state.basEffectDeltas.relationshipHealth + (effects.relationshipHealth ?? 0),
+            federationTrust: state.basEffectDeltas.federationTrust + (effects.federationTrust ?? 0),
+          },
         }));
       },
 
@@ -1558,6 +1610,8 @@ export const useScenarioStore = create<ScenarioState>()(
           engagementReadings,
           triggeredEvents,
           axisChangeCount,
+          choicesMade,
+          basEffectDeltas,
         } = get();
 
         if (!activeScenario) return;
@@ -1619,7 +1673,7 @@ export const useScenarioStore = create<ScenarioState>()(
             if (grade !== 'A' && grade !== 'B') grade = 'B';
           } else {
             summary =
-              'The engagement signature remained weak. When work feels like forcing, BAMS configuration needs adjustment.';
+              'The engagement signature remained weak. When work feels like forcing, BAS configuration needs adjustment.';
           }
         } else if (grade === 'A') {
           summary =
@@ -1634,6 +1688,21 @@ export const useScenarioStore = create<ScenarioState>()(
           summary =
             'System entered unstable state. Review the learning objectives and try different axis configurations.';
         }
+
+        // BAS metrics for the educational BAS scenarios
+        const isBASScenario =
+          activeScenario.category === 'economic_democracy' ||
+          activeScenario.category === 'bilateral' ||
+          activeScenario.category === 'inter_cooperation';
+        const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+        const basMetrics: ScenarioResult['basMetrics'] | undefined = isBASScenario
+          ? {
+              choicesMade,
+              solidarityMaintained: basEffectDeltas.solidarity >= 0,
+              relationshipHealth: clamp01(0.7 + basEffectDeltas.relationshipHealth),
+              federationTrust: clamp01(0.7 + basEffectDeltas.federationTrust),
+            }
+          : undefined;
 
         const result: ScenarioResult = {
           scenarioId: activeScenario.id,
@@ -1655,6 +1724,7 @@ export const useScenarioStore = create<ScenarioState>()(
           grade,
           summary,
           engagementMetrics,
+          basMetrics,
         };
 
         set((state) => ({
@@ -1705,12 +1775,20 @@ export const useScenarioStore = create<ScenarioState>()(
           engagementReadings: [],
           triggeredEvents: [],
           axisChangeCount: 0,
+          choicesMade: [],
+          basEffectDeltas: { solidarity: 0, relationshipHealth: 0, federationTrust: 0 },
         });
       },
     }),
     {
       name: 'millos-scenario',
       storage: safeJSONStorage,
+      version: 1,
+      migrate: (persisted) => sanitizeScenarioState(persisted) as unknown as ScenarioState,
+      merge: (persisted, current) => ({
+        ...current,
+        ...(sanitizeScenarioState(persisted) as unknown as Partial<ScenarioState>),
+      }),
       partialize: (state) => ({
         completedScenarios: state.completedScenarios,
         scenarioHistory: state.scenarioHistory,

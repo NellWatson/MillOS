@@ -1,4 +1,4 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useEffect } from 'react';
 import * as THREE from 'three';
 import { useAmbientAnimation } from './shared';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
@@ -90,6 +90,12 @@ export const TimeClockStation: React.FC<{
     }
   });
 
+  // Stabilize time-card visibility so cards do not pop in/out on re-render
+  const cardVisible = useMemo(
+    () => [-0.1, -0.05, 0, 0.05, 0.1].map(() => Math.random() > 0.3),
+    [position]
+  );
+
   return (
     <group position={position} rotation={rotation}>
       {/* Main unit */}
@@ -126,7 +132,7 @@ export const TimeClockStation: React.FC<{
 
       {/* Time cards in rack */}
       {[-0.1, -0.05, 0, 0.05, 0.1].map((y, i) => (
-        <mesh key={i} position={[0.22, y, 0.045]} visible={Math.random() > 0.3}>
+        <mesh key={i} position={[0.22, y, 0.045]} visible={cardVisible[i]}>
           <boxGeometry args={[0.08, 0.04, 0.002]} />
           <meshStandardMaterial color="#fef3c7" />
         </mesh>
@@ -317,6 +323,9 @@ export const Graffiti: React.FC<{
     tex.needsUpdate = true;
     return tex;
   }, [type]);
+
+  // Dispose the manually-created GPU texture on unmount / type change
+  useEffect(() => () => texture.dispose(), [texture]);
 
   return (
     <mesh position={position} rotation={rotation}>

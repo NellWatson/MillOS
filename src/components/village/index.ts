@@ -4,24 +4,22 @@
  * This module provides instanced rendering for village elements.
  * Use these components instead of the individual mesh-based ones
  * when you need to render multiple instances.
+ *
+ * Trees are NOT here. Vegetation has a single owner:
+ * `components/scenery/InstancedFoliage.tsx`.
  */
 
 export {
   InstancedLamps,
   InstancedBenches,
-  InstancedTrees,
   InstancedMarketStalls,
   // Shared geometries
   lampPostGeometry,
   lampHousingGeometry,
   benchSeatGeometry,
-  treeTrunkGeometry,
-  treeCanopyGeometry,
   // Shared materials
   blackMetalMaterial,
   timberMaterial,
   whiteMaterial,
-  brownBarkMaterial,
-  greenLeafMaterial,
   smokeMaterial,
 } from './InstancedVillageComponents';

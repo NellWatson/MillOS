@@ -1,8 +1,64 @@
 // Audio manager for realistic factory sounds using Web Audio API
 import { logger } from './logger';
 
+export type AmbientWeather = 'clear' | 'cloudy' | 'rain' | 'storm';
+
+export interface OutdoorAmbientMix {
+  birds: number;
+  wind: number;
+  traffic: number;
+  water: number;
+  ducks: number;
+  pigs: number;
+  cows: number;
+}
+
+const proximity = (x: number, z: number, targetX: number, targetZ: number, range: number): number =>
+  Math.max(0, 1 - Math.hypot(x - targetX, z - targetZ) / range);
+
+/** Pure spatial and weather mix, kept testable outside Web Audio. */
+export function calculateOutdoorAmbientMix(
+  camera: { x: number; z: number },
+  timeOfDay: 'day' | 'night',
+  weather: AmbientWeather
+): OutdoorAmbientMix {
+  const insideFactory = camera.x > -60 && camera.x < 60 && camera.z > -50 && camera.z < 50;
+  const exterior = insideFactory ? 0.12 : 1;
+  const weatherMix = {
+    clear: { birds: 1, wind: 1, water: 1, animals: 1 },
+    cloudy: { birds: 0.75, wind: 1.25, water: 1, animals: 0.85 },
+    rain: { birds: 0.16, wind: 1.7, water: 1.35, animals: 0.25 },
+    storm: { birds: 0, wind: 2.8, water: 1.75, animals: 0.08 },
+  }[weather];
+  const daylight = timeOfDay === 'day' ? 1 : 0.25;
+  const waterProximity = Math.max(
+    proximity(camera.x, camera.z, -190, 0, 70),
+    proximity(camera.x, camera.z, -125, 105, 70),
+    proximity(camera.x, camera.z, 120, 120, 80),
+    proximity(camera.x, camera.z, 0, -145, 75)
+  );
+  const farmProximity = proximity(camera.x, camera.z, 75, 120, 75);
+  const villagePondProximity = Math.max(
+    proximity(camera.x, camera.z, -190, 0, 55),
+    proximity(camera.x, camera.z, -125, 105, 45)
+  );
+
+  return {
+    birds: 0.002 * exterior * daylight * weatherMix.birds,
+    wind: 0.012 * exterior * (timeOfDay === 'night' ? 1.5 : 1) * weatherMix.wind,
+    traffic: 0.015 * exterior * (timeOfDay === 'night' ? 0.53 : 1),
+    water: 0.004 * exterior * waterProximity * weatherMix.water,
+    ducks: 0.0008 * exterior * villagePondProximity * daylight * weatherMix.animals,
+    pigs: 0.0012 * exterior * farmProximity * weatherMix.animals,
+    cows: 0.0008 * exterior * farmProximity * weatherMix.animals,
+  };
+}
+
 // Use centralized audio logger
 const audioLog = {
+  debug: (message: string, ...args: unknown[]) => {
+    logger.audio.debug(message, ...args);
+  },
   info: (message: string, ...args: unknown[]) => {
     logger.audio.info(message, ...args);
   },
@@ -35,6 +91,23 @@ class AudioManager {
 
   get initialized(): boolean {
     return this._initialized;
+  }
+
+  /**
+   * Speech synthesis must only be entered after a user gesture has initialized
+   * audio. Besides satisfying browser autoplay policies, this prevents the
+   * first ambient PA announcement from synchronously initializing the host
+   * voice service during an otherwise idle simulation.
+   */
+  get canSpeakAnnouncements(): boolean {
+    return (
+      this._initialized &&
+      this._ttsPrimed &&
+      this._ttsEnabled &&
+      !this._muted &&
+      typeof window !== 'undefined' &&
+      'speechSynthesis' in window
+    );
   }
 
   // Ambient sound nodes
@@ -77,6 +150,7 @@ class AudioManager {
     pigs?: { source: AudioBufferSourceNode; gain: GainNode };
     cows?: { source: AudioBufferSourceNode; gain: GainNode };
   } = {};
+  private lastOutdoorTargets: Partial<OutdoorAmbientMix> = {};
 
   // Camera position for spatial audio (updated externally)
   private cameraPosition: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
@@ -221,8 +295,9 @@ class AudioManager {
   private speechReverbPulseInterval: NodeJS.Timeout | number | null = null;
 
   // PA announcement queue - prevents messages from cutting each other off
-  private announcementQueue: string[] = [];
+  private announcementQueue: Array<{ text: string; priority: number }> = [];
   private isAnnouncementPlaying: boolean = false;
+  private speechDuckPriority = 0;
   private announcementChimeTimeout: ReturnType<typeof setTimeout> | null = null;
   private announcementSafetyTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -241,6 +316,7 @@ class AudioManager {
   private saveSettings(): void {
     try {
       const settings = {
+        version: 1,
         muted: this._muted,
         volume: this._volume,
         musicEnabled: this._musicEnabled,
@@ -348,7 +424,9 @@ class AudioManager {
   // Note: Each machine type has a different base volume (0.06/0.05/0.045)
   // We use an average base of 0.05 for volume updates
   private updateMachineVolumes(): void {
-    const effectiveVolume = this._muted ? 0 : this._machineVolume * 0.05;
+    const effectiveVolume = this._muted
+      ? 0
+      : this._machineVolume * 0.05 * this.getSpeechDuckFactor();
     this.machineNodes.forEach((node) => {
       if (node.gain) {
         node.gain.gain.setTargetAtTime(effectiveVolume, this.audioContext?.currentTime ?? 0, 0.15);
@@ -582,7 +660,8 @@ class AudioManager {
 
   private updateMasterVolume(): void {
     if (this.masterGain) {
-      const targetVolume = this._muted ? 0 : this._volume;
+      // Keep hidden-tab silence intact: backgroundMuted overrides volume/mute changes
+      const targetVolume = this.backgroundMuted || this._muted ? 0 : this._volume;
       this.masterGain.gain.setTargetAtTime(targetVolume, this.audioContext?.currentTime || 0, 0.1);
     }
   }
@@ -705,8 +784,23 @@ class AudioManager {
   private updateMusicVolume(): void {
     if (this.musicAudio) {
       // Music has its own independent volume control
-      this.musicAudio.volume = this._muted ? 0 : this._musicVolume;
+      this.musicAudio.volume = this._muted ? 0 : this._musicVolume * this.getSpeechDuckFactor();
     }
+  }
+
+  private getSpeechDuckFactor(): number {
+    if (this.speechDuckPriority >= 4) return 0.18;
+    if (this.speechDuckPriority >= 3) return 0.3;
+    if (this.speechDuckPriority > 0) return 0.45;
+    return 1;
+  }
+
+  private setSpeechDuckPriority(priority: number): void {
+    this.speechDuckPriority = Math.min(4, Math.max(0, priority));
+    this.updateMusicVolume();
+    this.updateMachineVolumes();
+    this.updateAmbientSpatialVolumes();
+    this.adjustAmbientForTimeOfDay();
   }
 
   startMusic(): void {
@@ -1419,7 +1513,15 @@ class AudioManager {
   // === TRUCK SOUNDS ===
 
   // Truck engine idle/running sound
-  private truckEngines: Map<string, { source: AudioBufferSourceNode; gain: GainNode }> = new Map();
+  private truckEngines: Map<
+    string,
+    {
+      source: AudioBufferSourceNode;
+      gain: GainNode;
+      filter: BiquadFilterNode;
+      lfo: OscillatorNode;
+    }
+  > = new Map();
 
   startTruckEngine(truckId: string, isMoving: boolean = false) {
     if (this.truckEngines.has(truckId)) return;
@@ -1463,7 +1565,7 @@ class AudioManager {
       source.start();
       lfo.start();
 
-      this.truckEngines.set(truckId, { source, gain });
+      this.truckEngines.set(truckId, { source, gain, filter, lfo });
     } catch (e) {
       audioLog.warn('Grain flow sound playback failed', e);
     }
@@ -1474,6 +1576,12 @@ class AudioManager {
     if (engine && this.audioContext) {
       const targetGain = isMoving ? 0.04 : 0.025;
       engine.gain.gain.setTargetAtTime(targetGain, this.audioContext.currentTime, 0.3);
+      engine.filter.frequency.setTargetAtTime(
+        isMoving ? 150 : 80,
+        this.audioContext.currentTime,
+        0.35
+      );
+      engine.lfo.frequency.setTargetAtTime(isMoving ? 25 : 15, this.audioContext.currentTime, 0.35);
     }
   }
 
@@ -1482,6 +1590,7 @@ class AudioManager {
     if (engine) {
       try {
         engine.source.stop();
+        engine.lfo.stop();
       } catch (e) {
         audioLog.warn('Truck engine start failed', { truckId }, e);
       }
@@ -1916,7 +2025,11 @@ class AudioManager {
   // Resume audio context if suspended (needed for user interaction requirement)
   async resume() {
     // Mark as initialized - this allows getContext() to create the AudioContext
+    const wasInitialized = this._initialized;
     this._initialized = true;
+    if (!wasInitialized) {
+      this.notifyListeners();
+    }
 
     const ctx = this.getContext();
     if (ctx && ctx.state === 'suspended') {
@@ -1940,23 +2053,23 @@ class AudioManager {
         primer.volume = 0; // Completely silent
         primer.rate = 2; // Fast but not extreme (rate=10 may cause issues)
         primer.onend = () => {
-          console.log('[TTS] Primer completed normally');
+          audioLog.debug('[TTS] Primer completed normally');
           this._ttsPrimerComplete = true;
         };
         primer.onerror = (e) => {
           // Even on error, mark as complete so real announcements can proceed
           // Note: "canceled" errors are expected if we cancel() before primer finishes
-          console.log('[TTS] Primer error:', e.error, '(proceeding anyway)');
+          audioLog.debug('[TTS] Primer error:', e.error, '(proceeding anyway)');
           this._ttsPrimerComplete = true;
         };
         window.speechSynthesis.speak(primer);
-        console.log('[TTS] Primer spoken for gesture activation');
+        audioLog.debug('[TTS] Primer spoken for gesture activation');
 
         // Safety: if primer doesn't complete within 2s, mark as complete anyway
         // (Reduced from 3s since primer should be very fast)
         setTimeout(() => {
           if (!this._ttsPrimerComplete) {
-            console.log('[TTS] Primer timeout - marking complete');
+            audioLog.debug('[TTS] Primer timeout - marking complete');
             this._ttsPrimerComplete = true;
           }
         }, 2000);
@@ -1974,6 +2087,7 @@ class AudioManager {
     this.cameraPosition = { x, y, z };
     // Update ambient factory sounds based on distance from factory
     this.updateAmbientSpatialVolumes();
+    this.adjustAmbientForTimeOfDay();
   }
 
   /**
@@ -2081,7 +2195,7 @@ class AudioManager {
     const wallAttenuation = this.calculateWallAttenuation(x, z);
 
     // Combined factor
-    const combinedFactor = interiorFalloff * wallAttenuation;
+    const combinedFactor = interiorFalloff * wallAttenuation * this.getSpeechDuckFactor();
 
     const currentTime = this.audioContext.currentTime;
     const rampTime = 0.4; // Slightly longer ramp for smoother transitions
@@ -2335,6 +2449,7 @@ class AudioManager {
 
   private currentTimeOfDay: 'day' | 'night' = 'day';
   private isDuskCricketTime: boolean = false;
+  private currentWeather: AmbientWeather = 'clear';
 
   // Update ambient sounds based on game time (0-24)
   updateTimeOfDay(gameTime: number) {
@@ -2360,30 +2475,27 @@ class AudioManager {
     }
   }
 
+  updateWeather(weather: AmbientWeather): void {
+    if (weather === this.currentWeather) return;
+    this.currentWeather = weather;
+    this.adjustAmbientForTimeOfDay();
+  }
+
   private adjustAmbientForTimeOfDay() {
     if (!this.audioContext) return;
     const currentTime = this.audioContext.currentTime;
-
-    // Adjust outdoor sounds for day/night
-    if (this.outdoorNodes.birds) {
-      // Birds quieter at night (base volume is now 0.002)
-      const birdVolume = this.currentTimeOfDay === 'night' ? 0.0005 : 0.002;
-      this.outdoorNodes.birds.gain.gain.setTargetAtTime(birdVolume, currentTime, 2);
-    }
-
-    if (this.outdoorNodes.wind) {
-      // Wind slightly louder at night (quieter environment makes it more noticeable)
-      const windVolume = this.currentTimeOfDay === 'night' ? 0.018 : 0.012;
-      this.outdoorNodes.wind.gain.gain.setTargetAtTime(windVolume, currentTime, 2);
-    }
-
-    if (this.outdoorNodes.traffic) {
-      // Less traffic at night
-      const trafficVolume = this.currentTimeOfDay === 'night' ? 0.008 : 0.015;
-      this.outdoorNodes.traffic.gain.gain.setTargetAtTime(trafficVolume, currentTime, 2);
-    }
-
-    // Note: Cricket sounds are now handled separately by isDuskCricketTime logic
+    const mix = calculateOutdoorAmbientMix(
+      this.cameraPosition,
+      this.currentTimeOfDay,
+      this.currentWeather
+    );
+    const duck = this.getSpeechDuckFactor();
+    (Object.keys(mix) as Array<keyof OutdoorAmbientMix>).forEach((key) => {
+      const target = mix[key] * duck;
+      if (Math.abs((this.lastOutdoorTargets[key] ?? -1) - target) < 0.00001) return;
+      this.lastOutdoorTargets[key] = target;
+      this.outdoorNodes[key]?.gain.gain.setTargetAtTime(target, currentTime, 0.8);
+    });
   }
 
   private nightAmbientInterval: NodeJS.Timeout | number | null = null;
@@ -3467,6 +3579,9 @@ class AudioManager {
 
         this.outdoorNodes.cows = { source, gain };
       }
+
+      // Apply camera, time and weather weighting after every layer exists.
+      this.adjustAmbientForTimeOfDay();
     } catch (e) {
       audioLog.warn('Outdoor ambient sound start failed', e);
     }
@@ -3483,6 +3598,7 @@ class AudioManager {
       }
     });
     this.outdoorNodes = {};
+    this.lastOutdoorTargets = {};
   }
 
   // === TOWN HALL CLOCK CHIME ===
@@ -5337,6 +5453,14 @@ class AudioManager {
     return this.isAnnouncementPlaying;
   }
 
+  /**
+   * Includes speech waiting for voice or primer initialization, so consumers
+   * do not mistake the short pre-speech queueing interval for completion.
+   */
+  get hasPendingAnnouncementSpeech(): boolean {
+    return this.isAnnouncementPlaying || this.announcementQueue.length > 0;
+  }
+
   // Initialize TTS voice - call after user interaction (browser requirement)
   private initTTSVoice(): void {
     if (this._ttsVoiceLoaded || !('speechSynthesis' in window)) return;
@@ -5434,29 +5558,32 @@ class AudioManager {
 
   // Speak a PA announcement using TTS with tannoy echo effect
   // Messages are queued so they don't cut each other off
-  speakAnnouncement(text: string): void {
-    console.log('[TTS] speakAnnouncement called:', text.substring(0, 40) + '...');
+  speakAnnouncement(text: string, priority: number = 2): void {
+    audioLog.debug('[TTS] speakAnnouncement called:', text.substring(0, 40) + '...');
 
     if (!this._ttsEnabled) {
-      console.log('[TTS] Blocked: TTS disabled');
+      audioLog.debug('[TTS] Blocked: TTS disabled');
       return;
     }
     if (this._muted) {
-      console.log('[TTS] Blocked: Audio muted');
+      audioLog.debug('[TTS] Blocked: Audio muted');
       return;
     }
     if (!('speechSynthesis' in window)) {
-      console.log('[TTS] Blocked: speechSynthesis not supported');
+      audioLog.debug('[TTS] Blocked: speechSynthesis not supported');
       return;
     }
 
     // Add to queue
-    this.announcementQueue.push(text);
-    console.log('[TTS] Added to queue, length:', this.announcementQueue.length);
+    this.announcementQueue.push({
+      text,
+      priority: Math.min(4, Math.max(1, priority)),
+    });
+    audioLog.debug('[TTS] Added to queue, length:', this.announcementQueue.length);
 
     // Ensure voice is loaded
     if (!this._ttsVoiceLoaded) {
-      console.log('[TTS] Voice not loaded, initializing...');
+      audioLog.debug('[TTS] Voice not loaded, initializing...');
       this.initTTSVoice();
       // Voice will load async; processAnnouncementQueue will check for voice
     }
@@ -5464,37 +5591,39 @@ class AudioManager {
     // If nothing is currently playing, start processing the queue
     // (will check for voice availability inside)
     if (!this.isAnnouncementPlaying) {
-      console.log('[TTS] Starting queue processing');
+      audioLog.debug('[TTS] Starting queue processing');
       this.processAnnouncementQueue();
     } else {
-      console.log('[TTS] Already playing, queued for later');
+      audioLog.debug('[TTS] Already playing, queued for later');
     }
   }
 
   // Process the next announcement in the queue
   private processAnnouncementQueue(): void {
-    console.log('[TTS] processAnnouncementQueue called, queue:', this.announcementQueue.length);
+    audioLog.debug('[TTS] processAnnouncementQueue called, queue:', this.announcementQueue.length);
 
     // Check if queue is empty
     if (this.announcementQueue.length === 0) {
-      console.log('[TTS] Queue empty, stopping');
+      audioLog.debug('[TTS] Queue empty, stopping');
       this.isAnnouncementPlaying = false;
+      this.setSpeechDuckPriority(0);
       return;
     }
 
     // Check if conditions prevent playback
     if (!this._ttsEnabled || this._muted) {
-      console.log('[TTS] Blocked in queue processing:', {
+      audioLog.debug('[TTS] Blocked in queue processing:', {
         ttsEnabled: this._ttsEnabled,
         muted: this._muted,
       });
       this.isAnnouncementPlaying = false;
+      this.setSpeechDuckPriority(0);
       return;
     }
 
     // If voice not loaded yet, retry after a short delay
     if (!this._ttsVoice) {
-      console.log('[TTS] Voice not ready, retrying in 500ms');
+      audioLog.debug('[TTS] Voice not ready, retrying in 500ms');
       setTimeout(() => this.processAnnouncementQueue(), 500);
       return;
     }
@@ -5502,19 +5631,21 @@ class AudioManager {
     // Wait for primer to complete before speaking real announcements
     // This prevents collision with the "warm up" utterance on Chrome
     if (!this._ttsPrimerComplete) {
-      console.log('[TTS] Waiting for primer to complete, retrying in 300ms');
+      audioLog.debug('[TTS] Waiting for primer to complete, retrying in 300ms');
       setTimeout(() => this.processAnnouncementQueue(), 300);
       return;
     }
 
-    console.log('[TTS] Voice ready, speaking...');
+    audioLog.debug('[TTS] Voice ready, speaking...');
     this.isAnnouncementPlaying = true;
-    const text = this.announcementQueue.shift();
+    const queuedAnnouncement = this.announcementQueue.shift();
     // Safety check: if shift() returns undefined (queue was emptied between checks), bail out
-    if (text === undefined) {
+    if (queuedAnnouncement === undefined) {
       this.isAnnouncementPlaying = false;
+      this.setSpeechDuckPriority(0);
       return;
     }
+    const { text, priority } = queuedAnnouncement;
 
     // Clear any existing safety timeout
     if (this.announcementSafetyTimeout) {
@@ -5526,9 +5657,10 @@ class AudioManager {
     // This prevents the PA system from getting stuck when speechSynthesis callbacks fail
     // At rate 0.85, longer announcements can take 15-20 seconds to speak
     this.announcementSafetyTimeout = setTimeout(() => {
-      console.log('[TTS] Safety timeout triggered - resetting');
+      audioLog.debug('[TTS] Safety timeout triggered - resetting');
       this.stopSpeechReverb();
       this.isAnnouncementPlaying = false;
+      this.setSpeechDuckPriority(0);
       // Cancel any stuck speech
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
@@ -5556,15 +5688,17 @@ class AudioManager {
 
       // When speech starts, begin continuous reverb simulation
       utterance.onstart = () => {
-        console.log('[TTS] Speech STARTED');
+        audioLog.debug('[TTS] Speech STARTED');
+        this.setSpeechDuckPriority(priority);
         this.startSpeechReverb();
       };
 
       // When speech ends, stop reverb, play reverberant echo tail, then process next in queue
       utterance.onend = () => {
-        console.log('[TTS] Speech ENDED');
+        audioLog.debug('[TTS] Speech ENDED');
         clearSafetyTimeout();
         this.stopSpeechReverb();
+        this.setSpeechDuckPriority(0);
         this.playPAReverbTail();
         // Wait for reverb tail to finish before next announcement (1.5s delay)
         setTimeout(() => {
@@ -5572,7 +5706,7 @@ class AudioManager {
         }, 1500);
       };
       utterance.onerror = (e) => {
-        console.log('[TTS] Speech ERROR:', e.error);
+        audioLog.debug('[TTS] Speech ERROR:', e.error);
         // "interrupted" and "canceled" errors happen when cancelling speech
         // (e.g. before new announcement, or iOS Safari workaround calling cancel())
         // This is usually expected behavior, so don't log as error
@@ -5582,6 +5716,7 @@ class AudioManager {
 
         clearSafetyTimeout();
         this.stopSpeechReverb();
+        this.setSpeechDuckPriority(0);
 
         // Even on error, continue processing queue after a short delay
         setTimeout(() => {
@@ -5590,7 +5725,7 @@ class AudioManager {
       };
 
       // Play PA chime first, then speak with slight overlap on chime tail
-      console.log('[TTS] Playing chime, will speak in 0.95s');
+      audioLog.debug('[TTS] Playing chime, will speak in 0.95s');
       this.playPAChime();
       this.announcementChimeTimeout = setTimeout(() => {
         if (this._ttsEnabled && !this._muted) {
@@ -5599,29 +5734,29 @@ class AudioManager {
           // Calling cancel() first resets the internal state and allows speech to proceed.
           // NOTE: We must wait ~100ms after cancel() for Chrome to fully process it,
           // otherwise our new utterance may also get cancelled (race condition).
-          console.log('[TTS] Cancelling any stale speech...');
+          audioLog.debug('[TTS] Cancelling any stale speech...');
           window.speechSynthesis.cancel();
 
           // Small delay after cancel() to let Chrome's internal state settle
           setTimeout(() => {
             if (!this._ttsEnabled || this._muted) {
-              console.log('[TTS] Conditions changed during cancel delay, skipping');
+              audioLog.debug('[TTS] Conditions changed during cancel delay, skipping');
               clearSafetyTimeout();
               this.processAnnouncementQueue();
               return;
             }
 
-            console.log('[TTS] Calling speechSynthesis.speak() now, volume:', this._volume);
-            console.log('[TTS] speechSynthesis state:', {
+            audioLog.debug('[TTS] Calling speechSynthesis.speak() now, volume:', this._volume);
+            audioLog.debug('[TTS] speechSynthesis state:', {
               speaking: window.speechSynthesis.speaking,
               pending: window.speechSynthesis.pending,
               paused: window.speechSynthesis.paused,
             });
             window.speechSynthesis.speak(utterance);
-            console.log('[TTS] speak() called, waiting for onstart...');
+            audioLog.debug('[TTS] speak() called, waiting for onstart...');
           }, 100);
         } else {
-          console.log('[TTS] Conditions changed during chime, skipping');
+          audioLog.debug('[TTS] Conditions changed during chime, skipping');
           clearSafetyTimeout();
           // If conditions changed during chime, process next
           this.processAnnouncementQueue();
@@ -5630,6 +5765,7 @@ class AudioManager {
     } catch (e) {
       audioLog.warn('TTS playback failed', e);
       this.isAnnouncementPlaying = false;
+      this.setSpeechDuckPriority(0);
       // Try next announcement
       setTimeout(() => {
         this.processAnnouncementQueue();
@@ -5805,10 +5941,16 @@ class AudioManager {
     // Clear the announcement queue
     this.announcementQueue = [];
     this.isAnnouncementPlaying = false;
+    this.setSpeechDuckPriority(0);
     // Cancel any pending chime timeout
     if (this.announcementChimeTimeout) {
       clearTimeout(this.announcementChimeTimeout);
       this.announcementChimeTimeout = null;
+    }
+    // Cancel the queue safety timeout so it cannot re-run processAnnouncementQueue
+    if (this.announcementSafetyTimeout) {
+      clearTimeout(this.announcementSafetyTimeout);
+      this.announcementSafetyTimeout = null;
     }
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
@@ -5818,6 +5960,31 @@ class AudioManager {
   // Check if TTS is currently speaking
   isSpeaking(): boolean {
     return 'speechSynthesis' in window && window.speechSynthesis.speaking;
+  }
+
+  getDiagnostics(): {
+    activeNodes: number;
+    queuedSpeech: number;
+    speechActive: boolean;
+    contextState: AudioContextState | 'not-created';
+  } {
+    const objectNodeCount =
+      Object.values(this.ambientNodes).filter(Boolean).length +
+      Object.values(this.outdoorNodes).filter(Boolean).length;
+    const mappedNodeCount =
+      this.machineNodes.size +
+      this.forkliftEngines.size +
+      this.truckEngines.size +
+      this.backupBeepers.size +
+      this.conveyorNodes.size +
+      this.spoutingNodes.size +
+      this.reeferNodes.size;
+    return {
+      activeNodes: objectNodeCount + mappedNodeCount,
+      queuedSpeech: this.announcementQueue.length,
+      speechActive: this.isAnnouncementPlaying,
+      contextState: this.audioContext?.state ?? 'not-created',
+    };
   }
 
   // Stop all sounds
@@ -5858,6 +6025,8 @@ class AudioManager {
     this.reeferNodes.forEach((_node, id) => {
       this.stopReeferSound(id);
     });
+    // Stop any in-flight TTS speech, clear its queue, and cancel its timers
+    this.stopTTS();
   }
 }
 

@@ -1,4 +1,7 @@
 @import 'tailwindcss';
+/* Self-hosted Inter + JetBrains Mono (removes the Google Fonts third-party
+   connection — GDPR). Must precede non-@import rules per the CSS spec. */
+@import './fonts.css';
 
 /* Explicit source paths for Tailwind v4 content detection */
 @source "../index.html";
@@ -31,6 +34,11 @@
 }
 
 @layer base {
+  html {
+    --ui-scale: 1;
+    font-size: calc(16px * var(--ui-scale));
+  }
+
   html,
   body,
   #root {
@@ -42,7 +50,6 @@
       system-ui,
       -apple-system,
       sans-serif;
-    font-size: 16px;
   }
 
   body {
@@ -238,9 +245,13 @@
 
 /* Soft page-to-page cross-fade, matching nellwatson.com. Browsers without
    cross-document View Transitions keep their normal navigation behaviour. */
-@view-transition { navigation: auto; }
+@view-transition {
+  navigation: auto;
+}
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*),
   ::view-transition-old(*),
-  ::view-transition-new(*) { animation: none !important; }
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
 }

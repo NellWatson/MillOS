@@ -85,10 +85,76 @@ export function KnowledgeEntryCard({ entry, onClose, onNavigate }: KnowledgeEntr
     const elements: React.ReactNode[] = [];
     let inTable = false;
     let tableRows: string[][] = [];
+    // Buffer for consecutive list items so each run gets a proper <ul>/<ol> parent
+    let listType: 'ul' | 'ol' | null = null;
+    let listItems: React.ReactNode[] = [];
+
+    // Wrap any buffered list items in their list parent before emitting other content
+    const flushList = (keyHint: string | number) => {
+      if (listType === null || listItems.length === 0) {
+        listType = null;
+        listItems = [];
+        return;
+      }
+      if (listType === 'ol') {
+        elements.push(
+          <ol key={`list-${keyHint}`} className="list-decimal ml-8 mb-3 space-y-1">
+            {listItems}
+          </ol>
+        );
+      } else {
+        elements.push(
+          <ul key={`list-${keyHint}`} className="list-disc ml-8 mb-3 space-y-1">
+            {listItems}
+          </ul>
+        );
+      }
+      listType = null;
+      listItems = [];
+    };
+
+    // Emit the buffered table (used both when a non-table line ends a table AND
+    // at end-of-article, so a table that is the final block isn't dropped).
+    const flushTable = (keyHint: string | number) => {
+      if (!inTable || tableRows.length === 0) {
+        inTable = false;
+        tableRows = [];
+        return;
+      }
+      elements.push(
+        <div key={`table-${keyHint}`} className="my-4 overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="border-b border-slate-700">
+                {tableRows[0]?.map((cell, i) => (
+                  <th key={i} className="text-left py-2 px-3 text-slate-300 font-medium">
+                    {cell.replace(/\*\*/g, '')}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tableRows.slice(1).map((row, rowIndex) => (
+                <tr key={rowIndex} className="border-b border-slate-700/50">
+                  {row.map((cell, cellIndex) => (
+                    <td key={cellIndex} className="py-2 px-3 text-slate-400">
+                      {cell.replace(/\*\*/g, '')}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      inTable = false;
+      tableRows = [];
+    };
 
     lines.forEach((line, index) => {
       // Headers
       if (line.startsWith('**') && line.endsWith('**') && !line.includes('|')) {
+        flushList(index);
         elements.push(
           <h4 key={index} className="text-amber-400 font-semibold mt-4 mb-2">
             {line.replace(/\*\*/g, '')}
@@ -99,6 +165,7 @@ export function KnowledgeEntryCard({ entry, onClose, onNavigate }: KnowledgeEntr
 
       // Table handling
       if (line.includes('|') && line.trim().startsWith('|')) {
+        flushList(index);
         if (!inTable) {
           inTable = true;
           tableRows = [];
@@ -112,41 +179,17 @@ export function KnowledgeEntryCard({ entry, onClose, onNavigate }: KnowledgeEntr
         }
         return;
       } else if (inTable) {
-        // End of table
-        elements.push(
-          <div key={`table-${index}`} className="my-4 overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="border-b border-slate-700">
-                  {tableRows[0]?.map((cell, i) => (
-                    <th key={i} className="text-left py-2 px-3 text-slate-300 font-medium">
-                      {cell.replace(/\*\*/g, '')}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {tableRows.slice(1).map((row, rowIndex) => (
-                  <tr key={rowIndex} className="border-b border-slate-700/50">
-                    {row.map((cell, cellIndex) => (
-                      <td key={cellIndex} className="py-2 px-3 text-slate-400">
-                        {cell.replace(/\*\*/g, '')}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-        inTable = false;
-        tableRows = [];
+        // A non-table line ends the current table
+        flushTable(index);
       }
 
       // List items
       if (line.trim().startsWith('- ')) {
-        elements.push(
-          <li key={index} className="text-slate-300 ml-4 mb-1">
+        // Switch list parent if the run type changes
+        if (listType !== 'ul') flushList(index);
+        listType = 'ul';
+        listItems.push(
+          <li key={index} className="text-slate-300 mb-1">
             {formatInlineText(line.replace(/^-\s*/, ''))}
           </li>
         );
@@ -156,8 +199,11 @@ export function KnowledgeEntryCard({ entry, onClose, onNavigate }: KnowledgeEntr
       // Numbered list items
       const numberedMatch = line.trim().match(/^(\d+)\.\s+/);
       if (numberedMatch) {
-        elements.push(
-          <li key={index} className="text-slate-300 ml-4 mb-1 list-decimal">
+        // Switch list parent if the run type changes
+        if (listType !== 'ol') flushList(index);
+        listType = 'ol';
+        listItems.push(
+          <li key={index} className="text-slate-300 mb-1">
             {formatInlineText(line.replace(/^\d+\.\s*/, ''))}
           </li>
         );
@@ -166,17 +212,24 @@ export function KnowledgeEntryCard({ entry, onClose, onNavigate }: KnowledgeEntr
 
       // Empty lines
       if (line.trim() === '') {
+        flushList(index);
         elements.push(<div key={index} className="h-2" />);
         return;
       }
 
       // Regular paragraphs
+      flushList(index);
       elements.push(
         <p key={index} className="text-slate-300 mb-3 leading-relaxed">
           {formatInlineText(line)}
         </p>
       );
     });
+
+    // Flush anything still open at the end of the article (a list, or a table
+    // that was the article's final block).
+    flushList('end');
+    flushTable('end');
 
     return elements;
   };

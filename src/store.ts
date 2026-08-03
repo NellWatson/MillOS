@@ -12,6 +12,7 @@
 
 import { logger } from './utils/logger';
 import { scadaToStoreMetrics } from './scada/SCADABridge';
+import { OPERATION_TAG_IDS } from './scada/tagDatabase';
 import type { MachineData } from './types';
 
 // Re-export everything from the new stores
@@ -34,11 +35,65 @@ export type { GraphicsQuality, GraphicsSettings } from './stores/graphicsStore';
 
 import { initializeSCADA, shutdownSCADA } from './scada/SCADAService';
 import { useProductionStore, useUIStore } from './stores';
+import { useMaterialFlowStore, type MaterialFlowState } from './stores/materialFlowStore';
+import { useBreakdownStore, type PartsInventory } from './stores/breakdownStore';
+import { getDispatchQualityStatus, useQCLabStore, type QCLabState } from './stores/qcLabStore';
 import { shallow } from 'zustand/shallow';
 
 // Debounced machine state sync to prevent flooding SCADA with updates
 let lastMachineSyncTime = 0;
 const MACHINE_SYNC_DEBOUNCE_MS = 200;
+
+export function buildOperationalTelemetry(
+  flow: MaterialFlowState,
+  parts: PartsInventory,
+  qcLab: QCLabState
+): Record<string, number> {
+  let totalInventoryKg = 0;
+  let rawInventoryKg = 0;
+  let finishedGoodsKg = 0;
+
+  flow.machineBuffers.forEach((buffer) => {
+    [...buffer.inputBuffer, ...buffer.outputBuffer].forEach((material) => {
+      totalInventoryKg += material.amount;
+    });
+    if (buffer.machineType === 'silo') {
+      rawInventoryKg += buffer.outputBuffer
+        .filter((material) => material.type === 'wheat_grain' || material.type === 'corn_grain')
+        .reduce((sum, material) => sum + material.amount, 0);
+    }
+    if (buffer.machineType === 'packer') {
+      finishedGoodsKg += buffer.outputBuffer
+        .filter((material) => material.type === 'flour' || material.type === 'semolina')
+        .reduce((sum, material) => sum + material.amount, 0);
+    }
+  });
+
+  const inTransitKg = flow.network.segments.reduce((sum, segment) => sum + segment.currentLoad, 0);
+  const inProcessKg = Math.max(
+    0,
+    totalInventoryKg - rawInventoryKg - finishedGoodsKg + inTransitKg
+  );
+  const lastReceiving = [...flow.manifests]
+    .reverse()
+    .find((manifest) => manifest.kind === 'receiving');
+  const lastShipping = [...flow.manifests]
+    .reverse()
+    .find((manifest) => manifest.kind === 'shipping');
+  const partsStock = Object.values(parts).reduce((sum, count) => sum + count, 0);
+
+  return {
+    [OPERATION_TAG_IDS.rawInventory]: rawInventoryKg / 1000,
+    [OPERATION_TAG_IDS.inProcess]: inProcessKg / 1000,
+    [OPERATION_TAG_IDS.finishedGoods]: finishedGoodsKg / 1000,
+    [OPERATION_TAG_IDS.packerFlow]: flow.currentPackerFlowRate * 3.6,
+    [OPERATION_TAG_IDS.materialBalanceError]: flow.getMaterialBalance().errorKg,
+    [OPERATION_TAG_IDS.lastReceiving]: (lastReceiving?.actualKg ?? 0) / 1000,
+    [OPERATION_TAG_IDS.lastShipping]: (lastShipping?.actualKg ?? 0) / 1000,
+    [OPERATION_TAG_IDS.partsStock]: partsStock,
+    [OPERATION_TAG_IDS.shippingReleased]: getDispatchQualityStatus(qcLab).released ? 1 : 0,
+  };
+}
 
 /**
  * Initialize SCADA system with bidirectional store synchronization.
@@ -97,7 +152,38 @@ export function initializeSCADASync(): () => void {
       );
       cleanupFunctions.push(unsubMachines);
 
-      // 2. SCADA → STORE: Sync critical alarms to alerts
+      // 2. STORE -> SCADA: publish the conserved material ledger that drives
+      // conveyors and truck manifests. The adapter samples these values into
+      // history, so overview cards, trends and alarms share one source.
+      let operationalSignature = '';
+      const syncOperationalTelemetry = (): void => {
+        const values = buildOperationalTelemetry(
+          useMaterialFlowStore.getState(),
+          useBreakdownStore.getState().partsInventory,
+          useQCLabStore.getState().qcLab
+        );
+        const nextSignature = Object.values(values)
+          .map((value) => value.toFixed(3))
+          .join(':');
+        if (nextSignature === operationalSignature) return;
+        operationalSignature = nextSignature;
+        service.updateOperationalValues(values);
+      };
+      const unsubMaterialFlow = useMaterialFlowStore.subscribe(syncOperationalTelemetry);
+      const unsubParts = useBreakdownStore.subscribe(
+        (state) => state.partsInventory,
+        syncOperationalTelemetry,
+        { fireImmediately: true, equalityFn: shallow }
+      );
+      const unsubQuality = useQCLabStore.subscribe(
+        (state) => state.qcLab,
+        syncOperationalTelemetry,
+        { fireImmediately: true }
+      );
+      syncOperationalTelemetry();
+      cleanupFunctions.push(unsubMaterialFlow, unsubParts, unsubQuality);
+
+      // 3. SCADA → STORE: Sync critical alarms to alerts
       // This displays SCADA alarms in the main UI alert system
       const unsubAlarms = service.subscribeToAlarms((alarms) => {
         const uiStore = useUIStore.getState();
@@ -127,7 +213,7 @@ export function initializeSCADASync(): () => void {
       });
       cleanupFunctions.push(unsubAlarms);
 
-      // 3. SCADA → STORE: Update efficiency metrics from SCADA
+      // 4. SCADA → STORE: Update efficiency metrics from SCADA
       // Throttled to 1Hz to avoid excessive updates
       let lastMetricsUpdate = 0;
       const unsubMetrics = service.subscribeToValues((values) => {
@@ -154,7 +240,7 @@ export function initializeSCADASync(): () => void {
       });
       cleanupFunctions.push(unsubMetrics);
 
-      // 4. SCADA → STORE: Sync real machine metrics for visualization
+      // 5. SCADA → STORE: Sync real machine metrics for visualization
       // Throttled to 1Hz to avoid extra renders
       // PERFORMANCE FIX: Use batch updates to prevent multiple re-renders per second
       let lastMachineUpdate = 0;

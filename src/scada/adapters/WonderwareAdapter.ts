@@ -54,7 +54,11 @@ interface WWTagInfo {
 
 /**
  * Map OPC quality codes to our Quality type.
- * OPC quality is 16-bit: high 8 bits = major, low 8 bits = substatus
+ *
+ * This handles the standard 8-bit OPC DA quality byte, where the top two
+ * bits (>>6 & 0x3) are the major quality field (Good/Uncertain/Bad) and the
+ * lower bits are substatus. If a deployment's REST API ever returns the full
+ * 16-bit OPC quality word, the Quality field would need normalising first.
  */
 function mapOpcQuality(opcQuality: number): Quality {
   const major = (opcQuality >> 6) & 0x3;
@@ -88,8 +92,11 @@ export class WonderwareAdapter implements IHistorian {
     this.protocol = config.protocol;
     this.timeout = config.timeout ?? 30000;
 
-    // Build base URL for REST API
-    this.baseUrl = `http://${this.serverHost}:${this.serverPort}/Historian/v1`;
+    // Build base URL for REST API.
+    // Default to https:// so Basic-auth credentials (potentially Windows
+    // domain creds) are sent over TLS, not in cleartext. http:// requests
+    // are also blocked as mixed content when MillOS is served over https.
+    this.baseUrl = `https://${this.serverHost}:${this.serverPort}/Historian/v1`;
 
     // Build authorization header
     if (config.authMode === 'windows' && config.domain && config.username && config.password) {
@@ -155,16 +162,22 @@ export class WonderwareAdapter implements IHistorian {
       `endTime=${endTime.toISOString()}&` +
       `maxCount=${maxCount}`;
 
-    const response = await this.fetchWithAuth(url);
-    if (!response.ok) {
-      logger.warn(
-        `[WonderwareAdapter] Failed to get recorded values for ${tagId}: ${response.status}`
-      );
+    try {
+      const response = await this.fetchWithAuth(url);
+      if (!response.ok) {
+        logger.warn(
+          `[WonderwareAdapter] Failed to get recorded values for ${tagId}: ${response.status}`
+        );
+        return [];
+      }
+
+      const data: WWHistoryResponse = await response.json();
+      const rows = Array.isArray(data?.Data) ? data.Data : [];
+      return this.mapWWValuesToHistoryPoints(rows);
+    } catch (error) {
+      logger.warn(`[WonderwareAdapter] Error getting recorded values for ${tagId}:`, error);
       return [];
     }
-
-    const data: WWHistoryResponse = await response.json();
-    return this.mapWWValuesToHistoryPoints(data.Data);
   }
 
   async getInterpolatedValues(
@@ -180,16 +193,22 @@ export class WonderwareAdapter implements IHistorian {
       `endTime=${endTime.toISOString()}&` +
       `resolutionMS=${intervalMs}`;
 
-    const response = await this.fetchWithAuth(url);
-    if (!response.ok) {
-      logger.warn(
-        `[WonderwareAdapter] Failed to get interpolated values for ${tagId}: ${response.status}`
-      );
+    try {
+      const response = await this.fetchWithAuth(url);
+      if (!response.ok) {
+        logger.warn(
+          `[WonderwareAdapter] Failed to get interpolated values for ${tagId}: ${response.status}`
+        );
+        return [];
+      }
+
+      const data: WWHistoryResponse = await response.json();
+      const rows = Array.isArray(data?.Data) ? data.Data : [];
+      return this.mapWWValuesToHistoryPoints(rows);
+    } catch (error) {
+      logger.warn(`[WonderwareAdapter] Error getting interpolated values for ${tagId}:`, error);
       return [];
     }
-
-    const data: WWHistoryResponse = await response.json();
-    return this.mapWWValuesToHistoryPoints(data.Data);
   }
 
   async getPlotValues(
@@ -206,28 +225,45 @@ export class WonderwareAdapter implements IHistorian {
       `endTime=${endTime.toISOString()}&` +
       `numberOfIntervals=${intervals}`;
 
-    const response = await this.fetchWithAuth(url);
-    if (!response.ok) {
-      // Fall back to interpolated if TrendData not available
-      const durationMs = endTime.getTime() - startTime.getTime();
-      const intervalMs = Math.floor(durationMs / intervals);
-      return this.getInterpolatedValues(tagId, startTime, endTime, intervalMs);
-    }
+    try {
+      const response = await this.fetchWithAuth(url);
+      if (!response.ok) {
+        // Fall back to interpolated if TrendData not available.
+        // Guard against intervals <= 0 (Infinity) and negative durations
+        // (startTime > endTime) producing a malformed historian request.
+        const safeIntervals = intervals > 0 ? intervals : 100;
+        const durationMs = Math.max(0, endTime.getTime() - startTime.getTime());
+        const intervalMs = Math.max(1, Math.floor(durationMs / safeIntervals));
+        return this.getInterpolatedValues(tagId, startTime, endTime, intervalMs);
+      }
 
-    const data: WWHistoryResponse = await response.json();
-    return this.mapWWValuesToHistoryPoints(data.Data);
+      const data: WWHistoryResponse = await response.json();
+      const rows = Array.isArray(data?.Data) ? data.Data : [];
+      return this.mapWWValuesToHistoryPoints(rows);
+    } catch (error) {
+      logger.warn(`[WonderwareAdapter] Error getting plot values for ${tagId}:`, error);
+      return [];
+    }
   }
 
   async getLatestValue(tagId: string): Promise<TagHistoryPoint | null> {
     const url = `${this.baseUrl}/Tags/${encodeURIComponent(tagId)}/CurrentValue`;
-    const response = await this.fetchWithAuth(url);
-    if (!response.ok) {
+    try {
+      const response = await this.fetchWithAuth(url);
+      if (!response.ok) {
+        return null;
+      }
+
+      const data: WWHistoryValue = await response.json();
+      if (!data || data.TimeStamp === undefined) {
+        return null;
+      }
+      const points = this.mapWWValuesToHistoryPoints([data]);
+      return points[0] ?? null;
+    } catch (error) {
+      logger.warn(`[WonderwareAdapter] Error getting latest value for ${tagId}:`, error);
       return null;
     }
-
-    const data: WWHistoryValue = await response.json();
-    const points = this.mapWWValuesToHistoryPoints([data]);
-    return points[0] ?? null;
   }
 
   async getMultipleTagHistory(
@@ -239,35 +275,41 @@ export class WonderwareAdapter implements IHistorian {
   ): Promise<Record<string, TagHistoryPoint[]>> {
     const result: Record<string, TagHistoryPoint[]> = {};
 
-    // Fetch in parallel
+    // Fetch in parallel. A single tag's failure must not poison the whole
+    // batch, so each tag's body is guarded and rejected tags resolve to [].
     const promises = tagIds.map(async (tagId) => {
-      let points: TagHistoryPoint[];
-      switch (mode) {
-        case 'interpolated':
-          points = await this.getInterpolatedValues(
-            tagId,
-            startTime,
-            endTime,
-            options?.intervalMs ?? 60000,
-            options
-          );
-          break;
-        case 'plot':
-          points = await this.getPlotValues(
-            tagId,
-            startTime,
-            endTime,
-            options?.intervals ?? 100,
-            options
-          );
-          break;
-        default:
-          points = await this.getRecordedValues(tagId, startTime, endTime, options);
+      try {
+        let points: TagHistoryPoint[];
+        switch (mode) {
+          case 'interpolated':
+            points = await this.getInterpolatedValues(
+              tagId,
+              startTime,
+              endTime,
+              options?.intervalMs ?? 60000,
+              options
+            );
+            break;
+          case 'plot':
+            points = await this.getPlotValues(
+              tagId,
+              startTime,
+              endTime,
+              options?.intervals ?? 100,
+              options
+            );
+            break;
+          default:
+            points = await this.getRecordedValues(tagId, startTime, endTime, options);
+        }
+        result[tagId] = points;
+      } catch (error) {
+        logger.warn(`[WonderwareAdapter] Failed to get history for ${tagId}:`, error);
+        result[tagId] = [];
       }
-      result[tagId] = points;
     });
 
-    await Promise.all(promises);
+    await Promise.allSettled(promises);
     return result;
   }
 

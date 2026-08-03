@@ -1,8 +1,8 @@
 /**
- * PortraitCard - Display portraits of BAMS contributors
+ * PortraitCard - Display portraits of BAS contributors
  *
  * Shows generative portraits of key thinkers behind the
- * Bilateral Alignment Management System.
+ * Bilateral Autonomy System.
  */
 
 import React, { useState, memo } from 'react';

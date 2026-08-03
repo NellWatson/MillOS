@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Factory,
   Brain,
@@ -12,6 +12,7 @@ import {
   Minimize,
   Heart,
   Database,
+  MoreHorizontal,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useUIStore } from '../../../stores/uiStore';
@@ -39,12 +40,15 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
   const fpsMode = useUIStore((state) => state.fpsMode);
   const toggleFpsMode = useUIStore((state) => state.toggleFpsMode);
   const isMultiplayerActive = useIsMultiplayerActive();
-  const { isMobile } = useMobileDetection();
+  const { isMobile, isCompactLayout } = useMobileDetection();
   const openMobilePanel = useMobileControlStore((state) => state.openMobilePanel);
 
   // Fullscreen state (mobile only)
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const moreMenuTriggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     // Check if fullscreen is actually supported (iOS Safari doesn't support it)
@@ -65,6 +69,24 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
     };
   }, []);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const closeOnOutside = (event: MouseEvent) => {
+      if (!moreMenuRef.current?.contains(event.target as Node)) setMoreOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setMoreOpen(false);
+      requestAnimationFrame(() => moreMenuTriggerRef.current?.focus());
+    };
+    document.addEventListener('mousedown', closeOnOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [moreOpen]);
 
   const toggleFullscreen = useCallback(async () => {
     try {
@@ -95,23 +117,29 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
 
   // On mobile, clicking a dock item opens the mobile panel instead of sidebar
   const handleModeChange = (mode: DockMode) => {
-    if (isMobile) {
+    if (isCompactLayout) {
       openMobilePanel(mode);
     } else {
       onModeChange(mode);
     }
   };
 
+  const handleMoreModeChange = (mode: DockMode) => {
+    moreMenuTriggerRef.current?.focus();
+    handleModeChange(mode);
+    setMoreOpen(false);
+  };
+
   return (
     <nav
       id="navigation-dock"
       className={`fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-2xl flex items-center shadow-2xl z-50 pointer-events-auto ${
-        isMobile ? 'px-2 py-2 gap-1' : 'px-4 py-3 gap-4'
+        isCompactLayout ? 'px-2 py-2 gap-1 max-w-full' : 'px-3 py-2 gap-2'
       }`}
       aria-label="Main Navigation"
       role="navigation"
       style={
-        isMobile
+        isCompactLayout
           ? {
               paddingBottom: 'max(8px, env(safe-area-inset-bottom))',
               marginLeft: 'env(safe-area-inset-left)',
@@ -122,109 +150,159 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
     >
       <DockItem
         mode="overview"
-        icon={<Factory />}
+        icon={<Factory size={24} />}
         label="Mill Overview"
         isActive={activeMode === 'overview'}
         onClick={() => handleModeChange('overview')}
-        isMobile={isMobile}
+        isMobile={isCompactLayout}
       />
       <DockItem
         mode="ai"
-        icon={<Brain />}
-        label="AI Command"
+        icon={<Brain size={24} />}
+        label="AI Partner"
         isActive={activeMode === 'ai'}
         onClick={() => handleModeChange('ai')}
-        isMobile={isMobile}
+        isMobile={isCompactLayout}
       />
       <DockItem
         mode="scada"
-        icon={<Activity />}
-        label="SCADA System"
+        icon={<Activity size={24} />}
+        label="Simulated SCADA"
         isActive={activeMode === 'scada'}
         onClick={() => handleModeChange('scada')}
-        isMobile={isMobile}
+        isMobile={isCompactLayout}
       />
-      <DockItem
-        mode="workforce"
-        icon={<HardHat />}
-        label="Workforce"
-        isActive={activeMode === 'workforce'}
-        onClick={() => handleModeChange('workforce')}
-        isMobile={isMobile}
-      />
-      <DockItem
-        mode="management"
-        icon={<Heart />}
-        label="BAMS"
-        isActive={activeMode === 'management'}
-        onClick={() => handleModeChange('management')}
-        isMobile={isMobile}
-      />
-      <DockItem
-        mode="multiplayer"
-        icon={<Users />}
-        label="Multiplayer"
-        isActive={activeMode === 'multiplayer'}
-        onClick={() => handleModeChange('multiplayer')}
-        badge={isMultiplayerActive}
-        isMobile={isMobile}
-      />
+      {!isCompactLayout && (
+        <DockItem
+          mode="workforce"
+          icon={<HardHat size={24} />}
+          label="Workforce"
+          isActive={activeMode === 'workforce'}
+          onClick={() => handleModeChange('workforce')}
+          isMobile={isCompactLayout}
+        />
+      )}
+      {!isCompactLayout && (
+        <DockItem
+          mode="management"
+          icon={<Heart size={24} />}
+          label="Bilateral Autonomy System (BAS)"
+          isActive={activeMode === 'management'}
+          onClick={() => handleModeChange('management')}
+          isMobile={isCompactLayout}
+        />
+      )}
       <DockItem
         mode="safety"
-        icon={<Shield />}
+        icon={<Shield size={24} />}
         label="Safety & Emergency"
         isActive={activeMode === 'safety'}
         onClick={() => handleModeChange('safety')}
-        isMobile={isMobile}
+        isMobile={isCompactLayout}
       />
       <DockItem
         mode="settings"
-        icon={<Settings />}
+        icon={<Settings size={24} />}
         label="Settings"
         isActive={activeMode === 'settings'}
         onClick={() => handleModeChange('settings')}
-        isMobile={isMobile}
+        isMobile={isCompactLayout}
       />
 
-      {/* Divider */}
-      <div className="w-px h-6 bg-white/10" />
-
-      {/* Datalinks Button */}
-      {onDatalinksOpen && (
+      <div className="relative border-l border-white/10 pl-2" ref={moreMenuRef}>
         <button
-          onClick={onDatalinksOpen}
-          aria-label="Datalinks (L)"
-          title="Datalinks (L)"
-          className={`relative rounded-xl transition-all ${
-            isMobile ? 'p-2 min-w-[44px] min-h-[44px]' : 'p-3'
-          } text-slate-400 hover:text-white hover:bg-white/5`}
+          ref={moreMenuTriggerRef}
+          type="button"
+          onClick={() => setMoreOpen((open) => !open)}
+          aria-label="More workspaces and view controls"
+          aria-haspopup="menu"
+          aria-expanded={moreOpen}
+          className={`relative min-h-[44px] min-w-[44px] rounded-xl p-2 text-slate-300 transition-colors hover:bg-white/5 hover:text-white ${
+            activeMode === 'multiplayer' || fpsMode ? 'bg-white/10 text-cyan-300' : ''
+          }`}
         >
-          <Database />
+          <MoreHorizontal size={24} aria-hidden="true" />
+          {isMultiplayerActive && (
+            <span
+              className="absolute right-1 top-1 h-2 w-2 rounded-full bg-green-500"
+              aria-hidden="true"
+            />
+          )}
         </button>
-      )}
-
-      {/* First Person Mode Toggle */}
-      <button
-        onClick={toggleFpsMode}
-        aria-label="First Person Mode (V)"
-        aria-pressed={fpsMode}
-        title="First Person Mode (V)"
-        className={`relative rounded-xl transition-all ${
-          isMobile ? 'p-2 min-w-[44px] min-h-[44px]' : 'p-3'
-        } ${
-          fpsMode
-            ? 'bg-violet-500/20 text-violet-400'
-            : 'text-slate-400 hover:text-white hover:bg-white/5'
-        }`}
-      >
-        <Eye />
-        {fpsMode && (
-          <motion.div
-            layoutId="fps-active"
-            className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 bg-violet-400 rounded-full"
-          />
+        {moreOpen && (
+          <div
+            role="menu"
+            aria-label="More workspaces and view controls"
+            className="absolute bottom-full right-0 mb-2 w-60 overflow-hidden rounded-xl border border-white/10 bg-slate-950/98 p-1.5 shadow-2xl"
+          >
+            {isCompactLayout && (
+              <>
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => handleMoreModeChange('workforce')}
+                  className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/10"
+                >
+                  <HardHat size={18} aria-hidden="true" />
+                  Workforce
+                </button>
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => handleMoreModeChange('management')}
+                  className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/10"
+                >
+                  <Heart size={18} aria-hidden="true" />
+                  Bilateral Autonomy System
+                </button>
+              </>
+            )}
+            <button
+              role="menuitem"
+              type="button"
+              onClick={() => handleMoreModeChange('multiplayer')}
+              className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/10"
+            >
+              <Users size={18} aria-hidden="true" />
+              Multiplayer
+              {isMultiplayerActive && (
+                <span className="ml-auto text-[10px] font-semibold text-green-300">ACTIVE</span>
+              )}
+            </button>
+            {onDatalinksOpen && (
+              <button
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  moreMenuTriggerRef.current?.focus();
+                  onDatalinksOpen();
+                  setMoreOpen(false);
+                }}
+                className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/10"
+              >
+                <Database size={18} aria-hidden="true" />
+                Datalinks
+                <kbd className="ml-auto text-[10px] text-slate-400">L</kbd>
+              </button>
+            )}
+            <button
+              role="menuitemcheckbox"
+              type="button"
+              aria-checked={fpsMode}
+              onClick={() => {
+                moreMenuTriggerRef.current?.focus();
+                toggleFpsMode();
+                setMoreOpen(false);
+              }}
+              className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/10"
+            >
+              <Eye size={18} aria-hidden="true" />
+              First-person view
+              <kbd className="ml-auto text-[10px] text-slate-400">V</kbd>
+            </button>
+          </div>
         )}
-      </button>
+      </div>
 
       {/* Fullscreen Toggle (mobile only, when supported) */}
       {isMobile && fullscreenSupported && (
@@ -238,7 +316,7 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
               : 'text-slate-400 hover:text-white hover:bg-white/5'
           }`}
         >
-          {isFullscreen ? <Minimize /> : <Maximize />}
+          {isFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}
         </button>
       )}
     </nav>
@@ -253,21 +331,23 @@ const DockItem: React.FC<{
   onClick: () => void;
   badge?: boolean;
   isMobile?: boolean;
-}> = ({ icon, label, isActive, onClick, badge, isMobile }) => {
+}> = ({ mode, icon, label, isActive, onClick, badge, isMobile }) => {
   return (
     <button
       onClick={onClick}
+      data-dock-mode={mode}
       aria-label={label}
       aria-pressed={isActive}
       aria-current={isActive ? 'page' : undefined}
-      className={`relative rounded-xl transition-all ${
+      title={label}
+      className={`relative rounded-xl transition-colors ${
         isMobile ? 'p-2 min-w-[44px] min-h-[44px]' : 'p-3'
       } ${isActive ? 'bg-white/10 text-cyan-400' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
     >
       <span aria-hidden="true">{icon}</span>
       {badge && (
         <span
-          className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full animate-pulse"
+          className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full"
           aria-label="Active session"
         />
       )}

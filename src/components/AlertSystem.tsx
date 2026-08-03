@@ -9,14 +9,14 @@ const getSampleAlerts = (): Omit<AlertData, 'id' | 'timestamp' | 'acknowledged'>
   {
     type: 'success',
     title: 'Maintenance Complete',
-    message: 'Roller Mill #3 back online',
-    machineId: 'mill-1.5',
+    message: 'Roller Mill RM-103 back online',
+    machineId: 'rm-103',
   },
   {
     type: 'warning',
     title: 'Temperature Rising',
-    message: 'Plansifter #2 bearing temperature elevated',
-    machineId: 'sifter-0',
+    message: 'Plansifter B bearing temperature elevated',
+    machineId: 'sifter-b',
   },
   { type: 'info', title: 'Quality Check', message: 'Hourly sample collection in progress' },
   { type: 'success', title: 'Target Met', message: 'Daily production target achieved at 94%' },
@@ -118,7 +118,7 @@ export const AlertSystem: React.FC = () => {
   // Only render screen reader live region - no visible UI
   // Alerts are displayed via StatusHUD notification dropdown
   return (
-    <div role="status" aria-live="assertive" aria-atomic="true" className="sr-only">
+    <div role="alert" aria-atomic="true" className="sr-only">
       {liveRegionMessage}
     </div>
   );

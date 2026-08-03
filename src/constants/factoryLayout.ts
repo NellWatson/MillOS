@@ -1,13 +1,4 @@
 /**
- * Factory layout constants
- *
- * Central source of truth for zone centerline positions used across the scene.
- * Keep these aligned with `src/components/MillScene.tsx`.
+ * Compatibility export. New spatial work should import SITE_LAYOUT directly.
  */
-
-export const FACTORY_ZONE_Z = {
-  silos: -22,
-  milling: -6,
-  sifting: 6,
-  packing: 25,
-} as const;
+export { FACTORY_ZONE_Z } from './siteLayout';

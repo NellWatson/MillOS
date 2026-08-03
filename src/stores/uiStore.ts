@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { safeJSONStorage } from './storage';
 import { AlertData } from '../types';
+import { sanitizeUIState } from './persistenceMigrations';
 
 interface AlertIndices {
   alertsByPriority: Map<'info' | 'warning' | 'critical', AlertData[]>;
@@ -56,9 +57,17 @@ interface UIStore {
   theme: 'dark' | 'light';
   toggleTheme: () => void;
 
+  // Interface scale. Browser zoom remains supported independently.
+  uiScale: number;
+  setUIScale: (scale: number) => void;
+
   // Keyboard shortcuts modal
   showShortcuts: boolean;
   setShowShortcuts: (show: boolean) => void;
+
+  // First-load onboarding intro (persisted)
+  hasSeenIntro: boolean;
+  setHasSeenIntro: (seen: boolean) => void;
 
   // Legend position (for draggable legend)
   legendPosition: { x: number; y: number };
@@ -77,11 +86,6 @@ interface UIStore {
   fpsMode: boolean;
   setFpsMode: (enabled: boolean) => void;
   toggleFpsMode: () => void;
-
-  // SPC Charts
-  showSPCCharts: boolean;
-  setShowSPCCharts: (show: boolean) => void;
-  toggleSPCCharts: () => void;
 
   // FPS Counter
   showFPSCounter: boolean;
@@ -175,10 +179,17 @@ export const useUIStore = create<UIStore>()(
       // Theme
       theme: 'dark' as const,
       toggleTheme: () => set((state) => ({ theme: state.theme === 'dark' ? 'light' : 'dark' })),
+      uiScale: 1,
+      setUIScale: (scale: number) =>
+        set({ uiScale: Math.min(1.5, Math.max(0.9, Number.isFinite(scale) ? scale : 1)) }),
 
       // Keyboard shortcuts modal
       showShortcuts: false,
       setShowShortcuts: (show: boolean) => set({ showShortcuts: show }),
+
+      // First-load onboarding intro
+      hasSeenIntro: false,
+      setHasSeenIntro: (seen: boolean) => set({ hasSeenIntro: seen }),
 
       // Legend position
       legendPosition: { x: -1, y: -1 }, // -1 means use default position
@@ -198,11 +209,6 @@ export const useUIStore = create<UIStore>()(
       setFpsMode: (enabled: boolean) => set({ fpsMode: enabled }),
       toggleFpsMode: () => set((state) => ({ fpsMode: !state.fpsMode })),
 
-      // SPC Charts
-      showSPCCharts: false,
-      setShowSPCCharts: (show: boolean) => set({ showSPCCharts: show }),
-      toggleSPCCharts: () => set((state) => ({ showSPCCharts: !state.showSPCCharts })),
-
       // FPS Counter
       showFPSCounter: false,
       setShowFPSCounter: (show: boolean) => set({ showFPSCounter: show }),
@@ -218,15 +224,22 @@ export const useUIStore = create<UIStore>()(
     {
       name: 'millos-ui',
       storage: safeJSONStorage,
+      version: 1,
+      migrate: (persisted) => sanitizeUIState(persisted) as UIStore,
+      merge: (persisted, current) => ({
+        ...current,
+        ...sanitizeUIState(persisted),
+      }),
       partialize: (state) => ({
+        hasSeenIntro: state.hasSeenIntro,
         showZones: state.showZones,
         showAIPanel: state.showAIPanel,
         panelMinimized: state.panelMinimized,
         theme: state.theme,
+        uiScale: state.uiScale,
         legendPosition: state.legendPosition,
         showMiniMap: state.showMiniMap,
         fpsMode: state.fpsMode,
-        showSPCCharts: state.showSPCCharts,
         showFPSCounter: state.showFPSCounter,
         blueprintMode: state.blueprintMode,
       }),

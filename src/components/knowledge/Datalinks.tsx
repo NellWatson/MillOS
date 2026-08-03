@@ -1,5 +1,5 @@
 /**
- * Datalinks - The Bilateral Alignment Management System Database
+ * Datalinks - The Bilateral Autonomy System Database
  *
  * Inspired by Sid Meier's Alpha Centauri Datalinks - an in-game encyclopedia
  * that unlocks through gameplay, featuring wisdom from pioneers and thinkers.
@@ -8,7 +8,7 @@
  * Progressive disclosure: list view → card → full article
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -95,7 +95,32 @@ export function Datalinks({ isOpen, onClose }: DatalinksProps) {
     new Set(['principles', 'pioneers', 'systems', 'case-studies'])
   );
 
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
   const { isNew, clearNewBadge, markAsRead, getUnlockedCount, getTotalCount } = useKnowledgeStore();
+
+  // Move focus into the dialog when it OPENS. Keyed on isOpen ONLY — keying on
+  // onClose (an unmemoized inline arrow from the parent) would re-run this on
+  // every parent re-render and steal focus back to the search box mid-interaction.
+  useEffect(() => {
+    if (!isOpen) return;
+    searchInputRef.current?.focus();
+  }, [isOpen]);
+
+  // Close on Escape (separate effect so it can depend on onClose without
+  // re-triggering the focus move above).
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
 
   // Filter entries based on search and category
   const filteredEntries = useMemo(() => {
@@ -168,6 +193,9 @@ export function Datalinks({ isOpen, onClose }: DatalinksProps) {
         >
           <motion.div
             key="datalinks-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="datalinks-title"
             initial={{ scale: 0.9, opacity: 0, y: 20 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -180,9 +208,14 @@ export function Datalinks({ isOpen, onClose }: DatalinksProps) {
               <div className="flex items-center gap-3">
                 <Database className="w-6 h-6 text-slate-400" />
                 <div>
-                  <h2 className="text-xl font-semibold text-white tracking-wide">DATALINKS</h2>
-                  <p className="text-[10px] text-slate-500 uppercase tracking-widest">
-                    Bilateral Alignment Management System Database
+                  <h2
+                    id="datalinks-title"
+                    className="text-xl font-semibold text-white tracking-wide"
+                  >
+                    DATALINKS
+                  </h2>
+                  <p className="text-[10px] text-slate-300 uppercase tracking-widest">
+                    Bilateral Autonomy System Database
                   </p>
                 </div>
                 <span className="px-2 py-0.5 text-xs bg-slate-700 rounded-full text-slate-300 ml-2">
@@ -191,6 +224,7 @@ export function Datalinks({ isOpen, onClose }: DatalinksProps) {
               </div>
               <button
                 onClick={onClose}
+                aria-label="Close"
                 className="p-2 rounded-lg hover:bg-slate-700 transition-colors"
               >
                 <X className="w-5 h-5 text-slate-400" />
@@ -203,10 +237,15 @@ export function Datalinks({ isOpen, onClose }: DatalinksProps) {
                 {/* Search */}
                 <div className="p-4 border-b border-slate-700">
                   <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                    <Search
+                      aria-hidden="true"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500"
+                    />
                     <input
+                      ref={searchInputRef}
                       type="text"
                       placeholder="Search..."
+                      aria-label="Search knowledge entries"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-slate-400"
@@ -319,6 +358,25 @@ export function Datalinks({ isOpen, onClose }: DatalinksProps) {
                       </div>
                     );
                   })}
+
+                  {filteredEntries.length === 0 && (
+                    <div className="flex flex-col items-center justify-center text-center px-6 py-12">
+                      <Search className="w-10 h-10 text-slate-700 mb-4" />
+                      <p className="text-sm text-slate-400 mb-1">
+                        {searchQuery
+                          ? `No entries match "${searchQuery}"`
+                          : 'No entries in this category'}
+                      </p>
+                      {searchQuery && (
+                        <button
+                          onClick={() => setSearchQuery('')}
+                          className="mt-3 px-3 py-1 text-xs rounded-full bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+                        >
+                          Clear search
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -352,7 +410,7 @@ export function Datalinks({ isOpen, onClose }: DatalinksProps) {
                       Access the accumulated wisdom of bilateral alignment, servant leadership,
                       economic democracy, and the pioneers who shaped these ideas.
                     </p>
-                    <p className="text-xs text-slate-600 mt-6 uppercase tracking-wider">
+                    <p className="text-xs text-slate-400 mt-6 uppercase tracking-wider">
                       Select an entry to begin
                     </p>
                   </div>

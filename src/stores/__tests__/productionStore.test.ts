@@ -13,6 +13,16 @@ import { useProductionStore } from '../productionStore';
 import { useAnnouncementsStore, type Announcement } from '../announcementsStore';
 import { AIDecision } from '../../types';
 
+const DEFAULT_ANNOUNCEMENT_CONTEXT: Pick<
+  Announcement,
+  'channel' | 'tone' | 'audience' | 'cooldownMs'
+> = {
+  channel: 'operational',
+  tone: 'literal',
+  audience: 'all',
+  cooldownMs: 0,
+};
+
 describe('ProductionStore - AI Decision Management', () => {
   beforeEach(() => {
     // Reset production store to initial state before each test
@@ -69,7 +79,17 @@ describe('ProductionStore - AI Decision Management', () => {
 
       const updatedDecisions = useProductionStore.getState().aiDecisions;
       expect(updatedDecisions).toHaveLength(1);
-      expect(updatedDecisions[0]).toEqual(decision);
+      expect(updatedDecisions[0]).toEqual(
+        expect.objectContaining({
+          ...decision,
+          provenance: expect.objectContaining({
+            expectedEffect: decision.impact,
+            observations: expect.arrayContaining([
+              expect.objectContaining({ label: 'Production throughput' }),
+            ]),
+          }),
+        })
+      );
     });
 
     it('should add decisions to the front of the array', () => {
@@ -179,6 +199,15 @@ describe('ProductionStore - AI Decision Management', () => {
       expect(updated).toBeDefined();
       expect(updated!.status).toBe('completed');
       expect(updated!.outcome).toBe('Successfully completed maintenance');
+      expect(updated!.measuredOutcome).toEqual(
+        expect.objectContaining({
+          summary: 'Successfully completed maintenance',
+          measurements: expect.objectContaining({
+            throughput: expect.any(Number),
+            efficiency: expect.any(Number),
+          }),
+        })
+      );
     });
 
     it('should preserve existing outcome if not provided', () => {
@@ -209,6 +238,34 @@ describe('ProductionStore - AI Decision Management', () => {
       // Should not modify the array
       expect(decisionsAfter).toEqual(decisionsBefore);
     });
+
+    it('records operator disposition separately from lifecycle status', () => {
+      const { recordDecisionResponse } = useProductionStore.getState();
+
+      recordDecisionResponse('decision-to-update', 'deferred', {
+        note: 'Review after the current production run.',
+      });
+
+      const deferred = useProductionStore
+        .getState()
+        .aiDecisions.find((decision) => decision.id === 'decision-to-update');
+      expect(deferred?.status).toBe('pending');
+      expect(deferred?.response).toEqual(
+        expect.objectContaining({
+          disposition: 'deferred',
+          note: 'Review after the current production run.',
+        })
+      );
+
+      recordDecisionResponse('decision-to-update', 'rejected', {
+        note: 'The evidence is insufficient.',
+      });
+      const rejected = useProductionStore
+        .getState()
+        .aiDecisions.find((decision) => decision.id === 'decision-to-update');
+      expect(rejected?.status).toBe('superseded');
+      expect(rejected?.outcome).toContain('evidence is insufficient');
+    });
   });
 
   describe('clearOldAnnouncements', () => {
@@ -226,6 +283,7 @@ describe('ProductionStore - AI Decision Management', () => {
       useAnnouncementsStore.setState({
         announcements: [
           {
+            ...DEFAULT_ANNOUNCEMENT_CONTEXT,
             id: 'old-announcement',
             message: 'Old message',
             type: 'info',
@@ -251,6 +309,7 @@ describe('ProductionStore - AI Decision Management', () => {
       useAnnouncementsStore.setState({
         announcements: [
           {
+            ...DEFAULT_ANNOUNCEMENT_CONTEXT,
             id: 'recent-announcement',
             message: 'Recent message',
             type: 'info',
@@ -276,6 +335,7 @@ describe('ProductionStore - AI Decision Management', () => {
       useAnnouncementsStore.setState({
         announcements: [
           {
+            ...DEFAULT_ANNOUNCEMENT_CONTEXT,
             id: 'recent-1',
             message: 'Recent 1',
             type: 'info',
@@ -284,6 +344,7 @@ describe('ProductionStore - AI Decision Management', () => {
             priority: 1,
           },
           {
+            ...DEFAULT_ANNOUNCEMENT_CONTEXT,
             id: 'old-1',
             message: 'Old 1',
             type: 'warning',
@@ -292,6 +353,7 @@ describe('ProductionStore - AI Decision Management', () => {
             priority: 2,
           },
           {
+            ...DEFAULT_ANNOUNCEMENT_CONTEXT,
             id: 'recent-2',
             message: 'Recent 2',
             type: 'success',
@@ -300,6 +362,7 @@ describe('ProductionStore - AI Decision Management', () => {
             priority: 1,
           },
           {
+            ...DEFAULT_ANNOUNCEMENT_CONTEXT,
             id: 'old-2',
             message: 'Old 2',
             type: 'info',
@@ -326,6 +389,7 @@ describe('ProductionStore - AI Decision Management', () => {
       const recentTimestamp = Date.now() - 60 * 1000; // 1 minute ago
       const initialAnnouncements: Announcement[] = [
         {
+          ...DEFAULT_ANNOUNCEMENT_CONTEXT,
           id: 'recent-announcement',
           message: 'Recent',
           type: 'info' as const,

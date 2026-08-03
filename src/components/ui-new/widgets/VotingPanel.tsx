@@ -40,6 +40,7 @@ import {
   BarChart2,
 } from 'lucide-react';
 import { useVotingStore } from '../../../stores/votingStore';
+import { useShallow } from 'zustand/react/shallow';
 import { WORKER_ROSTER } from '../../../types';
 import { ConceptTooltip } from './ConceptTooltip';
 import type { Vote as VoteInterface, VoteType, VoteOption, VoteStatus } from '../../../types/bas';
@@ -204,8 +205,18 @@ const VoteCard: React.FC<VoteCardProps> = ({
     >
       {/* Header */}
       <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-controls={`vote-card-content-${vote.id}`}
         className="p-2 cursor-pointer hover:bg-slate-700/30 transition-colors"
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setExpanded(!expanded);
+          }
+        }}
       >
         <div className="flex items-start gap-2">
           {/* Type icon */}
@@ -247,6 +258,7 @@ const VoteCard: React.FC<VoteCardProps> = ({
       <AnimatePresence>
         {expanded && (
           <motion.div
+            id={`vote-card-content-${vote.id}`}
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -275,6 +287,7 @@ const VoteCard: React.FC<VoteCardProps> = ({
                   const percentage =
                     totalVotes > 0 ? Math.round((option.votes.length / totalVotes) * 100) : 0;
                   const isSelected = option.id === votedOption?.id;
+                  const isSelectable = vote.status === 'open' && !isSelected;
                   const colors = [
                     'border-green-500 bg-green-500/10',
                     'border-amber-500 bg-amber-500/10',
@@ -285,20 +298,29 @@ const VoteCard: React.FC<VoteCardProps> = ({
                   return (
                     <div
                       key={option.id}
+                      role={isSelectable ? 'button' : undefined}
+                      tabIndex={isSelectable ? 0 : undefined}
+                      aria-label={isSelectable ? `Vote for ${option.label}` : undefined}
                       className={`rounded border p-1.5 ${
                         isSelected
                           ? colors[idx % colors.length]
                           : 'border-slate-600/50 bg-slate-700/30'
-                      } ${
-                        vote.status === 'open' && !isSelected
-                          ? 'cursor-pointer hover:bg-slate-700/50'
-                          : ''
-                      }`}
+                      } ${isSelectable ? 'cursor-pointer hover:bg-slate-700/50' : ''}`}
                       onClick={() => {
-                        if (vote.status === 'open' && !isSelected) {
+                        if (isSelectable) {
                           onCastVote(vote.id, option.id);
                         }
                       }}
+                      onKeyDown={
+                        isSelectable
+                          ? (e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                onCastVote(vote.id, option.id);
+                              }
+                            }
+                          : undefined
+                      }
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -334,7 +356,7 @@ const VoteCard: React.FC<VoteCardProps> = ({
               {vote.status === 'open' && (
                 <button
                   onClick={() => onSimulate(vote.id)}
-                  className="flex items-center gap-1 text-[9px] text-slate-500 hover:text-slate-300 transition-colors"
+                  className="flex items-center gap-1 text-[9px] text-slate-400 hover:text-slate-300 focus:text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500 transition-colors"
                 >
                   <Play className="w-3 h-3" />
                   <span>Simulate worker voting</span>
@@ -451,8 +473,19 @@ export const VotingPanel: React.FC<VotingPanelProps> = ({ defaultExpanded = true
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
 
+  // Subscribe to the used slice only — the bare useVotingStore() form
+  // re-rendered the panel on every store mutation.
   const { votes, castVote, simulateWorkerVoting, getActiveVotes, getClosedVotes, closeVote } =
-    useVotingStore();
+    useVotingStore(
+      useShallow((state) => ({
+        votes: state.votes,
+        castVote: state.castVote,
+        simulateWorkerVoting: state.simulateWorkerVoting,
+        getActiveVotes: state.getActiveVotes,
+        getClosedVotes: state.getClosedVotes,
+        closeVote: state.closeVote,
+      }))
+    );
 
   const activeVotes = useMemo(() => getActiveVotes(), [votes]);
   const closedVotes = useMemo(() => getClosedVotes().slice(0, 5), [votes]); // Last 5
@@ -470,8 +503,10 @@ export const VotingPanel: React.FC<VotingPanelProps> = ({ defaultExpanded = true
 
   const handleSimulate = (voteId: string) => {
     simulateWorkerVoting(voteId);
-    // Auto-close if all workers have voted
-    const vote = votes.find((v) => v.id === voteId);
+    // Auto-close if enough workers have voted. Read fresh state from the store:
+    // the `votes` render closure still holds the PRE-simulation tallies, so the
+    // auto-close would never fire on the triggering click.
+    const vote = useVotingStore.getState().votes.find((v) => v.id === voteId);
     if (vote) {
       const totalVotes = vote.options.reduce((sum, opt) => sum + opt.votes.length, 0);
       if (totalVotes >= WORKER_ROSTER.length * 0.8) {
@@ -484,8 +519,18 @@ export const VotingPanel: React.FC<VotingPanelProps> = ({ defaultExpanded = true
     <div className="bg-slate-800/50 rounded-lg border border-slate-700/50 overflow-hidden">
       {/* Header */}
       <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-controls="voting-panel-content"
         className="flex items-center justify-between p-2 cursor-pointer hover:bg-slate-700/30 transition-colors"
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setExpanded(!expanded);
+          }
+        }}
       >
         <div className="flex items-center gap-2">
           <VoteIcon className="w-4 h-4 text-green-400" />
@@ -510,6 +555,7 @@ export const VotingPanel: React.FC<VotingPanelProps> = ({ defaultExpanded = true
       <AnimatePresence>
         {expanded && (
           <motion.div
+            id="voting-panel-content"
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -534,8 +580,16 @@ export const VotingPanel: React.FC<VotingPanelProps> = ({ defaultExpanded = true
               </div>
 
               {/* Tab toggle */}
-              <div className="flex rounded bg-slate-700/30 p-0.5">
+              <div
+                role="tablist"
+                aria-label="Voting views"
+                className="flex rounded bg-slate-700/30 p-0.5"
+              >
                 <button
+                  role="tab"
+                  id="voting-tab-active"
+                  aria-selected={activeTab === 'active'}
+                  aria-controls="voting-tabpanel"
                   className={`flex-1 text-[10px] py-1 rounded transition-colors ${
                     activeTab === 'active'
                       ? 'bg-slate-600 text-white'
@@ -546,6 +600,10 @@ export const VotingPanel: React.FC<VotingPanelProps> = ({ defaultExpanded = true
                   Active ({openCount})
                 </button>
                 <button
+                  role="tab"
+                  id="voting-tab-history"
+                  aria-selected={activeTab === 'history'}
+                  aria-controls="voting-tabpanel"
                   className={`flex-1 text-[10px] py-1 rounded transition-colors ${
                     activeTab === 'history'
                       ? 'bg-slate-600 text-white'
@@ -558,7 +616,14 @@ export const VotingPanel: React.FC<VotingPanelProps> = ({ defaultExpanded = true
               </div>
 
               {/* Vote list */}
-              <div className="space-y-2 max-h-64 overflow-y-auto">
+              <div
+                role="tabpanel"
+                id="voting-tabpanel"
+                aria-labelledby={
+                  activeTab === 'active' ? 'voting-tab-active' : 'voting-tab-history'
+                }
+                className="space-y-2 max-h-64 overflow-y-auto"
+              >
                 {activeTab === 'active' ? (
                   activeVotes.length > 0 ? (
                     activeVotes.map((vote) => (

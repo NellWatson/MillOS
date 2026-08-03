@@ -138,7 +138,14 @@ export const InstancedPlansifters: React.FC<InstancedPlansiftersProps> = ({
       });
       playingSoundsRef.current.clear();
     };
-  }, [machines]);
+    // Only fire on add/remove/status-change, not every SCADA tick (machines is a new ref each tick)
+  }, [machines.map((m) => `${m.id}:${m.status}`).join(',')]);
+
+  // Signature of per-machine rpm; recomputed once per render and reused as the pitch-effect dep
+  const rpmSignature = useMemo(
+    () => machines.map((m) => `${m.id}:${m.metrics.rpm}`).join(','),
+    [machines]
+  );
 
   // Update RPM-based pitch for running machines (separate effect to avoid restart)
   useEffect(() => {
@@ -147,7 +154,7 @@ export const InstancedPlansifters: React.FC<InstancedPlansiftersProps> = ({
         audioManager.updateMachinePitch(machine.id, machine.metrics.rpm ?? 200);
       }
     });
-  }, [machines.map((m) => `${m.id}:${m.metrics.rpm}`).join(',')]);
+  }, [rpmSignature]);
 
   // Initialize Static Parts (Frame)
   useEffect(() => {
@@ -221,7 +228,13 @@ export const InstancedPlansifters: React.FC<InstancedPlansiftersProps> = ({
 
   // Animate Dynamic Parts with distance culling
   useFrame((state) => {
-    if (!bodyRef.current || !flywheelRef.current || !hangersRef.current || !isTabVisible) return;
+    // The flywheel instancedMesh is only rendered on medium+ (see JSX below), so
+    // its ref is legitimately null on LOW. Requiring it here bailed the whole
+    // frame on LOW, leaving sifter bodies + hanger rods unrendered. All flywheel
+    // writes inside are already guarded by `quality !== 'low'`, so it is safe to
+    // proceed without the flywheel ref on LOW.
+    if (!bodyRef.current || !hangersRef.current || !isTabVisible) return;
+    if (quality !== 'low' && !flywheelRef.current) return;
     if (!shouldRunThisFrame(quality === 'low' ? 4 : 2)) return;
 
     const time = state.clock.elapsedTime;
@@ -281,14 +294,24 @@ export const InstancedPlansifters: React.FC<InstancedPlansiftersProps> = ({
       dummy.updateMatrix();
       bodyRef.current!.setMatrixAt(i, dummy.matrix);
 
-      // 2. Hanger Rods (4 per machine)
+      // 2. Suspension rods (4 per machine) - run from the sifter's ceiling frame UP to
+      //    the roof underside so the assembly reads as genuinely roof-mounted. Previously
+      //    these were short stubs ending at ~y17, leaving a ~15-unit gap to the roof which
+      //    made the suspended sifters look like they hung from nothing. Roof underside
+      //    ~y31.75 (FactoryRoof roofHeight=32, 0.5-thick slab).
       const hangerOffset = w * 0.4;
+      const roofUndersideY = 31.75;
+      const rodTopY = machine.position[1] + h / 2 + h * 0.65; // ceiling-frame top (~y17)
+      const rodLength = Math.max(0.1, roofUndersideY - rodTopY);
+      const rodCenterY = (rodTopY + roofUndersideY) / 2;
       [1, -1].forEach((hx, hi) => {
         [1, -1].forEach((hz, zi) => {
           const hangerIdx = i * 4 + (hi * 2 + zi);
-          dummy.position.set(x + hx * hangerOffset, y + h * 0.35, z + hz * hangerOffset);
-          dummy.scale.set(0.05, h * 0.6, 0.05);
-          dummy.rotation.set(rotX, 0, rotZ);
+          // Base follows the body's tiny lateral oscillation; the long rods keep vertical
+          // (top sway from the ~0.05-unit body offset is imperceptible at the roof).
+          dummy.position.set(x + hx * hangerOffset, rodCenterY, z + hz * hangerOffset);
+          dummy.scale.set(0.05, rodLength, 0.05);
+          dummy.rotation.set(0, 0, 0);
           dummy.updateMatrix();
           hangersRef.current!.setMatrixAt(hangerIdx, dummy.matrix);
         });

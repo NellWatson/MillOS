@@ -16,15 +16,24 @@ export type { SimplifiedWorkerProps } from './SimplifiedWorker';
 export { WorkerBillboard } from './WorkerBillboard';
 export type { WorkerBillboardProps } from './WorkerBillboard';
 
+export { WorkerContactShadow } from './WorkerContactShadow';
+
 export type {
   WorkerAppearance,
   WorkerPoseRefs,
   SimplifiedPoseRefs,
   HairStyle,
   ToolType,
+  WorkerWorkAction,
 } from './workerTypes';
 
-export { getWorkerAppearance, SKIN_TONES, HAIR_COLORS, HAIR_STYLES } from './workerTypes';
+export {
+  getWorkerAppearance,
+  getPersonnelProfileIds,
+  SKIN_TONES,
+  HAIR_COLORS,
+  HAIR_STYLES,
+} from './workerTypes';
 
 export {
   TOOL_GEOMETRIES,

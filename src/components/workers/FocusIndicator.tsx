@@ -62,6 +62,9 @@ export const FocusIndicator: React.FC<FocusIndicatorProps> = React.memo(
           groupRef.current.remove(lineRef.current);
         }
         lineRef.current = null;
+        // Dispose per-instance GPU resources owned by this component.
+        geometry.dispose();
+        material.dispose();
       };
     }, [geometry, material]);
 
@@ -97,17 +100,17 @@ export const FocusIndicator: React.FC<FocusIndicatorProps> = React.memo(
       lineRef.current.computeLineDistances();
     });
 
-    // Don't render if no target or focus is on task/break
-    if (
-      !visible ||
-      !targetPosition ||
-      workerState?.focus === 'task' ||
-      workerState?.focus === 'break'
-    ) {
-      return null;
-    }
+    // Show only when visible, a target exists, and focus is not on task/break.
+    // The group is always mounted (so the create-once effect can attach the
+    // line on first render); we toggle its visibility instead of unmounting,
+    // which would orphan the line and prevent it from ever being re-added.
+    const shouldShow =
+      visible &&
+      !!targetPosition &&
+      workerState?.focus !== 'task' &&
+      workerState?.focus !== 'break';
 
-    return <group ref={groupRef} />;
+    return <group ref={groupRef} visible={shouldShow} />;
   }
 );
 

@@ -5,6 +5,8 @@ import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { audioManager } from '../utils/audioManager';
 import { shouldRunThisFrame } from '../utils/frameThrottle';
 import { FLOOR_LAYERS, POLYGON_OFFSET, RENDER_ORDER } from '../constants/renderLayers';
+import { safeDivide } from '../utils/typeGuards';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 // ==========================================
 // CENTRALIZED ANIMATION MANAGER
@@ -51,6 +53,13 @@ import { FLOOR_LAYERS, POLYGON_OFFSET, RENDER_ORDER } from '../constants/renderL
 
 type AnimationCallback = (time: number, delta: number) => void;
 
+const stableUnitForPosition = (position: readonly [number, number, number], salt = 0): number => {
+  const value =
+    Math.sin(position[0] * 12.9898 + position[1] * 78.233 + position[2] * 37.719 + salt * 19.19) *
+    43758.5453;
+  return value - Math.floor(value);
+};
+
 // Global registry for all ambient detail animations
 const ambientAnimations = new Map<string, AnimationCallback>();
 
@@ -67,10 +76,12 @@ export const unregisterAnimation = (id: string): void => {
 // Single useFrame hook that manages all ambient detail animations
 const AmbientAnimationManager: React.FC = () => {
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const prefersReducedMotion = useReducedMotion();
 
   useFrame((state, delta) => {
-    // Skip all animations when tab is hidden
-    if (!isTabVisible) return;
+    // Ambient motion is decorative. Pause it when hidden or when the user
+    // requests reduced motion, while process animation continues elsewhere.
+    if (!isTabVisible || prefersReducedMotion) return;
 
     // Throttle to every 3rd frame for ambient details (they don't need 60fps)
     if (!shouldRunThisFrame(3)) return;
@@ -168,6 +179,9 @@ const Cobweb: React.FC<{
     return geo;
   }, [scale]);
 
+  // Dispose the per-instance cobweb geometry on unmount / scale change.
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
   // Subtle swaying animation using centralized manager
   const animationId = useMemo(
     () => `cobweb-${position.join(',')}-${rotation.join(',')}`,
@@ -249,6 +263,9 @@ const RustStain: React.FC<{
     return tex;
   }, []);
 
+  // Dispose canvas texture on unmount to avoid GPU leak
+  useEffect(() => () => texture?.dispose?.(), [texture]);
+
   return (
     <mesh position={position} rotation={rotation} renderOrder={RENDER_ORDER.floorEffects}>
       <planeGeometry args={[safeSize, safeSize]} />
@@ -316,11 +333,16 @@ const OilPuddle: React.FC<{ position: [number, number, number]; size?: number }>
     return geo;
   }, [size]);
 
+  // Dispose the per-instance puddle geometry on unmount, and hoist the random
+  // rotation into a stable useMemo so it doesn't re-roll on every re-render.
+  useEffect(() => () => shape.dispose(), [shape]);
+  const rotZ = useMemo(() => Math.random() * Math.PI * 2, []);
+
   return (
     <mesh
       ref={meshRef}
       position={position}
-      rotation={[-Math.PI / 2, 0, Math.random() * Math.PI * 2]}
+      rotation={[-Math.PI / 2, 0, rotZ]}
       geometry={shape}
       renderOrder={RENDER_ORDER.floorEffects}
     >
@@ -392,11 +414,16 @@ const RainPuddle: React.FC<{ position: [number, number, number]; size?: number }
     return geo;
   }, [size]);
 
+  // Dispose the per-instance puddle geometry on unmount, and hoist the random
+  // rotation into a stable useMemo so it doesn't re-roll on every re-render.
+  useEffect(() => () => shape.dispose(), [shape]);
+  const rotZ = useMemo(() => Math.random() * Math.PI * 2, []);
+
   return (
     <mesh
       ref={meshRef}
       position={position}
-      rotation={[-Math.PI / 2, 0, Math.random() * Math.PI * 2]}
+      rotation={[-Math.PI / 2, 0, rotZ]}
       geometry={shape}
       renderOrder={RENDER_ORDER.floorEffects}
     >
@@ -1012,6 +1039,8 @@ const StackedPallets: React.FC<{ position: [number, number, number]; count?: num
   position,
   count = 3,
 }) => {
+  const hasBoxes = stableUnitForPosition(position, count) > 0.3;
+
   return (
     <group position={position}>
       {Array.from({ length: count }).map((_, i) => (
@@ -1038,7 +1067,7 @@ const StackedPallets: React.FC<{ position: [number, number, number]; count?: num
         </group>
       ))}
       {/* Random boxes on top pallet */}
-      {Math.random() > 0.3 && (
+      {hasBoxes && (
         <group position={[0, count * 0.15 + 0.2, 0]}>
           <mesh position={[-0.2, 0.15, 0.1]} castShadow>
             <boxGeometry args={[0.4, 0.3, 0.35]} />
@@ -1305,7 +1334,9 @@ const CableTray: React.FC<{
         {Array.from({ length: 3 }).map((_, i) => (
           <group key={i} position={[-length / 3 + i * (length / 3), -0.1, 0]}>
             <mesh>
-              <cylinderGeometry args={[0.008, 0.008, 0.5 + Math.random() * 0.3, 6]} />
+              <cylinderGeometry
+                args={[0.008, 0.008, 0.5 + stableUnitForPosition(position, i) * 0.3, 6]}
+              />
               <meshStandardMaterial color={['#ef4444', '#eab308', '#3b82f6'][i]} roughness={0.5} />
             </mesh>
           </group>
@@ -1764,9 +1795,9 @@ const Mouse: React.FC<{ position: [number, number, number]; pathLength?: number 
   return (
     <group position={position}>
       <group ref={mouseRef} scale={0.5}>
-        {/* Body */}
-        <mesh>
-          <sphereGeometry args={[0.06, 8, 6]} scale={[1.5, 1, 1]} />
+        {/* Body - scale belongs on the mesh; R3F ignores `scale` on a geometry */}
+        <mesh scale={[1.5, 1, 1]}>
+          <sphereGeometry args={[0.06, 8, 6]} />
           <meshStandardMaterial color="#78716c" roughness={0.9} />
         </mesh>
 
@@ -1930,6 +1961,9 @@ const Graffiti: React.FC<{
     tex.needsUpdate = true;
     return tex;
   }, [type]);
+
+  // Dispose canvas texture on unmount to avoid GPU leak
+  useEffect(() => () => texture?.dispose?.(), [texture]);
 
   return (
     <mesh position={position} rotation={rotation}>
@@ -2102,6 +2136,9 @@ const ScorchMark: React.FC<{
     return tex;
   }, []);
 
+  // Dispose canvas texture on unmount to avoid GPU leak
+  useEffect(() => () => texture?.dispose?.(), [texture]);
+
   return (
     <mesh position={position} rotation={rotation}>
       <planeGeometry args={[safeSize, safeSize]} />
@@ -2120,14 +2157,12 @@ const OilDrum: React.FC<{
   color?: string;
   tipped?: boolean;
 }> = ({ position, color = '#3b82f6', tipped = false }) => {
+  const rotationY = stableUnitForPosition(position, tipped ? 1 : 0) * Math.PI * 2;
+
   return (
     <group
       position={position}
-      rotation={
-        tipped
-          ? [Math.PI / 2 - 0.3, 0, Math.random() * Math.PI * 2]
-          : [0, Math.random() * Math.PI * 2, 0]
-      }
+      rotation={tipped ? [Math.PI / 2 - 0.3, 0, rotationY] : [0, rotationY, 0]}
     >
       {/* Drum body */}
       <mesh position={[0, tipped ? 0 : 0.45, 0]} castShadow>
@@ -2280,6 +2315,8 @@ const Toolbox: React.FC<{ position: [number, number, number]; isOpen?: boolean }
 
 // Trash bin with overflowing garbage
 const TrashBin: React.FC<{ position: [number, number, number] }> = ({ position }) => {
+  const bananaRotation = stableUnitForPosition(position, 1) * Math.PI;
+
   return (
     <group position={position}>
       {/* Bin body */}
@@ -2318,7 +2355,7 @@ const TrashBin: React.FC<{ position: [number, number, number] }> = ({ position }
       </mesh>
 
       {/* Banana peel */}
-      <mesh position={[0, 0.78, 0]} rotation={[0.4, Math.random() * Math.PI, 0]}>
+      <mesh position={[0, 0.78, 0]} rotation={[0.4, bananaRotation, 0]}>
         <torusGeometry args={[0.04, 0.015, 6, 8, Math.PI]} />
         <meshStandardMaterial color="#eab308" roughness={0.7} />
       </mesh>
@@ -2441,9 +2478,16 @@ const ExtensionCord: React.FC<{
       const wave = Math.sin(t * Math.PI * 3) * 0.3;
       const perpX = -(end[2] - start[2]);
       const perpZ = end[0] - start[0];
+      // Guard against coincident endpoints (len=0 would yield NaN Vector3s)
       const len = Math.sqrt(perpX * perpX + perpZ * perpZ);
 
-      pts.push(new THREE.Vector3(x + (perpX / len) * wave, 0.01, z + (perpZ / len) * wave));
+      pts.push(
+        new THREE.Vector3(
+          x + safeDivide(perpX, len, 0) * wave,
+          0.01,
+          z + safeDivide(perpZ, len, 0) * wave
+        )
+      );
     }
 
     return pts;
@@ -2523,6 +2567,9 @@ const ChalkOutline: React.FC<{ position: [number, number, number] }> = ({ positi
     tex.needsUpdate = true;
     return tex;
   }, []);
+
+  // Dispose canvas texture on unmount to avoid GPU leak
+  useEffect(() => () => texture?.dispose?.(), [texture]);
 
   return (
     <mesh position={position} rotation={[-Math.PI / 2, 0, 0]}>
@@ -2999,6 +3046,7 @@ const Spider: React.FC<{ position: [number, number, number] }> = ({ position }) 
 // Dust bunny
 const DustBunny: React.FC<{ position: [number, number, number] }> = ({ position }) => {
   const bunnyRef = useRef<THREE.Mesh>(null);
+  const radius = 0.03 + stableUnitForPosition(position, 1) * 0.02;
 
   // Very occasional drift using centralized manager
   const animationId = useMemo(() => `dust-bunny-${position.join(',')}`, [position]);
@@ -3014,7 +3062,7 @@ const DustBunny: React.FC<{ position: [number, number, number] }> = ({ position 
 
   return (
     <mesh ref={bunnyRef} position={position}>
-      <icosahedronGeometry args={[0.03 + Math.random() * 0.02, 0]} />
+      <icosahedronGeometry args={[radius, 0]} />
       <meshStandardMaterial color="#9ca3af" roughness={1} transparent opacity={0.7} />
     </mesh>
   );
@@ -3142,7 +3190,11 @@ const TimeClockStation: React.FC<{
 
       {/* Time cards in rack */}
       {[-0.1, -0.05, 0, 0.05, 0.1].map((y, i) => (
-        <mesh key={i} position={[0.22, y, 0.045]} visible={Math.random() > 0.3}>
+        <mesh
+          key={i}
+          position={[0.22, y, 0.045]}
+          visible={stableUnitForPosition(position, i) > 0.3}
+        >
           <boxGeometry args={[0.08, 0.04, 0.002]} />
           <meshStandardMaterial color="#fef3c7" />
         </mesh>
@@ -3517,12 +3569,29 @@ const CigaretteButts: React.FC<{ position: [number, number, number]; count?: num
 }) => {
   const butts = useMemo(
     () =>
-      Array.from({ length: count }).map(() => ({
-        offset: [(Math.random() - 0.5) * 0.4, 0, (Math.random() - 0.5) * 0.4],
-        rotation: Math.random() * Math.PI * 2,
-        isLit: Math.random() < 0.1, // 10% chance of recently discarded
+      Array.from({ length: count }).map((_, index) => ({
+        offset: [
+          (stableUnitForPosition(position, index * 5 + 1) - 0.5) * 0.4,
+          0,
+          (stableUnitForPosition(position, index * 5 + 2) - 0.5) * 0.4,
+        ],
+        rotation: stableUnitForPosition(position, index * 5 + 3) * Math.PI * 2,
+        tilt: stableUnitForPosition(position, index * 5 + 4) * 0.3,
+        isLit: stableUnitForPosition(position, index * 5 + 5) < 0.1,
       })),
-    [count]
+    [count, position]
+  );
+  const ash = useMemo(
+    () =>
+      Array.from({ length: 8 }).map((_, index) => ({
+        position: [
+          (stableUnitForPosition(position, index * 3 + 101) - 0.5) * 0.5,
+          0.001,
+          (stableUnitForPosition(position, index * 3 + 102) - 0.5) * 0.5,
+        ] as [number, number, number],
+        radius: 0.01 + stableUnitForPosition(position, index * 3 + 103) * 0.015,
+      })),
+    [position]
   );
 
   return (
@@ -3531,7 +3600,7 @@ const CigaretteButts: React.FC<{ position: [number, number, number]; count?: num
         <group
           key={i}
           position={butt.offset as [number, number, number]}
-          rotation={[Math.PI / 2, butt.rotation, Math.random() * 0.3]}
+          rotation={[Math.PI / 2, butt.rotation, butt.tilt]}
         >
           {/* Filter */}
           <mesh position={[0, 0, 0]}>
@@ -3555,13 +3624,9 @@ const CigaretteButts: React.FC<{ position: [number, number, number]; count?: num
         </group>
       ))}
       {/* Ash scatter around */}
-      {Array.from({ length: 8 }).map((_, i) => (
-        <mesh
-          key={`ash-${i}`}
-          position={[(Math.random() - 0.5) * 0.5, 0.001, (Math.random() - 0.5) * 0.5]}
-          rotation={[-Math.PI / 2, 0, 0]}
-        >
-          <circleGeometry args={[0.01 + Math.random() * 0.015, 6]} />
+      {ash.map((particle, i) => (
+        <mesh key={`ash-${i}`} position={particle.position} rotation={[-Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[particle.radius, 6]} />
           <meshBasicMaterial color="#4a4a4a" transparent opacity={0.4} />
         </mesh>
       ))}
@@ -3574,9 +3639,12 @@ const StuckGum: React.FC<{ position: [number, number, number]; color?: string }>
   position,
   color = '#f472b6',
 }) => {
+  // Stable per-instance radius (was re-rolled every render) and the squash
+  // scale moved onto the mesh (R3F ignores `scale` on a geometry).
+  const radius = useMemo(() => 0.015 + Math.random() * 0.01, []);
   return (
-    <mesh position={position}>
-      <sphereGeometry args={[0.015 + Math.random() * 0.01, 8, 6]} scale={[1, 0.4, 1]} />
+    <mesh position={position} scale={[1, 0.4, 1]}>
+      <sphereGeometry args={[radius, 8, 6]} />
       <meshStandardMaterial color={color} roughness={0.3} metalness={0.1} />
     </mesh>
   );
@@ -4289,6 +4357,9 @@ const WindowCondensation: React.FC<{
     return tex;
   }, []);
 
+  // Dispose canvas texture on unmount to avoid GPU leak
+  useEffect(() => () => texture?.dispose?.(), [texture]);
+
   return (
     <mesh position={position} rotation={rotation}>
       <planeGeometry args={[2, 1.5]} />
@@ -4348,6 +4419,9 @@ const CeilingWaterStain: React.FC<{ position: [number, number, number]; size?: n
     return tex;
   }, []);
 
+  // Dispose canvas texture on unmount to avoid GPU leak
+  useEffect(() => () => texture?.dispose?.(), [texture]);
+
   return (
     <mesh position={position} rotation={[Math.PI / 2, 0, 0]}>
       <planeGeometry args={[safeSize, safeSize]} />
@@ -4393,10 +4467,13 @@ const MothSwarm: React.FC<{ position: [number, number, number]; count?: number }
       moth.position.z = Math.sin(angle) * data.radius + Math.cos(time * 5 + i) * data.erratic;
       // Face direction of travel
       moth.rotation.y = -angle + Math.PI / 2;
-      // Wing flap
+      // Wing flap - children are [body, leftWing, rightWing]. Flap the two
+      // wings (1 and 2) around their ±0.3 rest spread; the body (0) stays put.
+      // Previously this rotated the body and only one wing, leaving the right
+      // wing (child 2) frozen.
       const wingAngle = Math.sin(time * 30 + i * 5) * 0.8;
-      (moth.children[0] as THREE.Mesh).rotation.z = wingAngle;
-      (moth.children[1] as THREE.Mesh).rotation.z = -wingAngle;
+      (moth.children[1] as THREE.Mesh).rotation.z = 0.3 + wingAngle;
+      (moth.children[2] as THREE.Mesh).rotation.z = -0.3 - wingAngle;
     });
   });
 
@@ -4521,39 +4598,64 @@ const Cockroach: React.FC<{ position: [number, number, number]; pathLength?: num
   );
 };
 
-// Main ambient details group component
-export const AmbientDetailsGroup: React.FC = () => {
+const LoadingDockDoors: React.FC = () => {
   const [doorStates, setDoorStates] = useState<Record<string, boolean>>({
     'door-1': false,
     'door-2': false,
     'door-3': false,
   });
+  const doorStatesRef = useRef(doorStates);
 
-  // Toggle door states periodically
   useEffect(() => {
-    const interval = setInterval(
-      () => {
-        const doorId = `door-${Math.floor(Math.random() * 3) + 1}`;
-        setDoorStates((prev) => ({
-          ...prev,
-          [doorId]: !prev[doorId],
-        }));
+    let timeoutId: number;
+    let cancelled = false;
 
-        // Play door sound
-        if (audioManager.initialized) {
-          if (doorStates[doorId]) {
-            audioManager.playDoorClose();
-          } else {
-            audioManager.playDoorOpen();
+    const scheduleNextToggle = () => {
+      timeoutId = window.setTimeout(
+        () => {
+          if (cancelled) return;
+
+          const doorId = `door-${Math.floor(Math.random() * 3) + 1}`;
+          const wasOpen = doorStatesRef.current[doorId] ?? false;
+          const nextDoorStates = {
+            ...doorStatesRef.current,
+            [doorId]: !wasOpen,
+          };
+          doorStatesRef.current = nextDoorStates;
+          setDoorStates(nextDoorStates);
+
+          if (audioManager.initialized) {
+            if (wasOpen) {
+              audioManager.playDoorClose();
+            } else {
+              audioManager.playDoorOpen();
+            }
           }
-        }
-      },
-      15000 + Math.random() * 30000
-    );
 
-    return () => clearInterval(interval);
-  }, [doorStates]);
+          scheduleNextToggle();
+        },
+        15000 + Math.random() * 30000
+      );
+    };
 
+    scheduleNextToggle();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
+
+  return (
+    <>
+      <LoadingDockDoor position={[-15, 0, 48]} isOpen={doorStates['door-1']} />
+      <LoadingDockDoor position={[0, 0, 48]} isOpen={doorStates['door-2']} />
+      <LoadingDockDoor position={[15, 0, 48]} isOpen={doorStates['door-3']} />
+    </>
+  );
+};
+
+// Main ambient details group component
+export const AmbientDetailsGroup: React.FC = () => {
   return (
     <group>
       {/* Centralized animation manager for all ambient details */}
@@ -4624,9 +4726,7 @@ export const AmbientDetailsGroup: React.FC = () => {
       <FireExtinguisherStation position={[0, 0, 35]} />
 
       {/* Loading dock doors - at z=48 (shipping dock) */}
-      <LoadingDockDoor position={[-15, 0, 48]} isOpen={doorStates['door-1']} />
-      <LoadingDockDoor position={[0, 0, 48]} isOpen={doorStates['door-2']} />
-      <LoadingDockDoor position={[15, 0, 48]} isOpen={doorStates['door-3']} />
+      <LoadingDockDoors />
 
       {/* Control panels - walls at x=±60 */}
       <ControlPanel position={[-40, 5, -42]} rotation={[0, 0, 0]} />
@@ -4652,7 +4752,9 @@ export const AmbientDetailsGroup: React.FC = () => {
           ========================================== */}
 
       {/* Stacked pallets in corners and along walls */}
-      <StackedPallets position={[-52, 0, -35]} count={4} />
+      {/* Moved off [-52,0,-35] which sat inside the locker-room building (x[-54,-46] z[-38,-32]);
+          [-52,0,-27] is the clear west-wall gap between the locker room and break-room-left. */}
+      <StackedPallets position={[-52, 0, -27]} count={4} />
       <StackedPallets position={[52, 0, -35]} count={3} />
       <StackedPallets position={[-52, 0, 35]} count={5} />
       <StackedPallets position={[52, 0, 35]} count={2} />
@@ -4857,7 +4959,9 @@ export const AmbientDetailsGroup: React.FC = () => {
           ========================================== */}
 
       {/* Emergency shower stations */}
-      <EmergencyShower position={[-48, 0, -35]} />
+      {/* Moved off [-48,0,-35] which sat inside the locker-room building; [-44,0,-35] is just
+          outside the locker-room east wall (x=-46) so the shower is reachable, not buried. */}
+      <EmergencyShower position={[-44, 0, -35]} />
       <EmergencyShower position={[48, 0, 35]} />
 
       {/* Eye wash stations */}

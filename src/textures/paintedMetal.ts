@@ -6,7 +6,7 @@
  */
 
 import * as THREE from 'three';
-import { getTexture, fbmNoise, voronoi, createDataTexture } from '../utils/textureGenerator';
+import { getTexture, fbmNoise, voronoi, createLinearDataTexture } from '../utils/textureGenerator';
 
 /**
  * Generates painted metal with subtle wear patterns.
@@ -53,6 +53,6 @@ export const generatePaintedMetal = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
   });
 };

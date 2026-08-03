@@ -8,11 +8,19 @@
  * R = Grass weight
  * G = Asphalt weight
  * B = Road weight
- * A = Cobblestone weight
+ * A = Dirt/gravel weight
  */
 
 import * as THREE from 'three';
-import { TerrainChannel, TerrainRegion, RegionShape, TERRAIN_BOUNDS } from './terrainTypes';
+import {
+  TerrainChannel,
+  TerrainRegion,
+  RegionShape,
+  TERRAIN_BOUNDS,
+  SPLAT_BOUNDS,
+  type TerrainBounds,
+} from './terrainTypes';
+import { createLinearDataTexture } from '../../utils/textureGenerator';
 
 /**
  * Calculate signed distance to a shape (negative = inside, positive = outside)
@@ -60,8 +68,40 @@ function signedDistanceToShape(worldX: number, worldZ: number, shape: RegionShap
   }
 }
 
-// Reserved for future use: world-to-UV conversion utilities
-// function worldToUV(...) and uvToPixel(...) available if needed
+/**
+ * Axis-aligned world-space bounding box of a region shape.
+ *
+ * Used to restrict painting to the pixels a region can actually touch.
+ * `generateSplatMap` previously walked all `resolution^2` pixels once per
+ * region (with a sqrt each), so adding the dirt verges would have taken the
+ * high/ultra splat build from ~5.2M to ~11.5M iterations.
+ */
+function shapeWorldBounds(shape: RegionShape): TerrainBounds {
+  switch (shape.type) {
+    case 'rect':
+    case 'roundedRect':
+      return {
+        minX: shape.x - shape.width / 2,
+        maxX: shape.x + shape.width / 2,
+        minZ: shape.z - shape.height / 2,
+        maxZ: shape.z + shape.height / 2,
+      };
+    case 'circle':
+      return {
+        minX: shape.x - shape.radius,
+        maxX: shape.x + shape.radius,
+        minZ: shape.z - shape.radius,
+        maxZ: shape.z + shape.radius,
+      };
+    case 'ellipse':
+      return {
+        minX: shape.x - shape.radiusX,
+        maxX: shape.x + shape.radiusX,
+        minZ: shape.z - shape.radiusZ,
+        maxZ: shape.z + shape.radiusZ,
+      };
+  }
+}
 
 /**
  * Convert pixel to world coordinates (center of pixel)
@@ -70,7 +110,7 @@ function pixelToWorld(
   px: number,
   py: number,
   resolution: number,
-  bounds: typeof TERRAIN_BOUNDS
+  bounds: TerrainBounds
 ): { worldX: number; worldZ: number } {
   const u = (px + 0.5) / resolution;
   const v = (py + 0.5) / resolution;
@@ -81,6 +121,12 @@ function pixelToWorld(
 
 /**
  * MillOS terrain regions - defines what material goes where
+ *
+ * Edge softness is deliberately generous (2-3.5 world units). The shader
+ * re-sharpens every transition with a height-based blend, so a wide soft zone
+ * now buys an organic interlocking boundary rather than a wider airbrushed
+ * smear. On the `low` tier there are no surface height maps and the soft zone
+ * stays a plain gradient, which is the correct behaviour for that tier.
  */
 export const MILLOS_TERRAIN_REGIONS: TerrainRegion[] = [
   // ============================================
@@ -90,7 +136,7 @@ export const MILLOS_TERRAIN_REGIONS: TerrainRegion[] = [
     channel: TerrainChannel.ASPHALT,
     shape: { type: 'rect', x: 0, z: 0, width: 200, height: 180 },
     intensity: 1,
-    edgeSoftness: 2,
+    edgeSoftness: 3.5,
     priority: 10,
   },
 
@@ -101,7 +147,7 @@ export const MILLOS_TERRAIN_REGIONS: TerrainRegion[] = [
     channel: TerrainChannel.ASPHALT,
     shape: { type: 'rect', x: 0, z: 80, width: 60, height: 60 },
     intensity: 1,
-    edgeSoftness: 1,
+    edgeSoftness: 2.5,
     priority: 15,
   },
 
@@ -112,7 +158,7 @@ export const MILLOS_TERRAIN_REGIONS: TerrainRegion[] = [
     channel: TerrainChannel.ROAD,
     shape: { type: 'rect', x: 20, z: 160, width: 16, height: 140 },
     intensity: 1,
-    edgeSoftness: 0.5,
+    edgeSoftness: 2,
     priority: 20,
   },
 
@@ -123,7 +169,7 @@ export const MILLOS_TERRAIN_REGIONS: TerrainRegion[] = [
     channel: TerrainChannel.ROAD,
     shape: { type: 'rect', x: -20, z: -160, width: 16, height: 140 },
     intensity: 1,
-    edgeSoftness: 0.5,
+    edgeSoftness: 2,
     priority: 20,
   },
 
@@ -144,8 +190,62 @@ export const MILLOS_TERRAIN_REGIONS: TerrainRegion[] = [
     channel: TerrainChannel.ASPHALT,
     shape: { type: 'rect', x: 45, z: 55, width: 30, height: 25 },
     intensity: 1,
-    edgeSoftness: 1,
+    edgeSoftness: 2.5,
     priority: 15,
+  },
+
+  // ============================================
+  // DIRT / GRAVEL VERGES AND WORN APPROACHES
+  // Priority 12 sits above the factory perimeter (10) so a verge can scuff the
+  // yard edge, and below the truck yard (15), parking (15) and roads (20) so
+  // it can never paint over a surfaced area. Real yards do not cut from grass
+  // straight to asphalt; these strips are what the transition needs.
+  // ============================================
+  // Front road runs x=12..28; verges flank it on both sides.
+  {
+    channel: TerrainChannel.DIRT,
+    shape: { type: 'rect', x: 8.5, z: 160, width: 7, height: 140 },
+    intensity: 1,
+    edgeSoftness: 3,
+    priority: 12,
+  },
+  {
+    channel: TerrainChannel.DIRT,
+    shape: { type: 'rect', x: 31.5, z: 160, width: 7, height: 140 },
+    intensity: 1,
+    edgeSoftness: 3,
+    priority: 12,
+  },
+  // Back road runs x=-28..-12.
+  {
+    channel: TerrainChannel.DIRT,
+    shape: { type: 'rect', x: -31.5, z: -160, width: 7, height: 140 },
+    intensity: 1,
+    edgeSoftness: 3,
+    priority: 12,
+  },
+  {
+    channel: TerrainChannel.DIRT,
+    shape: { type: 'rect', x: -8.5, z: -160, width: 7, height: 140 },
+    intensity: 1,
+    edgeSoftness: 3,
+    priority: 12,
+  },
+  // Worn apron pushed out by truck wheels at the north edge of the truck yard.
+  {
+    channel: TerrainChannel.DIRT,
+    shape: { type: 'rect', x: 0, z: 112, width: 66, height: 14 },
+    intensity: 1,
+    edgeSoftness: 4,
+    priority: 12,
+  },
+  // Scuffed gate approach where the front road meets the factory perimeter.
+  {
+    channel: TerrainChannel.DIRT,
+    shape: { type: 'rect', x: 20, z: 96, width: 30, height: 14 },
+    intensity: 1,
+    edgeSoftness: 4,
+    priority: 12,
   },
 ];
 
@@ -155,7 +255,7 @@ export const MILLOS_TERRAIN_REGIONS: TerrainRegion[] = [
 export function generateSplatMap(
   regions: TerrainRegion[],
   resolution: number = 1024,
-  bounds: typeof TERRAIN_BOUNDS = TERRAIN_BOUNDS
+  bounds: TerrainBounds = SPLAT_BOUNDS
 ): THREE.DataTexture {
   // Create RGBA buffer (4 bytes per pixel)
   const data = new Uint8Array(resolution * resolution * 4);
@@ -165,7 +265,7 @@ export function generateSplatMap(
     data[i * 4 + 0] = 255; // R = Grass
     data[i * 4 + 1] = 0; // G = Asphalt
     data[i * 4 + 2] = 0; // B = Road
-    data[i * 4 + 3] = 0; // A = Cobble
+    data[i * 4 + 3] = 0; // A = Dirt
   }
 
   // Sort regions by priority (lower first, so higher overwrites)
@@ -176,13 +276,20 @@ export function generateSplatMap(
     const edgeSoftness = region.edgeSoftness ?? 0;
     const intensity = region.intensity ?? 1;
 
-    // Calculate bounding box of region in pixels for optimization
-    const minPx = 0;
-    const maxPx = resolution - 1;
-    const minPy = 0;
-    const maxPy = resolution - 1;
+    // Restrict painting to the pixels this region can reach. `pixelToWorld`
+    // samples pixel centres, so the inverse is (world - min)/span * res - 0.5;
+    // an extra world unit of pad absorbs the ellipse SDF's approximation.
+    const worldBox = shapeWorldBounds(region.shape);
+    const pad = edgeSoftness + 1;
+    const spanX = bounds.maxX - bounds.minX;
+    const spanZ = bounds.maxZ - bounds.minZ;
+    const toPx = (worldX: number) => ((worldX - bounds.minX) / spanX) * resolution - 0.5;
+    const toPy = (worldZ: number) => ((worldZ - bounds.minZ) / spanZ) * resolution - 0.5;
 
-    // Could optimize with shape-specific bounds, but for now iterate all
+    const minPx = Math.max(0, Math.floor(toPx(worldBox.minX - pad)));
+    const maxPx = Math.min(resolution - 1, Math.ceil(toPx(worldBox.maxX + pad)));
+    const minPy = Math.max(0, Math.floor(toPy(worldBox.minZ - pad)));
+    const maxPy = Math.min(resolution - 1, Math.ceil(toPy(worldBox.maxZ + pad)));
 
     for (let py = minPy; py <= maxPy; py++) {
       for (let px = minPx; px <= maxPx; px++) {
@@ -236,7 +343,7 @@ export function generateSplatMap(
             newB = blend;
             newA = (data[idx + 3] / 255) * keepRatio;
             break;
-          case TerrainChannel.COBBLE:
+          case TerrainChannel.DIRT:
             newR = (data[idx + 0] / 255) * keepRatio;
             newG = (data[idx + 1] / 255) * keepRatio;
             newB = (data[idx + 2] / 255) * keepRatio;
@@ -253,13 +360,18 @@ export function generateSplatMap(
     }
   }
 
-  // Create texture
-  const texture = new THREE.DataTexture(data, resolution, resolution, THREE.RGBAFormat);
-  texture.needsUpdate = true;
+  // Blend weights are DATA, never colour - createLinearDataTexture states that
+  // explicitly instead of relying on THREE.DataTexture's NoColorSpace default.
+  // It also turns on the mipmap chain: without it, thin road and verge
+  // boundaries alias and crawl frame to frame at grazing angles, which is the
+  // classic "shimmering edges" tell.
+  const texture = createLinearDataTexture(data, resolution, resolution);
+  // createLinearDataTexture defaults to RepeatWrapping. Clamping is
+  // load-bearing here: it is what makes SPLAT_BOUNDS' restricted domain
+  // resolve to pure grass everywhere outside instead of tiling the whole site.
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
 
   return texture;
 }
@@ -347,7 +459,7 @@ function getDistanceToRiver(worldX: number, worldZ: number, config: RiverChannel
  */
 export function generateHeightmap(
   resolution: number = 512,
-  bounds: typeof TERRAIN_BOUNDS = TERRAIN_BOUNDS,
+  bounds: TerrainBounds = TERRAIN_BOUNDS,
   riverConfig: RiverChannelConfig = MILLOS_RIVER_CONFIG
 ): THREE.DataTexture {
   // Use RGBA format for better WebGL compatibility (R channel stores height)
@@ -389,15 +501,12 @@ export function generateHeightmap(
     }
   }
 
-  // Create RGBA texture for better compatibility
-  const texture = new THREE.DataTexture(data, resolution, resolution, THREE.RGBAFormat);
-  texture.needsUpdate = true;
+  // Height is DATA - createLinearDataTexture states the NoColorSpace choice at
+  // the call site rather than leaving it to THREE.DataTexture's default.
+  const texture = createLinearDataTexture(data, resolution, resolution);
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  // CRITICAL: Displacement maps need linear color space, not sRGB
-  texture.colorSpace = THREE.NoColorSpace;
+  texture.needsUpdate = true;
 
   return texture;
 }
@@ -421,13 +530,10 @@ export function generateTestHeightmap(resolution: number = 512): THREE.DataTextu
     }
   }
 
-  const texture = new THREE.DataTexture(data, resolution, resolution, THREE.RGBAFormat);
-  texture.needsUpdate = true;
+  const texture = createLinearDataTexture(data, resolution, resolution);
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.colorSpace = THREE.NoColorSpace;
+  texture.needsUpdate = true;
 
   return texture;
 }
@@ -491,7 +597,7 @@ export function debugSplatMapToCanvas(splatMap: THREE.DataTexture): HTMLCanvasEl
     grass: [92, 122, 74], // #5c7a4a
     asphalt: [58, 58, 58], // #3a3a3a
     road: [45, 52, 54], // #2d3436
-    cobble: [154, 154, 154], // #9a9a9a
+    dirt: [107, 88, 68], // #6b5844
   };
 
   const imageData = ctx.createImageData(resolution, resolution);
@@ -500,24 +606,24 @@ export function debugSplatMapToCanvas(splatMap: THREE.DataTexture): HTMLCanvasEl
     const grassW = data[i * 4 + 0] / 255;
     const asphaltW = data[i * 4 + 1] / 255;
     const roadW = data[i * 4 + 2] / 255;
-    const cobbleW = data[i * 4 + 3] / 255;
+    const dirtW = data[i * 4 + 3] / 255;
 
     // Blend colors based on weights
     const r =
       colors.grass[0] * grassW +
       colors.asphalt[0] * asphaltW +
       colors.road[0] * roadW +
-      colors.cobble[0] * cobbleW;
+      colors.dirt[0] * dirtW;
     const g =
       colors.grass[1] * grassW +
       colors.asphalt[1] * asphaltW +
       colors.road[1] * roadW +
-      colors.cobble[1] * cobbleW;
+      colors.dirt[1] * dirtW;
     const b =
       colors.grass[2] * grassW +
       colors.asphalt[2] * asphaltW +
       colors.road[2] * roadW +
-      colors.cobble[2] * cobbleW;
+      colors.dirt[2] * dirtW;
 
     imageData.data[i * 4 + 0] = r;
     imageData.data[i * 4 + 1] = g;

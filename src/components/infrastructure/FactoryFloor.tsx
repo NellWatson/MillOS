@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { useGraphicsStore } from '../../stores/graphicsStore';
 import { ReflectiveFloor } from './ReflectiveFloor';
@@ -86,7 +86,7 @@ const useConcreteFloorTextures = (width: number, depth: number) => {
 
 // Generate hazard stripe texture for safety walkways
 const useHazardStripeTexture = (type: 'walkway' | 'danger') => {
-  return useMemo(() => {
+  const texture = useMemo(() => {
     const size = 256;
     const canvas = document.createElement('canvas');
     canvas.width = size;
@@ -169,6 +169,11 @@ const useHazardStripeTexture = (type: 'walkway' | 'danger') => {
 
     return texture;
   }, [type]);
+
+  // Dispose owned base CanvasTexture on unmount / type change
+  useEffect(() => () => texture.dispose(), [texture]);
+
+  return texture;
 };
 
 // Safety zone component with proper industrial markings
@@ -196,6 +201,9 @@ const SafetyZone: React.FC<{
     t.needsUpdate = true;
     return t;
   }, [texture, repeatX, repeatY]);
+
+  // Dispose owned cloned CanvasTexture on unmount / re-clone
+  useEffect(() => () => clonedTexture.dispose(), [clonedTexture]);
 
   return (
     <group
@@ -271,6 +279,10 @@ const FloorPuddle: React.FC<{
     s.closePath();
     return new THREE.ShapeGeometry(s);
   }, [shape]);
+
+  // Dispose owned ShapeGeometry on unmount / regeneration (R3F does not
+  // auto-dispose geometry passed via the geometry={} prop)
+  useEffect(() => () => shapeGeometry.dispose(), [shapeGeometry]);
 
   return (
     <group
@@ -356,6 +368,9 @@ const WornFootpath: React.FC<{
     return tex;
   }, []);
 
+  // Dispose owned base scuff CanvasTexture on unmount
+  useEffect(() => () => texture.dispose(), [texture]);
+
   // Create path segments
   // CRITICAL: Filter out zero-length segments to prevent NaN in PlaneGeometry
   // "computeBoundingSphere(): Computed radius is NaN" errors
@@ -398,6 +413,9 @@ const WornFootpath: React.FC<{
     t.needsUpdate = true;
     return t;
   }, [texture]);
+
+  // Dispose owned cloned scuff CanvasTexture on unmount / re-clone
+  useEffect(() => () => clonedTexture.dispose(), [clonedTexture]);
 
   // Defensive guard for width prop
   const safeWidth = Number.isFinite(width) && width > 0 ? width : 2;
@@ -488,6 +506,10 @@ export const FactoryFloor: React.FC<FactoryFloorProps> = React.memo(
       texture.repeat.set(actualWidth / 5, actualDepth / 5);
       return texture;
     }, [actualWidth, actualDepth]);
+
+    // Dispose the grid CanvasTexture on unmount / dimension change to avoid
+    // orphaning GPU textures, matching the other CanvasTextures in this file.
+    useEffect(() => () => gridTexture.dispose(), [gridTexture]);
 
     return (
       <group matrixAutoUpdate={false}>

@@ -19,10 +19,20 @@ export {
 export {
   TerrainChannel,
   TERRAIN_BOUNDS,
+  SPLAT_BOUNDS,
   TERRAIN_COLORS,
+  TERRAIN_TINTS,
   DEFAULT_TERRAIN_MATERIALS,
+  type TerrainBounds,
   type TerrainRegion,
   type TerrainConfig,
   type TerrainMaterialProps,
   type RegionShape,
 } from './terrainTypes';
+export {
+  generateGrassSurface,
+  generateTarmacSurface,
+  generateDirtSurface,
+  generateDirtGravel,
+  generateTerrainMacro,
+} from './terrainTextures';

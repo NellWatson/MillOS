@@ -6,26 +6,44 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './e2e',
-  /* Run tests in files in parallel */
-  fullyParallel: true,
+  /* Keep browser-runner lifecycle cleanup away from persistent native,
+   * performance, and visual evidence stored elsewhere under test-results. */
+  outputDir: './test-results/playwright',
+  /* Each test boots the full 3D app; parallel instances saturate the GPU and
+   * time out. Run serially everywhere. */
+  fullyParallel: false,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
   /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
-  /* Opt out of parallel tests on CI. */
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
-    /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: 'http://localhost:3000',
+    /* Base URL to use in actions like `await page.goto('/')`.
+     * Dedicated e2e port: on port 3000 (the dev default) reuseExistingServer
+     * happily adopts WHATEVER is already listening — on one dev machine the
+     * suite silently tested a Grafana login page. 5180 + --strictPort makes
+     * the suite fail loudly instead of testing the wrong app. */
+    baseURL: 'http://localhost:5180',
+
+    /* A stale or obscured control should fail quickly enough to preserve the
+     * interaction state that caused the problem. The longer test timeout still
+     * accommodates the initial 3D boot on software WebGL. */
+    actionTimeout: 20_000,
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
 
     /* Screenshot on failure */
     screenshot: 'only-on-failure',
+
+    /* Headless chromium falls back to software WebGL (SwiftShader), which
+     * makes this 3D app's procedural texture generation take 150s+ and the
+     * shell mount time exceed any sane timeout. Run headed locally to use
+     * the real GPU; CI keeps headless and relies on the long timeouts. */
+    headless: !!process.env.CI,
   },
 
   /* Configure projects for major browsers */
@@ -38,14 +56,17 @@ export default defineConfig({
 
   /* Run your local dev server before starting the tests */
   webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:3000',
+    command: 'npm run dev -- --port 5180 --strictPort',
+    url: 'http://localhost:5180',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000, // 2 minutes for 3D app to start
   },
 
-  /* Increase timeout for 3D app loading */
-  timeout: 60000, // 60 seconds per test
+  /* Increase timeout for 3D app loading. Headless chromium renders WebGL in
+   * software (SwiftShader): procedural texture generation alone measured at
+   * ~155s (vs ~5s in real Chrome), and the loading overlay stays up until it
+   * finishes. The beforeEach counts toward the per-test timeout. */
+  timeout: 300000, // 5 minutes per test
   expect: {
     timeout: 15000, // 15 seconds for assertions
   },

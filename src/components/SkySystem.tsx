@@ -8,15 +8,13 @@ import { SHADOW_CONFIG } from '../constants/renderLayers';
 
 // Vertex Shader for SkyDome - Ultrathink Sky System
 const skyVertexShader = `
-varying vec2 vUv;
-varying vec3 vWorldPosition;
-varying float vHeight;
+varying vec3 vSkyDirection;
 
 void main() {
-  vUv = uv;
-  vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-  vWorldPosition = worldPosition.xyz;
-  vHeight = normalize(position).y;
+  // The dome follows the camera, so its gradient must be derived from the
+  // camera-relative sphere direction. World coordinates make the colour bands
+  // slide across the dome and appear as giant circular wedges.
+  vSkyDirection = normalize(position);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;
@@ -30,9 +28,7 @@ uniform vec3 groundColor;
 uniform float time;
 uniform float cloudDensity;
 uniform float sunAngle;
-varying vec2 vUv;
-varying vec3 vWorldPosition;
-varying float vHeight;
+varying vec3 vSkyDirection;
 
 // Improved pseudo-random noise
 float hash(vec2 p) {
@@ -66,7 +62,7 @@ float fbm(vec2 st) {
 }
 
 void main() {
-    vec3 dir = normalize(vWorldPosition);
+    vec3 dir = normalize(vSkyDirection);
     float h = dir.y;
 
     // Multi-layer sky gradient with horizon band
@@ -88,11 +84,15 @@ void main() {
         skyColor = mix(mix(bottomColor, topColor, 0.5), topColor, smoothstep(0.0, 1.0, t));
     }
 
-    // Procedural clouds using spherical coords (avoids UV seam)
-    // Use atan for seamless wrapping around the sphere
-    float theta = atan(dir.z, dir.x); // -PI to PI
-    float phi = acos(dir.y); // 0 to PI
-    vec2 cloudUV = vec2(theta * 0.5 + time * 0.015, phi * 1.5 + time * 0.005);
+    // Procedural clouds via a seamless planar dome projection.
+    // The previous mapping used theta = atan(dir.z, dir.x), which has a branch
+    // cut at the -x meridian (theta jumps +PI -> -PI there). fbm() is not
+    // periodic, so that produced a HARD VERTICAL SEAM splitting the sky. The
+    // direction vector is continuous everywhere, so projecting it has no branch
+    // cut. Dividing by (|dir.y| + k) spreads clouds toward the horizon and
+    // compresses them overhead for a natural dome look; the cloud mask below
+    // fades out the slight pinch at the zenith.
+    vec2 cloudUV = dir.xz / (abs(dir.y) + 0.5) * 1.5 + vec2(time * 0.015, time * 0.005);
 
     float n = fbm(cloudUV);
     // Secondary layer: cheaper single-noise detail to avoid a second fbm() pass
@@ -1127,13 +1127,14 @@ const SmoothMoon: React.FC = () => {
 
 export const SkySystem: React.FC = () => {
   // PERFORMANCE: Removed subscriptions to prevent re-renders. Animation handled by SkyAnimationManager.
-  // const gameTime = useGameSimulationStore((state) => state.gameTime);
-  // const weather = useGameSimulationStore((state) => state.weather);
   // FIX: Select primitives individually to avoid new object references causing infinite loops
   const shadowMapSize = useGraphicsStore((state) => state.graphics.shadowMapSize);
   const enableHighResShadows = useGraphicsStore((state) => state.graphics.enableHighResShadows);
-  // Use high-res shadow map only when toggle is enabled, otherwise default to 2048
-  const effectiveShadowMapSize = enableHighResShadows ? shadowMapSize : 2048;
+  // Respect the active preset. The previous fallback silently promoted medium
+  // from 1024 to 2048, quadrupling shadow-map pixels despite the toggle being off.
+  const effectiveShadowMapSize = enableHighResShadows
+    ? Math.max(2048, shadowMapSize)
+    : shadowMapSize;
   const meshRef = useRef<THREE.Mesh>(null);
   const sunLightRef = useRef<THREE.DirectionalLight>(null);
   const moonLightRef = useRef<THREE.DirectionalLight>(null);
@@ -1297,7 +1298,6 @@ export const SkySystem: React.FC = () => {
 const Stars: React.FC<{ visible: boolean }> = React.memo(({ visible }) => {
   const starsRef = useRef<THREE.Points>(null);
   const brightStarsRef = useRef<THREE.Points>(null);
-  const twinkleOffsetsRef = useRef<Float32Array | null>(null);
 
   const STAR_COUNT = 1500;
   const BRIGHT_STAR_COUNT = 50;
@@ -1362,14 +1362,6 @@ const Stars: React.FC<{ visible: boolean }> = React.memo(({ visible }) => {
       sizes[i] = 0.3 + Math.random() * 1.2;
     }
     return sizes;
-  }, []);
-
-  // Initialize twinkle offsets
-  useMemo(() => {
-    twinkleOffsetsRef.current = new Float32Array(STAR_COUNT);
-    for (let i = 0; i < STAR_COUNT; i++) {
-      twinkleOffsetsRef.current[i] = Math.random() * Math.PI * 2;
-    }
   }, []);
 
   // Register stars with animation manager
@@ -1682,6 +1674,8 @@ const CitySkylineLayer: React.FC<{
       return geo;
     }, [startAngle, endAngle, radius, baseY, heights]);
 
+    useEffect(() => () => geometry.dispose(), [geometry]);
+
     const shaderMaterial = useMemo(
       () => ({
         uniforms: {
@@ -1853,10 +1847,13 @@ const CityLights: React.FC<{
     }
   }, [isNight, startAngle]);
 
-  if (!isNight) return null;
-
+  // No early return on isNight: this component mounts during the day, so the
+  // old `if (!isNight) return null;` meant lightsRef never existed and the
+  // SkyAnimationManager (which reveals the lights imperatively via
+  // lightsRef.visible at dusk/night) had nothing to drive - city lights never
+  // appeared. Mount hidden instead; the manager toggles visibility.
   return (
-    <points ref={lightsRef}>
+    <points ref={lightsRef} visible={false}>
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[lightPositions, 3]} />
         <bufferAttribute attach="attributes-color" args={[lightColors, 3]} />
@@ -1973,6 +1970,8 @@ const SnowCappedMountainLayer: React.FC<{
 
       return geo;
     }, [radius, baseY, heights]);
+
+    useEffect(() => () => geometry.dispose(), [geometry]);
 
     const shaderMaterial = useMemo(
       () => ({
@@ -2184,6 +2183,8 @@ const HorizonLayer: React.FC<{
     return geo;
   }, [radius, baseY, heights]);
 
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
   const shaderMaterial = useMemo(
     () => ({
       uniforms: {
@@ -2278,215 +2279,12 @@ const HorizonLayer: React.FC<{
   );
 });
 
-// Animated water surface component
-const DistantWater: React.FC<{
-  startAngle: number;
-  endAngle: number;
-  innerRadius: number;
-  outerRadius: number;
-  baseY: number;
-  waterColor: string;
-  reflectionColor: string;
-  renderOrder?: number;
-}> = React.memo(
-  ({
-    startAngle,
-    endAngle,
-    innerRadius,
-    outerRadius,
-    baseY,
-    waterColor,
-    reflectionColor,
-    renderOrder = -600,
-  }) => {
-    const meshRef = useRef<THREE.Mesh>(null);
-    const materialRef = useRef<THREE.ShaderMaterial>(null);
-
-    // Custom shader for animated water with flowing effects
-    const waterShader = useMemo(
-      () => ({
-        uniforms: {
-          time: { value: 0 },
-          waterColor: { value: new THREE.Color(waterColor) },
-          reflectionColor: { value: new THREE.Color(reflectionColor) },
-        },
-        vertexShader: `
-        varying vec2 vUv;
-        varying vec3 vPosition;
-        varying vec3 vWorldPosition;
-        uniform float time;
-
-        void main() {
-          vUv = uv;
-          vPosition = position;
-          vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
-
-          // Multi-layered wave displacement for more natural movement
-          vec3 pos = position;
-          float wave = sin(pos.x * 0.04 + time * 0.8) * 0.4;
-          wave += sin(pos.z * 0.06 + time * 0.6) * 0.3;
-          wave += sin((pos.x + pos.z) * 0.03 + time * 1.2) * 0.25;
-          wave += sin(pos.x * 0.12 - time * 1.5) * 0.15; // Counter-flow ripples
-          pos.y += wave;
-
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-        }
-      `,
-        fragmentShader: `
-        uniform vec3 waterColor;
-        uniform vec3 reflectionColor;
-        uniform float time;
-        varying vec2 vUv;
-        varying vec3 vPosition;
-        varying vec3 vWorldPosition;
-
-        // Noise function for organic patterns
-        float hash(vec2 p) {
-          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-        }
-
-        float noise(vec2 p) {
-          vec2 i = floor(p);
-          vec2 f = fract(p);
-          f = f * f * (3.0 - 2.0 * f);
-          float a = hash(i);
-          float b = hash(i + vec2(1.0, 0.0));
-          float c = hash(i + vec2(0.0, 1.0));
-          float d = hash(i + vec2(1.0, 1.0));
-          return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-        }
-
-        void main() {
-          // Flowing UV distortion - water moves in a direction
-          vec2 flowUV = vWorldPosition.xz * 0.02;
-          flowUV.x += time * 0.15; // Flow direction
-          flowUV.y += sin(time * 0.3 + vWorldPosition.x * 0.05) * 0.1;
-
-          // Multi-layer ripple patterns
-          float ripple1 = sin(vWorldPosition.x * 0.08 + vWorldPosition.z * 0.06 + time * 1.8) * 0.5 + 0.5;
-          float ripple2 = sin(vWorldPosition.x * 0.12 - time * 2.2 + vWorldPosition.z * 0.1) * 0.5 + 0.5;
-          float ripple3 = sin((vWorldPosition.x + vWorldPosition.z) * 0.15 + time * 1.4) * 0.5 + 0.5;
-
-          // Combine ripples with varying weights
-          float ripples = ripple1 * 0.4 + ripple2 * 0.35 + ripple3 * 0.25;
-
-          // Caustic-like light patterns
-          float caustic1 = noise(flowUV * 8.0 + time * 0.5);
-          float caustic2 = noise(flowUV * 12.0 - time * 0.7);
-          float caustics = (caustic1 + caustic2) * 0.5;
-          caustics = pow(caustics, 1.5) * 1.2;
-
-          // Dynamic shimmer based on view angle simulation
-          float shimmer = ripples * caustics;
-          shimmer = smoothstep(0.2, 0.8, shimmer);
-
-          // Color mixing - base water with reflection highlights
-          vec3 color = waterColor;
-          color = mix(color, reflectionColor, shimmer * 0.4);
-
-          // Add bright reflection streaks
-          float streak = pow(ripple1 * ripple2, 4.0);
-          color += reflectionColor * streak * 0.6;
-
-          // Sparkle highlights on wave peaks
-          float sparkle = pow(max(ripples, caustics), 12.0);
-          color += vec3(1.0, 0.98, 0.95) * sparkle * 0.8;
-
-          // Subtle color variation for depth
-          float depthVar = noise(vWorldPosition.xz * 0.01 + time * 0.1);
-          color = mix(color, color * 0.85, depthVar * 0.3);
-
-          // Fade at edges
-          float edgeFade = smoothstep(0.0, 0.15, vUv.x) * smoothstep(1.0, 0.85, vUv.x);
-          float radialFade = smoothstep(0.0, 0.2, vUv.y) * smoothstep(1.0, 0.8, vUv.y);
-
-          gl_FragColor = vec4(color, 0.88 * edgeFade * radialFade);
-        }
-      `,
-      }),
-      // Empty dependencies - colors are updated via useEffect below
-      []
-    );
-
-    // Register water with animation manager
-    useEffect(() => {
-      if (materialRef.current) {
-        registerWater(`water-${startAngle}`, {
-          material: materialRef.current,
-        });
-        return () => unregisterWater(`water-${startAngle}`);
-      }
-    }, [startAngle]);
-
-    // Direct uniform update to ensure water colors stay in sync with game time
-    useEffect(() => {
-      if (materialRef.current?.uniforms) {
-        materialRef.current.uniforms.waterColor.value.set(waterColor);
-        materialRef.current.uniforms.reflectionColor.value.set(reflectionColor);
-      }
-    }, [waterColor, reflectionColor]);
-
-    // Create water segment geometry
-    const geometry = useMemo(() => {
-      const segments = 64;
-      const geo = new THREE.BufferGeometry();
-      const positions: number[] = [];
-      const uvs: number[] = [];
-      const indices: number[] = [];
-
-      const angleSpan = endAngle - startAngle;
-
-      for (let i = 0; i <= segments; i++) {
-        const t = i / segments;
-        const angle = startAngle + t * angleSpan;
-
-        // Inner edge
-        positions.push(Math.cos(angle) * innerRadius, baseY, Math.sin(angle) * innerRadius);
-        uvs.push(t, 0);
-
-        // Outer edge
-        positions.push(Math.cos(angle) * outerRadius, baseY, Math.sin(angle) * outerRadius);
-        uvs.push(t, 1);
-      }
-
-      for (let i = 0; i < segments; i++) {
-        const bl = i * 2;
-        const br = (i + 1) * 2;
-        const tl = i * 2 + 1;
-        const tr = (i + 1) * 2 + 1;
-
-        indices.push(bl, br, tl);
-        indices.push(br, tr, tl);
-      }
-
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-      geo.setIndex(indices);
-
-      return geo;
-    }, [startAngle, endAngle, innerRadius, outerRadius, baseY]);
-
-    return (
-      <mesh ref={meshRef} geometry={geometry} frustumCulled={false} renderOrder={renderOrder}>
-        <shaderMaterial
-          ref={materialRef}
-          {...waterShader}
-          transparent
-          side={THREE.DoubleSide}
-          depthWrite={false}
-        />
-      </mesh>
-    );
-  }
-);
-
 export const HorizonRing: React.FC = () => {
   // Determine if it's night or dusk for city lights
   // Use day palette as default
-  const { layerColors, waterColors, mountainColors, atmosphereColor, cityColors } = dayPalette;
+  const { layerColors, mountainColors, atmosphereColor, cityColors } = dayPalette;
 
   const isNight = false;
-  // const isDusk = false; // Unused
   const showCityLights = false;
 
   // Generate different mountain profiles for each layer using FBM
@@ -2584,42 +2382,6 @@ export const HorizonRing: React.FC = () => {
         radius={275}
         baseY={-2}
         isNight={isNight}
-      />
-
-      {/* Distant lake - positioned in a valley between mountains */}
-      <DistantWater
-        startAngle={Math.PI * 0.15}
-        endAngle={Math.PI * 0.45}
-        innerRadius={270}
-        outerRadius={310}
-        baseY={-3}
-        waterColor={waterColors.water}
-        reflectionColor={waterColors.reflection}
-        renderOrder={-650}
-      />
-
-      {/* Ocean/sea on opposite side */}
-      <DistantWater
-        startAngle={Math.PI * 1.1}
-        endAngle={Math.PI * 1.6}
-        innerRadius={265}
-        outerRadius={340}
-        baseY={-4}
-        waterColor={waterColors.water}
-        reflectionColor={waterColors.reflection}
-        renderOrder={-650}
-      />
-
-      {/* Small river/inlet */}
-      <DistantWater
-        startAngle={Math.PI * 0.7}
-        endAngle={Math.PI * 0.85}
-        innerRadius={260}
-        outerRadius={290}
-        baseY={-2}
-        waterColor={waterColors.water}
-        reflectionColor={waterColors.reflection}
-        renderOrder={-600}
       />
 
       {/* Solid ground plane below horizon */}

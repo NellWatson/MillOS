@@ -15,7 +15,12 @@ export enum TerrainChannel {
   GRASS = 0, // R channel - default ground cover
   ASPHALT = 1, // G channel - factory perimeter, truck yard, parking
   ROAD = 2, // B channel - darker road surfaces (higher priority)
-  COBBLE = 3, // A channel - village plaza, farm barnyard, paths
+  // A channel - dirt/gravel verges and worn approaches.
+  // Was COBBLE until the village and farm took ownership of their own cobbles
+  // (see splatMapGenerator.ts); the channel then painted nothing while still
+  // costing a texture tap on every terrain fragment. It now carries the verge
+  // and apron material that softens the grass-to-asphalt transition.
+  DIRT = 3,
 }
 
 /**
@@ -70,16 +75,25 @@ export interface TerrainMaterialProps {
 }
 
 /**
+ * World-space bounds rectangle.
+ *
+ * Declared as an interface rather than `typeof TERRAIN_BOUNDS` so that the
+ * geometry bounds and the (smaller) splat sampling bounds are interchangeable
+ * at every call site.
+ */
+export interface TerrainBounds {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+/**
  * Complete terrain configuration
  */
 export interface TerrainConfig {
   /** World-space bounds of the terrain */
-  bounds: {
-    minX: number;
-    maxX: number;
-    minZ: number;
-    maxZ: number;
-  };
+  bounds: TerrainBounds;
   /** Y position for the terrain mesh */
   yPosition: number;
   /** Resolution of the splat map texture (power of 2) */
@@ -91,24 +105,49 @@ export interface TerrainConfig {
     [TerrainChannel.GRASS]: TerrainMaterialProps;
     [TerrainChannel.ASPHALT]: TerrainMaterialProps;
     [TerrainChannel.ROAD]: TerrainMaterialProps;
-    [TerrainChannel.COBBLE]: TerrainMaterialProps;
+    [TerrainChannel.DIRT]: TerrainMaterialProps;
   };
 }
 
 /**
- * World-space bounds for the MillOS terrain
- * Extended to cover full visible area (camera far plane is 600)
+ * World-space bounds of the terrain GEOMETRY.
+ *
+ * Deliberately much larger than the camera far plane: SkySystem draws a
+ * 650-radius ground disc at y=-15, so a smaller terrain plane would expose a
+ * step at its edge. Do not shrink this - shrink SPLAT_BOUNDS instead.
  */
-export const TERRAIN_BOUNDS = {
-  minX: -600, // Extended to cover camera far plane (600 units)
-  maxX: 600, // Extended to cover camera far plane (600 units)
-  minZ: -600, // Extended to cover camera far plane (600 units)
-  maxZ: 600, // Extended to cover camera far plane (600 units)
-} as const;
+export const TERRAIN_BOUNDS: TerrainBounds = {
+  minX: -600,
+  maxX: 600,
+  minZ: -600,
+  maxZ: 600,
+};
 
 /**
- * Standard terrain colors matching existing codebase
- * Enhanced contrast for better visual distinction
+ * World-space domain the splat map is painted over, and the domain the shader
+ * maps to splat UV 0..1.
+ *
+ * The furthest painted region reaches z=230 (the front road), so every texel
+ * outside +/-280 would be pure grass. The splat texture uses
+ * ClampToEdgeWrapping, so world positions beyond this rectangle resolve to the
+ * border texel - which is pure grass - exactly as they did when the splat map
+ * covered the full +/-600. Restricting the domain is therefore visually
+ * lossless outside and raises texel density from 1200/res to 560/res: at the
+ * 1024 high/ultra resolution that is 1.17 -> 0.547 world units per texel, a
+ * 2.14x sharpening of every road, verge and yard edge for free.
+ */
+export const SPLAT_BOUNDS: TerrainBounds = {
+  minX: -280,
+  maxX: 280,
+  minZ: -280,
+  maxZ: 280,
+};
+
+/**
+ * UNTEXTURED fallback colours for each terrain channel.
+ *
+ * These are only reached when a channel has no albedo map bound. When a map IS
+ * bound the shader uses TERRAIN_TINTS instead - see the comment there.
  */
 export const TERRAIN_COLORS = {
   // Grass variants - vibrant greens
@@ -125,8 +164,31 @@ export const TERRAIN_COLORS = {
   },
   // Road - distinct dark gray
   road: '#222222',
-  // Cobblestone - warm gray
-  cobble: '#8a8a8a',
+  // Dirt / gravel verge - warm packed earth
+  dirt: '#6b5844',
+} as const;
+
+/**
+ * TEXTURED tint multipliers for each terrain channel.
+ *
+ * The per-channel colour uniform multiplies the albedo tap, so when a map is
+ * bound the uniform is a TINT and not a second base colour. It used to be
+ * handed TERRAIN_COLORS, which meant the grass channel multiplied the grass
+ * texture (whose own base is the identical #4a7c59) by itself - a dark,
+ * oversaturated, hue-shifted green with no headroom. Grass and dirt are now
+ * neutral: the texture alone carries the colour.
+ *
+ * Asphalt and road are deliberately NOT pure white. Both sample the same
+ * near-neutral tarmac albedo, so a near-neutral tint separates them without
+ * double-applying a hue: the yard reads a touch warmer and dustier, the roads
+ * a touch cooler and fresher. Both stay above ~0.75 linear so neither surface
+ * is pushed back toward the crushed near-black it used to render as.
+ */
+export const TERRAIN_TINTS = {
+  grass: '#ffffff',
+  asphalt: '#f0eeea',
+  road: '#e2e4e6',
+  dirt: '#ffffff',
 } as const;
 
 /**
@@ -148,9 +210,9 @@ export const DEFAULT_TERRAIN_MATERIALS: TerrainConfig['materials'] = {
     roughness: 0.6,
     textureScale: 0.3,
   },
-  [TerrainChannel.COBBLE]: {
-    color: TERRAIN_COLORS.cobble,
-    roughness: 0.85,
-    textureScale: 0.04, // ~25 units per tile (matches village)
+  [TerrainChannel.DIRT]: {
+    color: TERRAIN_COLORS.dirt,
+    roughness: 0.92,
+    textureScale: 0.22, // ~4.5 units per tile
   },
 };

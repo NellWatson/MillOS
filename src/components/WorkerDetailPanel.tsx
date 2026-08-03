@@ -22,6 +22,10 @@ import {
   History,
   Check,
   X,
+  CheckCircle,
+  Hand,
+  XCircle,
+  Scale,
 } from 'lucide-react';
 import { WorkerData, PerformanceReview, SkillLevel } from '../types';
 import { toSkillLevel } from '../utils/typeGuards';
@@ -63,13 +67,13 @@ const SKILL_NAMES: Record<keyof NonNullable<WorkerData['skills']>, string> = {
 // Available tasks for assignment
 const AVAILABLE_TASKS: { task: string; machine?: string; category: string }[] = [
   { task: 'Overseeing production line', category: 'Supervision' },
-  { task: 'Calibrating Roller Mill', machine: 'roller-mill-1', category: 'Operations' },
-  { task: 'Monitoring Silo levels', machine: 'silo-alpha', category: 'Operations' },
+  { task: 'Calibrating Roller Mill', machine: 'rm-101', category: 'Operations' },
+  { task: 'Monitoring Silo levels', machine: 'silo-0', category: 'Operations' },
   { task: 'Testing flour samples', machine: 'qc-lab', category: 'Quality Control' },
   { task: 'Preventive maintenance', machine: 'packer-1', category: 'Maintenance' },
   { task: 'Safety inspection', category: 'Safety' },
-  { task: 'Loading grain', machine: 'silo-gamma', category: 'Operations' },
-  { task: 'Optimizing Plansifter', machine: 'plansifter-a', category: 'Operations' },
+  { task: 'Loading grain', machine: 'silo-2', category: 'Operations' },
+  { task: 'Optimizing Plansifter', machine: 'sifter-a', category: 'Operations' },
   { task: 'Operating Packer', machine: 'packer-2', category: 'Operations' },
   { task: 'Moisture analysis', machine: 'qc-lab', category: 'Quality Control' },
   { task: 'Break', category: 'Break' },
@@ -394,7 +398,7 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
       case 'Supervisor':
         return 'from-blue-500 to-blue-700';
       case 'Engineer':
-        return 'from-purple-500 to-purple-700';
+        return 'from-teal-600 to-blue-700';
       case 'Operator':
         return 'from-orange-500 to-orange-700';
       case 'Safety Officer':
@@ -440,7 +444,7 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
               aria-label={`Close ${worker.name} details`}
               className="absolute top-2 right-2 w-6 h-6 bg-white/20 rounded-full flex items-center justify-center text-white hover:bg-white/30 transition-colors focus:outline-none focus:ring-2 focus:ring-white"
             >
-              ×
+              <X className="w-4 h-4" />
             </button>
           )}
           <div className="flex items-center gap-4">
@@ -485,6 +489,7 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
         {/* Tab Navigation */}
         <div
           role="tablist"
+          aria-label="Worker detail views"
           className="flex border-b border-slate-700/50 flex-shrink-0 bg-slate-900/50"
         >
           {[
@@ -495,6 +500,7 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
           ].map((tab) => (
             <button
               key={tab.id}
+              id={`${tab.id}-tab`}
               role="tab"
               aria-selected={activeTab === tab.id}
               aria-controls={`${tab.id}-panel`}
@@ -568,7 +574,7 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
                 {/* Worker Dialogue - philosophical comment */}
                 {workerDialogue && FEATURE_FLAGS.WORKER_DIALOGUE_ENABLED && (
                   <div className="px-4 pb-4">
-                    <div className="bg-gradient-to-r from-amber-500/10 to-transparent border-l-2 border-amber-500/50 rounded-r-lg p-3">
+                    <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-3">
                       <div className="flex items-start gap-2">
                         <MessageSquare className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
                         <div className="flex-1">
@@ -733,7 +739,7 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
                       </div>
                       <div className="flex items-center gap-2">
                         <span
-                          className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
                             workerMood.preferenceStatus === 'satisfied'
                               ? 'bg-green-500/20 text-green-300'
                               : workerMood.preferenceStatus === 'pending'
@@ -743,13 +749,23 @@ export const WorkerDetailPanel: React.FC<WorkerDetailPanelProps> = ({
                                   : 'bg-blue-500/20 text-blue-300'
                           }`}
                         >
-                          {workerMood.preferenceStatus === 'satisfied'
-                            ? '✅ Satisfied'
-                            : workerMood.preferenceStatus === 'pending'
-                              ? '✋ Request Pending'
-                              : workerMood.preferenceStatus === 'denied'
-                                ? '❌ Recently Denied'
-                                : '⚖️ Negotiating'}
+                          {workerMood.preferenceStatus === 'satisfied' ? (
+                            <>
+                              <CheckCircle className="w-3 h-3" /> Satisfied
+                            </>
+                          ) : workerMood.preferenceStatus === 'pending' ? (
+                            <>
+                              <Hand className="w-3 h-3" /> Request Pending
+                            </>
+                          ) : workerMood.preferenceStatus === 'denied' ? (
+                            <>
+                              <XCircle className="w-3 h-3" /> Recently Denied
+                            </>
+                          ) : (
+                            <>
+                              <Scale className="w-3 h-3" /> Negotiating
+                            </>
+                          )}
                         </span>
                       </div>
 

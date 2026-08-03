@@ -9,10 +9,47 @@ import {
   isPositionInDockZone,
 } from '../stores/useCameraPositionStore';
 import { useMobileControlStore } from '../stores/mobileControlStore';
-import { FACTORY_ZONE_Z } from '../constants/factoryLayout';
+import { SITE_LAYOUT, getVisibleSiteCellsForView } from '../constants/siteLayout';
+import { resolveCameraCollision } from '../utils/cameraCollision';
 
 // Movement key tracking
 const pressedKeys = new Set<string>();
+
+/**
+ * Physical key codes this controller consumes.
+ *
+ * Keyed on `event.code`, not `event.key`: `key` reports the produced character,
+ * which is layout dependent (AZERTY emits z/q/s/d for the WASD positions,
+ * QWERTZ emits 'y' for W), so a character-keyed table leaves movement dead on
+ * those keyboards. `code` is positional and identical everywhere.
+ */
+const MOVEMENT_CODES: ReadonlySet<string> = new Set([
+  'KeyW',
+  'KeyA',
+  'KeyS',
+  'KeyD',
+  'KeyQ',
+  'KeyE',
+  'ShiftLeft',
+  'ShiftRight',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+]);
+
+/** True when the event comes from somewhere the user is entering text. */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
+// Reusable vector for the D-pad look offset (avoids a per-frame Vector3
+// allocation while the mobile look control is held).
+const _lookOffset = new THREE.Vector3();
+const _viewDirection = new THREE.Vector3();
 
 // Movement configuration
 const MOVE_SPEED = 20; // Units per second
@@ -32,44 +69,44 @@ export interface CameraPreset {
 export const CAMERA_PRESETS: CameraPreset[] = [
   {
     name: 'Overview',
-    position: [70, 40, 70],
-    target: [0, 5, 0],
-    description: 'Full factory overview',
+    position: [...SITE_LAYOUT.cameras.overview.position],
+    target: [...SITE_LAYOUT.cameras.overview.target],
+    description: 'Whole mill and logistics site',
   },
   {
     name: 'Silos',
-    position: [0, 18, -45],
-    target: [0, 10, FACTORY_ZONE_Z.silos],
+    position: [...SITE_LAYOUT.cameras.silos.position],
+    target: [...SITE_LAYOUT.cameras.silos.target],
     description: 'Raw material storage (Zone 1)',
   },
   {
     name: 'Milling',
-    position: [35, 15, FACTORY_ZONE_Z.milling],
-    target: [0, 3, FACTORY_ZONE_Z.milling],
+    position: [...SITE_LAYOUT.cameras.milling.position],
+    target: [...SITE_LAYOUT.cameras.milling.target],
     description: 'Roller mills (Zone 2)',
   },
   {
     name: 'Sifting',
-    position: [0, 20, 25],
-    target: [0, 9, FACTORY_ZONE_Z.sifting],
+    position: [...SITE_LAYOUT.cameras.sifting.position],
+    target: [...SITE_LAYOUT.cameras.sifting.target],
     description: 'Plansifters (Zone 3)',
   },
   {
     name: 'Packing',
-    position: [-35, 12, 35],
-    target: [0, 2, FACTORY_ZONE_Z.packing],
+    position: [...SITE_LAYOUT.cameras.packing.position],
+    target: [...SITE_LAYOUT.cameras.packing.target],
     description: 'Packaging lines (Zone 4)',
   },
   {
     name: 'Shipping',
-    position: [30, 15, 60],
-    target: [0, 2, 48],
+    position: [...SITE_LAYOUT.cameras.shipping.position],
+    target: [...SITE_LAYOUT.cameras.shipping.target],
     description: 'Shipping dock (front)',
   },
   {
     name: 'Receiving',
-    position: [-30, 15, -60],
-    target: [0, 2, -48],
+    position: [...SITE_LAYOUT.cameras.receiving.position],
+    target: [...SITE_LAYOUT.cameras.receiving.target],
     description: 'Receiving dock (back)',
   },
 ];
@@ -81,6 +118,7 @@ interface CameraStore {
   targetLookAt: THREE.Vector3 | null;
   isAnimating: boolean;
   setPreset: (index: number) => void;
+  focusOn: (position: [number, number, number], target: [number, number, number]) => void;
   clearAnimation: () => void;
 }
 
@@ -100,6 +138,13 @@ export const useCameraStore = create<CameraStore>((set) => ({
       });
     }
   },
+  focusOn: (position, target) =>
+    set({
+      activePreset: null,
+      targetPosition: new THREE.Vector3(...position),
+      targetLookAt: new THREE.Vector3(...target),
+      isAnimating: true,
+    }),
   clearAnimation: () => set({ isAnimating: false }),
 }));
 
@@ -118,6 +163,10 @@ export const CameraController: React.FC<CameraControllerProps> = ({
   const { camera } = useThree();
   const { targetPosition, targetLookAt, isAnimating, clearAnimation } = useCameraStore();
   const animationProgress = useRef(0);
+  const animationStartPosition = useRef(new THREE.Vector3());
+  const animationStartLookAt = useRef(new THREE.Vector3());
+  const previousCameraPosition = useRef(new THREE.Vector3());
+  const cameraPositionInitialized = useRef(false);
   const currentSpeed = useRef(0);
 
   // Vectors for movement calculations (reused to avoid allocations)
@@ -128,37 +177,17 @@ export const CameraController: React.FC<CameraControllerProps> = ({
   // Set up keyboard listeners for WASD/Arrow movement
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore when typing in inputs
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
+      if (isTypingTarget(e.target)) return;
 
-      const key = e.key.toLowerCase();
-      // Track movement keys and shift for sprint
-      if (
-        [
-          'w',
-          'a',
-          's',
-          'd',
-          'arrowup',
-          'arrowdown',
-          'arrowleft',
-          'arrowright',
-          'q',
-          'e',
-          'shift',
-        ].includes(key)
-      ) {
-        pressedKeys.add(key);
+      if (MOVEMENT_CODES.has(e.code)) {
+        pressedKeys.add(e.code);
+        // Arrow keys scroll the page by default, which fights camera movement.
+        if (e.code.startsWith('Arrow')) e.preventDefault();
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      // Guard against undefined e.key (can happen with some meta keys or during blur)
-      if (!e.key) return;
-      const key = e.key.toLowerCase();
-      pressedKeys.delete(key);
+      pressedKeys.delete(e.code);
     };
 
     // Clear keys when window loses focus
@@ -178,6 +207,11 @@ export const CameraController: React.FC<CameraControllerProps> = ({
   }, []);
 
   useFrame((_, delta) => {
+    if (!cameraPositionInitialized.current) {
+      previousCameraPosition.current.copy(camera.position);
+      cameraPositionInitialized.current = true;
+    }
+
     // Get D-pad state from mobile control store
     const { dpadDirection, dpadMode } = useMobileControlStore.getState();
 
@@ -185,7 +219,7 @@ export const CameraController: React.FC<CameraControllerProps> = ({
     if (dpadDirection && dpadMode === 'look' && orbitControlsRef?.current) {
       const LOOK_SPEED = 1.5; // radians per second
       const target = orbitControlsRef.current.target;
-      const offset = camera.position.clone().sub(target);
+      const offset = _lookOffset.copy(camera.position).sub(target);
 
       // Convert to spherical coordinates
       const radius = offset.length();
@@ -210,7 +244,20 @@ export const CameraController: React.FC<CameraControllerProps> = ({
 
     // Combine keyboard and D-pad move input
     const hasDpadMoveInput = dpadDirection && dpadMode === 'move';
-    const hasKeyboardInput = pressedKeys.size > 0;
+    // Shift is a modifier, not a direction: counting it would let a held sprint
+    // key cancel a running preset animation without the camera moving at all.
+    let hasKeyboardInput = false;
+    for (const code of pressedKeys) {
+      if (code !== 'ShiftLeft' && code !== 'ShiftRight') {
+        hasKeyboardInput = true;
+        break;
+      }
+    }
+    const hasManualInput = Boolean(dpadDirection || hasKeyboardInput);
+
+    if (hasManualInput && isAnimating) {
+      clearAnimation();
+    }
 
     // Handle WASD/Arrow key movement OR D-pad move mode
     if ((hasKeyboardInput || hasDpadMoveInput) && orbitControlsRef?.current) {
@@ -226,18 +273,18 @@ export const CameraController: React.FC<CameraControllerProps> = ({
       moveDirection.current.set(0, 0, 0);
 
       // Forward/Backward (W/S or Up/Down arrows or D-pad Y)
-      if (pressedKeys.has('w') || pressedKeys.has('arrowup')) {
+      if (pressedKeys.has('KeyW') || pressedKeys.has('ArrowUp')) {
         moveDirection.current.add(forward.current);
       }
-      if (pressedKeys.has('s') || pressedKeys.has('arrowdown')) {
+      if (pressedKeys.has('KeyS') || pressedKeys.has('ArrowDown')) {
         moveDirection.current.sub(forward.current);
       }
 
       // Left/Right strafe (A/D or Left/Right arrows or D-pad X)
-      if (pressedKeys.has('a') || pressedKeys.has('arrowleft')) {
+      if (pressedKeys.has('KeyA') || pressedKeys.has('ArrowLeft')) {
         moveDirection.current.sub(right.current);
       }
-      if (pressedKeys.has('d') || pressedKeys.has('arrowright')) {
+      if (pressedKeys.has('KeyD') || pressedKeys.has('ArrowRight')) {
         moveDirection.current.add(right.current);
       }
 
@@ -256,17 +303,18 @@ export const CameraController: React.FC<CameraControllerProps> = ({
       }
 
       // Up/Down (Q/E for vertical movement)
-      if (pressedKeys.has('q')) {
+      if (pressedKeys.has('KeyQ')) {
         moveDirection.current.y -= 1;
       }
-      if (pressedKeys.has('e')) {
+      if (pressedKeys.has('KeyE')) {
         moveDirection.current.y += 1;
       }
 
       // Apply movement if there's any
       if (moveDirection.current.length() > 0) {
         // Apply sprint multiplier if shift is held
-        const speedMultiplier = pressedKeys.has('shift') ? SPRINT_MULTIPLIER : 1;
+        const speedMultiplier =
+          pressedKeys.has('ShiftLeft') || pressedKeys.has('ShiftRight') ? SPRINT_MULTIPLIER : 1;
 
         // Normalize horizontal movement but keep vertical separate
         const verticalMove = moveDirection.current.y;
@@ -304,55 +352,61 @@ export const CameraController: React.FC<CameraControllerProps> = ({
       orbitControlsRef.current.autoRotateSpeed = currentSpeed.current;
     }
 
-    // Handle preset animation
-    if (!isAnimating || !targetPosition || !targetLookAt) return;
+    // Handle preset animation from a fixed starting pose. The prior recursive
+    // lerp never followed a predictable easing curve and could stop short.
+    if (isAnimating && targetPosition && targetLookAt && !hasManualInput) {
+      const animationDuration = 0.9;
+      animationProgress.current += delta / animationDuration;
+      const t = Math.min(animationProgress.current, 1);
+      const easeT = t * t * (3 - 2 * t);
 
-    // Smooth animation using lerp
-    animationProgress.current += delta * 1.5; // Speed of animation
-    const t = Math.min(animationProgress.current, 1);
-    const easeT = 1 - Math.pow(1 - t, 3); // Ease out cubic
+      camera.position.lerpVectors(animationStartPosition.current, targetPosition, easeT);
+      if (orbitControlsRef?.current) {
+        orbitControlsRef.current.target.lerpVectors(
+          animationStartLookAt.current,
+          targetLookAt,
+          easeT
+        );
+      }
 
-    // Lerp camera position
-    camera.position.lerp(targetPosition, easeT * 0.1);
-
-    // Update OrbitControls target instead of calling camera.lookAt directly
-    if (orbitControlsRef?.current) {
-      orbitControlsRef.current.target.lerp(targetLookAt, easeT * 0.1);
+      if (t >= 1) {
+        camera.position.copy(targetPosition);
+        orbitControlsRef?.current?.target.copy(targetLookAt);
+        animationProgress.current = 0;
+        clearAnimation();
+      }
     }
 
-    // Clamp heights during animation to prevent ground clipping
-    if (camera.position.y < MIN_CAMERA_HEIGHT) {
-      camera.position.y = MIN_CAMERA_HEIGHT;
-    }
+    if (camera.position.y < MIN_CAMERA_HEIGHT) camera.position.y = MIN_CAMERA_HEIGHT;
     if (orbitControlsRef?.current && orbitControlsRef.current.target.y < MIN_TARGET_HEIGHT) {
       orbitControlsRef.current.target.y = MIN_TARGET_HEIGHT;
     }
 
-    // Check if animation is complete
-    const distanceToTarget = camera.position.distanceTo(targetPosition);
-    if (distanceToTarget < 0.5 || t >= 1) {
-      camera.position.copy(targetPosition);
-      // Ensure final position respects height limits
-      if (camera.position.y < MIN_CAMERA_HEIGHT) {
-        camera.position.y = MIN_CAMERA_HEIGHT;
-      }
-      if (orbitControlsRef?.current) {
-        orbitControlsRef.current.target.copy(targetLookAt);
-        if (orbitControlsRef.current.target.y < MIN_TARGET_HEIGHT) {
-          orbitControlsRef.current.target.y = MIN_TARGET_HEIGHT;
-        }
-      }
-      animationProgress.current = 0;
-      clearAnimation();
-    }
+    const collision = resolveCameraCollision(
+      [
+        previousCameraPosition.current.x,
+        previousCameraPosition.current.y,
+        previousCameraPosition.current.z,
+      ],
+      [camera.position.x, camera.position.y, camera.position.z]
+    );
+    camera.position.set(...collision.position);
+    camera.userData.lastCollision = collision.collidedWith;
+    previousCameraPosition.current.copy(camera.position);
   });
 
   // Reset animation progress when target changes
   useEffect(() => {
     if (isAnimating) {
       animationProgress.current = 0;
+      animationStartPosition.current.copy(camera.position);
+      if (orbitControlsRef?.current) {
+        animationStartLookAt.current.copy(orbitControlsRef.current.target);
+      } else if (targetLookAt) {
+        animationStartLookAt.current.copy(targetLookAt);
+      }
     }
-  }, [targetPosition, isAnimating]);
+  }, [camera, isAnimating, orbitControlsRef, targetLookAt, targetPosition]);
 
   return null;
 };
@@ -360,18 +414,20 @@ export const CameraController: React.FC<CameraControllerProps> = ({
 /**
  * Camera Bounds Tracker
  *
- * Tracks whether the camera is inside or outside the factory bounds.
- * Also tracks if camera is in a dock transition zone (near open dock openings).
- * Used to conditionally render interior vs exterior components for performance.
- * Throttled to every 10 frames (~6 checks/second at 60fps) to minimize overhead.
+ * Tracks whether the camera is inside the factory, near an open dock, and
+ * which site cells intersect its view. This informs controls, diagnostics,
+ * quality hints, and local effects. It never hides authored world districts.
+ * Throttled to every 10 frames (about 6 checks/second at 60fps).
  */
 export const CameraBoundsTracker: React.FC = () => {
   const { camera } = useThree();
   const setIsCameraInside = useCameraPositionStore((state) => state.setIsCameraInside);
   const setIsCameraInDockZone = useCameraPositionStore((state) => state.setIsCameraInDockZone);
+  const setVisibleCells = useCameraPositionStore((state) => state.setVisibleCells);
   const frameCountRef = useRef(0);
   const lastInsideRef = useRef(true);
   const lastInDockZoneRef = useRef(false);
+  const lastVisibleCellsRef = useRef('interior');
 
   useFrame(() => {
     // Throttle to every 10 frames for performance
@@ -390,6 +446,12 @@ export const CameraBoundsTracker: React.FC = () => {
     );
 
     const isInDockZone = isPositionInDockZone(camera.position.x, camera.position.z);
+    camera.getWorldDirection(_viewDirection);
+    const visibleCells = getVisibleSiteCellsForView(
+      [camera.position.x, camera.position.y, camera.position.z],
+      [_viewDirection.x, _viewDirection.y, _viewDirection.z]
+    );
+    const visibleCellsKey = visibleCells.join('|');
 
     // Only update store if state changed (prevents unnecessary re-renders)
     if (isInside !== lastInsideRef.current) {
@@ -400,6 +462,11 @@ export const CameraBoundsTracker: React.FC = () => {
     if (isInDockZone !== lastInDockZoneRef.current) {
       lastInDockZoneRef.current = isInDockZone;
       setIsCameraInDockZone(isInDockZone);
+    }
+
+    if (visibleCellsKey !== lastVisibleCellsRef.current) {
+      lastVisibleCellsRef.current = visibleCellsKey;
+      setVisibleCells(visibleCells);
     }
   });
 
@@ -444,13 +511,13 @@ export const CameraPresetIndicator: React.FC = () => {
           <div
             key={i}
             className={`w-4 h-4 rounded text-[9px] font-mono flex items-center justify-center transition-colors ${
-              i === activePreset ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-500'
+              i === activePreset ? 'bg-cyan-700 text-white' : 'bg-slate-800 text-white/70'
             }`}
           >
             {i + 1}
           </div>
         ))}
-        <div className="w-4 h-4 rounded text-[9px] font-mono flex items-center justify-center bg-slate-800 text-slate-500 ml-1">
+        <div className="w-4 h-4 rounded text-[9px] font-mono flex items-center justify-center bg-slate-800 text-white/70 ml-1">
           0
         </div>
       </div>

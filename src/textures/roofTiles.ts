@@ -8,7 +8,14 @@
  */
 
 import * as THREE from 'three';
-import { getTexture, fbmNoise, hash, createDataTexture } from '../utils/textureGenerator';
+import {
+  getTexture,
+  fbmNoise,
+  fbmNoiseSigned,
+  hash,
+  createColorDataTexture,
+  createLinearDataTexture,
+} from '../utils/textureGenerator';
 
 // ========================================
 // CLAY/TERRACOTTA ROOF TILES
@@ -24,7 +31,10 @@ export interface ClayTileOptions {
 const DEFAULT_CLAY_OPTIONS: Required<ClayTileOptions> = {
   tileWidth: 40,
   tileHeight: 56,
-  baseColor: '#b8450a',
+  // '#b8450a' decodes to linear (0.478, 0.061, 0.003) - the blue channel is
+  // essentially zero, which reads as a neon orange under correct decode.
+  // '#b8551f' gives (0.478, 0.093, 0.014): terracotta with real chroma.
+  baseColor: '#b8551f',
   variation: 0.22,
 };
 
@@ -33,6 +43,20 @@ const parseHex = (hex: string): { r: number; g: number; b: number } => ({
   g: parseInt(hex.slice(3, 5), 16) / 255,
   b: parseInt(hex.slice(5, 7), 16) / 255,
 });
+
+/**
+ * Slate lamination frequency, in radians per PIXEL. Keep the period above
+ * ~6 px or the mipmap chain erases the banding entirely.
+ */
+const SLATE_LAYER_FREQ_BASE = 0.55;
+const SLATE_LAYER_FREQ_VAR = 0.35;
+
+/**
+ * Thatch straw strand width in pixels. The original 2 px averaged to a flat
+ * constant at the FIRST mip level (measured std-dev retention 0.02 of L0 at
+ * L2). 6 px retains 0.96 at L1 and 0.48 at L2.
+ */
+const THATCH_STRAND_PX = 6;
 
 /**
  * Generates clay/terracotta roof tile texture.
@@ -133,7 +157,7 @@ export const generateClayTiles = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createColorDataTexture(data, size, size);
   });
 };
 
@@ -142,7 +166,7 @@ export const generateClayTilesNormal = (
   tileWidth: number = 40,
   tileHeight: number = 56
 ): THREE.DataTexture => {
-  return getTexture(`clay-tiles-normal-v4-${size}-${tileWidth}-${tileHeight}`, () => {
+  return getTexture(`clay-tiles-normal-v5-${size}-${tileWidth}-${tileHeight}`, () => {
     const data = new Uint8Array(size * size * 4);
 
     for (let y = 0; y < size; y++) {
@@ -179,16 +203,19 @@ export const generateClayTilesNormal = (
           ny = 0.2;
         }
 
-        const surfaceNoise = fbmNoise((x / size) * 120, (y / size) * 120, 2) * 0.05;
+        // Signed and decorrelated per axis - the previous unsigned noise added
+        // the same +0.025 to both channels, a constant diagonal tilt.
+        const surfaceX = fbmNoiseSigned((x / size) * 120, (y / size) * 120, 3) * 0.09;
+        const surfaceY = fbmNoiseSigned((x / size) * 120 + 61, (y / size) * 120 + 13, 3) * 0.09;
 
-        data[i] = Math.floor(Math.max(0, Math.min(1, nx + surfaceNoise)) * 255);
-        data[i + 1] = Math.floor(Math.max(0, Math.min(1, ny + surfaceNoise)) * 255);
+        data[i] = Math.floor(Math.max(0, Math.min(1, nx + surfaceX)) * 255);
+        data[i + 1] = Math.floor(Math.max(0, Math.min(1, ny + surfaceY)) * 255);
         data[i + 2] = 255;
         data[i + 3] = 255;
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
   });
 };
 
@@ -206,7 +233,10 @@ export interface SlateOptions {
 const DEFAULT_SLATE_OPTIONS: Required<SlateOptions> = {
   tileWidth: 44,
   tileHeight: 32,
-  baseColor: '#3a4555',
+  // '#3a4555' decodes to ~0.048 linear mean - 4.8% reflectance, darker than
+  // any real slate and effectively black in shadow. '#454f5f' gives ~0.075,
+  // inside the measured 5-10% band for weathered slate.
+  baseColor: '#454f5f',
   variation: 0.18,
 };
 
@@ -215,7 +245,7 @@ export const generateSlate = (
   options: SlateOptions = {}
 ): THREE.DataTexture => {
   const opts = { ...DEFAULT_SLATE_OPTIONS, ...options };
-  const cacheKey = `slate-v4-${size}-${opts.tileWidth}-${opts.tileHeight}-${opts.baseColor}`;
+  const cacheKey = `slate-v5-${size}-${opts.tileWidth}-${opts.tileHeight}-${opts.baseColor}`;
 
   return getTexture(cacheKey, () => {
     const data = new Uint8Array(size * size * 4);
@@ -237,7 +267,11 @@ export const generateSlate = (
 
         const colorVar = (tileId - 0.5) * opts.variation * 2;
 
-        const layerFreq = 2.5 + hash(tileCol, tileRow * 3) * 1.5;
+        // Layer frequency is in PIXELS. 2.5-4.0 rad/px gave a 1.6-2.5 px
+        // period, below the mipmap floor - it aliased at native resolution and
+        // averaged to nothing one mip down. 0.55-0.90 rad/px = 7-11 px bands,
+        // which is what a slate lamination actually looks like.
+        const layerFreq = SLATE_LAYER_FREQ_BASE + hash(tileCol, tileRow * 3) * SLATE_LAYER_FREQ_VAR;
         const layers = Math.sin(tileY * layerFreq) * 0.07;
 
         const edgeWidth = 4;
@@ -289,7 +323,7 @@ export const generateSlate = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createColorDataTexture(data, size, size);
   });
 };
 
@@ -298,7 +332,7 @@ export const generateSlateNormal = (
   tileWidth: number = 44,
   tileHeight: number = 32
 ): THREE.DataTexture => {
-  return getTexture(`slate-normal-v4-${size}-${tileWidth}-${tileHeight}`, () => {
+  return getTexture(`slate-normal-v5-${size}-${tileWidth}-${tileHeight}`, () => {
     const data = new Uint8Array(size * size * 4);
 
     for (let y = 0; y < size; y++) {
@@ -329,12 +363,14 @@ export const generateSlateNormal = (
           ny = 0.65;
         }
 
-        const layerFreq = 2.5 + hash(tileCol, tileRow * 3) * 1.5;
-        const layerNormal = Math.cos(tileY * layerFreq) * 0.1;
+        // Must use the SAME frequency as generateSlate so colour and relief
+        // stay registered.
+        const layerFreq = SLATE_LAYER_FREQ_BASE + hash(tileCol, tileRow * 3) * SLATE_LAYER_FREQ_VAR;
+        const layerNormal = Math.cos(tileY * layerFreq) * 0.12;
         ny += layerNormal;
 
-        const surfaceNormalX = fbmNoise((x / size) * 100, (y / size) * 50, 2) * 0.07;
-        const surfaceNormalY = fbmNoise((x / size) * 50, (y / size) * 100, 2) * 0.05;
+        const surfaceNormalX = fbmNoiseSigned((x / size) * 100, (y / size) * 50, 3) * 0.13;
+        const surfaceNormalY = fbmNoiseSigned((x / size) * 50, (y / size) * 100, 3) * 0.1;
 
         data[i] = Math.floor(Math.max(0, Math.min(1, nx + surfaceNormalX)) * 255);
         data[i + 1] = Math.floor(Math.max(0, Math.min(1, ny + surfaceNormalY)) * 255);
@@ -343,7 +379,7 @@ export const generateSlateNormal = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
   });
 };
 
@@ -358,7 +394,10 @@ export interface ThatchOptions {
 }
 
 const DEFAULT_THATCH_OPTIONS: Required<ThatchOptions> = {
-  baseColor: '#c9a065', // Golden straw color
+  // Pulled down from '#c9a065' (0.583 linear red) - straw reflectance is
+  // ~0.30-0.40, and the sun is now 3.10 rather than 1.84, so the old value
+  // blows out to white on a south-facing roof.
+  baseColor: '#bb9560',
   bundleWidth: 40,
   density: 0.8,
 };
@@ -368,7 +407,7 @@ export const generateThatch = (
   options: ThatchOptions = {}
 ): THREE.DataTexture => {
   const opts = { ...DEFAULT_THATCH_OPTIONS, ...options };
-  const cacheKey = `thatch-v9-${size}-${opts.baseColor}`;
+  const cacheKey = `thatch-v11-${size}-${opts.baseColor}`;
 
   return getTexture(cacheKey, () => {
     const data = new Uint8Array(size * size * 4);
@@ -378,8 +417,10 @@ export const generateThatch = (
       for (let x = 0; x < size; x++) {
         const i = (y * size + x) * 4;
 
-        // Vertical straw strands - each 2px wide with unique color
-        const strandId = Math.floor(x / 2);
+        // Vertical straw strands - THATCH_STRAND_PX wide. At the original
+        // 2 px the pattern sat at the Nyquist limit and averaged to flat one
+        // mip down.
+        const strandId = Math.floor(x / THATCH_STRAND_PX);
         const strandColor = (hash(strandId, 0) - 0.5) * 0.18;
 
         // Variation along strand using only hash (no continuous noise = no tiling seams)
@@ -406,7 +447,7 @@ export const generateThatch = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createColorDataTexture(data, size, size);
   });
 };
 
@@ -414,24 +455,29 @@ export const generateThatchNormal = (
   size: number = 512,
   _bundleWidth: number = 40
 ): THREE.DataTexture => {
-  return getTexture(`thatch-normal-v9-${size}`, () => {
+  return getTexture(`thatch-normal-v11-${size}`, () => {
     const data = new Uint8Array(size * size * 4);
 
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         const i = (y * size + x) * 4;
 
-        // Vertical strand normals - each strand slightly rounded
-        // strandId calculation used for posInStrand below
-        const posInStrand = (x % 2) / 2;
-        const strandNormalX = (posInStrand - 0.5) * 0.15;
+        // Vertical strand normals - each strand rounded across 4 px. The old
+        // `(x % 2) / 2` took only two values, i.e. a 2 px square wave whose
+        // mean is a constant tilt: the "roundness" was a mathematical no-op.
+        const posInStrand = ((x % THATCH_STRAND_PX) + 0.5) / THATCH_STRAND_PX;
+        const strandNormalX = Math.sin((posInStrand - 0.5) * Math.PI) * 0.28;
+
+        // Strand ends taper, so nudge Y at the segment boundaries.
+        const segmentId = Math.floor(y / 4);
+        const strandNormalY = (hash(Math.floor(x / THATCH_STRAND_PX), segmentId) - 0.5) * 0.12;
 
         // Fine grain only (no fbmNoise = no tiling seams)
-        const grainX = (hash(x * 2, y) - 0.5) * 0.04;
-        const grainY = (hash(x, y * 2) - 0.5) * 0.04;
+        const grainX = (hash(x * 2, y) - 0.5) * 0.05;
+        const grainY = (hash(x, y * 2) - 0.5) * 0.05;
 
         const finalNx = 0.5 + strandNormalX + grainX;
-        const finalNy = 0.5 + grainY;
+        const finalNy = 0.5 + strandNormalY + grainY;
 
         data[i] = Math.floor(Math.max(0, Math.min(1, finalNx)) * 255);
         data[i + 1] = Math.floor(Math.max(0, Math.min(1, finalNy)) * 255);
@@ -440,6 +486,6 @@ export const generateThatchNormal = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
   });
 };

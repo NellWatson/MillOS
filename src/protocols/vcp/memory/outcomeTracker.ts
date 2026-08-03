@@ -16,6 +16,11 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { OutcomeRecord, StateSnapshot } from '../types';
 
+// In-memory fallback used when localStorage is unavailable (SSR, privacy mode,
+// some test runners). Declared before create(persist(...)) so it is initialized
+// before zustand invokes storage.getItem synchronously during hydration.
+const memoryFallback = new Map<string, unknown>();
+
 // =============================================================================
 // PENDING DECISION TRACKING
 // =============================================================================
@@ -221,7 +226,10 @@ export const useOutcomeTracker = create<OutcomeTrackerState>()(
 
       getAverageAccuracy: () => {
         const { outcomes } = get();
-        if (outcomes.length === 0) return 1;
+        // No track record yet: report neutral confidence rather than a
+        // perfect 1.0, which falsely advertised flawless prediction accuracy
+        // (this value surfaces as learningConfidence in the VCP status UI).
+        if (outcomes.length === 0) return 0.5;
 
         const avgAbsDelta =
           outcomes.reduce((sum, o) => sum + Math.abs(o.delta), 0) / outcomes.length;
@@ -257,7 +265,14 @@ export const useOutcomeTracker = create<OutcomeTrackerState>()(
           }
 
           const str = webStorage.getItem(name);
-          return str ? JSON.parse(str) : null;
+          if (!str) return null;
+          try {
+            return JSON.parse(str);
+          } catch {
+            // Corrupt persisted entry: fall back to default empty state
+            // instead of throwing during hydration.
+            return null;
+          }
         },
         setItem: (name, value) => {
           const webStorage =
@@ -291,8 +306,6 @@ export const useOutcomeTracker = create<OutcomeTrackerState>()(
     }
   )
 );
-
-const memoryFallback = new Map<string, unknown>();
 
 // =============================================================================
 // HELPER FUNCTIONS

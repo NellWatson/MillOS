@@ -1,11 +1,17 @@
 import { create } from 'zustand';
+import {
+  FACTORY_BOUNDS as SITE_FACTORY_BOUNDS,
+  SITE_LAYOUT,
+  isPointInPortalTransition,
+} from '../constants/siteLayout';
 
 /**
  * Camera Position Store
  *
- * Tracks whether the camera is inside or outside the factory bounds.
- * Used for performance optimization - interior components are hidden when
- * camera is outside, and vice versa.
+ * Tracks the camera's relationship to the factory and nearby spatial cells.
+ * Consumers may use this for controls, diagnostics, quality hints, and local
+ * effects. It must never decide whether an authored world district exists or
+ * is visible: MillOS is one continuous interior and exterior scene.
  *
  * Factory bounds (from Environment.tsx walls):
  * - X: -60 to +60 (left/right walls)
@@ -19,20 +25,19 @@ import { create } from 'zustand';
  */
 
 // Factory boundary constants
-export const FACTORY_BOUNDS = {
-  minX: -60,
-  maxX: 60,
-  minZ: -50,
-  maxZ: 50,
-  minY: 0,
-  maxY: 32,
-} as const;
+export const FACTORY_BOUNDS = SITE_FACTORY_BOUNDS;
 
 // Dock opening dimensions (for transition zone detection)
 export const DOCK_OPENINGS = {
-  frontDock: { z: 50, halfWidth: 12 }, // 20m wide opening
-  backDock: { z: -50, halfWidth: 12 }, // 20m wide opening
-  transitionDepth: 15, // How far outside the dock zone extends
+  frontDock: {
+    z: SITE_LAYOUT.portals.shipping.centre[2],
+    halfWidth: SITE_LAYOUT.portals.shipping.halfWidth,
+  },
+  backDock: {
+    z: SITE_LAYOUT.portals.receiving.centre[2],
+    halfWidth: SITE_LAYOUT.portals.receiving.halfWidth,
+  },
+  transitionDepth: SITE_LAYOUT.portals.shipping.transitionDepth,
 } as const;
 
 interface CameraPositionStore {
@@ -40,18 +45,23 @@ interface CameraPositionStore {
   isCameraInside: boolean;
   /** Whether the camera is in a dock transition zone (show both interior + exterior) */
   isCameraInDockZone: boolean;
+  /** Spatial cells near the current view, for diagnostics and quality hints only. */
+  visibleCells: string[];
   /** Update the camera inside/outside state */
   setIsCameraInside: (inside: boolean) => void;
   /** Update the dock zone state */
   setIsCameraInDockZone: (inDockZone: boolean) => void;
+  setVisibleCells: (cells: string[]) => void;
 }
 
 export const useCameraPositionStore = create<CameraPositionStore>((set) => ({
   // Default to inside (most common starting position)
   isCameraInside: true,
   isCameraInDockZone: false,
+  visibleCells: ['interior'],
   setIsCameraInside: (inside) => set({ isCameraInside: inside }),
   setIsCameraInDockZone: (inDockZone) => set({ isCameraInDockZone: inDockZone }),
+  setVisibleCells: (visibleCells) => set({ visibleCells }),
 }));
 
 /**
@@ -81,19 +91,8 @@ export const isPositionInsideFactory = (
  * and exterior should be visible simultaneously
  */
 export const isPositionInDockZone = (x: number, z: number): boolean => {
-  const { frontDock, backDock, transitionDepth } = DOCK_OPENINGS;
-
-  // Front dock zone (shipping) - extending outward from Z=50
-  const inFrontDockZone =
-    z > FACTORY_BOUNDS.maxZ - 5 &&
-    z < FACTORY_BOUNDS.maxZ + transitionDepth &&
-    Math.abs(x) < frontDock.halfWidth;
-
-  // Back dock zone (receiving) - extending outward from Z=-50
-  const inBackDockZone =
-    z < FACTORY_BOUNDS.minZ + 5 &&
-    z > FACTORY_BOUNDS.minZ - transitionDepth &&
-    Math.abs(x) < backDock.halfWidth;
-
-  return inFrontDockZone || inBackDockZone;
+  return (
+    isPointInPortalTransition(SITE_LAYOUT.portals.shipping, x, z) ||
+    isPointInPortalTransition(SITE_LAYOUT.portals.receiving, x, z)
+  );
 };

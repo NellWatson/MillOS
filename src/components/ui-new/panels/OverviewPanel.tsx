@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, Suspense, useMemo } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import {
   Activity,
@@ -22,9 +22,20 @@ import { useGameSimulationStore } from '../../../stores/gameSimulationStore';
 import { useSafetyStore } from '../../../stores/safetyStore';
 import { useUIStore } from '../../../stores/uiStore';
 import { useHistoricalPlaybackStore } from '../../../stores/historicalPlaybackStore';
+import { useMaterialFlowStore } from '../../../stores/materialFlowStore';
 import { useShallow } from 'zustand/react/shallow';
 import { AchievementsPanel, WorkerLeaderboard } from '../../GameFeatures';
 import { TimelinePlayback } from '../../ui/TimelinePlayback';
+import { recoverableLazy } from '../../../utils/recoverableLazy';
+import { RecoverableFeatureBoundary } from '../../ErrorBoundary';
+
+// Re-homed from ui/ (orphaned after the UIOverlay removal): live breakdown
+// mechanics — active breakdowns, predictive alerts, parts inventory, schedule.
+const PredictiveMaintenancePanel = recoverableLazy(() =>
+  import('../../ui/PredictiveMaintenancePanel').then((m) => ({
+    default: m.PredictiveMaintenancePanel,
+  }))
+);
 
 // Isolated Clock component to prevent full panel re-renders
 const GameClock: React.FC = React.memo(() => {
@@ -58,6 +69,8 @@ const GameSpeedControls: React.FC = React.memo(() => {
     <div className="flex gap-1">
       <button
         onClick={() => setGameSpeed(0)}
+        aria-label="Pause"
+        aria-pressed={gameSpeed === 0}
         className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
           gameSpeed === 0
             ? 'bg-orange-600 text-white'
@@ -65,10 +78,11 @@ const GameSpeedControls: React.FC = React.memo(() => {
         }`}
         title="Pause"
       >
-        <Pause className="w-3.5 h-3.5" />
+        <Pause className="w-3.5 h-3.5" aria-hidden="true" />
       </button>
       <button
         onClick={() => setGameSpeed(180)}
+        aria-pressed={gameSpeed === 180}
         className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
           gameSpeed === 180
             ? 'bg-orange-600 text-white'
@@ -76,11 +90,12 @@ const GameSpeedControls: React.FC = React.memo(() => {
         }`}
         title="Normal (1x - 24hrs in 8min)"
       >
-        <Play className="w-3.5 h-3.5" />
+        <Play className="w-3.5 h-3.5" aria-hidden="true" />
         1x
       </button>
       <button
         onClick={() => setGameSpeed(1800)}
+        aria-pressed={gameSpeed === 1800}
         className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
           gameSpeed === 1800
             ? 'bg-orange-600 text-white'
@@ -88,11 +103,12 @@ const GameSpeedControls: React.FC = React.memo(() => {
         }`}
         title="Fast (10x)"
       >
-        <FastForward className="w-3.5 h-3.5" />
+        <FastForward className="w-3.5 h-3.5" aria-hidden="true" />
         10x
       </button>
       <button
         onClick={() => setGameSpeed(10800)}
+        aria-pressed={gameSpeed === 10800}
         className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
           gameSpeed === 10800
             ? 'bg-orange-600 text-white'
@@ -100,7 +116,7 @@ const GameSpeedControls: React.FC = React.memo(() => {
         }`}
         title="Ultra (60x)"
       >
-        <FastForward className="w-3.5 h-3.5" />
+        <FastForward className="w-3.5 h-3.5" aria-hidden="true" />
         60x
       </button>
     </div>
@@ -116,6 +132,88 @@ const ShiftDisplay: React.FC = React.memo(() => {
       <div className="text-[10px] text-slate-500 uppercase tracking-wider">Current Shift</div>
       <div className="text-sm font-bold text-white capitalize">{currentShift}</div>
     </div>
+  );
+});
+
+const formatManifestTime = (simulationTime: number): string => {
+  const totalSeconds = Math.max(0, Math.floor(simulationTime));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `T+${hours.toString().padStart(2, '0')}:${minutes
+    .toString()
+    .padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+};
+
+const MaterialTraceabilitySection: React.FC = React.memo(() => {
+  const { manifests, receivedKg, shippedKg } = useMaterialFlowStore(
+    useShallow((state) => ({
+      manifests: state.manifests,
+      receivedKg: state.receivedKg,
+      shippedKg: state.shippedKg,
+    }))
+  );
+  const latestManifests = useMemo(() => manifests.slice(-3).reverse(), [manifests]);
+  const formatKg = (value: number): string =>
+    value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+
+  return (
+    <section className="bg-slate-800/50 border border-white/5 rounded-xl p-3">
+      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+        <History size={14} className="text-teal-400" aria-hidden="true" />
+        Material Traceability
+      </h3>
+      <dl className="grid grid-cols-2 gap-2 mb-3">
+        <div className="rounded-lg bg-slate-900/45 p-2">
+          <dt className="text-[10px] uppercase tracking-wider text-slate-500">Received</dt>
+          <dd className="text-sm font-mono font-bold text-cyan-300">{formatKg(receivedKg)} kg</dd>
+        </div>
+        <div className="rounded-lg bg-slate-900/45 p-2">
+          <dt className="text-[10px] uppercase tracking-wider text-slate-500">Shipped</dt>
+          <dd className="text-sm font-mono font-bold text-emerald-300">{formatKg(shippedKg)} kg</dd>
+        </div>
+      </dl>
+      {latestManifests.length === 0 ? (
+        <p className="text-xs text-slate-500 py-1">Awaiting first dock transfer</p>
+      ) : (
+        <ol className="space-y-2" aria-label="Latest material manifests">
+          {latestManifests.map((manifest) => (
+            <li
+              key={manifest.id}
+              className="rounded-lg border border-slate-700/60 bg-slate-900/35 p-2"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-[11px] font-semibold text-slate-200">
+                  {manifest.id.toUpperCase()}
+                </span>
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                    manifest.kind === 'receiving'
+                      ? 'bg-cyan-500/15 text-cyan-300'
+                      : 'bg-emerald-500/15 text-emerald-300'
+                  }`}
+                >
+                  {manifest.kind}
+                </span>
+              </div>
+              <div className="mt-1 flex items-end justify-between gap-2 text-[10px] text-slate-400">
+                <span className="min-w-0 truncate">
+                  {manifest.materials
+                    .map((material) => material.type.replaceAll('_', ' '))
+                    .join(', ')}
+                </span>
+                <span className="shrink-0 font-mono text-slate-300">
+                  {formatKg(manifest.actualKg)} / {formatKg(manifest.requestedKg)} kg
+                </span>
+              </div>
+              <time className="mt-1 block text-[9px] font-mono text-slate-500">
+                {formatManifestTime(manifest.simulationTime)}
+              </time>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
 });
 
@@ -321,6 +419,23 @@ export const OverviewPanel: React.FC = React.memo(() => {
         </div>
       </section>
 
+      <MaterialTraceabilitySection />
+
+      {/* Maintenance (breakdowns, predictive alerts, parts, schedule) */}
+      <section>
+        <RecoverableFeatureBoundary featureName="Predictive maintenance">
+          <Suspense
+            fallback={
+              <div className="h-20 bg-slate-800/30 rounded-lg animate-pulse" role="status">
+                <span className="sr-only">Loading maintenance panel...</span>
+              </div>
+            }
+          >
+            <PredictiveMaintenancePanel />
+          </Suspense>
+        </RecoverableFeatureBoundary>
+      </section>
+
       {/* Total Production */}
       <div className="text-center py-3 bg-gradient-to-r from-cyan-900/20 to-blue-900/20 rounded-xl border border-cyan-500/20">
         <div className="text-[10px] text-slate-500 uppercase tracking-wider">
@@ -384,7 +499,7 @@ const MiniStat: React.FC<{ label: string; value: number; color: string }> = ({
   return (
     <div className={`${colorClasses[color]} rounded-lg p-2 text-center`}>
       <div className="text-lg font-bold">{value}</div>
-      <div className="text-[9px] uppercase tracking-wider opacity-70">{label}</div>
+      <div className="text-[10px] uppercase tracking-wider opacity-70">{label}</div>
     </div>
   );
 };

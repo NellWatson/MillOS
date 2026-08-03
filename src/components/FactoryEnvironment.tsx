@@ -10,7 +10,8 @@
 
 import React, { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Billboard, Text } from '@react-three/drei';
+import { Billboard } from '@react-three/drei';
+import { SceneText as Text } from './shared/SceneText';
 import * as THREE from 'three';
 import { useWorkerMoodStore } from '../stores/workerMoodStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
@@ -106,8 +107,8 @@ const PottedFern: React.FC<PlantProps> = React.memo(({ plant }) => {
       {/* Water needed indicator */}
       {plant.health < 40 && (
         <Billboard position={[0.2, 0.4, 0]}>
-          <Text fontSize={0.1} color="#3b82f6" anchorX="center">
-            {String.fromCharCode(128167)} {/* Water drop emoji workaround - use icon instead */}
+          <Text fontSize={0.06} color="#3b82f6" anchorX="center">
+            WATER
           </Text>
         </Billboard>
       )}
@@ -116,15 +117,18 @@ const PottedFern: React.FC<PlantProps> = React.memo(({ plant }) => {
 });
 PottedFern.displayName = 'PottedFern';
 
+// Shared ceramic pot material — one instance across all desk succulents
+// instead of a per-mount inline material per plant
+const ceramicPotMaterial = new THREE.MeshStandardMaterial({ color: '#e5e5e5', roughness: 0.5 });
+
 const DeskSucculent: React.FC<PlantProps> = React.memo(({ plant }) => {
   const healthMaterial = getHealthMaterial(plant.health);
 
   return (
     <group position={plant.position}>
       {/* Small pot - white ceramic */}
-      <mesh position={[0, 0.04, 0]} castShadow>
+      <mesh position={[0, 0.04, 0]} castShadow material={ceramicPotMaterial}>
         <cylinderGeometry args={[0.06, 0.05, 0.08, 8]} />
-        <meshStandardMaterial color="#e5e5e5" roughness={0.5} />
       </mesh>
 
       {/* Succulent body */}
@@ -343,7 +347,7 @@ const DustLayer: React.FC<{ dustLevel: number }> = React.memo(({ dustLevel }) =>
   if (dustLevel < 10) return null;
 
   return (
-    <points ref={dustRef}>
+    <points ref={dustRef} key={`dust-layer-${particleCount}`}>
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>

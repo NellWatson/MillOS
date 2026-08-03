@@ -18,6 +18,7 @@ import { useEngagementStore } from '../../stores/engagementStore';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useProductionStore } from '../../stores/productionStore';
 import { encodeWorkersVCL, encodeMachinesVCL } from '../../utils/vclEncoder';
+import { logger } from '../../utils/logger';
 
 import { generateReasoningScaffolds, expandReasoningGuidance, encodeVCPMessage } from './index';
 
@@ -402,14 +403,24 @@ export function registerDecision(
 ): void {
   const state = assembleStateSnapshot();
 
+  // Resolve baseline using the same dimension semantics as getDimensionValue in
+  // outcomeTracker.ts (the source of truth for the measured currentValue). Both
+  // sides must lowercase the key and cover the same dimension set, otherwise
+  // baseline=0 vs a real measured value yields a garbage delta into the learning
+  // loop. Unknown dims fall through to 0 here; getDimensionValue returns null for
+  // them so checkPendingDecisions never measures them (the 0 baseline is unused).
+  const lowerDim = expectedDimension.toLowerCase();
   let baselineValue = 0;
-  if (expectedDimension in state.wellbeing.dimensions) {
-    baselineValue =
-      state.wellbeing.dimensions[expectedDimension as keyof typeof state.wellbeing.dimensions];
-  } else if (expectedDimension === 'engagement') {
+  if (lowerDim in state.wellbeing.dimensions) {
+    baselineValue = state.wellbeing.dimensions[lowerDim as keyof typeof state.wellbeing.dimensions];
+  } else if (lowerDim === 'flourishing' || lowerDim === 'wellbeing') {
+    baselineValue = state.wellbeing.flourishingScore;
+  } else if (lowerDim === 'engagement') {
     baselineValue = state.engagement.score;
-  } else if (expectedDimension === 'stability') {
+  } else if (lowerDim === 'stability') {
     baselineValue = (1 - state.stability.product / 0.368) * 100;
+  } else if (lowerDim in state.governance.axes) {
+    baselineValue = state.governance.axes[lowerDim as keyof typeof state.governance.axes];
   }
 
   useOutcomeTracker
@@ -493,6 +504,10 @@ const VCP_UPDATE_INTERVAL_MS = 5000; // Every 5 seconds
 
 let vcpUpdateInterval: ReturnType<typeof setInterval> | null = null;
 
+// Tracks whether a VCP update failure has already been logged, so a persistent
+// failure produces a signal once instead of being silently swallowed every 5s.
+let vcpUpdateErrorLogged = false;
+
 /**
  * Starts the VCP periodic update loop.
  * Called once at application startup.
@@ -503,8 +518,14 @@ export function startVCPUpdateLoop(): void {
   vcpUpdateInterval = setInterval(() => {
     try {
       updateVCPFromState();
-    } catch {
-      // VCP update failed - silently continue
+      vcpUpdateErrorLogged = false;
+    } catch (err) {
+      // Keep the loop alive, but surface persistent failures once so a broken
+      // VCP learning/healing subsystem is observable instead of silent.
+      if (!vcpUpdateErrorLogged) {
+        vcpUpdateErrorLogged = true;
+        logger.warn('VCP update loop failed; continuing (suppressing repeats)', err);
+      }
     }
   }, VCP_UPDATE_INTERVAL_MS);
 

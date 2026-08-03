@@ -26,10 +26,8 @@ import { useProductionStore } from '../stores/productionStore';
 import { audioManager } from '../utils/audioManager';
 import { shouldRunThisFrame, incrementGlobalFrame } from '../utils/frameThrottle';
 
-// Orphaned store integrations for BAS history, breakdowns, and emergent cooperation
+// Orphaned store integrations for BAS history recording
 import { recordCurrentBASState } from '../stores/basHistoryStore';
-import { useBreakdownStore } from '../stores/breakdownStore';
-import { useEmergentCooperationStore } from '../stores/emergentCooperationStore';
 import { useStabilityStore } from '../stores/stabilityStore';
 import { useFlourishingStore } from '../stores/flourishingStore';
 import { useWorkerMoodStore } from '../stores/workerMoodStore';
@@ -95,6 +93,9 @@ import {
 const _cameraDir = new THREE.Vector3();
 const _lightPos = new THREE.Vector3();
 const _toCamera = new THREE.Vector3();
+
+// Reusable Color for the throttled daylight update (avoid per-tick allocation)
+const _daylightColor = new THREE.Color();
 
 // Manager component to handle all environment animations in a single consolidated loop
 const EnvironmentAnimationManager: React.FC = () => {
@@ -414,7 +415,10 @@ const EnvironmentAnimationManager: React.FC = () => {
     // 14. Update Weather Particles (30fps - throttled to every 2nd frame)
     if (weatherParticlesRegistry.size > 0 && shouldRunThisFrame(2)) {
       weatherParticlesRegistry.forEach((data) => {
-        if (data.quality === 'low' || data.quality === 'medium') return;
+        // Medium quality RENDERS weather particles (shouldRender gates only
+        // 'low', with medium-specific particle counts), so it must also
+        // ANIMATE them - excluding medium here left rain frozen in mid-air.
+        if (data.quality === 'low') return;
 
         const isRaining = data.weather === 'rain' || data.weather === 'storm';
         const isStorm = data.weather === 'storm';
@@ -487,10 +491,10 @@ const EnvironmentAnimationManager: React.FC = () => {
       // Calculate daylight properties once per frame
       const gameTime = useGameSimulationStore.getState().gameTime;
       const { color, intensity } = getDaylightProperties(gameTime);
-      const THREEColor = new THREE.Color(color);
+      _daylightColor.set(color);
 
       windowGlowRefs.forEach((mat) => {
-        mat.color.set(THREEColor);
+        mat.color.copy(_daylightColor);
         mat.opacity = intensity * 0.6;
       });
 
@@ -749,7 +753,13 @@ const DaylightWindow: React.FC<{ position: [number, number, number]; size: [numb
         {/* Daylight glow behind glass */}
         <mesh position={[0, 0, -0.1]}>
           <planeGeometry args={[innerW, innerH]} />
-          <meshBasicMaterial ref={glowMaterialRef} color="#7dd3fc" transparent opacity={0.3} />
+          <meshBasicMaterial
+            ref={glowMaterialRef}
+            color="#7dd3fc"
+            transparent
+            opacity={0.3}
+            depthWrite={false}
+          />
         </mesh>
       </group>
     );
@@ -795,19 +805,18 @@ const LightShaft: React.FC<{ position: [number, number, number] }> = memo(({ pos
 
 // Orphaned store integrations ticker - runs only when FactoryEnvironment is mounted
 // NOTE: Game time and production metrics are now handled by CentralTickProvider + UnifiedGameTick.
-// This component only handles supplemental store integrations (BAS history, breakdowns, etc.)
-// that are specific to when FactoryEnvironment is mounted.
+// Breakdown and emergent-cooperation simulation ticks are driven exclusively by
+// useBilateralAlignmentSimulation (WorkerMoodOverlay.tsx) - do NOT re-add them
+// here, or the simulations run at double rate with inconsistent time units.
+// This component only handles BAS history recording.
 const OrphanedStoresTicker: React.FC = () => {
-  // Refs to track time since last tick for each orphaned store
+  // Ref to track time since last BAS history tick
   const lastBASHistoryTickRef = useRef(0);
-  const lastBreakdownTickRef = useRef(0);
-  const lastEmergentCooperationTickRef = useRef(0);
 
   // Run orphaned store integrations on an interval
   useEffect(() => {
     const intervalId = setInterval(() => {
       const now = Date.now();
-      const currentGameTime = useGameSimulationStore.getState().gameTime;
 
       // BAS History: Record data point every ~10 seconds (real time)
       if (now - lastBASHistoryTickRef.current >= 10000) {
@@ -838,33 +847,6 @@ const OrphanedStoresTicker: React.FC = () => {
         const value = (flourishingScore / 100) * (stabilityPercentage / 100);
 
         recordCurrentBASState(stabilityProduct, value, flourishingScore, avgSatisfaction, phase);
-      }
-
-      // Breakdowns: Tick every ~5 seconds (real time)
-      if (now - lastBreakdownTickRef.current >= 5000) {
-        lastBreakdownTickRef.current = now;
-
-        const breakdownStore = useBreakdownStore.getState();
-        const productionState = useProductionStore.getState();
-
-        // Get machines for breakdown simulation from production store
-        const machines = productionState.machines.map((m) => ({
-          id: m.id,
-          name: m.name,
-          status: m.status,
-        }));
-
-        breakdownStore.tickBreakdownSimulation(currentGameTime, machines);
-      }
-
-      // Emergent Cooperation: Tick every ~3 seconds (real time)
-      if (now - lastEmergentCooperationTickRef.current >= 3000) {
-        lastEmergentCooperationTickRef.current = now;
-
-        const emergentStore = useEmergentCooperationStore.getState();
-        // Convert delta (game seconds) to minutes for the emergent cooperation tick
-        // Assume ~3 real seconds passed, game time delta is roughly delta * timeScale
-        emergentStore.tickEmergentCooperation(0.05); // ~3 game seconds = ~0.05 game minutes
       }
     }, 4000); // Check every 4 seconds (was 2s, then 1s - reduced for better perf)
 
@@ -1793,7 +1775,13 @@ const DripMesh: React.FC<{
       </mesh>
       <mesh ref={trailRef} visible={false}>
         <cylinderGeometry args={[0.02, 0.04, 0.3, 6]} />
-        <meshBasicMaterial ref={trailMaterialRef} color="#7dd3fc" transparent opacity={0.24} />
+        <meshBasicMaterial
+          ref={trailMaterialRef}
+          color="#7dd3fc"
+          transparent
+          opacity={0.24}
+          depthWrite={false}
+        />
       </mesh>
     </group>
   );
@@ -1829,7 +1817,13 @@ const SplashMesh: React.FC<{ data: SplashParticle }> = memo(({ data }) => {
     <>
       <mesh ref={meshRef} position={[data.x, data.y, data.z]}>
         <sphereGeometry args={[0.03, 6, 6]} />
-        <meshBasicMaterial ref={materialRef} color="#7dd3fc" transparent opacity={0.5} />
+        <meshBasicMaterial
+          ref={materialRef}
+          color="#7dd3fc"
+          transparent
+          opacity={0.5}
+          depthWrite={false}
+        />
       </mesh>
       <mesh
         ref={ringRef}
@@ -1838,7 +1832,13 @@ const SplashMesh: React.FC<{ data: SplashParticle }> = memo(({ data }) => {
         visible={false}
       >
         <ringGeometry args={[0.05, 0.1, 16]} />
-        <meshBasicMaterial ref={ringMaterialRef} color="#7dd3fc" transparent opacity={0.6} />
+        <meshBasicMaterial
+          ref={ringMaterialRef}
+          color="#7dd3fc"
+          transparent
+          opacity={0.6}
+          depthWrite={false}
+        />
       </mesh>
     </>
   );
@@ -1983,8 +1983,16 @@ const WeatherEffects: React.FC = () => {
     return pos;
   }, [splashCount]);
 
-  const splashVelocities = useRef<Float32Array>(new Float32Array(splashCount * 3));
-  const splashLife = useRef<Float32Array>(new Float32Array(splashCount));
+  // Allocate to the MAXIMUM splash count (50 on high/ultra), not the current
+  // one: these refs are created once on mount and never resized, but
+  // splashCount grows 20->50 when the user raises quality mid-session.
+  // Undersized buffers made the animation loop read undefined past index 19
+  // and write NaN into the splash position attribute (the
+  // computeBoundingSphere NaN class from CLAUDE.md). The loop is bounded by
+  // splashCount, so over-allocation is safe in both directions.
+  const SPLASH_MAX_COUNT = 50;
+  const splashVelocities = useRef<Float32Array>(new Float32Array(SPLASH_MAX_COUNT * 3));
+  const splashLife = useRef<Float32Array>(new Float32Array(SPLASH_MAX_COUNT));
 
   // Register weather particles with animation manager
   useEffect(() => {

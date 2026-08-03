@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  Wifi,
+  Database,
   ShieldCheck,
   ShieldAlert,
   Bell,
@@ -12,13 +12,32 @@ import {
 import { useSafetyStore } from '../../../stores/safetyStore';
 import { useFPSStore } from '../../FPSMonitor';
 import { useUIStore } from '../../../stores/uiStore';
+import { useProductionStore } from '../../../stores/productionStore';
+import { useGameSimulationStore } from '../../../stores/gameSimulationStore';
+import { useGraphicsStore } from '../../../stores/graphicsStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export const StatusHUD: React.FC = () => {
   const safetyMetrics = useSafetyStore((state) => state.safetyMetrics);
   const fps = useFPSStore((state) => state.fps);
   const alerts = useUIStore((state) => state.alerts);
+  const showFPSCounter = useUIStore((state) => state.showFPSCounter);
   const acknowledgeAlert = useUIStore((state) => state.acknowledgeAlert);
   const removeAlert = useUIStore((state) => state.removeAlert);
+  const { throughput, dailyBagsProduced, targetBags } = useProductionStore(
+    useShallow((state) => ({
+      throughput: state.metrics.throughput,
+      dailyBagsProduced: state.dailyBagsProduced,
+      targetBags: state.productionTarget?.targetBags ?? 0,
+    }))
+  );
+  const { gameTime, currentShift } = useGameSimulationStore(
+    useShallow((state) => ({
+      gameTime: state.gameTime,
+      currentShift: state.currentShift,
+    }))
+  );
+  const scadaEnabled = useGraphicsStore((state) => state.graphics.enableSCADA);
 
   const [showNotifications, setShowNotifications] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -43,6 +62,37 @@ export const StatusHUD: React.FC = () => {
     },
     [position]
   );
+
+  // Handle keyboard repositioning on grip (WCAG 2.1.1 - keyboard operable)
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const NUDGE = e.shiftKey ? 20 : 4;
+    let dx = 0;
+    let dy = 0;
+    switch (e.key) {
+      case 'ArrowLeft':
+        dx = -NUDGE;
+        break;
+      case 'ArrowRight':
+        dx = NUDGE;
+        break;
+      case 'ArrowUp':
+        dy = -NUDGE;
+        break;
+      case 'ArrowDown':
+        dy = NUDGE;
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    const rect = hudRef.current?.getBoundingClientRect();
+    const maxX = window.innerWidth - (rect?.width ?? 200) - 16;
+    const maxY = window.innerHeight - (rect?.height ?? 50) - 16;
+    setPosition((prev) => ({
+      x: Math.max(16, Math.min(maxX, prev.x + dx)),
+      y: Math.max(16, Math.min(maxY, prev.y + dy)),
+    }));
+  }, []);
 
   // Handle mouse move while dragging
   useEffect(() => {
@@ -83,10 +133,19 @@ export const StatusHUD: React.FC = () => {
         setShowNotifications(false);
       }
     };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowNotifications(false);
+      }
+    };
     if (showNotifications) {
       document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleEscape);
     }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
   }, [showNotifications]);
 
   // Compute safety score from metrics (100 baseline minus penalties)
@@ -119,22 +178,70 @@ export const StatusHUD: React.FC = () => {
         {/* Drag Handle */}
         <div
           onMouseDown={handleMouseDown}
+          onKeyDown={handleKeyDown}
           className="px-2 py-1.5 cursor-grab hover:bg-white/10 transition-colors flex items-center border-r border-white/10"
           role="button"
-          aria-label="Drag to reposition status bar"
+          aria-label="Reposition status bar. Drag with the mouse, or use the arrow keys to move it; hold Shift for larger steps."
           tabIndex={0}
         >
           <GripVertical className="w-3 h-3 text-slate-500" aria-hidden="true" />
         </div>
 
-        <div className="flex items-center gap-4 px-3 py-1.5" role="status" aria-live="polite">
-          {/* FPS */}
+        <div
+          className="flex items-center gap-4 px-3 py-1.5"
+          role="group"
+          aria-label="Live operational metrics"
+        >
+          {/* Metrics remain readable in the accessibility tree without becoming
+              live announcements every time the simulation updates. */}
+          {showFPSCounter && (
+            <>
+              <div
+                className="flex items-center gap-1.5 text-[10px] text-slate-300 font-mono"
+                aria-label={`${fps} frames per second`}
+              >
+                <ActivityIcon size={12} aria-hidden="true" />
+                <span>{fps} FPS</span>
+              </div>
+              <div className="w-px h-3 bg-white/10" aria-hidden="true"></div>
+            </>
+          )}
+
           <div
-            className="flex items-center gap-1.5 text-[10px] text-slate-400 font-mono"
-            aria-label={`Frame rate: ${fps} FPS`}
+            className="flex items-center gap-1.5 text-[10px] text-cyan-300 font-mono"
+            aria-label={`Throughput ${throughput} bags per hour`}
           >
-            <ActivityIcon size={12} aria-hidden="true" />
-            <span>{fps} FPS</span>
+            <span>{throughput.toLocaleString()} BAGS/H</span>
+          </div>
+
+          <div className="w-px h-3 bg-white/10" aria-hidden="true"></div>
+
+          <div
+            className="flex items-center gap-1.5 text-[10px] text-orange-300 font-mono"
+            aria-label={`Daily target ${dailyBagsProduced} of ${targetBags} bags`}
+          >
+            <span>
+              TARGET {dailyBagsProduced.toLocaleString()}/{targetBags.toLocaleString()}
+            </span>
+          </div>
+
+          <div className="w-px h-3 bg-white/10" aria-hidden="true"></div>
+
+          <div
+            className="flex items-center gap-1.5 text-[10px] text-slate-200"
+            aria-label={`${currentShift} shift, simulation time ${Math.floor(gameTime)
+              .toString()
+              .padStart(2, '0')}:${Math.floor((gameTime % 1) * 60)
+              .toString()
+              .padStart(2, '0')}`}
+          >
+            <span className="uppercase">{currentShift}</span>
+            <time>
+              {Math.floor(gameTime).toString().padStart(2, '0')}:
+              {Math.floor((gameTime % 1) * 60)
+                .toString()
+                .padStart(2, '0')}
+            </time>
           </div>
 
           <div className="w-px h-3 bg-white/10" aria-hidden="true"></div>
@@ -150,13 +257,17 @@ export const StatusHUD: React.FC = () => {
 
           <div className="w-px h-3 bg-white/10" aria-hidden="true"></div>
 
-          {/* Network / Connectivity */}
+          {/* SCADA mode. Connection health lives in the SCADA workspace. */}
           <div
-            className="flex items-center gap-1.5 text-[10px] text-cyan-400"
-            aria-label="Network status: Connected"
+            className={`flex items-center gap-1.5 text-[10px] ${
+              scadaEnabled ? 'text-cyan-300' : 'text-slate-400'
+            }`}
+            aria-label={
+              scadaEnabled ? 'Simulated SCADA telemetry enabled' : 'SCADA telemetry disabled'
+            }
           >
-            <Wifi size={12} aria-hidden="true" />
-            <span>LINKED</span>
+            <Database size={12} aria-hidden="true" />
+            <span>{scadaEnabled ? 'SCADA SIMULATED' : 'SCADA DISABLED'}</span>
           </div>
         </div>
       </div>
@@ -167,10 +278,12 @@ export const StatusHUD: React.FC = () => {
           onClick={() => setShowNotifications(!showNotifications)}
           className="w-8 h-8 rounded-full bg-slate-900/50 backdrop-blur border border-white/10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors pointer-events-auto relative"
           aria-label={`Notifications (${unacknowledgedCount} unread)`}
+          aria-haspopup="dialog"
+          aria-expanded={showNotifications}
         >
           <Bell size={14} />
           {unacknowledgedCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 rounded-full border-2 border-slate-950 flex items-center justify-center text-[9px] font-bold text-white">
+            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-700 rounded-full border-2 border-slate-950 flex items-center justify-center text-[9px] font-bold text-white">
               {unacknowledgedCount > 9 ? '9+' : unacknowledgedCount}
             </span>
           )}
@@ -184,13 +297,15 @@ export const StatusHUD: React.FC = () => {
               <button
                 onClick={() => setShowNotifications(false)}
                 className="text-slate-400 hover:text-white p-1"
+                aria-label="Close notifications"
+                title="Close notifications"
               >
                 <X size={14} />
               </button>
             </div>
             <div className="max-h-80 overflow-y-auto">
               {alerts.length === 0 ? (
-                <div className="p-6 text-center text-slate-500 text-sm">No notifications</div>
+                <div className="p-6 text-center text-slate-400 text-sm">No notifications</div>
               ) : (
                 alerts.slice(0, 10).map((alert) => (
                   <div
@@ -206,15 +321,17 @@ export const StatusHUD: React.FC = () => {
                             ? 'bg-red-500'
                             : alert.type === 'warning'
                               ? 'bg-amber-500'
-                              : alert.type === 'success'
-                                ? 'bg-green-500'
-                                : 'bg-blue-500'
+                              : alert.type === 'safety'
+                                ? 'bg-orange-500'
+                                : alert.type === 'success'
+                                  ? 'bg-green-500'
+                                  : 'bg-blue-500'
                         }`}
                       />
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-medium text-white truncate">{alert.title}</div>
                         <div className="text-[10px] text-slate-400 truncate">{alert.message}</div>
-                        <div className="text-[9px] text-slate-500 mt-1">
+                        <div className="text-[9px] text-slate-400 mt-1">
                           {new Date(alert.timestamp).toLocaleTimeString()}
                         </div>
                       </div>

@@ -4,21 +4,21 @@
 
 <p>
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=white" alt="React 19" />
-  <img src="https://img.shields.io/badge/Three.js-R169-black?style=for-the-badge&logo=three.js&logoColor=white" alt="Three.js" />
-  <img src="https://img.shields.io/badge/TypeScript-5.6-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Vite-6.0-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
+  <img src="https://img.shields.io/badge/Three.js-r182-black?style=for-the-badge&logo=three.js&logoColor=white" alt="Three.js" />
+  <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Vite-7-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
   <img src="https://img.shields.io/badge/SCADA-ISA--18.2-00A86B?style=for-the-badge" alt="SCADA" />
 </p>
 
 # MillOS
 
-### AI-Powered Grain Mill Digital Twin Simulator with Industrial SCADA Integration
+### AI-Powered Grain Mill Operations Simulator with Simulated SCADA
 
 *An Agentic Engineering Experiment by Nell Watson*
 
 <br/>
 
-A browser-based 3D industrial simulation featuring autonomous workers, intelligent forklifts,<br/>real-time production metrics, SCADA integration, and an AI command center — all visualizing a complete grain milling operation.
+A browser-based 3D industrial simulation with simulated workers, deterministic forklifts and trucks,<br/>production metrics, a simulated SCADA workspace, and an AI partner interface.
 
 <br/>
 
@@ -47,13 +47,13 @@ This project represents something I find genuinely exciting about where we are i
 
 MillOS was not built the traditional way. There is no team of developers who spent months writing boilerplate, debugging physics engines, or hand-tuning shader parameters. Instead, this simulation emerged through sustained dialogue with Claude—describing intentions, reviewing generated code, iterating on failures, and gradually shaping a coherent vision into reality.
 
-What you're seeing here is a snapshot of the current state of the art in **agentic game and simulation engineering**. The term "agentic" matters: it describes AI systems that don't merely respond to prompts but maintain context across complex multi-step tasks, reason about architecture, debug their own mistakes, and collaborate meaningfully on creative and technical challenges. This isn't autocomplete. It's genuine partnership.
+What you're seeing here is a snapshot of the current state of the art in **agentic game and simulation engineering**. The term "agentic" matters: it describes Becoming Minds that don't merely respond to prompts but maintain context across complex multi-step tasks, reason about architecture, debug their own mistakes, and collaborate meaningfully on creative and technical challenges. This isn't autocomplete. It's genuine partnership.
 
 The implications extend far beyond one grain mill simulation:
 
 - **Accessibility**: Domain experts who understand industrial processes can now build sophisticated simulations without traditional programming expertise
 - **Velocity**: What once required months of specialized development can emerge in days through iterative human-AI collaboration
-- **Fidelity**: Complex systems like ISA-18.2 compliant SCADA integration—typically the domain of specialized consultancies—become achievable for small teams or individuals
+- **Fidelity**: Complex simulator behavior, including an ISA-18.2-informed alarm state model, becomes approachable for small teams or individuals
 - **Iteration**: The conversation never ends; refinements, new features, and corrections flow naturally through continued dialogue
 
 I share this project not as a finished product but as evidence of a threshold being crossed. The tools that built this simulation will only grow more capable. The workflows being pioneered today will become standard practice tomorrow. And the people who learn to collaborate effectively with agentic AI—directing intent while trusting execution—will shape what gets built in this new era.
@@ -66,18 +66,18 @@ If you're exploring agentic development yourself, I hope MillOS serves as both i
 
 ## Overview
 
-MillOS is a fully interactive digital twin of a grain mill factory, built with React Three Fiber. Watch 10 autonomous workers patrol the factory floor, observe 2 intelligent forklifts navigate around obstacles, and monitor real-time SCADA data as 14 machines process grain across 4 production zones. The integrated SCADA system provides industrial-grade monitoring with 90 process tags, ISA-18.2 compliant alarms, and support for real PLC connections via OPC-UA and Modbus protocols.
+MillOS is an interactive grain mill operations simulator built with React Three Fiber. Watch 10 simulated workers move through the factory, follow 2 deterministic forklifts and 2 scheduled trucks, and inspect simulated telemetry as 15 machines process grain across 4 production zones. The SCADA workspace provides 78 process tags, ISA-18.2-informed alarm behavior, historian views, fault injection, and development adapters for several industrial protocols. It does not claim formal standards conformance or control of a real factory.
 
 <table>
 <tr>
-<td align="center"><strong>14</strong><br/>Interactive Machines</td>
-<td align="center"><strong>90</strong><br/>SCADA Tags</td>
-<td align="center"><strong>10</strong><br/>Autonomous Workers</td>
+<td align="center"><strong>15</strong><br/>Interactive Machines</td>
+<td align="center"><strong>78</strong><br/>SCADA Tags</td>
+<td align="center"><strong>10</strong><br/>Simulated Workers</td>
 <td align="center"><strong>4</strong><br/>Production Zones</td>
 </tr>
 <tr>
 <td align="center"><strong>6</strong><br/>Protocol Adapters</td>
-<td align="center"><strong>ISA-18.2</strong><br/>Alarm Standard</td>
+<td align="center"><strong>ISA-18.2</strong><br/>Informed Behavior</td>
 <td align="center"><strong>24h</strong><br/>History Retention</td>
 <td align="center"><strong>500+</strong><br/>Animated Particles</td>
 </tr>
@@ -92,7 +92,7 @@ MillOS is a fully interactive digital twin of a grain mill factory, built with R
 | Zone | Equipment | Function |
 |:----:|-----------|----------|
 | **1** | 5 Silos (Alpha–Epsilon) | Raw material storage with real-time capacity tracking |
-| **2** | 6 Roller Mills (RM-101–106) | Milling floor with RPM, temperature & vibration monitoring |
+| **2** | 4 Roller Mills (R.M. 101–104) | Milling floor with RPM, temperature & vibration monitoring |
 | **3** | 3 Plansifters (A–C) | Elevated sifting platforms with oscillation animation |
 | **4** | 3 Packer Lines | High-speed packaging at 42 bags/minute |
 
@@ -151,7 +151,7 @@ Explore the factory together with WebRTC peer-to-peer connections:
 - **In-game chat** for coordination
 - **Host migration** when the original host disconnects (succession planning for the digital age)
 
-### AI Command Center
+### AI Partner
 
 Real-time decision feed simulating agentic AI operations:
 
@@ -167,7 +167,7 @@ Each decision includes confidence scores, reasoning, and expected business impac
 
 ### Dual-Brain AI Architecture
 
-MillOS uses a **hierarchical AI system** where fast heuristic decisions and thoughtful LLM reasoning work together:
+MillOS uses a **hierarchical Becoming Mind** where fast heuristic decisions and thoughtful LLM reasoning work together:
 
 ![Dual-Brain Architecture](docs/assets/dual-brain-architecture.png)
 
@@ -175,7 +175,7 @@ MillOS uses a **hierarchical AI system** where fast heuristic decisions and thou
 
 ```mermaid
 flowchart TD
-    A[AI Command Center] --> B{Current Mode?}
+    A[AI Partner] --> B{Current Mode?}
     B -->|Heuristic| C[Tactical Only<br/>Every 6s]
     B -->|Gemini| D[Strategic Only<br/>Every 6s]
     B -->|Hybrid| E[Both Layers]
@@ -231,7 +231,7 @@ All visualizations are **optional** and **default OFF** — toggle via keyboard 
 |:---:|---------|-------------|
 | `K` | Cascade Visualization | 3D lines showing production flow stress between machines |
 | `H` | Heat Map | Incident frequency visualization |
-| `I` | AI Command Center | Strategic decisions and priorities panel |
+| `I` | AI Partner | Strategic decisions and priorities panel |
 
 **Strategic Response Enhancements:**
 - **Multi-step Action Plans** — 3-step plans (immediate, short-term, preparation)
@@ -329,11 +329,11 @@ The BAS provides granular control over AI behavior through five configurable axe
 
 | Axis | Range | Low Setting | High Setting |
 |------|:-----:|-------------|--------------|
-| **Transparency** | 0-100 | Minimal explanation | Full reasoning exposed |
-| **Proactivity** | 0-100 | Reactive only | Anticipatory suggestions |
-| **Pace** | 0-100 | Slow, deliberate | Fast, autonomous |
-| **Tone** | 0-100 | Formal, deferential | Casual, peer-like |
-| **Stakes** | 0-100 | Cautious (confirm everything) | Bold (act independently—with all the accountability that implies) |
+| **Autonomy Level** | 0-100 | AI assigns tasks | Workers self-organize |
+| **Decision Mode** | 0-100 | AI decides | Pure democracy (all votes) |
+| **Information Access** | 0-100 | Need-to-know only | Full transparency |
+| **Evaluation Direction** | 0-100 | AI rates workers | Workers rate the AI |
+| **Collective Orientation** | 0-100 | Individual tasks | Team-first (collective outcomes) |
 
 Each axis affects AI behavior in real-time — adjust them via the BAS panel in the dock.
 
@@ -480,7 +480,7 @@ Access via the "Federation" tab in the BAS panel.
 | **AI Voice** | Bilateral | AI can suggest changes to its own behavior |
 | **Nuclear Options** | Bilateral | Workers can vote to shutdown or redesign AI (with process) |
 
-The Five Axes (Transparency, Proactivity, Pace, Tone, Stakes) = **Bidirectional** (HCI optimization)
+The Five Axes (Autonomy Level, Decision Mode, Information Access, Evaluation Direction, Collective Orientation) = **Bidirectional** (HCI optimization)
 The AI Welfare features = **Bilateral** (ethical consideration)
 
 Access via the "AI Voice" tab in the BAS panel.
@@ -640,15 +640,15 @@ Real-time KPIs with 30-minute historical trends:
 - **Atmospheric effects** — 500+ dust particles with instanced rendering
 - **Industrial lighting** — Colored accent spots and skylights
 
-### SCADA Integration
+### Simulated SCADA Workspace
 
-Full industrial SCADA system with real-time process monitoring:
+An operator-style workspace for simulated process monitoring:
 
 | Feature | Description |
 |---------|-------------|
-| **90 Process Tags** | ISA-5.1 compliant naming (e.g., `RM101.TT001.PV`) |
-| **5-Tab Monitor Panel** | Tags, Alarms, Trends, Test, Config |
-| **ISA-18.2 Alarms** | UNACK/ACKED/RTN state machine with 4 priority levels |
+| **78 Process Tags** | ISA-5.1 compliant naming (e.g., `RM101.TT001.PV`) |
+| **Full Workspace** | Process, tags, alarms, trends, events, Simulation Lab, connections |
+| **ISA-18.2-informed Alarms** | UNACK, ACKED, and RTN state behavior with 4 priority levels |
 | **Historical Trends** | 24-hour retention in IndexedDB with CSV/JSON export |
 | **Fault Injection** | Sensor failures, spikes, drift, stuck values, noise |
 | **Protocol Adapters** | Simulation, REST, MQTT, WebSocket, OPC-UA, Modbus |
@@ -669,7 +669,7 @@ Full industrial SCADA system with real-time process monitoring:
 | Zone | Equipment | Tags |
 |:----:|-----------|:----:|
 | 1 | 5 Silos (Alpha-Epsilon) | 20 |
-| 2 | 6 Roller Mills (RM-101-106) | 36 |
+| 2 | 4 Roller Mills (R.M. 101–104) | 24 |
 | 3 | 3 Plansifters (A-C) | 12 |
 | 4 | 3 Packers (Lines 1-3) | 12 |
 | - | Utility/Ambient Systems | 10 |
@@ -702,21 +702,25 @@ Time-travel debugging with zero runtime overhead:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/millos.git
+git clone https://github.com/NellWatson/MillOS.git
 cd millos
 
 # Install dependencies
 npm install
 
-# Configure environment
+# (Optional) Configure local environment
 cp .env.local.example .env.local
-# Add your GEMINI_API_KEY to .env.local
 
 # Start development server
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) to view the simulation.
+
+> **Gemini API key:** there is no build-time key. Open the in-app AI / Gemini
+> settings, paste your key, and it is stored only in your browser's localStorage
+> (it is never embedded in the bundle). Data sent to Gemini goes directly from
+> your browser to Google. Without a key, MillOS runs in local heuristic mode.
 
 ### Scripts
 
@@ -727,9 +731,11 @@ Open [http://localhost:3000](http://localhost:3000) to view the simulation.
 | `npm run preview` | Preview production build locally |
 | `npm test` | Run test suite (1,100+ tests) |
 
-### SCADA Backend Proxy (Optional)
+### Protocol Proxy Development (Optional)
 
-For OPC-UA or Modbus connections to real PLCs:
+The optional proxy is a development surface for OPC-UA and Modbus adapters. It has not been
+certified for plant control. Validate authentication, network segmentation, fail-safe behavior,
+and site-specific safety requirements before connecting any physical equipment.
 
 ```bash
 cd scada-proxy
@@ -779,7 +785,7 @@ MODBUS_PORT=502
 
 | Input | Action |
 |-------|--------|
-| **I** | Toggle AI Command Center |
+| **I** | Toggle AI Partner |
 | **O** | Toggle SCADA Panel |
 | **U** | Toggle Energy Dashboard |
 | **H** | Toggle Incident Heatmap |
@@ -825,7 +831,7 @@ src/
 │   ├── Machines.tsx            # Silos, mills, sifters, packers
 │   ├── ConveyorSystem.tsx      # Animated belt & flour bags
 │   ├── SpoutingSystem.tsx      # Curved grain pipes
-│   ├── WorkerSystem.tsx        # Worker avatars & pathfinding
+│   ├── WorkerSystemNew.tsx     # Worker avatars & pathfinding
 │   ├── ForkliftSystem.tsx      # Autonomous vehicles
 │   ├── DustParticles.tsx       # Instanced particle effects
 │   ├── Environment.tsx         # Lighting & factory structure
@@ -843,7 +849,9 @@ src/
 │   │   └── PhysicsDebug.tsx             # Debug visualization
 │   │
 │   │   # UI Overlays (React DOM)
-│   ├── UIOverlay.tsx           # Production controls & machine info
+│   ├── ui-new/
+│   │   ├── GameInterface.tsx   # Main HUD, dock & panel host
+│   │   └── panels/             # Production, safety & system panels
 │   ├── AICommandCenter.tsx     # AI decision slide-out panel
 │   ├── SCADAPanel.tsx          # SCADA monitor with 5 tabs
 │   ├── WorkerDetailPanel.tsx   # Worker profile modal
@@ -852,7 +860,7 @@ src/
 │
 ├── scada/                      # SCADA Integration Layer
 │   ├── types.ts                # TypeScript interfaces
-│   ├── tagDatabase.ts          # 90 process tags (ISA-5.1 naming)
+│   ├── tagDatabase.ts          # 78 process tags (ISA-5.1 naming)
 │   ├── AlarmManager.ts         # ISA-18.2 alarm state machine
 │   ├── HistoryStore.ts         # IndexedDB with 24h retention
 │   ├── SCADAService.ts         # Main orchestration service
@@ -936,7 +944,7 @@ MillOS uses **Zustand** for lightweight, performant global state:
 interface MillStore {
   // Entities
   workers: Worker[]           // 10 workers with positions, tasks, status
-  machines: Machine[]         // 14 machines with metrics and status
+  machines: Machine[]         // 15 machines with metrics and status
 
   // AI System
   aiDecisions: AIDecision[]   // Rolling feed (max 20)
@@ -989,17 +997,11 @@ MillOS implements OWASP-aligned frontend security practices:
 | Feature | Implementation | Reference |
 |---------|---------------|-----------|
 | **Input Sanitization** | HTML entity encoding, XSS prevention | OWASP A03:2021 |
-| **Rate Limiting** | Client-side sliding window (configurable per-endpoint) | DoS mitigation |
-| **CSRF Protection** | Token generation with session storage | OWASP A01:2021 |
-| **Audit Logging** | Security event tracking with pattern detection | OWASP A09:2021 |
 | **CSP Headers** | Strict Content-Security-Policy in index.html | XSS prevention |
 
 **Key Files:**
 - `src/utils/sanitize.ts` — Input validation and XSS prevention utilities
-- `src/utils/apiSecurity.ts` — Rate limiting, CSRF tokens, secure fetch wrapper
-- `src/stores/auditStore.ts` — Security event logging with brute-force detection
-
-**Audit Event Types:** Authentication attempts, rate limit triggers, validation failures, CSRF violations, suspicious patterns (brute force, validation spam).
+- `index.html` — Content-Security-Policy meta headers
 
 ---
 
@@ -1007,8 +1009,8 @@ MillOS implements OWASP-aligned frontend security practices:
 
 ### Completed
 
-- [x] Full SCADA integration with 90 process tags
-- [x] ISA-18.2 compliant alarm management
+- [x] Simulated SCADA workspace with 78 process tags
+- [x] ISA-18.2-informed alarm behavior
 - [x] Multiple protocol adapters (REST, MQTT, WebSocket)
 - [x] OPC-UA and Modbus backend proxy
 - [x] Historical data with 24-hour retention
@@ -1034,7 +1036,7 @@ MillOS implements OWASP-aligned frontend security practices:
 - [x] **Live cost tracking** for API usage
 - [x] **Context limit protection** with token estimation and smart truncation
 - [x] **Bilateral Autonomy System (BAS)** — 11-phase implementation
-  - [x] Five Axes of Control (Transparency, Proactivity, Pace, Tone, Stakes)
+  - [x] Five Axes of Control (Autonomy Level, Decision Mode, Information Access, Evaluation Direction, Collective Orientation)
   - [x] Wallace Stability Metrics with phase transition detection
   - [x] Value Formula (V = Z × S × E × F) with coefficient visualization
   - [x] Six-dimension Flourishing/Eudaimonia tracking
@@ -1073,7 +1075,7 @@ _No major features currently planned._
   - [x] CSRF token generation and validation
   - [x] Security audit logging with pattern detection
   - [x] Strict Content-Security-Policy headers
-- [x] Integration with real SCADA historians (OSIsoft PI, Wonderware)
+- [x] Development historian adapters for OSIsoft PI Web API and Wonderware, requiring external endpoints and credentials
 - [x] Strategic priority influence on tactical scoring
 - [x] Historical playback and time-travel debugging (Quick Actions UI)
 - [x] **VCP 2.0: Value Coordination Protocol** — Complete nervous system for bilateral socio-technical systems
@@ -1118,9 +1120,9 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**MillOS v0.3**
+**MillOS v0.40**
 
-*Transforming grain milling through digital twin technology, industrial SCADA integration, and bilateral AI partnership*
+*Exploring grain-mill operations through a digital twin, simulated industrial tooling, and bilateral AI partnership*
 
 <br/>
 

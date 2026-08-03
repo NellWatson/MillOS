@@ -6,7 +6,7 @@
  */
 
 import * as THREE from 'three';
-import { getTexture, fbmNoise, createDataTexture } from '../utils/textureGenerator';
+import { getTexture, fbmNoise, createColorDataTexture } from '../utils/textureGenerator';
 
 export interface StripeColors {
   primary: string; // Hex color
@@ -74,6 +74,6 @@ export const generateSafetyStripe = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createColorDataTexture(data, size, size);
   });
 };

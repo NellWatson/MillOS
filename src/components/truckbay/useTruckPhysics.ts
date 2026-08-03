@@ -1,4 +1,5 @@
-// Animation phases for realistic truck docking
+import { SITE_LAYOUT } from '../../constants/siteLayout';
+
 export type TruckPhase =
   | 'entering'
   | 'slowing'
@@ -15,7 +16,6 @@ export type TruckPhase =
   | 'accelerating'
   | 'leaving';
 
-// Truck animation state with full 2D position and detailed state
 export interface TruckAnimState {
   phase: TruckPhase;
   x: number;
@@ -32,512 +32,375 @@ export interface TruckAnimState {
   cabPitch: number;
   throttle: number;
   doorsOpen: boolean;
+  doorOpenAmount: number;
+  landingGearAmount: number;
 }
 
-// =============================================================================
-// EASING FUNCTIONS
-// =============================================================================
+export function isTruckDockedPhase(phase: TruckPhase): boolean {
+  return phase === 'final_adjustment' || phase === 'docked' || phase === 'preparing_to_leave';
+}
 
-const easeInOutCubic = (t: number): number => {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-};
+export function isTruckGuidingPhase(phase: TruckPhase): boolean {
+  return phase === 'backing' || phase === 'final_adjustment';
+}
 
-const easeInQuad = (t: number): number => {
-  return t * t;
-};
-
-const easeInOutQuad = (t: number): number => {
-  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-};
-
-const smoothstep = (t: number): number => t * t * (3 - 2 * t);
-
-const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
-
-// =============================================================================
-// SHIPPING DOCK (Front of building, z=50)
-// Uses 90-degree alley dock: Drive past, swing left, back straight in
-// =============================================================================
-
-export const calculateShippingTruckState = (cycle: number, time: number): TruckAnimState => {
-  // WAYPOINTS - simple (x, z, rotation) tuples
-  // Rotation: π = facing -Z (toward building), 0 = facing +Z (away from building)
-  const TUNNEL = { x: 20, z: 270, rot: Math.PI };
-  const APPROACH = { x: 20, z: 95, rot: Math.PI };
-  const SETUP = { x: -8, z: 75, rot: 0 }; // Swung left, now facing +Z for backing
-  const DOCK = { x: 0, z: 61, rot: 0 };
-  const PULLOUT_END = { x: 0, z: 80, rot: 0 };
-  const EXIT_ROAD = { x: 20, z: 110, rot: 0 };
-
-  // Phase durations (total = 60s)
-  const T_ENTER = 8; // Tunnel to approach
-  const T_TURN = 6; // Swing left into setup position
-  const T_BACK = 8; // Back into dock
-  const T_DOCKED = 16; // Loading
-  const T_PULLOUT = 4; // Pull forward
-  const T_EXIT = 6; // Turn right to road
-  const T_LEAVE = 12; // Drive away
-
-  const signalBlink = Math.sin(time * 8) > 0;
-
-  // =========================================================================
-  // PHASE 1: ENTERING - Straight from tunnel to approach point
-  // =========================================================================
-  if (cycle < T_ENTER) {
-    const t = easeInOutQuad(cycle / T_ENTER);
-    return {
-      phase: 'entering',
-      x: lerp(TUNNEL.x, APPROACH.x, t),
-      z: lerp(TUNNEL.z, APPROACH.z, t),
-      rotation: TUNNEL.rot, // Constant: facing -Z
-      speed: lerp(1.0, 0.4, t),
-      steeringAngle: 0,
-      brakeLights: t > 0.8,
-      reverseLights: false,
-      leftSignal: t > 0.6 && signalBlink,
-      rightSignal: false,
-      trailerAngle: 0,
-      cabRoll: 0,
-      cabPitch: t > 0.8 ? 0.02 : 0,
-      throttle: lerp(0.7, 0.3, t),
-      doorsOpen: false,
-    };
-  }
-
-  // =========================================================================
-  // PHASE 2: TURNING IN - Swing left to setup position (90-degree alley dock)
-  // =========================================================================
-  if (cycle < T_ENTER + T_TURN) {
-    const t = easeInOutCubic((cycle - T_ENTER) / T_TURN);
-
-    // Simple lerp for position and rotation
-    const x = lerp(APPROACH.x, SETUP.x, t);
-    const z = lerp(APPROACH.z, SETUP.z, t);
-    // Rotation sweeps from π to 0 (180° turn)
-    const rotation = lerp(APPROACH.rot, SETUP.rot, t);
-
-    // Steering angle follows the turn
-    const steeringAngle = -0.4 * Math.sin(t * Math.PI);
-
-    return {
-      phase: 'turning_in',
-      x,
-      z,
-      rotation,
-      speed: 0.35,
-      steeringAngle,
-      brakeLights: t > 0.9,
-      reverseLights: false,
-      leftSignal: signalBlink,
-      rightSignal: false,
-      trailerAngle: steeringAngle * -0.3,
-      cabRoll: steeringAngle * 0.05,
-      cabPitch: 0,
-      throttle: 0.35,
-      doorsOpen: false,
-    };
-  }
-
-  // =========================================================================
-  // PHASE 3: BACKING - Straight reverse into dock
-  // =========================================================================
-  if (cycle < T_ENTER + T_TURN + T_BACK) {
-    const t = easeInOutQuad((cycle - T_ENTER - T_TURN) / T_BACK);
-
-    // Curve slightly to center the trailer
-    const x = lerp(SETUP.x, DOCK.x, smoothstep(t));
-    const z = lerp(SETUP.z, DOCK.z, t);
-
-    // Small steering corrections for realism
-    const wobble = Math.sin(cycle * 2) * 0.02 * (1 - t);
-    const steeringAngle = 0.15 * Math.sin(t * Math.PI * 0.8) * (1 - t) + wobble;
-
-    return {
-      phase: 'backing',
-      x,
-      z,
-      rotation: SETUP.rot + wobble,
-      speed: -0.25,
-      steeringAngle,
-      brakeLights: false,
-      reverseLights: true,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: steeringAngle * 0.2,
-      cabRoll: 0,
-      cabPitch: -0.01,
-      throttle: 0.25,
-      doorsOpen: false,
-    };
-  }
-
-  // =========================================================================
-  // PHASE 4: DOCKED - Loading/unloading
-  // =========================================================================
-  if (cycle < T_ENTER + T_TURN + T_BACK + T_DOCKED) {
-    const phaseTime = cycle - T_ENTER - T_TURN - T_BACK;
-    return {
-      phase: 'docked',
-      x: DOCK.x,
-      z: DOCK.z,
-      rotation: DOCK.rot,
-      speed: 0,
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      cabRoll: 0,
-      cabPitch: 0,
-      throttle: 0.1,
-      doorsOpen: phaseTime > 1 && phaseTime < T_DOCKED - 2,
-    };
-  }
-
-  // =========================================================================
-  // PHASE 5: PULLING OUT - Drive forward from dock
-  // =========================================================================
-  if (cycle < T_ENTER + T_TURN + T_BACK + T_DOCKED + T_PULLOUT) {
-    const t = easeInQuad((cycle - T_ENTER - T_TURN - T_BACK - T_DOCKED) / T_PULLOUT);
-    return {
-      phase: 'pulling_out',
-      x: lerp(DOCK.x, PULLOUT_END.x, t),
-      z: lerp(DOCK.z, PULLOUT_END.z, t),
-      rotation: DOCK.rot,
-      speed: lerp(0.1, 0.5, t),
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: signalBlink,
-      trailerAngle: 0,
-      cabRoll: 0,
-      cabPitch: -0.02 * t,
-      throttle: lerp(0.3, 0.5, t),
-      doorsOpen: false,
-    };
-  }
-
-  // =========================================================================
-  // PHASE 6: TURNING OUT - Right turn toward road
-  // =========================================================================
-  const exitStart = T_ENTER + T_TURN + T_BACK + T_DOCKED + T_PULLOUT;
-  if (cycle < exitStart + T_EXIT) {
-    const t = easeInOutCubic((cycle - exitStart) / T_EXIT);
-
-    const x = lerp(PULLOUT_END.x, EXIT_ROAD.x, t);
-    const z = lerp(PULLOUT_END.z, EXIT_ROAD.z, t);
-
-    // Steering right
-    const steeringAngle = 0.35 * Math.sin(t * Math.PI);
-
-    return {
-      phase: 'turning_out',
-      x,
-      z,
-      rotation: PULLOUT_END.rot, // Stays at 0 (facing +Z)
-      speed: 0.5 + t * 0.2,
-      steeringAngle,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: t < 0.7 && signalBlink,
-      trailerAngle: steeringAngle * -0.2,
-      cabRoll: steeringAngle * 0.04,
-      cabPitch: -0.015,
-      throttle: 0.55,
-      doorsOpen: false,
-    };
-  }
-
-  // =========================================================================
-  // PHASE 7: LEAVING - Drive away to tunnel
-  // =========================================================================
-  const leaveStart = exitStart + T_EXIT;
-  if (cycle < leaveStart + T_LEAVE) {
-    const t = easeInQuad((cycle - leaveStart) / T_LEAVE);
-    return {
-      phase: 'accelerating',
-      x: EXIT_ROAD.x,
-      z: lerp(EXIT_ROAD.z, TUNNEL.z, t),
-      rotation: 0, // Facing +Z (away from building)
-      speed: 0.8 + t * 0.3,
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      cabRoll: 0,
-      cabPitch: -0.02,
-      throttle: 0.8,
-      doorsOpen: false,
-    };
-  }
-
-  // =========================================================================
-  // PHASE 8: HOLD - At tunnel (cycle wraps)
-  // =========================================================================
+export function applyTruckSafetyHold(state: TruckAnimState): TruckAnimState {
   return {
-    phase: 'leaving',
-    x: TUNNEL.x,
-    z: TUNNEL.z,
-    rotation: 0,
-    speed: 1.0,
+    ...state,
+    speed: 0,
     steeringAngle: 0,
-    brakeLights: false,
+    brakeLights: true,
     reverseLights: false,
     leftSignal: false,
     rightSignal: false,
-    trailerAngle: 0,
     cabRoll: 0,
     cabPitch: 0,
     throttle: 0,
-    doorsOpen: false,
   };
+}
+
+export const TRUCK_CYCLE_SECONDS = 60;
+
+export const TRUCK_PHASE_DURATIONS = {
+  entering: 7,
+  slowing: 3,
+  turning_in: 5,
+  straightening: 2,
+  positioning: 2,
+  stopping_to_back: 1,
+  backing: 6,
+  final_adjustment: 2,
+  docked: 14,
+  preparing_to_leave: 2,
+  pulling_out: 4,
+  turning_out: 5,
+  accelerating: 4,
+  leaving: 3,
+} as const satisfies Record<TruckPhase, number>;
+
+const PHASE_ORDER = Object.keys(TRUCK_PHASE_DURATIONS) as TruckPhase[];
+
+export const TRUCK_PHASE_STARTS = PHASE_ORDER.reduce(
+  (starts, phase) => {
+    const priorPhase = PHASE_ORDER[PHASE_ORDER.indexOf(phase) - 1];
+    starts[phase] = priorPhase ? starts[priorPhase] + TRUCK_PHASE_DURATIONS[priorPhase] : 0;
+    return starts;
+  },
+  {} as Record<TruckPhase, number>
+);
+
+const BENCHMARK_PHASE_OFFSET_SECONDS = 0.5;
+
+/**
+ * Starts fixed-camera captures with the featured truck performing a visible,
+ * safety-relevant manoeuvre near its dock. The ordinary simulation clock is
+ * untouched; this is used only when the deterministic benchmark runtime names
+ * a shipping or receiving scene.
+ */
+export function getTruckBenchmarkControllerStart(scene: string): number | null {
+  if (scene === 'shipping') {
+    return TRUCK_PHASE_STARTS.turning_in + BENCHMARK_PHASE_OFFSET_SECONDS;
+  }
+  if (scene === 'receiving') {
+    return (
+      (TRUCK_PHASE_STARTS.backing +
+        BENCHMARK_PHASE_OFFSET_SECONDS -
+        TRUCK_CYCLE_SECONDS / 2 +
+        TRUCK_CYCLE_SECONDS) %
+      TRUCK_CYCLE_SECONDS
+    );
+  }
+  return null;
+}
+
+const DOCK_START_SECONDS = TRUCK_PHASE_STARTS.docked;
+const DEPARTURE_SECONDS = TRUCK_PHASE_STARTS.preparing_to_leave;
+
+interface Pose {
+  readonly x: number;
+  readonly z: number;
+  readonly rotation: number;
+}
+
+const SHIPPING_DOCK = SITE_LAYOUT.docks.shipping.bayCentre;
+const SHIPPING_POSES = {
+  tunnelIncoming: { x: 20, z: 238, rotation: Math.PI },
+  highway: { x: 20, z: 118, rotation: Math.PI },
+  approach: { x: 20, z: 94, rotation: Math.PI },
+  turnEnd: { x: -10, z: 78, rotation: 0 },
+  straightEnd: { x: -7, z: 74, rotation: 0 },
+  positioningEnd: { x: -4, z: 70, rotation: 0 },
+  backingEnd: { x: 0, z: 64, rotation: 0 },
+  dock: { x: SHIPPING_DOCK[0], z: SHIPPING_DOCK[2], rotation: 0 },
+  pullout: { x: 0, z: 80, rotation: 0 },
+  exitRoad: { x: 20, z: 108, rotation: 0 },
+  acceleratingEnd: { x: 20, z: 165, rotation: 0 },
+  tunnelOutgoing: { x: 20, z: 238, rotation: 0 },
+} as const satisfies Record<string, Pose>;
+
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+const smoothstep = (value: number): number => {
+  const t = clamp01(value);
+  return t * t * (3 - 2 * t);
 };
+const smootherstep = (value: number): number => {
+  const t = clamp01(value);
+  return t * t * t * (t * (t * 6 - 15) + 10);
+};
+const lerp = (start: number, end: number, t: number): number => start + (end - start) * t;
+const normalizeAngle = (angle: number): number => Math.atan2(Math.sin(angle), Math.cos(angle));
+const lerpAngle = (start: number, end: number, t: number): number =>
+  start + normalizeAngle(end - start) * t;
 
-// =============================================================================
-// RECEIVING DOCK (Back of building, z=-50)
-// Mirror of shipping: Drive past, swing right, back straight in
-// =============================================================================
+const linearPose = (start: Pose, end: Pose, t: number): Pose => ({
+  x: lerp(start.x, end.x, t),
+  z: lerp(start.z, end.z, t),
+  rotation: lerpAngle(start.rotation, end.rotation, t),
+});
 
-export const calculateReceivingTruckState = (cycle: number, time: number): TruckAnimState => {
-  // WAYPOINTS - mirrored from shipping (x and z signs flipped, rotation offset by π)
-  // Rotation: 0 = facing +Z (toward building), π = facing -Z (away from building)
-  const TUNNEL = { x: -20, z: -270, rot: 0 };
-  const APPROACH = { x: -20, z: -95, rot: 0 };
-  const SETUP = { x: 8, z: -75, rot: Math.PI }; // Swung right, now facing -Z for backing
-  const DOCK = { x: 0, z: -61, rot: Math.PI };
-  const PULLOUT_END = { x: 0, z: -80, rot: Math.PI };
-  const EXIT_ROAD = { x: -20, z: -110, rot: Math.PI };
-
-  // Phase durations (same as shipping, total = 60s)
-  const T_ENTER = 8;
-  const T_TURN = 6;
-  const T_BACK = 8;
-  const T_DOCKED = 16;
-  const T_PULLOUT = 4;
-  const T_EXIT = 6;
-  const T_LEAVE = 12;
-
-  const signalBlink = Math.sin(time * 8) > 0;
-
-  // =========================================================================
-  // PHASE 1: ENTERING - Straight from tunnel to approach point
-  // =========================================================================
-  if (cycle < T_ENTER) {
-    const t = easeInOutQuad(cycle / T_ENTER);
-    return {
-      phase: 'entering',
-      x: lerp(TUNNEL.x, APPROACH.x, t),
-      z: lerp(TUNNEL.z, APPROACH.z, t),
-      rotation: TUNNEL.rot, // Constant: facing +Z
-      speed: lerp(1.0, 0.4, t),
-      steeringAngle: 0,
-      brakeLights: t > 0.8,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: t > 0.6 && signalBlink, // Signaling right (mirror)
-      trailerAngle: 0,
-      cabRoll: 0,
-      cabPitch: t > 0.8 ? 0.02 : 0,
-      throttle: lerp(0.7, 0.3, t),
-      doorsOpen: false,
-    };
-  }
-
-  // =========================================================================
-  // PHASE 2: TURNING IN - Swing right to setup position (mirror of shipping)
-  // =========================================================================
-  if (cycle < T_ENTER + T_TURN) {
-    const t = easeInOutCubic((cycle - T_ENTER) / T_TURN);
-
-    // Simple lerp for position and rotation
-    const x = lerp(APPROACH.x, SETUP.x, t);
-    const z = lerp(APPROACH.z, SETUP.z, t);
-    // Rotation sweeps from 0 to π (180° turn)
-    const rotation = lerp(APPROACH.rot, SETUP.rot, t);
-
-    // Steering angle follows the turn (positive = right turn)
-    const steeringAngle = 0.4 * Math.sin(t * Math.PI);
-
-    return {
-      phase: 'turning_in',
-      x,
-      z,
-      rotation,
-      speed: 0.35,
-      steeringAngle,
-      brakeLights: t > 0.9,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: signalBlink,
-      trailerAngle: steeringAngle * -0.3,
-      cabRoll: steeringAngle * 0.05,
-      cabPitch: 0,
-      throttle: 0.35,
-      doorsOpen: false,
-    };
-  }
-
-  // =========================================================================
-  // PHASE 3: BACKING - Straight reverse into dock
-  // =========================================================================
-  if (cycle < T_ENTER + T_TURN + T_BACK) {
-    const t = easeInOutQuad((cycle - T_ENTER - T_TURN) / T_BACK);
-
-    // Curve slightly to center the trailer
-    const x = lerp(SETUP.x, DOCK.x, smoothstep(t));
-    const z = lerp(SETUP.z, DOCK.z, t);
-
-    // Small steering corrections for realism
-    const wobble = Math.sin(cycle * 2) * 0.02 * (1 - t);
-    const steeringAngle = -0.15 * Math.sin(t * Math.PI * 0.8) * (1 - t) + wobble;
-
-    return {
-      phase: 'backing',
-      x,
-      z,
-      rotation: SETUP.rot + wobble,
-      speed: -0.25,
-      steeringAngle,
-      brakeLights: false,
-      reverseLights: true,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: steeringAngle * 0.2,
-      cabRoll: 0,
-      cabPitch: -0.01,
-      throttle: 0.25,
-      doorsOpen: false,
-    };
-  }
-
-  // =========================================================================
-  // PHASE 4: DOCKED - Loading/unloading
-  // =========================================================================
-  if (cycle < T_ENTER + T_TURN + T_BACK + T_DOCKED) {
-    const phaseTime = cycle - T_ENTER - T_TURN - T_BACK;
-    return {
-      phase: 'docked',
-      x: DOCK.x,
-      z: DOCK.z,
-      rotation: DOCK.rot,
-      speed: 0,
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      cabRoll: 0,
-      cabPitch: 0,
-      throttle: 0.1,
-      doorsOpen: phaseTime > 1 && phaseTime < T_DOCKED - 2,
-    };
-  }
-
-  // =========================================================================
-  // PHASE 5: PULLING OUT - Drive forward from dock
-  // =========================================================================
-  if (cycle < T_ENTER + T_TURN + T_BACK + T_DOCKED + T_PULLOUT) {
-    const t = easeInQuad((cycle - T_ENTER - T_TURN - T_BACK - T_DOCKED) / T_PULLOUT);
-    return {
-      phase: 'pulling_out',
-      x: lerp(DOCK.x, PULLOUT_END.x, t),
-      z: lerp(DOCK.z, PULLOUT_END.z, t),
-      rotation: DOCK.rot,
-      speed: lerp(0.1, 0.5, t),
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: signalBlink, // Mirror: signal left
-      rightSignal: false,
-      trailerAngle: 0,
-      cabRoll: 0,
-      cabPitch: -0.02 * t,
-      throttle: lerp(0.3, 0.5, t),
-      doorsOpen: false,
-    };
-  }
-
-  // =========================================================================
-  // PHASE 6: TURNING OUT - Left turn toward road (mirror of shipping)
-  // =========================================================================
-  const exitStart = T_ENTER + T_TURN + T_BACK + T_DOCKED + T_PULLOUT;
-  if (cycle < exitStart + T_EXIT) {
-    const t = easeInOutCubic((cycle - exitStart) / T_EXIT);
-
-    const x = lerp(PULLOUT_END.x, EXIT_ROAD.x, t);
-    const z = lerp(PULLOUT_END.z, EXIT_ROAD.z, t);
-
-    // Steering left (negative, mirror of shipping)
-    const steeringAngle = -0.35 * Math.sin(t * Math.PI);
-
-    return {
-      phase: 'turning_out',
-      x,
-      z,
-      rotation: PULLOUT_END.rot, // Stays at π (facing -Z)
-      speed: 0.5 + t * 0.2,
-      steeringAngle,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: t < 0.7 && signalBlink,
-      rightSignal: false,
-      trailerAngle: steeringAngle * -0.2,
-      cabRoll: steeringAngle * 0.04,
-      cabPitch: -0.015,
-      throttle: 0.55,
-      doorsOpen: false,
-    };
-  }
-
-  // =========================================================================
-  // PHASE 7: LEAVING - Drive away to tunnel
-  // =========================================================================
-  const leaveStart = exitStart + T_EXIT;
-  if (cycle < leaveStart + T_LEAVE) {
-    const t = easeInQuad((cycle - leaveStart) / T_LEAVE);
-    return {
-      phase: 'accelerating',
-      x: EXIT_ROAD.x,
-      z: lerp(EXIT_ROAD.z, TUNNEL.z, t),
-      rotation: Math.PI, // Facing -Z (away from building)
-      speed: 0.8 + t * 0.3,
-      steeringAngle: 0,
-      brakeLights: false,
-      reverseLights: false,
-      leftSignal: false,
-      rightSignal: false,
-      trailerAngle: 0,
-      cabRoll: 0,
-      cabPitch: -0.02,
-      throttle: 0.8,
-      doorsOpen: false,
-    };
-  }
-
-  // =========================================================================
-  // PHASE 8: HOLD - At tunnel (cycle wraps)
-  // =========================================================================
+const cubicBezier = (
+  start: Pose,
+  controlA: readonly [number, number],
+  controlB: readonly [number, number],
+  end: Pose,
+  t: number
+): Pose => {
+  const inverse = 1 - t;
   return {
-    phase: 'leaving',
-    x: TUNNEL.x,
-    z: TUNNEL.z,
-    rotation: Math.PI,
-    speed: 1.0,
-    steeringAngle: 0,
-    brakeLights: false,
-    reverseLights: false,
-    leftSignal: false,
-    rightSignal: false,
-    trailerAngle: 0,
-    cabRoll: 0,
-    cabPitch: 0,
-    throttle: 0,
-    doorsOpen: false,
+    x:
+      inverse ** 3 * start.x +
+      3 * inverse * inverse * t * controlA[0] +
+      3 * inverse * t * t * controlB[0] +
+      t ** 3 * end.x,
+    z:
+      inverse ** 3 * start.z +
+      3 * inverse * inverse * t * controlA[1] +
+      3 * inverse * t * t * controlB[1] +
+      t ** 3 * end.z,
+    rotation: lerpAngle(start.rotation, end.rotation, smootherstep(t)),
   };
 };
+
+const baseState = (
+  phase: TruckPhase,
+  pose: Pose,
+  speed: number,
+  overrides: Partial<TruckAnimState> = {}
+): TruckAnimState => ({
+  phase,
+  x: pose.x,
+  z: pose.z,
+  rotation: normalizeAngle(pose.rotation),
+  speed,
+  steeringAngle: 0,
+  brakeLights: false,
+  reverseLights: false,
+  leftSignal: false,
+  rightSignal: false,
+  trailerAngle: 0,
+  cabRoll: 0,
+  cabPitch: 0,
+  throttle: speed === 0 ? 0 : Math.min(1, Math.abs(speed) / 18),
+  doorsOpen: false,
+  doorOpenAmount: 0,
+  landingGearAmount: 0,
+  ...overrides,
+});
+
+const getPhaseProgress = (cycle: number, phase: TruckPhase): number =>
+  (cycle - TRUCK_PHASE_STARTS[phase]) / TRUCK_PHASE_DURATIONS[phase];
+
+export function getTruckPhase(cycleSeconds: number): TruckPhase {
+  const cycle = ((cycleSeconds % TRUCK_CYCLE_SECONDS) + TRUCK_CYCLE_SECONDS) % TRUCK_CYCLE_SECONDS;
+  return (
+    PHASE_ORDER.find((phase) => cycle < TRUCK_PHASE_STARTS[phase] + TRUCK_PHASE_DURATIONS[phase]) ??
+    'leaving'
+  );
+}
+
+/**
+ * BODY ATTITUDE. `cabPitch` and `cabRoll` were authored at +/-0.025 and
+ * `steeringAngle * 0.055` - under 1.5 degrees, which is below the threshold at
+ * which a viewer reads a lean as suspension at all, so the tractor looked
+ * rigidly bolted to the road. They are roughly doubled here, which is still
+ * well inside the range a loaded combination actually travels.
+ *
+ * These coefficients belong to the CANONICAL shipping state only. The receiving
+ * truck is derived by `mirrorForReceiving`, which negates `cabRoll` and
+ * `steeringAngle`; changing a coefficient there instead would make the
+ * receiving truck lean into its turns the wrong way.
+ *
+ * The trailer is only ever yawed (`trailerAngle`), never pitched, so raising
+ * pitch cannot drive the trailer's rear corner at z = -11.35 through the
+ * ground - the geometry that would clip is on a sibling group.
+ */
+const calculateCanonicalShippingState = (
+  cycleSeconds: number,
+  timeSeconds: number
+): TruckAnimState => {
+  const cycle = ((cycleSeconds % TRUCK_CYCLE_SECONDS) + TRUCK_CYCLE_SECONDS) % TRUCK_CYCLE_SECONDS;
+  const phase = getTruckPhase(cycle);
+  const t = clamp01(getPhaseProgress(cycle, phase));
+  const eased = smoothstep(t);
+  const signalBlink = Math.sin(timeSeconds * 8) > 0;
+  const poses = SHIPPING_POSES;
+
+  switch (phase) {
+    case 'entering':
+      return baseState(phase, linearPose(poses.tunnelIncoming, poses.highway, eased), 17, {
+        throttle: lerp(0.72, 0.48, eased),
+      });
+    case 'slowing':
+      return baseState(
+        phase,
+        linearPose(poses.highway, poses.approach, eased),
+        lerp(11, 5, eased),
+        {
+          brakeLights: t > 0.18,
+          leftSignal: t > 0.45 && signalBlink,
+          cabPitch: lerp(0, 0.055, eased),
+          throttle: lerp(0.35, 0.16, eased),
+        }
+      );
+    case 'turning_in': {
+      const pose = cubicBezier(poses.approach, [20, 80], [-13, 66], poses.turnEnd, eased);
+      const steeringAngle = -0.42 * Math.sin(t * Math.PI);
+      return baseState(phase, pose, 5.8, {
+        steeringAngle,
+        leftSignal: signalBlink,
+        trailerAngle: -steeringAngle * 0.42,
+        cabRoll: steeringAngle * 0.1,
+        throttle: 0.28,
+      });
+    }
+    case 'straightening':
+      return baseState(phase, linearPose(poses.turnEnd, poses.straightEnd, eased), 3.2, {
+        steeringAngle: lerp(-0.18, 0, eased),
+        trailerAngle: lerp(0.12, 0, eased),
+        brakeLights: t > 0.65,
+        throttle: 0.16,
+      });
+    case 'positioning':
+      return baseState(
+        phase,
+        linearPose(poses.straightEnd, poses.positioningEnd, eased),
+        lerp(2.5, 0.6, eased),
+        {
+          brakeLights: t > 0.45,
+          cabPitch: 0.038 * eased,
+          throttle: 0.1,
+        }
+      );
+    case 'stopping_to_back':
+      return baseState(phase, poses.positioningEnd, 0, {
+        brakeLights: true,
+        throttle: 0.06,
+      });
+    case 'backing': {
+      const pose = cubicBezier(poses.positioningEnd, [-4, 67], [-1, 65], poses.backingEnd, eased);
+      const steeringAngle = 0.12 * Math.sin(t * Math.PI) * (1 - t);
+      return baseState(phase, pose, -1.8, {
+        steeringAngle,
+        reverseLights: true,
+        trailerAngle: steeringAngle * 0.35,
+        cabPitch: -0.03,
+        throttle: 0.14,
+      });
+    }
+    case 'final_adjustment':
+      return baseState(phase, linearPose(poses.backingEnd, poses.dock, eased), -0.7, {
+        reverseLights: true,
+        brakeLights: t > 0.72,
+        throttle: 0.08,
+      });
+    case 'docked': {
+      const opening = smoothstep(clamp01((t - 0.06) / 0.14));
+      const closing = 1 - smoothstep(clamp01((t - 0.76) / 0.16));
+      const doorOpenAmount = Math.min(opening, closing);
+      const landingGearAmount = smoothstep(clamp01((t - 0.03) / 0.12));
+      return baseState(phase, poses.dock, 0, {
+        brakeLights: t < 0.08,
+        doorsOpen: doorOpenAmount > 0.02,
+        doorOpenAmount,
+        landingGearAmount,
+        throttle: 0.04,
+      });
+    }
+    case 'preparing_to_leave':
+      return baseState(phase, poses.dock, 0, {
+        brakeLights: true,
+        rightSignal: signalBlink,
+        landingGearAmount: 1 - smootherstep(t),
+        throttle: lerp(0.06, 0.18, eased),
+      });
+    case 'pulling_out':
+      return baseState(phase, linearPose(poses.dock, poses.pullout, eased), lerp(0.8, 4.5, eased), {
+        rightSignal: signalBlink,
+        cabPitch: -0.038 * eased,
+        throttle: lerp(0.18, 0.38, eased),
+      });
+    case 'turning_out': {
+      const pose = cubicBezier(poses.pullout, [0, 97], [20, 94], poses.exitRoad, eased);
+      const steeringAngle = 0.38 * Math.sin(t * Math.PI);
+      return baseState(phase, pose, 5.5, {
+        steeringAngle,
+        rightSignal: t < 0.72 && signalBlink,
+        trailerAngle: -steeringAngle * 0.34,
+        cabRoll: steeringAngle * 0.095,
+        throttle: 0.42,
+      });
+    }
+    case 'accelerating':
+      return baseState(
+        phase,
+        linearPose(poses.exitRoad, poses.acceleratingEnd, smootherstep(t)),
+        lerp(6, 16, eased),
+        {
+          cabPitch: -0.045 * (1 - t),
+          throttle: lerp(0.5, 0.78, eased),
+        }
+      );
+    case 'leaving':
+      return baseState(phase, linearPose(poses.acceleratingEnd, poses.tunnelOutgoing, t), 24.3, {
+        throttle: 0.82,
+      });
+  }
+};
+
+const mirrorForReceiving = (state: TruckAnimState): TruckAnimState => ({
+  ...state,
+  x: -state.x,
+  z: -state.z,
+  rotation: normalizeAngle(state.rotation + Math.PI),
+  steeringAngle: -state.steeringAngle,
+  leftSignal: state.rightSignal,
+  rightSignal: state.leftSignal,
+  trailerAngle: -state.trailerAngle,
+  cabRoll: -state.cabRoll,
+});
+
+export const calculateShippingTruckState = (cycle: number, time: number): TruckAnimState =>
+  calculateCanonicalShippingState(cycle, time);
+
+export const calculateReceivingTruckState = (cycle: number, time: number): TruckAnimState =>
+  mirrorForReceiving(calculateCanonicalShippingState(cycle, time));
+
+export function getTruckScheduleStatus(cycleSeconds: number): {
+  status: 'arriving' | 'loading' | 'departing' | 'clear';
+  etaMinutes: number;
+} {
+  const cycle = ((cycleSeconds % TRUCK_CYCLE_SECONDS) + TRUCK_CYCLE_SECONDS) % TRUCK_CYCLE_SECONDS;
+  if (cycle < DOCK_START_SECONDS) {
+    return {
+      status: 'arriving',
+      etaMinutes: Math.ceil((DOCK_START_SECONDS - cycle) / 3),
+    };
+  }
+  if (cycle < DEPARTURE_SECONDS) {
+    return {
+      status: 'loading',
+      etaMinutes: Math.ceil((DEPARTURE_SECONDS - cycle) / 3),
+    };
+  }
+  return { status: 'departing', etaMinutes: 0 };
+}

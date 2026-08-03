@@ -25,6 +25,9 @@ interface ShiftSummary {
 
 import { useShallow } from 'zustand/react/shallow';
 
+// Auto-dismiss countdown duration (seconds). Used by the timer and the SVG progress ring.
+const COUNTDOWN_SECONDS = 5;
+
 // ...
 
 export const ShiftHandoverSummary: React.FC = () => {
@@ -62,7 +65,7 @@ export const ShiftHandoverSummary: React.FC = () => {
   const [previousShift, setPreviousShift] = useState<string>(currentShift);
   const [showSummary, setShowSummary] = useState(false);
   const [summary, setSummary] = useState<ShiftSummary | null>(null);
-  const [countdown, setCountdown] = useState(5); // Auto-dismiss after 5 seconds
+  const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS); // Auto-dismiss after COUNTDOWN_SECONDS
 
   // Detect shift change
   useEffect(() => {
@@ -78,7 +81,7 @@ export const ShiftHandoverSummary: React.FC = () => {
       };
       setSummary(summary);
       setShowSummary(true);
-      setCountdown(5); // Reset countdown when new summary appears
+      setCountdown(COUNTDOWN_SECONDS); // Reset countdown when new summary appears
       setPreviousShift(currentShift);
     } else if (currentShift !== previousShift) {
       setPreviousShift(currentShift);
@@ -192,6 +195,9 @@ export const ShiftHandoverSummary: React.FC = () => {
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
           className="fixed top-16 left-4 z-50 w-80 bg-slate-900/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden pointer-events-auto"
           onClick={(e) => e.stopPropagation()}
+          role="status"
+          aria-live="polite"
+          aria-label={`Shift handover summary for ${summary.shift} shift`}
         >
           {/* Header */}
           <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5">
@@ -221,7 +227,7 @@ export const ShiftHandoverSummary: React.FC = () => {
                     stroke="currentColor"
                     strokeWidth="2"
                     strokeDasharray={50}
-                    strokeDashoffset={50 * (1 - countdown / 15)}
+                    strokeDashoffset={50 * (1 - countdown / COUNTDOWN_SECONDS)}
                     className="text-amber-400 transition-all duration-1000 ease-linear"
                   />
                 </svg>
@@ -230,8 +236,9 @@ export const ShiftHandoverSummary: React.FC = () => {
               <button
                 onClick={() => setShowSummary(false)}
                 className="p-1 hover:bg-white/10 rounded-lg transition-colors text-slate-300 hover:text-white"
+                aria-label="Close shift handover"
               >
-                <X size={16} />
+                <X size={16} aria-hidden="true" />
               </button>
             </div>
           </div>

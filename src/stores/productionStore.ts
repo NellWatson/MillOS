@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { MachineData, MachineType, WorkerData, AIDecision, ProductionTarget } from '../types';
+import {
+  MachineData,
+  MachineType,
+  WorkerData,
+  AIDecision,
+  ProductionTarget,
+  type AIDecisionDisposition,
+} from '../types';
 import type { WorkerStatus } from '../utils/statusColors';
 import { useHistoricalPlaybackStore } from './historicalPlaybackStore';
 import { useMaterialFlowStore } from './materialFlowStore';
@@ -37,6 +44,12 @@ export type { TruckScheduleState, TruckScheduleStore } from './truckScheduleStor
 // - incidentReplayStore.ts - Incident replay
 // - truckScheduleStore.ts - Truck scheduling
 // =========================================================================
+
+/**
+ * Daily production goal in bags. Shared by ProductionTargetWidget (progress UI)
+ * and UnifiedGameTick (milestone celebrations at 25/50/75/100%).
+ */
+export const DAILY_TARGET_BAGS = 5000;
 
 // =========================================================================
 // PERF: Throttled bag production accumulator
@@ -309,7 +322,16 @@ export interface ProductionStore
   extends
     QCLabStore,
     AchievementsStore,
-    AnnouncementsStore,
+    Pick<
+      AnnouncementsStore,
+      | 'announcements'
+      | 'lastAnnouncementTime'
+      | 'addAnnouncement'
+      | 'dismissAnnouncement'
+      | 'clearOldAnnouncements'
+      | 'getActiveAnnouncements'
+      | 'getAnnouncementsByPriority'
+    >,
     IncidentReplayStore,
     TruckScheduleStore {
   // Performance indices (internal, not directly accessed)
@@ -344,9 +366,20 @@ export interface ProductionStore
     status: AIDecision['status'],
     outcome?: string
   ) => void;
+  recordDecisionResponse: (
+    decisionId: string,
+    disposition: AIDecisionDisposition,
+    options?: { note?: string; modifiedAction?: string }
+  ) => void;
 
   // Machine management
   setMachines: (machines: MachineData[]) => void;
+  /** Reduce a machine's wear (repairs breakdowns); returns the outcome for UI feedback */
+  performMaintenance: (machineId: string) => {
+    success: boolean;
+    wearReduced: number;
+    message: string;
+  };
   updateMachineMetrics: (machineId: string, metrics: Partial<MachineData['metrics']>) => void;
   batchUpdateMachineMetrics: (
     updates: { machineId: string; metrics: Partial<MachineData['metrics']> }[]
@@ -354,7 +387,7 @@ export interface ProductionStore
 
   // Metrics - now computed from actual simulation state
   metrics: {
-    throughput: number; // Bags per minute based on packer output
+    throughput: number; // Bags per hour based on final packer output
     efficiency: number; // Running machines / total machines * 100
     uptime: number; // Cumulative running time / elapsed time * 100
     quality: number; // Average QC test grade (A=100, B=85, C=70, FAIL=0)
@@ -394,6 +427,10 @@ export interface ProductionStore
   setProductionTarget: (target: ProductionTarget) => void;
   updateProductionProgress: (bagsProduced: number) => void;
   totalBagsProduced: number;
+  /** Bags produced since the last game-day rollover (drives the daily target UI) */
+  dailyBagsProduced: number;
+  /** Reset the daily counter - called by the game tick on day rollover */
+  resetDailyBagsProduced: () => void;
   incrementBagsProduced: (count?: number) => void;
   /** @internal Direct increment - use throttledIncrementBags() for high-frequency updates */
   _directIncrementBags: (count: number) => void;
@@ -425,6 +462,121 @@ export interface ProductionStore
   // SCADA integration state
   scadaLive: boolean;
   setScadaLive: (live: boolean) => void;
+}
+
+function enrichDecisionProvenance(
+  decision: AIDecision,
+  state: Pick<
+    ProductionStore,
+    'metrics' | 'machines' | 'workers' | 'productionSpeed' | 'totalBagsProduced'
+  >
+): AIDecision {
+  if (decision.provenance) return decision;
+
+  const capturedAt = decision.timestamp.getTime();
+  const machine = decision.machineId
+    ? state.machines.find((candidate) => candidate.id === decision.machineId)
+    : undefined;
+  const worker = decision.workerId
+    ? state.workers.find((candidate) => candidate.id === decision.workerId)
+    : undefined;
+  const source =
+    decision.triggeredBy === 'schedule'
+      ? 'schedule'
+      : decision.triggeredBy === 'prediction'
+        ? 'prediction'
+        : decision.triggeredBy === 'user'
+          ? 'operator'
+          : 'simulation';
+  const observations: NonNullable<AIDecision['provenance']>['observations'] = [
+    {
+      label: 'Production throughput',
+      value: state.metrics.throughput,
+      unit: 'bags/h',
+      source: 'simulation',
+      quality: 'good',
+      capturedAt,
+    },
+    {
+      label: 'Process efficiency',
+      value: state.metrics.efficiency,
+      unit: '%',
+      source: 'simulation',
+      quality: 'good',
+      capturedAt,
+    },
+    {
+      label: 'Product quality',
+      value: state.metrics.quality,
+      unit: '%',
+      source: 'simulation',
+      quality: 'good',
+      capturedAt,
+    },
+  ];
+
+  if (machine) {
+    observations.push(
+      {
+        label: `${machine.name} status`,
+        value: machine.status,
+        source,
+        quality: 'good',
+        capturedAt,
+      },
+      {
+        label: `${machine.name} temperature`,
+        value: machine.metrics.temperature,
+        unit: '°C',
+        source,
+        quality: 'good',
+        capturedAt,
+      },
+      {
+        label: `${machine.name} load`,
+        value: machine.metrics.load,
+        unit: '%',
+        source,
+        quality: 'good',
+        capturedAt,
+      }
+    );
+  }
+
+  return {
+    ...decision,
+    provenance: {
+      capturedAt,
+      observations,
+      assumptions: decision.uncertainty
+        ? [decision.uncertainty]
+        : ['Simulator telemetry is current at the captured time.'],
+      affectedPeople: worker ? [`${worker.name} (${worker.id})`] : ['Mill operators'],
+      affectedEquipment: machine ? [`${machine.name} (${machine.id})`] : ['Production system'],
+      expectedEffect: decision.impact,
+      alternatives:
+        decision.alternatives && decision.alternatives.length > 0
+          ? decision.alternatives
+          : [
+              {
+                action: 'Maintain the current simulated operating state',
+                tradeoff: 'Avoids intervention while leaving the observed condition unchanged.',
+              },
+            ],
+      inputSnapshot: {
+        productionSpeed: state.productionSpeed,
+        throughput: state.metrics.throughput,
+        efficiency: state.metrics.efficiency,
+        uptime: state.metrics.uptime,
+        quality: state.metrics.quality,
+        totalBagsProduced: state.totalBagsProduced,
+        machineId: decision.machineId ?? null,
+        machineStatus: machine?.status ?? null,
+        workerId: decision.workerId ?? null,
+        trigger: decision.triggeredBy ?? null,
+      },
+    },
+  };
 }
 
 export const useProductionStore = create<ProductionStore>()(
@@ -500,13 +652,26 @@ export const useProductionStore = create<ProductionStore>()(
     get currentReplayIndex() {
       return useIncidentReplayStore.getState().currentReplayIndex;
     },
+    get sessionStartedAt() {
+      return useIncidentReplayStore.getState().sessionStartedAt;
+    },
+    get simulationSeed() {
+      return useIncidentReplayStore.getState().simulationSeed;
+    },
+    get commands() {
+      return useIncidentReplayStore.getState().commands;
+    },
     setReplayMode: (...args: Parameters<IncidentReplayStore['setReplayMode']>) =>
       useIncidentReplayStore.getState().setReplayMode(...args),
     recordReplayFrame: (...args: Parameters<IncidentReplayStore['recordReplayFrame']>) =>
       useIncidentReplayStore.getState().recordReplayFrame(...args),
+    recordCommand: (...args: Parameters<IncidentReplayStore['recordCommand']>) =>
+      useIncidentReplayStore.getState().recordCommand(...args),
     setReplayIndex: (...args: Parameters<IncidentReplayStore['setReplayIndex']>) =>
       useIncidentReplayStore.getState().setReplayIndex(...args),
     clearReplayFrames: () => useIncidentReplayStore.getState().clearReplayFrames(),
+    clearDiagnostics: () => useIncidentReplayStore.getState().clearDiagnostics(),
+    createDiagnosticExport: () => useIncidentReplayStore.getState().createDiagnosticExport(),
     getCurrentFrame: () => useIncidentReplayStore.getState().getCurrentFrame(),
     getFrameCount: () => useIncidentReplayStore.getState().getFrameCount(),
     stepForward: () => useIncidentReplayStore.getState().stepForward(),
@@ -530,6 +695,7 @@ export const useProductionStore = create<ProductionStore>()(
       useTruckScheduleStore.getState().getTimeUntilNextArrival(...args),
     tickArrivals: (...args: Parameters<TruckScheduleStore['tickArrivals']>) =>
       useTruckScheduleStore.getState().tickArrivals(...args),
+    resetTruckSchedule: () => useTruckScheduleStore.getState().resetTruckSchedule(),
 
     productionSpeed: 1,
     setProductionSpeed: (speed) => set({ productionSpeed: speed }),
@@ -564,10 +730,11 @@ export const useProductionStore = create<ProductionStore>()(
         if (state.aiDecisions.some((d) => d.id === decision.id)) {
           return state; // No-op if decision already exists
         }
-        const updatedDecisions = [decision, ...state.aiDecisions].slice(0, 50);
+        const enrichedDecision = enrichDecisionProvenance(decision, state);
+        const updatedDecisions = [enrichedDecision, ...state.aiDecisions].slice(0, 50);
 
         // Log decision to historical playback store (fire-and-forget)
-        useHistoricalPlaybackStore.getState().logDecision(decision);
+        useHistoricalPlaybackStore.getState().logDecision(enrichedDecision);
 
         return { aiDecisions: updatedDecisions };
       }),
@@ -575,7 +742,26 @@ export const useProductionStore = create<ProductionStore>()(
       // Update the state
       set((state) => ({
         aiDecisions: state.aiDecisions.map((d) =>
-          d.id === decisionId ? { ...d, status, outcome: outcome ?? d.outcome } : d
+          d.id === decisionId
+            ? {
+                ...d,
+                status,
+                outcome: outcome ?? d.outcome,
+                measuredOutcome: outcome
+                  ? {
+                      recordedAt: Date.now(),
+                      summary: outcome,
+                      measurements: {
+                        throughput: state.metrics.throughput,
+                        efficiency: state.metrics.efficiency,
+                        uptime: state.metrics.uptime,
+                        quality: state.metrics.quality,
+                        totalBagsProduced: state.totalBagsProduced,
+                      },
+                    }
+                  : d.measuredOutcome,
+              }
+            : d
         ),
       }));
 
@@ -596,6 +782,43 @@ export const useProductionStore = create<ProductionStore>()(
           });
       }
     },
+    recordDecisionResponse: (decisionId, disposition, options) =>
+      set((state) => ({
+        aiDecisions: state.aiDecisions.map((decision) => {
+          if (decision.id !== decisionId) return decision;
+          const action =
+            disposition === 'modified' && options?.modifiedAction
+              ? options.modifiedAction
+              : decision.action;
+          const status =
+            decision.status === 'completed' || decision.status === 'superseded'
+              ? decision.status
+              : disposition === 'rejected'
+                ? 'superseded'
+                : disposition === 'accepted' ||
+                    disposition === 'modified' ||
+                    disposition === 'automatic'
+                  ? 'in_progress'
+                  : decision.status;
+          return {
+            ...decision,
+            action,
+            status,
+            response: {
+              disposition,
+              recordedAt: Date.now(),
+              note: options?.note,
+              modifiedAction: options?.modifiedAction,
+            },
+            outcome:
+              disposition === 'rejected'
+                ? options?.note
+                  ? `Rejected: ${options.note}`
+                  : 'Rejected by the operator'
+                : decision.outcome,
+          };
+        }),
+      })),
 
     // Machine management
     setMachines: (machines: MachineData[]) => set({ machines }),
@@ -768,7 +991,10 @@ export const useProductionStore = create<ProductionStore>()(
         // This represents actual kg/sec flowing through the system
         // Convert to bags/hour: (kg/sec) / 25 kg/bag * 3600 sec/hour
         const materialFlowState = useMaterialFlowStore.getState();
-        const flowRateKgPerSec = materialFlowState.currentFlowRate;
+        // Final-stage (packer) rate only - the documented basis for throughput.
+        // currentFlowRate sums every processing stage (mill + sifter + packer),
+        // which inflated bags/hour ~3x.
+        const flowRateKgPerSec = materialFlowState.currentPackerFlowRate;
         const BAG_WEIGHT_KG = 25; // Standard bag weight
 
         // If material flow is not initialized yet, fall back to RPM-based calculation
@@ -843,7 +1069,10 @@ export const useProductionStore = create<ProductionStore>()(
         }
 
         const materialFlowState = useMaterialFlowStore.getState();
-        const flowRateKgPerSec = materialFlowState.currentFlowRate;
+        // Final-stage (packer) rate only - the documented basis for throughput.
+        // currentFlowRate sums every processing stage (mill + sifter + packer),
+        // which inflated bags/hour ~3x.
+        const flowRateKgPerSec = materialFlowState.currentPackerFlowRate;
         const BAG_WEIGHT_KG = 25;
 
         let throughput: number;
@@ -935,7 +1164,12 @@ export const useProductionStore = create<ProductionStore>()(
 
     // Heat map data
     heatMapData: [],
-    recordHeatMapPoint: (x: number, z: number) =>
+    recordHeatMapPoint: (x: number, z: number) => {
+      // Heat map is usually toggled OFF. Avoid the per-call Map clone + array
+      // rebuild (and the resulting subscriber churn) when nothing consumes it.
+      // History starts fresh when the overlay is re-enabled — acceptable for a
+      // live overlay.
+      if (!get().showHeatMap) return;
       set((state) => {
         const threshold = 2;
         const gridKey = getGridKey(x, z, threshold);
@@ -974,7 +1208,8 @@ export const useProductionStore = create<ProductionStore>()(
             heatMapIndex: newIndex,
           },
         };
-      }),
+      });
+    },
     clearHeatMap: () =>
       set((state) => ({
         heatMapData: [],
@@ -1050,7 +1285,7 @@ export const useProductionStore = create<ProductionStore>()(
     productionTarget: {
       id: 'daily-target-1',
       date: new Date().toISOString().split('T')[0],
-      targetBags: 15000,
+      targetBags: DAILY_TARGET_BAGS,
       producedBags: 0,
       targetThroughput: 1500,
       actualThroughput: 0,
@@ -1069,6 +1304,19 @@ export const useProductionStore = create<ProductionStore>()(
           : null,
       })),
     totalBagsProduced: 0,
+    dailyBagsProduced: 0,
+    resetDailyBagsProduced: () =>
+      set((state) => ({
+        dailyBagsProduced: 0,
+        // Keep the Overview panel's daily target in sync: new day, fresh count
+        productionTarget: state.productionTarget
+          ? {
+              ...state.productionTarget,
+              producedBags: 0,
+              status: 'in_progress' as const,
+            }
+          : null,
+      })),
     incrementBagsProduced: (count = 1) =>
       set((state) => {
         // Validate input: ensure non-negative integer count
@@ -1082,6 +1330,10 @@ export const useProductionStore = create<ProductionStore>()(
 
         return {
           totalBagsProduced: newTotal,
+          dailyBagsProduced: Math.min(
+            Number.MAX_SAFE_INTEGER,
+            state.dailyBagsProduced + actualIncrement
+          ),
           productionTarget: state.productionTarget
             ? {
                 ...state.productionTarget,
@@ -1113,6 +1365,10 @@ export const useProductionStore = create<ProductionStore>()(
 
         return {
           totalBagsProduced: newTotal,
+          dailyBagsProduced: Math.min(
+            Number.MAX_SAFE_INTEGER,
+            state.dailyBagsProduced + actualIncrement
+          ),
           productionTarget: state.productionTarget
             ? {
                 ...state.productionTarget,

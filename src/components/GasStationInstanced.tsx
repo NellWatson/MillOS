@@ -1,6 +1,34 @@
 import * as THREE from 'three';
 import React, { useRef, useMemo, useEffect } from 'react';
-import { Text } from '@react-three/drei';
+import { SceneText as Text } from './shared/SceneText';
+import { PROCEDURAL_TEXTURES } from '../utils/sharedMaterials';
+
+// ============================================================================
+// Shared surface textures
+// ============================================================================
+// `Texture.clone()` shares `.source`, so these cost a sampler binding and no
+// extra upload. The procedural albedo generators are sRGB-tagged
+// (`createColorDataTexture`), so a mesh carrying `tarmacColor` takes a white
+// tint - a dark hex would multiply the same hue twice and crush the surface.
+const cloneTiled = (source: THREE.Texture, x: number, y: number): THREE.Texture => {
+  const texture = source.clone();
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(x, y);
+  return texture;
+};
+const FORECOURT_MAP = cloneTiled(PROCEDURAL_TEXTURES.tarmacColor, 10, 7);
+const FORECOURT_ROUGHNESS = cloneTiled(PROCEDURAL_TEXTURES.tarmacRoughness, 10, 7);
+const SHOP_WALL_NORMAL = cloneTiled(PROCEDURAL_TEXTURES.panelNormal, 3, 2);
+const SHOP_WALL_ROUGHNESS = cloneTiled(PROCEDURAL_TEXTURES.concreteRoughness, 3, 2);
+const SHOP_WALL_NORMAL_SCALE = new THREE.Vector2(0.14, 0.14);
+// Rendered blockwork: no albedo map, so the call sites keep their own `color`.
+const SHOP_WALL_SURFACE = {
+  roughness: 0.85,
+  normalMap: SHOP_WALL_NORMAL,
+  normalScale: SHOP_WALL_NORMAL_SCALE,
+  roughnessMap: SHOP_WALL_ROUGHNESS,
+} as const;
 
 // ============================================================================
 // Module-level shared geometries (singleton instances)
@@ -8,7 +36,9 @@ import { Text } from '@react-three/drei';
 const GEOMETRIES = {
   shelfProduct: new THREE.BoxGeometry(0.15, 0.25, 0.2),
   drinkBottle: new THREE.CylinderGeometry(0.1, 0.1, 0.4, 8),
-  canopyColumn: new THREE.CylinderGeometry(0.25, 0.25, 5, 8),
+  // 5 m columns standing free against the sky and passed close by on the
+  // forecourt, where 8 sides read as a faceted post rather than a steel pillar.
+  canopyColumn: new THREE.CylinderGeometry(0.25, 0.25, 5, 16),
   magazine: new THREE.BoxGeometry(0.6, 0.35, 0.02),
   // Pump hose/handle geometries
   hoseSegment: new THREE.CylinderGeometry(0.025, 0.025, 0.6, 6),
@@ -335,27 +365,27 @@ export const GasStation = React.memo<GasStationProps>(
           {/* Back wall (solid) */}
           <mesh position={[-3.9, 2.5, 0]} castShadow receiveShadow>
             <boxGeometry args={[0.2, 5, 10]} />
-            <meshStandardMaterial color="#e0e0e0" roughness={0.6} />
+            <meshStandardMaterial color="#e0e0e0" {...SHOP_WALL_SURFACE} />
           </mesh>
           {/* Left side wall (solid) */}
           <mesh position={[0, 2.5, -4.9]} castShadow receiveShadow>
             <boxGeometry args={[8, 5, 0.2]} />
-            <meshStandardMaterial color="#e0e0e0" roughness={0.6} />
+            <meshStandardMaterial color="#e0e0e0" {...SHOP_WALL_SURFACE} />
           </mesh>
           {/* Right side wall (with door opening) - top section */}
           <mesh position={[0, 4, 4.9]} castShadow receiveShadow>
             <boxGeometry args={[8, 2, 0.2]} />
-            <meshStandardMaterial color="#e0e0e0" roughness={0.6} />
+            <meshStandardMaterial color="#e0e0e0" {...SHOP_WALL_SURFACE} />
           </mesh>
           {/* Right side wall - left of door */}
           <mesh position={[-2.65, 1.5, 4.9]} castShadow receiveShadow>
             <boxGeometry args={[2.5, 3, 0.2]} />
-            <meshStandardMaterial color="#e0e0e0" roughness={0.6} />
+            <meshStandardMaterial color="#e0e0e0" {...SHOP_WALL_SURFACE} />
           </mesh>
           {/* Right side wall - right of door */}
           <mesh position={[2.65, 1.5, 4.9]} castShadow receiveShadow>
             <boxGeometry args={[2.5, 3, 0.2]} />
-            <meshStandardMaterial color="#e0e0e0" roughness={0.6} />
+            <meshStandardMaterial color="#e0e0e0" {...SHOP_WALL_SURFACE} />
           </mesh>
           {/* Front wall - large glass window section (transparent) */}
           <mesh position={[3.9, 2.5, 0]}>
@@ -860,10 +890,23 @@ export const GasStation = React.memo<GasStationProps>(
           </Text>
         </group>
 
-        {/* Forecourt ground */}
-        <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        {/* Forecourt ground.
+            Y RAISED 0.01 -> 0.08. TerrainGround renders at y=0.05, so at 0.01
+            this apron was buried and drew for nothing. 0.08 with a -2/-2
+            polygonOffset is exactly what ParkingLot and ConnectingRoad already
+            use against the same datum - this is matching the file's existing
+            convention, not inventing a new Y layer. */}
+        <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[20, 14]} />
-          <meshStandardMaterial color="#4a4a4a" roughness={0.85} />
+          <meshStandardMaterial
+            color="#ffffff"
+            roughness={0.85}
+            map={FORECOURT_MAP}
+            roughnessMap={FORECOURT_ROUGHNESS}
+            polygonOffset
+            polygonOffsetFactor={-2}
+            polygonOffsetUnits={-2}
+          />
         </mesh>
 
         {/* ========== INSTANCED ELEMENTS ========== */}

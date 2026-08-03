@@ -30,10 +30,12 @@ interface KnowledgeIntegrationState {
   hasVotedThisSession: boolean;
   hasRejectedSuggestion: boolean;
   hasAcceptedWellbeingSuggestion: boolean;
-  lastStabilityCheck: number;
-  lastFlourishingCheck: number;
   sessionStartTime: number;
 }
+
+const WELLBEING_CHECK_INTERVAL_MS = 30_000;
+const HIGH_FLOURISHING_SCORE = 80;
+const LOW_FLOURISHING_SCORE = 40;
 
 export function useKnowledgeIntegration(onNarration?: (narration: NarrationEntry) => void) {
   const stateRef = useRef<KnowledgeIntegrationState>({
@@ -42,8 +44,6 @@ export function useKnowledgeIntegration(onNarration?: (narration: NarrationEntry
     hasVotedThisSession: false,
     hasRejectedSuggestion: false,
     hasAcceptedWellbeingSuggestion: false,
-    lastStabilityCheck: 0,
-    lastFlourishingCheck: 0,
     sessionStartTime: Date.now(),
   });
 
@@ -62,8 +62,6 @@ export function useKnowledgeIntegration(onNarration?: (narration: NarrationEntry
   // Game state hooks - use selectors for performance
   const votes = useVotingStore((s) => s.votes);
   const axes = useBASStore((s) => s.axes);
-  const getStabilityPercentage = useStabilityStore((s) => s.getStabilityPercentage);
-  const getFactoryFlourishing = useFlourishingStore((s) => s.getFactoryFlourishing);
 
   // Helper to trigger narration
   const triggerNarration = useCallback(
@@ -89,6 +87,13 @@ export function useKnowledgeIntegration(onNarration?: (narration: NarrationEntry
     if (!FEATURE_FLAGS.FIRST_PLAY_WELCOME_ENABLED) return;
     if (stateRef.current.hasTriggeredFirstPlay) return;
 
+    // Don't consume the one-time first-play moment while narration is disabled.
+    // triggerNarration early-returns when narration is off, so writing the
+    // 'millos-has-played' flag here would permanently suppress the welcome even
+    // after the user later enables AI Reflections. Gate the whole effect instead;
+    // it re-runs when narrationEnabled flips back on.
+    if (!FEATURE_FLAGS.AI_NARRATION_ENABLED || !narrationEnabled) return;
+
     // Belt-and-suspenders: check both localStorage AND the persisted store
     const hasPlayedBefore = localStorage.getItem('millos-has-played');
     const welcomeAlreadyShown = hasBeenShown('welcome');
@@ -106,7 +111,7 @@ export function useKnowledgeIntegration(onNarration?: (narration: NarrationEntry
       // Sync localStorage if store says already shown
       localStorage.setItem('millos-has-played', 'true');
     }
-  }, [triggerNarration, hasBeenShown]);
+  }, [triggerNarration, hasBeenShown, narrationEnabled]);
 
   // =========================================================================
   // VOTING DETECTION
@@ -165,42 +170,32 @@ export function useKnowledgeIntegration(onNarration?: (narration: NarrationEntry
   }, [axes, checkUnlockConditions, triggerNarration]);
 
   // =========================================================================
-  // STABILITY DETECTION
+  // STABILITY AND FLOURISHING DETECTION
   // =========================================================================
   useEffect(() => {
-    const now = Date.now();
-    // Only check every 30 seconds
-    if (now - stateRef.current.lastStabilityCheck < 30000) return;
-    stateRef.current.lastStabilityCheck = now;
+    const checkWellbeing = () => {
+      const stability = useStabilityStore.getState().getStabilityPercentage();
+      if (stability >= 80) {
+        checkUnlockConditions({ hasAchievedHighStability: true });
+        triggerNarration('stability-high');
+      } else if (stability < 30) {
+        triggerNarration('stability-critical');
+      }
 
-    const stability = getStabilityPercentage();
-    if (stability >= 80) {
-      checkUnlockConditions({ hasAchievedHighStability: true });
-      triggerNarration('stability-high');
-    } else if (stability < 30) {
-      triggerNarration('stability-critical');
-    }
-  }, [getStabilityPercentage, checkUnlockConditions, triggerNarration]);
+      // Factory flourishing is expressed as a percentage on a 0-100 scale.
+      const avgFlourishing = useFlourishingStore.getState().getFactoryFlourishing().overallScore;
+      if (avgFlourishing >= HIGH_FLOURISHING_SCORE) {
+        checkUnlockConditions({ hasAchievedHighFlourishing: true });
+        triggerNarration('all-workers-thriving');
+      } else if (avgFlourishing < LOW_FLOURISHING_SCORE) {
+        triggerNarration('flourishing-dropped');
+      }
+    };
 
-  // =========================================================================
-  // FLOURISHING DETECTION
-  // =========================================================================
-  useEffect(() => {
-    const now = Date.now();
-    // Only check every 30 seconds
-    if (now - stateRef.current.lastFlourishingCheck < 30000) return;
-    stateRef.current.lastFlourishingCheck = now;
-
-    const factoryFlourishing = getFactoryFlourishing();
-    const avgFlourishing = factoryFlourishing.overallScore;
-
-    if (avgFlourishing >= 0.8) {
-      checkUnlockConditions({ hasAchievedHighFlourishing: true });
-      triggerNarration('all-workers-thriving');
-    } else if (avgFlourishing < 0.4) {
-      triggerNarration('flourishing-dropped');
-    }
-  }, [getFactoryFlourishing, checkUnlockConditions, triggerNarration]);
+    checkWellbeing();
+    const interval = setInterval(checkWellbeing, WELLBEING_CHECK_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [checkUnlockConditions, triggerNarration]);
 
   // =========================================================================
   // PLAY TIME TRACKING

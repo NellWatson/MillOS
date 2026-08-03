@@ -26,7 +26,8 @@ export interface SignalingCallbacks {
 const PEERJS_CONFIG = {
   // Uses default PeerJS cloud server (free tier, good for small projects)
   // For production, consider self-hosting: https://github.com/peers/peerjs-server
-  debug: process.env.NODE_ENV === 'development' ? 2 : 0,
+  // Use Vite's import.meta.env.DEV (browser-safe); process.env is undefined in the browser bundle.
+  debug: import.meta.env?.DEV ? 2 : 0,
 };
 
 export class SignalingService {
@@ -58,7 +59,7 @@ export class SignalingService {
 
         this.peer.on('open', (id) => {
           if (this.isDestroyed) return;
-          logger.multiplayer.info(`Connected to PeerJS server with ID: ${id}`);
+          logger.multiplayer.debug(`Connected to PeerJS server with ID: ${id}`);
           this.callbacks.onOpen(id);
 
           // If not host, connect to the host
@@ -93,7 +94,16 @@ export class SignalingService {
         this.peer.on('disconnected', () => {
           if (this.isDestroyed) return;
           logger.multiplayer.warn('Disconnected from PeerJS server, attempting reconnect...');
-          // PeerJS will auto-reconnect
+          // PeerJS does NOT auto-reconnect a server-disconnected peer; reconnect()
+          // must be called explicitly. Existing P2P data connections survive a
+          // signaling-server drop, but new connections are blocked until the
+          // signaling channel is restored. A disconnected (not destroyed) peer is
+          // the only valid target for reconnect().
+          try {
+            this.peer?.reconnect();
+          } catch (err) {
+            logger.multiplayer.error('PeerJS reconnect attempt failed:', err);
+          }
         });
 
         // Set a timeout for initial connection
@@ -143,21 +153,21 @@ export class SignalingService {
   private setupConnectionHandlers(conn: DataConnection, peerId: string): void {
     conn.on('open', () => {
       if (this.isDestroyed) return;
-      logger.multiplayer.info(`Connection opened with: ${peerId}`);
+      logger.multiplayer.debug(`Connection opened with: ${peerId}`);
       this.connections.set(peerId, conn);
       this.callbacks.onPeerConnected(peerId, conn);
     });
 
     conn.on('close', () => {
       if (this.isDestroyed) return;
-      logger.multiplayer.info(`Connection closed with: ${peerId}`);
+      logger.multiplayer.debug(`Connection closed with: ${peerId}`);
       this.connections.delete(peerId);
       this.callbacks.onPeerDisconnected(peerId);
     });
 
     conn.on('error', (err) => {
       if (this.isDestroyed) return;
-      logger.multiplayer.error(`Connection error with ${peerId}:`, err);
+      logger.multiplayer.debug(`Connection error with ${peerId}:`, err);
       this.connections.delete(peerId);
       this.callbacks.onPeerDisconnected(peerId);
     });

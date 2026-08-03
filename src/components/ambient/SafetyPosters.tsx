@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
+import { AlertTriangle, CheckCircle, Eye, HardHat, Info } from 'lucide-react';
 import { useSafetyStore } from '../../stores/safetyStore';
 
 interface SafetyPosterProps {
@@ -34,7 +35,7 @@ export const SafetyPoster: React.FC<SafetyPosterProps> = ({
           border: '#991b1b',
           title: 'SAFETY FIRST',
           subtitle: 'Production Second',
-          icon: '⚠',
+          icon: 'warning',
           textColor: '#fef3c7',
         };
       case 'look_out':
@@ -43,7 +44,7 @@ export const SafetyPoster: React.FC<SafetyPosterProps> = ({
           border: '#c2410c',
           title: 'LOOK OUT',
           subtitle: 'For Each Other',
-          icon: '👁',
+          icon: 'watch',
           textColor: '#fff7ed',
         };
       case 'incident_free':
@@ -52,7 +53,7 @@ export const SafetyPoster: React.FC<SafetyPosterProps> = ({
           border: '#15803d',
           title: `${daysWithoutIncident} DAYS`,
           subtitle: 'Without Incident!',
-          icon: '✓',
+          icon: 'clear',
           textColor: '#f0fdf4',
         };
       case 'ppe_required':
@@ -61,7 +62,7 @@ export const SafetyPoster: React.FC<SafetyPosterProps> = ({
           border: '#a16207',
           title: 'PPE REQUIRED',
           subtitle: 'Hard Hat • Safety Vest',
-          icon: '🦺',
+          icon: 'ppe',
           textColor: '#1e293b',
         };
       default:
@@ -70,11 +71,21 @@ export const SafetyPoster: React.FC<SafetyPosterProps> = ({
           border: '#1e40af',
           title: 'STAY SAFE',
           subtitle: 'Stay Alert',
-          icon: 'ℹ',
+          icon: 'information',
           textColor: '#eff6ff',
         };
     }
   }, [type, daysWithoutIncident]);
+  const PosterIcon =
+    posterContent.icon === 'warning'
+      ? AlertTriangle
+      : posterContent.icon === 'watch'
+        ? Eye
+        : posterContent.icon === 'clear'
+          ? CheckCircle
+          : posterContent.icon === 'ppe'
+            ? HardHat
+            : Info;
 
   // Memoized poster backing
   const posterTexture = useMemo(() => {
@@ -130,7 +141,12 @@ export const SafetyPoster: React.FC<SafetyPosterProps> = ({
         }}
       >
         <div style={{ padding: '8px' }}>
-          <div style={{ fontSize: '28px', lineHeight: '1' }}>{posterContent.icon}</div>
+          <PosterIcon
+            aria-hidden="true"
+            size={28}
+            strokeWidth={2.5}
+            style={{ display: 'block', margin: '0 auto' }}
+          />
           <div
             style={{
               fontSize: '14px',

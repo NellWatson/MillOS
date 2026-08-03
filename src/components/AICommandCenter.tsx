@@ -1,5 +1,17 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Bot, Brain, TrendingUp, Target, Settings, Shield, Activity } from 'lucide-react';
+import {
+  Bot,
+  Brain,
+  TrendingUp,
+  Target,
+  Settings,
+  Shield,
+  Activity,
+  Eye,
+  CheckCircle2,
+  Clock3,
+  XCircle,
+} from 'lucide-react';
 import { AIDecision } from '../types';
 import { useProductionStore } from '../stores/productionStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
@@ -13,6 +25,7 @@ import { DecisionHistoryPanel } from './ui/DecisionHistoryPanel';
 import { StrategicPriorityCards } from './ui/StrategicPriorityCards';
 import { VCLDebugPanel } from './ui/VCLDebugPanel';
 import { VCLDiffPanel } from './ui/VCLDiffPanel';
+import { DecisionReplay } from './ui/DecisionReplay';
 import {
   getDecisionTypeIcon,
   getDecisionStatusIcon,
@@ -39,6 +52,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
 }) => {
   const [isThinking, setIsThinking] = useState(false);
   const [activeTab, setActiveTab] = useState<'decisions' | 'strategic'>('decisions');
+  const [selectedDecision, setSelectedDecision] = useState<AIDecision | null>(null);
 
   // Track actual decision outcomes for real success rate calculation
   // Track actual decision outcomes for real success rate calculation
@@ -64,12 +78,14 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
     machines: _machines,
     metrics,
     workerSatisfaction: _workerSatisfaction,
+    recordDecisionResponse,
   } = useProductionStore(
     useShallow((state) => ({
       aiDecisions: state.aiDecisions,
       machines: state.machines,
       metrics: state.metrics,
       workerSatisfaction: state.workerSatisfaction,
+      recordDecisionResponse: state.recordDecisionResponse,
     }))
   );
 
@@ -89,13 +105,19 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
     }))
   );
 
-  // Gemini AI configuration
-  const { aiMode, isGeminiConnected } = useAIConfigStore(
+  // AI backend configuration (Gemini API or local WebGPU neural core)
+  const { aiMode, isGeminiConnected, llmBackend, webgpuModelReady } = useAIConfigStore(
     useShallow((state) => ({
       aiMode: state.aiMode,
       isGeminiConnected: state.isGeminiConnected,
+      llmBackend: state.llmBackend,
+      webgpuModelReady: state.webgpuModelReady,
     }))
   );
+  // The ACTIVE backend's readiness drives the badges — not "either backend".
+  // (Gemini connected while backend=webgpu-not-loaded must NOT read as ready.)
+  const isLocalBackend = llmBackend === 'webgpu';
+  const llmReady = isLocalBackend ? webgpuModelReady : isGeminiConnected;
   const [showGeminiSettings, setShowGeminiSettings] = useState(false);
 
   // React to new alerts
@@ -165,8 +187,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
         d.outcome?.toLowerCase().includes('success') ||
         d.outcome?.toLowerCase().includes('resolved') ||
         d.outcome?.toLowerCase().includes('completed') ||
-        d.outcome?.toLowerCase().includes('improved') ||
-        !d.outcome // No outcome recorded = assumed success
+        d.outcome?.toLowerCase().includes('improved')
     ).length;
 
     decisionOutcomesRef.current = {
@@ -187,15 +208,15 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
   if (embedded) {
     return (
       <>
-        <div className="h-full flex flex-col bg-transparent">
+        <div className="h-full flex flex-col bg-transparent" data-testid="ai-command-center">
           {/* Compact Header for embedded mode */}
           <div className="p-3 border-b border-cyan-500/20">
             <div className="flex items-center gap-2 text-cyan-400 mb-2">
-              <Brain className="w-5 h-5" />
-              <span className="font-bold text-sm">AI Engine</span>
+              <Brain className="w-5 h-5" aria-hidden="true" />
+              <span className="font-bold text-sm">AI Partner</span>
               {/* Fixed width container prevents layout jitter */}
               <span className={`text-xs ml-1 w-16 ${isThinking ? 'animate-pulse' : 'invisible'}`}>
-                analyzing...
+                reviewing...
               </span>
               {/* Gemini Settings Button */}
               <button
@@ -203,18 +224,20 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
                 className="ml-auto flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 border border-slate-700 transition-colors"
                 title={
                   aiMode === 'gemini'
-                    ? 'Gemini AI Active - Click to configure'
+                    ? `${isLocalBackend ? 'Local AI' : 'Gemini AI'} Active - Click to configure`
                     : aiMode === 'hybrid'
                       ? 'Hybrid Mode Active - Click to configure'
-                      : 'Heuristic Mode - Click to configure Gemini'
+                      : 'Heuristic Mode - Click to configure AI backend'
                 }
               >
-                {aiMode === 'gemini' && isGeminiConnected ? (
+                {aiMode === 'gemini' && llmReady ? (
                   <>
                     <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                    <span className="text-[10px] text-green-400 font-medium">Gemini</span>
+                    <span className="text-[10px] text-green-400 font-medium">
+                      {isLocalBackend ? 'Local' : 'Gemini'}
+                    </span>
                   </>
-                ) : aiMode === 'hybrid' && isGeminiConnected ? (
+                ) : aiMode === 'hybrid' && llmReady ? (
                   <>
                     <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
                     <span className="text-[10px] text-purple-400 font-medium">Hybrid</span>
@@ -225,34 +248,43 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
                     <span className="text-[10px] text-amber-400 font-medium">Heuristic</span>
                   </>
                 )}
-                <Settings className="w-3 h-3 text-slate-400" />
+                <Settings className="w-3 h-3 text-slate-400" aria-hidden="true" />
               </button>
             </div>
             {/* System Status - compact */}
             <div className="grid grid-cols-4 gap-1.5 text-[10px]">
               <div className="bg-slate-800/50 rounded px-2 py-1">
-                <span className="text-slate-500">CPU</span>
-                <span className="text-cyan-400 ml-1">{systemStatus.cpu.toFixed(0)}%</span>
+                <span className="text-slate-400">CPU</span>
+                <span className="text-cyan-400 ml-1" data-testid="ai-cpu-value">
+                  {systemStatus.cpu.toFixed(0)}%
+                </span>
               </div>
               <div className="bg-slate-800/50 rounded px-2 py-1">
-                <span className="text-slate-500">MEM</span>
-                <span className="text-green-400 ml-1">{systemStatus.memory.toFixed(0)}%</span>
+                <span className="text-slate-400">MEM</span>
+                <span className="text-green-400 ml-1" data-testid="ai-memory-value">
+                  {systemStatus.memory.toFixed(0)}%
+                </span>
               </div>
               <div className="bg-slate-800/50 rounded px-2 py-1">
-                <span className="text-slate-500">DEC</span>
-                <span className="text-purple-400 ml-1">{systemStatus.decisions}</span>
+                <span className="text-slate-400">DEC</span>
+                <span className="text-purple-400 ml-1" data-testid="ai-decisions-count">
+                  {systemStatus.decisions}
+                </span>
               </div>
               <div className="bg-slate-800/50 rounded px-2 py-1">
-                {(aiMode === 'gemini' || aiMode === 'hybrid') && isGeminiConnected ? (
+                {(aiMode === 'gemini' || aiMode === 'hybrid') &&
+                !isLocalBackend &&
+                isGeminiConnected ? (
                   <>
-                    <span className="text-slate-500">$</span>
+                    <span className="text-slate-400">$</span>
                     <span className="text-emerald-400 ml-1">
                       {useAIConfigStore.getState().getFormattedCost()}
                     </span>
                   </>
                 ) : (
                   <>
-                    <span className="text-slate-500">$</span>
+                    <span className="text-slate-400">$</span>
+                    {/* Local WebGPU inference and heuristic mode are both free. */}
                     <span className="text-emerald-400 ml-1">FREE</span>
                   </>
                 )}
@@ -268,7 +300,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
               </div>
             )}
             {/* Context: Weather & Shift */}
-            <div className="mt-2 flex items-center justify-between text-[9px] text-slate-500">
+            <div className="mt-2 flex items-center justify-between text-[9px] text-slate-400">
               <span className="capitalize">
                 {weather} | {currentShift} shift
               </span>
@@ -277,8 +309,16 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
           </div>
 
           {/* Tab Switcher */}
-          <div className="px-3 py-2 border-b border-slate-800 flex gap-2">
+          <div
+            role="tablist"
+            aria-label="AI Partner views"
+            className="px-3 py-2 border-b border-slate-800 flex gap-2"
+          >
             <button
+              role="tab"
+              id="ai-decisions-tab"
+              aria-selected={activeTab === 'decisions'}
+              aria-controls="ai-command-tabpanel"
               onClick={() => setActiveTab('decisions')}
               className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 activeTab === 'decisions'
@@ -286,11 +326,15 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
                   : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800'
               }`}
             >
-              <Activity className="w-3 h-3 inline mr-1" />
+              <Activity className="w-3 h-3 inline mr-1" aria-hidden="true" />
               Decisions ({aiDecisions.length})
             </button>
 
             <button
+              role="tab"
+              id="ai-strategic-tab"
+              aria-selected={activeTab === 'strategic'}
+              aria-controls="ai-command-tabpanel"
               onClick={() => setActiveTab('strategic')}
               className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 activeTab === 'strategic'
@@ -298,13 +342,23 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
                   : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800'
               }`}
             >
-              <Target className="w-3 h-3 inline mr-1" />
+              <Target className="w-3 h-3 inline mr-1" aria-hidden="true" />
               Strategic
             </button>
           </div>
 
+          {/* Screen-reader-only live region announcing the newest AI decision */}
+          <div className="sr-only" role="status" aria-live="polite">
+            {aiDecisions[0]?.action ? `New AI decision: ${aiDecisions[0].action}` : ''}
+          </div>
+
           {/* Content Area */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          <div
+            id="ai-command-tabpanel"
+            role="tabpanel"
+            aria-labelledby={activeTab === 'decisions' ? 'ai-decisions-tab' : 'ai-strategic-tab'}
+            className="flex-1 overflow-y-auto p-3 space-y-2"
+          >
             {activeTab === 'decisions' ? (
               <>
                 {aiDecisions.slice(0, 15).map((decision: AIDecision) => (
@@ -344,6 +398,49 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
                           <TrendingUp className="w-2.5 h-2.5" />
                           <span>{decision.impact}</span>
                         </div>
+                        {decision.response && (
+                          <p className="mt-1 text-[9px] capitalize text-slate-400">
+                            Response: {decision.response.disposition}
+                          </p>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDecision(decision)}
+                            className="inline-flex min-h-8 items-center gap-1 rounded-md bg-slate-900/70 px-2 text-[9px] text-cyan-300 transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                          >
+                            <Eye className="h-3 w-3" aria-hidden="true" />
+                            Inspect evidence
+                          </button>
+                          {decision.status === 'pending' && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => applyDecisionEffects(decision, 'accepted')}
+                                className="inline-flex min-h-8 items-center gap-1 rounded-md bg-emerald-500/15 px-2 text-[9px] text-emerald-300 transition-colors hover:bg-emerald-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                              >
+                                <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                                Accept
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => recordDecisionResponse(decision.id, 'deferred')}
+                                className="inline-flex min-h-8 items-center gap-1 rounded-md bg-amber-500/15 px-2 text-[9px] text-amber-300 transition-colors hover:bg-amber-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                              >
+                                <Clock3 className="h-3 w-3" aria-hidden="true" />
+                                Defer
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => recordDecisionResponse(decision.id, 'rejected')}
+                                className="inline-flex min-h-8 items-center gap-1 rounded-md bg-red-500/15 px-2 text-[9px] text-red-300 transition-colors hover:bg-red-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                              >
+                                <XCircle className="h-3 w-3" aria-hidden="true" />
+                                Reject
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -351,7 +448,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
                 {aiDecisions.length === 0 && (
                   <div className="text-center py-6 text-slate-500">
                     <Bot className="w-6 h-6 mx-auto mb-2" />
-                    <p className="text-xs">AI analyzing factory state...</p>
+                    <p className="text-xs">No recommendations have been recorded.</p>
                   </div>
                 )}
               </>
@@ -372,6 +469,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
           isOpen={showGeminiSettings}
           onClose={() => setShowGeminiSettings(false)}
         />
+        <DecisionReplay decision={selectedDecision} onClose={() => setSelectedDecision(null)} />
       </>
     );
   }

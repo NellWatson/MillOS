@@ -1,7 +1,7 @@
 /**
- * Portrait Configuration for BAMS Educational Content
+ * Portrait Configuration for BAS Educational Content
  *
- * Lists all people referenced in the Bilateral Alignment Management System
+ * Lists all people referenced in the Bilateral Autonomy System
  * educational materials who need generative portraits.
  *
  * Portrait images should be placed in: public/portraits/
@@ -76,7 +76,7 @@ export const PORTRAITS: PortraitConfig[] = [
     title: 'Founder of Modern Servant Leadership',
     affiliation: 'AT&T (former) / Greenleaf Center',
     contribution:
-      'Developed servant leadership philosophy. Leaders serve first, lead second. Influenced BAMS AI-as-servant model.',
+      'Developed servant leadership philosophy. Leaders serve first, lead second. Influenced BAS AI-as-servant model.',
     category: 'bilateral',
     imagePath: '/portraits/robert-greenleaf.webp',
   },

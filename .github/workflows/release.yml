@@ -22,11 +22,18 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: '22'
+          cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --force
+
+      - name: Validate release source
+        run: |
+          npm run typecheck
+          npm run lint
+          npm run format:check
+          npm test
 
       - name: Build
         run: npm run build
@@ -41,55 +48,17 @@ jobs:
           OUTPUT: CHANGELOG.md
 
       - name: Create release archive
-        run: |
-          tar -czvf millos-${{ github.ref_name }}.tar.gz dist/
+        run: tar -czvf "millos-${{ github.ref_name }}.tar.gz" dist/
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           body: ${{ steps.changelog.outputs.content }}
-          files: |
-            millos-${{ github.ref_name }}.tar.gz
+          files: millos-${{ github.ref_name }}.tar.gz
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  deploy-ghpages:
-    name: Deploy to GitHub Pages
-    runs-on: ubuntu-latest
-    needs: release
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: 'dist'
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+  # GitHub Pages deployment is owned solely by deploy.yml. Keeping release
+  # publication separate prevents a tag build from replacing the versioned site.

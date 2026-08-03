@@ -23,6 +23,11 @@ import type {
   OutcomeRecord,
 } from '../types';
 
+// In-memory fallback used when localStorage is unavailable (SSR, privacy mode,
+// some test runners). Declared before create(persist(...)) so it is initialized
+// before zustand invokes storage.getItem synchronously during hydration.
+const memoryFallback = new Map<string, unknown>();
+
 // =============================================================================
 // HYPOTHESIS GENERATION
 // =============================================================================
@@ -270,12 +275,16 @@ export const useHypothesisEngine = create<HypothesisEngineState>()(
             const testResult = results.find((r) => r.hypothesis.id === h.id);
             if (!testResult) return h;
 
-            if (testResult.result.newConfidence > 0.7) {
+            // Check the no-evidence case FIRST: a hypothesis with no relevant
+            // evidence and a low confidence would otherwise fall into the
+            // < 0.3 'refuted' branch and be wrongly marked refuted on absent
+            // data rather than left at its current status.
+            if (testResult.result.evidence.includes('No relevant')) {
+              return h; // Insufficient data - keep current status
+            } else if (testResult.result.newConfidence > 0.7) {
               return { ...h, status: 'confirmed' as const };
             } else if (testResult.result.newConfidence < 0.3) {
               return { ...h, status: 'refuted' as const };
-            } else if (testResult.result.evidence.includes('No relevant')) {
-              return h; // Keep current status
             }
             return { ...h, status: 'inconclusive' as const };
           }),
@@ -329,7 +338,14 @@ export const useHypothesisEngine = create<HypothesisEngineState>()(
           }
 
           const str = webStorage.getItem(name);
-          return str ? JSON.parse(str) : null;
+          if (!str) return null;
+          try {
+            return JSON.parse(str);
+          } catch {
+            // Corrupt persisted entry: fall back to default empty state
+            // instead of throwing during hydration.
+            return null;
+          }
         },
         setItem: (name, value) => {
           const webStorage =
@@ -363,5 +379,3 @@ export const useHypothesisEngine = create<HypothesisEngineState>()(
     }
   )
 );
-
-const memoryFallback = new Map<string, unknown>();

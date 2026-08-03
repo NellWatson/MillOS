@@ -1,0 +1,111 @@
+import { ArrowRight, Check, ChevronLeft, Factory, Gauge, MousePointer2, X } from 'lucide-react';
+
+export interface OnboardingStep {
+  readonly title: string;
+  readonly content: string;
+  readonly icon: 'factory' | 'goal' | 'controls';
+}
+
+interface OnboardingGuideProps {
+  readonly step: OnboardingStep;
+  readonly stepIndex: number;
+  readonly stepCount: number;
+  readonly onNext: () => void;
+  readonly onBack: () => void;
+  readonly onSkip: () => void;
+  readonly onClose: () => void;
+}
+
+const ICONS = {
+  factory: Factory,
+  goal: Gauge,
+  controls: MousePointer2,
+} as const;
+
+export function OnboardingGuide({
+  step,
+  stepIndex,
+  stepCount,
+  onNext,
+  onBack,
+  onSkip,
+  onClose,
+}: OnboardingGuideProps) {
+  const StepIcon = ICONS[step.icon];
+  const isLastStep = stepIndex === stepCount - 1;
+
+  return (
+    <section
+      aria-label={`Getting started, step ${stepIndex + 1} of ${stepCount}`}
+      aria-live="polite"
+      className="pointer-events-auto fixed bottom-24 left-3 right-3 z-40 rounded-xl border border-cyan-400/40 bg-slate-950/95 p-4 shadow-2xl shadow-black/40 backdrop-blur-md sm:left-5 sm:right-auto sm:w-[360px]"
+    >
+      <div className="mb-3 flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-cyan-400/30 bg-cyan-400/10">
+          <StepIcon className="h-5 w-5 text-cyan-300" aria-hidden="true" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex items-center justify-between gap-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-300">
+              Getting started {stepIndex + 1}/{stepCount}
+            </p>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close getting started for this session"
+              className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
+          <h2 className="text-base font-semibold text-white">{step.title}</h2>
+        </div>
+      </div>
+
+      <p className="text-sm leading-6 text-slate-200">{step.content}</p>
+
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <div className="flex gap-1.5" aria-hidden="true">
+          {Array.from({ length: stepCount }, (_, index) => (
+            <span
+              key={index}
+              className={`h-1.5 rounded-full transition-[width,background-color] ${
+                index === stepIndex ? 'w-6 bg-cyan-300' : 'w-2 bg-slate-600'
+              }`}
+            />
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onBack}
+            disabled={stepIndex === 0}
+            className="inline-flex min-h-10 items-center gap-1 rounded-lg px-3 py-2 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+            Back
+          </button>
+          <button
+            type="button"
+            onClick={onSkip}
+            className="min-h-10 rounded-lg px-3 py-2 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
+          >
+            Skip tour
+          </button>
+          <button
+            type="button"
+            onClick={onNext}
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-teal-700 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-teal-600"
+          >
+            {isLastStep ? 'Start operating' : 'Next'}
+            {isLastStep ? (
+              <Check className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            )}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}

@@ -15,14 +15,28 @@ import { useUIStore } from '../../stores';
 
 type WeatherType = 'storm' | 'rain' | 'wind' | 'snow' | 'clear';
 
+const seededUnit = (seed: number): number => {
+  const value = Math.sin(seed * 12.9898) * 43758.5453;
+  return value - Math.floor(value);
+};
+
+const RAIN_DROPS = Array.from({ length: 50 }, (_, index) => ({
+  left: `${seededUnit(index * 4 + 1) * 100}%`,
+  height: `${20 + seededUnit(index * 4 + 2) * 30}px`,
+  duration: 0.8 + seededUnit(index * 4 + 3) * 0.4,
+  delay: seededUnit(index * 4 + 4) * 2,
+}));
+
+const LIGHTNING_REPEAT_DELAY = seededUnit(211) * 5;
+
 export const WeatherEffectsOverlay: React.FC = () => {
   // Optimized selector: Derived state inside useStore + useShallow
   const weatherAlert = useUIStore(
     useShallow((state) => {
       // Find first weather-related alert
       const alert = state.alerts.find((a) => {
-        const t = a.title?.toLowerCase() || '';
-        const m = a.message?.toLowerCase() || '';
+        const t = a.title?.toLowerCase() ?? '';
+        const m = a.message?.toLowerCase() ?? '';
         const combined = t + ' ' + m;
         return (
           combined.includes('storm') ||
@@ -134,20 +148,20 @@ export const WeatherEffectsOverlay: React.FC = () => {
         {/* Rain effect - animated lines */}
         {(weatherAlert.type === 'rain' || weatherAlert.type === 'storm') && (
           <div className="absolute inset-0 overflow-hidden">
-            {Array.from({ length: weatherAlert.severity === 'high' ? 50 : 25 }).map((_, i) => (
+            {RAIN_DROPS.slice(0, weatherAlert.severity === 'high' ? 50 : 25).map((drop, i) => (
               <motion.div
                 key={i}
                 className="absolute w-0.5 bg-gradient-to-b from-blue-400/30 to-transparent"
                 style={{
-                  left: `${Math.random() * 100}%`,
-                  height: `${20 + Math.random() * 30}px`,
+                  left: drop.left,
+                  height: drop.height,
                 }}
                 initial={{ top: '-5%' }}
                 animate={{ top: '105%' }}
                 transition={{
-                  duration: 0.8 + Math.random() * 0.4,
+                  duration: drop.duration,
                   repeat: Infinity,
-                  delay: Math.random() * 2,
+                  delay: drop.delay,
                   ease: 'linear',
                 }}
               />
@@ -164,7 +178,7 @@ export const WeatherEffectsOverlay: React.FC = () => {
             transition={{
               duration: 5,
               repeat: Infinity,
-              repeatDelay: Math.random() * 5,
+              repeatDelay: LIGHTNING_REPEAT_DELAY,
             }}
           />
         )}

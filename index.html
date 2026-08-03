@@ -1,77 +1,90 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="
+    <!--
+      CSP connect-src third-party domains and their runtime consumers:
+      - https://0.peerjs.com                      PeerJS multiplayer signalling
+      - https://generativelanguage.googleapis.com Gemini cloud AI (GeminiSettingsModal)
+      - https://cdn.jsdelivr.net                  asset/CDN fetches
+      - https://huggingface.co + https://*.hf.co  @mlc-ai/web-llm model weights
+                                                  (Qwen3-4B-q4f16_1-MLC); HF LFS blobs
+                                                  are served from *.hf.co
+      - https://raw.githubusercontent.com         @mlc-ai/web-llm WASM model libs
+                                                  (mlc-ai/binary-mlc-llm-libs/web-llm-models)
+      These are NOT dead trust surface: they back the on-device WebGPU neural core
+      (src/utils/webgpuClient.ts, webgpuWorker.ts). The references live inside the
+      web-llm dependency's appConfig, so a grep of src/ alone will not surface them.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
       default-src 'self';
       script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:;
-      style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-      font-src 'self' https://fonts.gstatic.com;
-      img-src 'self' data: blob: https://millos.net;
-      connect-src 'self' ws: wss: https://generativelanguage.googleapis.com https://cdn.jsdelivr.net https://fonts.gstatic.com https://fonts.googleapis.com;
+      style-src 'self' 'unsafe-inline';
+      font-src 'self';
+      img-src 'self' data: blob: https://www.millos.net;
+      connect-src 'self' blob: ws: wss: https://0.peerjs.com https://generativelanguage.googleapis.com https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com;
       worker-src 'self' blob:;
-    " />
+      object-src 'none';
+      base-uri 'self';
+      form-action 'self';
+      upgrade-insecure-requests;
+    "
+    />
     <meta http-equiv="X-Content-Type-Options" content="nosniff" />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏭</text></svg>" />
+    <meta name="theme-color" content="#0a0f1a" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏭</text></svg>"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="description" content="MillOS - AI-Powered Grain Mill Digital Twin Simulator. A browser-based 3D industrial simulation featuring autonomous workers, intelligent forklifts, real-time production metrics, and SCADA integration." />
-    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta
+      name="description"
+      content="Explore MillOS, a browser-based 3D grain mill operations simulator with simulated workers, deterministic logistics, production metrics, and a simulated SCADA workspace."
+    />
     <meta name="author" content="Nell Watson" />
-    <meta name="keywords" content="MillOS, grain mill, digital twin, 3D simulation, SCADA, industrial automation, AI, React Three Fiber, agentic AI" />
+    <meta
+      name="robots"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
+    <meta
+      name="keywords"
+      content="MillOS, grain mill, digital twin, 3D simulation, SCADA, industrial automation, AI, React Three Fiber, agentic AI"
+    />
 
     <!-- Open Graph / Facebook -->
-    <meta property="og:locale" content="en_US" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://www.millos.net/v0.30/" />
-    <meta property="og:title" content="MillOS | AI-Powered Grain Mill Digital Twin" />
-    <meta property="og:description" content="A browser-based 3D industrial simulation featuring autonomous workers, intelligent forklifts, real-time production metrics, and SCADA integration. An agentic AI experiment by Nell Watson." />
-    <meta property="og:image" content="https://www.millos.net/v0.30/og-image.png" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
+    <meta property="og:url" content="https://www.millos.net/" />
+    <meta property="og:title" content="MillOS | 3D Grain Mill Operations Simulator" />
+    <meta
+      property="og:description"
+      content="Explore a browser-based grain mill simulator with deterministic logistics, production metrics, and a simulated SCADA workspace."
+    />
+    <meta property="og:image" content="https://www.millos.net/og-image.png" />
+    <meta property="og:image:alt" content="MillOS grain mill digital twin interface" />
+    <meta property="og:image:width" content="3456" />
+    <meta property="og:image:height" content="1993" />
     <meta property="og:site_name" content="MillOS" />
+    <meta property="og:locale" content="en_GB" />
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:url" content="https://www.millos.net/v0.30/" />
-    <meta name="twitter:title" content="MillOS | AI-Powered Grain Mill Digital Twin" />
-    <meta name="twitter:description" content="A browser-based 3D industrial simulation featuring autonomous workers, intelligent forklifts, real-time production metrics, and SCADA integration." />
-    <meta name="twitter:image" content="https://www.millos.net/v0.30/og-image.png" />
+    <meta name="twitter:url" content="https://www.millos.net/" />
+    <meta name="twitter:title" content="MillOS | 3D Grain Mill Operations Simulator" />
+    <meta
+      name="twitter:description"
+      content="A browser-based 3D grain mill simulator with simulated workers, deterministic logistics, production metrics, and simulated SCADA."
+    />
+    <meta name="twitter:image" content="https://www.millos.net/og-image.png" />
+    <meta name="twitter:image:alt" content="MillOS grain mill digital twin interface" />
     <meta name="twitter:creator" content="@NellWatson" />
 
     <!-- Additional SEO -->
-    <link rel="canonical" href="https://www.millos.net/v0.30/" />
+    <link rel="canonical" href="https://www.millos.net/" />
 
-    <title>MillOS | Grain Mill Digital Twin</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <!-- Preload 3D scene font for faster troika-three-text initialization -->
-    <!-- Relative path works at any base URL (/, /v0.20/, etc.) -->
-    <link rel="preload" href="fonts/MedievalSharp.ttf" as="font" type="font/ttf" crossorigin>
-    <style>
-      body, html { height: 100%; margin: 0; overflow: hidden; background-color: #0a0f1a; }
-      #root { width: 100%; height: 100%; }
-      .loading-screen {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: #0a0f1a;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        z-index: 9999;
-      }
-      .loading-logo { font-size: 3rem; margin-bottom: 1rem; }
-      .loading-text { color: #64748b; font-family: 'Inter', sans-serif; font-size: 0.875rem; letter-spacing: 0.1em; }
-      .loading-bar { width: 200px; height: 2px; background: #1e293b; margin-top: 1.5rem; border-radius: 1px; overflow: hidden; }
-      .loading-bar::after { content: ''; display: block; width: 50%; height: 100%; background: linear-gradient(90deg, #f97316, #3b82f6); animation: loading 1.5s ease-in-out infinite; }
-      @keyframes loading { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
-    </style>
-
+    <!-- Structured data -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -81,13 +94,13 @@
             "@id": "https://www.millos.net/#website",
             "url": "https://www.millos.net/",
             "name": "MillOS",
-            "description": "A browser-based 3D grain mill digital twin."
+            "description": "A browser-based 3D grain mill operations simulator."
           },
           {
             "@type": "WebApplication",
             "@id": "https://www.millos.net/#application",
             "name": "MillOS",
-            "description": "A browser-based 3D grain mill digital twin with autonomous workers, intelligent forklifts, real-time production metrics, and SCADA tools.",
+            "description": "A browser-based 3D grain mill operations simulator with deterministic logistics, production metrics, and a simulated SCADA workspace.",
             "applicationCategory": "SimulationApplication",
             "operatingSystem": "Any",
             "browserRequirements": "Requires a WebGL-capable browser",
@@ -102,8 +115,77 @@
         ]
       }
     </script>
+
+    <title>MillOS | Grain Mill Digital Twin</title>
+    <!-- Inter + JetBrains Mono are now self-hosted (see src/fonts.css), so there
+         is no Google Fonts <link> and no third-party IP transmission on load. -->
+    <style>
+      body,
+      html {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background-color: #0a0f1a;
+      }
+      #root {
+        width: 100%;
+        height: 100%;
+      }
+      .loading-screen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: #0a0f1a;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+      }
+      .loading-logo {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+      }
+      .loading-text {
+        color: #64748b;
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          sans-serif;
+        font-size: 0.875rem;
+        letter-spacing: 0.1em;
+      }
+      .loading-bar {
+        width: 200px;
+        height: 2px;
+        background: #1e293b;
+        margin-top: 1.5rem;
+        border-radius: 1px;
+        overflow: hidden;
+      }
+      .loading-bar::after {
+        content: '';
+        display: block;
+        width: 50%;
+        height: 100%;
+        background: linear-gradient(90deg, #f97316, #3b82f6);
+        animation: loading 1.5s ease-in-out infinite;
+      }
+      @keyframes loading {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(300%);
+        }
+      }
+    </style>
   </head>
   <body>
+    <noscript><h1>MillOS Industrial Factory Simulation</h1></noscript>
     <div id="root">
       <div class="loading-screen">
         <div class="loading-logo">🏭</div>

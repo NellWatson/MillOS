@@ -216,6 +216,25 @@ describe('SimulationAdapter', () => {
     });
   });
 
+  describe('Operational State Integration', () => {
+    beforeEach(async () => {
+      await adapter.connect();
+    });
+
+    it('publishes exact conserved values without synthetic noise', async () => {
+      adapter.updateOperationalValues({ 'TEST.TT001.PV': 63.25 });
+      await vi.advanceTimersByTimeAsync(1100);
+      expect((await adapter.readTag('TEST.TT001.PV')).value).toBe(63.25);
+    });
+
+    it('keeps fault injection authoritative over operational values', async () => {
+      adapter.updateOperationalValues({ 'TEST.TT001.PV': 63.25 });
+      await vi.advanceTimersByTimeAsync(1100);
+      adapter.injectFault({ tagId: 'TEST.TT001.PV', faultType: 'sensor_fail' });
+      expect((await adapter.readTag('TEST.TT001.PV')).quality).toBe('BAD');
+    });
+  });
+
   describe('Fault Injection', () => {
     beforeEach(async () => {
       await adapter.connect();

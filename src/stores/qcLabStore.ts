@@ -48,6 +48,38 @@ export interface QCLabStore {
   getLatestTestResult: () => QualityTestResult | null;
 }
 
+export type DispatchQualityHoldReason =
+  | 'certification_expired'
+  | 'unresolved_contamination'
+  | 'failed_quality_test';
+
+export interface DispatchQualityStatus {
+  released: boolean;
+  reason: DispatchQualityHoldReason | null;
+}
+
+/**
+ * Translate the laboratory state into the shipping interlock used by the
+ * operations tick and SCADA. An untested startup batch remains releasable so
+ * the simulation can begin, while explicit adverse evidence creates a hold.
+ */
+export function getDispatchQualityStatus(qcLab: QCLabState): DispatchQualityStatus {
+  if (qcLab.certificationStatus === 'expired') {
+    return { released: false, reason: 'certification_expired' };
+  }
+
+  if (qcLab.contaminationAlerts.some((alert) => !alert.resolved)) {
+    return { released: false, reason: 'unresolved_contamination' };
+  }
+
+  const latestTest = qcLab.testHistory[qcLab.testHistory.length - 1];
+  if (latestTest && (!latestTest.passed || latestTest.grade === 'FAIL')) {
+    return { released: false, reason: 'failed_quality_test' };
+  }
+
+  return { released: true, reason: null };
+}
+
 const initialQCLabState: QCLabState = {
   isRunning: false,
   currentTest: null,

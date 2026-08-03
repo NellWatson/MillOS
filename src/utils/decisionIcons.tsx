@@ -89,7 +89,7 @@ export function getDecisionTypeColor(type: DecisionType | string): string {
     case 'optimization':
       return 'from-green-500 to-green-600';
     case 'prediction':
-      return 'from-purple-500 to-purple-600';
+      return 'from-teal-600 to-blue-600';
     case 'maintenance':
       return 'from-yellow-500 to-yellow-600';
     case 'safety':

@@ -6,7 +6,14 @@
  */
 
 import * as THREE from 'three';
-import { getTexture, fbmNoise, hash, createDataTexture } from '../utils/textureGenerator';
+import {
+  getTexture,
+  fbmNoise,
+  fbmNoiseSigned,
+  hash,
+  createColorDataTexture,
+  createLinearDataTexture,
+} from '../utils/textureGenerator';
 
 export interface CobblestoneOptions {
   stoneSize?: number; // Average stone size in pixels
@@ -104,18 +111,28 @@ export const generateCobblestone = (
           const colorIndex = Math.floor(hash(cellX + 50, cellY + 50) * STONE_COLORS.length);
           const stoneColor = STONE_COLORS[colorIndex];
 
-          // Surface texture
+          // Surface texture - 5 octaves so the stone face still reads as stone
+          // when the camera is a metre away rather than dissolving to a smudge.
           const nx = x / size;
           const ny = y / size;
-          const surfaceNoise = fbmNoise(nx * 50, ny * 50, 3) * 0.1;
+          const surfaceNoise = fbmNoiseSigned(nx * 50, ny * 50, 5) * 0.16;
+          const microPit = fbmNoiseSigned(nx * 180, ny * 180, 2) * 0.06;
 
           // Slight variation per stone
-          const stoneVariation = (hash(cellX * 3, cellY * 5) - 0.5) * 0.1;
+          const stoneVariation = (hash(cellX * 3, cellY * 5) - 0.5) * 0.12;
 
-          r = stoneColor.r + surfaceNoise + stoneVariation;
-          g = stoneColor.g + surfaceNoise + stoneVariation;
-          b = stoneColor.b + surfaceNoise + stoneVariation;
+          r = stoneColor.r + surfaceNoise + microPit + stoneVariation;
+          g = stoneColor.g + surfaceNoise + microPit + stoneVariation;
+          b = stoneColor.b + surfaceNoise + microPit + stoneVariation;
         }
+
+        // Macro-scale damp/dry drift across the whole tile. Two octaves at
+        // sub-tile frequency break the repeat beat on large courtyards without
+        // touching per-stone contrast.
+        const macro = fbmNoiseSigned((x / size) * 2.5 + 7, (y / size) * 2.5 + 19, 2) * 0.09;
+        r += macro;
+        g += macro * 0.98;
+        b += macro * 0.92;
 
         data[i] = Math.floor(Math.max(0, Math.min(1, r)) * 255);
         data[i + 1] = Math.floor(Math.max(0, Math.min(1, g)) * 255);
@@ -124,7 +141,7 @@ export const generateCobblestone = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createColorDataTexture(data, size, size);
   });
 };
 
@@ -182,16 +199,86 @@ export const generateCobblestoneNormal = (
           ny = 0.5 - (dy / (stoneRadius + 1)) * normalStrength * domeHeight;
         }
 
-        // Add surface roughness
-        const roughness = fbmNoise((x / size) * 60, (y / size) * 60, 2) * 0.1;
+        // Surface perturbation MUST be signed. The previous unsigned
+        // `fbmNoise(...) * 0.1` added +0.05 average to BOTH channels, tilting
+        // every texel the same diagonal way and cancelling the dome relief.
+        const bumpX = fbmNoiseSigned((x / size) * 60, (y / size) * 60, 3) * 0.14;
+        const bumpY = fbmNoiseSigned((x / size) * 60 + 31, (y / size) * 60 + 57, 3) * 0.14;
 
-        data[i] = Math.floor(Math.max(0, Math.min(1, nx + roughness)) * 255);
-        data[i + 1] = Math.floor(Math.max(0, Math.min(1, ny + roughness)) * 255);
+        data[i] = Math.floor(Math.max(0, Math.min(1, nx + bumpX)) * 255);
+        data[i + 1] = Math.floor(Math.max(0, Math.min(1, ny + bumpY)) * 255);
         data[i + 2] = 255;
         data[i + 3] = 255;
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
+  });
+};
+
+/**
+ * Generates a cobblestone roughness map.
+ *
+ * Stone crowns are polished by traffic (low roughness), mortar gaps stay dry
+ * and rough. That wet-crown / dry-mortar split is what makes cobble read as
+ * stone rather than as a grey pattern once an environment map exists.
+ *
+ * Written to R, G and B: three samples `roughnessMap.g`, so a single-channel
+ * map silently evaluates to zero roughness.
+ */
+export const generateCobblestoneRoughness = (
+  size: number = 256,
+  stoneSize: number = 24
+): THREE.DataTexture => {
+  return getTexture(`cobblestone-roughness-${size}-${stoneSize}`, () => {
+    const data = new Uint8Array(size * size * 4);
+    const gridSize = stoneSize;
+    const halfGrid = gridSize / 2;
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const i = (y * size + x) * 4;
+
+        const cellX = Math.floor(x / gridSize);
+        const cellY = Math.floor(y / gridSize);
+
+        const jitterX = (hash(cellX, cellY) - 0.5) * gridSize * 0.5;
+        const jitterY = (hash(cellX + 100, cellY + 100) - 0.5) * gridSize * 0.5;
+
+        const stoneCenterX = cellX * gridSize + halfGrid + jitterX;
+        const stoneCenterY = cellY * gridSize + halfGrid + jitterY;
+
+        const dx = x - stoneCenterX;
+        const dy = y - stoneCenterY;
+
+        const stoneAngle = hash(cellX * 17, cellY * 31) * Math.PI;
+        const stoneStretch = 0.7 + hash(cellX * 23, cellY * 29) * 0.5;
+        const cosA = Math.cos(stoneAngle);
+        const sinA = Math.sin(stoneAngle);
+        const rotDx = dx * cosA + dy * sinA;
+        const rotDy = -dx * sinA + dy * cosA;
+        const dist = Math.sqrt((rotDx * rotDx) / (stoneStretch * stoneStretch) + rotDy * rotDy);
+
+        const stoneRadius = halfGrid * (0.65 + hash(cellX * 7, cellY * 13) * 0.3);
+        const normDist = Math.min(1, dist / (stoneRadius * 0.88));
+
+        // Crown (normDist 0) polished to 0.35, rim rising to mortar at 0.92.
+        const crownToMortar = Math.pow(normDist, 1.6);
+        let roughness = 0.35 + crownToMortar * 0.57;
+
+        // Per-stone wear: some stones are newer / never walked on.
+        roughness += (hash(cellX * 11, cellY * 19) - 0.5) * 0.18;
+        // Fine breakup so the specular lobe is not perfectly uniform per stone.
+        roughness += fbmNoiseSigned((x / size) * 90, (y / size) * 90, 2) * 0.08;
+
+        const val = Math.floor(Math.max(0.28, Math.min(0.98, roughness)) * 255);
+        data[i] = val;
+        data[i + 1] = val;
+        data[i + 2] = val;
+        data[i + 3] = 255;
+      }
+    }
+
+    return createLinearDataTexture(data, size, size);
   });
 };

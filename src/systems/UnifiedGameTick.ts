@@ -13,13 +13,44 @@
 import { useEffect } from 'react';
 import { centralTick, TICK_PRIORITY } from './CentralTickSystem';
 import type { TickContext } from './CentralTickSystem';
-import { useGameSimulationStore } from '../stores/gameSimulationStore';
-import { useProductionStore } from '../stores/productionStore';
+import { useGameSimulationStore, getShiftForHour } from '../stores/gameSimulationStore';
+import { useProductionStore, DAILY_TARGET_BAGS } from '../stores/productionStore';
+import { getDispatchQualityStatus, useQCLabStore } from '../stores/qcLabStore';
+import { useMaterialFlowStore } from '../stores/materialFlowStore';
+import { useTruckScheduleStore } from '../stores/truckScheduleStore';
+import { useBreakdownStore } from '../stores/breakdownStore';
 import { useUIStore } from '../stores/uiStore';
 import type { MachineData } from '../types';
 
+// Tracks the receiving dock's docked state across ticks so a false->true
+// transition (a grain truck arriving) triggers exactly one silo delivery.
+let _lastReceivingDocked = false;
+let _lastShippingDocked = false;
+
+// One grain truck tops up ~15 t (silo capacity is 50 t)
+const GRAIN_DELIVERY_KG = 15000;
+// A shipping truck can load up to 5 t of finished flour or semolina.
+const FINISHED_GOODS_SHIPMENT_KG = 5000;
+
+// Shift-change phase timer. startShiftHandover() sets phase 'leaving' (workers
+// walk to the exit at z=-50, ~3 u/s, worst case ~27 s) but nothing ever
+// completed the change — shiftChangeActive stayed true forever and the
+// handover button disabled itself permanently. This timer advances
+// leaving -> entering -> completeShiftHandover().
+let _shiftPhaseElapsed = 0;
+const SHIFT_LEAVING_DURATION_S = 30;
+const SHIFT_ENTERING_DURATION_S = 10;
+
 // Machine status type (matches MachineData.status)
 type MachineStatus = 'running' | 'idle' | 'warning' | 'critical';
+
+// QC grade -> quality score mapping (mirrors deprecated productionStore.tickMetrics)
+const QC_GRADE_SCORES: Record<string, number> = { A: 100, B: 85, C: 70, FAIL: 0 };
+
+// Daily-target milestone tracking (percent thresholds, fired once each per day,
+// reset on day rollover). Bitmask index matches _MILESTONE_THRESHOLDS.
+const _MILESTONE_THRESHOLDS = [25, 50, 75, 100] as const;
+let _milestonesReachedMask = 0;
 
 // ============================================================
 // REUSABLE MODULE-LEVEL OBJECTS (never recreated)
@@ -120,16 +151,21 @@ function updateMachineTruth(
   const baseLoad = machine.metrics.load;
   const wearConfig = getWearConfig(machine.type);
 
-  // Temperature changes (this IS truth, affects machine health)
+  // Temperature changes (this IS truth, affects machine health).
+  // Keep 0.1C resolution and DON'T floor the per-tick step at 0.1: the old
+  // `Math.round(... Math.max(0.1, delta))` forced a minimum +0.1 then rounded
+  // it back off, so as the proportional delta shrank near the target the
+  // temperature froze a full degree below 75C and never converged. Rounding to
+  // one decimal (matching Machines.tsx) lets it settle within 0.1C of target.
   let newTemp = baseTemp;
   if (isRunning) {
     const tempTarget = 75;
     const tempDelta = (tempTarget - baseTemp) * 0.02 * deltaSeconds;
-    newTemp = Math.round(Math.min(85, baseTemp + Math.max(0.1, tempDelta)));
+    newTemp = Math.round(Math.min(85, baseTemp + tempDelta) * 10) / 10;
   } else {
     const tempTarget = 25;
     const tempDelta = (baseTemp - tempTarget) * 0.01 * deltaSeconds;
-    newTemp = Math.round(Math.max(25, baseTemp - Math.max(0.1, tempDelta)));
+    newTemp = Math.round(Math.max(25, baseTemp - tempDelta) * 10) / 10;
   }
 
   // Wear accumulation (this IS truth)
@@ -199,6 +235,20 @@ function unifiedGameTick(ctx: TickContext): void {
   let newGameDay = gameStore.gameDay;
   if (newGameTime < gameStore.gameTime && hoursElapsed > 0) {
     newGameDay++;
+
+    // Close out the production day: celebrate the result, then reset the
+    // daily counter and milestone tracking so the target loop restarts fresh.
+    const dayEndStore = useProductionStore.getState();
+    const dayBags = dayEndStore.dailyBagsProduced;
+    gameStore.triggerCelebration('shift_complete', {
+      value: dayBags,
+      message:
+        dayBags >= DAILY_TARGET_BAGS
+          ? `Day complete: ${Math.round(dayBags).toLocaleString()} bags - target met!`
+          : `Day complete: ${Math.round(dayBags).toLocaleString()} of ${DAILY_TARGET_BAGS.toLocaleString()} bags`,
+    });
+    dayEndStore.resetDailyBagsProduced();
+    _milestonesReachedMask = 0;
   }
 
   // 2. Update machine TRUTH (not cosmetics)
@@ -208,6 +258,7 @@ function unifiedGameTick(ctx: TickContext): void {
   let anyMachineChanged = false;
   let runningCount = 0;
   let totalRunningDelta = 0;
+  let efficiencySum = 0;
 
   // Check each machine for truth changes
   // Use module-level reusable arrays (cleared here, never reallocated)
@@ -222,6 +273,7 @@ function unifiedGameTick(ctx: TickContext): void {
       runningCount++;
       totalRunningDelta += deltaSeconds;
     }
+    efficiencySum += machine.metrics.efficiency ?? 100;
 
     const result = updateMachineTruth(machine, deltaSeconds);
 
@@ -256,6 +308,20 @@ function unifiedGameTick(ctx: TickContext): void {
 
   // Efficiency: percentage of machines running
   _metricsUpdate.efficiency = Math.round((runningCount / totalMachines) * 100 * 10) / 10;
+
+  // Quality: latest QC Lab test grade (A=100, B=85, C=70, FAIL=0 - mirrors the
+  // deprecated productionStore.tickMetrics mapping). Before any test exists,
+  // derive an estimate from average machine health so the KPI isn't frozen at
+  // its 99.5 initial value: pristine machines read 99.5, worn ones drag it down.
+  const qcHistory = useQCLabStore.getState().qcLab.testHistory;
+  const latestTest = qcHistory[qcHistory.length - 1];
+  if (latestTest) {
+    _metricsUpdate.quality = QC_GRADE_SCORES[latestTest.grade] ?? 99.5;
+  } else {
+    const avgMachineEfficiency = efficiencySum / totalMachines; // 0-100
+    _metricsUpdate.quality =
+      Math.round(Math.max(0, Math.min(99.5, 99.5 * (avgMachineEfficiency / 100))) * 10) / 10;
+  }
 
   // Update tracking
   _metricTrackingUpdate.totalRunningSeconds =
@@ -325,6 +391,26 @@ function unifiedGameTick(ctx: TickContext): void {
     });
   }
 
+  // 3b. Daily-target milestones: celebrate 25/50/75/100% once each per day
+  // (mask resets on day rollover above). 100% counts as target met.
+  if (DAILY_TARGET_BAGS > 0) {
+    const dailyProgressPct = (prodStore.dailyBagsProduced / DAILY_TARGET_BAGS) * 100;
+    for (let t = 0; t < _MILESTONE_THRESHOLDS.length; t++) {
+      const threshold = _MILESTONE_THRESHOLDS[t];
+      const bit = 1 << t;
+      if (dailyProgressPct >= threshold && (_milestonesReachedMask & bit) === 0) {
+        _milestonesReachedMask |= bit;
+        gameStore.triggerCelebration(threshold === 100 ? 'target_met' : 'milestone', {
+          value: Math.round(prodStore.dailyBagsProduced),
+          message:
+            threshold === 100
+              ? `Daily target reached: ${DAILY_TARGET_BAGS.toLocaleString()} bags!`
+              : `Daily target ${threshold}% complete`,
+        });
+      }
+    }
+  }
+
   // 4. Update game time only if changed
   const timeChanged =
     Math.abs(newGameTime - gameStore.gameTime) > 0.0001 || newGameDay !== gameStore.gameDay;
@@ -333,6 +419,90 @@ function unifiedGameTick(ctx: TickContext): void {
       gameTime: newGameTime,
       gameDay: newGameDay,
     });
+
+    // Keep the shift in lock-step with the clock. This unified tick replaced the
+    // store's tickGameTime (which reconciled the shift inline); without this the
+    // clock advanced but currentShift stayed frozen at its load-time value, so
+    // the HUD showed e.g. "Afternoon" at 23:59. getShiftForHour derives from the
+    // final time, so a single high-speed tick spanning multiple boundaries still
+    // lands on the correct shift. setShift silently updates shiftData too.
+    const expectedShift = getShiftForHour(newGameTime);
+    if (expectedShift !== gameStore.currentShift) {
+      gameStore.setShift(expectedShift);
+    }
+  }
+
+  // 4b. Advance the material-flow simulation (grain -> mills -> sifters -> packers).
+  // This tick was orphaned when ConveyorSystem was modularized (a5d0c21) — the
+  // whole flow network silently froze. It belongs here, on the simulation tick,
+  // not in a render-loop useFrame.
+  const flowStore = useMaterialFlowStore.getState();
+  // Couple machine status to flow FIRST so a stopped/broken machine stops
+  // processing material this same tick (action -> consequence).
+  flowStore.syncMachineProcessing(
+    anyMachineChanged ? useProductionStore.getState().machines : machines
+  );
+  flowStore.tickMaterialFlow(deltaSeconds, productionSpeed);
+
+  // 4c. Grain deliveries: when a receiving truck docks, it refills the
+  // emptiest silo — without this the silos drain dry in under an hour of
+  // simulation and the flow network starves permanently.
+  const receivingDocked = useTruckScheduleStore.getState().truckSchedule.receiving.truckDocked;
+  if (receivingDocked && !_lastReceivingDocked) {
+    flowStore.receiveGrainDelivery(GRAIN_DELIVERY_KG);
+    // The same truck also carries a spare-parts resupply, closing the
+    // maintenance loop: consume parts to repair, trucks bring them back.
+    useBreakdownStore.getState().restockDelivery();
+  }
+  _lastReceivingDocked = receivingDocked;
+
+  // 4d. Finished goods leave through the shipping dock. The material store
+  // records the actual loaded mass and manifest, so an under-filled truck does
+  // not make product appear or disappear.
+  const shippingDocked = useTruckScheduleStore.getState().truckSchedule.shipping.truckDocked;
+  if (shippingDocked && !_lastShippingDocked) {
+    const qualityStatus = getDispatchQualityStatus(useQCLabStore.getState().qcLab);
+    if (qualityStatus.released) {
+      flowStore.shipFinishedGoods(FINISHED_GOODS_SHIPMENT_KG);
+    } else {
+      const reason =
+        qualityStatus.reason === 'certification_expired'
+          ? 'quality certification is expired'
+          : qualityStatus.reason === 'unresolved_contamination'
+            ? 'a contamination alert is unresolved'
+            : 'the latest laboratory result failed';
+      useUIStore.getState().addAlert({
+        id: `dispatch-quality-hold-${Date.now()}`,
+        type: 'warning',
+        title: 'Dispatch Quality Hold',
+        message: `Shipping truck held at the dock because ${reason}. Clear the quality condition before release.`,
+        timestamp: new Date(),
+        acknowledged: false,
+      });
+    }
+  }
+  _lastShippingDocked = shippingDocked;
+
+  // 4e. Shift-change completion (see _shiftPhaseElapsed above)
+  const simStore = useGameSimulationStore.getState();
+  if (simStore.shiftChangeActive) {
+    _shiftPhaseElapsed += deltaSeconds;
+    if (simStore.shiftChangePhase === 'leaving' && _shiftPhaseElapsed >= SHIFT_LEAVING_DURATION_S) {
+      // Old crew is out — new crew walks back in (normal worker behavior resumes)
+      useGameSimulationStore.setState({ shiftChangePhase: 'entering' });
+      _shiftPhaseElapsed = 0;
+    } else if (
+      simStore.shiftChangePhase === 'entering' &&
+      _shiftPhaseElapsed >= SHIFT_ENTERING_DURATION_S
+    ) {
+      // completeShiftHandover (not the plain completeShiftChange): also
+      // archives shift notes/production, resets incidents and clock-ins,
+      // and rolls the supervisor handoff for the incoming shift.
+      simStore.completeShiftHandover();
+      _shiftPhaseElapsed = 0;
+    }
+  } else {
+    _shiftPhaseElapsed = 0;
   }
 
   // 5. Handle breakdowns (async, outside main path)

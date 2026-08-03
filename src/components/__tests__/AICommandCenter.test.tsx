@@ -71,6 +71,9 @@ vi.mock('lucide-react', () => ({
   TrendingUp: () => null,
   Target: () => null,
   Settings: () => null,
+  CheckCircle2: () => null,
+  Clock3: () => null,
+  XCircle: () => null,
 }));
 
 // Mock Framer Motion to avoid animation complications in tests
@@ -159,6 +162,7 @@ describe('AICommandCenter', () => {
       averageEnergy: 75,
       averageSatisfaction: 80,
     },
+    recordDecisionResponse: vi.fn(),
   };
 
   const mockUIState = {
@@ -210,8 +214,7 @@ describe('AICommandCenter', () => {
     it('should render when isOpen is true', () => {
       render(<AICommandCenter isOpen={true} onClose={vi.fn()} embedded />);
 
-      // Embedded mode uses 'AI Engine' instead of 'AI Command Center'
-      expect(screen.getByText('AI Engine')).toBeInTheDocument();
+      expect(screen.getByText('AI Partner')).toBeInTheDocument();
     });
 
     it('should display initial system status', () => {
@@ -309,12 +312,13 @@ describe('AICommandCenter', () => {
   it('should switch between decisions and strategic tabs', () => {
     render(<AICommandCenter isOpen={true} onClose={vi.fn()} embedded />);
 
-    // Initially on decisions tab - check for the decisions button showing selected state
-    const decisionsButton = screen.getByRole('button', { name: /decisions/i });
+    // Initially on decisions tab - check for the decisions tab showing selected state
+    // (tabs now expose role="tab" inside the role="tablist" group for WCAG conformance)
+    const decisionsButton = screen.getByRole('tab', { name: /decisions/i });
     expect(decisionsButton).toHaveClass('bg-cyan-500/20');
 
     // Click strategic tab
-    const strategicButton = screen.getByRole('button', { name: /strategic/i });
+    const strategicButton = screen.getByRole('tab', { name: /strategic/i });
     fireEvent.click(strategicButton);
 
     // Strategic tab should now be selected
@@ -415,8 +419,7 @@ describe('AICommandCenter', () => {
     it('should show empty state when no decisions exist', () => {
       render(<AICommandCenter isOpen={true} onClose={vi.fn()} embedded />);
 
-      // Embedded mode shows "AI analyzing factory state..."
-      expect(screen.getByText(/AI analyzing factory state/i)).toBeInTheDocument();
+      expect(screen.getByText(/No recommendations have been recorded/i)).toBeInTheDocument();
     });
 
     // Updated: Embedded mode limits to 15 decisions, not 20

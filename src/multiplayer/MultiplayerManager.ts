@@ -14,21 +14,28 @@ import { SignalingService, SignalingConfig } from './SignalingService';
 import { PeerConnection } from './PeerConnection';
 import {
   MultiplayerMessage,
-  RemotePlayer as _RemotePlayer,
   GameStateDiff,
   FullGameState,
   MachineIntent,
   PLAYER_COLORS,
   PlayerColor,
+  RemotePlayer,
 } from './types';
 import { useMultiplayerStore } from '../stores/multiplayerStore';
+import { useProductionStore } from '../stores/productionStore';
 import { handleHostDisconnect } from './HostMigration';
 import { logger } from '../utils/logger';
+import { sanitizeChatMessage, sanitizePlayerName } from '../utils/sanitize';
 
 // Broadcast frequencies
 const PLAYER_UPDATE_INTERVAL = 50; // 20Hz for smooth movement
 const STATE_SYNC_INTERVAL = 100; // 10Hz for game state
 const PING_INTERVAL = 1000; // 1Hz for latency measurement
+
+// Resolve any guest intent that has not received an INTENT_RESULT within this
+// window as failed, so the UI surfaces the failure and pendingIntents does not
+// grow unbounded when the host drops an INTENT silently.
+const INTENT_TIMEOUT_MS = 5000;
 
 export class MultiplayerManager {
   private signalingService: SignalingService | null = null;
@@ -38,6 +45,18 @@ export class MultiplayerManager {
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private stateSequence = 0;
   private isDestroyed = false;
+
+  // HOST AUTHORITY: the verified identity for each connection, assigned once at
+  // connect time. Every identity-bearing field in subsequent messages from that
+  // connection (PLAYER_UPDATE.id, INTENT.playerId, CHAT.from, AI_VOTE.playerId)
+  // is overwritten with this value — peers cannot impersonate other players.
+  private verifiedPlayerIds: Map<string, string> = new Map();
+
+  // GUEST TRUST BOUNDARY: the only peer a guest accepts messages/connections
+  // from. PeerJS peer IDs are guessable (room code + broadcast player ids), so
+  // without this check any room member could connect directly to a guest and
+  // be treated as the host (full state takeover).
+  private expectedHostPeerId: string | null = null;
 
   // Callbacks for external integration
   private onGameStateRequest: (() => FullGameState) | null = null;
@@ -100,7 +119,11 @@ export class MultiplayerManager {
       if (currentState.connectionState === 'connecting') {
         logger.multiplayer.error('Connection timeout - no state sync received');
         currentState.setConnectionState('disconnected');
-        this.destroy();
+        // Use the module-level destroy so the singleton is nulled, not just
+        // flagged isDestroyed. Otherwise getMultiplayerManager() keeps returning
+        // this poisoned (isDestroyed=true) instance and all later broadcasts/
+        // state-syncs short-circuit, breaking subsequent multiplayer attempts.
+        destroyMultiplayerManager();
       }
     }, 15000);
   }
@@ -110,6 +133,10 @@ export class MultiplayerManager {
    */
   private async initializeSignaling(config: SignalingConfig): Promise<void> {
     const store = useMultiplayerStore.getState();
+
+    // Guests trust exactly one peer: the host. This mirrors the peer ID that
+    // SignalingService.connectToHost() dials, so the two can never drift.
+    this.expectedHostPeerId = config.isHost ? null : `millos-${config.roomCode}`;
 
     this.signalingService = new SignalingService(config, {
       onPeerConnected: (peerId, connection) => {
@@ -137,8 +164,31 @@ export class MultiplayerManager {
     const store = useMultiplayerStore.getState();
     const metadata = connection.metadata as { playerName?: string; playerId?: string } | undefined;
     const isHost = store.isHost;
-    const playerId = metadata?.playerId || peerId;
-    const playerName = metadata?.playerName || 'Player';
+    const playerName = sanitizePlayerName(metadata?.playerName) || 'Player';
+
+    // Guests accept ONLY their outbound host connection. Any other incoming
+    // connection (peer IDs are guessable from the room code + broadcast player
+    // ids) is refused before a message handler is ever attached.
+    if (!isHost && peerId !== this.expectedHostPeerId) {
+      logger.multiplayer.warn(`Refused non-host connection on guest: ${peerId}`);
+      connection.close();
+      return;
+    }
+
+    // HOST AUTHORITY: verify the claimed player id once, at connect time. The
+    // claim is honored only when well-formed and not already in use (the host
+    // itself, another verified connection, or a registered remote player);
+    // otherwise fall back to the PeerJS-unique peerId. All later messages from
+    // this connection are stamped with this verified id.
+    const claimedId = metadata?.playerId;
+    const claimedIdInUse =
+      claimedId === store.localPlayerId ||
+      Array.from(this.verifiedPlayerIds.values()).includes(claimedId ?? '') ||
+      (claimedId !== undefined && store.remotePlayers.has(claimedId));
+    const playerId =
+      typeof claimedId === 'string' && /^[\w-]{1,64}$/.test(claimedId) && !claimedIdInUse
+        ? claimedId
+        : peerId;
 
     // Create peer connection wrapper
     const peerConn = new PeerConnection(connection, {
@@ -163,6 +213,8 @@ export class MultiplayerManager {
       });
       return;
     }
+
+    this.verifiedPlayerIds.set(peerId, playerId);
 
     // Assign a color to the new player
     const usedColors = store._remotePlayersArray.map((p) => p.color);
@@ -245,14 +297,15 @@ export class MultiplayerManager {
    * Handle peer disconnection
    */
   private handlePeerDisconnected(peerId: string): void {
+    // Guard against running twice for the same peer (onClose + stale sweep can
+    // both fire). Store removals are idempotent but the PLAYER_LEAVE broadcast is not.
+    if (!this.peerConnections.has(peerId)) return;
+
     const store = useMultiplayerStore.getState();
 
     const peerConn = this.peerConnections.get(peerId);
-    const metadata = peerConn?.getMetadata();
-    const playerId =
-      store.isHost && metadata && typeof metadata.playerId === 'string'
-        ? (metadata.playerId as string)
-        : peerId;
+    const playerId = this.verifiedPlayerIds.get(peerId) ?? peerId;
+    this.verifiedPlayerIds.delete(peerId);
 
     if (store.isHost) {
       store.removeRemotePlayer(playerId);
@@ -271,72 +324,232 @@ export class MultiplayerManager {
       handleHostDisconnect();
     }
 
+    // Close the wrapper before dropping it. On the stale-sweep path the underlying
+    // DataConnection is still open, so without this the connection/handlers leak.
+    // PeerConnection.close() guards isOpen, so the normal 'close' path is a no-op here.
+    peerConn?.close();
     this.peerConnections.delete(peerId);
   }
 
   /**
-   * Handle incoming message from a peer
+   * Handle incoming message from a peer.
+   *
+   * Role-gated: the HOST accepts only guest-originated message types and stamps
+   * every identity-bearing field with the connection's verified player id;
+   * GUESTS accept messages only from the host connection. Anything outside the
+   * role's allow-list is dropped with a warning.
    */
   private handleMessage(peerId: string, message: MultiplayerMessage): void {
     const store = useMultiplayerStore.getState();
+    if (store.isHost) {
+      this.handleHostMessage(peerId, message);
+    } else {
+      this.handleGuestMessage(peerId, message);
+    }
+  }
+
+  /** Validate the 20Hz PLAYER_UPDATE payload field-by-field (untrusted input). */
+  private sanitizePlayerUpdate(p: RemotePlayer): Partial<RemotePlayer> {
+    // Validate-or-omit each field so a malicious peer can't push NaN/Infinity
+    // coords (which crash PlayerInterpolation's new THREE.Vector3(...) /
+    // RemotePlayerAvatar geometry) or clobber a good name. Omitted fields
+    // preserve the last-good value via the store's partial spread. Identity
+    // (id, color) is fixed at connect/PLAYER_JOIN and never read from here.
+    const update: Partial<RemotePlayer> = {};
+
+    const cleanName = sanitizePlayerName(p.name);
+    if (cleanName) update.name = cleanName;
+
+    const isFiniteTriple = (v: unknown): v is [number, number, number] =>
+      Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(n));
+    if (isFiniteTriple(p.position)) update.position = p.position;
+    if (isFiniteTriple(p.velocity)) update.velocity = p.velocity;
+
+    if (Number.isFinite(p.rotation)) update.rotation = p.rotation;
+
+    if (p.selectedMachineId === null) {
+      update.selectedMachineId = null;
+    } else if (typeof p.selectedMachineId === 'string') {
+      // Validate the peer-supplied machine id against the real machine registry
+      // (seeded locally on every client when MillScene mounts) so a peer can't
+      // inject fabricated/non-existent ids into remote player state. The list is
+      // empty only during the brief window before the scene seeds it; accept
+      // rather than falsely null during that initial-sync race, then reject
+      // unknown ids once the registry is populated.
+      const machines = useProductionStore.getState().machines;
+      update.selectedMachineId =
+        machines.length === 0 || machines.some((m) => m.id === p.selectedMachineId)
+          ? p.selectedMachineId
+          : null;
+    }
+    if (typeof p.isInFpsMode === 'boolean') update.isInFpsMode = p.isInFpsMode;
+
+    return update;
+  }
+
+  /** Messages the HOST accepts from guest connections. */
+  private handleHostMessage(peerId: string, message: MultiplayerMessage): void {
+    const store = useMultiplayerStore.getState();
+
+    // Identity is the verified id assigned at connect time — never the payload.
+    const senderId = this.verifiedPlayerIds.get(peerId);
+    if (!senderId) {
+      logger.multiplayer.warn('Dropped message from unverified peer', peerId);
+      return;
+    }
 
     switch (message.type) {
-      case 'PLAYER_UPDATE':
-        store.updateRemotePlayer(message.payload.id, message.payload);
-        break;
+      case 'PLAYER_UPDATE': {
+        const update = this.sanitizePlayerUpdate(message.payload);
+        store.updateRemotePlayer(senderId, update);
 
-      case 'PLAYER_JOIN':
+        // STAR-TOPOLOGY RELAY: guests connect only to the host, so without this
+        // relay other guests never see this player move (frozen-at-spawn avatars
+        // in 3+ player rooms). The relayed payload is rebuilt from the store
+        // (sanitized + verified identity), never echoed from the wire.
+        const verified = store.getRemotePlayer(senderId);
+        if (verified) {
+          this.broadcast({ type: 'PLAYER_UPDATE', payload: verified }, peerId);
+        }
+        break;
+      }
+
+      case 'INTENT': {
+        if (!this.onMachineIntent) break;
+        const raw = message.payload;
+        // Shape-validate the untrusted intent, then stamp the verified sender id
+        // so the host-side handler and machine locks act for the real player.
+        if (
+          !raw ||
+          typeof raw.id !== 'string' ||
+          typeof raw.machineId !== 'string' ||
+          !['START', 'STOP', 'ADJUST'].includes(raw.type)
+        ) {
+          logger.multiplayer.warn('Dropped malformed INTENT from peer', peerId);
+          break;
+        }
+        const result = this.onMachineIntent({ ...raw, playerId: senderId });
+        // Send result back to the sender
+        const peerConn = this.peerConnections.get(peerId);
+        if (peerConn) {
+          peerConn.send({
+            type: 'INTENT_RESULT',
+            payload: {
+              intentId: raw.id,
+              success: result.success,
+              error: result.error,
+            },
+          });
+        }
+        break;
+      }
+
+      case 'CHAT': {
+        const cleanMessage = sanitizeChatMessage(message.payload.message);
+        if (!cleanMessage) break;
+        // Stamp identity from the verified connection (sender-controlled
+        // from/fromName would allow chat impersonation), then relay so other
+        // guests see it too (star topology — see PLAYER_UPDATE above).
+        const chat = {
+          id: `chat_${senderId}_${message.payload.timestamp ?? Date.now()}`,
+          from: senderId,
+          fromName: store.getRemotePlayer(senderId)?.name ?? 'Player',
+          message: cleanMessage,
+          timestamp: Date.now(),
+        };
+        store.addChatMessage(chat);
+        this.broadcast({ type: 'CHAT', payload: chat }, peerId);
+        break;
+      }
+
+      case 'AI_VOTE': {
+        // Validate the untrusted-peer vote shape before forwarding it onto the
+        // app event bus, and stamp the verified sender id (a guest must not be
+        // able to cast votes as another player).
+        const raw = message.payload;
+        if (!raw || typeof raw.decisionId !== 'string' || typeof raw.approve !== 'boolean') {
+          logger.multiplayer.warn('Dropped malformed AI_VOTE from peer', peerId);
+          break;
+        }
+        const vote = {
+          decisionId: raw.decisionId,
+          playerId: senderId,
+          approve: raw.approve,
+          timestamp: Date.now(),
+        };
+        window.dispatchEvent(new CustomEvent('multiplayer:ai-vote', { detail: vote }));
+        // Relay so all guests tally the same votes (star topology).
+        this.broadcast({ type: 'AI_VOTE', payload: vote }, peerId);
+        break;
+      }
+
+      default:
+        // PLAYER_JOIN / PLAYER_LEAVE / STATE_SYNC / FULL_STATE_SYNC /
+        // INTENT_RESULT / MACHINE_LOCK are host-emitted only; a guest sending
+        // one is misbehaving (e.g. lock spoofing, fake-player injection).
+        logger.multiplayer.warn(
+          `Dropped host-only or unknown message type from guest ${peerId}:`,
+          (message as { type?: string }).type
+        );
+        break;
+    }
+  }
+
+  /** Messages a GUEST accepts — from the host connection only. */
+  private handleGuestMessage(peerId: string, message: MultiplayerMessage): void {
+    const store = useMultiplayerStore.getState();
+
+    // Defense in depth: handlePeerConnected already refuses non-host
+    // connections on guests, so this only fires if that boundary regresses.
+    if (peerId !== this.expectedHostPeerId) {
+      logger.multiplayer.warn('Dropped message from non-host peer on guest', peerId);
+      return;
+    }
+
+    switch (message.type) {
+      case 'PLAYER_UPDATE': {
+        const p = message.payload;
+        // Ignore echoes of ourselves (the host relay excludes the origin, but a
+        // self-update would fight the local controller if it ever arrived).
+        if (p.id === store.localPlayerId) break;
+        store.updateRemotePlayer(p.id, this.sanitizePlayerUpdate(p));
+        break;
+      }
+
+      case 'PLAYER_JOIN': {
+        if (message.payload.id === store.localPlayerId) break;
+        // Validate the color against the allow-list before it reaches
+        // Three.js materials / CSS swatches.
+        const joinColor: PlayerColor = PLAYER_COLORS.includes(message.payload.color)
+          ? message.payload.color
+          : PLAYER_COLORS[0];
         store.addRemotePlayer({
           id: message.payload.id,
-          name: message.payload.name,
+          name: sanitizePlayerName(message.payload.name) || 'Player',
           position: [0, 1.7, 0],
           rotation: 0,
           velocity: [0, 0, 0],
-          color: message.payload.color,
+          color: joinColor,
           selectedMachineId: null,
           isInFpsMode: true,
           lastUpdate: Date.now(),
         });
         break;
+      }
 
       case 'PLAYER_LEAVE':
         store.removeRemotePlayer(message.payload.id);
         break;
 
       case 'STATE_SYNC':
-        // Only process if we're not the host
-        if (!store.isHost) {
-          this.applyStateDiff(message.payload);
-        }
+        this.applyStateDiff(message.payload);
         break;
 
       case 'FULL_STATE_SYNC':
-        // Only process if we're not the host
-        if (!store.isHost) {
-          this.applyFullState(message.payload);
-          store.setConnectionState('connected');
-          // Start broadcasting our position now that we're connected
-          this.startBroadcasting();
-        }
-        break;
-
-      case 'INTENT':
-        // Host processes intents
-        if (store.isHost && this.onMachineIntent) {
-          const result = this.onMachineIntent(message.payload);
-          // Send result back to the sender
-          const peerConn = this.peerConnections.get(peerId);
-          if (peerConn) {
-            peerConn.send({
-              type: 'INTENT_RESULT',
-              payload: {
-                intentId: message.payload.id,
-                success: result.success,
-                error: result.error,
-              },
-            });
-          }
-        }
+        this.applyFullState(message.payload);
+        store.setConnectionState('connected');
+        // Start broadcasting our position now that we're connected
+        this.startBroadcasting();
         break;
 
       case 'INTENT_RESULT':
@@ -348,16 +561,40 @@ export class MultiplayerManager {
         break;
 
       case 'MACHINE_LOCK':
+        // Host-authoritative: guests apply lock state as announced by the host.
+        // (Guests request locks via INTENT; the host validates, sets, and
+        // broadcasts the lock itself.)
         store.setMachineLock(message.payload.machineId, message.payload.playerId);
         break;
 
       case 'CHAT':
-        store.addChatMessage(message.payload);
+        store.addChatMessage({
+          ...message.payload,
+          message: sanitizeChatMessage(message.payload.message),
+        });
         break;
 
-      case 'AI_VOTE':
-        // Dispatch event for UI components to receive the vote
-        window.dispatchEvent(new CustomEvent('multiplayer:ai-vote', { detail: message.payload }));
+      case 'AI_VOTE': {
+        // Host-relayed vote (host stamps identity before relaying).
+        const vote = message.payload;
+        if (
+          !vote ||
+          typeof vote.decisionId !== 'string' ||
+          typeof vote.playerId !== 'string' ||
+          typeof vote.approve !== 'boolean'
+        ) {
+          logger.multiplayer.warn('Dropped malformed AI_VOTE from host relay');
+          break;
+        }
+        window.dispatchEvent(new CustomEvent('multiplayer:ai-vote', { detail: vote }));
+        break;
+      }
+
+      default:
+        logger.multiplayer.warn(
+          'Unhandled multiplayer message type',
+          (message as { type?: string }).type
+        );
         break;
     }
   }
@@ -463,6 +700,17 @@ export class MultiplayerManager {
     this.pingInterval = setInterval(() => {
       if (this.isDestroyed) return;
 
+      // Sweep stale pending intents (guest path). Any intent that has not been
+      // resolved by an INTENT_RESULT within INTENT_TIMEOUT_MS is resolved as
+      // failed so the UI is notified and pendingIntents stays bounded.
+      const now = Date.now();
+      const pendingStore = useMultiplayerStore.getState();
+      for (const intent of pendingStore.pendingIntents) {
+        if (now - intent.timestamp > INTENT_TIMEOUT_MS) {
+          pendingStore.resolveIntent(intent.id, false, 'Intent timed out');
+        }
+      }
+
       let totalLatency = 0;
       let count = 0;
       const stalePeers: string[] = [];
@@ -542,6 +790,12 @@ export class MultiplayerManager {
           type: 'INTENT',
           payload: fullIntent,
         });
+      } else {
+        // No host connection: the INTENT can never be sent, so resolve it
+        // locally as failed instead of leaving it stuck in pendingIntents
+        // forever. The timeout sweep covers the case where the host receives
+        // the INTENT but silently drops it (no INTENT_RESULT returned).
+        store.resolveIntent(fullIntent.id, false, 'Not connected to host');
       }
     }
   }
@@ -596,11 +850,14 @@ export class MultiplayerManager {
   sendChat(message: string): void {
     const store = useMultiplayerStore.getState();
 
+    const cleanMessage = sanitizeChatMessage(message);
+    if (!cleanMessage) return;
+
     const chatMessage = {
       id: `chat_${Date.now()}`,
       from: store.localPlayerId,
       fromName: store.localPlayerName,
-      message,
+      message: cleanMessage,
       timestamp: Date.now(),
     };
 
@@ -642,6 +899,8 @@ export class MultiplayerManager {
       conn.close();
     }
     this.peerConnections.clear();
+    this.verifiedPlayerIds.clear();
+    this.expectedHostPeerId = null;
 
     // Destroy signaling service
     if (this.signalingService) {

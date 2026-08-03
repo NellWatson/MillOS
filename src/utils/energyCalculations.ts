@@ -1,15 +1,15 @@
 /**
  * Energy Calculations Utility
  *
- * Shared energy consumption models for the factory simulation.
+ * Shared instantaneous power-demand models for the factory simulation.
  * Used by ProductionMetrics, EnergyDashboard, and AI grounding.
  */
 
 import { MachineType, MachineData } from '../types';
 
 /**
- * Energy consumption by machine type (kWh)
- * Running = full operation, Idle = standby power
+ * Electrical demand by machine type (kW).
+ * Running = full operation, Idle = standby demand.
  */
 export const MACHINE_ENERGY_CONSUMPTION: Record<MachineType, { running: number; idle: number }> = {
   [MachineType.SILO]: { running: 2, idle: 0.5 },
@@ -39,7 +39,7 @@ export interface MachineEnergyBreakdown {
 }
 
 /**
- * Calculate energy for a single machine based on its current state.
+ * Calculate instantaneous power demand for a machine based on its current state.
  * Includes load factor, warning status, and maintenance penalties.
  */
 export function getMachineEnergy(machine: MachineData): number {
@@ -47,7 +47,7 @@ export function getMachineEnergy(machine: MachineData): number {
 }
 
 /**
- * Get detailed energy breakdown for a machine including all modifiers.
+ * Get a detailed demand breakdown for a machine including all modifiers.
  */
 export function getMachineEnergyDetailed(machine: MachineData): MachineEnergyBreakdown {
   const consumption = MACHINE_ENERGY_CONSUMPTION[machine.type] || { running: 20, idle: 1 };
@@ -114,9 +114,9 @@ export interface FacilityBaseLoad {
 /**
  * Calculate base facility load based on time of day.
  *
- * Lighting: 8 kWh day → 35 kWh night (dawn/dusk transitions 6-8am, 5-7pm)
- * HVAC: 20 kWh night → 30 kWh morning → 45 kWh afternoon peak → 35 kWh evening
- * Other: 15 kWh constant (security, IT, fire systems)
+ * Lighting: 8 kW day to 35 kW night (dawn/dusk transitions 6-8am, 5-7pm)
+ * HVAC: 20 kW night to 30 kW morning to 45 kW afternoon peak to 35 kW evening
+ * Other: 15 kW constant (security, IT, fire systems)
  */
 export function getFacilityBaseLoad(gameTime: number): FacilityBaseLoad {
   // Normalize hour to 0-24
@@ -180,8 +180,8 @@ export interface EmergencyLoad {
 }
 
 /**
- * Calculate emergency mode energy consumption.
- * Only 30% lighting + 50% HVAC + base systems (~40-50 kWh)
+ * Calculate emergency-mode electrical demand.
+ * Only 30% lighting + 50% HVAC + base systems (approximately 40-50 kW).
  */
 export function getEmergencyLoad(baseLoad: FacilityBaseLoad): EmergencyLoad {
   const lighting = baseLoad.lighting * 0.3;
@@ -209,7 +209,7 @@ export interface MachineTypeEnergyStats {
 }
 
 /**
- * Aggregate energy statistics by machine type.
+ * Aggregate instantaneous demand statistics by machine type.
  */
 export function getMachineEnergyByType(machines: MachineData[]): MachineTypeEnergyStats[] {
   const stats: Map<MachineType, MachineTypeEnergyStats> = new Map();
@@ -252,7 +252,7 @@ export function getMachineEnergyByType(machines: MachineData[]): MachineTypeEner
     }
   }
 
-  // Filter to only types with machines and sort by energy consumption
+  // Filter to only types with machines and sort by electrical demand.
   return Array.from(stats.values())
     .filter((s) => s.runningCount + s.idleCount + s.warningCount > 0)
     .sort((a, b) => b.totalEnergy - a.totalEnergy);

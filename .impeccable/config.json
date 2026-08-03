@@ -1,0 +1,6 @@
+{
+  "detector": {
+    "ignoreFiles": ["src/0.10 Archive/**"],
+    "ignoreRules": ["overused-font"]
+  }
+}

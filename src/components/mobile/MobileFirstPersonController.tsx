@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useCallback } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { FACTORY_ZONE_Z } from '../../constants/factoryLayout';
+import { WORLD_RADIUS } from '../../constants/siteLayout';
 import { useMobileControlStore } from '../../stores/mobileControlStore';
 
 // Movement configuration (same as desktop FPS)
@@ -14,8 +15,9 @@ const ORBIT_FOV = 65;
 const LOOK_SENSITIVITY = 0.006; // Fine-tuned for smooth mobile experience
 const LOOK_SMOOTHING = 0.15; // Lerp factor for smooth camera movement
 
-// World boundary
-const WORLD_RADIUS = 255;
+// Module-level reusable vectors to avoid per-frame allocation (GC pressure on mobile)
+const _forward = new THREE.Vector3();
+const _right = new THREE.Vector3();
 
 // Collision boxes (same as desktop FPS)
 const COLLISION_BOXES: Array<{
@@ -189,13 +191,23 @@ export const MobileFirstPersonController: React.FC = () => {
     return false;
   }, []);
 
-  // Movement update using D-pad input
+  // Per-frame update: camera look (touch-drag) and D-pad movement.
   useFrame((_, delta) => {
     const { dpadDirection, isSprinting } = useMobileControlStore.getState();
 
-    // Get D-pad input for movement
-    direction.current.set(0, 0, 0);
+    // --- Camera look (touch-to-look) ---
+    // MUST run every frame, independent of movement. Previously this lived after
+    // the no-movement early-return below, so touch-to-look did nothing unless a
+    // D-pad direction was also held.
+    euler.current.x += (targetEuler.current.x - euler.current.x) * LOOK_SMOOTHING;
+    euler.current.y += (targetEuler.current.y - euler.current.y) * LOOK_SMOOTHING;
+    camera.quaternion.setFromEuler(euler.current);
 
+    // Keep camera at player height
+    camera.position.y = PLAYER_HEIGHT;
+
+    // --- D-pad movement ---
+    direction.current.set(0, 0, 0);
     if (dpadDirection) {
       // D-pad Y: negative = forward, positive = backward
       direction.current.z = dpadDirection.y;
@@ -203,6 +215,7 @@ export const MobileFirstPersonController: React.FC = () => {
       direction.current.x = dpadDirection.x;
     }
 
+    // No movement input this frame — look is already applied above, so just stop here.
     if (direction.current.length() === 0) return;
 
     // Normalize diagonal movement
@@ -211,20 +224,20 @@ export const MobileFirstPersonController: React.FC = () => {
     // Calculate speed based on sprint state
     const speed = isSprinting ? SPRINT_SPEED : MOVE_SPEED;
 
-    // Get forward and right vectors from camera
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    // Get forward and right vectors from the (already-updated) camera orientation
+    _forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    _right.set(1, 0, 0).applyQuaternion(camera.quaternion);
 
     // Keep movement horizontal
-    forward.y = 0;
-    right.y = 0;
-    forward.normalize();
-    right.normalize();
+    _forward.y = 0;
+    _right.y = 0;
+    _forward.normalize();
+    _right.normalize();
 
     // Calculate desired movement
     velocity.current.set(0, 0, 0);
-    velocity.current.addScaledVector(forward, -direction.current.z * speed * delta);
-    velocity.current.addScaledVector(right, direction.current.x * speed * delta);
+    velocity.current.addScaledVector(_forward, -direction.current.z * speed * delta);
+    velocity.current.addScaledVector(_right, direction.current.x * speed * delta);
 
     // Calculate new position
     const newX = camera.position.x + velocity.current.x;
@@ -237,14 +250,6 @@ export const MobileFirstPersonController: React.FC = () => {
     if (!checkCollision(camera.position.x, newZ)) {
       camera.position.z = newZ;
     }
-
-    // Smoothly interpolate camera rotation for better feel
-    euler.current.x += (targetEuler.current.x - euler.current.x) * LOOK_SMOOTHING;
-    euler.current.y += (targetEuler.current.y - euler.current.y) * LOOK_SMOOTHING;
-    camera.quaternion.setFromEuler(euler.current);
-
-    // Keep camera at player height
-    camera.position.y = PLAYER_HEIGHT;
   });
 
   return null;
@@ -257,17 +262,44 @@ export const MobileFPSInstructions: React.FC<{ visible: boolean; onDismiss: () =
   visible,
   onDismiss,
 }) => {
+  const dismissButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+
+  // Focus management: move focus into the dialog on open, restore on close.
+  useEffect(() => {
+    if (!visible) return;
+    previouslyFocusedRef.current = (document.activeElement as HTMLElement) ?? null;
+    dismissButtonRef.current?.focus();
+    return () => {
+      previouslyFocusedRef.current?.focus?.();
+    };
+  }, [visible]);
+
   if (!visible) return null;
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      onDismiss();
+    }
+  };
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mobile-fps-instructions-title"
       className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center pointer-events-auto"
       onClick={onDismiss}
+      onKeyDown={handleKeyDown}
     >
       <div
         className="bg-slate-900/95 backdrop-blur-xl rounded-2xl border border-slate-700/50 p-4 max-w-xs text-center shadow-2xl mx-4"
         onClick={(e) => e.stopPropagation()}
       >
+        <h2 id="mobile-fps-instructions-title" className="text-white text-sm font-semibold mb-3">
+          First-Person Controls
+        </h2>
         <div className="flex gap-3 mb-4">
           <div className="flex-1 bg-slate-800/50 rounded-lg p-3 flex flex-col items-center gap-1">
             <div className="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center text-base">
@@ -285,6 +317,7 @@ export const MobileFPSInstructions: React.FC<{ visible: boolean; onDismiss: () =
         </div>
 
         <button
+          ref={dismissButtonRef}
           onClick={onDismiss}
           className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors text-sm"
         >

@@ -5,7 +5,7 @@
  * Can link to knowledge entries and be dismissed
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, X } from 'lucide-react';
 import {
@@ -57,7 +57,7 @@ export function AINarration({ narration, onDismiss }: AINarrationProps) {
           className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
           aria-label="Close"
         >
-          <X className="w-6 h-6" />
+          <X className="w-5 h-5" />
         </button>
       </div>
 
@@ -99,6 +99,18 @@ interface AINarrationModalProps {
 }
 
 export function AINarrationModal({ narration, onDismiss }: AINarrationModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!narration) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onDismiss?.();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    dialogRef.current?.querySelector('button')?.focus();
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [narration, onDismiss]);
+
   if (!narration) return null;
 
   return (
@@ -111,6 +123,10 @@ export function AINarrationModal({ narration, onDismiss }: AINarrationModalProps
         onClick={onDismiss}
       >
         <motion.div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="AI Reflection"
           initial={{ scale: 0.9, y: 20 }}
           animate={{ scale: 1, y: 0 }}
           exit={{ scale: 0.9, y: 20 }}
@@ -166,6 +182,7 @@ export function AINarrationInline({ narration, onDismiss, maxLines = 3 }: AINarr
         {onDismiss && (
           <button
             onClick={onDismiss}
+            aria-label="Dismiss"
             className="p-0.5 text-slate-600 hover:text-slate-400 transition-colors"
           >
             <X className="w-3 h-3" />

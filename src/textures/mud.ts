@@ -6,7 +6,14 @@
  */
 
 import * as THREE from 'three';
-import { getTexture, fbmNoise, hash, createDataTexture } from '../utils/textureGenerator';
+import {
+  getTexture,
+  fbmNoise,
+  fbmNoiseSigned,
+  hash,
+  createColorDataTexture,
+  createLinearDataTexture,
+} from '../utils/textureGenerator';
 
 export interface MudOptions {
   wetness?: number; // How wet/dark the mud is (0-1)
@@ -100,7 +107,7 @@ export const generateMud = (size: number = 512, options: MudOptions = {}): THREE
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createColorDataTexture(data, size, size);
   });
 };
 
@@ -112,7 +119,7 @@ export const generateMudRoughness = (
   size: number = 512,
   wetness: number = 0.5
 ): THREE.DataTexture => {
-  return getTexture(`mud-roughness-${size}-${wetness}`, () => {
+  return getTexture(`mud-roughness-v2-${size}-${wetness}`, () => {
     const data = new Uint8Array(size * size * 4);
 
     for (let y = 0; y < size; y++) {
@@ -129,15 +136,19 @@ export const generateMudRoughness = (
         const roughness = 0.95 - localWetness * 0.4;
 
         // Add variation
-        const variation = fbmNoise(nx * 25, ny * 25, 2) * 0.1;
+        const variation = fbmNoiseSigned(nx * 25, ny * 25, 3) * 0.12;
+        const val = Math.floor(Math.max(0.3, Math.min(1, roughness + variation)) * 255);
 
-        data[i] = Math.floor(Math.max(0.3, Math.min(1, roughness + variation)) * 255);
-        data[i + 1] = 0;
-        data[i + 2] = 0;
+        // MUST write G (and B). three reads roughness from the GREEN channel
+        // and metalness from BLUE; writing only R forced roughness to zero on
+        // every material that used this map.
+        data[i] = val;
+        data[i + 1] = val;
+        data[i + 2] = val;
         data[i + 3] = 255;
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
   });
 };
