@@ -24,11 +24,9 @@ const CURRENT_AUDIO_FILES = new Set([
 function finalizeCurrentBuild({
   buildId,
   cacheVersion,
-  rootDeployment,
 }: {
   buildId: string;
   cacheVersion: string;
-  rootDeployment: boolean;
 }): Plugin {
   return {
     name: 'finalize-current-build',
@@ -63,8 +61,6 @@ function finalizeCurrentBuild({
           }
         }
       }
-
-      if (!rootDeployment) return;
 
       for (const entry of fs.readdirSync(outputDirectory, { withFileTypes: true })) {
         if (entry.isDirectory() && /^v\d+\.\d+$/.test(entry.name)) {
@@ -162,7 +158,6 @@ export default defineConfig((): UserConfig => {
       finalizeCurrentBuild({
         buildId,
         cacheVersion,
-        rootDeployment: !version,
       }),
     ],
     define: {
