@@ -33,15 +33,9 @@ describe('UnifiedGameTick shipping quality interlock', () => {
     // Synchronize the module-level dock edge detector to an undocked state.
     unifiedGameTick(tickContext);
 
-    const flow = useMaterialFlowStore.getState();
-    const buffers = new Map(flow.machineBuffers);
-    const packer = buffers.get('packer-0');
-    if (!packer) throw new Error('packer-0 missing from material flow fixture');
-    buffers.set('packer-0', {
-      ...packer,
-      outputBuffer: [{ type: 'flour', amount: 1000 }],
-    });
-    useMaterialFlowStore.setState({ machineBuffers: buffers });
+    // Build genuine packed output so batch identity and source genealogy are
+    // present. Untracked aggregate flour is intentionally not dispatchable.
+    useMaterialFlowStore.getState().tickMaterialFlow(1, 1);
   });
 
   it('holds a docked shipping truck when certification has expired', () => {

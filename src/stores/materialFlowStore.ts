@@ -31,9 +31,86 @@ export type MaterialType =
   | 'middlings'
   | 'semolina';
 
+export interface SourceContribution {
+  /** Receiving or opening-stock lot that supplied this mass. */
+  lotId: string;
+  /** Conserved mass from this source lot. */
+  amount: number;
+  /** Ordered machine path already traversed by this contribution. */
+  path: string[];
+}
+
+export interface ProductBatchContribution {
+  batchId: string;
+  amount: number;
+}
+
 export interface MaterialAmount {
   type: MaterialType;
   amount: number; // kg
+  /** Optional only for backwards-compatible fixtures. Live material always carries it. */
+  sourceContributions?: SourceContribution[];
+  /** Present on packed output so prohibited batches can never be dispatched by aggregation. */
+  productBatches?: ProductBatchContribution[];
+}
+
+export type MaterialDisposition = 'released' | 'hold' | 'recalled' | 'shipped';
+
+export interface SourceLot {
+  id: string;
+  materialType: MaterialType;
+  origin: 'opening_stock' | 'receiving';
+  sourceManifestId: string | null;
+  supplier: string;
+  receivedKg: number;
+  simulationTime: number;
+  disposition: Exclude<MaterialDisposition, 'shipped'>;
+  dispositionReason: string | null;
+}
+
+export interface ProductionBatch {
+  id: string;
+  packerId: string;
+  materialType: Extract<MaterialType, 'flour' | 'semolina'>;
+  producedKg: number;
+  availableKg: number;
+  simulationTime: number;
+  sourceContributions: SourceContribution[];
+  disposition: MaterialDisposition;
+  dispositionReason: string | null;
+  qcTestIds: string[];
+  dispatchManifestIds: string[];
+  sealed: boolean;
+}
+
+export interface ProcessGenealogyRecord {
+  id: string;
+  machineId: string;
+  inputType: MaterialType;
+  inputKg: number;
+  outputs: MaterialAmount[];
+  wasteKg: number;
+  sourceContributions: SourceContribution[];
+  simulationTime: number;
+}
+
+export interface BatchTrace {
+  batch: ProductionBatch;
+  sourceLots: Array<{
+    lot: SourceLot;
+    amount: number;
+    paths: string[][];
+  }>;
+}
+
+export interface GenealogyBalance {
+  expectedKg: number;
+  inventoryKg: number;
+  inTransitKg: number;
+  wasteKg: number;
+  shippedKg: number;
+  accountedKg: number;
+  errorKg: number;
 }
 
 export interface MaterialManifest {
@@ -43,6 +120,8 @@ export interface MaterialManifest {
   requestedKg: number;
   actualKg: number;
   materials: MaterialAmount[];
+  sourceLots: SourceContribution[];
+  productBatches: ProductBatchContribution[];
   simulationTime: number;
 }
 
@@ -96,7 +175,12 @@ export interface ConveyorSegment {
   /** Transit time in seconds at production speed 1.0 */
   transitTime: number;
   /** Material in transit with arrival timestamps */
-  inTransit: { amount: number; arrivalTime: number; type: MaterialType }[];
+  inTransit: Array<{
+    amount: number;
+    arrivalTime: number;
+    type: MaterialType;
+    sourceContributions?: SourceContribution[];
+  }>;
 }
 
 // =============================================================================
@@ -137,6 +221,16 @@ export interface MaterialFlowState {
   manifests: MaterialManifest[];
   manifestSequence: number;
 
+  // Lot and batch genealogy
+  sourceLots: Map<string, SourceLot>;
+  productionBatches: ProductionBatch[];
+  processGenealogy: ProcessGenealogyRecord[];
+  wasteSourceContributions: SourceContribution[];
+  shippedSourceContributions: SourceContribution[];
+  lotSequence: number;
+  batchSequence: number;
+  processSequence: number;
+
   // Time tracking for transit
   simulationTime: number; // seconds elapsed
 
@@ -151,12 +245,32 @@ export interface MaterialFlowState {
    * A receiving truck delivers grain: tops up the emptiest silo (wheat for
    * even silo indices, corn for odd, matching the initial fill pattern).
    */
-  receiveGrainDelivery: (amountKg: number) => number;
+  receiveGrainDelivery: (
+    amountKg: number,
+    details?: {
+      supplier?: string;
+      materialType?: Extract<MaterialType, 'wheat_grain' | 'corn_grain'>;
+    }
+  ) => number;
   /**
    * A shipping truck removes completed flour or semolina from packer output.
    * Returns the amount actually loaded, which may be lower than requested.
    */
   shipFinishedGoods: (amountKg: number) => number;
+  setBatchDisposition: (
+    batchIds: readonly string[],
+    disposition: Exclude<MaterialDisposition, 'shipped'>,
+    reason: string,
+    qcTestId?: string
+  ) => string[];
+  setLotDisposition: (
+    lotIds: readonly string[],
+    disposition: Exclude<MaterialDisposition, 'shipped'>,
+    reason: string
+  ) => string[];
+  getBatchTrace: (batchId: string) => BatchTrace | null;
+  getDispatchableFinishedGoods: () => number;
+  getGenealogyBalance: () => GenealogyBalance;
   getMaterialBalance: () => MaterialBalance;
   getMachineBuffer: (machineId: string) => MachineBuffer | undefined;
   getConveyorLoad: (segmentId: string) => number;
@@ -168,6 +282,134 @@ export interface MaterialFlowState {
 // =============================================================================
 // INITIAL STATE FACTORY
 // =============================================================================
+
+// This threshold removes only numerical dust. It must stay far below the
+// operator-facing 0.01 kg reconciliation tolerance because it is applied to
+// many lot/path contributions over a long simulation run.
+const GENEALOGY_EPSILON_KG = 0.000000001;
+const PRODUCT_BATCH_TARGET_KG = 1000;
+const MAX_PROCESS_GENEALOGY_RECORDS = 500;
+const MAX_MATERIAL_MANIFESTS = 200;
+const MAX_PRODUCTION_BATCHES = 500;
+const MAX_SOURCE_LOTS = 1000;
+
+function contributionKey(contribution: SourceContribution): string {
+  return `${contribution.lotId}|${contribution.path.join('>')}`;
+}
+
+function cloneSourceContributions(
+  contributions: readonly SourceContribution[] | undefined
+): SourceContribution[] {
+  return (contributions ?? []).map((contribution) => ({
+    ...contribution,
+    path: [...contribution.path],
+  }));
+}
+
+function mergeSourceContributions(
+  current: readonly SourceContribution[] | undefined,
+  additions: readonly SourceContribution[] | undefined
+): SourceContribution[] {
+  const merged = new Map<string, SourceContribution>();
+  const merge = (contribution: SourceContribution) => {
+    if (!Number.isFinite(contribution.amount) || contribution.amount <= GENEALOGY_EPSILON_KG)
+      return;
+    const key = contributionKey(contribution);
+    const existing = merged.get(key);
+    if (existing) {
+      existing.amount += contribution.amount;
+    } else {
+      merged.set(key, { ...contribution, path: [...contribution.path] });
+    }
+  };
+  current?.forEach(merge);
+  additions?.forEach(merge);
+  return [...merged.values()];
+}
+
+function subtractSourceContributions(
+  current: readonly SourceContribution[] | undefined,
+  removals: readonly SourceContribution[]
+): SourceContribution[] {
+  const remaining = new Map(
+    cloneSourceContributions(current).map((contribution) => [
+      contributionKey(contribution),
+      contribution,
+    ])
+  );
+  for (const removal of removals) {
+    const key = contributionKey(removal);
+    const existing = remaining.get(key);
+    if (!existing) continue;
+    existing.amount = Math.max(0, existing.amount - removal.amount);
+    if (existing.amount <= GENEALOGY_EPSILON_KG) remaining.delete(key);
+  }
+  return [...remaining.values()];
+}
+
+function scaleSourceContributions(
+  contributions: readonly SourceContribution[] | undefined,
+  scale: number
+): SourceContribution[] {
+  if (!Number.isFinite(scale) || scale <= 0) return [];
+  return (contributions ?? [])
+    .map((contribution) => ({
+      ...contribution,
+      path: [...contribution.path],
+      amount: contribution.amount * scale,
+    }))
+    .filter((contribution) => contribution.amount > GENEALOGY_EPSILON_KG);
+}
+
+function withdrawSourceContributions(
+  material: MaterialAmount,
+  amountKg: number
+): SourceContribution[] {
+  if (amountKg <= 0 || material.amount <= 0 || !material.sourceContributions?.length) return [];
+  const fraction = Math.min(1, amountKg / material.amount);
+  const withdrawn = scaleSourceContributions(material.sourceContributions, fraction);
+  material.sourceContributions = scaleSourceContributions(
+    material.sourceContributions,
+    1 - fraction
+  );
+  return withdrawn;
+}
+
+function appendMachineToPath(
+  contributions: readonly SourceContribution[],
+  machineId: string
+): SourceContribution[] {
+  return contributions.map((contribution) => ({
+    ...contribution,
+    path:
+      contribution.path.at(-1) === machineId
+        ? [...contribution.path]
+        : [...contribution.path, machineId],
+  }));
+}
+
+function mergeProductBatchContributions(
+  current: readonly ProductBatchContribution[] | undefined,
+  additions: readonly ProductBatchContribution[] | undefined
+): ProductBatchContribution[] {
+  const merged = new Map<string, number>();
+  const merge = (contribution: ProductBatchContribution) => {
+    if (!Number.isFinite(contribution.amount) || contribution.amount <= GENEALOGY_EPSILON_KG)
+      return;
+    merged.set(contribution.batchId, (merged.get(contribution.batchId) ?? 0) + contribution.amount);
+  };
+  current?.forEach(merge);
+  additions?.forEach(merge);
+  return [...merged.entries()].map(([batchId, amount]) => ({ batchId, amount }));
+}
+
+function openingMaterial(machineId: string, type: MaterialType, amount: number): MaterialAmount {
+  return {
+    type,
+    amount,
+    sourceContributions: [{ lotId: `lot-opening-${machineId}`, amount, path: [machineId] }],
+  };
+}
 
 function createInitialMachineBuffers(): Map<string, MachineBuffer> {
   const buffers = new Map<string, MachineBuffer>();
@@ -181,7 +423,7 @@ function createInitialMachineBuffers(): Map<string, MachineBuffer> {
       machineId: id,
       machineType: 'silo',
       inputBuffer: [], // Silos receive from trucks (external)
-      outputBuffer: [{ type: grainType, amount: 20000 }], // 20 tons initial
+      outputBuffer: [openingMaterial(id, grainType, 20000)], // 20 tons initial
       inputCapacity: 50000, // 50 ton capacity
       outputCapacity: 50000,
       processingRate: 200, // 200 kg/sec discharge rate
@@ -196,7 +438,7 @@ function createInitialMachineBuffers(): Map<string, MachineBuffer> {
     buffers.set(id, {
       machineId: id,
       machineType: 'roller_mill',
-      inputBuffer: [{ type: 'wheat_grain', amount: 500 }], // Start with some grain
+      inputBuffer: [openingMaterial(id, 'wheat_grain', 500)], // Start with some grain
       outputBuffer: [],
       inputCapacity: 2000, // 2 ton input buffer
       outputCapacity: 2000,
@@ -229,7 +471,7 @@ function createInitialMachineBuffers(): Map<string, MachineBuffer> {
     buffers.set(id, {
       machineId: id,
       machineType: 'plansifter',
-      inputBuffer: [{ type: 'flour', amount: 300 }], // Start with some flour
+      inputBuffer: [openingMaterial(id, 'flour', 300)], // Start with some flour
       outputBuffer: [],
       inputCapacity: 3000, // 3 ton buffer
       outputCapacity: 3000,
@@ -255,7 +497,7 @@ function createInitialMachineBuffers(): Map<string, MachineBuffer> {
     buffers.set(id, {
       machineId: id,
       machineType: 'packer',
-      inputBuffer: [{ type: 'flour', amount: 200 }], // Start with some flour
+      inputBuffer: [openingMaterial(id, 'flour', 200)], // Start with some flour
       outputBuffer: [],
       inputCapacity: 1000, // 1 ton hopper
       outputCapacity: 5000, // Packed bags accumulate
@@ -275,6 +517,35 @@ function createInitialMachineBuffers(): Map<string, MachineBuffer> {
   });
 
   return buffers;
+}
+
+function createInitialSourceLots(
+  buffers: ReadonlyMap<string, MachineBuffer>
+): Map<string, SourceLot> {
+  const lots = new Map<string, SourceLot>();
+  buffers.forEach((buffer) => {
+    for (const material of [...buffer.inputBuffer, ...buffer.outputBuffer]) {
+      for (const contribution of material.sourceContributions ?? []) {
+        const existing = lots.get(contribution.lotId);
+        if (existing) {
+          existing.receivedKg += contribution.amount;
+        } else {
+          lots.set(contribution.lotId, {
+            id: contribution.lotId,
+            materialType: material.type,
+            origin: 'opening_stock',
+            sourceManifestId: null,
+            supplier: 'Opening inventory',
+            receivedKg: contribution.amount,
+            simulationTime: 0,
+            disposition: 'released',
+            dispositionReason: null,
+          });
+        }
+      }
+    }
+  });
+  return lots;
 }
 
 function sumMachineInventory(buffers: ReadonlyMap<string, MachineBuffer>): number {
@@ -356,412 +627,856 @@ function createInitialNetwork(): NetworkTopology {
 // =============================================================================
 
 export const useMaterialFlowStore = create<MaterialFlowState>()(
-  subscribeWithSelector((set, get) => ({
-    machineBuffers: createInitialMachineBuffers(),
-    network: createInitialNetwork(),
-    totalMaterialProcessed: 0,
-    totalFlourProduced: 0,
-    currentFlowRate: 0,
-    currentPackerFlowRate: 0,
-    initialInventoryKg: INITIAL_INVENTORY_KG,
-    receivedKg: 0,
-    wasteKg: 0,
-    shippedKg: 0,
-    manifests: [],
-    manifestSequence: 0,
-    simulationTime: 0,
+  subscribeWithSelector((set, get) => {
+    const initialMachineBuffers = createInitialMachineBuffers();
+    return {
+      machineBuffers: initialMachineBuffers,
+      network: createInitialNetwork(),
+      totalMaterialProcessed: 0,
+      totalFlourProduced: 0,
+      currentFlowRate: 0,
+      currentPackerFlowRate: 0,
+      initialInventoryKg: INITIAL_INVENTORY_KG,
+      receivedKg: 0,
+      wasteKg: 0,
+      shippedKg: 0,
+      manifests: [],
+      manifestSequence: 0,
+      sourceLots: createInitialSourceLots(initialMachineBuffers),
+      productionBatches: [],
+      processGenealogy: [],
+      wasteSourceContributions: [],
+      shippedSourceContributions: [],
+      lotSequence: 0,
+      batchSequence: 0,
+      processSequence: 0,
+      simulationTime: 0,
 
-    tickMaterialFlow: (deltaSeconds: number, productionSpeed: number) => {
-      if (
-        !Number.isFinite(deltaSeconds) ||
-        !Number.isFinite(productionSpeed) ||
-        deltaSeconds <= 0
-      ) {
-        return;
-      }
-
-      const state = get();
-      if (productionSpeed <= 0) {
-        if (state.currentFlowRate !== 0 || state.currentPackerFlowRate !== 0) {
-          set({ currentFlowRate: 0, currentPackerFlowRate: 0 });
+      tickMaterialFlow: (deltaSeconds: number, productionSpeed: number) => {
+        if (
+          !Number.isFinite(deltaSeconds) ||
+          !Number.isFinite(productionSpeed) ||
+          deltaSeconds <= 0
+        ) {
+          return;
         }
-        return;
-      }
 
-      const effectiveDelta = deltaSeconds * productionSpeed;
-      const newTime = state.simulationTime + effectiveDelta;
+        const state = get();
+        if (productionSpeed <= 0) {
+          if (state.currentFlowRate !== 0 || state.currentPackerFlowRate !== 0) {
+            set({ currentFlowRate: 0, currentPackerFlowRate: 0 });
+          }
+          return;
+        }
 
-      // Clone buffers for mutation
-      const newBuffers = new Map<string, MachineBuffer>();
-      state.machineBuffers.forEach((buffer, id) => {
-        newBuffers.set(id, {
-          ...buffer,
-          inputBuffer: buffer.inputBuffer.map((m) => ({ ...m })),
-          outputBuffer: buffer.outputBuffer.map((m) => ({ ...m })),
+        const effectiveDelta = deltaSeconds * productionSpeed;
+        const newTime = state.simulationTime + effectiveDelta;
+
+        // Clone buffers for mutation
+        const newBuffers = new Map<string, MachineBuffer>();
+        state.machineBuffers.forEach((buffer, id) => {
+          newBuffers.set(id, {
+            ...buffer,
+            inputBuffer: buffer.inputBuffer.map((material) => ({
+              ...material,
+              sourceContributions: cloneSourceContributions(material.sourceContributions),
+              productBatches: material.productBatches?.map((batch) => ({ ...batch })),
+            })),
+            outputBuffer: buffer.outputBuffer.map((material) => ({
+              ...material,
+              sourceContributions: cloneSourceContributions(material.sourceContributions),
+              productBatches: material.productBatches?.map((batch) => ({ ...batch })),
+            })),
+          });
         });
-      });
 
-      // Clone network segments
-      const newSegments = state.network.segments.map((seg) => ({
-        ...seg,
-        inTransit: seg.inTransit.map((t) => ({ ...t })),
-      }));
+        // Clone network segments
+        const newSegments = state.network.segments.map((seg) => ({
+          ...seg,
+          inTransit: seg.inTransit.map((transit) => ({
+            ...transit,
+            sourceContributions: cloneSourceContributions(transit.sourceContributions),
+          })),
+        }));
 
-      let instantFlowRate = 0;
-      let instantPackerFlowRate = 0;
-      let flourProducedThisTick = 0;
-      let wasteThisTick = 0;
+        const productionBatches = state.productionBatches.map((batch) => ({
+          ...batch,
+          sourceContributions: cloneSourceContributions(batch.sourceContributions),
+          qcTestIds: [...batch.qcTestIds],
+          dispatchManifestIds: [...batch.dispatchManifestIds],
+        }));
+        const newProcessRecords: ProcessGenealogyRecord[] = [];
+        let batchSequence = state.batchSequence;
+        let processSequence = state.processSequence;
+        let wasteSourceContributions = cloneSourceContributions(state.wasteSourceContributions);
 
-      // 1. Process each machine: convert input -> output
-      newBuffers.forEach((buffer) => {
-        if (!buffer.isProcessing) return;
+        let instantFlowRate = 0;
+        let instantPackerFlowRate = 0;
+        let flourProducedThisTick = 0;
+        let wasteThisTick = 0;
 
-        // The processing rate is a machine-level budget. Sharing it across
-        // material types prevents a multi-material buffer from multiplying
-        // the machine's rated throughput.
-        let remainingProcessCapacity = buffer.processingRate * effectiveDelta;
-
-        // Process each input material type
-        buffer.inputBuffer.forEach((inputMaterial) => {
-          if (inputMaterial.amount <= 0 || remainingProcessCapacity <= 0) return;
-
-          const conversion = buffer.conversionRatios.find(
-            (c) => c.inputType === inputMaterial.type
-          );
-          if (!conversion) return;
-
-          const declaredOutputRatio = conversion.outputs.reduce(
-            (sum, output) => sum + Math.max(0, output.ratio),
-            0
-          );
-          if (declaredOutputRatio <= 0) return;
-
-          // Defensive normalization prevents malformed ratios above 100%
-          // from creating material. Ratios below 100% become recorded waste.
-          const outputScale = declaredOutputRatio > 1 ? 1 / declaredOutputRatio : 1;
-          const effectiveOutputRatio = Math.min(1, declaredOutputRatio);
-          const existingOutputKg = buffer.outputBuffer.reduce(
-            (sum, material) => sum + material.amount,
-            0
-          );
-          const outputSpaceKg = Math.max(0, buffer.outputCapacity - existingOutputKg);
-          const capacityLimitedInput =
-            effectiveOutputRatio > 0 ? outputSpaceKg / effectiveOutputRatio : 0;
-
-          // Calculate how much we can process
-          const available = inputMaterial.amount;
-          const toProcess = Math.min(available, remainingProcessCapacity, capacityLimitedInput);
-
-          if (toProcess <= 0) return;
-
-          // Subtract from input
-          inputMaterial.amount -= toProcess;
-          remainingProcessCapacity -= toProcess;
-
-          // Add to output based on conversion ratios
-          conversion.outputs.forEach(({ type, ratio }) => {
-            const outputAmount = toProcess * Math.max(0, ratio) * outputScale;
-            const existingOutput = buffer.outputBuffer.find((o) => o.type === type);
-            if (existingOutput) {
-              existingOutput.amount += outputAmount;
-            } else {
-              buffer.outputBuffer.push({ type, amount: outputAmount });
+        const appendPackedBatch = (
+          packerId: string,
+          materialType: Extract<MaterialType, 'flour' | 'semolina'>,
+          amountKg: number,
+          sourceContributions: readonly SourceContribution[]
+        ): ProductBatchContribution[] => {
+          const assignments: ProductBatchContribution[] = [];
+          let remaining = amountKg;
+          while (remaining > GENEALOGY_EPSILON_KG) {
+            let batch: ProductionBatch | undefined;
+            for (let index = productionBatches.length - 1; index >= 0; index -= 1) {
+              const candidate = productionBatches[index];
+              if (
+                candidate.packerId === packerId &&
+                candidate.materialType === materialType &&
+                !candidate.sealed &&
+                candidate.disposition === 'released' &&
+                candidate.availableKg === candidate.producedKg
+              ) {
+                batch = candidate;
+                break;
+              }
+            }
+            if (!batch) {
+              batchSequence += 1;
+              const sourceDispositions = sourceContributions.map(
+                (contribution) =>
+                  state.sourceLots.get(contribution.lotId)?.disposition ?? 'released'
+              );
+              const disposition = sourceDispositions.includes('recalled')
+                ? 'recalled'
+                : sourceDispositions.includes('hold')
+                  ? 'hold'
+                  : 'released';
+              batch = {
+                id: `batch-${String(batchSequence).padStart(5, '0')}`,
+                packerId,
+                materialType,
+                producedKg: 0,
+                availableKg: 0,
+                simulationTime: newTime,
+                sourceContributions: [],
+                disposition,
+                dispositionReason:
+                  disposition === 'released' ? null : 'Inherited source-lot disposition',
+                qcTestIds: [],
+                dispatchManifestIds: [],
+                sealed: false,
+              };
+              productionBatches.push(batch);
             }
 
-            // Track flour production
-            if (type === 'flour' && buffer.machineType === 'plansifter') {
-              flourProducedThisTick += outputAmount;
+            const availableCapacity = Math.max(0, PRODUCT_BATCH_TARGET_KG - batch.producedKg);
+            const portion = Math.min(remaining, availableCapacity || remaining);
+            const portionSources = scaleSourceContributions(
+              sourceContributions,
+              amountKg > 0 ? portion / amountKg : 0
+            );
+            batch.producedKg += portion;
+            batch.availableKg += portion;
+            batch.sourceContributions = mergeSourceContributions(
+              batch.sourceContributions,
+              portionSources
+            );
+            batch.sealed = batch.producedKg >= PRODUCT_BATCH_TARGET_KG - GENEALOGY_EPSILON_KG;
+            assignments.push({ batchId: batch.id, amount: portion });
+            remaining -= portion;
+          }
+          return assignments;
+        };
+
+        // 1. Process each machine: convert input -> output
+        newBuffers.forEach((buffer) => {
+          if (!buffer.isProcessing) return;
+
+          // The processing rate is a machine-level budget. Sharing it across
+          // material types prevents a multi-material buffer from multiplying
+          // the machine's rated throughput.
+          let remainingProcessCapacity = buffer.processingRate * effectiveDelta;
+
+          // Process each input material type
+          buffer.inputBuffer.forEach((inputMaterial) => {
+            if (inputMaterial.amount <= 0 || remainingProcessCapacity <= 0) return;
+
+            const conversion = buffer.conversionRatios.find(
+              (c) => c.inputType === inputMaterial.type
+            );
+            if (!conversion) return;
+
+            const declaredOutputRatio = conversion.outputs.reduce(
+              (sum, output) => sum + Math.max(0, output.ratio),
+              0
+            );
+            if (declaredOutputRatio <= 0) return;
+
+            // Defensive normalization prevents malformed ratios above 100%
+            // from creating material. Ratios below 100% become recorded waste.
+            const outputScale = declaredOutputRatio > 1 ? 1 / declaredOutputRatio : 1;
+            const effectiveOutputRatio = Math.min(1, declaredOutputRatio);
+            const existingOutputKg = buffer.outputBuffer.reduce(
+              (sum, material) => sum + material.amount,
+              0
+            );
+            const outputSpaceKg = Math.max(0, buffer.outputCapacity - existingOutputKg);
+            const capacityLimitedInput =
+              effectiveOutputRatio > 0 ? outputSpaceKg / effectiveOutputRatio : 0;
+
+            // Calculate how much we can process
+            const available = inputMaterial.amount;
+            const toProcess = Math.min(available, remainingProcessCapacity, capacityLimitedInput);
+
+            if (toProcess <= 0) return;
+
+            // Withdraw the exact source contribution before changing the aggregate
+            // amount, then append this machine to the path carried downstream.
+            const inputContributions = appendMachineToPath(
+              withdrawSourceContributions(inputMaterial, toProcess),
+              buffer.machineId
+            );
+
+            // Subtract from input
+            inputMaterial.amount -= toProcess;
+            remainingProcessCapacity -= toProcess;
+
+            // Add to output based on conversion ratios
+            const processOutputs: MaterialAmount[] = [];
+            conversion.outputs.forEach(({ type, ratio }) => {
+              const outputAmount = toProcess * Math.max(0, ratio) * outputScale;
+              const outputContributions = scaleSourceContributions(
+                inputContributions,
+                toProcess > 0 ? outputAmount / toProcess : 0
+              );
+              const existingOutput = buffer.outputBuffer.find((o) => o.type === type);
+              if (existingOutput) {
+                existingOutput.amount += outputAmount;
+                existingOutput.sourceContributions = mergeSourceContributions(
+                  existingOutput.sourceContributions,
+                  outputContributions
+                );
+              } else {
+                buffer.outputBuffer.push({
+                  type,
+                  amount: outputAmount,
+                  sourceContributions: cloneSourceContributions(outputContributions),
+                });
+              }
+
+              if (buffer.machineType === 'packer' && (type === 'flour' || type === 'semolina')) {
+                const assignments = appendPackedBatch(
+                  buffer.machineId,
+                  type,
+                  outputAmount,
+                  outputContributions
+                );
+                const packedOutput = buffer.outputBuffer.find((output) => output.type === type);
+                if (packedOutput) {
+                  packedOutput.productBatches = mergeProductBatchContributions(
+                    packedOutput.productBatches,
+                    assignments
+                  );
+                }
+              }
+
+              processOutputs.push({
+                type,
+                amount: outputAmount,
+                sourceContributions: cloneSourceContributions(outputContributions),
+              });
+
+              // Track flour production
+              if (type === 'flour' && buffer.machineType === 'plansifter') {
+                flourProducedThisTick += outputAmount;
+              }
+            });
+            const processWasteKg = toProcess * (1 - effectiveOutputRatio);
+            wasteThisTick += processWasteKg;
+            wasteSourceContributions = mergeSourceContributions(
+              wasteSourceContributions,
+              scaleSourceContributions(
+                inputContributions,
+                toProcess > 0 ? processWasteKg / toProcess : 0
+              )
+            );
+            processSequence += 1;
+            newProcessRecords.push({
+              id: `process-${String(processSequence).padStart(7, '0')}`,
+              machineId: buffer.machineId,
+              inputType: inputMaterial.type,
+              inputKg: toProcess,
+              outputs: processOutputs,
+              wasteKg: processWasteKg,
+              sourceContributions: cloneSourceContributions(inputContributions),
+              simulationTime: newTime,
+            });
+
+            // Defensive check: avoid division by zero (early return already guards this,
+            // but add explicit check at point of use for safety)
+            if (deltaSeconds > 0) {
+              instantFlowRate += toProcess / deltaSeconds;
+              // Track the final-stage rate separately: only packers represent
+              // finished-goods output. The headline throughput must use this, not
+              // the all-stage sum (which triple-counts mill + sifter + packer).
+              if (buffer.machineType === 'packer') {
+                instantPackerFlowRate += toProcess / deltaSeconds;
+              }
             }
           });
-          wasteThisTick += toProcess * (1 - effectiveOutputRatio);
+        });
 
-          // Defensive check: avoid division by zero (early return already guards this,
-          // but add explicit check at point of use for safety)
-          if (deltaSeconds > 0) {
-            instantFlowRate += toProcess / deltaSeconds;
-            // Track the final-stage rate separately: only packers represent
-            // finished-goods output. The headline throughput must use this, not
-            // the all-stage sum (which triple-counts mill + sifter + packer).
-            if (buffer.machineType === 'packer') {
-              instantPackerFlowRate += toProcess / deltaSeconds;
+        // 2. Move material along conveyors
+        newSegments.forEach((segment) => {
+          const fromBuffer = newBuffers.get(segment.fromMachineId);
+          const toBuffer = newBuffers.get(segment.toMachineId);
+          if (!fromBuffer || !toBuffer) return;
+
+          // Check for material arrivals
+          const arrivedMaterial = segment.inTransit.filter((t) => t.arrivalTime <= newTime);
+          segment.inTransit = segment.inTransit.filter((t) => t.arrivalTime > newTime);
+
+          // Add arrived material to destination input buffer.
+          // Mass conservation: a parcel only leaves the belt (currentLoad -= ...)
+          // for the amount the destination actually ACCEPTS. Any remainder stays
+          // on the belt as a re-queued in-transit parcel that retries shortly.
+          // Previously the whole parcel was removed from inTransit while
+          // currentLoad was only decremented by the accepted amount - when a
+          // destination buffer filled up, currentLoad ratcheted upward until
+          // spaceOnConveyor hit 0 and the belt stalled PERMANENTLY (and the
+          // rejected material was silently destroyed). With the re-queue, a
+          // jammed belt backs up and then recovers once downstream drains.
+          arrivedMaterial.forEach((arrived) => {
+            const totalInput = toBuffer.inputBuffer.reduce((sum, m) => sum + m.amount, 0);
+            const spaceAvailable = toBuffer.inputCapacity - totalInput;
+            const toAdd = Math.max(0, Math.min(arrived.amount, spaceAvailable));
+
+            if (toAdd > 0) {
+              const acceptedContributions = scaleSourceContributions(
+                arrived.sourceContributions,
+                arrived.amount > 0 ? toAdd / arrived.amount : 0
+              );
+              const existingInput = toBuffer.inputBuffer.find((m) => m.type === arrived.type);
+              if (existingInput) {
+                existingInput.amount += toAdd;
+                existingInput.sourceContributions = mergeSourceContributions(
+                  existingInput.sourceContributions,
+                  acceptedContributions
+                );
+              } else {
+                toBuffer.inputBuffer.push({
+                  type: arrived.type,
+                  amount: toAdd,
+                  sourceContributions: acceptedContributions,
+                });
+              }
+              segment.currentLoad = Math.max(0, segment.currentLoad - toAdd);
+            }
+
+            const remainder = arrived.amount - toAdd;
+            if (remainder > GENEALOGY_EPSILON_KG) {
+              // Destination full: keep the remainder on the belt (currentLoad
+              // still includes it) and retry in 1s of sim time.
+              segment.inTransit.push({
+                amount: remainder,
+                arrivalTime: newTime + 1,
+                type: arrived.type,
+                sourceContributions: scaleSourceContributions(
+                  arrived.sourceContributions,
+                  arrived.amount > 0 ? remainder / arrived.amount : 0
+                ),
+              });
+            }
+          });
+
+          // Move material from source output to conveyor
+          const outputMaterial = fromBuffer.outputBuffer.find(
+            (m) => m.type === segment.fromOutputType
+          );
+          if (outputMaterial && outputMaterial.amount > 0) {
+            const spaceOnConveyor = segment.capacity - segment.currentLoad;
+            const flowThisTick = segment.flowRate * effectiveDelta;
+            const toMove = Math.min(outputMaterial.amount, flowThisTick, spaceOnConveyor);
+
+            if (toMove > 0) {
+              const sourceContributions = withdrawSourceContributions(outputMaterial, toMove);
+              outputMaterial.amount -= toMove;
+              segment.currentLoad += toMove;
+              segment.inTransit.push({
+                amount: toMove,
+                arrivalTime: newTime + segment.transitTime,
+                type: segment.fromOutputType,
+                sourceContributions,
+              });
             }
           }
         });
-      });
 
-      // 2. Move material along conveyors
-      newSegments.forEach((segment) => {
-        const fromBuffer = newBuffers.get(segment.fromMachineId);
-        const toBuffer = newBuffers.get(segment.toMachineId);
-        if (!fromBuffer || !toBuffer) return;
-
-        // Check for material arrivals
-        const arrivedMaterial = segment.inTransit.filter((t) => t.arrivalTime <= newTime);
-        segment.inTransit = segment.inTransit.filter((t) => t.arrivalTime > newTime);
-
-        // Add arrived material to destination input buffer.
-        // Mass conservation: a parcel only leaves the belt (currentLoad -= ...)
-        // for the amount the destination actually ACCEPTS. Any remainder stays
-        // on the belt as a re-queued in-transit parcel that retries shortly.
-        // Previously the whole parcel was removed from inTransit while
-        // currentLoad was only decremented by the accepted amount - when a
-        // destination buffer filled up, currentLoad ratcheted upward until
-        // spaceOnConveyor hit 0 and the belt stalled PERMANENTLY (and the
-        // rejected material was silently destroyed). With the re-queue, a
-        // jammed belt backs up and then recovers once downstream drains.
-        arrivedMaterial.forEach((arrived) => {
-          const totalInput = toBuffer.inputBuffer.reduce((sum, m) => sum + m.amount, 0);
-          const spaceAvailable = toBuffer.inputCapacity - totalInput;
-          const toAdd = Math.max(0, Math.min(arrived.amount, spaceAvailable));
-
-          if (toAdd > 0) {
-            const existingInput = toBuffer.inputBuffer.find((m) => m.type === arrived.type);
-            if (existingInput) {
-              existingInput.amount += toAdd;
-            } else {
-              toBuffer.inputBuffer.push({ type: arrived.type, amount: toAdd });
-            }
-            segment.currentLoad = Math.max(0, segment.currentLoad - toAdd);
-          }
-
-          const remainder = arrived.amount - toAdd;
-          if (remainder > 0.01) {
-            // Destination full: keep the remainder on the belt (currentLoad
-            // still includes it) and retry in 1s of sim time.
-            segment.inTransit.push({
-              amount: remainder,
-              arrivalTime: newTime + 1,
-              type: arrived.type,
-            });
-          }
+        // Clean up zero-amount materials
+        newBuffers.forEach((buffer) => {
+          buffer.inputBuffer = buffer.inputBuffer.filter(
+            (material) => material.amount > GENEALOGY_EPSILON_KG
+          );
+          buffer.outputBuffer = buffer.outputBuffer.filter(
+            (material) => material.amount > GENEALOGY_EPSILON_KG
+          );
         });
 
-        // Move material from source output to conveyor
-        const outputMaterial = fromBuffer.outputBuffer.find(
-          (m) => m.type === segment.fromOutputType
-        );
-        if (outputMaterial && outputMaterial.amount > 0) {
-          const spaceOnConveyor = segment.capacity - segment.currentLoad;
-          const flowThisTick = segment.flowRate * effectiveDelta;
-          const toMove = Math.min(outputMaterial.amount, flowThisTick, spaceOnConveyor);
+        let batchesToDrop = Math.max(0, productionBatches.length - MAX_PRODUCTION_BATCHES);
+        const boundedProductionBatches =
+          batchesToDrop > 0
+            ? productionBatches.filter((batch) => {
+                if (batchesToDrop > 0 && batch.disposition === 'shipped') {
+                  batchesToDrop -= 1;
+                  return false;
+                }
+                return true;
+              })
+            : productionBatches;
 
-          if (toMove > 0) {
-            outputMaterial.amount -= toMove;
-            segment.currentLoad += toMove;
-            segment.inTransit.push({
-              amount: toMove,
-              arrivalTime: newTime + segment.transitTime,
-              type: segment.fromOutputType,
-            });
+        set({
+          machineBuffers: newBuffers,
+          network: { ...state.network, segments: newSegments },
+          simulationTime: newTime,
+          totalMaterialProcessed: state.totalMaterialProcessed + instantFlowRate * deltaSeconds,
+          totalFlourProduced: state.totalFlourProduced + flourProducedThisTick,
+          currentFlowRate: instantFlowRate,
+          currentPackerFlowRate: instantPackerFlowRate,
+          wasteKg: state.wasteKg + wasteThisTick,
+          productionBatches: boundedProductionBatches,
+          batchSequence,
+          processSequence,
+          processGenealogy: [...state.processGenealogy, ...newProcessRecords].slice(
+            -MAX_PROCESS_GENEALOGY_RECORDS
+          ),
+          wasteSourceContributions,
+        });
+      },
+
+      syncMachineProcessing: (machines) => {
+        const state = get();
+        let changed = false;
+        const newBuffers = new Map(state.machineBuffers);
+
+        for (const machine of machines) {
+          const buffer = newBuffers.get(machine.id);
+          if (!buffer) continue;
+          // 'running' and 'warning' machines process; idle/critical/stopped don't.
+          const shouldProcess = machine.status === 'running' || machine.status === 'warning';
+          if (buffer.isProcessing !== shouldProcess) {
+            newBuffers.set(machine.id, { ...buffer, isProcessing: shouldProcess });
+            changed = true;
           }
         }
-      });
 
-      // Clean up zero-amount materials
-      newBuffers.forEach((buffer) => {
-        buffer.inputBuffer = buffer.inputBuffer.filter((m) => m.amount > 0.01);
-        buffer.outputBuffer = buffer.outputBuffer.filter((m) => m.amount > 0.01);
-      });
-
-      set({
-        machineBuffers: newBuffers,
-        network: { ...state.network, segments: newSegments },
-        simulationTime: newTime,
-        totalMaterialProcessed: state.totalMaterialProcessed + instantFlowRate * deltaSeconds,
-        totalFlourProduced: state.totalFlourProduced + flourProducedThisTick,
-        currentFlowRate: instantFlowRate,
-        currentPackerFlowRate: instantPackerFlowRate,
-        wasteKg: state.wasteKg + wasteThisTick,
-      });
-    },
-
-    syncMachineProcessing: (machines) => {
-      const state = get();
-      let changed = false;
-      const newBuffers = new Map(state.machineBuffers);
-
-      for (const machine of machines) {
-        const buffer = newBuffers.get(machine.id);
-        if (!buffer) continue;
-        // 'running' and 'warning' machines process; idle/critical/stopped don't.
-        const shouldProcess = machine.status === 'running' || machine.status === 'warning';
-        if (buffer.isProcessing !== shouldProcess) {
-          newBuffers.set(machine.id, { ...buffer, isProcessing: shouldProcess });
-          changed = true;
+        if (changed) {
+          set({ machineBuffers: newBuffers });
         }
-      }
+      },
 
-      if (changed) {
-        set({ machineBuffers: newBuffers });
-      }
-    },
+      receiveGrainDelivery: (amountKg: number, details) => {
+        if (!Number.isFinite(amountKg) || amountKg <= 0) return 0;
+        const state = get();
 
-    receiveGrainDelivery: (amountKg: number) => {
-      if (!Number.isFinite(amountKg) || amountKg <= 0) return 0;
-      const state = get();
+        // Find the emptiest silo (least total stored grain)
+        let emptiest: MachineBuffer | null = null;
+        let emptiestTotal = Infinity;
+        state.machineBuffers.forEach((buffer) => {
+          if (buffer.machineType !== 'silo') return;
+          const siloIndex = Number.parseInt(buffer.machineId.replace('silo-', ''), 10) || 0;
+          const siloMaterial: Extract<MaterialType, 'wheat_grain' | 'corn_grain'> =
+            siloIndex % 2 === 0 ? 'wheat_grain' : 'corn_grain';
+          if (details?.materialType && details.materialType !== siloMaterial) return;
+          const total = buffer.outputBuffer.reduce((sum, m) => sum + m.amount, 0);
+          if (total < emptiestTotal) {
+            emptiestTotal = total;
+            emptiest = buffer;
+          }
+        });
+        if (!emptiest) return 0;
 
-      // Find the emptiest silo (least total stored grain)
-      let emptiest: MachineBuffer | null = null;
-      let emptiestTotal = Infinity;
-      state.machineBuffers.forEach((buffer) => {
-        if (buffer.machineType !== 'silo') return;
-        const total = buffer.outputBuffer.reduce((sum, m) => sum + m.amount, 0);
-        if (total < emptiestTotal) {
-          emptiestTotal = total;
-          emptiest = buffer;
+        const target: MachineBuffer = emptiest;
+        // Even silo indices store wheat, odd store corn (matches initial fill)
+        const siloIndex = Number.parseInt(target.machineId.replace('silo-', ''), 10) || 0;
+        const grainType: MaterialType = siloIndex % 2 === 0 ? 'wheat_grain' : 'corn_grain';
+        const space = target.outputCapacity - emptiestTotal;
+        const toAdd = Math.max(0, Math.min(amountKg, space));
+        if (toAdd <= 0) return 0;
+
+        const newBuffers = new Map(state.machineBuffers);
+        const newOutput: MaterialAmount[] = target.outputBuffer.map((material) => ({
+          ...material,
+          sourceContributions: cloneSourceContributions(material.sourceContributions),
+          productBatches: material.productBatches?.map((batch) => ({ ...batch })),
+        }));
+        const manifestSequence = state.manifestSequence + 1;
+        const lotSequence = state.lotSequence + 1;
+        const manifestId = `receiving-${String(manifestSequence).padStart(4, '0')}`;
+        const lotId = `lot-${String(lotSequence).padStart(5, '0')}`;
+        const contribution: SourceContribution = {
+          lotId,
+          amount: toAdd,
+          path: [target.machineId],
+        };
+        const existing = newOutput.find((m) => m.type === grainType);
+        if (existing) {
+          existing.amount += toAdd;
+          existing.sourceContributions = mergeSourceContributions(existing.sourceContributions, [
+            contribution,
+          ]);
+        } else {
+          newOutput.push({ type: grainType, amount: toAdd, sourceContributions: [contribution] });
         }
-      });
-      if (!emptiest) return 0;
+        newBuffers.set(target.machineId, { ...target, outputBuffer: newOutput });
+        const manifest: MaterialManifest = {
+          id: manifestId,
+          kind: 'receiving',
+          dock: 'receiving',
+          requestedKg: amountKg,
+          actualKg: toAdd,
+          materials: [{ type: grainType, amount: toAdd }],
+          sourceLots: [contribution],
+          productBatches: [],
+          simulationTime: state.simulationTime,
+        };
+        const sourceLots = new Map(state.sourceLots);
+        sourceLots.set(lotId, {
+          id: lotId,
+          materialType: grainType,
+          origin: 'receiving',
+          sourceManifestId: manifestId,
+          supplier: details?.supplier?.trim() || 'Scheduled farm intake',
+          receivedKg: toAdd,
+          simulationTime: state.simulationTime,
+          disposition: 'released',
+          dispositionReason: null,
+        });
+        while (sourceLots.size > MAX_SOURCE_LOTS) {
+          const oldestLotId = sourceLots.keys().next().value as string | undefined;
+          if (!oldestLotId) break;
+          sourceLots.delete(oldestLotId);
+        }
+        set({
+          machineBuffers: newBuffers,
+          receivedKg: state.receivedKg + toAdd,
+          manifests: [...state.manifests.slice(-(MAX_MATERIAL_MANIFESTS - 1)), manifest],
+          manifestSequence,
+          sourceLots,
+          lotSequence,
+        });
+        return toAdd;
+      },
 
-      const target: MachineBuffer = emptiest;
-      // Even silo indices store wheat, odd store corn (matches initial fill)
-      const siloIndex = Number.parseInt(target.machineId.replace('silo-', ''), 10) || 0;
-      const grainType: MaterialType = siloIndex % 2 === 0 ? 'wheat_grain' : 'corn_grain';
-      const space = target.outputCapacity - emptiestTotal;
-      const toAdd = Math.max(0, Math.min(amountKg, space));
-      if (toAdd <= 0) return 0;
+      shipFinishedGoods: (amountKg: number) => {
+        if (!Number.isFinite(amountKg) || amountKg <= 0) return 0;
+        const state = get();
+        const newBuffers = new Map(state.machineBuffers);
+        const materials = new Map<MaterialType, number>();
+        const productBatches = state.productionBatches.map((batch) => ({
+          ...batch,
+          sourceContributions: cloneSourceContributions(batch.sourceContributions),
+          qcTestIds: [...batch.qcTestIds],
+          dispatchManifestIds: [...batch.dispatchManifestIds],
+        }));
+        const shippedBatchContributions: ProductBatchContribution[] = [];
+        let shippedSourceContributions: SourceContribution[] = [];
+        let remaining = amountKg;
 
-      const newBuffers = new Map(state.machineBuffers);
-      const newOutput = target.outputBuffer.map((m) => ({ ...m }));
-      const existing = newOutput.find((m) => m.type === grainType);
-      if (existing) {
-        existing.amount += toAdd;
-      } else {
-        newOutput.push({ type: grainType, amount: toAdd });
-      }
-      newBuffers.set(target.machineId, { ...target, outputBuffer: newOutput });
-      const manifestSequence = state.manifestSequence + 1;
-      const manifest: MaterialManifest = {
-        id: `receiving-${String(manifestSequence).padStart(4, '0')}`,
-        kind: 'receiving',
-        dock: 'receiving',
-        requestedKg: amountKg,
-        actualKg: toAdd,
-        materials: [{ type: grainType, amount: toAdd }],
-        simulationTime: state.simulationTime,
-      };
-      set({
-        machineBuffers: newBuffers,
-        receivedKg: state.receivedKg + toAdd,
-        manifests: [...state.manifests, manifest],
-        manifestSequence,
-      });
-      return toAdd;
-    },
-
-    shipFinishedGoods: (amountKg: number) => {
-      if (!Number.isFinite(amountKg) || amountKg <= 0) return 0;
-      const state = get();
-      const newBuffers = new Map(state.machineBuffers);
-      const materials = new Map<MaterialType, number>();
-      let remaining = amountKg;
-
-      // Stable machine and material order makes manifests replayable.
-      for (const machineId of ['packer-0', 'packer-1', 'packer-2']) {
-        if (remaining <= 0) break;
-        const buffer = newBuffers.get(machineId);
-        if (!buffer) continue;
-
-        const outputBuffer = buffer.outputBuffer.map((material) => ({ ...material }));
-        for (const materialType of ['flour', 'semolina'] as const) {
+        // Stable machine and material order makes manifests replayable.
+        for (const machineId of ['packer-0', 'packer-1', 'packer-2']) {
           if (remaining <= 0) break;
-          const material = outputBuffer.find((entry) => entry.type === materialType);
-          if (!material || material.amount <= 0) continue;
-          const toShip = Math.min(material.amount, remaining);
-          material.amount -= toShip;
-          remaining -= toShip;
-          materials.set(materialType, (materials.get(materialType) ?? 0) + toShip);
+          const buffer = newBuffers.get(machineId);
+          if (!buffer) continue;
+
+          const outputBuffer = buffer.outputBuffer.map((material) => ({
+            ...material,
+            sourceContributions: cloneSourceContributions(material.sourceContributions),
+            productBatches: material.productBatches?.map((batch) => ({ ...batch })),
+          }));
+          for (const materialType of ['flour', 'semolina'] as const) {
+            if (remaining <= 0) break;
+            const material = outputBuffer.find((entry) => entry.type === materialType);
+            if (!material || material.amount <= 0) continue;
+            const batchContributions = material.productBatches ?? [];
+            for (const contribution of batchContributions) {
+              if (remaining <= 0) break;
+              const batch = productBatches.find(
+                (candidate) => candidate.id === contribution.batchId
+              );
+              if (!batch || batch.disposition !== 'released' || batch.availableKg <= 0) continue;
+              const toShip = Math.min(contribution.amount, batch.availableKg, remaining);
+              if (toShip <= 0) continue;
+
+              contribution.amount -= toShip;
+              material.amount -= toShip;
+              remaining -= toShip;
+              batch.availableKg -= toShip;
+              batch.sealed = true;
+              if (batch.availableKg <= GENEALOGY_EPSILON_KG) {
+                batch.availableKg = 0;
+                batch.disposition = 'shipped';
+                batch.dispositionReason = 'Fully dispatched';
+              }
+              materials.set(materialType, (materials.get(materialType) ?? 0) + toShip);
+              shippedBatchContributions.push({ batchId: batch.id, amount: toShip });
+              const batchShipmentSources = scaleSourceContributions(
+                batch.sourceContributions,
+                batch.producedKg > 0 ? toShip / batch.producedKg : 0
+              );
+              shippedSourceContributions = mergeSourceContributions(
+                shippedSourceContributions,
+                batchShipmentSources
+              );
+              material.sourceContributions = subtractSourceContributions(
+                material.sourceContributions,
+                batchShipmentSources
+              );
+            }
+
+            material.productBatches = batchContributions.filter(
+              (contribution) => contribution.amount > GENEALOGY_EPSILON_KG
+            );
+          }
+
+          newBuffers.set(machineId, {
+            ...buffer,
+            outputBuffer: outputBuffer.filter((material) => material.amount > GENEALOGY_EPSILON_KG),
+          });
         }
 
-        newBuffers.set(machineId, {
-          ...buffer,
-          outputBuffer: outputBuffer.filter((material) => material.amount > 0.01),
+        const actualKg = amountKg - remaining;
+        if (actualKg <= 0) return 0;
+
+        const manifestSequence = state.manifestSequence + 1;
+        const manifestId = `shipping-${String(manifestSequence).padStart(4, '0')}`;
+        for (const shippedBatch of shippedBatchContributions) {
+          const batch = productBatches.find((candidate) => candidate.id === shippedBatch.batchId);
+          if (batch && !batch.dispatchManifestIds.includes(manifestId)) {
+            batch.dispatchManifestIds.push(manifestId);
+          }
+        }
+        const manifest: MaterialManifest = {
+          id: manifestId,
+          kind: 'shipping',
+          dock: 'shipping',
+          requestedKg: amountKg,
+          actualKg,
+          materials: [...materials.entries()].map(([type, amount]) => ({ type, amount })),
+          sourceLots: shippedSourceContributions,
+          productBatches: mergeProductBatchContributions([], shippedBatchContributions),
+          simulationTime: state.simulationTime,
+        };
+        const cumulativeShippedSources = mergeSourceContributions(
+          state.shippedSourceContributions,
+          shippedSourceContributions
+        );
+        set({
+          machineBuffers: newBuffers,
+          shippedKg: state.shippedKg + actualKg,
+          manifests: [...state.manifests.slice(-(MAX_MATERIAL_MANIFESTS - 1)), manifest],
+          manifestSequence,
+          productionBatches: productBatches,
+          shippedSourceContributions: cumulativeShippedSources,
         });
-      }
+        return actualKg;
+      },
 
-      const actualKg = amountKg - remaining;
-      if (actualKg <= 0) return 0;
+      setBatchDisposition: (batchIds, disposition, reason, qcTestId) => {
+        const requested = new Set(batchIds);
+        const changed: string[] = [];
+        set((state) => ({
+          productionBatches: state.productionBatches.map((batch) => {
+            if (!requested.has(batch.id) || batch.disposition === 'shipped') return batch;
+            // A recall is a terminal product disposition. A later passing retest
+            // may release a hold, but must never silently reverse a recall.
+            if (batch.disposition === 'recalled' && disposition === 'released') return batch;
+            changed.push(batch.id);
+            return {
+              ...batch,
+              disposition,
+              dispositionReason: reason,
+              sealed: batch.sealed || disposition !== 'released',
+              qcTestIds:
+                qcTestId && !batch.qcTestIds.includes(qcTestId)
+                  ? [...batch.qcTestIds, qcTestId]
+                  : batch.qcTestIds,
+            };
+          }),
+        }));
+        return changed;
+      },
 
-      const manifestSequence = state.manifestSequence + 1;
-      const manifest: MaterialManifest = {
-        id: `shipping-${String(manifestSequence).padStart(4, '0')}`,
-        kind: 'shipping',
-        dock: 'shipping',
-        requestedKg: amountKg,
-        actualKg,
-        materials: [...materials.entries()].map(([type, amount]) => ({ type, amount })),
-        simulationTime: state.simulationTime,
-      };
-      set({
-        machineBuffers: newBuffers,
-        shippedKg: state.shippedKg + actualKg,
-        manifests: [...state.manifests, manifest],
-        manifestSequence,
-      });
-      return actualKg;
-    },
+      setLotDisposition: (lotIds, disposition, reason) => {
+        const requested = new Set(lotIds);
+        const affectedBatchIds: string[] = [];
+        set((state) => {
+          const sourceLots = new Map(state.sourceLots);
+          for (const lotId of requested) {
+            const lot = sourceLots.get(lotId);
+            if (!lot) continue;
+            if (lot.disposition === 'recalled' && disposition === 'released') continue;
+            sourceLots.set(lotId, { ...lot, disposition, dispositionReason: reason });
+          }
 
-    getMaterialBalance: () => {
-      const state = get();
-      const inventoryKg = sumMachineInventory(state.machineBuffers);
-      // currentLoad is the conserved mass represented by inTransit parcels.
-      // Summing both would double-count the same material.
-      const inTransitKg = state.network.segments.reduce(
-        (sum, segment) => sum + segment.currentLoad,
-        0
-      );
-      const expectedKg = state.initialInventoryKg + state.receivedKg;
-      const accountedKg = inventoryKg + inTransitKg + state.wasteKg + state.shippedKg;
-      return {
-        initialKg: state.initialInventoryKg,
-        receivedKg: state.receivedKg,
-        inventoryKg,
-        inTransitKg,
-        wasteKg: state.wasteKg,
-        shippedKg: state.shippedKg,
-        expectedKg,
-        accountedKg,
-        errorKg: expectedKg - accountedKg,
-      };
-    },
+          const productionBatches = state.productionBatches.map((batch) => {
+            if (batch.disposition === 'shipped' || batch.disposition === 'recalled') return batch;
+            if (!batch.sourceContributions.some((source) => requested.has(source.lotId)))
+              return batch;
+            const sourceDispositions = batch.sourceContributions.map(
+              (source) => sourceLots.get(source.lotId)?.disposition ?? 'released'
+            );
+            const nextDisposition = sourceDispositions.includes('recalled')
+              ? 'recalled'
+              : sourceDispositions.includes('hold')
+                ? 'hold'
+                : disposition;
+            affectedBatchIds.push(batch.id);
+            return {
+              ...batch,
+              disposition: nextDisposition,
+              dispositionReason: reason,
+              sealed: batch.sealed || nextDisposition !== 'released',
+            };
+          });
+          return { sourceLots, productionBatches };
+        });
+        return affectedBatchIds;
+      },
 
-    getMachineBuffer: (machineId: string) => {
-      return get().machineBuffers.get(machineId);
-    },
+      getBatchTrace: (batchId) => {
+        const state = get();
+        const batch = state.productionBatches.find((candidate) => candidate.id === batchId);
+        if (!batch) return null;
+        const grouped = new Map<string, { amount: number; paths: string[][] }>();
+        for (const contribution of batch.sourceContributions) {
+          const current = grouped.get(contribution.lotId) ?? { amount: 0, paths: [] };
+          current.amount += contribution.amount;
+          if (!current.paths.some((path) => path.join('>') === contribution.path.join('>'))) {
+            current.paths.push([...contribution.path]);
+          }
+          grouped.set(contribution.lotId, current);
+        }
+        return {
+          batch,
+          sourceLots: [...grouped.entries()].flatMap(([lotId, contribution]) => {
+            const lot = state.sourceLots.get(lotId);
+            return lot ? [{ lot, ...contribution }] : [];
+          }),
+        };
+      },
 
-    getConveyorLoad: (segmentId: string) => {
-      const segment = get().network.segments.find((s) => s.id === segmentId);
-      return segment?.currentLoad ?? 0;
-    },
+      getDispatchableFinishedGoods: () =>
+        get().productionBatches.reduce(
+          (sum, batch) => sum + (batch.disposition === 'released' ? batch.availableKg : 0),
+          0
+        ),
 
-    getTotalInputBuffer: (machineId: string) => {
-      const buffer = get().machineBuffers.get(machineId);
-      if (!buffer) return 0;
-      return buffer.inputBuffer.reduce((sum, m) => sum + m.amount, 0);
-    },
+      getGenealogyBalance: () => {
+        const state = get();
+        const sumContributions = (contributions: readonly SourceContribution[] | undefined) =>
+          (contributions ?? []).reduce((sum, contribution) => sum + contribution.amount, 0);
+        let inventoryKg = 0;
+        state.machineBuffers.forEach((buffer) => {
+          for (const material of buffer.inputBuffer) {
+            inventoryKg += sumContributions(material.sourceContributions);
+          }
+          for (const material of buffer.outputBuffer) {
+            inventoryKg += sumContributions(material.sourceContributions);
+          }
+        });
+        const inTransitKg = state.network.segments.reduce(
+          (segmentTotal, segment) =>
+            segmentTotal +
+            segment.inTransit.reduce(
+              (parcelTotal, parcel) => parcelTotal + sumContributions(parcel.sourceContributions),
+              0
+            ),
+          0
+        );
+        const wasteKg = sumContributions(state.wasteSourceContributions);
+        const shippedKg = sumContributions(state.shippedSourceContributions);
+        const expectedKg = state.initialInventoryKg + state.receivedKg;
+        const accountedKg = inventoryKg + inTransitKg + wasteKg + shippedKg;
+        return {
+          expectedKg,
+          inventoryKg,
+          inTransitKg,
+          wasteKg,
+          shippedKg,
+          accountedKg,
+          errorKg: expectedKg - accountedKg,
+        };
+      },
 
-    getTotalOutputBuffer: (machineId: string) => {
-      const buffer = get().machineBuffers.get(machineId);
-      if (!buffer) return 0;
-      return buffer.outputBuffer.reduce((sum, m) => sum + m.amount, 0);
-    },
+      getMaterialBalance: () => {
+        const state = get();
+        const inventoryKg = sumMachineInventory(state.machineBuffers);
+        // currentLoad is the conserved mass represented by inTransit parcels.
+        // Summing both would double-count the same material.
+        const inTransitKg = state.network.segments.reduce(
+          (sum, segment) => sum + segment.currentLoad,
+          0
+        );
+        const expectedKg = state.initialInventoryKg + state.receivedKg;
+        const accountedKg = inventoryKg + inTransitKg + state.wasteKg + state.shippedKg;
+        return {
+          initialKg: state.initialInventoryKg,
+          receivedKg: state.receivedKg,
+          inventoryKg,
+          inTransitKg,
+          wasteKg: state.wasteKg,
+          shippedKg: state.shippedKg,
+          expectedKg,
+          accountedKg,
+          errorKg: expectedKg - accountedKg,
+        };
+      },
 
-    resetMaterialFlow: () => {
-      set({
-        machineBuffers: createInitialMachineBuffers(),
-        network: createInitialNetwork(),
-        totalMaterialProcessed: 0,
-        totalFlourProduced: 0,
-        currentFlowRate: 0,
-        currentPackerFlowRate: 0,
-        initialInventoryKg: INITIAL_INVENTORY_KG,
-        receivedKg: 0,
-        wasteKg: 0,
-        shippedKg: 0,
-        manifests: [],
-        manifestSequence: 0,
-        simulationTime: 0,
-      });
-    },
-  }))
+      getMachineBuffer: (machineId: string) => {
+        return get().machineBuffers.get(machineId);
+      },
+
+      getConveyorLoad: (segmentId: string) => {
+        const segment = get().network.segments.find((s) => s.id === segmentId);
+        return segment?.currentLoad ?? 0;
+      },
+
+      getTotalInputBuffer: (machineId: string) => {
+        const buffer = get().machineBuffers.get(machineId);
+        if (!buffer) return 0;
+        return buffer.inputBuffer.reduce((sum, m) => sum + m.amount, 0);
+      },
+
+      getTotalOutputBuffer: (machineId: string) => {
+        const buffer = get().machineBuffers.get(machineId);
+        if (!buffer) return 0;
+        return buffer.outputBuffer.reduce((sum, m) => sum + m.amount, 0);
+      },
+
+      resetMaterialFlow: () => {
+        const machineBuffers = createInitialMachineBuffers();
+        set({
+          machineBuffers,
+          network: createInitialNetwork(),
+          totalMaterialProcessed: 0,
+          totalFlourProduced: 0,
+          currentFlowRate: 0,
+          currentPackerFlowRate: 0,
+          initialInventoryKg: INITIAL_INVENTORY_KG,
+          receivedKg: 0,
+          wasteKg: 0,
+          shippedKg: 0,
+          manifests: [],
+          manifestSequence: 0,
+          sourceLots: createInitialSourceLots(machineBuffers),
+          productionBatches: [],
+          processGenealogy: [],
+          wasteSourceContributions: [],
+          shippedSourceContributions: [],
+          lotSequence: 0,
+          batchSequence: 0,
+          processSequence: 0,
+          simulationTime: 0,
+        });
+      },
+    };
+  })
 );

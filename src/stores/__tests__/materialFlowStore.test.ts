@@ -207,6 +207,59 @@ describe('MaterialFlowStore', () => {
         }
       }
     );
+
+    it('preserves sub-centigram inventory fragments instead of deleting mass', () => {
+      const state = useMaterialFlowStore.getState();
+      const machineBuffers = new Map(state.machineBuffers);
+      const silo = state.getMachineBuffer('silo-0')!;
+      const packer = state.getMachineBuffer('packer-0')!;
+      const transferredKg = 0.005;
+      const source = silo.outputBuffer[0].sourceContributions![0];
+
+      machineBuffers.set('silo-0', {
+        ...silo,
+        outputBuffer: silo.outputBuffer.map((material, index) =>
+          index === 0
+            ? {
+                ...material,
+                amount: material.amount - transferredKg,
+                sourceContributions: material.sourceContributions!.map(
+                  (contribution, sourceIndex) =>
+                    sourceIndex === 0
+                      ? { ...contribution, amount: contribution.amount - transferredKg }
+                      : { ...contribution }
+                ),
+              }
+            : material
+        ),
+      });
+      machineBuffers.set('packer-0', {
+        ...packer,
+        isProcessing: false,
+        inputBuffer: [
+          ...packer.inputBuffer,
+          {
+            type: 'wheat_grain',
+            amount: transferredKg,
+            sourceContributions: [
+              { lotId: source.lotId, amount: transferredKg, path: ['silo-0', 'packer-0'] },
+            ],
+          },
+        ],
+      });
+      useMaterialFlowStore.setState({ machineBuffers });
+
+      useMaterialFlowStore.getState().tickMaterialFlow(1 / 60, 1);
+
+      const after = useMaterialFlowStore.getState();
+      expect(
+        after
+          .getMachineBuffer('packer-0')
+          ?.inputBuffer.find((material) => material.type === 'wheat_grain')?.amount
+      ).toBeCloseTo(transferredKg, 8);
+      expect(Math.abs(after.getMaterialBalance().errorKg)).toBeLessThan(0.001);
+      expect(Math.abs(after.getGenealogyBalance().errorKg)).toBeLessThan(0.001);
+    });
   });
 
   describe('syncMachineProcessing', () => {
@@ -338,6 +391,95 @@ describe('MaterialFlowStore', () => {
       expect(balance.wasteKg).toBeGreaterThan(0);
       expect(balance.shippedKg).toBeCloseTo(shipped, 5);
       expect(Math.abs(balance.errorKg)).toBeLessThan(0.001);
+    });
+  });
+
+  describe('lot and batch genealogy', () => {
+    it('creates deterministic receiving lots and links them to manifests', () => {
+      useMaterialFlowStore.getState().receiveGrainDelivery(5000, {
+        supplier: 'North Field Cooperative',
+        materialType: 'wheat_grain',
+      });
+      const state = useMaterialFlowStore.getState();
+      const lot = state.sourceLots.get('lot-00001');
+
+      expect(lot).toMatchObject({
+        id: 'lot-00001',
+        origin: 'receiving',
+        sourceManifestId: 'receiving-0001',
+        supplier: 'North Field Cooperative',
+        receivedKg: 5000,
+        disposition: 'released',
+      });
+      expect(state.manifests[0].sourceLots).toEqual([
+        { lotId: 'lot-00001', amount: 5000, path: ['silo-0'] },
+      ]);
+    });
+
+    it('traces a packed batch to exact source lots and ordered process paths', () => {
+      for (let index = 0; index < 20; index += 1) {
+        useMaterialFlowStore.getState().tickMaterialFlow(1, 1);
+      }
+      const state = useMaterialFlowStore.getState();
+      const batch = state.productionBatches[0];
+      const trace = state.getBatchTrace(batch.id);
+
+      expect(batch.id).toBe('batch-00001');
+      expect(trace?.batch.id).toBe(batch.id);
+      expect(trace?.sourceLots.length).toBeGreaterThan(0);
+      expect(trace?.sourceLots[0].amount).toBeGreaterThan(0);
+      const upstreamPath = trace?.sourceLots
+        .flatMap((source) => source.paths)
+        .find((path) => path.length >= 3);
+      expect(upstreamPath).toEqual(expect.arrayContaining(['rm-101', 'sifter-a', 'packer-0']));
+      expect(trace!.sourceLots.reduce((sum, source) => sum + source.amount, 0)).toBeCloseTo(
+        batch.producedKg,
+        5
+      );
+    });
+
+    it('excludes held and recalled batches from dispatch manifests', () => {
+      useMaterialFlowStore.getState().tickMaterialFlow(4, 1);
+      let state = useMaterialFlowStore.getState();
+      const [held, recalled] = state.productionBatches;
+      state.setBatchDisposition([held.id], 'hold', 'Investigation');
+      state.setBatchDisposition([recalled.id], 'recalled', 'Confirmed foreign material');
+
+      const shipped = useMaterialFlowStore.getState().shipFinishedGoods(1000);
+      state = useMaterialFlowStore.getState();
+      const manifest = state.manifests.at(-1)!;
+
+      expect(shipped).toBeGreaterThan(0);
+      expect(manifest.productBatches.map((batch) => batch.batchId)).not.toContain(held.id);
+      expect(manifest.productBatches.map((batch) => batch.batchId)).not.toContain(recalled.id);
+      expect(state.productionBatches.find((batch) => batch.id === held.id)?.availableKg).toBe(
+        held.availableKg
+      );
+      expect(state.productionBatches.find((batch) => batch.id === recalled.id)?.availableKg).toBe(
+        recalled.availableKg
+      );
+    });
+
+    it('conserves source contributions through backpressure, waste, and dispatch', () => {
+      useMaterialFlowStore.getState().syncMachineProcessing([{ id: 'packer-0', status: 'idle' }]);
+      for (let index = 0; index < 70; index += 1) {
+        useMaterialFlowStore.getState().tickMaterialFlow(0.5, 1.5);
+        expect(
+          Math.abs(useMaterialFlowStore.getState().getGenealogyBalance().errorKg)
+        ).toBeLessThan(0.001);
+      }
+      useMaterialFlowStore
+        .getState()
+        .syncMachineProcessing([{ id: 'packer-0', status: 'running' }]);
+      for (let index = 0; index < 30; index += 1) {
+        useMaterialFlowStore.getState().tickMaterialFlow(0.5, 1.5);
+      }
+      useMaterialFlowStore.getState().shipFinishedGoods(2000);
+
+      const genealogy = useMaterialFlowStore.getState().getGenealogyBalance();
+      expect(genealogy.wasteKg).toBeGreaterThan(0);
+      expect(genealogy.shippedKg).toBeGreaterThan(0);
+      expect(Math.abs(genealogy.errorKg)).toBeLessThan(0.001);
     });
   });
 

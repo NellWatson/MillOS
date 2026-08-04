@@ -698,6 +698,10 @@ export const OPERATION_TAG_IDS = {
   lastShipping: 'OPERATIONS.WT006.PV',
   partsStock: 'MAINT.QT001.PV',
   shippingReleased: 'QUALITY.ZS001.PV',
+  activeQualityHolds: 'QUALITY.QT001.PV',
+  recalledBatches: 'QUALITY.QT002.PV',
+  openWorkOrders: 'MAINT.QT002.PV',
+  maintenanceDowntime: 'MAINT.TT001.PV',
 } as const;
 
 const operationalTags: TagDefinition[] = [
@@ -831,6 +835,67 @@ const operationalTags: TagDefinition[] = [
     group: 'STATUS',
     simulation: { baseValue: 1, noiseAmplitude: 0, driftRate: 0 },
   },
+  {
+    id: OPERATION_TAG_IDS.activeQualityHolds,
+    name: 'Active Quality Holds',
+    description: 'Available production batches isolated from dispatch pending disposition',
+    dataType: 'INT16',
+    accessMode: 'READ',
+    engUnit: 'batches',
+    engLow: 0,
+    engHigh: 100,
+    alarmHi: 1,
+    deadband: 1,
+    machineId: 'quality',
+    group: 'STATUS',
+    simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+  },
+  {
+    id: OPERATION_TAG_IDS.recalledBatches,
+    name: 'Recalled Product Batches',
+    description: 'Production batches under terminal recall disposition',
+    dataType: 'INT16',
+    accessMode: 'READ',
+    engUnit: 'batches',
+    engLow: 0,
+    engHigh: 100,
+    alarmHi: 1,
+    deadband: 1,
+    machineId: 'quality',
+    group: 'STATUS',
+    simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+  },
+  {
+    id: OPERATION_TAG_IDS.openWorkOrders,
+    name: 'Open Maintenance Work Orders',
+    description: 'Causal repair work orders not yet returned to service',
+    dataType: 'INT16',
+    accessMode: 'READ',
+    engUnit: 'orders',
+    engLow: 0,
+    engHigh: 100,
+    alarmHi: 1,
+    deadband: 1,
+    machineId: 'maintenance',
+    group: 'STATUS',
+    simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+  },
+  {
+    id: OPERATION_TAG_IDS.maintenanceDowntime,
+    name: 'Maintenance Downtime',
+    description: 'Accumulated downtime across currently open maintenance work orders',
+    dataType: 'FLOAT32',
+    accessMode: 'READ',
+    engUnit: 's',
+    engLow: 0,
+    engHigh: 86400,
+    alarmHi: 600,
+    alarmHiHi: 1800,
+    deadband: 1,
+    machineId: 'maintenance',
+    group: 'STATUS',
+    simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+  },
 ];
 
 // ============================================================================
@@ -844,8 +909,8 @@ export const MILL_TAGS: TagDefinition[] = [
   ...plansifterTags, // 12 tags
   ...packerTags, // 12 tags
   ...utilityTags, // 10 tags
-  ...operationalTags, // 9 tags
-]; // Total: 87 tags
+  ...operationalTags, // 13 tags
+]; // Total: 91 tags
 
 /** Get tags by machine ID */
 export function getTagsByMachine(machineId: string): TagDefinition[] {

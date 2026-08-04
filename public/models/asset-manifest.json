@@ -72,7 +72,7 @@
       "license": "CC0-1.0",
       "attribution": "Ultimate Modular Men Pack by Quaternius",
       "selfContained": true,
-      "maxFileBytes": 1400000,
+      "maxFileBytes": 850000,
       "maxMaterials": 11,
       "maxTextures": 0,
       "maxRenderVertices": 16000,
@@ -84,6 +84,9 @@
         "centreTolerance": 0.01
       },
       "requiredNodes": ["Root", "Hips", "Chest", "Head", "Wrist.L", "Wrist.R"],
+      "requiredSkinCount": 1,
+      "requiredJointCount": 62,
+      "requiredExtensions": ["KHR_draco_mesh_compression"],
       "requiredAnimations": [
         "worker-idle",
         "worker-walk",
@@ -104,7 +107,7 @@
       "license": "CC0-1.0",
       "attribution": "Ultimate Modular Women Pack by Quaternius",
       "selfContained": true,
-      "maxFileBytes": 1500000,
+      "maxFileBytes": 850000,
       "maxMaterials": 9,
       "maxTextures": 0,
       "maxRenderVertices": 19000,
@@ -116,6 +119,9 @@
         "centreTolerance": 0.01
       },
       "requiredNodes": ["Root", "Hips", "Chest", "Head", "Wrist.L", "Wrist.R"],
+      "requiredSkinCount": 1,
+      "requiredJointCount": 62,
+      "requiredExtensions": ["KHR_draco_mesh_compression"],
       "requiredAnimations": [
         "worker-idle",
         "worker-walk",

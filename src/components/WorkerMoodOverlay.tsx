@@ -566,7 +566,10 @@ export const useBilateralAlignmentSimulation = () => {
 
       const machines = useProductionStore.getState().machines;
       const gameTime = useGameSimulationStore.getState().gameTime;
-      useBreakdownStore.getState().tickBreakdownSimulation(gameTime, machines);
+      const breakdown = useBreakdownStore.getState().tickBreakdownSimulation(gameTime, machines);
+      if (breakdown) {
+        useProductionStore.getState().updateMachineStatus(breakdown.machineId, 'critical');
+      }
 
       useFlourishingStore.getState().tickFlourishing(deltaMinutes);
 

@@ -69,6 +69,10 @@ import { useGraphicsStore } from '../stores/graphicsStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { processTrendHistory, TREND_QUALITY_SUFFIX, type TrendRow } from '../scada/trendProcessing';
 import { OPERATION_TAG_IDS } from '../scada/tagDatabase';
+import { useMaterialFlowStore } from '../stores/materialFlowStore';
+import { useBreakdownStore } from '../stores/breakdownStore';
+import { useQCLabStore } from '../stores/qcLabStore';
+import { useShallow } from 'zustand/react/shallow';
 
 interface SCADAPanelProps {
   isOpen: boolean;
@@ -133,6 +137,28 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
   selectedMachineId,
   onFocusMachine,
 }) => {
+  const materialProvenance = useMaterialFlowStore(
+    useShallow((state) => {
+      let latestLot = null as
+        | (typeof state.sourceLots extends Map<string, infer T> ? T : never)
+        | null;
+      state.sourceLots.forEach((lot) => {
+        if (!latestLot || lot.simulationTime >= latestLot.simulationTime) latestLot = lot;
+      });
+      return {
+        latestBatch: state.productionBatches.at(-1) ?? null,
+        latestManifest: state.manifests.at(-1) ?? null,
+        latestLot,
+      };
+    })
+  );
+  const latestOpenWorkOrder = useBreakdownStore(
+    (state) =>
+      state.workOrders.find((workOrder) => workOrder.phase !== 'returned_to_service') ?? null
+  );
+  const latestQualityRecord = useQCLabStore(
+    (state) => state.qcLab.dispositionHistory.at(-1) ?? null
+  );
   const activeSafetyEvent = useGameSimulationStore((state) =>
     state.safetyEvents.find((event) => event.id === state.activeSafetyEventId)
   );
@@ -316,6 +342,10 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
       lastShipping: read(OPERATION_TAG_IDS.lastShipping),
       partsStock: read(OPERATION_TAG_IDS.partsStock),
       shippingReleased: read(OPERATION_TAG_IDS.shippingReleased) >= 0.5,
+      activeQualityHolds: read(OPERATION_TAG_IDS.activeQualityHolds),
+      recalledBatches: read(OPERATION_TAG_IDS.recalledBatches),
+      openWorkOrders: read(OPERATION_TAG_IDS.openWorkOrders),
+      maintenanceDowntime: read(OPERATION_TAG_IDS.maintenanceDowntime),
     };
   }, [values]);
 
@@ -1112,6 +1142,66 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                     role="status"
                   >
                     Dispatch quality: {operationalTelemetry.shippingReleased ? 'released' : 'hold'}
+                  </div>
+                </div>
+                <div className="mt-2 grid gap-2 text-xs text-slate-300 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded border border-slate-700/50 px-2.5 py-2">
+                    Quality holds: {Math.round(operationalTelemetry.activeQualityHolds)} batches
+                  </div>
+                  <div className="rounded border border-slate-700/50 px-2.5 py-2">
+                    Recalled: {Math.round(operationalTelemetry.recalledBatches)} batches
+                  </div>
+                  <div className="rounded border border-slate-700/50 px-2.5 py-2">
+                    Open work orders: {Math.round(operationalTelemetry.openWorkOrders)}
+                  </div>
+                  <div className="rounded border border-slate-700/50 px-2.5 py-2">
+                    Maintenance downtime: {Math.round(operationalTelemetry.maintenanceDowntime)} s
+                  </div>
+                </div>
+                <div className="mt-2 grid gap-2 text-[10px] text-slate-400 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded border border-cyan-500/20 bg-cyan-950/10 px-2.5 py-2">
+                    <div className="uppercase tracking-wide">Latest batch</div>
+                    <div className="mt-1 font-mono text-cyan-200">
+                      {materialProvenance.latestBatch?.id ?? 'awaiting production'}
+                    </div>
+                    {materialProvenance.latestBatch && (
+                      <div className="mt-0.5 capitalize">
+                        {materialProvenance.latestBatch.disposition},{' '}
+                        {materialProvenance.latestBatch.availableKg.toFixed(1)} kg
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded border border-cyan-500/20 bg-cyan-950/10 px-2.5 py-2">
+                    <div className="uppercase tracking-wide">Latest source lot</div>
+                    <div className="mt-1 font-mono text-cyan-200">
+                      {materialProvenance.latestLot?.id ?? 'opening inventory'}
+                    </div>
+                    <div className="mt-0.5">
+                      {materialProvenance.latestManifest?.id ?? 'no dock manifest'}
+                    </div>
+                  </div>
+                  <div className="rounded border border-orange-500/20 bg-orange-950/10 px-2.5 py-2">
+                    <div className="uppercase tracking-wide">Maintenance provenance</div>
+                    <div className="mt-1 font-mono text-orange-200">
+                      {latestOpenWorkOrder?.id ?? 'no open work order'}
+                    </div>
+                    {latestOpenWorkOrder && (
+                      <div className="mt-0.5 capitalize">
+                        {latestOpenWorkOrder.phase.replaceAll('_', ' ')},{' '}
+                        {latestOpenWorkOrder.assignedWorkerName ?? 'unassigned'}
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded border border-violet-500/20 bg-violet-950/10 px-2.5 py-2">
+                    <div className="uppercase tracking-wide">Quality provenance</div>
+                    <div className="mt-1 font-mono text-violet-200">
+                      {latestQualityRecord?.id ?? 'no disposition action'}
+                    </div>
+                    {latestQualityRecord && (
+                      <div className="mt-0.5 capitalize">
+                        {latestQualityRecord.action}, {latestQualityRecord.referenceId}
+                      </div>
+                    )}
                   </div>
                 </div>
               </section>

@@ -74,6 +74,12 @@ describe('parseRuntimeMode', () => {
     expect(parseRuntimeMode('?benchmark=true&scene=moon').benchmarkScene).toBe('moon');
   });
 
+  it('defaults moon review captures to midnight while preserving explicit time', () => {
+    expect(parseRuntimeMode('?benchmark=true&scene=moon').gameTime).toBe(0);
+    expect(parseRuntimeMode('?benchmark=true&scene=moon&time=12').gameTime).toBe(12);
+    expect(parseRuntimeMode('?scene=moon').gameTime).toBe(12);
+  });
+
   it('parses explicit SCADA isolation states without changing the default', () => {
     expect(parseRuntimeMode('?benchmark=overview&scada=off').scadaEnabled).toBe(false);
     expect(parseRuntimeMode('?benchmark=overview&scada=on').scadaEnabled).toBe(true);

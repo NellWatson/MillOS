@@ -600,10 +600,14 @@ export const useProductionStore = create<ProductionStore>()(
       useQCLabStore.getState().startQCTest(...args),
     completeQCTest: (...args: Parameters<QCLabStore['completeQCTest']>) =>
       useQCLabStore.getState().completeQCTest(...args),
-    triggerContaminationAlert: () => useQCLabStore.getState().triggerContaminationAlert(),
+    triggerContaminationAlert: (...args: Parameters<QCLabStore['triggerContaminationAlert']>) =>
+      useQCLabStore.getState().triggerContaminationAlert(...args),
+    resolveContaminationAlert: (...args: Parameters<QCLabStore['resolveContaminationAlert']>) =>
+      useQCLabStore.getState().resolveContaminationAlert(...args),
     updateCertificationStatus: (...args: Parameters<QCLabStore['updateCertificationStatus']>) =>
       useQCLabStore.getState().updateCertificationStatus(...args),
     getLatestTestResult: () => useQCLabStore.getState().getLatestTestResult(),
+    resetQCLab: () => useQCLabStore.getState().resetQCLab(),
 
     // Achievements
     // FIX: Use getter pattern for fresh state

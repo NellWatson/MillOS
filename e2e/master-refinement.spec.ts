@@ -175,6 +175,26 @@ test.describe('MillOS master refinement runtime', () => {
     await expect(introStepThree).toBeHidden();
     await expectNoWcagViolations(page, testInfo, 'default-desktop');
 
+    const overviewDockButton = page.getByRole('button', { name: 'Mill Overview', exact: true });
+    await overviewDockButton.click();
+    const overviewSidebar = page.getByRole('complementary', {
+      name: 'Mill Overview sidebar panel',
+    });
+    await expect(overviewSidebar).toBeVisible();
+    await expect(
+      overviewSidebar.getByRole('heading', { name: 'Batch genealogy and quality' })
+    ).toBeVisible();
+    await expect(
+      overviewSidebar.getByRole('combobox', { name: 'Select MillOS version' })
+    ).toHaveValue('v0.40');
+    await expect(
+      overviewSidebar.getByRole('alert', { name: 'Mill Overview unavailable' })
+    ).toHaveCount(0);
+    await expectNoWcagViolations(page, testInfo, 'mill-overview');
+    await overviewSidebar.getByRole('button', { name: 'Close sidebar panel' }).click();
+    await expect(overviewSidebar).toBeHidden();
+    await expect(overviewDockButton).toBeFocused();
+
     const aiDockButton = page.getByRole('button', { name: 'AI Partner', exact: true });
     await aiDockButton.click();
     const aiSidebar = page.getByRole('complementary', { name: 'AI Partner sidebar panel' });

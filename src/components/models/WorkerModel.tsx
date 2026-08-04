@@ -96,6 +96,8 @@ const RUN_CROSSOVER = 1.45;
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
 const EAR_DEFENDER = new THREE.CylinderGeometry(0.038, 0.038, 0.025, 14);
 const EAR_DEFENDER_BAND = new THREE.TorusGeometry(0.104, 0.008, 6, 18, Math.PI);
+const SUPERVISOR_CABLE = new THREE.TorusGeometry(0.065, 0.005, 6, 18, Math.PI * 1.25);
+const SUPERVISOR_RADIO_KNOB = new THREE.CylinderGeometry(0.009, 0.009, 0.012, 10);
 
 /**
  * Conservative pose margin added to the bind-pose bounding volume, in metres.
@@ -464,6 +466,7 @@ const WorkerAccessories: React.FC<{
   const chest = model.getObjectByName('Chest') ?? null;
   const hips = model.getObjectByName('Hips') ?? null;
   const wrist = model.getObjectByName('Wrist.L') ?? null;
+  const isSupervisor = appearance.workAction === 'supervise';
   const faceSkinMaterial = useMemo(
     () => getSkinSoftMaterial(appearance.skinTone),
     [appearance.skinTone]
@@ -550,7 +553,81 @@ const WorkerAccessories: React.FC<{
           material={materials.dark}
           scale={[0.018, 0.027, 0.004]}
         />
+        {isSupervisor && (
+          <>
+            <mesh
+              position={[0.015, 0.006, 0.006]}
+              geometry={UNIT_BOX}
+              material={materials.dark}
+              scale={[0.021, 0.004, 0.004]}
+            />
+            <mesh
+              position={[0.015, -0.008, 0.006]}
+              geometry={UNIT_BOX}
+              material={materials.dark}
+              scale={[0.021, 0.004, 0.004]}
+            />
+            <mesh
+              position={[0.015, -0.022, 0.006]}
+              geometry={UNIT_BOX}
+              material={materials.accent}
+              scale={[0.021, 0.004, 0.004]}
+            />
+          </>
+        )}
       </BoneMount>
+
+      {isSupervisor && (
+        <>
+          <BoneMount bone={head} name="supervisor-hard-hat-identity-stripe">
+            <mesh
+              position={[0, 0.17, 0.125]}
+              geometry={UNIT_BOX}
+              material={materials.badge}
+              scale={[0.025, 0.11, 0.008]}
+            />
+            <mesh
+              position={[0, 0.222, 0.045]}
+              geometry={UNIT_BOX}
+              material={materials.badge}
+              scale={[0.025, 0.008, 0.15]}
+            />
+          </BoneMount>
+          <BoneMount
+            bone={chest}
+            name="supervisor-radio-and-lanyard"
+            position={[-0.13, 0.055, 0.14]}
+          >
+            <mesh geometry={UNIT_BOX} material={materials.dark} scale={[0.052, 0.082, 0.026]} />
+            <mesh
+              position={[0.018, 0.048, 0]}
+              rotation={[0, 0, Math.PI / 2]}
+              geometry={SUPERVISOR_RADIO_KNOB}
+              material={materials.accent}
+            />
+            <mesh
+              position={[-0.021, 0.083, 0]}
+              rotation={[0, 0, -0.14]}
+              geometry={UNIT_BOX}
+              material={materials.dark}
+              scale={[0.006, 0.075, 0.006]}
+            />
+            <mesh
+              position={[0.08, -0.035, -0.002]}
+              rotation={[Math.PI / 2, 0, -0.55]}
+              geometry={SUPERVISOR_CABLE}
+              material={materials.dark}
+            />
+            <mesh
+              position={[0.18, -0.045, 0.004]}
+              rotation={[0, 0, -0.18]}
+              geometry={UNIT_BOX}
+              material={materials.accent}
+              scale={[0.008, 0.12, 0.007]}
+            />
+          </BoneMount>
+        </>
+      )}
 
       {appearance.hasVest && (
         <>
@@ -613,7 +690,10 @@ const WorkerAccessories: React.FC<{
 export const WorkerModel: React.FC<WorkerModelProps> = ({ appearance, activity, signals }) => {
   const modelPath =
     appearance.bodyType === 'feminine' ? WORKER_ASSET_PATHS.feminine : WORKER_ASSET_PATHS.masculine;
-  const { scene, animations } = useDracoGLTF(modelPath, false);
+  // The normalized v0.40 worker bodies use KHR_draco_mesh_compression. Keep
+  // the decoder explicit here so a cold load never depends on another model
+  // having configured Drei's shared GLTFLoader first.
+  const { scene, animations } = useDracoGLTF(modelPath);
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const simulationRunning = useGameSimulationStore(
     (state) => Number.isFinite(state.gameSpeed) && state.gameSpeed > 0
@@ -855,6 +935,8 @@ export const WorkerModel: React.FC<WorkerModelProps> = ({ appearance, activity, 
           : activity === 'working'
             ? TASK_CLIPS[appearance.workAction]
             : 'worker-idle';
+    const supervisorFocus =
+      appearance.workAction === 'supervise' && !moving && activity === 'working' ? -0.025 : 0;
 
     for (const clipName of WORKER_CLIPS) {
       const action = actionsRef.current[clipName];
@@ -895,14 +977,17 @@ export const WorkerModel: React.FC<WorkerModelProps> = ({ appearance, activity, 
     if (rightEyelidRef.current) rightEyelidRef.current.scale.y = eyelidScale;
 
     if (head) {
-      _euler.set(signals.headPitch, signals.headYaw, 0, 'XYZ');
+      // The supervisor's close-LOD expression is a restrained gaze and posture
+      // cue on the existing rig. No duplicate face or unavailable morph target
+      // is introduced.
+      _euler.set(signals.headPitch + supervisorFocus, signals.headYaw, 0, 'XYZ');
       _quat.setFromEuler(_euler);
       // Pre-multiply: the offset must read as an increment on the clip's own
       // parent-space rotation, not a rotation about the already-rotated bone.
       head.quaternion.premultiply(_quat);
     }
 
-    const chestPitch = signals.chestPitch + signals.breathAmount * 0.008;
+    const chestPitch = signals.chestPitch + signals.breathAmount * 0.008 - supervisorFocus * 0.35;
     if (chest && Math.abs(chestPitch) > 1e-4) {
       _euler.set(chestPitch, 0, 0, 'XYZ');
       _quat.setFromEuler(_euler);

@@ -1,5 +1,5 @@
 /**
- * UnifiedGameTick - Zero-allocation game state updates
+ * UnifiedGameTick - Allocation-conscious game state updates
  *
  * ARCHITECTURE (per GPT 5.2 recommendations):
  * 1. REUSE OBJECTS - Module-level ctx/arrays, mutated not recreated
@@ -18,7 +18,7 @@ import { useProductionStore, DAILY_TARGET_BAGS } from '../stores/productionStore
 import { getDispatchQualityStatus, useQCLabStore } from '../stores/qcLabStore';
 import { useMaterialFlowStore } from '../stores/materialFlowStore';
 import { useTruckScheduleStore } from '../stores/truckScheduleStore';
-import { useBreakdownStore } from '../stores/breakdownStore';
+import { useBreakdownStore, type BreakdownType } from '../stores/breakdownStore';
 import { useUIStore } from '../stores/uiStore';
 import type { MachineData } from '../types';
 
@@ -57,7 +57,12 @@ let _milestonesReachedMask = 0;
 // ============================================================
 
 // Reusable breakdowns array - cleared with .length = 0, never reallocated
-const _breakdowns: Array<{ id: string; name: string; type: string }> = [];
+const _breakdowns: Array<{
+  id: string;
+  name: string;
+  machineType: string;
+  breakdownType: BreakdownType;
+}> = [];
 
 // Reusable metrics object - mutated in place
 const _metricsUpdate = {
@@ -109,6 +114,13 @@ function calculateEfficiency(wear: number, machineType: string): number {
   const wearInRange = wear - config.warningThreshold * 0.5;
   const degradation = Math.min(1, wearInRange / degradationRange);
   return Math.round((1 - degradation * 0.4) * 100);
+}
+
+function inferBreakdownType(machine: MachineData): BreakdownType {
+  if (machine.metrics.temperature >= 80) return 'overheating';
+  if (machine.type === 'PLANSIFTER') return 'vibration_failure';
+  if (machine.type === 'SILO') return 'electrical';
+  return 'mechanical';
 }
 
 // ============================================================
@@ -252,7 +264,26 @@ function unifiedGameTick(ctx: TickContext): void {
   }
 
   // 2. Update machine TRUTH (not cosmetics)
-  const prodStore = useProductionStore.getState();
+  let prodStore = useProductionStore.getState();
+  const maintenanceStore = useBreakdownStore.getState();
+  maintenanceStore.tickDowntime(deltaSeconds);
+
+  // A restart request is the final far-side contract in the maintenance loop.
+  // The production store resets machine wear/status first; only then does the
+  // work order close and release the lockout.
+  let maintenanceRestarted = false;
+  for (const workOrder of maintenanceStore.workOrders) {
+    if (workOrder.phase === 'restart_requested') {
+      const result = useProductionStore.getState().performMaintenance(workOrder.machineId);
+      if (result.success) {
+        useBreakdownStore.getState().confirmMachineRestart(workOrder.breakdownId);
+        maintenanceRestarted = true;
+      }
+    }
+  }
+  if (maintenanceRestarted) {
+    prodStore = useProductionStore.getState();
+  }
   const machines = prodStore.machines;
 
   let anyMachineChanged = false;
@@ -278,7 +309,12 @@ function unifiedGameTick(ctx: TickContext): void {
     const result = updateMachineTruth(machine, deltaSeconds);
 
     if (result.breakdown) {
-      _breakdowns.push({ id: machine.id, name: machine.name, type: machine.type });
+      _breakdowns.push({
+        id: machine.id,
+        name: machine.name,
+        machineType: machine.type,
+        breakdownType: inferBreakdownType(machine),
+      });
     }
 
     if (result.changed) {
@@ -461,16 +497,23 @@ function unifiedGameTick(ctx: TickContext): void {
   // not make product appear or disappear.
   const shippingDocked = useTruckScheduleStore.getState().truckSchedule.shipping.truckDocked;
   if (shippingDocked && !_lastShippingDocked) {
-    const qualityStatus = getDispatchQualityStatus(useQCLabStore.getState().qcLab);
+    const qualityStatus = getDispatchQualityStatus(
+      useQCLabStore.getState().qcLab,
+      flowStore.productionBatches
+    );
     if (qualityStatus.released) {
       flowStore.shipFinishedGoods(FINISHED_GOODS_SHIPMENT_KG);
     } else {
-      const reason =
-        qualityStatus.reason === 'certification_expired'
-          ? 'quality certification is expired'
-          : qualityStatus.reason === 'unresolved_contamination'
-            ? 'a contamination alert is unresolved'
-            : 'the latest laboratory result failed';
+      const reasonByCode = {
+        certification_expired: 'quality certification is expired',
+        unresolved_contamination: 'a contamination alert is unresolved',
+        failed_quality_test: 'the latest laboratory result failed',
+        batch_quality_hold: 'available production batches remain on quality hold',
+        batch_recalled: 'recalled production remains isolated from dispatch',
+      } as const;
+      const reason = qualityStatus.reason
+        ? reasonByCode[qualityStatus.reason]
+        : 'the quality interlock is not released';
       useUIStore.getState().addAlert({
         id: `dispatch-quality-hold-${Date.now()}`,
         type: 'warning',
@@ -509,12 +552,14 @@ function unifiedGameTick(ctx: TickContext): void {
   if (_breakdowns.length > 0) {
     // Copy breakdowns before async (since we reuse the array)
     const breakdownsCopy = _breakdowns.map((b) => ({ ...b }));
-    breakdownsCopy.forEach(({ id, name, type }) => {
+    breakdownsCopy.forEach(({ id, name, machineType, breakdownType }) => {
+      const breakdown = useBreakdownStore.getState().triggerBreakdown(id, name, breakdownType);
+      if (!breakdown) return;
       useUIStore.getState().addAlert({
         id: `breakdown-${id}-${Date.now()}`,
         type: 'critical',
         title: 'Machine Breakdown',
-        message: `${name} (${type}) has broken down due to excessive wear. Maintenance required.`,
+        message: `${name} (${machineType}) has broken down due to excessive wear. Work order ${breakdown.workOrderId} requires repair, verification, and controlled restart.`,
         machineId: id,
         timestamp: new Date(),
         acknowledged: false,
