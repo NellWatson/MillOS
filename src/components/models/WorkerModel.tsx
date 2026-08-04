@@ -1,5 +1,5 @@
 /**
- * Authored production-worker renderer for MillOS v0.41.
+ * Authored production-worker renderer for MillOS v0.40.
  *
  * The two CC0 Quaternius worker bodies arrive with complete industrial
  * workwear, compatible rigs, and a curated semantic animation set. Runtime
@@ -690,7 +690,7 @@ const WorkerAccessories: React.FC<{
 export const WorkerModel: React.FC<WorkerModelProps> = ({ appearance, activity, signals }) => {
   const modelPath =
     appearance.bodyType === 'feminine' ? WORKER_ASSET_PATHS.feminine : WORKER_ASSET_PATHS.masculine;
-  // The normalized v0.41 worker bodies use KHR_draco_mesh_compression. Keep
+  // The normalized v0.40 worker bodies use KHR_draco_mesh_compression. Keep
   // the decoder explicit here so a cold load never depends on another model
   // having configured Drei's shared GLTFLoader first.
   const { scene, animations } = useDracoGLTF(modelPath);

@@ -185,6 +185,9 @@ test.describe('MillOS master refinement runtime', () => {
       overviewSidebar.getByRole('heading', { name: 'Batch genealogy and quality' })
     ).toBeVisible();
     await expect(
+      overviewSidebar.getByRole('combobox', { name: 'Select MillOS version' })
+    ).toHaveValue('v0.40');
+    await expect(
       overviewSidebar.getByRole('alert', { name: 'Mill Overview unavailable' })
     ).toHaveCount(0);
     await expectNoWcagViolations(page, testInfo, 'mill-overview');

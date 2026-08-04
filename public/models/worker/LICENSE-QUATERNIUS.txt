@@ -1,4 +1,4 @@
-MillOS v0.41 personnel asset licence record
+MillOS v0.40 personnel asset licence record
 
 The runtime derivatives use the Worker characters and authored animations from the Quaternius Ultimate Modular Men and Ultimate Modular Women packs. Both packs use the same CC0 1.0 licence reproduced below.
 

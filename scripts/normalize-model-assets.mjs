@@ -459,7 +459,7 @@ async function normalizeAuthoredWorker(io, source, output, bodyType) {
   centreSceneBelow(document, scene);
   scene.setName(`MillOS_Worker_${bodyType}`);
   Object.assign(root.getAsset(), {
-    generator: `MillOS v0.41 worker pipeline, glTF-Transform ${GLTF_TRANSFORM_VERSION}`,
+    generator: `MillOS v0.40 worker pipeline, glTF-Transform ${GLTF_TRANSFORM_VERSION}`,
     copyright: `Ultimate Modular ${bodyType === 'masculine' ? 'Men' : 'Women'} Worker by Quaternius, CC0 1.0`,
   });
 

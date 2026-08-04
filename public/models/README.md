@@ -19,7 +19,7 @@ models/
     └── worker-masculine.glb
 ```
 
-MillOS v0.41 uses authored Worker characters from the Quaternius Ultimate
+MillOS v0.40 uses authored Worker characters from the Quaternius Ultimate
 Modular Men and Ultimate Modular Women packs for its named personnel. Each body
 has complete industrial workwear and the same nine simulation-driven clips:
 idle, walk, run, break, inspect, repair, supervise, radio, and sample. Their
@@ -28,7 +28,7 @@ hair, eye, PPE, and tool variants can be applied at runtime without duplicating
 texture memory. The compact Kenney worker remains a validated compatibility
 asset for older consumers.
 
-The v0.41 delivery pipeline applies `KHR_draco_mesh_compression` to both
+The v0.40 delivery pipeline applies `KHR_draco_mesh_compression` to both
 authored personnel bodies. Runtime derivatives preserve one skin, the complete
 62-joint rig, all nine semantic clips, names, and physical bounds. The asset
 validator checks those contracts and the DRACO extension before release.

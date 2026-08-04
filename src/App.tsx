@@ -129,7 +129,7 @@ const StartupInterface: React.FC = () => (
     aria-live="polite"
     className="pointer-events-none fixed left-4 top-4 z-20 rounded-lg border border-white/15 bg-slate-950/80 px-4 py-3 text-slate-100 shadow-lg backdrop-blur-md"
   >
-    <div className="text-sm font-semibold tracking-[0.12em]">MILLOS 0.41</div>
+    <div className="text-sm font-semibold tracking-[0.12em]">MILLOS 0.40</div>
     <div className="mt-1 text-xs text-slate-300">Bringing operations online</div>
   </div>
 );

@@ -1,5 +1,5 @@
 ---
-title: MillOS v0.41 Operational Consequences
+title: MillOS v0.40 Operational Consequences
 date: 2026-08-04
 status: complete
 stepsCompleted: 6
@@ -17,11 +17,11 @@ verification_criteria:
   - "Typecheck, lint, format, unit tests, build, asset, depth, shader, bundle, browser, accessibility, motion, and visual evidence gates are green on the feature branch."
 ---
 
-# MillOS v0.41 Operational Consequences
+# MillOS v0.40 Operational Consequences
 
 ## Product decision
 
-Version 0.41 makes the living mill operationally consequential. Material, quality, maintenance, training, and personnel state must tell one inspectable story across the 3D world, Overview, SCADA, alerts, and scenario debrief. The accepted v0.40 world composition remains intact.
+Version 0.40 makes the living mill operationally consequential. Material, quality, maintenance, training, and personnel state must tell one inspectable story across the 3D world, Overview, SCADA, alerts, and scenario debrief. The accepted v0.40 world composition remains intact. The product version is intentionally locked at 0.40 while features continue to evolve.
 
 ## Adversarial pre-check
 
@@ -29,7 +29,7 @@ Version 0.41 makes the living mill operationally consequential. Material, qualit
 2. QC currently applies only a global latest-result interlock. Batch-specific hold, retest, release, and recall need stable identifiers and explicit disposition records.
 3. Machine wear and breakdown UI already exist in separate stores. The implementation must connect them rather than add a second fault simulator. Production status, material flow, work order phase, parts, worker assignment, downtime, verification, and restart must share one causal lifecycle.
 4. The scenario framework is already mature and BAS-oriented. Operational scoring should extend its choice and result contracts without weakening existing categories, persistence, or debriefs.
-5. The authored worker bodies already have compatible rigs, 62 joints, nine semantic clips, PBR variants, LOD, blink, gaze, breathing, and role accessories. They contain no morph targets. The truthful v0.41 personnel slice is a supervisor refinement on the existing rig, not an invented facial-animation system.
+5. The authored worker bodies already have compatible rigs, 62 joints, nine semantic clips, PBR variants, LOD, blink, gaze, breathing, and role accessories. They contain no morph targets. The truthful v0.40 personnel slice is a supervisor refinement on the existing rig, not an invented facial-animation system.
 6. The existing personnel pipeline emits uncompressed geometry even though every runtime consumer already uses the DRACO-capable loader. Compression is acceptable only if validation proves skins, bones, names, bounds, and all nine clips survive.
 7. Full real-system publication, browser acceptance, and visual judgment remain separate gates from TypeScript and build success.
 
@@ -115,13 +115,13 @@ Working if a keyboard-only operator can diagnose and resolve the training incide
 
 ## Verification results
 
-- Deterministic source, test, build, and design gates: TypeScript, ESLint, Prettier, 102 test files with 1,651 tests, Vite build with 3,721 modules, asset validation, depth policy, shader contracts, bundle budget, and Impeccable all pass.
+- Deterministic source, test, build, and design gates: TypeScript, ESLint, Prettier, 103 test files with 1,652 tests, Vite build with 3,721 modules, asset validation, depth policy, shader contracts, bundle budget, and Impeccable all pass.
 - Asset delivery: the two authored DRACO personnel derivatives validate at 797,268 and 796,120 bytes with their skins, rigs, and nine semantic clips intact. Cold browser loading now configures the local decoder at the worker call site.
 - Conservation stress run: after 15,000 ticks, ordinary ledger error is 0.000000035 kg and genealogy error is 0.000000310 kg across receiving, processing, waste, inventory, shipping, 18 batches, and four manifests.
-- Browser gate: two Playwright journeys pass in 47.3 seconds. They cover cold model delivery, the complete 3D scene, Mill Overview, genealogy, simulated SCADA, fire drill, settings, responsive layout, keyboard focus, and WCAG A/AA scans.
+- Browser gate: two Playwright journeys pass in 1.1 minutes. They cover cold model delivery, the complete 3D scene, Mill Overview, the visible v0.40 identity, genealogy, simulated SCADA, fire drill, settings, responsive layout, keyboard focus, and WCAG A/AA scans.
 - Operational scenario: the keyboard-operated strong path scores A and 94 percent overall, with Safety 100, Traceability 100, Quality 100, Continuity 85, and Response Time 83. The four timed choices and their outcomes remain in the debrief audit.
 - Maintenance: the UI requires technician assignment, consumes bearings and belts once, requires repair completion and verification, queues the restart, and the real unified tick returns R.M. 101 to service with wear reduced from 100 to 50 and a complete work-order audit.
-- Performance: all five default complete-world samples pass. Overview is 110.7 FPS, interior 120.1, shipping 116.1, receiving 115.3, and water 95.4; p95 frame time ranges from 9.3 to 11.5 ms.
-- Reproducible visual evidence is under `test-results/v041-operational/`, including supervisor and feminine personnel close-ups, batch recall and genealogy, maintenance, SCADA provenance, scenario debrief, and high-fidelity yard, village, farm, water, garage, forklift, sun, and moon captures.
+- Performance: all five default complete-world samples pass. Overview is 100.6 FPS, interior 118.8, shipping 103.5, receiving 104.1, and water 85.2; p95 frame time ranges from 9.6 to 12.9 ms.
+- Reproducible visual evidence is under `test-results/v040-operational/`, including supervisor and feminine personnel close-ups, batch recall and genealogy, maintenance, SCADA provenance, scenario debrief, and high-fidelity yard, village, farm, water, garage, forklift, sun, and moon captures.
 
 Human visual acceptance remains a human review decision. This completion records implementation and reproducible evidence without self-approving taste.

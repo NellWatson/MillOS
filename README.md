@@ -1120,7 +1120,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**MillOS v0.41**
+**MillOS v0.40 (Operational Consequences update)**
 
 *Exploring grain-mill operations through a digital twin, simulated industrial tooling, and bilateral AI partnership*
 
