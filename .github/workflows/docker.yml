@@ -25,7 +25,7 @@ jobs:
       output: image
       push: ${{ github.event_name != 'pull_request' }}
       context: ./scada-proxy
-      file: ./scada-proxy/Dockerfile
+      file: Dockerfile
       platforms: linux/amd64,linux/arm64
       cache: true
       cache-mode: max
