@@ -706,14 +706,19 @@ describe('StabilityStore', () => {
     it('should apply small drift to friction sources', () => {
       const { tickStability } = useStabilityStore.getState();
       const initialFriction = { ...useStabilityStore.getState().frictionSources };
+      const random = vi.spyOn(Math, 'random').mockReturnValue(0.75);
 
-      // Run several ticks to accumulate drift
-      for (let i = 0; i < 100; i++) {
-        tickStability(1);
+      try {
+        // Use a deterministic positive sample so this validates drift rather
+        // than occasionally failing when independent random walks cancel out.
+        for (let i = 0; i < 10; i++) {
+          tickStability(1);
+        }
+      } finally {
+        random.mockRestore();
       }
 
       const { frictionSources } = useStabilityStore.getState();
-      // At least one source should have changed (probabilistic)
       const changed = Object.keys(frictionSources).some(
         (key) => Math.abs(frictionSources[key] - initialFriction[key]) > 0.001
       );
