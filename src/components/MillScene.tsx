@@ -86,6 +86,11 @@ const PostProcessing = recoverableLazy(() =>
 const VisibleChaos = recoverableLazy(() =>
   import('./VisibleChaos').then((module) => ({ default: module.VisibleChaos }))
 );
+const OperationalWorldSignals = recoverableLazy(() =>
+  import('./OperationalWorldSignals').then((module) => ({
+    default: module.OperationalWorldSignals,
+  }))
+);
 import { useMoodSimulation, useBilateralAlignmentSimulation } from './WorkerMoodOverlay';
 import { MachineData, MachineType, WorkerData } from '../types';
 import { useGraphicsStore, isPostProcessingActive } from '../stores/graphicsStore';
@@ -945,6 +950,17 @@ export const MillScene: React.FC<MillSceneProps> = ({
       </ErrorBoundary>
       {/* Incident Heat Map Visualization */}
       <IncidentHeatMap />
+
+      {/* Operational campaign incidents become legible in the same authored
+          site. The marker layer adds no lights or shadows and keeps one shared
+          animation loop for all active incidents. */}
+      {authoredSiteReady && (
+        <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
+          <Suspense fallback={null}>
+            <OperationalWorldSignals />
+          </Suspense>
+        </ErrorBoundary>
+      )}
 
       {/* Fire Drill Exit Markers - shown during active drill */}
       <FireDrillExitMarkers />

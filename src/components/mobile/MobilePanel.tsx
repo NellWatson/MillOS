@@ -34,6 +34,7 @@ import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useSafetyStore } from '../../stores/safetyStore';
 import { useAIConfigStore } from '../../stores/aiConfigStore';
 import { useWorkerMoodStore } from '../../stores/workerMoodStore';
+import { useOperationsCampaignStore } from '../../stores/operationsCampaignStore';
 import { EmergencyStopButton } from '../ui/EmergencyStopButton';
 
 interface MobilePanelProps {
@@ -124,6 +125,10 @@ const OverviewContent: React.FC = () => {
   const setGameSpeed = useGameSimulationStore((s) => s.setGameSpeed);
 
   const safetyMetrics = useSafetyStore((s) => s.safetyMetrics);
+  const campaignOrders = useOperationsCampaignStore((s) => s.orders);
+  const campaignIncidents = useOperationsCampaignStore((s) => s.incidents);
+  const campaignConstraints = useOperationsCampaignStore((s) => s.constraints);
+  const campaignEconomics = useOperationsCampaignStore((s) => s.economics);
 
   // Machine status counts
   const machineStats = {
@@ -310,6 +315,37 @@ const OverviewContent: React.FC = () => {
       </div>
 
       {/* Total Production */}
+      <div className="rounded-lg border border-cyan-500/20 bg-cyan-950/20 p-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-300">
+            Operations campaign
+          </span>
+          <span className="font-mono text-[10px] text-slate-300">
+            {campaignOrders.filter((order) => order.status === 'fulfilled').length}/
+            {campaignOrders.length} orders
+          </span>
+        </div>
+        <div className="mt-1 grid grid-cols-2 gap-2 text-[9px]">
+          <div className="text-slate-400">
+            Active incidents:{' '}
+            <span className="font-semibold text-amber-300">
+              {campaignIncidents.filter((incident) => incident.phase !== 'resolved').length}
+            </span>
+          </div>
+          <div className="text-slate-400">
+            Revenue:{' '}
+            <span className="font-semibold text-emerald-300">
+              £{campaignEconomics.revenue.toFixed(0)}
+            </span>
+          </div>
+        </div>
+        {campaignConstraints[0] && (
+          <p className="mt-1.5 text-[9px] text-amber-100">
+            {campaignConstraints[0].label}: {campaignConstraints[0].detail}
+          </p>
+        )}
+      </div>
+
       <div className="text-center py-2 bg-gradient-to-r from-cyan-900/20 to-blue-900/20 rounded-lg border border-cyan-500/20">
         <div className="text-[10px] text-slate-500">Total Bags</div>
         <div className="text-xl font-bold font-mono text-cyan-400">
@@ -905,21 +941,9 @@ const ManagementContent: React.FC = () => {
   );
 };
 
-// Placeholder content for other panels
-const PlaceholderContent: React.FC<{ mode: DockMode }> = ({ mode }) => {
-  return (
-    <div className="flex items-center justify-center h-full text-slate-400">
-      <div className="text-center">
-        <div className="mb-2">{getPanelIcon(mode)}</div>
-        <div className="text-sm">{getPanelTitle(mode)} panel</div>
-        <div className="text-xs text-slate-500 mt-1">This panel is unavailable on mobile.</div>
-      </div>
-    </div>
-  );
-};
-
 // Get content based on mode
 const getPanelContent = (mode: DockMode | null) => {
+  if (!mode) return null;
   switch (mode) {
     case 'overview':
       return <OverviewContent />;
@@ -937,8 +961,6 @@ const getPanelContent = (mode: DockMode | null) => {
       return <SettingsContent />;
     case 'management':
       return <ManagementContent />;
-    default:
-      return mode ? <PlaceholderContent mode={mode} /> : null;
   }
 };
 

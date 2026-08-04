@@ -14,6 +14,7 @@ import { persist } from 'zustand/middleware';
 import { safeJSONStorage } from './storage';
 import { sanitizeScenarioState } from './persistenceMigrations';
 import type { FiveAxes } from '../types/bas';
+import type { IncidentKind } from './operationsCampaignStore';
 
 // =============================================================================
 // TYPES
@@ -107,6 +108,14 @@ export interface Scenario {
   durationDisplay?: string;
   /** Scenario phases for multi-phase scenarios */
   phases?: ScenarioPhase[];
+  /** Live operations incident activated when this training scenario starts. */
+  operationalIncidentKind?: IncidentKind;
+  /** Scenario-specific sequence used in the operational debrief. */
+  operationalPlaybook?: string[];
+  /** Scenario-specific safeguard text keyed to the five scored objectives. */
+  operationalSafeguards?: Partial<
+    Record<'safety' | 'traceability' | 'quality' | 'continuity' | 'responseTime', string>
+  >;
 }
 
 export interface ScenarioResult {
@@ -236,6 +245,314 @@ interface ScenarioState {
 // =============================================================================
 // PRESET SCENARIOS
 // =============================================================================
+
+interface IncidentScenarioConfig {
+  kind: Exclude<IncidentKind, 'supplier_contamination'>;
+  name: string;
+  description: string;
+  firstAction: string;
+  controlAction: string;
+  recoveryAction: string;
+  evidence: string;
+}
+
+const OPERATIONAL_AXES: FiveAxes = {
+  autonomyLevel: 62,
+  decisionMode: 58,
+  informationAccess: 76,
+  evaluationDirection: 64,
+  collectiveOrientation: 66,
+};
+
+function createIncidentScenario(config: IncidentScenarioConfig): Scenario {
+  const playbook = [config.firstAction, config.controlAction, config.recoveryAction];
+  const safeEffects = {
+    safety: 0.24,
+    traceability: 0.16,
+    quality: 0.16,
+    continuity: 0.12,
+    responseTime: 0.24,
+  };
+  return {
+    id: `operations-${config.kind.replaceAll('_', '-')}`,
+    name: config.name,
+    description: config.description,
+    category: 'operational',
+    icon: 'ShieldAlert',
+    difficulty: 'advanced',
+    durationDisplay: '2 minutes',
+    initialAxes: { ...OPERATIONAL_AXES },
+    operationalIncidentKind: config.kind,
+    operationalPlaybook: playbook,
+    operationalSafeguards: {
+      safety: config.firstAction,
+      traceability: `Preserve timestamps, affected assets, material identity, and operator decisions using ${config.evidence}.`,
+      quality: config.controlAction,
+      continuity: config.recoveryAction,
+      responseTime:
+        'Acknowledge promptly, establish the first safe state, and name the response owner.',
+    },
+    phases: [
+      {
+        id: 'stabilize',
+        name: 'Stabilize',
+        description: 'Establish the first safe operating state.',
+        durationSeconds: 40,
+        instruction: config.firstAction,
+      },
+      {
+        id: 'control',
+        name: 'Control',
+        description: 'Use evidence to control the actual scope and consequence.',
+        durationSeconds: 40,
+        instruction: config.controlAction,
+      },
+      {
+        id: 'recover',
+        name: 'Recover',
+        description: 'Return to service without hiding residual conditions.',
+        durationSeconds: 40,
+        instruction: config.recoveryAction,
+      },
+    ],
+    events: [
+      {
+        time: 16,
+        type: 'choice_point',
+        magnitude: 0.7,
+        description: 'The alarm is active. What is your immediate response?',
+        choices: [
+          {
+            id: `${config.kind}-contain`,
+            label: 'Establish the safe state',
+            description: config.firstAction,
+            effects: safeEffects,
+            outcome:
+              'The hazard is acknowledged, ownership is clear, and escalation stops before diagnosis begins.',
+          },
+          {
+            id: `${config.kind}-defer`,
+            label: 'Wait for more certainty',
+            description: 'Continue the current state until the next scheduled review.',
+            effects: { safety: -0.22, quality: -0.08, continuity: -0.1, responseTime: -0.3 },
+            outcome:
+              'The response starts late and the affected scope grows while nobody owns the first action.',
+          },
+          {
+            id: `${config.kind}-override`,
+            label: 'Override and maintain output',
+            description: 'Treat the alarm as nuisance telemetry and hold the production plan.',
+            effects: {
+              safety: -0.38,
+              traceability: -0.18,
+              quality: -0.25,
+              continuity: 0.12,
+              responseTime: 0.08,
+            },
+            outcome:
+              'Short-term output continues at the cost of an uncontrolled technical and human exposure.',
+          },
+        ],
+      },
+      {
+        time: 58,
+        type: 'choice_point',
+        magnitude: 0.65,
+        description: `The first safe state is available. Which evidence controls the next decision?`,
+        choices: [
+          {
+            id: `${config.kind}-control`,
+            label: 'Use the operational evidence',
+            description: `${config.controlAction} Evidence source: ${config.evidence}.`,
+            effects: {
+              safety: 0.16,
+              traceability: 0.3,
+              quality: 0.24,
+              continuity: 0.12,
+              responseTime: 0.06,
+            },
+            outcome:
+              'The response scope follows recorded evidence rather than intuition or blanket restriction.',
+          },
+          {
+            id: `${config.kind}-guess`,
+            label: 'Use operator intuition alone',
+            description:
+              'Act on the most plausible explanation without preserving the evidence trail.',
+            effects: { safety: -0.08, traceability: -0.32, quality: -0.12, continuity: 0.08 },
+            outcome:
+              'The immediate choice may work, but the next shift cannot reproduce or audit the reasoning.',
+          },
+          {
+            id: `${config.kind}-blanket`,
+            label: 'Stop the entire site indefinitely',
+            description: 'Avoid scope judgment by holding every process and asset.',
+            effects: {
+              safety: 0.18,
+              traceability: -0.08,
+              quality: 0.08,
+              continuity: -0.36,
+              responseTime: -0.18,
+            },
+            outcome:
+              'Exposure is constrained, but a disproportionate hold creates avoidable backlog and cost.',
+          },
+        ],
+      },
+      {
+        time: 98,
+        type: 'choice_point',
+        magnitude: 0.65,
+        description: 'The controlled condition is stable. How does the mill recover?',
+        choices: [
+          {
+            id: `${config.kind}-recover`,
+            label: 'Verify, hand over, recover',
+            description: config.recoveryAction,
+            effects: {
+              safety: 0.16,
+              traceability: 0.18,
+              quality: 0.18,
+              continuity: 0.32,
+              responseTime: 0.08,
+            },
+            outcome:
+              'Operations resume from a known state with ownership, residual controls, and evidence intact.',
+          },
+          {
+            id: `${config.kind}-restart-early`,
+            label: 'Restart before verification',
+            description: 'Resume normal operation as soon as the headline alarm clears.',
+            effects: {
+              safety: -0.2,
+              traceability: -0.14,
+              quality: -0.2,
+              continuity: 0.2,
+              responseTime: 0.1,
+            },
+            outcome:
+              'Output returns quickly, while latent causes and inherited controls remain ambiguous.',
+          },
+          {
+            id: `${config.kind}-stay-closed`,
+            label: 'Never release the hold',
+            description: 'Keep the safe state indefinitely rather than making a recovery decision.',
+            effects: {
+              safety: 0.12,
+              traceability: 0.04,
+              quality: 0.08,
+              continuity: -0.38,
+              responseTime: -0.18,
+            },
+            outcome:
+              'Risk remains bounded, but the response never becomes an operational recovery.',
+          },
+        ],
+      },
+    ],
+    duration: 120,
+    learningObjectives: [
+      ...playbook,
+      `Make ${config.evidence} part of the decision record and next-shift handover.`,
+    ],
+  };
+}
+
+const OPERATIONAL_INCIDENT_SCENARIOS: Scenario[] = [
+  createIncidentScenario({
+    kind: 'bearing_overheat',
+    name: 'Bearing Temperature Escalation',
+    description:
+      'R.M. 101 bearing temperature is rising. Protect the person and machine, diagnose the work order, and verify a controlled restart.',
+    firstAction:
+      'Reduce load, stop and isolate R.M. 101 before the trip point, then establish a maintenance owner.',
+    controlAction:
+      'Confirm bearing condition, lubrication, alignment, parts, and affected product before repair.',
+    recoveryAction:
+      'Complete repair verification, request the restart explicitly, and monitor temperature under staged load.',
+    evidence: 'temperature trend, lockout record, work-order audit, and restart readings',
+  }),
+  createIncidentScenario({
+    kind: 'dust_filter_pressure',
+    name: 'Dust Extraction Pressure',
+    description:
+      'Extraction resistance is rising around the sifting floor. Control combustible dust exposure while preserving a proportional production response.',
+    firstAction:
+      'Reduce dusty operations, inspect extraction differential pressure, and restrict the affected sifting area.',
+    controlAction:
+      'Verify filter loading, duct condition, ignition controls, and housekeeping before intervention.',
+    recoveryAction:
+      'Prove extraction flow and dust containment before restoring the sifter in stages.',
+    evidence:
+      'differential-pressure tags, inspection record, housekeeping check, and airflow verification',
+  }),
+  createIncidentScenario({
+    kind: 'power_sag',
+    name: 'Site Power Sag',
+    description:
+      'Incoming voltage is unstable. Protect motors and product state while deciding which loads can remain available.',
+    firstAction:
+      'Shed nonessential load, hold unstable drives, and establish the state of every interrupted process.',
+    controlAction:
+      'Inspect voltage history, protection trips, motor temperature, and material caught between process stages.',
+    recoveryAction:
+      'Restore loads in a verified sequence and inspect the first post-event production before release.',
+    evidence: 'power-quality trend, protection events, machine state, and affected batch genealogy',
+  }),
+  createIncidentScenario({
+    kind: 'delayed_truck',
+    name: 'Delayed Dispatch Collection',
+    description:
+      'A scheduled collection is late. Balance storage, customer promises, production rate, and demurrage without inventing capacity.',
+    firstAction:
+      'Confirm the revised arrival, identify the threatened commitment, and reserve safe finished-goods capacity.',
+    controlAction:
+      'Re-sequence production against real storage, quality release, and customer priority constraints.',
+    recoveryAction:
+      'Load only released product, update the customer promise, and hand over remaining capacity risk.',
+    evidence: 'truck ETA, order due times, warehouse utilization, and dispatch manifests',
+  }),
+  createIncidentScenario({
+    kind: 'packaging_shortage',
+    name: 'Packaging Material Shortage',
+    description:
+      'Packer consumables cannot cover the active commitments. Protect label integrity and decide what production remains useful.',
+    firstAction:
+      'Stop any pack operation that cannot preserve correct package identity and count the usable consumables.',
+    controlAction:
+      'Re-sequence recipes and commitments using real packaging stock, quality status, and storage capacity.',
+    recoveryAction:
+      'Verify replenished materials and label setup before staged packing and dispatch.',
+    evidence: 'consumables count, recipe and label setup, order priority, and packer batch record',
+  }),
+  createIncidentScenario({
+    kind: 'severe_rain',
+    name: 'Severe Rain and Drainage Load',
+    description:
+      'Yard drainage and the stream are rising. Protect people, vehicles, stored material, and the authored site without hiding the weather consequence.',
+    firstAction:
+      'Slow yard traffic, close flooded pedestrian routes, and inspect drainage and stream thresholds.',
+    controlAction:
+      'Move vulnerable goods, preserve safe dock access, and coordinate vehicle movements with the weather state.',
+    recoveryAction:
+      'Inspect routes, drainage, stream banks, and stored material before normal yard speed returns.',
+    evidence:
+      'rain state, water-level markers, route inspection, dock status, and material condition',
+  }),
+  createIncidentScenario({
+    kind: 'understaffing',
+    name: 'Understaffed Shift',
+    description:
+      'Critical roles are uncovered. Match certified people to the work, reduce scope, and preserve fatigue controls.',
+    firstAction:
+      'Identify uncovered safety, quality, maintenance, and forklift duties before setting the production plan.',
+    controlAction:
+      'Assign certified personnel, reduce line scope where needed, and schedule restorative breaks.',
+    recoveryAction:
+      'Document inherited gaps, rebalance the next shift, and restore capacity only as qualified coverage returns.',
+    evidence: 'roster skills, certifications, live assignments, fatigue, and shift handover',
+  }),
+];
 
 const PRESET_SCENARIOS: Scenario[] = [
   {
@@ -1472,6 +1789,13 @@ const PRESET_SCENARIOS: Scenario[] = [
     icon: 'ShieldAlert',
     difficulty: 'advanced',
     durationDisplay: '3 minutes',
+    operationalIncidentKind: 'supplier_contamination',
+    operationalPlaybook: [
+      'Stop dispatch, establish the quality hold, preserve evidence, and notify the response team.',
+      'Trace the affected batch to exact source lots and every downstream sibling batch.',
+      'Test retained samples, recall failed scope, and release only conforming held material.',
+      'Verify interlocks, document the decision trail, brief the next shift, and restart dispatch deliberately.',
+    ],
     initialAxes: {
       autonomyLevel: 60,
       decisionMode: 55,
@@ -1736,6 +2060,7 @@ const PRESET_SCENARIOS: Scenario[] = [
       'Record decision timing and consequences so the response can be audited and improved',
     ],
   },
+  ...OPERATIONAL_INCIDENT_SCENARIOS,
 ];
 
 // =============================================================================
@@ -2098,34 +2423,41 @@ export const useScenarioStore = create<ScenarioState>()(
             Object.values(objectiveScores).reduce((sum, score) => sum + score, 0) / 5
           );
           const missedSafeguards: string[] = [];
+          const safeguards = activeScenario.operationalSafeguards;
           if (objectiveScores.safety < 70) {
-            missedSafeguards.push('Stop dispatch and isolate potentially affected product first.');
+            missedSafeguards.push(
+              safeguards?.safety ?? 'Stop dispatch and isolate potentially affected product first.'
+            );
           }
           if (objectiveScores.traceability < 70) {
             missedSafeguards.push(
-              'Preserve batch identity and trace exact source and sibling scope.'
+              safeguards?.traceability ??
+                'Preserve batch identity and trace exact source and sibling scope.'
             );
           }
           if (objectiveScores.quality < 70) {
             missedSafeguards.push(
-              'Use laboratory evidence for hold, release, and recall disposition.'
+              safeguards?.quality ??
+                'Use laboratory evidence for hold, release, and recall disposition.'
             );
           }
           if (objectiveScores.continuity < 70) {
             missedSafeguards.push(
-              'Narrow the affected scope and plan a controlled operational recovery.'
+              safeguards?.continuity ??
+                'Narrow the affected scope and plan a controlled operational recovery.'
             );
           }
           if (objectiveScores.responseTime < 70) {
             missedSafeguards.push(
-              'Acknowledge the alarm and establish the interlock without delay.'
+              safeguards?.responseTime ??
+                'Acknowledge the alarm and establish the interlock without delay.'
             );
           }
           operationalMetrics = {
             objectiveScores,
             overallScore,
             missedSafeguards,
-            recommendedResponse: [
+            recommendedResponse: activeScenario.operationalPlaybook ?? [
               'Stop dispatch, establish the quality hold, preserve evidence, and notify the response team.',
               'Trace the affected batch to exact source lots and every downstream sibling batch.',
               'Test retained samples, recall failed scope, and release only conforming held material.',
@@ -2148,7 +2480,7 @@ export const useScenarioStore = create<ScenarioState>()(
                     : 'F';
           summary =
             missedSafeguards.length === 0
-              ? 'Strong operational response. You contained exposure, preserved genealogy, made an evidence-based disposition, and restored dispatch deliberately.'
+              ? `Strong operational response. You stabilized ${activeScenario.name.toLowerCase()}, controlled the evidence, and recovered deliberately.`
               : `${missedSafeguards.length} material safeguard${missedSafeguards.length === 1 ? '' : 's'} missed. Review the objective breakdown and follow the recommended response sequence.`;
         }
 

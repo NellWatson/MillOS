@@ -149,7 +149,7 @@ Explore the factory together with WebRTC peer-to-peer connections:
 - **Shared machine control** with locking to prevent conflicts
 - **AI decision voting** for collaborative factory management (democracy at work, literally)
 - **In-game chat** for coordination
-- **Host migration** when the original host disconnects (succession planning for the digital age)
+- **Explicit host-loss handling** that ends guest sessions cleanly when the host disconnects
 
 ### AI Partner
 
@@ -879,7 +879,7 @@ src/
 │   ├── SignalingService.ts     # Room creation & peer discovery
 │   ├── PeerConnection.ts       # WebRTC data channel wrapper
 │   ├── PlayerInterpolation.ts  # Smooth remote player movement
-│   ├── HostMigration.ts        # Failover when host disconnects
+│   ├── HostMigration.ts        # Explicit host-loss session teardown
 │   └── hooks/                  # React hooks (useMultiplayerSync)
 │
 ├── hooks/                      # Reusable React Hooks
@@ -1025,7 +1025,7 @@ MillOS implements OWASP-aligned frontend security practices:
 - [x] Dynamic weather system (clear, cloudy, rain, storm)
 - [x] Factory exterior with branded signage
 - [x] End-to-end testing with Playwright
-- [x] WebRTC peer-to-peer multiplayer with host migration
+- [x] WebRTC peer-to-peer multiplayer with explicit host-loss teardown
 - [x] Mobile touch controls with gesture support
 - [x] GPU resource management with adaptive quality
 - [x] Compressed texture support (KTX2/Basis Universal)

@@ -546,10 +546,9 @@ export const SettingsPanel: React.FC<{
               value={graphics.graphics.enableWireframe}
               onChange={(v) => graphics.setGraphicsSetting('enableWireframe', v)}
             />
-            {/* REMOVED: "Textures Enabled" (`enableTextureFiltering`) and
-                "Procedural Textures" (`enableProceduralTextures`).
-                `enableTextureFiltering` has zero readers anywhere in the tree -
-                it was a switch wired to nothing. `enableProceduralTextures`
+            {/* REMOVED: "Textures Enabled" and "Procedural Textures".
+                The former setting had zero readers and was retired in graphics
+                persistence v5. `enableProceduralTextures`
                 does not control procedural texture generation at all (that is
                 unconditional, through `getTexture()`); after the App.tsx
                 preloader was decoupled from it, all it still gates is two

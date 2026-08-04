@@ -27,6 +27,25 @@ export { useProductionStore };
 export { useSafetyStore };
 export { useUIStore };
 export { useWorkerMoodStore };
+export {
+  useOperationsCampaignStore,
+  INCIDENT_DEFINITIONS,
+  MILL_RECIPES,
+  calculateWorkerEffectiveness,
+  deriveWorkerSkills,
+  getAssignmentLabel,
+  isWorkerCertified,
+} from './operationsCampaignStore';
+export type {
+  AssignmentKind,
+  CampaignConstraint,
+  CampaignLogEntry,
+  CustomerOrder,
+  IncidentKind,
+  OperationalIncident,
+  PersonnelAssignment,
+  ShiftCampaignReport,
+} from './operationsCampaignStore';
 
 // =============================================================================
 // BILATERAL AUTONOMY SYSTEM (BAS) STORES

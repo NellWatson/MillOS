@@ -121,12 +121,7 @@ export interface GraphicsSettings {
    */
   enableMachineDetail: boolean;
   /** DEAD - see the DEAD SETTINGS block below. */
-  enableMachineLOD: boolean;
-  /** DEAD - see the DEAD SETTINGS block below. */
   machineLodDistance: number;
-  // Texture filtering options
-  /** DEAD - see the DEAD SETTINGS block below. */
-  enableTextureFiltering: boolean;
   anisotropyLevel: 1 | 4 | 8 | 16; // Anisotropic filtering level
   // Resolution scaling (0.25 to 1.0 multiplier of device pixel ratio)
   resolutionScale: number;
@@ -152,16 +147,14 @@ export interface GraphicsSettings {
  * |-----------------------|------------------------------------------|--------------|
  * | enableWeathering      | `components/Machines.tsx` (3 sites)       | Machines.tsx is deleted |
  * | machineLodDistance    | `machines/Instanced{Silos,RollerMills,Plansifters,Packers}.tsx` -> `getCullDistanceSquared` | those four + Machines.tsx are deleted |
- * | enableMachineLOD      | NOTHING - zero readers, not even a dead one | immediately, once no persisted payload needs it |
- * | enableTextureFiltering| NOTHING - zero readers                    | immediately, ditto |
  *
  * `Machines.tsx` has no importer (`src/test/fixtures/mockMachines` is an
  * unrelated name match) and `machines/index.tsx` is a barrel with no importer,
  * so the whole `Instanced*` tree is unreachable. The live machine path is
  * `machines/CompactMachines.tsx`, mounted by `MillScene.tsx`.
  *
- * The two of these that were exposed as SettingsPanel toggles have been removed
- * from that panel: a switch that does nothing is worse than an absent one.
+ * Two zero-reader keys, `enableMachineLOD` and `enableTextureFiltering`, were
+ * retired in persistence v5 rather than preserved as settings that did nothing.
  */
 
 // Default perf debug settings (all systems enabled)
@@ -298,10 +291,8 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     enableMachineColorVariation: false,
     // Low draws the base machine silhouette only: no decals, no surface wear.
     enableMachineDetail: false,
-    enableMachineLOD: true,
     machineLodDistance: 30, // Aggressive LOD for low quality
     resolutionScale: 0.4,
-    enableTextureFiltering: false, // No texture filtering on low
     anisotropyLevel: 1, // No anisotropic filtering
     enableAudioReactive: false, // Disabled on low for performance
     enableWireframe: false, // Wireframe mode off by default
@@ -384,13 +375,11 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     // Decals and surface wear are instanced onto the existing machine meshes,
     // so they cost draw calls rather than fill; medium can carry them.
     enableMachineDetail: true,
-    enableMachineLOD: true,
     machineLodDistance: 45,
     // Raised from 0.5. Resolution is the real sharpness lever and the verified
     // frame budget shows the headroom: most scenes sit around 37% of a 25 ms
     // p95. SMAA now handles edges, so the extra pixels are not wasted.
     resolutionScale: 0.6,
-    enableTextureFiltering: true, // Basic texture filtering
     anisotropyLevel: 4, // Low anisotropic filtering
     enableAudioReactive: false,
     enableWireframe: false, // Wireframe mode off by default
@@ -446,12 +435,10 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     enableMachineTextures: false, // See the hold documented on the low preset.
     enableMachineColorVariation: true,
     enableMachineDetail: true,
-    enableMachineLOD: true,
     machineLodDistance: 80,
     // DPR 1.5 on a common 2x display keeps High visibly sharper than Medium
     // while preserving interactive frame pacing across the complete site.
     resolutionScale: 0.75,
-    enableTextureFiltering: true, // Full texture filtering
     anisotropyLevel: 8, // Medium anisotropic filtering
     enableAudioReactive: true, // Audio-reactive visuals enabled
     enableWireframe: false, // Wireframe mode off by default
@@ -503,12 +490,10 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     enableMachineTextures: false, // See the hold documented on the low preset.
     enableMachineColorVariation: true,
     enableMachineDetail: true,
-    enableMachineLOD: true,
     machineLodDistance: 150, // Very long LOD distance for ultra
     // DPR 1.7 on a common 2x display preserves a meaningful Ultra sharpness
     // step without reintroducing the frame-pacing collapse seen at DPR 2.
     resolutionScale: 0.85,
-    enableTextureFiltering: true, // Full texture filtering
     anisotropyLevel: 16, // Maximum anisotropic filtering
     enableAudioReactive: true, // Audio-reactive visuals enabled
     enableWireframe: false, // Wireframe mode off by default
@@ -688,7 +673,8 @@ export const useGraphicsStore = create<GraphicsStore>()(
       // `dustParticleCount: 24` forever and never sees either change. Both are
       // reset through a STALE-DEFAULT guard - the pattern already proven for
       // `resolutionScale` at v3 - so a value the user actually chose survives.
-      version: 4,
+      // v5: retire two persisted toggles that never had a live reader.
+      version: 5,
       migrate: (persisted: unknown, version: number) => {
         const p = persisted as
           | {
@@ -772,6 +758,10 @@ export const useGraphicsStore = create<GraphicsStore>()(
               p.graphics.dustParticleCount = preset.dustParticleCount;
             }
           }
+        }
+        if (version < 5 && p?.graphics) {
+          delete p.graphics.enableMachineLOD;
+          delete p.graphics.enableTextureFiltering;
         }
         return persisted as GraphicsStore;
       },
