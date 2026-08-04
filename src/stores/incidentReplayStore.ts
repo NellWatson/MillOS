@@ -77,13 +77,13 @@ const MAX_DIAGNOSTIC_COMMANDS = 1000;
 const BUILD_ID = typeof __MILLOS_BUILD_ID__ === 'string' ? __MILLOS_BUILD_ID__ : 'development';
 
 function getSimulationSeed(): string {
-  if (typeof window === 'undefined') return 'millos-v0.40-default';
+  if (typeof window === 'undefined') return 'millos-v0.41-default';
   const requested = new URLSearchParams(window.location.search).get('seed');
   const sanitized = requested
     ?.trim()
     .replace(/[^a-zA-Z0-9_.:]/g, '')
     .slice(0, 64);
-  return sanitized || 'millos-v0.40-default';
+  return sanitized || 'millos-v0.41-default';
 }
 
 export const useIncidentReplayStore = create<IncidentReplayStore>()(

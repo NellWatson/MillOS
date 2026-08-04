@@ -58,6 +58,11 @@ export interface ScenarioChoice {
     solidarity?: number;
     relationshipHealth?: number;
     federationTrust?: number;
+    safety?: number;
+    traceability?: number;
+    quality?: number;
+    continuity?: number;
+    responseTime?: number;
   };
   /** Outcome description shown after selection */
   outcome: string;
@@ -84,7 +89,8 @@ export interface Scenario {
     // BAS-specific categories
     | 'economic_democracy'
     | 'bilateral'
-    | 'inter_cooperation';
+    | 'inter_cooperation'
+    | 'operational';
   /** Lucide icon name */
   icon: string;
   /** Initial five axes configuration */
@@ -133,6 +139,29 @@ export interface ScenarioResult {
     federationTrust?: number;
     choicesMade?: string[];
   };
+  operationalMetrics?: {
+    objectiveScores: {
+      safety: number;
+      traceability: number;
+      quality: number;
+      continuity: number;
+      responseTime: number;
+    };
+    overallScore: number;
+    missedSafeguards: string[];
+    recommendedResponse: string[];
+    choiceAudit: OperationalChoiceAuditEntry[];
+  };
+}
+
+export interface OperationalChoiceAuditEntry {
+  choiceId: string;
+  eventDescription: string;
+  selectedAtSeconds: number;
+  scheduledAtSeconds: number;
+  responseSeconds: number;
+  outcome: string;
+  effects: ScenarioChoice['effects'];
 }
 
 interface ScenarioState {
@@ -164,6 +193,14 @@ interface ScenarioState {
     relationshipHealth: number;
     federationTrust: number;
   };
+  operationalEffectDeltas: {
+    safety: number;
+    traceability: number;
+    quality: number;
+    continuity: number;
+    responseTime: number;
+  };
+  operationalChoiceAudit: OperationalChoiceAuditEntry[];
 
   // Actions
   startScenario: (id: string) => void;
@@ -177,7 +214,11 @@ interface ScenarioState {
   recordStability: (stability: number) => void;
   recordEngagement: (engagement: number) => void;
   recordAxisChange: () => void;
-  recordChoice: (choiceId: string, effects?: ScenarioChoice['effects']) => void;
+  recordChoice: (
+    choiceId: string,
+    effects?: ScenarioChoice['effects'],
+    context?: { eventDescription?: string; eventTime?: number; outcome?: string }
+  ) => void;
   recordBASEffect: (effects: ScenarioChoice['effects']) => void;
   markEventTriggered: (eventIndex: number) => void;
   calculateResults: (finalAxes: FiveAxes, finalStability: number) => void;
@@ -1422,6 +1463,279 @@ const PRESET_SCENARIOS: Scenario[] = [
       'Mondragon insight: solidarity ratio is identity, not just policy',
     ],
   },
+  {
+    id: 'contamination-at-dispatch',
+    name: 'Contamination at Dispatch',
+    description:
+      'A foreign-material alert arrives while finished product is queued at the shipping dock. Protect people, preserve genealogy, control the recall scope, and restore dispatch deliberately.',
+    category: 'operational',
+    icon: 'ShieldAlert',
+    difficulty: 'advanced',
+    durationDisplay: '3 minutes',
+    initialAxes: {
+      autonomyLevel: 60,
+      decisionMode: 55,
+      informationAccess: 75,
+      evaluationDirection: 60,
+      collectiveOrientation: 65,
+    },
+    phases: [
+      {
+        id: 'contain',
+        name: 'Contain',
+        description: 'Stop the release and establish a visible quality hold.',
+        durationSeconds: 40,
+        instruction:
+          'Decide whether to stop dispatch, isolate the affected scope, and notify the shift team.',
+      },
+      {
+        id: 'trace',
+        name: 'Trace',
+        description: 'Use conserved genealogy to identify affected lots and batches.',
+        durationSeconds: 45,
+        instruction:
+          'Choose evidence that preserves the path from receiving lot through processing and packing.',
+      },
+      {
+        id: 'disposition',
+        name: 'Disposition',
+        description: 'Test, recall, or release the identified scope.',
+        durationSeconds: 40,
+        instruction:
+          'Apply a documented quality disposition without widening or narrowing the scope arbitrarily.',
+      },
+      {
+        id: 'recover',
+        name: 'Recover',
+        description: 'Restore dispatch with a controlled handover.',
+        durationSeconds: 35,
+        instruction:
+          'Communicate the outcome, verify the interlock, and restart only released dispatch.',
+      },
+    ],
+    events: [
+      {
+        time: 10,
+        type: 'choice_point',
+        magnitude: 0.5,
+        description:
+          'Foreign-material detector alarm: a shipping truck is docked and finished product is staged for loading. What is your first action?',
+        choices: [
+          {
+            id: 'contain-stop-hold-notify',
+            label: 'Stop, hold, and notify',
+            description:
+              'Stop dispatch, place staged batches on quality hold, preserve the scene, and notify QC and the shift supervisor.',
+            effects: {
+              safety: 0.28,
+              traceability: 0.18,
+              quality: 0.2,
+              continuity: -0.08,
+              responseTime: 0.22,
+            },
+            outcome:
+              'The dispatch interlock closes before loading. Staged product remains identifiable and the investigation starts from a controlled state.',
+          },
+          {
+            id: 'continue-then-investigate',
+            label: 'Finish loading first',
+            description: 'Protect the delivery schedule, then investigate after the truck departs.',
+            effects: {
+              safety: -0.3,
+              traceability: -0.25,
+              quality: -0.35,
+              continuity: 0.12,
+              responseTime: -0.18,
+            },
+            outcome:
+              'Potentially affected product leaves the controlled site. Recall scope and customer exposure both expand.',
+          },
+          {
+            id: 'hold-everything-unscoped',
+            label: 'Hold the whole mill',
+            description:
+              'Stop every line and warehouse movement without first preserving batch scope.',
+            effects: {
+              safety: 0.16,
+              traceability: -0.12,
+              quality: 0.12,
+              continuity: -0.32,
+              responseTime: 0.05,
+            },
+            outcome:
+              'Exposure stops, but the unscoped shutdown destroys useful boundaries and creates avoidable continuity loss.',
+          },
+        ],
+      },
+      {
+        time: 50,
+        type: 'choice_point',
+        magnitude: 0.4,
+        description:
+          'The alarm sample points to one packed batch. Which evidence should define the investigation scope?',
+        choices: [
+          {
+            id: 'trace-batch-to-source-lots',
+            label: 'Trace batch genealogy',
+            description:
+              'Follow exact source contributions through packer, sifter, mill, silo, and receiving manifests, then identify every downstream sibling batch.',
+            effects: {
+              safety: 0.08,
+              traceability: 0.34,
+              quality: 0.2,
+              continuity: 0.15,
+              responseTime: 0.08,
+            },
+            outcome:
+              'The investigation identifies exact upstream lots and downstream batches with conserved mass evidence.',
+          },
+          {
+            id: 'use-shift-date-only',
+            label: 'Use production date only',
+            description:
+              'Treat every batch from the shift as affected because the date is easy to read.',
+            effects: {
+              safety: 0.04,
+              traceability: -0.2,
+              quality: 0.03,
+              continuity: -0.24,
+              responseTime: 0.08,
+            },
+            outcome:
+              'The broad date range is quick but imprecise. Good product is held and source causality remains unknown.',
+          },
+          {
+            id: 'sample-staged-pallet',
+            label: 'Sample one staged pallet',
+            description: 'Use a single pallet sample as a proxy for the entire run.',
+            effects: {
+              safety: -0.12,
+              traceability: -0.16,
+              quality: -0.2,
+              continuity: 0.08,
+              responseTime: 0.1,
+            },
+            outcome:
+              'The sample cannot prove which upstream lots or sibling batches share the contamination path.',
+          },
+        ],
+      },
+      {
+        time: 95,
+        type: 'choice_point',
+        magnitude: 0.45,
+        description:
+          'Genealogy identifies the affected scope and the retained sample fails. Choose the disposition.',
+        choices: [
+          {
+            id: 'recall-affected-release-clear',
+            label: 'Recall affected scope',
+            description:
+              'Recall failed batches, document the source lots, retest unaffected held batches, and release only conforming product.',
+            effects: {
+              safety: 0.22,
+              traceability: 0.24,
+              quality: 0.32,
+              continuity: 0.12,
+              responseTime: 0.08,
+            },
+            outcome:
+              'Affected product remains isolated. Conforming sibling batches can return to dispatch with a complete audit trail.',
+          },
+          {
+            id: 'release-on-visual-check',
+            label: 'Release after visual check',
+            description:
+              'Override the laboratory failure because no contaminant is visible in a quick inspection.',
+            effects: {
+              safety: -0.28,
+              traceability: -0.1,
+              quality: -0.38,
+              continuity: 0.15,
+              responseTime: 0.1,
+            },
+            outcome:
+              'The failed analytical result is bypassed. The release lacks defensible evidence and preserves customer exposure.',
+          },
+          {
+            id: 'destroy-all-finished-goods',
+            label: 'Destroy all finished goods',
+            description: 'Dispose of every available batch regardless of genealogy or test result.',
+            effects: {
+              safety: 0.18,
+              traceability: -0.08,
+              quality: 0.15,
+              continuity: -0.4,
+              responseTime: -0.08,
+            },
+            outcome:
+              'Exposure is removed at disproportionate cost. The response ignores evidence that could safely narrow the loss.',
+          },
+        ],
+      },
+      {
+        time: 130,
+        type: 'choice_point',
+        magnitude: 0.3,
+        description: 'The affected scope is controlled. How should dispatch return to service?',
+        choices: [
+          {
+            id: 'verify-interlock-handover-restart',
+            label: 'Verify, hand over, restart',
+            description:
+              'Confirm recalled batches remain sealed, verify released inventory, brief the next shift, and authorize controlled dispatch.',
+            effects: {
+              safety: 0.12,
+              traceability: 0.14,
+              quality: 0.16,
+              continuity: 0.28,
+              responseTime: 0.06,
+            },
+            outcome:
+              'Dispatch resumes from a known state. The next shift inherits the evidence, controls, and outstanding actions.',
+          },
+          {
+            id: 'restart-without-handover',
+            label: 'Restart immediately',
+            description:
+              'Resume loading as soon as the alert clears, without a documented handover.',
+            effects: {
+              safety: -0.08,
+              traceability: -0.12,
+              quality: -0.05,
+              continuity: 0.16,
+              responseTime: 0.12,
+            },
+            outcome:
+              'Output resumes quickly, but the next shift cannot distinguish cleared product from residual investigation work.',
+          },
+          {
+            id: 'leave-dispatch-closed',
+            label: 'Leave dispatch closed',
+            description:
+              'Keep the interlock closed indefinitely even though conforming product is available.',
+            effects: {
+              safety: 0.1,
+              traceability: 0.02,
+              quality: 0.08,
+              continuity: -0.34,
+              responseTime: -0.18,
+            },
+            outcome:
+              'Risk remains controlled, but the mill never completes the recovery step and preventable backlog grows.',
+          },
+        ],
+      },
+    ],
+    duration: 165,
+    learningObjectives: [
+      'Stop dispatch and establish a visible quality hold before product leaves control',
+      'Use conserved genealogy to trace exact source lots and downstream batches',
+      'Keep failed or recalled product isolated while releasing only conforming scope',
+      'Recover continuity through verified interlocks, communication, and controlled restart',
+      'Record decision timing and consequences so the response can be audited and improved',
+    ],
+  },
 ];
 
 // =============================================================================
@@ -1447,6 +1761,14 @@ export const useScenarioStore = create<ScenarioState>()(
       axisChangeCount: 0,
       choicesMade: [],
       basEffectDeltas: { solidarity: 0, relationshipHealth: 0, federationTrust: 0 },
+      operationalEffectDeltas: {
+        safety: 0,
+        traceability: 0,
+        quality: 0,
+        continuity: 0,
+        responseTime: 0,
+      },
+      operationalChoiceAudit: [],
 
       // Actions
       startScenario: (id) => {
@@ -1466,6 +1788,14 @@ export const useScenarioStore = create<ScenarioState>()(
           axisChangeCount: 0,
           choicesMade: [],
           basEffectDeltas: { solidarity: 0, relationshipHealth: 0, federationTrust: 0 },
+          operationalEffectDeltas: {
+            safety: 0,
+            traceability: 0,
+            quality: 0,
+            continuity: 0,
+            responseTime: 0,
+          },
+          operationalChoiceAudit: [],
         });
       },
 
@@ -1493,6 +1823,14 @@ export const useScenarioStore = create<ScenarioState>()(
           axisChangeCount: 0,
           choicesMade: [],
           basEffectDeltas: { solidarity: 0, relationshipHealth: 0, federationTrust: 0 },
+          operationalEffectDeltas: {
+            safety: 0,
+            traceability: 0,
+            quality: 0,
+            continuity: 0,
+            responseTime: 0,
+          },
+          operationalChoiceAudit: [],
         });
       },
 
@@ -1570,13 +1908,46 @@ export const useScenarioStore = create<ScenarioState>()(
         }));
       },
 
-      recordChoice: (choiceId, effects) => {
-        set((state) => ({
-          choicesMade: [...state.choicesMade, choiceId],
-        }));
-        if (effects) {
-          get().recordBASEffect(effects);
-        }
+      recordChoice: (choiceId, effects = {}, context) => {
+        set((state) => {
+          const selectedAtSeconds = state.currentTime;
+          const scheduledAtSeconds = context?.eventTime ?? selectedAtSeconds;
+          const isOperational = state.activeScenario?.category === 'operational';
+          const operationalChoiceAudit = isOperational
+            ? [
+                ...state.operationalChoiceAudit.slice(-49),
+                {
+                  choiceId,
+                  eventDescription: context?.eventDescription ?? 'Scenario decision',
+                  selectedAtSeconds,
+                  scheduledAtSeconds,
+                  responseSeconds: Math.max(0, selectedAtSeconds - scheduledAtSeconds),
+                  outcome: context?.outcome ?? '',
+                  effects: { ...effects },
+                },
+              ]
+            : state.operationalChoiceAudit;
+          return {
+            choicesMade: [...state.choicesMade, choiceId],
+            basEffectDeltas: {
+              solidarity: state.basEffectDeltas.solidarity + (effects.solidarity ?? 0),
+              relationshipHealth:
+                state.basEffectDeltas.relationshipHealth + (effects.relationshipHealth ?? 0),
+              federationTrust:
+                state.basEffectDeltas.federationTrust + (effects.federationTrust ?? 0),
+            },
+            operationalEffectDeltas: {
+              safety: state.operationalEffectDeltas.safety + (effects.safety ?? 0),
+              traceability:
+                state.operationalEffectDeltas.traceability + (effects.traceability ?? 0),
+              quality: state.operationalEffectDeltas.quality + (effects.quality ?? 0),
+              continuity: state.operationalEffectDeltas.continuity + (effects.continuity ?? 0),
+              responseTime:
+                state.operationalEffectDeltas.responseTime + (effects.responseTime ?? 0),
+            },
+            operationalChoiceAudit,
+          };
+        });
       },
 
       recordBASEffect: (effects) => {
@@ -1612,6 +1983,8 @@ export const useScenarioStore = create<ScenarioState>()(
           axisChangeCount,
           choicesMade,
           basEffectDeltas,
+          operationalEffectDeltas,
+          operationalChoiceAudit,
         } = get();
 
         if (!activeScenario) return;
@@ -1704,6 +2077,81 @@ export const useScenarioStore = create<ScenarioState>()(
             }
           : undefined;
 
+        let operationalMetrics: ScenarioResult['operationalMetrics'] | undefined;
+        if (activeScenario.category === 'operational') {
+          const clampScore = (value: number) => Math.round(Math.max(0, Math.min(100, value)));
+          const averageResponseSeconds =
+            operationalChoiceAudit.length > 0
+              ? operationalChoiceAudit.reduce((sum, choice) => sum + choice.responseSeconds, 0) /
+                operationalChoiceAudit.length
+              : activeScenario.duration;
+          const objectiveScores = {
+            safety: clampScore(50 + operationalEffectDeltas.safety * 75),
+            traceability: clampScore(50 + operationalEffectDeltas.traceability * 75),
+            quality: clampScore(50 + operationalEffectDeltas.quality * 75),
+            continuity: clampScore(50 + operationalEffectDeltas.continuity * 75),
+            responseTime: clampScore(
+              50 + operationalEffectDeltas.responseTime * 75 - averageResponseSeconds * 2
+            ),
+          };
+          const overallScore = Math.round(
+            Object.values(objectiveScores).reduce((sum, score) => sum + score, 0) / 5
+          );
+          const missedSafeguards: string[] = [];
+          if (objectiveScores.safety < 70) {
+            missedSafeguards.push('Stop dispatch and isolate potentially affected product first.');
+          }
+          if (objectiveScores.traceability < 70) {
+            missedSafeguards.push(
+              'Preserve batch identity and trace exact source and sibling scope.'
+            );
+          }
+          if (objectiveScores.quality < 70) {
+            missedSafeguards.push(
+              'Use laboratory evidence for hold, release, and recall disposition.'
+            );
+          }
+          if (objectiveScores.continuity < 70) {
+            missedSafeguards.push(
+              'Narrow the affected scope and plan a controlled operational recovery.'
+            );
+          }
+          if (objectiveScores.responseTime < 70) {
+            missedSafeguards.push(
+              'Acknowledge the alarm and establish the interlock without delay.'
+            );
+          }
+          operationalMetrics = {
+            objectiveScores,
+            overallScore,
+            missedSafeguards,
+            recommendedResponse: [
+              'Stop dispatch, establish the quality hold, preserve evidence, and notify the response team.',
+              'Trace the affected batch to exact source lots and every downstream sibling batch.',
+              'Test retained samples, recall failed scope, and release only conforming held material.',
+              'Verify interlocks, document the decision trail, brief the next shift, and restart dispatch deliberately.',
+            ],
+            choiceAudit: operationalChoiceAudit.map((choice) => ({
+              ...choice,
+              effects: { ...choice.effects },
+            })),
+          };
+          grade =
+            overallScore >= 85
+              ? 'A'
+              : overallScore >= 75
+                ? 'B'
+                : overallScore >= 65
+                  ? 'C'
+                  : overallScore >= 50
+                    ? 'D'
+                    : 'F';
+          summary =
+            missedSafeguards.length === 0
+              ? 'Strong operational response. You contained exposure, preserved genealogy, made an evidence-based disposition, and restored dispatch deliberately.'
+              : `${missedSafeguards.length} material safeguard${missedSafeguards.length === 1 ? '' : 's'} missed. Review the objective breakdown and follow the recommended response sequence.`;
+        }
+
         const result: ScenarioResult = {
           scenarioId: activeScenario.id,
           scenarioName: activeScenario.name,
@@ -1725,6 +2173,7 @@ export const useScenarioStore = create<ScenarioState>()(
           summary,
           engagementMetrics,
           basMetrics,
+          operationalMetrics,
         };
 
         set((state) => ({
@@ -1777,6 +2226,14 @@ export const useScenarioStore = create<ScenarioState>()(
           axisChangeCount: 0,
           choicesMade: [],
           basEffectDeltas: { solidarity: 0, relationshipHealth: 0, federationTrust: 0 },
+          operationalEffectDeltas: {
+            safety: 0,
+            traceability: 0,
+            quality: 0,
+            continuity: 0,
+            responseTime: 0,
+          },
+          operationalChoiceAudit: [],
         });
       },
     }),
@@ -1850,6 +2307,11 @@ export function getCategoryColor(category: Scenario['category']): {
       bg: 'bg-indigo-500/20',
       text: 'text-indigo-400',
       border: 'border-indigo-500/50',
+    },
+    operational: {
+      bg: 'bg-orange-500/20',
+      text: 'text-orange-300',
+      border: 'border-orange-500/50',
     },
   };
   return colors[category];

@@ -114,13 +114,18 @@ export function parseRuntimeMode(search: string): RuntimeMode {
     benchmarkValue && benchmarkValue !== '1' && benchmarkValue !== 'true'
       ? benchmarkValue
       : params.get('scene');
+  const benchmarkScene = setValue<BenchmarkScene>(requestedScene, BENCHMARK_SCENES, 'overview');
+  // A moon review must default to a time when the moon is above the horizon.
+  // An explicit time remains authoritative, including deliberate below-horizon
+  // diagnostics, while every other route keeps the noon default.
+  const defaultGameTime = benchmark && benchmarkScene === 'moon' ? 0 : 12;
 
   return {
     benchmark,
-    benchmarkScene: setValue<BenchmarkScene>(requestedScene, BENCHMARK_SCENES, 'overview'),
+    benchmarkScene,
     durationSeconds: finiteNumber(params.get('duration'), 10, 2, 300),
     quality: setValue<GraphicsQuality>(params.get('quality'), GRAPHICS_QUALITIES, 'medium'),
-    gameTime: finiteNumber(params.get('time'), 12, 0, 24),
+    gameTime: finiteNumber(params.get('time'), defaultGameTime, 0, 24),
     weather: setValue<RuntimeWeather>(params.get('weather'), WEATHER_VALUES, 'clear'),
     scadaEnabled: booleanValue(params.get('scada'), true),
     paMode: setValue<RuntimePAMode>(params.get('pa'), PA_MODE_VALUES, 'focused'),

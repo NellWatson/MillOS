@@ -420,6 +420,11 @@ export const OwnershipPanel: React.FC = () => {
             className="ml-auto"
             aria-expanded={showOwnershipDetails}
             aria-controls="ownership-distribution-details"
+            aria-label={
+              showOwnershipDetails
+                ? 'Hide ownership distribution details'
+                : 'Show ownership distribution details'
+            }
           >
             {showOwnershipDetails ? (
               <ChevronUp className="w-3 h-3 text-slate-400" />
@@ -504,26 +509,28 @@ export const OwnershipPanel: React.FC = () => {
 
       {/* Self-Set Compensation */}
       <div className="p-3 border-b border-slate-700/30">
-        <button
-          onClick={() => setShowCompensation(!showCompensation)}
-          className="w-full flex items-center justify-between"
-          aria-expanded={showCompensation}
-          aria-controls="compensation-details"
-        >
-          <span className="flex items-center gap-1">
-            <CircleDollarSign className="w-3 h-3 text-amber-400" />
-            <span className="text-[10px] font-medium text-white">Compensation</span>
-            <ConceptTooltip conceptId="self-set-compensation" position="right" />
-            {wageSolidarity.compensationTransparency && (
-              <span className="text-[8px] text-green-400 ml-1">Transparent</span>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setShowCompensation(!showCompensation)}
+            className="flex min-h-11 flex-1 items-center justify-between"
+            aria-expanded={showCompensation}
+            aria-controls="compensation-details"
+          >
+            <span className="flex items-center gap-1">
+              <CircleDollarSign className="w-3 h-3 text-amber-400" />
+              <span className="text-[10px] font-medium text-white">Compensation</span>
+              {wageSolidarity.compensationTransparency && (
+                <span className="text-[8px] text-green-400 ml-1">Transparent</span>
+              )}
+            </span>
+            {showCompensation ? (
+              <ChevronUp className="w-3 h-3 text-slate-400" />
+            ) : (
+              <ChevronDown className="w-3 h-3 text-slate-400" />
             )}
-          </span>
-          {showCompensation ? (
-            <ChevronUp className="w-3 h-3 text-slate-400" />
-          ) : (
-            <ChevronDown className="w-3 h-3 text-slate-400" />
-          )}
-        </button>
+          </button>
+          <ConceptTooltip conceptId="self-set-compensation" position="right" />
+        </div>
 
         <AnimatePresence>
           {showCompensation && (

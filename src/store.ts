@@ -36,7 +36,11 @@ export type { GraphicsQuality, GraphicsSettings } from './stores/graphicsStore';
 import { initializeSCADA, shutdownSCADA } from './scada/SCADAService';
 import { useProductionStore, useUIStore } from './stores';
 import { useMaterialFlowStore, type MaterialFlowState } from './stores/materialFlowStore';
-import { useBreakdownStore, type PartsInventory } from './stores/breakdownStore';
+import {
+  useBreakdownStore,
+  type MaintenanceWorkOrder,
+  type PartsInventory,
+} from './stores/breakdownStore';
 import { getDispatchQualityStatus, useQCLabStore, type QCLabState } from './stores/qcLabStore';
 import { shallow } from 'zustand/shallow';
 
@@ -47,14 +51,18 @@ const MACHINE_SYNC_DEBOUNCE_MS = 200;
 export function buildOperationalTelemetry(
   flow: MaterialFlowState,
   parts: PartsInventory,
-  qcLab: QCLabState
+  qcLab: QCLabState,
+  workOrders: MaintenanceWorkOrder[] = []
 ): Record<string, number> {
   let totalInventoryKg = 0;
   let rawInventoryKg = 0;
   let finishedGoodsKg = 0;
 
   flow.machineBuffers.forEach((buffer) => {
-    [...buffer.inputBuffer, ...buffer.outputBuffer].forEach((material) => {
+    buffer.inputBuffer.forEach((material) => {
+      totalInventoryKg += material.amount;
+    });
+    buffer.outputBuffer.forEach((material) => {
       totalInventoryKg += material.amount;
     });
     if (buffer.machineType === 'silo') {
@@ -74,13 +82,24 @@ export function buildOperationalTelemetry(
     0,
     totalInventoryKg - rawInventoryKg - finishedGoodsKg + inTransitKg
   );
-  const lastReceiving = [...flow.manifests]
-    .reverse()
-    .find((manifest) => manifest.kind === 'receiving');
-  const lastShipping = [...flow.manifests]
-    .reverse()
-    .find((manifest) => manifest.kind === 'shipping');
+  let lastReceiving: MaterialFlowState['manifests'][number] | undefined;
+  let lastShipping: MaterialFlowState['manifests'][number] | undefined;
+  for (let index = flow.manifests.length - 1; index >= 0; index -= 1) {
+    const manifest = flow.manifests[index];
+    if (!lastReceiving && manifest.kind === 'receiving') lastReceiving = manifest;
+    if (!lastShipping && manifest.kind === 'shipping') lastShipping = manifest;
+    if (lastReceiving && lastShipping) break;
+  }
   const partsStock = Object.values(parts).reduce((sum, count) => sum + count, 0);
+  const activeQualityHolds = flow.productionBatches.filter(
+    (batch) => batch.disposition === 'hold' && batch.availableKg > 0
+  ).length;
+  const recalledBatches = flow.productionBatches.filter(
+    (batch) => batch.disposition === 'recalled'
+  ).length;
+  const openWorkOrders = workOrders.filter(
+    (workOrder) => workOrder.phase !== 'returned_to_service'
+  );
 
   return {
     [OPERATION_TAG_IDS.rawInventory]: rawInventoryKg / 1000,
@@ -91,7 +110,17 @@ export function buildOperationalTelemetry(
     [OPERATION_TAG_IDS.lastReceiving]: (lastReceiving?.actualKg ?? 0) / 1000,
     [OPERATION_TAG_IDS.lastShipping]: (lastShipping?.actualKg ?? 0) / 1000,
     [OPERATION_TAG_IDS.partsStock]: partsStock,
-    [OPERATION_TAG_IDS.shippingReleased]: getDispatchQualityStatus(qcLab).released ? 1 : 0,
+    [OPERATION_TAG_IDS.shippingReleased]: getDispatchQualityStatus(qcLab, flow.productionBatches)
+      .released
+      ? 1
+      : 0,
+    [OPERATION_TAG_IDS.activeQualityHolds]: activeQualityHolds,
+    [OPERATION_TAG_IDS.recalledBatches]: recalledBatches,
+    [OPERATION_TAG_IDS.openWorkOrders]: openWorkOrders.length,
+    [OPERATION_TAG_IDS.maintenanceDowntime]: openWorkOrders.reduce(
+      (sum, workOrder) => sum + workOrder.downtimeSeconds,
+      0
+    ),
   };
 }
 
@@ -160,7 +189,8 @@ export function initializeSCADASync(): () => void {
         const values = buildOperationalTelemetry(
           useMaterialFlowStore.getState(),
           useBreakdownStore.getState().partsInventory,
-          useQCLabStore.getState().qcLab
+          useQCLabStore.getState().qcLab,
+          useBreakdownStore.getState().workOrders
         );
         const nextSignature = Object.values(values)
           .map((value) => value.toFixed(3))
@@ -170,18 +200,14 @@ export function initializeSCADASync(): () => void {
         service.updateOperationalValues(values);
       };
       const unsubMaterialFlow = useMaterialFlowStore.subscribe(syncOperationalTelemetry);
-      const unsubParts = useBreakdownStore.subscribe(
-        (state) => state.partsInventory,
-        syncOperationalTelemetry,
-        { fireImmediately: true, equalityFn: shallow }
-      );
+      const unsubMaintenance = useBreakdownStore.subscribe(syncOperationalTelemetry);
       const unsubQuality = useQCLabStore.subscribe(
         (state) => state.qcLab,
         syncOperationalTelemetry,
         { fireImmediately: true }
       );
       syncOperationalTelemetry();
-      cleanupFunctions.push(unsubMaterialFlow, unsubParts, unsubQuality);
+      cleanupFunctions.push(unsubMaterialFlow, unsubMaintenance, unsubQuality);
 
       // 3. SCADA → STORE: Sync critical alarms to alerts
       // This displays SCADA alarms in the main UI alert system

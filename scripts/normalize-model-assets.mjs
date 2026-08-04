@@ -10,7 +10,7 @@ import {
   VERSION as GLTF_TRANSFORM_VERSION,
 } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { simplifyPrimitive, weldPrimitive } from '@gltf-transform/functions';
+import { draco, simplifyPrimitive, weldPrimitive } from '@gltf-transform/functions';
 import { MeshoptDecoder, MeshoptEncoder, MeshoptSimplifier } from 'meshoptimizer';
 import draco3d from 'draco3dgltf';
 import * as THREE from 'three';
@@ -459,9 +459,24 @@ async function normalizeAuthoredWorker(io, source, output, bodyType) {
   centreSceneBelow(document, scene);
   scene.setName(`MillOS_Worker_${bodyType}`);
   Object.assign(root.getAsset(), {
-    generator: `MillOS v0.40 worker pipeline, glTF-Transform ${GLTF_TRANSFORM_VERSION}`,
+    generator: `MillOS v0.41 worker pipeline, glTF-Transform ${GLTF_TRANSFORM_VERSION}`,
     copyright: `Ultimate Modular ${bodyType === 'masculine' ? 'Men' : 'Women'} Worker by Quaternius, CC0 1.0`,
   });
+
+  // Runtime already loads both authored bodies through the shared DRACO-aware
+  // loader. Compress only geometry accessors: skins, 62-joint armatures, node
+  // names, and animation samplers retain their authored contracts.
+  await document.transform(
+    draco({
+      method: 'edgebreaker',
+      encodeSpeed: 5,
+      decodeSpeed: 5,
+      quantizePosition: 14,
+      quantizeNormal: 10,
+      quantizeTexcoord: 12,
+      quantizeGeneric: 12,
+    })
+  );
 
   await writeBinaryGLB(io, output, document);
   return {
@@ -469,6 +484,9 @@ async function normalizeAuthoredWorker(io, source, output, bodyType) {
     materials: root.listMaterials().length,
     textures: root.listTextures().length,
     animations: root.listAnimations().map((animation) => animation.getName()),
+    skins: root.listSkins().length,
+    jointCounts: root.listSkins().map((skin) => skin.listJoints().length),
+    compression: 'KHR_draco_mesh_compression',
   };
 }
 

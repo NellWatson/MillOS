@@ -15,7 +15,8 @@
  */
 
 import React, { useEffect, useRef, useMemo, useState, memo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { createPortal } from 'react-dom';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import {
   Play,
   Pause,
@@ -46,6 +47,7 @@ import {
   Network,
   Scale,
   GitBranch,
+  ShieldAlert,
 } from 'lucide-react';
 import { useScenarioStore, getCategoryColor, formatTime } from '../../../stores/scenarioStore';
 import type {
@@ -57,6 +59,8 @@ import type {
 import { useBASStore } from '../../../stores/basStore';
 import { useStabilityStore } from '../../../stores/stabilityStore';
 import { useVotingStore } from '../../../stores/votingStore';
+import { useQCLabStore } from '../../../stores/qcLabStore';
+import { useMaterialFlowStore } from '../../../stores/materialFlowStore';
 import { useShallow } from 'zustand/react/shallow';
 import { audioManager } from '../../../utils/audioManager';
 
@@ -76,6 +80,7 @@ const SCENARIO_ICONS: Record<string, React.ComponentType<{ className?: string }>
   HeartHandshake,
   Network,
   Scale,
+  ShieldAlert,
 };
 
 // =============================================================================
@@ -669,6 +674,97 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, onRestart, onE
         </div>
       )}
 
+      {results.operationalMetrics && (
+        <section
+          className="rounded-lg border border-orange-500/25 bg-orange-500/10 p-3"
+          aria-labelledby="operational-debrief-heading"
+        >
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <ShieldAlert className="h-4 w-4 text-orange-300" aria-hidden="true" />
+              <h3
+                id="operational-debrief-heading"
+                className="text-xs font-semibold text-orange-200"
+              >
+                Operational debrief
+              </h3>
+            </div>
+            <div className="font-mono text-lg font-bold text-white">
+              {results.operationalMetrics.overallScore}%
+            </div>
+          </div>
+          <dl className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            {(
+              Object.entries(results.operationalMetrics.objectiveScores) as Array<[string, number]>
+            ).map(([objective, score]) => (
+              <div key={objective} className="rounded bg-slate-950/40 p-2 text-center">
+                <dt className="text-[9px] capitalize text-slate-400">
+                  {objective.replaceAll(/([A-Z])/g, ' $1')}
+                </dt>
+                <dd
+                  className={`mt-1 font-mono text-sm font-bold ${
+                    score >= 80
+                      ? 'text-emerald-300'
+                      : score >= 60
+                        ? 'text-amber-300'
+                        : 'text-red-300'
+                  }`}
+                >
+                  {score}%
+                </dd>
+              </div>
+            ))}
+          </dl>
+
+          {results.operationalMetrics.missedSafeguards.length > 0 && (
+            <div className="mt-3">
+              <h4 className="text-[10px] font-semibold uppercase tracking-wide text-red-200">
+                Missed safeguards
+              </h4>
+              <ul className="mt-1 list-disc space-y-1 pl-4 text-[10px] text-slate-300">
+                {results.operationalMetrics.missedSafeguards.map((safeguard) => (
+                  <li key={safeguard}>{safeguard}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="mt-3">
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-cyan-200">
+              Recommended response sequence
+            </h4>
+            <ol className="mt-1 list-decimal space-y-1 pl-4 text-[10px] text-slate-300">
+              {results.operationalMetrics.recommendedResponse.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+          </div>
+
+          <details className="mt-3 rounded border border-slate-700/60 bg-slate-950/30 p-2">
+            <summary className="min-h-11 cursor-pointer py-3 text-[10px] font-semibold text-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-300">
+              Decision audit trail ({results.operationalMetrics.choiceAudit.length})
+            </summary>
+            <ol className="mt-1 space-y-2">
+              {results.operationalMetrics.choiceAudit.map((choice, index) => (
+                <li
+                  key={`${choice.choiceId}-${index}`}
+                  className="rounded bg-slate-900/60 p-2 text-[9px] text-slate-300"
+                >
+                  <div className="flex justify-between gap-2">
+                    <span className="font-mono text-orange-200">{choice.choiceId}</span>
+                    <span className="shrink-0 text-slate-500">
+                      T+{choice.selectedAtSeconds.toFixed(1)} s, response{' '}
+                      {choice.responseSeconds.toFixed(1)} s
+                    </span>
+                  </div>
+                  <p className="mt-1 text-slate-400">{choice.outcome}</p>
+                </li>
+              ))}
+            </ol>
+          </details>
+        </section>
+      )}
+
       {/* Learnings */}
       {results.learningsUnlocked.length > 0 && (
         <div className="bg-slate-800/30 rounded p-2">
@@ -691,14 +787,14 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, onRestart, onE
       <div className="flex gap-2">
         <button
           onClick={onRestart}
-          className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-all text-sm"
+          className="flex min-h-11 flex-1 items-center justify-center gap-1 rounded-lg bg-cyan-500/20 px-3 py-2 text-sm text-cyan-400 transition-all hover:bg-cyan-500/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
         >
           <RotateCcw className="w-3 h-3" />
           Retry
         </button>
         <button
           onClick={onExit}
-          className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-slate-700/50 text-slate-300 hover:bg-slate-600/50 transition-all text-sm"
+          className="flex min-h-11 flex-1 items-center justify-center gap-1 rounded-lg bg-slate-700/50 px-3 py-2 text-sm text-slate-300 transition-all hover:bg-slate-600/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300"
         >
           <XCircle className="w-3 h-3" />
           Exit
@@ -719,6 +815,11 @@ const CHOICE_EFFECT_LABELS: Record<keyof ScenarioChoice['effects'], string> = {
   solidarity: 'Solidarity',
   relationshipHealth: 'Relationship',
   federationTrust: 'Federation',
+  safety: 'Safety',
+  traceability: 'Traceability',
+  quality: 'Quality',
+  continuity: 'Continuity',
+  responseTime: 'Response',
 };
 
 /** friction/delay going up is bad; every other effect going up is good */
@@ -758,67 +859,110 @@ const ChoicePointModal: React.FC<ChoicePointModalProps> = ({
   outcome,
   onSelect,
   onContinue,
-}) => (
-  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-auto p-4">
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95, y: 10 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Scenario decision point"
-      className="w-full max-w-md bg-slate-900 border border-violet-500/40 rounded-lg shadow-2xl overflow-hidden"
-    >
-      {/* Header */}
-      <div className="p-3 border-b border-slate-700/50 bg-violet-500/10">
-        <div className="flex items-center gap-2">
-          <GitBranch className="w-4 h-4 text-violet-400" />
-          <span className="text-sm font-bold text-white">Decision Point</span>
-          <span className="ml-auto text-[9px] text-violet-300">Scenario paused</span>
-        </div>
-        <p className="text-[11px] text-slate-300 mt-2">{event.description}</p>
-      </div>
+}) => {
+  const reduceMotion = useReducedMotion();
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
-      {/* Body */}
-      <div className="p-3 space-y-2">
-        {outcome === null ? (
-          event.choices?.map((choice) => (
-            <button
-              key={choice.id}
-              onClick={() => onSelect(choice)}
-              className="w-full text-left p-2.5 rounded-lg border border-slate-600/50 bg-slate-800/60 hover:border-violet-500/50 hover:bg-slate-700/60 transition-all"
-            >
-              <span className="text-xs font-medium text-white">{choice.label}</span>
-              <p className="text-[9px] text-slate-400 mt-0.5">{choice.description}</p>
-              <ChoiceEffectChips effects={choice.effects} />
-            </button>
-          ))
-        ) : (
-          <>
-            <div className="p-2.5 rounded-lg bg-violet-500/10 border border-violet-500/30">
-              <div className="flex items-start gap-1.5">
-                <Sparkles className="w-3 h-3 text-violet-400 mt-0.5 flex-shrink-0" />
-                <p className="text-[10px] text-slate-200">{outcome}</p>
+  useEffect(() => {
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => previousFocusRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    window.requestAnimationFrame(() =>
+      modalRef.current?.querySelector<HTMLElement>('button:not(:disabled)')?.focus()
+    );
+  }, [event, outcome]);
+
+  const trapFocus = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(
+      modalRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled)') ?? []
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-auto p-4">
+      <motion.div
+        ref={modalRef}
+        initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.95, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Scenario decision point"
+        onKeyDown={trapFocus}
+        className="w-full max-w-md bg-slate-900 border border-violet-500/40 rounded-lg shadow-2xl overflow-hidden"
+      >
+        {/* Header */}
+        <div className="p-3 border-b border-slate-700/50 bg-violet-500/10">
+          <div className="flex items-center gap-2">
+            <GitBranch className="w-4 h-4 text-violet-400" />
+            <span className="text-sm font-bold text-white">Decision Point</span>
+            <span className="ml-auto text-[9px] text-violet-300">Scenario paused</span>
+          </div>
+          <p className="text-[11px] text-slate-300 mt-2">{event.description}</p>
+        </div>
+
+        {/* Body */}
+        <div className="p-3 space-y-2">
+          {outcome === null ? (
+            event.choices?.map((choice) => (
+              <button
+                key={choice.id}
+                onClick={() => onSelect(choice)}
+                className="min-h-11 w-full rounded-lg border border-slate-600/50 bg-slate-800/60 p-2.5 text-left transition-all hover:border-violet-500/50 hover:bg-slate-700/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-300"
+              >
+                <span className="text-xs font-medium text-white">{choice.label}</span>
+                <p className="text-[9px] text-slate-400 mt-0.5">{choice.description}</p>
+                <ChoiceEffectChips effects={choice.effects} />
+              </button>
+            ))
+          ) : (
+            <>
+              <div
+                role="status"
+                aria-live="polite"
+                className="p-2.5 rounded-lg bg-violet-500/10 border border-violet-500/30"
+              >
+                <div className="flex items-start gap-1.5">
+                  <Sparkles className="w-3 h-3 text-violet-400 mt-0.5 flex-shrink-0" />
+                  <p className="text-[10px] text-slate-200">{outcome}</p>
+                </div>
               </div>
-            </div>
-            <button
-              onClick={onContinue}
-              className="w-full flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 transition-all text-xs font-medium"
-            >
-              <Play className="w-3 h-3" />
-              Continue Scenario
-            </button>
-          </>
-        )}
-      </div>
-    </motion.div>
-  </div>
-);
+              <button
+                onClick={onContinue}
+                className="flex min-h-11 w-full items-center justify-center gap-1 rounded-lg bg-violet-500/20 px-3 py-2 text-xs font-medium text-violet-300 transition-all hover:bg-violet-500/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-300"
+              >
+                <Play className="w-3 h-3" />
+                Continue Scenario
+              </button>
+            </>
+          )}
+        </div>
+      </motion.div>
+    </div>,
+    document.body
+  );
+};
 
 // =============================================================================
 // MAIN COMPONENT
 // =============================================================================
 
 export const ScenarioPlayground: React.FC = () => {
+  const reduceMotion = useReducedMotion();
   const {
     availableScenarios,
     activeScenario,
@@ -1111,9 +1255,69 @@ export const ScenarioPlayground: React.FC = () => {
       // Trust eases collaboration friction (and distrust adds it)
       updateFriction('choice-trust', -choice.effects.trust * 0.5);
     }
-    // Records the choice id into the scenario result's basMetrics and
-    // accumulates solidarity/relationship/federation deltas
-    recordChoice(choice.id, choice.effects);
+    if (activeScenario?.category === 'operational') {
+      const qc = useQCLabStore.getState();
+      const flow = useMaterialFlowStore.getState();
+      const availableBatchIds = flow.productionBatches
+        .filter((batch) => batch.availableKg > 0 && batch.disposition !== 'shipped')
+        .map((batch) => batch.id);
+      if (choice.id === 'contain-stop-hold-notify' || choice.id === 'hold-everything-unscoped') {
+        qc.triggerContaminationAlert({
+          batchIds: availableBatchIds,
+          severity: choice.id === 'contain-stop-hold-notify' ? 'high' : 'medium',
+          operator: 'Scenario operator',
+          operatorNote: 'Contamination-at-dispatch training interlock',
+        });
+      } else if (
+        choice.id === 'recall-affected-release-clear' ||
+        choice.id === 'destroy-all-finished-goods'
+      ) {
+        const alerts = useQCLabStore
+          .getState()
+          .qcLab.contaminationAlerts.filter((alert) => !alert.resolved);
+        const alertIds =
+          alerts.length > 0
+            ? alerts.map((alert) => alert.id)
+            : [
+                qc.triggerContaminationAlert({
+                  batchIds: availableBatchIds,
+                  severity: 'high',
+                  operator: 'Scenario operator',
+                  operatorNote: 'Recall disposition from operational scenario',
+                }),
+              ];
+        alertIds.forEach((alertId) =>
+          useQCLabStore
+            .getState()
+            .resolveContaminationAlert(
+              alertId,
+              'recalled',
+              'Scenario operator',
+              'Failed scope recalled during contamination response'
+            )
+        );
+      } else if (choice.id === 'release-on-visual-check') {
+        useQCLabStore
+          .getState()
+          .qcLab.contaminationAlerts.filter((alert) => !alert.resolved)
+          .forEach((alert) =>
+            useQCLabStore
+              .getState()
+              .resolveContaminationAlert(
+                alert.id,
+                'released',
+                'Scenario operator',
+                'Unsafe training choice: visual inspection override'
+              )
+          );
+      }
+    }
+    // Record exact timing, consequence, BAS effects, and operational objective deltas.
+    recordChoice(choice.id, choice.effects, {
+      eventDescription: activeChoice?.description,
+      eventTime: activeChoice?.time,
+      outcome: choice.outcome,
+    });
     setChoiceOutcome(choice.outcome);
     audioManager.playClick?.();
   };
@@ -1130,7 +1334,7 @@ export const ScenarioPlayground: React.FC = () => {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: -10 }}
+      initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
       className="bg-slate-900/90 backdrop-blur-md border border-slate-600/50 rounded-lg shadow-lg w-full"
     >

@@ -518,36 +518,33 @@ export const VotingPanel: React.FC<VotingPanelProps> = ({ defaultExpanded = true
   return (
     <div className="bg-slate-800/50 rounded-lg border border-slate-700/50 overflow-hidden">
       {/* Header */}
-      <div
-        role="button"
-        tabIndex={0}
-        aria-expanded={expanded}
-        aria-controls="voting-panel-content"
-        className="flex items-center justify-between p-2 cursor-pointer hover:bg-slate-700/30 transition-colors"
-        onClick={() => setExpanded(!expanded)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            setExpanded(!expanded);
-          }
-        }}
-      >
-        <div className="flex items-center gap-2">
-          <VoteIcon className="w-4 h-4 text-green-400" />
-          <span className="text-xs font-medium text-white">Democratic Voting</span>
+      <div className="flex items-center hover:bg-slate-700/30 transition-colors">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls="voting-panel-content"
+          className="flex min-h-11 flex-1 items-center justify-between p-2 text-left"
+          onClick={() => setExpanded(!expanded)}
+        >
+          <span className="flex items-center gap-2">
+            <VoteIcon className="w-4 h-4 text-green-400" />
+            <span className="text-xs font-medium text-white">Democratic Voting</span>
+          </span>
+          <span className="flex items-center gap-2">
+            {openCount > 0 && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-green-600/30 text-green-400">
+                {openCount} active
+              </span>
+            )}
+            {expanded ? (
+              <ChevronUp className="w-4 h-4 text-slate-500" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-slate-500" />
+            )}
+          </span>
+        </button>
+        <div className="pr-2">
           <ConceptTooltip conceptId="democratic-voting" position="right" />
-        </div>
-        <div className="flex items-center gap-2">
-          {openCount > 0 && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-green-600/30 text-green-400">
-              {openCount} active
-            </span>
-          )}
-          {expanded ? (
-            <ChevronUp className="w-4 h-4 text-slate-500" />
-          ) : (
-            <ChevronDown className="w-4 h-4 text-slate-500" />
-          )}
         </div>
       </div>
 

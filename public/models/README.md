@@ -19,7 +19,7 @@ models/
     └── worker-masculine.glb
 ```
 
-MillOS v0.40 uses authored Worker characters from the Quaternius Ultimate
+MillOS v0.41 uses authored Worker characters from the Quaternius Ultimate
 Modular Men and Ultimate Modular Women packs for its named personnel. Each body
 has complete industrial workwear and the same nine simulation-driven clips:
 idle, walk, run, break, inspect, repair, supervise, radio, and sample. Their
@@ -27,6 +27,11 @@ meshes remain texture-free so skin tone, uniform, vest, trousers, hard hat,
 hair, eye, PPE, and tool variants can be applied at runtime without duplicating
 texture memory. The compact Kenney worker remains a validated compatibility
 asset for older consumers.
+
+The v0.41 delivery pipeline applies `KHR_draco_mesh_compression` to both
+authored personnel bodies. Runtime derivatives preserve one skin, the complete
+62-joint rig, all nine semantic clips, names, and physical bounds. The asset
+validator checks those contracts and the DRACO extension before release.
 
 The selected Quaternius Worker models and their authored animation sets are
 CC0. Exact source models, licences, download identifiers, hashes, and
@@ -61,7 +66,8 @@ npm run validate:assets
 
 The validator checks each manifest asset for self-containment, finite and
 approved bounds, ground and centre alignment, file size, mesh and material
-budgets, required rig nodes, stable animation names, and attribution metadata.
+budgets, required rig nodes, skin and joint counts, compression, stable
+animation names, and attribution metadata.
 Validation is a release gate.
 
 ## Adding or replacing an asset

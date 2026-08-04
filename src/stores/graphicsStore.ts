@@ -140,7 +140,7 @@ export interface GraphicsSettings {
 }
 
 /**
- * DEAD SETTINGS - keys with NO live consumer anywhere in the v0.40 tree.
+ * DEAD SETTINGS - keys with NO live consumer anywhere in the v0.41 tree.
  *
  * Verified by repo-wide grep (excluding `src/0.10 Archive/`). They are kept
  * rather than deleted because every remaining reader is inside a dead subtree

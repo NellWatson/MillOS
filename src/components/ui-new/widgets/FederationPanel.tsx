@@ -293,22 +293,24 @@ export const FederationPanel: React.FC = () => {
 
       {/* Member Units Expandable */}
       <div className="p-3 border-b border-slate-700/30">
-        <button
-          onClick={() => {
-            setShowMembers(!showMembers);
-            audioManager.playClick?.();
-          }}
-          className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-white transition-colors"
-          aria-expanded={showMembers}
-          aria-controls="federation-members"
-        >
-          <span className="flex items-center gap-1">
-            <Building2 className="w-3 h-3" />
-            Federation Members
-            <ConceptTooltip conceptId="mondragon-principles" position="right" />
-          </span>
-          {showMembers ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => {
+              setShowMembers(!showMembers);
+              audioManager.playClick?.();
+            }}
+            className="flex min-h-11 flex-1 items-center justify-between text-xs text-slate-400 transition-colors hover:text-white"
+            aria-expanded={showMembers}
+            aria-controls="federation-members"
+          >
+            <span className="flex items-center gap-1">
+              <Building2 className="w-3 h-3" />
+              Federation Members
+            </span>
+            {showMembers ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
+          <ConceptTooltip conceptId="mondragon-principles" position="right" />
+        </div>
 
         <AnimatePresence>
           {showMembers && (
