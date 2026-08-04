@@ -1,7 +1,82 @@
 import path from 'path';
 import fs from 'fs';
-import { defineConfig, loadEnv, Plugin } from 'vite';
+import { defineConfig, Plugin, UserConfig } from 'vite';
 import react from '@vitejs/plugin-react-swc'; // SWC is 20x faster than Babel
+
+const packageMetadata = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')
+) as { version?: string };
+
+const CURRENT_AUDIO_FILES = new Set([
+  'The Builder.mp3',
+  'Space Jazz.mp3',
+  'Upbeat Forever.mp3',
+  'Fuzzball Parade.mp3',
+  'I Got a Stick Feat James Gavins.mp3',
+  'Boogie Party.mp3',
+  'Voxel Revolution.mp3',
+  'Newer Wave.mp3',
+  'Neon Laser Horizon.mp3',
+  'Cloud Dancer.mp3',
+  'Fanfare for Space.mp3',
+]);
+
+function finalizeCurrentBuild({
+  buildId,
+  cacheVersion,
+}: {
+  buildId: string;
+  cacheVersion: string;
+}): Plugin {
+  return {
+    name: 'finalize-current-build',
+    closeBundle() {
+      const outputDirectory = path.resolve(__dirname, 'dist');
+      if (!fs.existsSync(outputDirectory)) return;
+
+      const serviceWorkerPath = path.join(outputDirectory, 'sw.js');
+      if (fs.existsSync(serviceWorkerPath)) {
+        const serviceWorker = fs
+          .readFileSync(serviceWorkerPath, 'utf8')
+          .replaceAll('__MILLOS_BUILD_ID__', buildId)
+          .replaceAll('__MILLOS_CACHE_VERSION__', cacheVersion);
+        fs.writeFileSync(serviceWorkerPath, serviceWorker);
+      }
+
+      fs.writeFileSync(
+        path.join(outputDirectory, 'build-info.json'),
+        `${JSON.stringify({ buildId, cacheVersion }, null, 2)}\n`
+      );
+
+      const pendingDirectories = [outputDirectory];
+      while (pendingDirectories.length > 0) {
+        const directory = pendingDirectories.pop();
+        if (!directory) continue;
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+          const entryPath = path.join(directory, entry.name);
+          if (entry.isDirectory()) {
+            pendingDirectories.push(entryPath);
+          } else if (entry.name === '.DS_Store' || entry.name === 'blocked_commands.log') {
+            fs.rmSync(entryPath, { force: true });
+          }
+        }
+      }
+
+      for (const entry of fs.readdirSync(outputDirectory, { withFileTypes: true })) {
+        if (entry.isDirectory() && /^v\d+\.\d+$/.test(entry.name)) {
+          fs.rmSync(path.join(outputDirectory, entry.name), { recursive: true, force: true });
+        }
+        if (
+          entry.isFile() &&
+          entry.name.toLocaleLowerCase().endsWith('.mp3') &&
+          !CURRENT_AUDIO_FILES.has(entry.name)
+        ) {
+          fs.rmSync(path.join(outputDirectory, entry.name), { force: true });
+        }
+      }
+    },
+  };
+}
 
 // Plugin to serve static v0.10 and v0.20 builds during development
 function serveStaticVersions(): Plugin {
@@ -50,11 +125,19 @@ function serveStaticVersions(): Plugin {
   };
 }
 
-export default defineConfig(({ mode }) => {
-  loadEnv(mode, '.', '');
+export default defineConfig((): UserConfig => {
   // Support versioned deployments: VERSION=v0.10 -> base=/v0.10/
   const version = process.env.VERSION;
   const basePath = version ? `/${version}/` : '/';
+  const packageVersion = packageMetadata.version ?? '0.0.0';
+  const commit =
+    process.env.GITHUB_SHA ??
+    process.env.VERCEL_GIT_COMMIT_SHA ??
+    process.env.CI_COMMIT_SHA ??
+    process.env.COMMIT_SHA;
+  const buildId = `${version ?? packageVersion}-${commit?.slice(0, 12) ?? 'local'}`;
+  const cacheVersion = buildId.replace(/[^a-zA-Z0-9._-]/g, '_');
+
   return {
     base: basePath,
     server: {
@@ -69,13 +152,18 @@ export default defineConfig(({ mode }) => {
         ignored: ['**/node_modules/**', '**/dist/**', '**/.git/**'],
       },
     },
-    plugins: [serveStaticVersions(), react()],
-    // SECURITY: API keys should NOT be embedded in client bundles
-    // Use a backend proxy (serverless function) instead
-    // define: {
-    //   'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-    //   'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
-    // },
+    plugins: [
+      serveStaticVersions(),
+      react(),
+      finalizeCurrentBuild({
+        buildId,
+        cacheVersion,
+      }),
+    ],
+    define: {
+      __MILLOS_BUILD_ID__: JSON.stringify(buildId),
+      __MILLOS_CACHE_VERSION__: JSON.stringify(cacheVersion),
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
@@ -86,45 +174,46 @@ export default defineConfig(({ mode }) => {
       target: 'es2020',
       minify: 'esbuild', // esbuild is faster, terser for smaller bundles
       sourcemap: false, // Disable for production (saves ~30% bundle size)
+      manifest: true,
       rollupOptions: {
         input: {
           main: path.resolve(__dirname, 'index.html'),
-          prototypes: path.resolve(__dirname, 'prototypes/index.html'),
         },
         output: {
           // Manual chunks for better caching and parallel loading
           manualChunks: {
-            // Core framework chunks
-            'react-vendor': ['react', 'react-dom'],
-            'state-vendor': ['zustand'],
             // Three.js ecosystem (largest dependencies)
             'three-core': ['three'],
-            'three-fiber': ['@react-three/fiber', '@react-three/drei'],
-            'three-postprocessing': ['@react-three/postprocessing', 'postprocessing'],
-            // Rapier physics - large WASM bundle (~2.2MB), isolated for parallel loading
-            // This chunk contains the Rapier WASM physics engine which cannot be reduced
-            'three-rapier': ['@react-three/rapier'],
+            // Fiber/Drei depend directly on React and Zustand. Keeping that
+            // tightly coupled runtime together prevents circular vendor chunks.
+            'three-fiber': [
+              'react',
+              'react-dom',
+              'zustand',
+              '@react-three/fiber',
+              '@react-three/drei',
+            ],
             // UI libraries
             'ui-vendor': ['framer-motion'],
-            charts: ['recharts'],
             // Utilities
             icons: ['lucide-react'],
-            // Additional splits to reduce main bundle
-            'ai-vendor': ['@google/generative-ai'],
-            multiplayer: ['peerjs'],
             'math-utils': ['maath'],
           },
         },
       },
-      // Rapier physics WASM is ~2.2MB - this is expected and cannot be reduced
-      // Increase limit to suppress warning for this known large dependency
-      chunkSizeWarningLimit: 2500,
+      // The lazy local WebGPU brain is isolated in its own ~6MB chunk and only
+      // loads when an operator opts into it. Rapier's WASM chunk is ~2.2MB.
+      chunkSizeWarningLimit: 6500,
     },
     optimizeDeps: {
       // Pre-bundle heavy dependencies for faster dev startup
       include: ['three', '@react-three/fiber', '@react-three/drei', 'framer-motion'],
-      // Exclude troika to prevent ES6 class transpilation issues
-      exclude: ['troika-three-text'],
+      // Exclude troika to prevent ES6 class transpilation issues.
+      // Exclude @mlc-ai/web-llm: it is dynamically imported only (loaded on demand
+      // when the operator opts into the local WebGPU brain), ships a large WASM
+      // runtime, and uses require() inside ESM that breaks esbuild pre-bundling.
+      // Rollup auto-splits the dynamic import into its own lazy chunk for prod.
+      exclude: ['troika-three-text', '@mlc-ai/web-llm'],
       esbuildOptions: {
         target: 'esnext',
         supported: {

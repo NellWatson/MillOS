@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getModelTextures, type MachineTextures } from '../../utils/machineTextures';
+import { loadCompressedTexture } from '../../utils/textureCompression';
 import { useGraphicsStore } from '../../stores/graphicsStore';
 
 /**
@@ -55,7 +56,7 @@ function applyWorkerTextures(material: THREE.MeshStandardMaterial): void {
   }
   if (workerTextures.normal) {
     material.normalMap = workerTextures.normal;
-    material.normalScale = new THREE.Vector2(0.3, 0.3); // Subtle for workers
+    material.normalScale.set(0.3, 0.3); // Subtle for workers
   }
   if (workerTextures.ao) {
     material.aoMap = workerTextures.ao;
@@ -63,6 +64,101 @@ function applyWorkerTextures(material: THREE.MeshStandardMaterial): void {
   }
 
   material.needsUpdate = true;
+}
+
+// =============================================================================
+// CHARACTER DETAIL MAPS (authored GLB path)
+// =============================================================================
+
+/**
+ * Tiling surface detail for the authored skinned workers.
+ *
+ * public/textures/compressed/worker_normal.ktx2 and worker_roughness.ktx2 are
+ * full 1024x1024, 11-level mip chains that reached no worker at any quality
+ * tier: `getModelTextures` short-circuits on `graphics.enableMachineTextures`,
+ * which is `false` on all four presets, and WorkerModel never imported this
+ * module at all. These are loaded directly through the KTX2 path instead so the
+ * dead flag is not in the way, and so the JPG fallback in machineTextures.ts —
+ * which applies NearestFilter with `generateMipmaps = false` and would shimmer
+ * badly on a moving character — is never used.
+ *
+ * HARD CONSTRAINT: worker_color.ktx2 must NEVER be bound as `material.map`.
+ * The GLB UV unwrap spans roughly U/V [-1.0, 1.5] with no atlas intent, so an
+ * albedo map smears unrelated colour across the body. That same arbitrary
+ * unwrap is exactly why RepeatWrapping normal/roughness detail works here.
+ */
+export interface WorkerDetailMaps {
+  normal: THREE.Texture;
+  roughness: THREE.Texture;
+}
+
+const COMPRESSED_TEXTURE_PATH = `${import.meta.env.BASE_URL}textures/compressed`;
+const DETAIL_JPG_FALLBACK_PATH = `${import.meta.env.BASE_URL}textures/machines/256`;
+
+let detailMapsPromise: Promise<WorkerDetailMaps | null> | null = null;
+let resolvedDetailMaps: WorkerDetailMaps | null = null;
+const detailVariantCache = new Map<string, THREE.Texture>();
+
+/**
+ * Kick off (or join) the one-time load of the shared worker detail maps.
+ * Resolves to null if neither the KTX2 nor the JPG fallback is reachable.
+ */
+export function requestWorkerDetailMaps(): Promise<WorkerDetailMaps | null> {
+  if (resolvedDetailMaps) return Promise.resolve(resolvedDetailMaps);
+  if (detailMapsPromise) return detailMapsPromise;
+
+  detailMapsPromise = Promise.all([
+    loadCompressedTexture(
+      `${COMPRESSED_TEXTURE_PATH}/worker_normal.ktx2`,
+      `${DETAIL_JPG_FALLBACK_PATH}/worker_normal.jpg`,
+      'worker-detail-normal'
+    ),
+    loadCompressedTexture(
+      `${COMPRESSED_TEXTURE_PATH}/worker_roughness.ktx2`,
+      `${DETAIL_JPG_FALLBACK_PATH}/worker_roughness.jpg`,
+      'worker-detail-roughness'
+    ),
+  ])
+    .then(([normal, roughness]) => {
+      if (!normal || !roughness) return null;
+      // Neither map is colour data - leave both on the three.js default
+      // (no colour space), which is what a normal/roughness map requires.
+      // Anisotropy has to be set on the base texture: sampler state is applied
+      // during upload and every repeat-variant clone shares one GL texture.
+      for (const texture of [normal, roughness]) {
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        texture.anisotropy = Math.max(texture.anisotropy, 4);
+      }
+      resolvedDetailMaps = { normal, roughness };
+      return resolvedDetailMaps;
+    })
+    .catch(() => null);
+
+  return detailMapsPromise;
+}
+
+/**
+ * Return a repeat-specific view of one detail map, or null before the load
+ * resolves. Clones share `Texture.source` (and therefore one GPU upload) while
+ * carrying their own UV transform, so mutating a repeat here cannot leak into
+ * any other consumer of the same file.
+ */
+export function getWorkerDetailMapVariant(
+  channel: 'normal' | 'roughness',
+  repeat: number
+): THREE.Texture | null {
+  if (!resolvedDetailMaps) return null;
+  const key = `${channel}:${repeat}`;
+  const cached = detailVariantCache.get(key);
+  if (cached) return cached;
+
+  const variant = resolvedDetailMaps[channel].clone();
+  variant.wrapS = THREE.RepeatWrapping;
+  variant.wrapT = THREE.RepeatWrapping;
+  variant.repeat.set(repeat, repeat);
+  detailVariantCache.set(key, variant);
+  return variant;
 }
 
 // =============================================================================
@@ -82,6 +178,32 @@ export const SHARED_WORKER_MATERIALS = {
   mediumGray: new THREE.MeshStandardMaterial({ color: '#333333' }),
   white: new THREE.MeshStandardMaterial({ color: '#ffffff' }),
   offWhite: new THREE.MeshStandardMaterial({ color: '#e5e5e5', roughness: 0.7 }),
+  reflective: new THREE.MeshStandardMaterial({
+    color: '#f8fafc',
+    emissive: '#ffffff',
+    emissiveIntensity: 0.22,
+    metalness: 0.3,
+    roughness: 0.2,
+  }),
+  boot: new THREE.MeshStandardMaterial({ color: '#111827', roughness: 0.78 }),
+  glove: new THREE.MeshStandardMaterial({ color: '#1e40af', roughness: 0.62 }),
+  safetyLens: new THREE.MeshStandardMaterial({
+    color: '#c9edff',
+    transparent: true,
+    opacity: 0.48,
+    roughness: 0.08,
+    metalness: 0.05,
+    depthWrite: false,
+  }),
+  sampleGlass: new THREE.MeshStandardMaterial({
+    color: '#dbeafe',
+    transparent: true,
+    opacity: 0.62,
+    roughness: 0.12,
+    depthWrite: false,
+  }),
+  sampleCap: new THREE.MeshStandardMaterial({ color: '#7c3aed', roughness: 0.55 }),
+  badgeWhite: new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.45 }),
 
   // Metallic
   chrome: new THREE.MeshStandardMaterial({
@@ -96,7 +218,12 @@ export const SHARED_WORKER_MATERIALS = {
   }),
 
   // Safety equipment
-  vestOrange: new THREE.MeshStandardMaterial({ color: '#f97316', roughness: 0.6 }),
+  vestOrange: new THREE.MeshStandardMaterial({
+    color: '#f97316',
+    emissive: '#7c2d12',
+    emissiveIntensity: 0.035,
+    roughness: 0.6,
+  }),
   safetyGreen: new THREE.MeshStandardMaterial({
     color: '#22c55e',
     emissive: '#22c55e',
@@ -134,6 +261,7 @@ const hairMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
 const uniformMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
 const pantsMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
 const hatMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
+const accentMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
 
 // Track which materials have had textures applied
 const texturedMaterials = new WeakSet<THREE.MeshStandardMaterial>();
@@ -210,6 +338,8 @@ export const getUniformMaterial = (color: string): THREE.MeshStandardMaterial =>
   if (!uniformMaterialCache.has(color)) {
     const material = new THREE.MeshStandardMaterial({
       color: color,
+      emissive: color,
+      emissiveIntensity: 0.025,
       roughness: 0.7,
     });
     uniformMaterialCache.set(color, material);
@@ -233,6 +363,8 @@ export const getPantsMaterial = (color: string): THREE.MeshStandardMaterial => {
   if (!pantsMaterialCache.has(color)) {
     const material = new THREE.MeshStandardMaterial({
       color: color,
+      emissive: color,
+      emissiveIntensity: 0.015,
       roughness: 0.8,
     });
     pantsMaterialCache.set(color, material);
@@ -264,6 +396,20 @@ export const getHatMaterial = (color: string): THREE.MeshStandardMaterial => {
   return hatMaterialCache.get(color)!;
 };
 
+export const getAccentMaterial = (color: string): THREE.MeshStandardMaterial => {
+  if (!accentMaterialCache.has(color)) {
+    accentMaterialCache.set(
+      color,
+      new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.48,
+        metalness: 0.12,
+      })
+    );
+  }
+  return accentMaterialCache.get(color)!;
+};
+
 // =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
@@ -289,13 +435,12 @@ export const refreshWorkerTextures = (): void => {
       material.roughnessMap = null;
       material.normalMap = null;
       material.aoMap = null;
+      // Evict from the textured tracking set so the getters re-run
+      // applyWorkerTextures on next access (WeakSet has no clear()).
+      texturedMaterials.delete(material);
       material.needsUpdate = true;
     }
   }
-
-  // Clear the textured tracking so textures get re-applied
-  // Note: WeakSet doesn't have clear(), so materials will get re-textured
-  // on next access since we reset texturesInitialized
 };
 
 /**
@@ -310,6 +455,7 @@ export const clearMaterialCaches = (): void => {
     uniformMaterialCache,
     pantsMaterialCache,
     hatMaterialCache,
+    accentMaterialCache,
   ];
 
   for (const cache of caches) {
@@ -335,6 +481,7 @@ export const getMaterialCacheStats = () => ({
   uniform: uniformMaterialCache.size,
   pants: pantsMaterialCache.size,
   hat: hatMaterialCache.size,
+  accent: accentMaterialCache.size,
   staticMaterials: Object.keys(SHARED_WORKER_MATERIALS).length,
   texturesEnabled: workerTextures !== null,
   quality: lastQuality,

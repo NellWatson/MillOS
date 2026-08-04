@@ -2,7 +2,8 @@ import React, { useRef, useState, useEffect, useMemo, Suspense } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { MachineData, MachineType } from '../types';
 import * as THREE from 'three';
-import { Text, Html } from '@react-three/drei';
+import { Html } from '@react-three/drei';
+import { SceneText as Text } from './shared/SceneText';
 import { audioManager } from '../utils/audioManager';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -13,8 +14,8 @@ import { MACHINE_MATERIALS, METAL_MATERIALS } from '../utils/sharedMaterials';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useBreakdownStore } from '../stores/breakdownStore';
 import { useProductionStore } from '../stores/productionStore';
-import { useWorkerMoodStore } from '../stores/workerMoodStore';
 import { BreakdownEffects } from './breakdown/BreakdownEffects';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // Import machine subcomponents
 import { GRAIN_TYPES, INDICES_5, INDICES_6, INDICES_8 } from './machines/shared';
@@ -43,6 +44,81 @@ import { InstancedSilos } from './machines/InstancedSilos';
 import { InstancedRollerMills } from './machines/InstancedRollerMills';
 import { InstancedPlansifters } from './machines/InstancedPlansifters';
 import { InstancedPackers } from './machines/InstancedPackers';
+
+// Module-level read-only temporary to avoid per-render allocation (CLAUDE.md convention).
+// Value identical to the previous inline `new THREE.Vector2(0.3, 0.3)`; never mutated.
+const SILO_NORMAL_SCALE = new THREE.Vector2(0.3, 0.3);
+
+// ==========================================
+// LOW-QUALITY SIMPLIFIED MACHINE SILHOUETTES
+// ==========================================
+// Normalized (1x1x1 footprint, base at y=0) merged geometries, shared across
+// all machines and scaled per-instance -> one draw call per machine, but the
+// silhouette still reads as the machine type instead of a flat box.
+
+// Bake a vertical brightness gradient into vertex colors (dark base -> light top)
+const bakeVerticalGradient = (
+  geometry: THREE.BufferGeometry,
+  minShade = 0.55
+): THREE.BufferGeometry => {
+  const pos = geometry.getAttribute('position');
+  const colors = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const t = THREE.MathUtils.clamp(pos.getY(i), 0, 1);
+    const shade = minShade + (1 - minShade) * t;
+    colors[i * 3] = shade;
+    colors[i * 3 + 1] = shade;
+    colors[i * 3 + 2] = shade;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return geometry;
+};
+
+const createSimplifiedMachineGeometries = () => {
+  // SILO: cylinder body + cone cap
+  const siloBody = new THREE.CylinderGeometry(0.5, 0.5, 0.85, 12);
+  siloBody.translate(0, 0.425, 0);
+  const siloCap = new THREE.ConeGeometry(0.5, 0.15, 12);
+  siloCap.translate(0, 0.925, 0);
+  const silo = bakeVerticalGradient(mergeGeometries([siloBody, siloCap]) ?? siloBody.clone());
+  siloBody.dispose();
+  siloCap.dispose();
+
+  // MILL/PACKER: box body + tapered hopper wedge on top (4-sided frustum)
+  const millBody = new THREE.BoxGeometry(1, 0.75, 1);
+  millBody.translate(0, 0.375, 0);
+  const hopper = new THREE.CylinderGeometry(0.14, 0.55, 0.25, 4);
+  hopper.rotateY(Math.PI / 4);
+  hopper.translate(0, 0.875, 0);
+  const hopperBox = bakeVerticalGradient(mergeGeometries([millBody, hopper]) ?? millBody.clone());
+  millBody.dispose();
+  hopper.dispose();
+
+  // Everything else: plain box
+  const box = new THREE.BoxGeometry(1, 1, 1);
+  box.translate(0, 0.5, 0);
+  bakeVerticalGradient(box);
+
+  return { silo, hopperBox, box };
+};
+
+const SIMPLIFIED_MACHINE_GEOMETRIES = createSimplifiedMachineGeometries();
+
+// Lambert + baked vertex-color gradient: cheap shading without per-pixel cost
+const SIMPLIFIED_MACHINE_MATERIALS: Record<string, THREE.MeshLambertMaterial> = {
+  [MachineType.SILO]: new THREE.MeshLambertMaterial({ color: '#94a3b8', vertexColors: true }),
+  [MachineType.ROLLER_MILL]: new THREE.MeshLambertMaterial({
+    color: '#64748b',
+    vertexColors: true,
+  }),
+  [MachineType.PLANSIFTER]: new THREE.MeshLambertMaterial({ color: '#78716c', vertexColors: true }),
+  [MachineType.PACKER]: new THREE.MeshLambertMaterial({ color: '#475569', vertexColors: true }),
+  [MachineType.CONTROL_ROOM]: new THREE.MeshLambertMaterial({
+    color: '#64748b',
+    vertexColors: true,
+  }),
+  fallback: new THREE.MeshLambertMaterial({ color: '#64748b', vertexColors: true }),
+};
 
 interface MachinesProps {
   machines: MachineData[];
@@ -274,11 +350,15 @@ interface MachineMeshProps {
 const MachineMesh: React.FC<MachineMeshProps> = React.memo(({ data, onSelect, onStateUpdate }) => {
   const { type, position, rotation, status } = data;
   // Guard against NaN/invalid dimensions - critical for preventing PlaneGeometry NaN errors
-  const size: [number, number, number] = [
-    Number.isFinite(data.size[0]) && data.size[0] > 0 ? data.size[0] : 3,
-    Number.isFinite(data.size[1]) && data.size[1] > 0 ? data.size[1] : 5,
-    Number.isFinite(data.size[2]) && data.size[2] > 0 ? data.size[2] : 3,
-  ];
+  const [rawWidth, rawHeight, rawDepth] = data.size;
+  const size = useMemo<[number, number, number]>(
+    () => [
+      Number.isFinite(rawWidth) && rawWidth > 0 ? rawWidth : 3,
+      Number.isFinite(rawHeight) && rawHeight > 0 ? rawHeight : 5,
+      Number.isFinite(rawDepth) && rawDepth > 0 ? rawDepth : 3,
+    ],
+    [rawWidth, rawHeight, rawDepth]
+  );
   const groupRef = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
 
@@ -337,6 +417,17 @@ const MachineMesh: React.FC<MachineMeshProps> = React.memo(({ data, onSelect, on
   );
   const legCylinderGeometry = useMemo(() => new THREE.CylinderGeometry(0.15, 0.2, 4), []);
 
+  // Dispose useMemo'd geometries on unmount/replacement so their GPU buffers are released.
+  // These are attached via the `geometry={...}` prop, so R3F does not own or auto-dispose them.
+  useEffect(
+    () => () => {
+      motorFinGeometry.dispose();
+      legCylinderGeometry.dispose();
+    },
+    [motorFinGeometry, legCylinderGeometry]
+  );
+  useEffect(() => () => conveyorRollerGeometry.dispose(), [conveyorRollerGeometry]);
+
   // Machine-specific sounds based on type and status
   // Machine-specific sounds - Optimized to avoid thrashing
   const soundRef = useRef<string | null>(null);
@@ -366,19 +457,7 @@ const MachineMesh: React.FC<MachineMeshProps> = React.memo(({ data, onSelect, on
           break;
       }
     } else {
-      // Just update parameters if already playing
-      if (type === MachineType.ROLLER_MILL || type === MachineType.PLANSIFTER) {
-        // Assuming audioManager handles parameter updates efficiently or ignores if no change
-        // Ideally we'd have precise update methods, but re-calling play with same ID
-        // usually acts as update or ignore in well-designed managers.
-        // If not, we might need a specific update method.
-        // For now, let's assume we shouldn't spam play.
-        // Actually, let's rely on the manager's idempotency or add an update method if possible.
-        // Checking audioManager.ts would be ideal, but for now preventing mount/unmount is key.
-        // Better approach: Do nothing here if just RPM changes, rely on a separate effect/ref?
-        // No, invalidating this effect on RPM change is what causes the stop/start loop.
-        // We need to NOT depend on RPM in the start/stop effect.
-      }
+      // RPM updates handled by the dedicated effect below to avoid restarting the sound.
     }
 
     return () => {
@@ -487,7 +566,7 @@ const MachineMesh: React.FC<MachineMeshProps> = React.memo(({ data, onSelect, on
                   roughness={0.2}
                   roughnessMap={roughnessMap}
                   normalMap={normalMap}
-                  normalScale={normalMap ? new THREE.Vector2(0.3, 0.3) : undefined}
+                  normalScale={normalMap ? SILO_NORMAL_SCALE : undefined}
                   {...matProps}
                 />
               </mesh>
@@ -592,16 +671,16 @@ const MachineMesh: React.FC<MachineMeshProps> = React.memo(({ data, onSelect, on
         const h = Number.isFinite(size[1]) && size[1] > 0 ? size[1] : 5;
         const d = Number.isFinite(size[2]) && size[2] > 0 ? size[2] : 3.5;
 
-        // Cable path for motor power
-        const motorCablePoints = useMemo(
-          () => [
-            new THREE.Vector3(-w * 0.5 - 0.4, -h * 0.1, 0), // Motor
-            new THREE.Vector3(-w * 0.5 - 0.4, -h * 0.4, 0), // Down
-            new THREE.Vector3(-w * 0.3, -h * 0.45, 0), // In
-            new THREE.Vector3(0, -h * 0.45, 0), // Center
-          ],
-          [w, h]
-        );
+        // Cable path for motor power. Plain const, NOT useMemo: renderGeometry()
+        // is called conditionally (low-quality branch at the render site), so a
+        // hook here would violate the Rules of Hooks. Rebuilding 4 vectors per
+        // render of a static machine is negligible.
+        const motorCablePoints = [
+          new THREE.Vector3(-w * 0.5 - 0.4, -h * 0.1, 0), // Motor
+          new THREE.Vector3(-w * 0.5 - 0.4, -h * 0.4, 0), // Down
+          new THREE.Vector3(-w * 0.3, -h * 0.45, 0), // In
+          new THREE.Vector3(0, -h * 0.45, 0), // Center
+        ];
 
         return (
           <group position={[0, size[1] / 2, 0]}>
@@ -1522,7 +1601,13 @@ const MachineMesh: React.FC<MachineMeshProps> = React.memo(({ data, onSelect, on
               {status === 'running' && (
                 <mesh position={[0, -0.25, 0]}>
                   <boxGeometry args={[0.5, 0.4, 0.3]} />
-                  <meshStandardMaterial color="#fef3c7" roughness={0.7} transparent opacity={0.8} />
+                  <meshStandardMaterial
+                    color="#fef3c7"
+                    roughness={0.7}
+                    transparent
+                    opacity={0.8}
+                    depthWrite={false}
+                  />
                 </mesh>
               )}
             </group>
@@ -1664,24 +1749,22 @@ const MachineMesh: React.FC<MachineMeshProps> = React.memo(({ data, onSelect, on
     }
   };
 
-  // PERFORMANCE: Simplified box representation for LOW quality
-  // Reduces ~150 draw calls per machine down to ~5
+  // PERFORMANCE: Simplified representation for LOW quality
+  // Type-specific silhouette (shared merged geometry, one draw call per machine)
   const renderSimplifiedGeometry = () => {
-    // Simple colored box based on machine type
-    const typeColors: Record<MachineType, string> = {
-      [MachineType.SILO]: '#94a3b8',
-      [MachineType.ROLLER_MILL]: '#64748b',
-      [MachineType.PLANSIFTER]: '#78716c',
-      [MachineType.PACKER]: '#475569',
-      [MachineType.CONTROL_ROOM]: '#64748b',
-    };
-    const color = typeColors[type] || '#64748b';
+    const geometry =
+      type === MachineType.SILO
+        ? SIMPLIFIED_MACHINE_GEOMETRIES.silo
+        : type === MachineType.ROLLER_MILL || type === MachineType.PACKER
+          ? SIMPLIFIED_MACHINE_GEOMETRIES.hopperBox
+          : SIMPLIFIED_MACHINE_GEOMETRIES.box;
 
     return (
-      <mesh position={[0, size[1] / 2, 0]}>
-        <boxGeometry args={[size[0], size[1], size[2]]} />
-        <meshBasicMaterial color={color} />
-      </mesh>
+      <mesh
+        geometry={geometry}
+        material={SIMPLIFIED_MACHINE_MATERIALS[type] ?? SIMPLIFIED_MACHINE_MATERIALS.fallback}
+        scale={[size[0], size[1], size[2]]}
+      />
     );
   };
 
@@ -1756,7 +1839,7 @@ const MachineMesh: React.FC<MachineMeshProps> = React.memo(({ data, onSelect, on
         />
       )}
 
-      {/* SCADA Live Values Overlay - shows on hover for high/ultra graphics */}
+      {/* Simulated SCADA values overlay, shown on hover for high/ultra graphics */}
       {hovered && Object.keys(scadaVisuals.tagValues).length > 0 && (
         <SCADAValueOverlay
           position={[-(size[0] / 2 + 1.5), size[1] / 2, 0]}
@@ -1810,150 +1893,4 @@ export const MachinesContainer: React.FC<{
   return <Machines machines={displayMachines} onSelect={onSelect} />;
 });
 
-/**
- * MachineSimulationController - Handles physics simulation loop for machines.
- * Isolated from the main rendering tree to prevent re-renders of the scene.
- */
-export const MachineSimulationController: React.FC = () => {
-  const { storeMachines, batchUpdateMachineMetrics, updateMachineStatus, scadaLive } =
-    useProductionStore(
-      useShallow((state) => ({
-        storeMachines: state.machines,
-        batchUpdateMachineMetrics: state.batchUpdateMachineMetrics,
-        updateMachineStatus: state.updateMachineStatus,
-        scadaLive: state.scadaLive,
-      }))
-    );
-
-  const lastUpdateRef = useRef(0);
-  const frameCountRef = useRef(0);
-  const productionSpeed = useProductionStore((state) => state.productionSpeed);
-
-  // BILATERAL ALIGNMENT: Workforce productivity multiplier affects production output
-  const workforceProductivity = useWorkerMoodStore((state) =>
-    state.getWorkforceProductivityMultiplier()
-  );
-
-  // Simulate realistic machine metric changes over time
-  // Throttled to check every 30 frames (~0.5s at 60fps) instead of every frame
-  useFrame((state) => {
-    // When SCADA is driving metrics, skip local simulation
-    if (scadaLive) return;
-    frameCountRef.current++;
-
-    // Only check time every 30 frames to reduce overhead
-    if (frameCountRef.current % 30 !== 0) return;
-
-    const now = state.clock.elapsedTime;
-
-    // Update every 2 seconds
-    if (now - lastUpdateRef.current < 2) return;
-    lastUpdateRef.current = now;
-
-    // Only update if store has machines
-    if (storeMachines.length === 0) return;
-
-    // PHYSICS-BASED METRIC SIMULATION
-    // Update ALL machines based on their actual state (not random selection)
-    const metricUpdates: { machineId: string; metrics: Partial<MachineData['metrics']> }[] = [];
-
-    for (const machine of storeMachines) {
-      const isRunning = machine.status === 'running' || machine.status === 'warning';
-      const isIdle = machine.status === 'idle';
-      const isCritical = machine.status === 'critical';
-
-      // Get base temps for machine type
-      const baseTemp: Record<string, number> = {
-        SILO: 20,
-        ROLLER_MILL: 42,
-        PLANSIFTER: 28,
-        PACKER: 28,
-        CONTROL_ROOM: 22,
-      };
-      const machineBaseTemp = baseTemp[machine.type.toString()] || 30;
-
-      // LOAD: Responds to productionSpeed * workforce productivity multiplier
-      // BILATERAL ALIGNMENT: High trust workers (1.15x) produce more, low trust (0.85x) drags
-      let targetLoad = machine.metrics.load;
-      if (isRunning) {
-        // Running machines adjust load toward productionSpeed * 80 * workforce productivity
-        const baseLoad = 50 + productionSpeed * 30; // 50-80% based on speed
-        targetLoad = baseLoad * workforceProductivity; // Apply trust/initiative multiplier (0.85-1.20x)
-      } else if (isIdle) {
-        targetLoad = 0; // Idle = no load
-      }
-      const loadChange = (targetLoad - machine.metrics.load) * 0.1; // Smooth transition
-      const newLoad = Math.max(0, Math.min(100, machine.metrics.load + loadChange));
-
-      // TEMPERATURE: Correlates with load (high load = heat up, idle = cool down)
-      let targetTemp = machineBaseTemp;
-      if (isRunning) {
-        // Temperature rises with load: base + up to 20°C at full load
-        targetTemp = machineBaseTemp + (newLoad / 100) * 20;
-      } else if (isIdle) {
-        // Cooling down toward ambient
-        targetTemp = 20;
-      } else if (isCritical) {
-        // Critical machines run hot
-        targetTemp = machineBaseTemp + 40;
-      }
-      const tempChange = (targetTemp - machine.metrics.temperature) * 0.05; // Slow thermal change
-      const newTemp = Math.max(15, Math.min(90, machine.metrics.temperature + tempChange));
-
-      // VIBRATION: Correlates with RPM and machine status
-      let targetVibration = 1.0;
-      if (isRunning) {
-        // Vibration based on RPM ratio and load
-        const rpmRatio = machine.metrics.rpm / 1200; // Normalize to 1200 RPM base
-        targetVibration = 1.0 + rpmRatio * 2 + newLoad / 100;
-        // Warning machines vibrate more (something is wrong)
-        if (machine.status === 'warning') targetVibration *= 1.5;
-      } else if (isCritical) {
-        targetVibration = 7; // Critical = high vibration
-      } else {
-        targetVibration = 0.2; // Idle = minimal vibration
-      }
-      const vibrationChange = (targetVibration - machine.metrics.vibration) * 0.1;
-      const newVibration = Math.max(0, Math.min(10, machine.metrics.vibration + vibrationChange));
-
-      // Collect metric updates for batch processing
-      metricUpdates.push({
-        machineId: machine.id,
-        metrics: {
-          temperature: Math.round(newTemp * 10) / 10,
-          vibration: Math.round(newVibration * 100) / 100,
-          load: Math.round(newLoad * 10) / 10,
-        },
-      });
-
-      // STATUS CHANGES: Based on actual threshold crossings (deterministic)
-      if (machine.status === 'running') {
-        // Transition to warning if temp or vibration exceeds threshold
-        if (newTemp > 70 || newVibration > 5) {
-          updateMachineStatus(machine.id, 'warning');
-        }
-      } else if (machine.status === 'warning') {
-        // Recovery when metrics return to safe levels
-        if (newTemp < 55 && newVibration < 3.5) {
-          updateMachineStatus(machine.id, 'running');
-        }
-        // Escalate to critical if thresholds exceeded significantly
-        if (newTemp > 80 || newVibration > 8) {
-          updateMachineStatus(machine.id, 'critical');
-        }
-      } else if (machine.status === 'critical') {
-        // Only recover from critical if metrics are very low (machine cooled down)
-        if (newTemp < 40 && newVibration < 2) {
-          updateMachineStatus(machine.id, 'warning');
-        }
-      }
-    }
-
-    // Commit all metric updates in one batch to prevent render thrashing
-    if (metricUpdates.length > 0) {
-      batchUpdateMachineMetrics(metricUpdates);
-    }
-  });
-
-  return null;
-};
+export { MachineSimulationController } from './machines/MachineSimulationController';

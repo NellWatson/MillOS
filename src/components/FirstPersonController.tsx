@@ -3,6 +3,7 @@ import { useThree, useFrame } from '@react-three/fiber';
 import { PointerLockControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { FACTORY_ZONE_Z } from '../constants/factoryLayout';
+import { WORLD_RADIUS } from '../constants/siteLayout';
 import { useUIStore } from '../stores/uiStore';
 
 // Movement configuration
@@ -13,9 +14,6 @@ const PLAYER_RADIUS = 0.4; // Collision radius
 const FPS_FOV = 105; // Wide FOV for immersive first-person view
 const ORBIT_FOV = 65; // Default FOV for orbit mode
 const MOUSE_SENSITIVITY = 1.875; // Mouse look speed multiplier (increased 25%)
-
-// World boundary - circular at mountain base (mountains start at radius 260)
-const WORLD_RADIUS = 255; // Maximum traversal radius before hitting mountains
 
 // Collision boxes for machines (approximate bounding boxes)
 // These are simplified rectangular colliders for major obstacles
@@ -140,6 +138,56 @@ const COLLISION_BOXES: Array<{
 // Track pressed keys
 const pressedKeys = new Set<string>();
 
+/**
+ * Physical key codes this controller consumes.
+ *
+ * `KeyW`/`KeyA`/`KeyS`/`KeyD` are positions, not letters, so these bindings
+ * hold on AZERTY, QWERTZ, Dvorak and Colemak without a per-layout table.
+ * `KeyQ`/`KeyE` drive vertical movement; both Shift keys sprint.
+ */
+const MOVEMENT_CODES: ReadonlySet<string> = new Set([
+  'KeyW',
+  'KeyA',
+  'KeyS',
+  'KeyD',
+  'KeyQ',
+  'KeyE',
+  'ShiftLeft',
+  'ShiftRight',
+  'Space',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+]);
+
+/** Keys whose default action scrolls the page and must be suppressed. */
+const SCROLLING_CODES: ReadonlySet<string> = new Set([
+  'Space',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+]);
+
+/**
+ * True when the event originates from somewhere the user is entering text.
+ *
+ * Checking only input/textarea misses contenteditable surfaces and select
+ * elements, where arrow keys and letters are meaningful to the control.
+ */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
+/** Vertical travel rate for Q/E, in units per second. */
+const VERTICAL_SPEED = 8;
+/** Ceiling for Q/E ascent, high enough to clear the roof but not the sky. */
+const MAX_FREE_HEIGHT = 60;
+
 interface FirstPersonControllerProps {
   onLockChange?: (locked: boolean) => void;
 }
@@ -194,26 +242,26 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
   }, [camera]);
 
   // Keyboard handlers
+  //
+  // Tracked by `event.code` (physical key) rather than `event.key` (produced
+  // character). `event.key` is keyboard-layout dependent: on AZERTY the WASD
+  // keys emit z/q/s/d and on QWERTZ the W emits 'y', so a layout-keyed lookup
+  // leaves movement completely dead for those users. `code` is positional and
+  // identical on every layout, which is why it is the standard choice for
+  // game movement. It is also immune to Shift and AltGr changing the character.
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    // Ignore when typing in inputs
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-      return;
-    }
+    if (isTypingTarget(e.target)) return;
 
-    const key = e.key.toLowerCase();
-    if (['w', 'a', 's', 'd', 'shift', ' '].includes(key)) {
-      pressedKeys.add(key);
-    }
-
-    // ESC to exit FPS mode (handled by PointerLockControls, but we can also toggle)
-    if (key === 'escape' && isLocked.current) {
-      // PointerLockControls handles this automatically
+    if (MOVEMENT_CODES.has(e.code)) {
+      pressedKeys.add(e.code);
+      // Space and the arrows scroll the page by default, which fights the
+      // pointer-locked view.
+      if (SCROLLING_CODES.has(e.code)) e.preventDefault();
     }
   }, []);
 
   const handleKeyUp = useCallback((e: KeyboardEvent) => {
-    const key = e.key.toLowerCase();
-    pressedKeys.delete(key);
+    pressedKeys.delete(e.code);
   }, []);
 
   const handleBlur = useCallback(() => {
@@ -288,10 +336,10 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
     // Get movement input
     direction.current.set(0, 0, 0);
 
-    if (pressedKeys.has('w')) direction.current.z -= 1;
-    if (pressedKeys.has('s')) direction.current.z += 1;
-    if (pressedKeys.has('a')) direction.current.x -= 1;
-    if (pressedKeys.has('d')) direction.current.x += 1;
+    if (pressedKeys.has('KeyW') || pressedKeys.has('ArrowUp')) direction.current.z -= 1;
+    if (pressedKeys.has('KeyS') || pressedKeys.has('ArrowDown')) direction.current.z += 1;
+    if (pressedKeys.has('KeyA') || pressedKeys.has('ArrowLeft')) direction.current.x -= 1;
+    if (pressedKeys.has('KeyD') || pressedKeys.has('ArrowRight')) direction.current.x += 1;
 
     // Normalize diagonal movement
     if (direction.current.length() > 0) {
@@ -299,7 +347,15 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
     }
 
     // Apply sprint multiplier
-    const speed = pressedKeys.has('shift') ? MOVE_SPEED * SPRINT_MULTIPLIER : MOVE_SPEED;
+    const sprinting = pressedKeys.has('ShiftLeft') || pressedKeys.has('ShiftRight');
+    const speedScale = sprinting ? SPRINT_MULTIPLIER : 1;
+    const speed = MOVE_SPEED * speedScale;
+
+    // Q descends, E ascends. Held separately from the horizontal direction so a
+    // diagonal walk does not dilute the climb rate when both are pressed.
+    let verticalInput = 0;
+    if (pressedKeys.has('KeyE')) verticalInput += 1;
+    if (pressedKeys.has('KeyQ')) verticalInput -= 1;
 
     // Calculate world-space movement based on camera direction
     const forward = forwardRef.current.set(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -328,8 +384,12 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
       // CLIMBING PHYSICS: W/S moves Up/Down
       const climbSpeed = speed * 0.8;
 
-      if (pressedKeys.has('w')) velocity.current.y += climbSpeed * delta;
-      if (pressedKeys.has('s')) velocity.current.y -= climbSpeed * delta;
+      if (pressedKeys.has('KeyW') || pressedKeys.has('ArrowUp'))
+        velocity.current.y += climbSpeed * delta;
+      if (pressedKeys.has('KeyS') || pressedKeys.has('ArrowDown'))
+        velocity.current.y -= climbSpeed * delta;
+      // Q/E climb the ladder too, so the vertical binding is consistent.
+      velocity.current.y += verticalInput * climbSpeed * delta;
 
       // Allow some horizontal movement to guide onto/off ladder
       velocity.current.addScaledVector(right, direction.current.x * speed * 0.5 * delta);
@@ -368,9 +428,20 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
         camera.position.z = newZ;
       }
 
-      // Gravity / Snap to ground
-      currentHeight.current = PLAYER_HEIGHT;
-      camera.position.y = PLAYER_HEIGHT;
+      // Vertical: Q/E lift the eye off the ground and hold it there. Without
+      // this the next line would snap the camera straight back down, which is
+      // why an unconditional ground-snap and a fly control cannot coexist.
+      if (verticalInput !== 0) {
+        currentHeight.current = THREE.MathUtils.clamp(
+          currentHeight.current + verticalInput * VERTICAL_SPEED * speedScale * delta,
+          PLAYER_HEIGHT,
+          MAX_FREE_HEIGHT
+        );
+      }
+
+      // Gravity / snap to ground, but only once the player is back at eye level.
+      if (currentHeight.current <= PLAYER_HEIGHT) currentHeight.current = PLAYER_HEIGHT;
+      camera.position.y = currentHeight.current;
     }
   });
 

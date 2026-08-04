@@ -123,7 +123,10 @@ export const WATER_LAYERS = {
   /** Deep channel/bed effect (below terrain for depth illusion) */
   deepChannel: -0.5,
 
-  /** Main water surface (above TerrainGround at y=0.05) */
+  /** Visible bed beneath shallow transparent water, physically separated from terrain */
+  bed: 0.01,
+
+  /** Main water surface, physically separated from both terrain and the visible bed */
   surface: 0.08,
 
   /** Floating objects (lily pads, debris) */
@@ -204,6 +207,33 @@ export const RENDER_ORDER = {
   /** Default (unspecified) */
   default: 0,
 
+  /**
+   * Machine body placards (nameplates, hazard chevrons, lockout roundels).
+   *
+   * DECLARED, NOT APPLIED. `MACHINE_DECAL_MATERIAL` is OPAQUE - it uses
+   * `alphaTest` without `transparent`, so it sits in the opaque pass where the
+   * renderer already sorts front-to-back for early-Z. Setting a `renderOrder`
+   * on it would override that sort and pay depth-complexity on every placard
+   * for no ordering benefit, because `POLYGON_OFFSET.moderate` plus the
+   * physical `SURFACE_LAYERS.machineDecal` standoff already resolve the only
+   * contention that exists (placard against the face it marks).
+   *
+   * This constant exists so that if a placard variant is ever made genuinely
+   * transparent it has a named home between the opaque default and
+   * `vehicleGlass`, rather than acquiring another anonymous literal.
+   */
+  machineDecal: 2,
+
+  /**
+   * Vehicle glazing (truck cab windows, forklift canopy panes).
+   *
+   * These set `depthWrite: false` and had no explicit order, so as the cab
+   * animates its roll/pitch the default distance heuristic could swap a pane
+   * against the interior meshes behind it and pop. Above the opaque default
+   * and below the floor overlays (5+), which never contend with a cab window.
+   */
+  vehicleGlass: 3,
+
   /** Floor transient effects (puddles, tracks, ripples) */
   floorEffects: 5,
 
@@ -240,21 +270,36 @@ export const CAMERA_DEPTH = {
   near: 0.5,
 
   /** Far plane - maximum view distance */
-  far: 600,
+  far: 360,
 
   /** Recommended ratio for indoor scenes */
-  recommendedRatio: 1200,
+  recommendedRatio: 720,
 } as const;
 
 /**
  * Shadow configuration to prevent shadow acne and peter-panning.
+ *
+ * PRE-RIG FALLBACK ONLY. `components/environment/SunShadowRig.tsx` fits the
+ * sun's orthographic shadow camera to the view every third frame and overrides
+ * `normalBias` from the resulting world-space texel size
+ * (`1.6 * 2 * halfExtent / shadowMapSize`), because the correct normal offset
+ * is a function of texel footprint and cannot be a constant across a rig that
+ * spans 45 to 110 world units. These values are what the light uses on the
+ * frames before the rig has resolved it, and if the rig is ever removed.
+ *
+ * `bias` is applied to the depth stored in `[0, 1]` across the shadow camera's
+ * near/far span, so it scales with that span rather than with world units:
+ * -0.0004 over a typical ~230-unit span is roughly 0.09 world units of constant
+ * offset. -0.001 was tuned against a 260-unit fixed frustum and is over three
+ * times more offset than the fitted rig needs, which is peter-panning bought
+ * for no reason.
  */
 export const SHADOW_CONFIG = {
   /** Shadow map bias - negative pushes shadows away from light */
-  bias: -0.001,
+  bias: -0.0004,
 
-  /** Normal bias - offset along surface normal */
-  normalBias: 0.02,
+  /** Normal bias - offset along surface normal (SunShadowRig overrides per frame) */
+  normalBias: 0.12,
 } as const;
 
 /**
@@ -269,6 +314,24 @@ export const SURFACE_LAYERS = {
   decal: 0.005,
   /** Labels and signage */
   label: 0.01,
+  /**
+   * Machine placard standing proud of a machine BODY face.
+   *
+   * 15 mm reads as a bolted-on plate at the interior and first-person cameras
+   * while staying inside the sagitta budget on the silo drum: a flat quad laid
+   * on the tangent plane of a 2.25 m radius floats at its edges by
+   * `r - sqrt(r^2 - (w/2)^2)`, which is 20 mm at the 0.6 m nameplate. Pair with
+   * `POLYGON_OFFSET.moderate`; the standoff alone is not a depth guarantee at
+   * grazing angles.
+   */
+  machineDecal: 0.015,
+  /**
+   * Machine placard on a recessed or flat panel (the silo hatch cover).
+   *
+   * 10 mm rather than 15: the hatch is already proud of the drum, so the full
+   * body standoff would read as a plate floating off a plate.
+   */
+  machineRecessedPanel: 0.01,
   /** Selection highlights */
   selection: 0.02,
 } as const;

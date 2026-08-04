@@ -26,7 +26,7 @@ export const MultiplayerChat: React.FC = () => {
   const markChatRead = useMultiplayerStore((s) => s.markChatRead);
   const localPlayerId = useMultiplayerStore((s) => s.localPlayerId);
   const localPlayerColor = useMultiplayerStore((s) => s.localPlayerColor);
-  const remotePlayers = useMultiplayerStore((s) => s._remotePlayersArray);
+  const remotePlayers = useMultiplayerStore((s) => s._remoteRosterArray);
 
   // Get player color by ID
   const getPlayerColor = useCallback(
@@ -101,6 +101,7 @@ export const MultiplayerChat: React.FC = () => {
               <span className="text-xs font-medium text-slate-300">Chat</span>
               <button
                 onClick={() => setExpanded(false)}
+                aria-label="Close chat"
                 className="p-1 hover:bg-slate-700/50 rounded transition-colors"
               >
                 <X className="w-3 h-3 text-slate-400" />
@@ -108,7 +109,12 @@ export const MultiplayerChat: React.FC = () => {
             </div>
 
             {/* Messages */}
-            <div className="h-64 overflow-y-auto p-2 space-y-2">
+            <div
+              className="h-64 overflow-y-auto p-2 space-y-2"
+              role="log"
+              aria-live="polite"
+              aria-relevant="additions"
+            >
               {chatMessages.length === 0 ? (
                 <div className="text-center text-slate-500 text-xs py-8">
                   No messages yet. Say hello!
@@ -149,6 +155,7 @@ export const MultiplayerChat: React.FC = () => {
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   onKeyDown={handleKeyDown}
+                  aria-label="Chat message"
                   placeholder="Type a message..."
                   maxLength={200}
                   className="flex-1 bg-slate-800/50 border border-slate-600/50 rounded px-2 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-blue-500/50"
@@ -156,7 +163,7 @@ export const MultiplayerChat: React.FC = () => {
                 <button
                   onClick={handleSend}
                   disabled={!message.trim()}
-                  className="p-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded transition-colors"
+                  className="p-1.5 bg-blue-700 hover:bg-blue-600 disabled:bg-slate-700 disabled:text-white/40 text-white rounded transition-colors"
                 >
                   <Send className="w-4 h-4" />
                 </button>

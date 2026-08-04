@@ -6,13 +6,25 @@
  */
 
 import * as THREE from 'three';
-import { getTexture, fbmNoise, hash, createDataTexture } from '../utils/textureGenerator';
+import {
+  getTexture,
+  fbmNoise,
+  fbmNoiseSigned,
+  hash,
+  createLinearDataTexture,
+} from '../utils/textureGenerator';
 
 export type ScratchDirection = 'horizontal' | 'vertical' | 'diagonal';
 
 /**
  * Generates brushed metal texture with directional scratches.
  * Returns: roughness/metalness texture (R=roughness, G=metalness, B=AO)
+ *
+ * WARNING - channel order does NOT match what three reads. three samples
+ * `roughnessMap.g` and `metalnessMap.b`, so assigning this as a `roughnessMap`
+ * multiplies roughness by the METALNESS channel (a near-flat 0.90-1.00) and
+ * produces no variation at all. Kept byte-identical for compatibility; use
+ * `generateMachineORM` below for anything new.
  */
 export const generateBrushedMetal = (
   size: number = 256,
@@ -69,6 +81,110 @@ export const generateBrushedMetal = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
+  });
+};
+
+/**
+ * Generates a machine ORM map in glTF channel order.
+ *
+ *   R = ambient occlusion  (three reads `aoMap.r`)
+ *   G = roughness          (three reads `roughnessMap.g`)
+ *   B = metalness          (three reads `metalnessMap.b`)
+ *
+ * Assign the SAME texture object to `aoMap`, `roughnessMap` and `metalnessMap`
+ * on a MeshStandardMaterial - no uv2 is required, `Texture.channel` defaults
+ * to 0. `aoMap` only affects indirect light, so it is invisible until
+ * `scene.environment` exists.
+ *
+ * IMPORTANT for callers: this map is a real multiplier, unlike the old
+ * `generateBrushedMetal` (which multiplied by ~0.95 and did nothing). Base
+ * `roughness` values must be RE-AUTHORED UPWARD when switching, or metals
+ * become up to 2.7x shinier than intended.
+ */
+export const generateMachineORM = (
+  size: number = 512,
+  brushDirection: ScratchDirection = 'horizontal',
+  panelPitch: number = 128
+): THREE.DataTexture => {
+  /** Deep-scratch groove width in pixels. Below ~3 px the mipmap erases it. */
+  const GROOVE_PX = 3;
+
+  return getTexture(`machine-orm-${size}-${brushDirection}-${panelPitch}`, () => {
+    const data = new Uint8Array(size * size * 4);
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const i = (y * size + x) * 4;
+        const nx = x / size;
+        const ny = y / size;
+
+        // Coordinate the brush runs along.
+        let brushCoord: number;
+        let acrossCoord: number;
+        switch (brushDirection) {
+          case 'vertical':
+            brushCoord = y;
+            acrossCoord = x;
+            break;
+          case 'diagonal':
+            brushCoord = (x + y) * 0.707;
+            acrossCoord = (x - y) * 0.707;
+            break;
+          case 'horizontal':
+          default:
+            brushCoord = x;
+            acrossCoord = y;
+            break;
+        }
+
+        // --- ROUGHNESS (G) -------------------------------------------------
+        // Brush streaks vary ACROSS the brush direction, so they read as long
+        // parallel lines rather than as noise. Periods held above ~5 px.
+        const streakA = Math.sin(acrossCoord * 0.42 + hash(Math.floor(acrossCoord * 0.08), 3) * 6);
+        const streakB = Math.sin(acrossCoord * 1.05 + hash(Math.floor(acrossCoord * 0.2), 7) * 4);
+        const streak = streakA * 0.6 + streakB * 0.4;
+
+        // Occasional deep scratch running along the brush. GROOVE_PX wide, NOT
+        // one pixel: a 1 px groove is below the mipmap floor and would average
+        // away entirely one mip level down - the same inert-detail failure as
+        // the 0.64 px panel bevel. The groove is soft-edged across its width so
+        // it survives filtering rather than aliasing.
+        const grooveId = Math.floor(acrossCoord / GROOVE_PX);
+        const grooveOffset = acrossCoord / GROOVE_PX - grooveId;
+        const isGroove = hash(grooveId * 13, 91) > 0.955;
+        const grooveRun = fbmNoise(brushCoord * 0.02, grooveId * 0.5, 2);
+        const grooveProfile = Math.sin(grooveOffset * Math.PI);
+        const groove = isGroove && grooveRun > 0.42 ? grooveProfile : 0;
+
+        // Broad breakup: cast/rolled stock is not uniform.
+        const breakup = fbmNoiseSigned(nx * 6, ny * 6, 4) * 0.15;
+        const grime = Math.max(0, fbmNoise(nx * 2.2 + 11, ny * 2.2 + 5, 3) - 0.55) * 0.5;
+
+        let roughness = 0.55 + streak * 0.14 + breakup + grime;
+        roughness += groove * 0.22;
+        roughness = Math.max(0.35, Math.min(0.85, roughness));
+
+        // --- AMBIENT OCCLUSION (R) -----------------------------------------
+        // Darker inside scratch grooves and along panel seams.
+        const seamX = Math.min(x % panelPitch, panelPitch - (x % panelPitch));
+        const seamY = Math.min(y % panelPitch, panelPitch - (y % panelPitch));
+        const seamDist = Math.min(seamX, seamY);
+        const seamAO = seamDist < 6 ? (1 - seamDist / 6) * 0.25 : 0;
+        const ao = Math.max(0.6, 1 - seamAO - groove * 0.12 - grime * 0.3);
+
+        // --- METALNESS (B) --------------------------------------------------
+        // Binary: bare metal everywhere on a machine housing. Kept explicit so
+        // a future painted region can drop it to 0 without a shader change.
+        const metalness = 1;
+
+        data[i] = Math.floor(ao * 255);
+        data[i + 1] = Math.floor(roughness * 255);
+        data[i + 2] = Math.floor(metalness * 255);
+        data[i + 3] = 255;
+      }
+    }
+
+    return createLinearDataTexture(data, size, size);
   });
 };

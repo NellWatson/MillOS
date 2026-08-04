@@ -9,7 +9,7 @@
  * - Connection status
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users,
@@ -30,6 +30,7 @@ import {
   useIsHost,
 } from '../../stores/multiplayerStore';
 import { getMultiplayerManager, destroyMultiplayerManager } from '../../multiplayer';
+import { sanitizePlayerName, sanitizeRoomCode } from '../../utils/sanitize';
 
 export const MultiplayerLobby: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
@@ -38,20 +39,42 @@ export const MultiplayerLobby: React.FC = () => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [confirmingLeave, setConfirmingLeave] = useState(false);
 
   const connectionState = useMultiplayerStore((s) => s.connectionState);
   const roomCode = useMultiplayerStore((s) => s.roomCode);
   const localPlayerName = useMultiplayerStore((s) => s.localPlayerName);
   const localPlayerColor = useMultiplayerStore((s) => s.localPlayerColor);
-  const remotePlayers = useMultiplayerStore((s) => s._remotePlayersArray);
+  const remotePlayers = useMultiplayerStore((s) => s._remoteRosterArray);
   const averageLatency = useMultiplayerStore((s) => s.averageLatencyMs);
   const setLocalPlayerName = useMultiplayerStore((s) => s.setLocalPlayerName);
 
   const isActive = useIsMultiplayerActive();
   const isHost = useIsHost();
 
+  // Listen for host disconnect so a guest is informed (not silently dumped to the join form)
+  useEffect(() => {
+    const handleHostDisconnected = (event: CustomEvent<{ message: string }>) => {
+      setError(event.detail?.message ?? 'The host has left the session.');
+      destroyMultiplayerManager();
+    };
+
+    window.addEventListener(
+      'multiplayer:host-disconnected',
+      handleHostDisconnected as EventListener
+    );
+
+    return () => {
+      window.removeEventListener(
+        'multiplayer:host-disconnected',
+        handleHostDisconnected as EventListener
+      );
+    };
+  }, []);
+
   const handleCreateRoom = useCallback(async () => {
-    if (!playerName.trim()) {
+    const name = sanitizePlayerName(playerName);
+    if (!name) {
       setError('Please enter your name');
       return;
     }
@@ -60,9 +83,9 @@ export const MultiplayerLobby: React.FC = () => {
     setIsConnecting(true);
 
     try {
-      setLocalPlayerName(playerName.trim());
+      setLocalPlayerName(name);
       const manager = getMultiplayerManager();
-      await manager.hostRoom(playerName.trim());
+      await manager.hostRoom(name);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create room');
     } finally {
@@ -71,11 +94,13 @@ export const MultiplayerLobby: React.FC = () => {
   }, [playerName, setLocalPlayerName]);
 
   const handleJoinRoom = useCallback(async () => {
-    if (!playerName.trim()) {
+    const name = sanitizePlayerName(playerName);
+    if (!name) {
       setError('Please enter your name');
       return;
     }
-    if (!joinCode.trim() || joinCode.trim().length !== 6) {
+    const code = sanitizeRoomCode(joinCode);
+    if (!code) {
       setError('Please enter a valid 6-character room code');
       return;
     }
@@ -84,9 +109,9 @@ export const MultiplayerLobby: React.FC = () => {
     setIsConnecting(true);
 
     try {
-      setLocalPlayerName(playerName.trim());
+      setLocalPlayerName(name);
       const manager = getMultiplayerManager();
-      await manager.joinRoom(joinCode.trim().toUpperCase(), playerName.trim());
+      await manager.joinRoom(code, name);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to join room');
     } finally {
@@ -95,17 +120,51 @@ export const MultiplayerLobby: React.FC = () => {
   }, [playerName, joinCode, setLocalPlayerName]);
 
   const handleLeaveRoom = useCallback(() => {
+    // Destructive action: require a second tap to confirm before tearing down the
+    // session. As host this ends the room for every guest, so guard against
+    // accidental clicks.
+    if (!confirmingLeave) {
+      setConfirmingLeave(true);
+      return;
+    }
     const manager = getMultiplayerManager();
     manager.leave();
     destroyMultiplayerManager();
+    setConfirmingLeave(false);
     setError(null);
+  }, [confirmingLeave]);
+
+  const handleCancelLeave = useCallback(() => {
+    setConfirmingLeave(false);
   }, []);
+
+  // Auto-disarm the leave confirmation so it does not stay armed indefinitely.
+  useEffect(() => {
+    if (!confirmingLeave) return;
+    const timer = setTimeout(() => setConfirmingLeave(false), 4000);
+    return () => clearTimeout(timer);
+  }, [confirmingLeave]);
+
+  // Reset the confirm state whenever the session ends (e.g. host disconnect).
+  useEffect(() => {
+    if (!isActive && confirmingLeave) {
+      setConfirmingLeave(false);
+    }
+  }, [isActive, confirmingLeave]);
 
   const handleCopyCode = useCallback(() => {
     if (roomCode) {
-      navigator.clipboard.writeText(roomCode);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      // navigator.clipboard is undefined in insecure (non-HTTPS/localhost)
+      // contexts; guard + catch so a copy attempt can't throw.
+      navigator.clipboard
+        ?.writeText(roomCode)
+        .then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        })
+        .catch(() => {
+          /* clipboard unavailable - silently ignore */
+        });
     }
   }, [roomCode]);
 
@@ -144,7 +203,7 @@ export const MultiplayerLobby: React.FC = () => {
           Multiplayer
           {isActive && (
             <span className="bg-green-500/20 text-green-400 text-[10px] px-1.5 py-0.5 rounded">
-              {remotePlayers.length + 1} players
+              {remotePlayers.length + 1} player{remotePlayers.length + 1 !== 1 ? 's' : ''}
             </span>
           )}
         </span>
@@ -164,10 +223,14 @@ export const MultiplayerLobby: React.FC = () => {
               <div className="bg-slate-800/50 rounded-lg p-3 space-y-3">
                 {/* Name input */}
                 <div>
-                  <label className="text-[10px] text-slate-400 uppercase tracking-wider mb-1 block">
+                  <label
+                    htmlFor="lobby-player-name"
+                    className="text-[10px] text-slate-400 uppercase tracking-wider mb-1 block"
+                  >
                     Your Name
                   </label>
                   <input
+                    id="lobby-player-name"
                     type="text"
                     value={playerName}
                     onChange={(e) => setPlayerName(e.target.value)}
@@ -175,6 +238,9 @@ export const MultiplayerLobby: React.FC = () => {
                     maxLength={20}
                     className="w-full bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-blue-500/50"
                   />
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Visible to other players in the room. A nickname is fine.
+                  </p>
                 </div>
 
                 {/* Create room button */}
@@ -203,6 +269,7 @@ export const MultiplayerLobby: React.FC = () => {
                     value={joinCode}
                     onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                     placeholder="ROOM CODE"
+                    aria-label="Enter 6-character room code"
                     maxLength={6}
                     className="flex-1 bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-green-500/50 font-mono tracking-wider text-center"
                   />
@@ -216,7 +283,11 @@ export const MultiplayerLobby: React.FC = () => {
                 </div>
 
                 {/* Error message */}
-                {error && <div className="text-red-400 text-[10px] text-center">{error}</div>}
+                {error && (
+                  <div role="alert" className="text-red-400 text-[10px] text-center">
+                    {error}
+                  </div>
+                )}
               </div>
             )}
 
@@ -310,14 +381,42 @@ export const MultiplayerLobby: React.FC = () => {
                   </div>
                 )}
 
-                {/* Leave button */}
-                <button
-                  onClick={handleLeaveRoom}
-                  className="w-full flex items-center justify-center gap-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 text-xs font-medium py-2 px-3 rounded transition-colors"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Leave Room
-                </button>
+                {/* Leave button - requires confirmation to avoid accidental teardown */}
+                {confirmingLeave ? (
+                  <div className="space-y-2">
+                    <p
+                      role="alert"
+                      className="text-[10px] text-red-300 text-center leading-relaxed"
+                    >
+                      {isHost
+                        ? 'Leaving ends the session for everyone. Are you sure?'
+                        : 'Leave this room? Are you sure?'}
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleCancelLeave}
+                        className="flex-1 flex items-center justify-center gap-2 bg-slate-700/50 hover:bg-slate-700/70 text-slate-300 text-xs font-medium py-2 px-3 rounded transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleLeaveRoom}
+                        className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 text-white text-xs font-medium py-2 px-3 rounded transition-colors"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        Confirm Leave
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleLeaveRoom}
+                    className="w-full flex items-center justify-center gap-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 text-xs font-medium py-2 px-3 rounded transition-colors"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Leave Room
+                  </button>
+                )}
               </div>
             )}
           </motion.div>

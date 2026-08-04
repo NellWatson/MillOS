@@ -8,11 +8,7 @@
 import React, { useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ThumbsUp, ThumbsDown, Bot, Users, Check, X } from 'lucide-react';
-import {
-  useMultiplayerStore,
-  useIsMultiplayerActive,
-  useIsHost,
-} from '../../stores/multiplayerStore';
+import { useMultiplayerStore, useIsMultiplayerActive } from '../../stores/multiplayerStore';
 import { useProductionStore } from '../../stores/productionStore';
 import { getMultiplayerManager } from '../../multiplayer/MultiplayerManager';
 import { AIDecision } from '../../types';
@@ -28,10 +24,8 @@ interface AIDecisionVotingProps {
  */
 export const AIDecisionVotingCard: React.FC<AIDecisionVotingProps> = ({ decision, onClose }) => {
   const isActive = useIsMultiplayerActive();
-  // isHost will be used for host-specific voting controls
-  useIsHost();
   const localPlayerId = useMultiplayerStore((s) => s.localPlayerId);
-  const remotePlayers = useMultiplayerStore((s) => s._remotePlayersArray);
+  const remotePlayers = useMultiplayerStore((s) => s._remoteRosterArray);
 
   // For now, voting is stored in local state
   // In a full implementation, this would sync via the multiplayer system
@@ -94,6 +88,24 @@ export const AIDecisionVotingCard: React.FC<AIDecisionVotingProps> = ({ decision
   const isRejected = rejectCount >= voteThreshold;
   const votingComplete = approveCount + rejectCount >= totalPlayers || isApproved || isRejected;
 
+  // Apply the collective verdict to the production store exactly once when the
+  // multiplayer vote completes. Previously the result was only shown in the UI
+  // and never committed, so an approved team vote had no effect on the actual
+  // decision (the single-player Apply/Dismiss buttons did commit, but those are
+  // hidden in multiplayer).
+  const verdictAppliedRef = React.useRef(false);
+  useEffect(() => {
+    if (!isActive || !votingComplete || verdictAppliedRef.current) return;
+    verdictAppliedRef.current = true;
+    useProductionStore
+      .getState()
+      .updateDecisionStatus(
+        decision.id,
+        isApproved ? 'completed' : 'superseded',
+        isApproved ? 'Approved by team vote' : 'Rejected by team vote'
+      );
+  }, [isActive, votingComplete, isApproved, decision.id]);
+
   // Get confidence color
   const confidenceColor =
     decision.confidence >= 0.8
@@ -116,7 +128,11 @@ export const AIDecisionVotingCard: React.FC<AIDecisionVotingProps> = ({ decision
           <span className="text-sm font-medium text-white">AI Recommendation</span>
         </div>
         {onClose && (
-          <button onClick={onClose} className="p-1 hover:bg-slate-700/50 rounded transition-colors">
+          <button
+            onClick={onClose}
+            aria-label="Dismiss recommendation"
+            className="p-1 hover:bg-slate-700/50 rounded transition-colors"
+          >
             <X className="w-4 h-4 text-slate-400" />
           </button>
         )}
@@ -146,7 +162,7 @@ export const AIDecisionVotingCard: React.FC<AIDecisionVotingProps> = ({ decision
       {isActive && !votingComplete && (
         <div className="border-t border-slate-700/50 pt-3">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-slate-400 flex items-center gap-1">
+            <span className="text-xs text-slate-400 flex items-center gap-1" aria-live="polite">
               <Users className="w-3 h-3" />
               {approveCount + rejectCount} / {totalPlayers} voted
             </span>
@@ -176,7 +192,10 @@ export const AIDecisionVotingCard: React.FC<AIDecisionVotingProps> = ({ decision
           )}
 
           {/* Vote progress bar */}
-          <div className="mt-2 h-1.5 bg-slate-700 rounded-full overflow-hidden flex">
+          <div
+            className="mt-2 h-1.5 bg-slate-700 rounded-full overflow-hidden flex"
+            aria-hidden="true"
+          >
             <div
               className="bg-green-500 transition-all duration-300"
               style={{ width: `${(approveCount / totalPlayers) * 100}%` }}
@@ -191,7 +210,7 @@ export const AIDecisionVotingCard: React.FC<AIDecisionVotingProps> = ({ decision
 
       {/* Vote result */}
       {votingComplete && (
-        <div className="border-t border-slate-700/50 pt-3">
+        <div className="border-t border-slate-700/50 pt-3" aria-live="polite">
           <div
             className={`flex items-center justify-center gap-2 py-2 rounded ${
               isApproved ? 'bg-green-600/20 text-green-400' : 'bg-red-600/20 text-red-400'
@@ -252,10 +271,15 @@ export const AIDecisionVotingPanel: React.FC = () => {
   const isActive = useIsMultiplayerActive();
   const aiDecisions = useProductionStore((s) => s.aiDecisions);
 
-  // Filter to pending decisions only
+  // Locally dismissed decision IDs so a stalled vote (peers never vote) can be
+  // cleared from this player's view without mutating shared/synced store state.
+  const [dismissedIds, setDismissedIds] = React.useState<Set<string>>(new Set());
+
+  // Filter to pending decisions only, then drop any the local player dismissed.
+  // Filter dismissed before slicing so a freed slot backfills with the next decision.
   const pendingDecisions = useMemo(
-    () => aiDecisions.filter((d) => d.status === 'pending'),
-    [aiDecisions]
+    () => aiDecisions.filter((d) => d.status === 'pending' && !dismissedIds.has(d.id)),
+    [aiDecisions, dismissedIds]
   );
 
   if (!isActive || pendingDecisions.length === 0) {
@@ -266,7 +290,17 @@ export const AIDecisionVotingPanel: React.FC = () => {
     <div className="fixed top-20 right-4 z-40 space-y-2">
       <AnimatePresence>
         {pendingDecisions.slice(0, 3).map((decision) => (
-          <AIDecisionVotingCard key={decision.id} decision={decision} />
+          <AIDecisionVotingCard
+            key={decision.id}
+            decision={decision}
+            onClose={() =>
+              setDismissedIds((prev) => {
+                const next = new Set(prev);
+                next.add(decision.id);
+                return next;
+              })
+            }
+          />
         ))}
       </AnimatePresence>
     </div>

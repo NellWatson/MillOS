@@ -10,7 +10,8 @@
 
 import React, { useRef, useMemo, useCallback, createContext, useContext } from 'react';
 import { useFrame, type RootState } from '@react-three/fiber';
-import { Billboard, Text } from '@react-three/drei';
+import { Billboard } from '@react-three/drei';
+import { SceneText as Text } from './shared/SceneText';
 import * as THREE from 'three';
 import { useWorkerMoodStore } from '../stores/workerMoodStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
@@ -34,6 +35,7 @@ interface ChaosRefs {
   lightRef?: React.RefObject<THREE.PointLight | null>;
   // Grain spill specific
   scaleRef?: React.MutableRefObject<number>;
+  pileRef?: React.RefObject<THREE.Mesh | null>;
   positions?: Array<{ x: number; z: number; delay: number; scale: number }>;
   dummy?: THREE.Object3D;
   // Rat specific
@@ -80,6 +82,14 @@ function animateGrainSpill(refs: ChaosRefs, state: RootState): void {
 
   const elapsed = (Date.now() - refs.startTime) / 1000;
   refs.scaleRef.current = Math.min(1, elapsed / 2);
+
+  // Grow the main pile via object scale. The cone geometry itself is fixed
+  // radius - the old `args={[0.8 * scaleRef.current, ...]}` evaluated the ref
+  // at the component's single render, when it was still 0, so the pile was
+  // permanently degenerate (radius-0) and only the scattered specks showed.
+  if (refs.pileRef?.current) {
+    refs.pileRef.current.scale.setScalar(Math.max(0.001, refs.scaleRef.current));
+  }
 
   refs.positions.forEach((p, i) => {
     const spreadProgress = Math.max(0, Math.min(1, (refs.scaleRef!.current - p.delay) / 0.5));
@@ -318,6 +328,7 @@ const GrainSpill: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
   const groupRef = useRef<THREE.Group>(null);
   const particlesRef = useRef<THREE.InstancedMesh>(null);
   const scaleRef = useRef(0);
+  const pileRef = useRef<THREE.Mesh>(null);
 
   const particleCount = Math.max(10, Math.floor(50 * qualityScale));
   const dummy = useMemo(() => new THREE.Object3D(), []);
@@ -341,6 +352,7 @@ const GrainSpill: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
       groupRef,
       particlesRef: particlesRef as React.RefObject<THREE.InstancedMesh | THREE.Points>,
       scaleRef,
+      pileRef,
       positions,
       dummy,
     });
@@ -358,9 +370,10 @@ const GrainSpill: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
 
   return (
     <group ref={groupRef} position={[event.position[0], 0, event.position[2]]}>
-      {/* Main spill pile */}
-      <mesh position={[0, 0.1, 0]} castShadow>
-        <coneGeometry args={[0.8 * scaleRef.current, 0.3, 8]} />
+      {/* Main spill pile - fixed-radius cone; animateGrainSpill grows it via
+          object scale (starts near-zero to avoid a one-frame full-size pop). */}
+      <mesh ref={pileRef} position={[0, 0.1, 0]} scale={0.001} castShadow>
+        <coneGeometry args={[0.8, 0.3, 8]} />
         <meshStandardMaterial color="#d4a574" roughness={0.9} />
       </mesh>
 

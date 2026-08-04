@@ -2,10 +2,10 @@
  * DecisionHistoryPanel Component
  *
  * Scrollable, paginated history of past strategic AI decisions.
- * Displays in the AI Command Center sidebar.
+ * Displays in the AI Partner sidebar.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { History, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useProductionStore } from '../../stores/productionStore';
@@ -29,6 +29,15 @@ export const DecisionHistoryPanel: React.FC = () => {
   }, [aiDecisions]);
 
   const totalPages = Math.ceil(sortedDecisions.length / ITEMS_PER_PAGE);
+
+  // Clamp the page when the decision list shrinks so the user is never stranded
+  // on an out-of-range (empty) page with the pagination controls hidden.
+  useEffect(() => {
+    if (currentPage > totalPages - 1) {
+      setCurrentPage(Math.max(0, totalPages - 1));
+    }
+  }, [currentPage, totalPages]);
+
   const paginatedDecisions = sortedDecisions.slice(
     currentPage * ITEMS_PER_PAGE,
     (currentPage + 1) * ITEMS_PER_PAGE
@@ -51,15 +60,17 @@ export const DecisionHistoryPanel: React.FC = () => {
       {/* Header */}
       <button
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-label="Toggle decision history"
         className="w-full flex items-center justify-between p-3 hover:bg-slate-700/30 transition-colors"
       >
         <div className="flex items-center gap-2">
           <History className="w-4 h-4 text-cyan-400" />
           <span className="text-sm font-medium text-slate-200">Decision History</span>
-          <span className="text-xs text-slate-500">({sortedDecisions.length})</span>
+          <span className="text-xs text-slate-400">({sortedDecisions.length})</span>
         </div>
         <motion.div animate={{ rotate: expanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
-          <ChevronLeft className="w-4 h-4 text-slate-400 rotate-[-90deg]" />
+          <ChevronLeft className="w-4 h-4 text-slate-400 rotate-[-90deg]" aria-hidden="true" />
         </motion.div>
       </button>
 
@@ -74,7 +85,7 @@ export const DecisionHistoryPanel: React.FC = () => {
             {/* Decision List */}
             <div className="px-3 pb-2 space-y-2 max-h-64 overflow-y-auto">
               {paginatedDecisions.length === 0 ? (
-                <div className="text-center text-slate-500 text-xs py-4">No decisions yet</div>
+                <div className="text-center text-slate-400 text-xs py-4">No decisions yet</div>
               ) : (
                 paginatedDecisions.map((decision) => (
                   <DecisionReplayTrigger key={decision.id} decision={decision}>
@@ -92,7 +103,7 @@ export const DecisionHistoryPanel: React.FC = () => {
                             {decision.reasoning}
                           </p>
                           <div className="flex items-center gap-2 mt-1">
-                            <span className="text-[9px] text-slate-500">
+                            <span className="text-[9px] text-slate-400">
                               {formatTime(decision.timestamp)}
                             </span>
                             <span
@@ -126,19 +137,21 @@ export const DecisionHistoryPanel: React.FC = () => {
                 <button
                   onClick={goToPrevPage}
                   disabled={currentPage === 0}
+                  aria-label="Previous page"
                   className="p-1 rounded hover:bg-slate-700/50 disabled:opacity-30 disabled:cursor-not-allowed"
                 >
-                  <ChevronLeft className="w-4 h-4 text-slate-400" />
+                  <ChevronLeft className="w-4 h-4 text-slate-400" aria-hidden="true" />
                 </button>
-                <span className="text-[10px] text-slate-500">
+                <span className="text-[10px] text-slate-400">
                   {currentPage + 1} / {totalPages}
                 </span>
                 <button
                   onClick={goToNextPage}
                   disabled={currentPage >= totalPages - 1}
+                  aria-label="Next page"
                   className="p-1 rounded hover:bg-slate-700/50 disabled:opacity-30 disabled:cursor-not-allowed"
                 >
-                  <ChevronRight className="w-4 h-4 text-slate-400" />
+                  <ChevronRight className="w-4 h-4 text-slate-400" aria-hidden="true" />
                 </button>
               </div>
             )}

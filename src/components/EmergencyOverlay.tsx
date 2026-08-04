@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { OctagonX, Shield } from 'lucide-react';
+import React from 'react';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { OctagonX, Shield, Siren } from 'lucide-react';
 import { useSafetyStore } from '../stores/safetyStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 
@@ -124,67 +124,79 @@ export const SafetyScoreBadge: React.FC<{ compact?: boolean }> = ({ compact = fa
 export const EmergencyOverlay: React.FC = () => {
   const forkliftEmergencyStop = useSafetyStore((state) => state.forkliftEmergencyStop);
   const emergencyActive = useGameSimulationStore((state) => state.emergencyActive);
-  const [flash, setFlash] = useState(true);
+  const emergencyDrillMode = useGameSimulationStore((state) => state.emergencyDrillMode);
+  const reduceMotion = useReducedMotion();
 
   // Either emergency type triggers the overlay
   const isEmergency = forkliftEmergencyStop || emergencyActive;
-
-  // Flash effect
-  useEffect(() => {
-    if (!isEmergency) return;
-
-    const interval = setInterval(() => {
-      setFlash((f) => !f);
-    }, 300);
-
-    return () => clearInterval(interval);
-  }, [isEmergency]);
+  const isDrill = emergencyDrillMode;
+  const accent = isDrill ? 'rgba(245, 158, 11, 0.82)' : 'rgba(239, 68, 68, 0.82)';
+  const wash = isDrill ? 'rgba(245, 158, 11, 0.16)' : 'rgba(239, 68, 68, 0.24)';
+  const Icon = isDrill ? Siren : OctagonX;
 
   return (
     <AnimatePresence>
       {isEmergency && (
-        <>
+        <motion.div
+          key={isDrill ? 'simulated-drill' : 'facility-stop'}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.18, ease: 'easeOut' }}
+          className="pointer-events-none fixed inset-0 z-[60]"
+        >
           {/* Flashing red border */}
           <motion.div
             initial={{ opacity: 0 }}
-            animate={{ opacity: flash ? 1 : 0.3 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 pointer-events-none"
+            animate={reduceMotion ? { opacity: 1 } : { opacity: [0.55, 1, 0.55] }}
+            transition={
+              reduceMotion
+                ? { duration: 0 }
+                : { duration: 1.2, repeat: Number.POSITIVE_INFINITY, ease: 'easeInOut' }
+            }
+            className="absolute inset-0"
             style={{
-              boxShadow:
-                'inset 0 0 0 4px rgba(239, 68, 68, 0.8), inset 0 0 60px rgba(239, 68, 68, 0.3)',
+              boxShadow: `inset 0 0 0 4px ${accent}, inset 0 0 52px ${wash}`,
             }}
           />
 
-          {/* Corner warning triangles */}
+          {/* Explicit safety-state banner */}
           <motion.div
             initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: flash ? 1 : 0.5, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none"
+            animate={{ opacity: 1, scale: 1 }}
+            className="absolute left-1/2 top-4 -translate-x-1/2"
+            role="alert"
+            aria-live="assertive"
+            aria-label={isDrill ? 'Simulated fire drill' : 'Facility emergency stop'}
           >
-            <div className="flex items-center gap-2 bg-red-600/90 backdrop-blur-sm px-4 py-2 rounded-lg border border-red-400 shadow-lg shadow-red-500/50">
-              <OctagonX className="w-5 h-5 text-white animate-pulse" />
-              <span className="text-white font-bold text-sm uppercase tracking-wider">
-                Emergency Stop Active
+            <div
+              className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-white shadow-lg backdrop-blur-sm ${
+                isDrill
+                  ? 'border-amber-300 bg-amber-700/95 shadow-amber-500/30'
+                  : 'border-red-300 bg-red-700/95 shadow-red-500/40'
+              }`}
+            >
+              <Icon className="w-5 h-5" aria-hidden="true" />
+              <span className="font-bold text-sm uppercase tracking-wider">
+                {isDrill ? 'Simulated fire drill' : 'Facility emergency stop'}
               </span>
-              <OctagonX className="w-5 h-5 text-white animate-pulse" />
+              <Icon className="w-5 h-5" aria-hidden="true" />
             </div>
           </motion.div>
 
-          {/* Keyboard hint */}
+          {/* Unambiguous response guidance */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 0.8, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none"
+            animate={{ opacity: 1, y: 0 }}
+            className="absolute bottom-20 left-1/2 -translate-x-1/2"
           >
-            <div className="bg-slate-900/80 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs">
-              Press <kbd className="bg-slate-700 px-1.5 py-0.5 rounded font-mono mx-1">SPACE</kbd>{' '}
-              to release
+            <div className="max-w-md rounded-lg border border-slate-600 bg-slate-950/95 px-4 py-2 text-center text-xs text-slate-100 backdrop-blur-sm">
+              {isDrill
+                ? 'Simulation only. Follow marked exits and report to the assembly point.'
+                : 'Machines and mobile equipment are stopped. Clear the interlock from Safety after the cause is resolved.'}
             </div>
           </motion.div>
-        </>
+        </motion.div>
       )}
     </AnimatePresence>
   );

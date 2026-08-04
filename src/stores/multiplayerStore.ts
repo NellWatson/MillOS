@@ -9,6 +9,18 @@ import {
   ChatMessage,
   PeerInfo,
 } from '../multiplayer/types';
+import { sanitizePlayerName, sanitizeRoomCode } from '../utils/sanitize';
+
+/** Identity slice of a RemotePlayer — the fields UI rosters render. */
+export interface RemotePlayerIdentity {
+  id: string;
+  name: string;
+  color: PlayerColor;
+}
+
+function buildRoster(players: Map<string, RemotePlayer>): RemotePlayerIdentity[] {
+  return Array.from(players.values(), (p) => ({ id: p.id, name: p.name, color: p.color }));
+}
 
 // Generate a simple 6-character room code
 function generateRoomCode(): string {
@@ -22,7 +34,7 @@ function generateRoomCode(): string {
 
 // Generate a unique player ID
 function generatePlayerId(): string {
-  return `player_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  return `player_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 }
 
 interface MultiplayerStore {
@@ -37,6 +49,11 @@ interface MultiplayerStore {
   // Remote players (indexed by ID)
   remotePlayers: Map<string, RemotePlayer>;
   _remotePlayersArray: RemotePlayer[]; // Cached array for iteration
+  // Identity-only roster for UI lists (lobby, chat, voting). Rebuilt only on
+  // join/leave/rename — NOT on the 20Hz kinematic PLAYER_UPDATE stream, so
+  // roster subscribers don't re-render twenty times a second while players
+  // move. Kinematic consumers (avatars) keep using _remotePlayersArray.
+  _remoteRosterArray: RemotePlayerIdentity[];
 
   // Local player state (for broadcasting)
   localPosition: [number, number, number];
@@ -120,6 +137,7 @@ const initialState = {
   localPlayerColor: PLAYER_COLORS[0],
   remotePlayers: new Map<string, RemotePlayer>(),
   _remotePlayersArray: [] as RemotePlayer[],
+  _remoteRosterArray: [] as RemotePlayerIdentity[],
   peers: new Map<string, PeerInfo>(),
   machineLocks: new Map<string, string>(),
   pendingIntents: [] as MachineIntent[],
@@ -137,7 +155,11 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
 
   // Connection state
   setConnectionState: (state: ConnectionState) => set({ connectionState: state }),
-  setLocalPlayerName: (name: string) => set({ localPlayerName: name }),
+  setLocalPlayerName: (name: string) =>
+    // Defense-in-depth: sanitize at the store boundary so every caller
+    // (lobby, panels) gets XSS-safe names broadcast to peers. Idempotent for
+    // callers that already sanitize. Fall back to 'Player' if input is empty.
+    set({ localPlayerName: sanitizePlayerName(name) || 'Player' }),
   setLocalPlayerColor: (color: PlayerColor) => set({ localPlayerColor: color }),
 
   // Room management
@@ -153,8 +175,13 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
   },
 
   joinRoom: (code) => {
+    // Defense-in-depth: validate/normalize the room code at the store boundary.
+    // sanitizeRoomCode upper-cases, strips non-alphanumerics, and requires
+    // exactly 6 chars (returns '' otherwise). Fall back to a plain upper-case
+    // of the raw input so a malformed code still produces a (non-matching)
+    // value rather than silently blanking, preserving prior behavior.
     set({
-      roomCode: code.toUpperCase(),
+      roomCode: sanitizeRoomCode(code) || code.toUpperCase(),
       isHost: false,
       connectionState: 'connecting',
       localPlayerId: generatePlayerId(),
@@ -180,6 +207,7 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
     set({
       remotePlayers: newMap,
       _remotePlayersArray: Array.from(newMap.values()),
+      _remoteRosterArray: buildRoster(newMap),
     });
   },
 
@@ -191,9 +219,14 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
     const updated = { ...existing, ...update, lastUpdate: Date.now() };
     const newMap = new Map(state.remotePlayers);
     newMap.set(id, updated);
+    // The roster only changes when an identity field changes (rename); the
+    // 20Hz kinematic updates keep the existing roster reference so roster
+    // subscribers don't re-render per movement packet.
+    const identityChanged = update.name !== undefined && update.name !== existing.name;
     set({
       remotePlayers: newMap,
       _remotePlayersArray: Array.from(newMap.values()),
+      ...(identityChanged ? { _remoteRosterArray: buildRoster(newMap) } : {}),
     });
   },
 
@@ -214,6 +247,7 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
     set({
       remotePlayers: newMap,
       _remotePlayersArray: Array.from(newMap.values()),
+      _remoteRosterArray: buildRoster(newMap),
       machineLocks: newLocks,
     });
 
@@ -281,7 +315,7 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
     const state = get();
     const fullIntent: MachineIntent = {
       ...intent,
-      id: `intent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: `intent_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
       playerId: state.localPlayerId,
       timestamp: Date.now(),
     };
@@ -353,11 +387,6 @@ export const useIsMultiplayerActive = () =>
 
 export const useIsHost = () => useMultiplayerStore((s) => s.isHost);
 
-export const useRoomCode = () => useMultiplayerStore((s) => s.roomCode);
-
 export const useRemotePlayersArray = () => useMultiplayerStore((s) => s._remotePlayersArray);
 
 export const useLocalPlayerId = () => useMultiplayerStore((s) => s.localPlayerId);
-
-export const useMachineLock = (machineId: string) =>
-  useMultiplayerStore((s) => s.machineLocks.get(machineId) ?? null);

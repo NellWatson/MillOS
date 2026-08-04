@@ -19,6 +19,7 @@ import {
   WifiOff,
   UserPlus,
   Copy,
+  Check,
   Gauge,
   Package,
   FastForward,
@@ -33,6 +34,7 @@ import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useSafetyStore } from '../../stores/safetyStore';
 import { useAIConfigStore } from '../../stores/aiConfigStore';
 import { useWorkerMoodStore } from '../../stores/workerMoodStore';
+import { EmergencyStopButton } from '../ui/EmergencyStopButton';
 
 interface MobilePanelProps {
   isVisible: boolean;
@@ -78,6 +80,8 @@ const getPanelIcon = (mode: DockMode) => {
       return <Settings className={iconClass} />;
     case 'management':
       return <Heart className={iconClass} />;
+    case 'multiplayer':
+      return <Users className={iconClass} />;
     default:
       return <Home className={iconClass} />;
   }
@@ -87,19 +91,19 @@ const getPanelIcon = (mode: DockMode) => {
 const getPanelTitle = (mode: DockMode) => {
   switch (mode) {
     case 'overview':
-      return 'Overview';
+      return 'Mill Overview';
     case 'ai':
-      return 'AI Command';
+      return 'AI Partner';
     case 'scada':
-      return 'SCADA System';
+      return 'Simulated SCADA';
     case 'workforce':
       return 'Workforce';
     case 'safety':
-      return 'Safety';
+      return 'Safety & Emergency';
     case 'settings':
       return 'Settings';
     case 'management':
-      return 'Management';
+      return 'Bilateral Autonomy';
     case 'multiplayer':
       return 'Multiplayer';
     default:
@@ -180,8 +184,10 @@ const OverviewContent: React.FC = () => {
         <div className="flex gap-1">
           <button
             onClick={() => setGameSpeed(0)}
+            aria-label="Pause simulation"
+            aria-pressed={gameSpeed === 0}
             className={`flex-1 py-1.5 rounded text-[10px] font-bold flex items-center justify-center gap-1 ${
-              gameSpeed === 0 ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-400'
+              gameSpeed === 0 ? 'bg-orange-700 text-white' : 'bg-slate-700 text-white/70'
             }`}
           >
             <Pause className="w-3 h-3" />
@@ -189,7 +195,7 @@ const OverviewContent: React.FC = () => {
           <button
             onClick={() => setGameSpeed(180)}
             className={`flex-1 py-1.5 rounded text-[10px] font-bold flex items-center justify-center gap-1 ${
-              gameSpeed === 180 ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-400'
+              gameSpeed === 180 ? 'bg-orange-700 text-white' : 'bg-slate-700 text-white/70'
             }`}
           >
             <Play className="w-3 h-3" />
@@ -198,7 +204,7 @@ const OverviewContent: React.FC = () => {
           <button
             onClick={() => setGameSpeed(1800)}
             className={`flex-1 py-1.5 rounded text-[10px] font-bold flex items-center justify-center gap-1 ${
-              gameSpeed === 1800 ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-400'
+              gameSpeed === 1800 ? 'bg-orange-700 text-white' : 'bg-slate-700 text-white/70'
             }`}
           >
             <FastForward className="w-3 h-3" />
@@ -207,7 +213,7 @@ const OverviewContent: React.FC = () => {
           <button
             onClick={() => setGameSpeed(10800)}
             className={`flex-1 py-1.5 rounded text-[10px] font-bold flex items-center justify-center gap-1 ${
-              gameSpeed === 10800 ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-400'
+              gameSpeed === 10800 ? 'bg-orange-700 text-white' : 'bg-slate-700 text-white/70'
             }`}
           >
             <FastForward className="w-3 h-3" />
@@ -382,10 +388,7 @@ const SafetyContent: React.FC = () => {
   return (
     <div className="space-y-3">
       {/* Emergency Stop */}
-      <button className="w-full p-3 bg-red-600 hover:bg-red-500 rounded-lg flex items-center justify-center gap-2 text-white font-bold transition-colors">
-        <AlertTriangle className="w-5 h-5" />
-        EMERGENCY STOP
-      </button>
+      <EmergencyStopButton />
 
       {/* Fire Drill Section */}
       <div className="bg-slate-800/50 rounded-lg p-3">
@@ -458,6 +461,9 @@ const SettingsContent: React.FC = () => {
           </div>
           <button
             onClick={() => setShowZones(!showZones)}
+            role="switch"
+            aria-checked={showZones}
+            aria-label="Safety Zones"
             className={`w-12 h-6 rounded-full transition-colors ${
               showZones ? 'bg-cyan-600' : 'bg-slate-600'
             }`}
@@ -474,7 +480,7 @@ const SettingsContent: React.FC = () => {
   );
 };
 
-// AI Command panel content
+// AI Partner panel content
 const AIContent: React.FC = () => {
   const aiDecisions = useProductionStore((s) => s.aiDecisions);
   const recentDecisions = aiDecisions.slice(0, 5);
@@ -520,7 +526,7 @@ const AIContent: React.FC = () => {
   );
 };
 
-// SCADA System panel content
+// Simulated SCADA panel content
 const SCADAContent: React.FC = () => {
   const metrics = useProductionStore((s) => s.metrics);
   const scadaLive = useProductionStore((s) => s.scadaLive);
@@ -554,7 +560,7 @@ const SCADAContent: React.FC = () => {
           className={`flex items-center gap-1 text-xs ${scadaLive ? 'text-green-400' : 'text-slate-500'}`}
         >
           {scadaLive ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-          <span>{scadaLive ? 'Live' : 'Offline'}</span>
+          <span>{scadaLive ? 'Telemetry on' : 'Telemetry off'}</span>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -632,17 +638,69 @@ const WorkforceContent: React.FC = () => {
 };
 
 // Multiplayer panel content
+const MultiplayerTrustNotice: React.FC = () => (
+  <p className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-2 text-[11px] leading-relaxed text-amber-100">
+    Trusted friends, experimental. The host owns the simulation state. Guest sessions end if the
+    host leaves.
+  </p>
+);
+
 const MultiplayerContent: React.FC = () => {
   const connectionState = useMultiplayerStore((s) => s.connectionState);
   const roomCode = useMultiplayerStore((s) => s.roomCode);
   const isHost = useMultiplayerStore((s) => s.isHost);
-  const remotePlayers = useMultiplayerStore((s) => s._remotePlayersArray);
+  const remotePlayers = useMultiplayerStore((s) => s._remoteRosterArray);
   const createRoom = useMultiplayerStore((s) => s.createRoom);
   const leaveRoom = useMultiplayerStore((s) => s.leaveRoom);
 
+  const [copied, setCopied] = React.useState(false);
+  const copyTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [confirmLeave, setConfirmLeave] = React.useState(false);
+  const leaveTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+      if (leaveTimeoutRef.current) {
+        clearTimeout(leaveTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Two-tap confirm so an accidental touch can't end the shared session.
+  const handleLeaveClick = () => {
+    if (confirmLeave) {
+      if (leaveTimeoutRef.current) {
+        clearTimeout(leaveTimeoutRef.current);
+        leaveTimeoutRef.current = null;
+      }
+      setConfirmLeave(false);
+      leaveRoom();
+      return;
+    }
+    setConfirmLeave(true);
+    if (leaveTimeoutRef.current) {
+      clearTimeout(leaveTimeoutRef.current);
+    }
+    leaveTimeoutRef.current = setTimeout(() => setConfirmLeave(false), 3000);
+  };
+
   const copyRoomCode = () => {
     if (roomCode) {
-      navigator.clipboard.writeText(roomCode);
+      navigator.clipboard
+        ?.writeText(roomCode)
+        .then(() => {
+          setCopied(true);
+          if (copyTimeoutRef.current) {
+            clearTimeout(copyTimeoutRef.current);
+          }
+          copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
+        })
+        .catch(() => {
+          /* clipboard write failed; leave UI unchanged */
+        });
     }
   };
 
@@ -653,6 +711,7 @@ const MultiplayerContent: React.FC = () => {
           <Users className="w-4 h-4" />
           <span>Multiplayer</span>
         </div>
+        <MultiplayerTrustNotice />
         <button
           onClick={createRoom}
           className="w-full p-3 bg-cyan-600 hover:bg-cyan-500 rounded-lg flex items-center justify-center gap-2 text-white font-medium transition-colors"
@@ -662,6 +721,26 @@ const MultiplayerContent: React.FC = () => {
         </button>
         <div className="text-[10px] text-slate-500 text-center">
           Share the room code with friends to play together
+        </div>
+      </div>
+    );
+  }
+
+  // While the session is still establishing, show a loading indicator instead
+  // of the connected room view (mirrors the desktop MultiplayerLobby).
+  if (connectionState === 'connecting' || connectionState === 'reconnecting') {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-xs text-slate-400">
+          <Users className="w-4 h-4" />
+          <span>Multiplayer</span>
+        </div>
+        <MultiplayerTrustNotice />
+        <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+          <div className="flex items-center justify-center gap-2 text-yellow-400 text-xs">
+            <Wifi className="w-4 h-4 animate-pulse" />
+            {connectionState === 'reconnecting' ? 'Reconnecting...' : 'Connecting...'}
+          </div>
         </div>
       </div>
     );
@@ -677,11 +756,16 @@ const MultiplayerContent: React.FC = () => {
         <button
           onClick={copyRoomCode}
           className="p-1.5 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
-          aria-label="Copy room code"
+          aria-label={copied ? 'Room code copied' : 'Copy room code'}
         >
-          <Copy className="w-4 h-4 text-slate-300" />
+          {copied ? (
+            <Check className="w-4 h-4 text-green-400" />
+          ) : (
+            <Copy className="w-4 h-4 text-slate-300" />
+          )}
         </button>
       </div>
+      <MultiplayerTrustNotice />
 
       <div className="bg-slate-800/50 rounded-lg p-2">
         <div className="text-xs text-slate-400 mb-2">
@@ -706,10 +790,10 @@ const MultiplayerContent: React.FC = () => {
       </div>
 
       <button
-        onClick={leaveRoom}
+        onClick={handleLeaveClick}
         className="w-full p-2 bg-red-600/80 hover:bg-red-500/80 rounded-lg text-white text-sm font-medium transition-colors"
       >
-        Leave Room
+        {confirmLeave ? 'Tap again to confirm' : 'Leave Room'}
       </button>
     </div>
   );
@@ -828,7 +912,7 @@ const PlaceholderContent: React.FC<{ mode: DockMode }> = ({ mode }) => {
       <div className="text-center">
         <div className="mb-2">{getPanelIcon(mode)}</div>
         <div className="text-sm">{getPanelTitle(mode)} panel</div>
-        <div className="text-xs text-slate-500 mt-1">Coming soon</div>
+        <div className="text-xs text-slate-500 mt-1">This panel is unavailable on mobile.</div>
       </div>
     </div>
   );
@@ -863,6 +947,54 @@ const getPanelContent = (mode: DockMode | null) => {
  * Shows simplified versions of sidebar content
  */
 export const MobilePanel: React.FC<MobilePanelProps> = ({ isVisible, content, onClose }) => {
+  const panelRef = React.useRef<HTMLElement>(null);
+  const closeButtonRef = React.useRef<HTMLButtonElement>(null);
+
+  // Modal behavior: Escape to dismiss, move focus into the panel on open,
+  // and restore focus to the previously-focused element on close.
+  React.useEffect(() => {
+    if (!isVisible || !content) return;
+
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !panelRef.current) return;
+
+      const focusable = Array.from(
+        panelRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => !element.hidden && element.getClientRects().length > 0);
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) {
+        e.preventDefault();
+        closeButtonRef.current?.focus();
+      } else if (
+        e.shiftKey &&
+        (document.activeElement === first || !panelRef.current.contains(document.activeElement))
+      ) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      previouslyFocused?.focus?.();
+    };
+  }, [isVisible, content, onClose]);
+
   return (
     <AnimatePresence>
       {isVisible && content && (
@@ -878,6 +1010,7 @@ export const MobilePanel: React.FC<MobilePanelProps> = ({ isVisible, content, on
 
           {/* Panel */}
           <motion.aside
+            ref={panelRef}
             variants={panelVariants}
             initial="hidden"
             animate="visible"
@@ -888,16 +1021,18 @@ export const MobilePanel: React.FC<MobilePanelProps> = ({ isVisible, content, on
               maxHeight: '33vh',
             }}
             aria-label={`${getPanelTitle(content)} mobile panel`}
-            role="complementary"
+            role="dialog"
+            aria-modal="true"
           >
-            <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-700/50 rounded-2xl overflow-hidden shadow-2xl">
+            <div className="flex flex-col max-h-[33vh] bg-slate-900/95 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
               {/* Header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
+              <div className="flex shrink-0 items-center justify-between px-4 py-3 border-b border-slate-700/50">
                 <div className="flex items-center gap-2 text-slate-200">
                   {getPanelIcon(content)}
                   <span className="font-medium">{getPanelTitle(content)}</span>
                 </div>
                 <button
+                  ref={closeButtonRef}
                   onClick={onClose}
                   className="p-2 rounded-lg hover:bg-slate-700/50 transition-colors"
                   aria-label="Close panel"
@@ -907,9 +1042,7 @@ export const MobilePanel: React.FC<MobilePanelProps> = ({ isVisible, content, on
               </div>
 
               {/* Content */}
-              <div className="p-4 overflow-y-auto" style={{ maxHeight: 'calc(33vh - 56px)' }}>
-                {getPanelContent(content)}
-              </div>
+              <div className="flex-1 min-h-0 p-4 overflow-y-auto">{getPanelContent(content)}</div>
             </div>
           </motion.aside>
         </>

@@ -4,11 +4,12 @@
  * Animated status ring at machine base that indicates operational status.
  * Uses shader-based animation for performance.
  */
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getStatusColor, getPulseSpeed, getGlowIntensity } from '../../utils/digitalTwinPalette';
 import { INDICATOR_HEIGHTS, POLYGON_OFFSET } from '../../constants/renderLayers';
+import { useMaterialFlowStore } from '../../stores/materialFlowStore';
 
 export type StatusType = 'running' | 'idle' | 'warning' | 'critical' | 'maintenance';
 
@@ -24,7 +25,7 @@ interface StatusRingProps {
  * Create the status ring shader material
  */
 const createStatusRingMaterial = (color: string, opacity: number): THREE.ShaderMaterial => {
-  return new THREE.ShaderMaterial({
+  const material = new THREE.ShaderMaterial({
     uniforms: {
       color: { value: new THREE.Color(color) },
       time: { value: 0 },
@@ -59,15 +60,19 @@ const createStatusRingMaterial = (color: string, opacity: number): THREE.ShaderM
 
         float alpha = ring * opacity * pulse * highlight;
         gl_FragColor = vec4(color, alpha);
+        #include <colorspace_fragment>
       }
     `,
     transparent: true,
+    toneMapped: false,
     side: THREE.DoubleSide,
     depthWrite: false,
     polygonOffset: true,
     polygonOffsetFactor: POLYGON_OFFSET.moderate.factor,
     polygonOffsetUnits: POLYGON_OFFSET.moderate.units,
   });
+  material.customProgramCacheKey = () => 'millos-status-ring-v2';
+  return material;
 };
 
 export const StatusRing: React.FC<StatusRingProps> = ({
@@ -83,22 +88,34 @@ export const StatusRing: React.FC<StatusRingProps> = ({
   const glowIntensity = getGlowIntensity(status);
   const opacity = status === 'idle' ? 0.3 : glowIntensity * 0.6;
 
+  // Create the ShaderMaterial exactly ONCE. The status-change effect below
+  // already keeps color/opacity/pulseSpeed uniforms in sync in place, so
+  // recreating the material on every status transition (the old
+  // [color, opacity, pulseSpeed] deps) only leaked the previous material's
+  // GPU program - accumulating across all machines as statuses cycle.
   const material = useMemo(() => {
     const mat = createStatusRingMaterial(color, opacity);
     mat.uniforms.pulseSpeed.value = pulseSpeed;
     materialRef.current = mat;
     return mat;
-  }, [color, opacity, pulseSpeed]);
+  }, []);
+
+  // Dispose the material on unmount
+  useEffect(() => {
+    return () => {
+      material.dispose();
+    };
+  }, [material]);
 
   // Update time uniform for animation
-  useFrame((state) => {
+  useFrame(() => {
     if (!isStatic && materialRef.current?.uniforms.time) {
-      materialRef.current.uniforms.time.value = state.clock.elapsedTime;
+      materialRef.current.uniforms.time.value = useMaterialFlowStore.getState().simulationTime;
     }
   });
 
   // Update uniforms when status changes
-  useMemo(() => {
+  useEffect(() => {
     if (materialRef.current) {
       materialRef.current.uniforms.color.value.set(color);
       materialRef.current.uniforms.opacity.value = opacity;

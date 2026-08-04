@@ -7,7 +7,8 @@
 import * as THREE from 'three';
 import {
   getTexture,
-  createDataTexture,
+  createColorDataTexture,
+  createLinearDataTexture,
   fbmNoise,
   hash,
   smoothNoise,
@@ -143,7 +144,7 @@ export const generateGrass = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createColorDataTexture(data, size, size);
   });
 };
 
@@ -184,6 +185,6 @@ export const generateGrassRoughness = (size: number = 512): THREE.DataTexture =>
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createLinearDataTexture(data, size, size);
   });
 };

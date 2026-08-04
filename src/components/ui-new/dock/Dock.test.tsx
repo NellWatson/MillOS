@@ -17,6 +17,8 @@ vi.mock('lucide-react', () => ({
   Heart: () => <span data-testid="icon-heart" />,
   Maximize: () => <span data-testid="icon-maximize" />,
   Minimize: () => <span data-testid="icon-minimize" />,
+  Database: () => <span data-testid="icon-database" />,
+  MoreHorizontal: () => <span data-testid="icon-more" />,
 }));
 
 describe('Dock Component', () => {
@@ -24,11 +26,10 @@ describe('Dock Component', () => {
     render(<Dock activeMode="overview" onModeChange={() => {}} />);
 
     expect(screen.getByLabelText('Mill Overview')).toBeInTheDocument();
-    expect(screen.getByLabelText('AI Command')).toBeInTheDocument();
-    expect(screen.getByLabelText('SCADA System')).toBeInTheDocument();
+    expect(screen.getByLabelText('AI Partner')).toBeInTheDocument();
+    expect(screen.getByLabelText('Simulated SCADA')).toBeInTheDocument();
     expect(screen.getByLabelText('Workforce')).toBeInTheDocument();
-    expect(screen.getByLabelText('BAMS')).toBeInTheDocument();
-    expect(screen.getByLabelText('Multiplayer')).toBeInTheDocument();
+    expect(screen.getByLabelText('Bilateral Autonomy System (BAS)')).toBeInTheDocument();
     expect(screen.getByLabelText('Safety & Emergency')).toBeInTheDocument();
     expect(screen.getByLabelText('Settings')).toBeInTheDocument();
   });
@@ -41,7 +42,7 @@ describe('Dock Component', () => {
     expect(overviewBtn).toHaveAttribute('aria-pressed', 'true');
 
     rerender(<Dock activeMode="ai" onModeChange={() => {}} />);
-    const aiBtn = screen.getByLabelText('AI Command');
+    const aiBtn = screen.getByLabelText('AI Partner');
     expect(aiBtn).toHaveAttribute('aria-pressed', 'true');
     expect(overviewBtn).toHaveAttribute('aria-pressed', 'false');
   });
@@ -50,8 +51,17 @@ describe('Dock Component', () => {
     const handleModeChange = vi.fn();
     render(<Dock activeMode="overview" onModeChange={handleModeChange} />);
 
-    fireEvent.click(screen.getByLabelText('AI Command'));
+    fireEvent.click(screen.getByLabelText('AI Partner'));
     expect(handleModeChange).toHaveBeenCalledWith('ai');
+  });
+
+  it('groups secondary workspaces and view controls behind one menu', () => {
+    const handleModeChange = vi.fn();
+    render(<Dock activeMode="overview" onModeChange={handleModeChange} />);
+
+    fireEvent.click(screen.getByLabelText('More workspaces and view controls'));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Multiplayer/ }));
+    expect(handleModeChange).toHaveBeenCalledWith('multiplayer');
   });
 
   it('has accessible labels for screen readers', () => {

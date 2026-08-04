@@ -99,14 +99,36 @@ export const voronoi = (
 };
 
 /**
+ * Signed fractal Brownian motion, centred on zero.
+ *
+ * `fbmNoise` returns [0,1]. Adding it directly to a normal-map channel biases
+ * every texel in one direction, which reads as a constant surface tilt rather
+ * than as relief. Use this variant whenever the result is a *perturbation*.
+ */
+export const fbmNoiseSigned = (x: number, y: number, octaves: number = 4): number =>
+  fbmNoise(x, y, octaves) - 0.5;
+
+/**
  * Create a DataTexture from pixel data.
+ *
+ * COLOUR SPACE IS NOT OPTIONAL. three defaults DataTexture to `NoColorSpace`
+ * (linear), so hand-authored sRGB albedo bytes were previously fed to the
+ * shader as if they were already linear radiance — mid-tones ~2.4x too bright
+ * with all tonal separation crushed. Prefer the two named wrappers below over
+ * calling this directly, so the choice is visible at the call site.
+ *
+ * - albedo / colour / emissive        -> THREE.SRGBColorSpace
+ * - normal / roughness / metalness /
+ *   AO / height / mask / packed data  -> THREE.NoColorSpace (linear)
  */
 export const createDataTexture = (
   data: Uint8Array,
   width: number,
-  height: number
+  height: number,
+  colorSpace: THREE.ColorSpace = THREE.NoColorSpace
 ): THREE.DataTexture => {
   const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+  texture.colorSpace = colorSpace;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.magFilter = THREE.LinearFilter;
@@ -117,16 +139,45 @@ export const createDataTexture = (
 };
 
 /**
+ * Create an ALBEDO/colour DataTexture. Bytes are interpreted as sRGB and
+ * decoded to linear by the GPU (SRGB8_ALPHA8 internal format). Alpha is
+ * unaffected by the transfer function, so RGBA masks are safe here.
+ */
+export const createColorDataTexture = (
+  data: Uint8Array,
+  width: number,
+  height: number
+): THREE.DataTexture => createDataTexture(data, width, height, THREE.SRGBColorSpace);
+
+/**
+ * Create a DATA DataTexture (normal, roughness, metalness, AO, height, mask).
+ * Bytes are consumed verbatim - no transfer function is applied.
+ */
+export const createLinearDataTexture = (
+  data: Uint8Array,
+  width: number,
+  height: number
+): THREE.DataTexture => createDataTexture(data, width, height, THREE.NoColorSpace);
+
+/**
+ * Cache generation. Bump when generator *output* changes so a warm module-level
+ * cache (Vite HMR keeps this module alive across edits) cannot serve stale
+ * textures. Not persisted anywhere, so this is dev hygiene only.
+ */
+const TEXTURE_CACHE_VERSION = 'v2-srgb';
+
+/**
  * Get or generate a cached texture.
  * Uses cache-or-generate pattern to avoid regenerating textures.
  */
 export const getTexture = (name: string, generator: () => THREE.DataTexture): THREE.DataTexture => {
-  if (textureCache.has(name)) {
-    return textureCache.get(name)!;
+  const key = `${TEXTURE_CACHE_VERSION}:${name}`;
+  if (textureCache.has(key)) {
+    return textureCache.get(key)!;
   }
 
   const texture = generator();
-  textureCache.set(name, texture);
+  textureCache.set(key, texture);
   return texture;
 };
 

@@ -9,28 +9,67 @@
 
 import React, { useMemo, useLayoutEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { SIMPLE_TREE_MATERIALS, BENCH_MATERIALS } from '../../utils/sharedMaterials';
+import { TREE_MATERIALS, BENCH_MATERIALS } from '../../utils/sharedMaterials';
+import {
+  createCanopyCage,
+  createFoliageMaterial,
+  BROADLEAF_DEPTH,
+} from '../scenery/InstancedFoliage';
+import { WindDriver } from '../scenery/WindDriver';
 
 // ============================================================
 // GEOMETRIES (Module Level - Pre-translated with baked offsets)
 // ============================================================
 
-// SimpleTree geometry offsets (from original component):
-// - Trunk: position [0, 1.5, 0], cylinder [0.3, 0.4, 3, 6]
-// - Lower foliage: position [0, 4.5, 0], cone [2, 5, 6]
-// - Upper foliage: position [0, 6.5, 0], cone [1.5, 3.5, 6]
+/**
+ * Tree canopy: three alpha-cut card cages, one per variant.
+ *
+ * These used to be merged flat-shaded icosahedra - solid green blobs. The
+ * exterior tree list sits physically BETWEEN the village and the farm
+ * (MAIN_EXTERIOR_TREES below), so leaving it on the old system while those two
+ * moved to card foliage would put two different species systems in the same
+ * frame. FactoryExterior.tsx imports these three arrays for its individual
+ * SimpleTree path, so the shape of the exports is unchanged: index by the
+ * `variant` that `treeJitterFromPosition` returns.
+ *
+ * Sized to the previous canopies (blobs spanned y 4.4-6.6 at radius ~1.1-1.9),
+ * so no exterior tree changes height or footprint.
+ */
+export const TREE_FOLIAGE_VARIANTS = [
+  createCanopyCage({ radius: 2.45, height: 1.95, centerY: 5.3, taper: 0 }),
+  createCanopyCage({ radius: 2.75, height: 2.25, centerY: 5.7, taper: 0 }),
+  createCanopyCage({ radius: 2.2, height: 1.8, centerY: 5.0, taper: 0.12 }),
+];
+
+/**
+ * Per-variant hue jitter through three shared materials (no per-instance
+ * material churn). `color` is a uniform and all three share one
+ * `customProgramCacheKey`, so this is still ONE compiled shader program.
+ */
+export const TREE_FOLIAGE_MATERIALS = [
+  createFoliageMaterial('broadleaf', '#c9d8b4'),
+  createFoliageMaterial('broadleaf', '#ffffff'),
+  createFoliageMaterial('broadleaf', '#b9c79c'),
+];
+
+/** Deterministic per-tree variant/rotation/scale jitter from position hash
+ *  (identical to SimpleTree's, so a tree looks the same whether it is
+ *  rendered individually or instanced). */
+export const treeJitterFromPosition = (position: [number, number, number]) => {
+  const h = Math.abs(Math.sin(position[0] * 12.9898 + position[2] * 78.233) * 43758.5453);
+  const frac = h - Math.floor(h);
+  return {
+    variant: Math.floor(frac * 3) % 3,
+    rotY: frac * Math.PI * 2,
+    jitter: 0.9 + frac * 0.2,
+  };
+};
 
 const createTreeGeometries = () => {
   const trunk = new THREE.CylinderGeometry(0.3, 0.4, 3, 6);
   trunk.translate(0, 1.5, 0);
 
-  const foliageLower = new THREE.ConeGeometry(2, 5, 6);
-  foliageLower.translate(0, 4.5, 0);
-
-  const foliageUpper = new THREE.ConeGeometry(1.5, 3.5, 6);
-  foliageUpper.translate(0, 6.5, 0);
-
-  return { trunk, foliageLower, foliageUpper };
+  return { trunk };
 };
 
 // ParkBench geometry offsets (from original component):
@@ -103,35 +142,65 @@ export interface TreeInstanceData {
 export const SimpleTreeInstances: React.FC<{
   trees: TreeInstanceData[];
 }> = React.memo(({ trees }) => {
-  const count = trees.length;
-  if (count === 0) return null;
+  // Per-tree deterministic variant/rotation/scale jitter, matching SimpleTree.
+  // Trees are bucketed by canopy variant: one instancedMesh per variant plus
+  // one for all trunks (4 draw calls total regardless of tree count).
+  const { allTrees, byVariant } = useMemo(() => {
+    const all: InstanceData[] = [];
+    const buckets: InstanceData[][] = [[], [], []];
+    trees.forEach((t) => {
+      const { variant, rotY, jitter } = treeJitterFromPosition(t.position);
+      const item: InstanceData = {
+        position: t.position,
+        rotation: rotY,
+        scale: (t.scale ?? 1) * jitter,
+      };
+      all.push(item);
+      buckets[variant].push(item);
+    });
+    return { allTrees: all, byVariant: buckets };
+  }, [trees]);
 
-  const data = useMemo(
-    () => trees.map((t) => ({ position: t.position, scale: t.scale ?? 1 })),
-    [trees]
+  const trunkRef = useInstances(allTrees.length, allTrees);
+  const canopy0Ref = useInstances(byVariant[0].length, byVariant[0]);
+  const canopy1Ref = useInstances(byVariant[1].length, byVariant[1]);
+  const canopy2Ref = useInstances(byVariant[2].length, byVariant[2]);
+  const canopyRefs = useMemo(
+    () => [canopy0Ref, canopy1Ref, canopy2Ref],
+    [canopy0Ref, canopy1Ref, canopy2Ref]
   );
 
-  const trunkRef = useInstances(count, data);
-  const foliageLowerRef = useInstances(count, data);
-  const foliageUpperRef = useInstances(count, data);
+  // Wind-synced shadows: three copies map/alphaTest onto the depth material by
+  // itself, but not the vertex sway, so leaves would move under a rigid shadow.
+  useLayoutEffect(() => {
+    canopyRefs.forEach((ref) => {
+      if (ref.current) ref.current.customDepthMaterial = BROADLEAF_DEPTH;
+    });
+  }, [canopyRefs]);
+
+  if (trees.length === 0) return null;
 
   return (
     <group>
+      {/* Idempotent per frame - the village and the farm mount one too, and
+          only the first call of any given frame advances the clock. */}
+      <WindDriver />
       <instancedMesh
         ref={trunkRef}
-        args={[TREE_GEOMETRIES.trunk, SIMPLE_TREE_MATERIALS.trunk, count]}
+        args={[TREE_GEOMETRIES.trunk, TREE_MATERIALS.trunk, allTrees.length]}
         castShadow
+        receiveShadow
       />
-      <instancedMesh
-        ref={foliageLowerRef}
-        args={[TREE_GEOMETRIES.foliageLower, SIMPLE_TREE_MATERIALS.foliageLower, count]}
-        castShadow
-      />
-      <instancedMesh
-        ref={foliageUpperRef}
-        args={[TREE_GEOMETRIES.foliageUpper, SIMPLE_TREE_MATERIALS.foliageUpper, count]}
-        castShadow
-      />
+      {byVariant.map((bucket, variant) =>
+        bucket.length > 0 ? (
+          <instancedMesh
+            key={variant}
+            ref={canopyRefs[variant]}
+            args={[TREE_FOLIAGE_VARIANTS[variant], TREE_FOLIAGE_MATERIALS[variant], bucket.length]}
+            castShadow
+          />
+        ) : null
+      )}
     </group>
   );
 });
@@ -150,7 +219,6 @@ export const ParkBenchInstances: React.FC<{
   benches: BenchInstanceData[];
 }> = React.memo(({ benches }) => {
   const count = benches.length;
-  if (count === 0) return null;
 
   const data = useMemo(
     () => benches.map((b) => ({ position: b.position, rotation: b.rotation ?? 0 })),
@@ -161,6 +229,8 @@ export const ParkBenchInstances: React.FC<{
   const backrestRef = useInstances(count, data);
   const leftLegRef = useInstances(count, data);
   const rightLegRef = useInstances(count, data);
+
+  if (count === 0) return null;
 
   return (
     <group>

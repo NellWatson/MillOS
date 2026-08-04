@@ -204,12 +204,14 @@ interface InvestmentProposalCardProps {
   };
   onVote: (vote: 'approve' | 'reject' | 'abstain') => void;
   canVote: boolean;
+  userVote?: 'approve' | 'reject' | 'abstain' | null;
 }
 
 const InvestmentProposalCard: React.FC<InvestmentProposalCardProps> = ({
   proposal,
   onVote,
   canVote,
+  userVote = null,
 }) => {
   const approvals = proposal.votes.filter((v) => v.vote === 'approve').length;
   const rejections = proposal.votes.filter((v) => v.vote === 'reject').length;
@@ -290,6 +292,30 @@ const InvestmentProposalCard: React.FC<InvestmentProposalCardProps> = ({
             <X className="w-3 h-3" />
             Reject
           </button>
+        </div>
+      )}
+
+      {/* Cast-vote confirmation chip */}
+      {!canVote && userVote && (
+        <div className="pt-1">
+          <div
+            className={`flex items-center justify-center gap-1 px-2 py-1 rounded text-[9px] ${
+              userVote === 'approve'
+                ? 'bg-green-500/10 text-green-400'
+                : userVote === 'reject'
+                  ? 'bg-red-500/10 text-red-400'
+                  : 'bg-slate-700/40 text-slate-400'
+            }`}
+          >
+            {userVote === 'approve' ? (
+              <Check className="w-3 h-3" />
+            ) : userVote === 'reject' ? (
+              <X className="w-3 h-3" />
+            ) : (
+              <Clock className="w-3 h-3" />
+            )}
+            You voted: {userVote.charAt(0).toUpperCase() + userVote.slice(1)}
+          </div>
         </div>
       )}
     </div>
@@ -392,6 +418,8 @@ export const OwnershipPanel: React.FC = () => {
           <button
             onClick={() => setShowOwnershipDetails(!showOwnershipDetails)}
             className="ml-auto"
+            aria-expanded={showOwnershipDetails}
+            aria-controls="ownership-distribution-details"
           >
             {showOwnershipDetails ? (
               <ChevronUp className="w-3 h-3 text-slate-400" />
@@ -410,6 +438,7 @@ export const OwnershipPanel: React.FC = () => {
         <AnimatePresence>
           {showOwnershipDetails && (
             <motion.div
+              id="ownership-distribution-details"
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
@@ -421,17 +450,17 @@ export const OwnershipPanel: React.FC = () => {
                   <div className="bg-slate-800/50 rounded p-1.5 text-center">
                     <Users className="w-3 h-3 mx-auto mb-0.5 text-cyan-400" />
                     <div className="text-[10px] font-bold text-white">{workerCount || 10}</div>
-                    <div className="text-[7px] text-slate-500">Members</div>
+                    <div className="text-[7px] text-slate-400">Members</div>
                   </div>
                   <div className="bg-slate-800/50 rounded p-1.5 text-center">
                     <Target className="w-3 h-3 mx-auto mb-0.5 text-green-400" />
                     <div className="text-[10px] font-bold text-white">51%</div>
-                    <div className="text-[7px] text-slate-500">Min Target</div>
+                    <div className="text-[7px] text-slate-400">Min Target</div>
                   </div>
                   <div className="bg-slate-800/50 rounded p-1.5 text-center">
                     <Shield className="w-3 h-3 mx-auto mb-0.5 text-amber-400" />
                     <div className="text-[10px] font-bold text-white">{structure.reservePool}%</div>
-                    <div className="text-[7px] text-slate-500">Reserve</div>
+                    <div className="text-[7px] text-slate-400">Reserve</div>
                   </div>
                 </div>
 
@@ -478,6 +507,8 @@ export const OwnershipPanel: React.FC = () => {
         <button
           onClick={() => setShowCompensation(!showCompensation)}
           className="w-full flex items-center justify-between"
+          aria-expanded={showCompensation}
+          aria-controls="compensation-details"
         >
           <span className="flex items-center gap-1">
             <CircleDollarSign className="w-3 h-3 text-amber-400" />
@@ -497,6 +528,7 @@ export const OwnershipPanel: React.FC = () => {
         <AnimatePresence>
           {showCompensation && (
             <motion.div
+              id="compensation-details"
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
@@ -568,6 +600,8 @@ export const OwnershipPanel: React.FC = () => {
         <button
           onClick={() => setShowInvestments(!showInvestments)}
           className="w-full flex items-center justify-between"
+          aria-expanded={showInvestments}
+          aria-controls="investment-proposals-details"
         >
           <span className="flex items-center gap-1">
             <Vote className="w-3 h-3 text-violet-400" />
@@ -588,6 +622,7 @@ export const OwnershipPanel: React.FC = () => {
         <AnimatePresence>
           {showInvestments && (
             <motion.div
+              id="investment-proposals-details"
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
@@ -606,6 +641,9 @@ export const OwnershipPanel: React.FC = () => {
                       proposal={proposal}
                       onVote={(vote) => voteOnInvestment(proposal.id, localPlayerId, vote)}
                       canVote={!proposal.votes.some((v) => v.workerId === localPlayerId)}
+                      userVote={
+                        proposal.votes.find((v) => v.workerId === localPlayerId)?.vote ?? null
+                      }
                     />
                   ))
                 )}
@@ -628,6 +666,8 @@ export const OwnershipPanel: React.FC = () => {
         <button
           onClick={() => setShowEducation(!showEducation)}
           className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-white transition-colors"
+          aria-expanded={showEducation}
+          aria-controls="economic-democracy-about"
         >
           <span className="flex items-center gap-1">
             <Info className="w-3 h-3" />
@@ -639,6 +679,7 @@ export const OwnershipPanel: React.FC = () => {
         <AnimatePresence>
           {showEducation && (
             <motion.div
+              id="economic-democracy-about"
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}

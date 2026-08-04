@@ -35,6 +35,10 @@ interface AdaptiveQualityConfig {
   sampleSize: number;
   /** Minimum time between quality changes (ms) */
   cooldownMs: number;
+  /** Sustained low-frame-rate duration required before a downgrade */
+  downgradeSustainMs: number;
+  /** Sustained high-frame-rate duration required before an upgrade */
+  upgradeSustainMs: number;
   /** Whether adaptive quality is enabled */
   enabled: boolean;
   /** Minimum quality level (won't go below this) */
@@ -45,10 +49,12 @@ interface AdaptiveQualityConfig {
 
 const DEFAULT_CONFIG: AdaptiveQualityConfig = {
   targetFps: 60,
-  downgradeThreshold: 30, // Below 30 FPS, consider downgrading (was 45 - too aggressive)
-  upgradeThreshold: 55, // Above 55 FPS with headroom, consider upgrading
-  sampleSize: 120, // Average over ~2 seconds at 60fps (was 60 - too reactive)
-  cooldownMs: 10000, // Wait 10 seconds between changes (was 3s - too fast)
+  downgradeThreshold: 42,
+  upgradeThreshold: 58,
+  sampleSize: 90,
+  cooldownMs: 12000,
+  downgradeSustainMs: 2500,
+  upgradeSustainMs: 12000,
   enabled: true,
   minQuality: 'low',
   maxQuality: 'ultra',
@@ -58,8 +64,8 @@ class AdaptiveQualityManager {
   private config: AdaptiveQualityConfig = { ...DEFAULT_CONFIG };
   private frameTimes: number[] = [];
   private lastChangeTime = 0;
-  private consecutiveLowFrames = 0;
-  private consecutiveHighFrames = 0;
+  private lowFpsDurationMs = 0;
+  private highFpsDurationMs = 0;
   private isInitialized = false;
   private isChangingQuality = false; // Prevent concurrent quality changes
   private pendingQualityChange: GraphicsQuality | null = null;
@@ -91,31 +97,29 @@ class AdaptiveQualityManager {
 
     // Check for sustained low FPS
     if (avgFps < this.config.downgradeThreshold) {
-      this.consecutiveLowFrames++;
-      this.consecutiveHighFrames = 0;
+      this.lowFpsDurationMs += deltaSeconds * 1000;
+      this.highFpsDurationMs = 0;
 
-      // Require sustained low FPS (not just a spike) - ~3 seconds at 60fps
-      if (this.consecutiveLowFrames > 180) {
+      if (this.lowFpsDurationMs >= this.config.downgradeSustainMs) {
         this.downgradeQuality();
         this.lastChangeTime = now;
-        this.consecutiveLowFrames = 0;
+        this.lowFpsDurationMs = 0;
       }
     }
     // Check for sustained high FPS (with headroom to upgrade)
     else if (avgFps > this.config.upgradeThreshold) {
-      this.consecutiveHighFrames++;
-      this.consecutiveLowFrames = 0;
+      this.highFpsDurationMs += deltaSeconds * 1000;
+      this.lowFpsDurationMs = 0;
 
-      // Require sustained high FPS before upgrading - ~5 seconds at 60fps
-      if (this.consecutiveHighFrames > 300) {
+      if (this.highFpsDurationMs >= this.config.upgradeSustainMs) {
         this.upgradeQuality();
         this.lastChangeTime = now;
-        this.consecutiveHighFrames = 0;
+        this.highFpsDurationMs = 0;
       }
     } else {
       // FPS is acceptable, reset counters
-      this.consecutiveLowFrames = 0;
-      this.consecutiveHighFrames = 0;
+      this.lowFpsDurationMs = 0;
+      this.highFpsDurationMs = 0;
     }
   }
 
@@ -233,8 +237,8 @@ class AdaptiveQualityManager {
     this.config.enabled = enabled;
     if (!enabled) {
       this.frameTimes = [];
-      this.consecutiveLowFrames = 0;
-      this.consecutiveHighFrames = 0;
+      this.lowFpsDurationMs = 0;
+      this.highFpsDurationMs = 0;
     }
   }
 
@@ -257,8 +261,8 @@ class AdaptiveQualityManager {
    */
   reset(): void {
     this.frameTimes = [];
-    this.consecutiveLowFrames = 0;
-    this.consecutiveHighFrames = 0;
+    this.lowFpsDurationMs = 0;
+    this.highFpsDurationMs = 0;
     this.lastChangeTime = 0;
   }
 }

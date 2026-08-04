@@ -1,6 +1,7 @@
 import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Text, Billboard, RoundedBox } from '@react-three/drei';
+import { Billboard, RoundedBox } from '@react-three/drei';
+import { SceneText as Text } from './shared/SceneText';
 
 // NOTE: The "unsupported GPOS table" warnings in the console are expected and harmless.
 // They originate from the font parser in the underlying Troika library used by @react-three/drei's Text component.
@@ -119,7 +120,7 @@ export const HolographicDisplays: React.FC = () => {
       />
 
       <HoloPanel
-        position={[30, 10, 28]}
+        position={[24, 9, 20]}
         title="ZONE 4: PACKING"
         value={`${zoneMetrics.bagsPerMin} bags/min`}
         subValue={`Today: ${zoneMetrics.totalBags.toLocaleString()} bags`}
@@ -204,7 +205,7 @@ const HoloPanel: React.FC<HoloPanelProps> = React.memo(
     });
 
     return (
-      <group ref={groupRef} position={position}>
+      <group ref={groupRef} position={position} scale={0.6}>
         <Billboard>
           {/* Glow background - depthWrite false to prevent z-fighting */}
           <mesh ref={glowRef} position={[0, 0, -0.1]}>
@@ -287,9 +288,12 @@ const DataParticles: React.FC = React.memo(() => {
   const positions = React.useMemo(() => {
     const pos = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * 80;
-      pos[i * 3 + 1] = Math.random() * 20 + 5;
-      pos[i * 3 + 2] = (Math.random() - 0.5) * 60;
+      const xSequence = ((i * 73) % 101) / 100;
+      const ySequence = ((i * 47 + 19) % 103) / 102;
+      const zSequence = ((i * 89 + 31) % 107) / 106;
+      pos[i * 3] = (xSequence - 0.5) * 80;
+      pos[i * 3 + 1] = ySequence * 20 + 5;
+      pos[i * 3 + 2] = (zSequence - 0.5) * 60;
     }
     return pos;
   }, [count]);

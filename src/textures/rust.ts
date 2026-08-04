@@ -6,7 +6,7 @@
  */
 
 import * as THREE from 'three';
-import { getTexture, fbmNoise, hash, createDataTexture } from '../utils/textureGenerator';
+import { getTexture, fbmNoise, hash, createColorDataTexture } from '../utils/textureGenerator';
 
 export type StreakDirection = 'down' | 'radial';
 
@@ -83,6 +83,6 @@ export const generateRustPattern = (
       }
     }
 
-    return createDataTexture(data, size, size);
+    return createColorDataTexture(data, size, size);
   });
 };

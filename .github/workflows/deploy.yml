@@ -17,8 +17,12 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      V030_SOURCE_SHA: 20bcbe044fc6d7ca7275999fec63ddce83fd49d0
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -29,54 +33,27 @@ jobs:
       - name: Install dependencies
         run: npm ci --force
 
-      # Build v0.30 (current) to /v0.30/ subdirectory
-      - name: Build v0.30 current
-        run: VERSION=v0.30 npm run build
-
-      - name: Setup staging with v0.30 current
+      - name: Validate release source
         run: |
-          # Vite copies public/ wholesale. Remove versioned archives before
-          # staging, because they are copied exactly once in the steps below.
-          rm -rf dist/v0.10 dist/v0.20 dist/v0.30
-          mkdir -p staging/v0.30
-          cp -r dist/* staging/v0.30/
+          npm run typecheck
+          npm run lint
+          npm run format:check
+          npm test
 
-      # v0.20 is pre-built in public/v0.20/ - copy to staging
-      - name: Copy v0.20 to staging
-        run: cp -r public/v0.20 staging/v0.20
-
-      # v0.10 is pre-built in public/v0.10/ - copy to staging (legacy)
-      - name: Copy v0.10 to staging
-        run: cp -r public/v0.10 staging/v0.10
-
-      # Copy music files to legacy versions for music backport
-      - name: Copy music files to v0.10
-        run: cp public/*.mp3 staging/v0.10/
-
-      - name: Copy music files to v0.20
-        run: cp public/*.mp3 staging/v0.20/
-
-      # Root redirects to v0.30 (current)
-      - name: Create root redirect
+      - name: Rebuild the deployed v0.30 release for preservation
         run: |
-          cat > staging/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="UTF-8">
-            <meta http-equiv="refresh" content="0;url=/v0.30/">
-            <title>Redirecting to MillOS</title>
-          </head>
-          <body>
-            <p>Redirecting to <a href="/v0.30/">MillOS v0.30</a>...</p>
-          </body>
-          </html>
-          EOF
+          git worktree add --detach "$RUNNER_TEMP/millos-v030" "$V030_SOURCE_SHA"
+          npm ci --force --ignore-scripts --prefix "$RUNNER_TEMP/millos-v030"
+          VERSION=v0.30 npm run build --prefix "$RUNNER_TEMP/millos-v030"
 
-      - name: Copy crawl control files to the site root
+      - name: Build current release
+        run: VERSION="v$(node -p "require('./package.json').version.split('.').slice(0, 2).join('.')")" npm run build
+
+      - name: Stage current and archived releases
         run: |
-          cp public/robots.txt staging/robots.txt
-          cp public/sitemap.xml staging/sitemap.xml
+          npm run build:pages-staging -- \
+            --archive-build "v0.30=$RUNNER_TEMP/millos-v030/dist" \
+            --archive-source "v0.30=$V030_SOURCE_SHA"
 
       - name: Setup Pages
         uses: actions/configure-pages@v6

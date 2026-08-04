@@ -2,8 +2,10 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { safeJSONStorage } from './storage';
 import { audioManager } from '../utils/audioManager';
+import { logger } from '../utils/logger';
 import { useProductionStore } from './productionStore';
 import { useSafetyStore } from './safetyStore';
+import { sanitizeGameSimulationState } from './persistenceMigrations';
 
 export type CelebrationType = 'milestone' | 'zero_incident' | 'target_met' | 'shift_complete';
 
@@ -98,6 +100,24 @@ export interface CrisisState {
   metadata?: Record<string, unknown>;
 }
 
+export type SafetyEventKind = 'facility_stop' | 'fire_drill' | 'crisis';
+export type SafetyEventStage = 'active' | 'acknowledged' | 'cleared';
+
+export interface SafetyEventRecord {
+  id: string;
+  kind: SafetyEventKind;
+  cause: string;
+  severity: CrisisSeverity;
+  simulated: boolean;
+  stage: SafetyEventStage;
+  startedAt: number;
+  response: string;
+  acknowledgedAt?: number;
+  acknowledgementNote?: string;
+  clearedAt?: number;
+  recovery: string;
+}
+
 interface GameSimulationStore {
   // Tab visibility - PERFORMANCE: animations should check this and skip when false
   isTabVisible: boolean;
@@ -158,10 +178,13 @@ interface GameSimulationStore {
   emergencyMachineId: string | null;
   emergencyDrillMode: boolean;
   preEmergencyMachineStatuses: Map<string, string>; // Stores machine statuses before emergency
+  safetyEvents: SafetyEventRecord[];
+  activeSafetyEventId: string | null;
   triggerEmergency: (machineId: string) => void;
   resolveEmergency: () => void;
   startEmergencyDrill: (totalWorkers: number) => void;
   endEmergencyDrill: () => void;
+  acknowledgeSafetyEvent: (eventId: string, note?: string) => void;
 
   // Fire drill metrics
   drillMetrics: DrillMetrics;
@@ -190,6 +213,14 @@ interface GameSimulationStore {
   updateZeroIncidentStreak: (days: number) => void;
   setPackerBellEnabled: (enabled: boolean) => void;
 }
+
+const createDefaultCelebrations = (): GameSimulationStore['celebrations'] => ({
+  lastMilestone: 0,
+  milestoneQueue: [],
+  zeroIncidentStreak: 0,
+  celebrationActive: false,
+  packerBellEnabled: true,
+});
 
 // Supervisor names pool for rotation
 const SUPERVISORS = [
@@ -235,7 +266,7 @@ const getShiftPriorities = (shift: 'morning' | 'afternoon' | 'night'): string[] 
 };
 
 // Calculate expected shift based on game hour (handles midnight crossover correctly)
-const getShiftForHour = (hour: number): 'morning' | 'afternoon' | 'night' => {
+export const getShiftForHour = (hour: number): 'morning' | 'afternoon' | 'night' => {
   // Normalize hour to 0-24 range
   const normalizedHour = ((hour % 24) + 24) % 24;
   if (normalizedHour >= 6 && normalizedHour < 14) return 'morning';
@@ -294,50 +325,68 @@ const createDefaultDrillMetrics = (): DrillMetrics => ({
   finalTimeSeconds: null,
 });
 
-const FIRE_DRILL_ANNOUNCEMENTS = [
-  {
-    message:
-      'Attention all personnel. This is a fire drill. Please proceed to the nearest exit in an orderly fashion. Yes, Dave, that means you too.',
-    type: 'emergency' as const,
-    priority: 4 as const,
-    duration: 20,
-  },
-  {
-    message:
-      'Fire drill initiated. Remember, this is practice for if flour becomes sentient and combustible. Stranger things have happened.',
-    type: 'emergency' as const,
-    priority: 4 as const,
-    duration: 20,
-  },
-  {
-    message:
-      'Emergency evacuation drill in progress. The last person out does NOT win a prize. Please move with purpose.',
-    type: 'emergency' as const,
-    priority: 4 as const,
-    duration: 20,
-  },
-  {
-    message:
-      'Fire drill. Please leave your workstations immediately. The flour will be fine. It has survived worse than your absence.',
-    type: 'emergency' as const,
-    priority: 4 as const,
-    duration: 20,
-  },
-  {
-    message:
-      'This is a drill. Repeat, this is a drill. If this were an actual emergency, you would already be running. Take notes.',
-    type: 'emergency' as const,
-    priority: 4 as const,
-    duration: 20,
-  },
-  {
-    message:
-      'Evacuation drill commencing. Fun fact: the average worker can exit the building in ninety seconds. Let us see if we can beat that.',
-    type: 'emergency' as const,
-    priority: 4 as const,
-    duration: 22,
-  },
-];
+const FIRE_DRILL_ANNOUNCEMENT = {
+  message:
+    'This is a simulated fire drill. Evacuate through the nearest safe exit and report to the assembly point. Do not re-enter until the all clear.',
+  type: 'emergency' as const,
+  priority: 4 as const,
+  channel: 'safety' as const,
+  tone: 'literal' as const,
+  audience: 'all' as const,
+  cooldownMs: 0,
+};
+
+const MAX_SAFETY_EVENTS = 50;
+
+const shouldInterlockForCrisis = (severity: CrisisSeverity): boolean =>
+  severity === 'high' || severity === 'critical';
+
+const haltProductionMachines = (): Map<string, string> => {
+  const productionStore = useProductionStore.getState();
+  const preEmergencyStatuses = new Map<string, string>();
+
+  productionStore.machines.forEach((machine) => {
+    preEmergencyStatuses.set(machine.id, machine.status);
+    if (machine.status === 'running' || machine.status === 'warning') {
+      productionStore.updateMachineStatus(machine.id, 'idle');
+    }
+  });
+
+  return preEmergencyStatuses;
+};
+
+const restoreProductionMachines = (statuses: Map<string, string>): void => {
+  const productionStore = useProductionStore.getState();
+  statuses.forEach((status, machineId) => {
+    const currentMachine = productionStore.machines.find((machine) => machine.id === machineId);
+    if (currentMachine?.status === 'idle') {
+      productionStore.updateMachineStatus(
+        machineId,
+        status as 'running' | 'idle' | 'warning' | 'critical'
+      );
+    }
+  });
+};
+
+const closeSafetyEvent = (
+  events: SafetyEventRecord[],
+  eventId: string | null,
+  recovery: string
+): SafetyEventRecord[] =>
+  events.map((event) =>
+    event.id === eventId
+      ? {
+          ...event,
+          stage: 'cleared',
+          clearedAt: Date.now(),
+          recovery,
+        }
+      : event
+  );
+
+export const selectSafetyHoldActive = (
+  state: Pick<GameSimulationStore, 'emergencyActive' | 'emergencyDrillMode'>
+): boolean => state.emergencyActive || state.emergencyDrillMode;
 
 // Helper to find nearest exit
 const findNearestExit = (x: number, z: number): FireDrillExit => {
@@ -371,7 +420,29 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
       gameDay: 0, // Days elapsed since simulation start
       gameSpeed: 180, // Default: 1 game day = 8 real minutes
 
-      setGameTime: (time) => set({ gameTime: ((time % 24) + 24) % 24 }), // Handle negative wrap
+      setGameTime: (time) => {
+        // Normalize to [0,24) and keep the shift in lock-step with the clock.
+        // A direct time set (e.g. multiplayer sync) must not leave currentShift
+        // stale, or the HUD shows the wrong shift for the displayed hour.
+        const gameTime = ((time % 24) + 24) % 24; // Handle negative wrap
+        const expectedShift = getShiftForHour(gameTime);
+        set((state) =>
+          state.currentShift === expectedShift
+            ? { gameTime }
+            : {
+                gameTime,
+                currentShift: expectedShift,
+                shiftStartTime: Date.now(),
+                shiftData: {
+                  ...state.shiftData,
+                  currentShift: expectedShift,
+                  shiftStartTime: Date.now(),
+                  incomingSupervisor: getSupervisorForShift(expectedShift),
+                  priorities: getShiftPriorities(expectedShift),
+                },
+              }
+        );
+      },
 
       setGameSpeed: (speed) => set({ gameSpeed: speed }),
 
@@ -419,7 +490,10 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
         });
       },
 
-      resetGameState: () =>
+      resetGameState: () => {
+        audioManager.stopEmergencyAlarm();
+        audioManager.stopEmergencyStopAlarm();
+        useSafetyStore.getState().setForkliftEmergencyStop(false);
         set({
           gameTime: 10,
           gameDay: 0,
@@ -427,12 +501,29 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
           shiftData: createDefaultShiftData(),
           currentShift: 'morning',
           shiftStartTime: Date.now(),
+          celebrations: createDefaultCelebrations(),
           crisisState: createDefaultCrisisState(),
-        }),
+          // Emergency/drill/shift-change runtime flags must reset too, or an
+          // active emergency survives the reset (frozen forklifts, evacuation
+          // behavior, alarm overlays) with no way to clear it.
+          emergencyActive: false,
+          emergencyMachineId: null,
+          emergencyDrillMode: false,
+          drillMetrics: createDefaultDrillMetrics(),
+          preEmergencyMachineStatuses: new Map(),
+          safetyEvents: [],
+          activeSafetyEventId: null,
+          shiftChangeActive: false,
+          shiftChangePhase: 'idle',
+        });
+      },
 
       clearPersistedState: () => {
         // Clear localStorage for this store
         localStorage.removeItem('millos-game-simulation');
+        audioManager.stopEmergencyAlarm();
+        audioManager.stopEmergencyStopAlarm();
+        useSafetyStore.getState().setForkliftEmergencyStop(false);
         // Reset to defaults
         set({
           gameTime: 10,
@@ -442,14 +533,19 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
           shiftData: createDefaultShiftData(),
           currentShift: 'morning',
           shiftStartTime: Date.now(),
-          celebrations: {
-            lastMilestone: 0,
-            milestoneQueue: [],
-            zeroIncidentStreak: 0,
-            celebrationActive: false,
-            packerBellEnabled: true,
-          },
+          celebrations: createDefaultCelebrations(),
           crisisState: createDefaultCrisisState(),
+          // Same emergency/shift runtime-flag reset as resetGameState — a
+          // "clear data" that leaves an alarm state running is not a reset.
+          emergencyActive: false,
+          emergencyMachineId: null,
+          emergencyDrillMode: false,
+          drillMetrics: createDefaultDrillMetrics(),
+          preEmergencyMachineStatuses: new Map(),
+          safetyEvents: [],
+          activeSafetyEventId: null,
+          shiftChangeActive: false,
+          shiftChangePhase: 'idle',
         });
       },
 
@@ -745,56 +841,69 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
       emergencyMachineId: null,
       emergencyDrillMode: false,
       preEmergencyMachineStatuses: new Map(),
+      safetyEvents: [],
+      activeSafetyEventId: null,
 
       triggerEmergency: (machineId) => {
-        // Store current machine statuses and stop all machines
-        const productionStore = useProductionStore.getState();
-        const machines = productionStore.machines;
-        const preEmergencyStatuses = new Map<string, string>();
+        const state = get();
+        if (state.emergencyActive || state.crisisState.active || state.emergencyDrillMode) {
+          logger.warn('Cannot trigger a facility stop while another safety state is active');
+          return;
+        }
 
-        // Save current statuses before stopping
-        machines.forEach((m) => {
-          preEmergencyStatuses.set(m.id, m.status);
-        });
+        const preEmergencyStatuses = haltProductionMachines();
+        const startedAt = Date.now();
+        const eventId = `safety-facility-stop-${startedAt}`;
+        useSafetyStore.getState().setForkliftEmergencyStop(true);
 
-        // Set all running/warning machines to idle during emergency
-        machines.forEach((m) => {
-          if (m.status === 'running' || m.status === 'warning') {
-            productionStore.updateMachineStatus(m.id, 'idle');
-          }
-        });
-
-        set({
+        set((current) => ({
           emergencyActive: true,
           emergencyMachineId: machineId,
           preEmergencyMachineStatuses: preEmergencyStatuses,
-        });
+          activeSafetyEventId: eventId,
+          safetyEvents: [
+            ...current.safetyEvents.slice(-(MAX_SAFETY_EVENTS - 1)),
+            {
+              id: eventId,
+              kind: 'facility_stop',
+              cause: machineId,
+              severity: 'critical',
+              simulated: false,
+              stage: 'active',
+              startedAt,
+              response: 'Machines and mobile equipment stopped',
+              recovery: 'Awaiting operator clearance',
+            },
+          ],
+        }));
       },
 
       resolveEmergency: () => {
         const state = get();
-        const productionStore = useProductionStore.getState();
 
         // Preserve drill state if drill is active (resolving emergency shouldn't end drill)
         const isDrillActive = state.emergencyDrillMode && state.drillMetrics.active;
+        if (isDrillActive) return;
+        if (state.crisisState.active) {
+          logger.warn('Resolve the active crisis before clearing its safety interlock');
+          return;
+        }
 
-        // Restore machine statuses from before emergency
-        state.preEmergencyMachineStatuses.forEach((status, machineId) => {
-          // Only restore if machine is currently idle (set by emergency stop)
-          const currentMachine = productionStore.machines.find((m) => m.id === machineId);
-          if (currentMachine && currentMachine.status === 'idle') {
-            // Restore to original status (running, warning, etc.)
-            const validStatus = status as 'running' | 'idle' | 'warning' | 'critical';
-            productionStore.updateMachineStatus(machineId, validStatus);
-          }
-        });
+        restoreProductionMachines(state.preEmergencyMachineStatuses);
+        useSafetyStore.getState().setForkliftEmergencyStop(false);
+        audioManager.stopEmergencyStopAlarm();
 
         set({
-          // Preserve emergency state if drill is active
-          emergencyActive: isDrillActive ? state.emergencyActive : false,
-          emergencyMachineId: isDrillActive ? state.emergencyMachineId : null,
-          emergencyDrillMode: isDrillActive ? state.emergencyDrillMode : false,
+          emergencyActive: false,
+          emergencyMachineId: null,
+          emergencyDrillMode: false,
           preEmergencyMachineStatuses: new Map(),
+          activeSafetyEventId: null,
+          safetyEvents: closeSafetyEvent(
+            state.safetyEvents,
+            state.activeSafetyEventId,
+            'Interlock cleared and prior machine states restored'
+          ),
         });
       },
 
@@ -803,35 +912,50 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
 
       startEmergencyDrill: (totalWorkers: number) => {
         // Mutual exclusion: cannot start drill during active crisis
-        if (get().crisisState.active) {
-          console.warn('Cannot start drill during active crisis');
+        const state = get();
+        if (state.crisisState.active || state.emergencyActive || state.emergencyDrillMode) {
+          logger.warn('Cannot start a drill while another safety state is active');
           return;
         }
 
-        // Start alarm sound and queue funny PA announcement
-        audioManager.startEmergencyAlarm();
-        // Add fire drill announcement to PA system
-        const announcement =
-          FIRE_DRILL_ANNOUNCEMENTS[Math.floor(Math.random() * FIRE_DRILL_ANNOUNCEMENTS.length)];
-        useProductionStore.getState().addAnnouncement({
-          type: announcement.type,
-          message: announcement.message,
-          priority: announcement.priority,
-        });
+        const preEmergencyStatuses = haltProductionMachines();
+        const startedAt = Date.now();
+        const eventId = `safety-fire-drill-${startedAt}`;
 
-        set({
+        // Start the drill alarm and an unequivocal simulated-drill announcement.
+        audioManager.startEmergencyAlarm();
+        useSafetyStore.getState().setForkliftEmergencyStop(true);
+        useProductionStore.getState().addAnnouncement(FIRE_DRILL_ANNOUNCEMENT);
+
+        set((current) => ({
           emergencyActive: true,
           emergencyMachineId: 'DRILL',
           emergencyDrillMode: true,
+          preEmergencyMachineStatuses: preEmergencyStatuses,
+          activeSafetyEventId: eventId,
+          safetyEvents: [
+            ...current.safetyEvents.slice(-(MAX_SAFETY_EVENTS - 1)),
+            {
+              id: eventId,
+              kind: 'fire_drill',
+              cause: 'Scheduled simulated evacuation drill',
+              severity: 'high',
+              simulated: true,
+              stage: 'active',
+              startedAt,
+              response: 'Alarm active, production stopped, workers evacuating',
+              recovery: 'Awaiting all clear',
+            },
+          ],
           drillMetrics: {
             active: true,
-            startTime: Date.now(),
+            startTime: startedAt,
             evacuatedWorkerIds: [],
             totalWorkers,
             evacuationComplete: false,
             finalTimeSeconds: null,
           },
-        });
+        }));
       },
 
       endEmergencyDrill: () => {
@@ -841,16 +965,38 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
 
         // Stop alarm sound
         audioManager.stopEmergencyAlarm();
+        const state = get();
+        restoreProductionMachines(state.preEmergencyMachineStatuses);
+        useSafetyStore.getState().setForkliftEmergencyStop(false);
 
         set({
           emergencyActive: false,
           emergencyMachineId: null,
           emergencyDrillMode: false,
           drillMetrics: createDefaultDrillMetrics(),
+          preEmergencyMachineStatuses: new Map(),
+          activeSafetyEventId: null,
+          safetyEvents: closeSafetyEvent(
+            state.safetyEvents,
+            state.activeSafetyEventId,
+            'All clear issued and prior machine states restored'
+          ),
         });
-        // Reset forklift emergency stop so they can move again (stored in safetyStore)
-        useSafetyStore.getState().setForkliftEmergencyStop(false);
       },
+
+      acknowledgeSafetyEvent: (eventId, note) =>
+        set((state) => ({
+          safetyEvents: state.safetyEvents.map((event) =>
+            event.id === eventId && event.stage === 'active'
+              ? {
+                  ...event,
+                  stage: 'acknowledged',
+                  acknowledgedAt: Date.now(),
+                  acknowledgementNote: note?.trim() || undefined,
+                }
+              : event
+          ),
+        })),
 
       markWorkerEvacuated: (workerId: string) =>
         set((state) => {
@@ -887,27 +1033,64 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
       triggerCrisis: (type, severity, metadata = {}) => {
         const state = get();
         // Mutual exclusion: cannot trigger crisis during active drill
-        if (state.emergencyDrillMode || state.drillMetrics.active) {
-          console.warn('Cannot trigger crisis during active drill');
+        if (state.emergencyDrillMode || state.drillMetrics.active || state.emergencyActive) {
+          logger.warn('Cannot trigger a crisis while another safety state is active');
           return;
         }
         // Only allow one crisis at a time
         if (state.crisisState.active) return;
 
-        set({
+        const startedAt = Date.now();
+        const eventId = `safety-crisis-${type}-${startedAt}`;
+        const requiresInterlock = shouldInterlockForCrisis(severity);
+        const preEmergencyStatuses = requiresInterlock
+          ? haltProductionMachines()
+          : new Map<string, string>();
+        if (requiresInterlock) {
+          useSafetyStore.getState().setForkliftEmergencyStop(true);
+        }
+
+        set((current) => ({
           crisisState: {
             active: true,
             type,
             severity,
-            startTime: Date.now(),
+            startTime: startedAt,
             affectedMachineId: metadata.affectedMachineId as string | undefined,
             metadata,
           },
-        });
+          emergencyActive: requiresInterlock,
+          emergencyMachineId: requiresInterlock ? `CRISIS:${type}` : null,
+          preEmergencyMachineStatuses: preEmergencyStatuses,
+          activeSafetyEventId: eventId,
+          safetyEvents: [
+            ...current.safetyEvents.slice(-(MAX_SAFETY_EVENTS - 1)),
+            {
+              id: eventId,
+              kind: 'crisis',
+              cause: type.replaceAll('_', ' '),
+              severity,
+              simulated: true,
+              stage: 'active',
+              startedAt,
+              response: requiresInterlock
+                ? 'Facility interlock stopped machines and mobile equipment'
+                : 'Crisis monitoring active; facility interlock not required',
+              recovery: 'Awaiting operator resolution',
+            },
+          ],
+        }));
       },
 
-      resolveCrisis: () =>
-        set((state) => ({
+      resolveCrisis: () => {
+        const state = get();
+        const hadInterlock = state.emergencyMachineId?.startsWith('CRISIS:') ?? false;
+        if (hadInterlock) {
+          restoreProductionMachines(state.preEmergencyMachineStatuses);
+          useSafetyStore.getState().setForkliftEmergencyStop(false);
+        }
+
+        set({
           crisisState: {
             ...state.crisisState,
             active: false,
@@ -915,19 +1098,31 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
             affectedMachineId: undefined, // Clear affected machine
             severity: 'medium', // Reset to default severity
           },
-        })),
+          emergencyActive: false,
+          emergencyMachineId: null,
+          preEmergencyMachineStatuses: new Map(),
+          activeSafetyEventId: null,
+          safetyEvents: closeSafetyEvent(
+            state.safetyEvents,
+            state.activeSafetyEventId,
+            hadInterlock
+              ? 'Crisis cleared and prior machine states restored'
+              : 'Crisis monitoring cleared'
+          ),
+        });
+      },
 
       // Celebrations system
-      celebrations: {
-        lastMilestone: 0,
-        milestoneQueue: [],
-        zeroIncidentStreak: 0,
-        celebrationActive: false,
-        packerBellEnabled: true,
-      },
+      celebrations: createDefaultCelebrations(),
 
       triggerCelebration: (type, data = {}) =>
         set((state) => {
+          const milestoneQueue = Array.isArray(state.celebrations?.milestoneQueue)
+            ? state.celebrations.milestoneQueue
+            : [];
+          const previousLastMilestone = Number.isFinite(state.celebrations?.lastMilestone)
+            ? state.celebrations.lastMilestone
+            : 0;
           const celebration: CelebrationEvent = {
             type,
             timestamp: Date.now(),
@@ -938,13 +1133,13 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
 
           // Update milestone tracking for production milestones
           const lastMilestone =
-            type === 'milestone' && data.value ? data.value : state.celebrations.lastMilestone;
+            type === 'milestone' && data.value ? data.value : previousLastMilestone;
 
           return {
             celebrations: {
               ...state.celebrations,
               lastMilestone,
-              milestoneQueue: [...state.celebrations.milestoneQueue, celebration].slice(-5),
+              milestoneQueue: [...milestoneQueue, celebration].slice(-5),
               celebrationActive: true,
             },
           };
@@ -977,6 +1172,54 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
     {
       name: 'millos-game-simulation',
       storage: safeJSONStorage,
+      version: 1,
+      migrate: (persisted) =>
+        sanitizeGameSimulationState(persisted) as unknown as GameSimulationStore,
+      merge: (persisted, current) => {
+        const persistedState = sanitizeGameSimulationState(
+          persisted
+        ) as unknown as Partial<GameSimulationStore>;
+        const persistedCelebrations = persistedState.celebrations;
+        const persistedShiftData = persistedState.shiftData;
+
+        return {
+          ...current,
+          ...persistedState,
+          shiftData: {
+            ...current.shiftData,
+            ...persistedShiftData,
+            shiftProduction: {
+              ...current.shiftData.shiftProduction,
+              ...(persistedShiftData?.shiftProduction ?? {}),
+            },
+            previousShiftNotes:
+              persistedShiftData?.previousShiftNotes ?? current.shiftData.previousShiftNotes,
+            shiftIncidents: persistedShiftData?.shiftIncidents ?? current.shiftData.shiftIncidents,
+            priorities: persistedShiftData?.priorities ?? current.shiftData.priorities,
+            workerAssignments:
+              persistedShiftData?.workerAssignments ?? current.shiftData.workerAssignments,
+            clockedInWorkerIds:
+              persistedShiftData?.clockedInWorkerIds ?? current.shiftData.clockedInWorkerIds,
+            clockedOutWorkerIds:
+              persistedShiftData?.clockedOutWorkerIds ?? current.shiftData.clockedOutWorkerIds,
+            handoffConversations:
+              persistedShiftData?.handoffConversations ?? current.shiftData.handoffConversations,
+          },
+          celebrations: {
+            ...current.celebrations,
+            packerBellEnabled:
+              typeof persistedCelebrations?.packerBellEnabled === 'boolean'
+                ? persistedCelebrations.packerBellEnabled
+                : current.celebrations.packerBellEnabled,
+            zeroIncidentStreak:
+              typeof persistedCelebrations?.zeroIncidentStreak === 'number' &&
+              Number.isFinite(persistedCelebrations.zeroIncidentStreak) &&
+              persistedCelebrations.zeroIncidentStreak >= 0
+                ? persistedCelebrations.zeroIncidentStreak
+                : current.celebrations.zeroIncidentStreak,
+          },
+        };
+      },
       partialize: (state) => ({
         gameTime: state.gameTime,
         gameSpeed: state.gameSpeed,
@@ -1021,13 +1264,7 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
 
         // Initialize celebrations if missing
         if (state && !state.celebrations) {
-          state.celebrations = {
-            lastMilestone: 0,
-            milestoneQueue: [],
-            zeroIncidentStreak: 0,
-            celebrationActive: false,
-            packerBellEnabled: true,
-          };
+          state.celebrations = createDefaultCelebrations();
         }
 
         // Initialize shift data if missing

@@ -141,7 +141,7 @@ export interface TagHistoryPoint {
 }
 
 // ============================================================================
-// Alarm System (ISA-18.2 Compliant)
+// Alarm System (ISA-18.2-informed simulator behavior)
 // ============================================================================
 
 /** Alarm state machine states per ISA-18.2 */
@@ -156,6 +156,9 @@ export type AlarmPriority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
 /** Alarm type based on threshold exceeded */
 export type AlarmType = 'HIHI' | 'HI' | 'LO' | 'LOLO' | 'BAD_QUALITY' | 'RATE_OF_CHANGE';
+
+/** Operator disposition, kept separate from the process alarm state machine. */
+export type AlarmDisposition = 'IN_SERVICE' | 'SHELVED' | 'SUPPRESSED' | 'OUT_OF_SERVICE';
 
 /** Active or historical alarm record */
 export interface Alarm {
@@ -177,8 +180,22 @@ export interface Alarm {
   threshold: number;
   /** When the alarm was raised */
   timestamp: number;
+  /** Latest recurrence of the condition */
+  lastOccurrenceAt?: number;
+  /** Number of occurrences represented by this alarm record */
+  occurrenceCount?: number;
+  /** Engineering unit copied from the source tag */
+  unit?: string;
+  /** Source data quality at the latest occurrence */
+  quality?: Quality;
+  /** Literal condition shown to operators */
+  condition?: string;
+  /** Current operator disposition */
+  disposition?: AlarmDisposition;
   /** Operator who acknowledged (if applicable) */
   acknowledgedBy?: string;
+  /** Optional operator context entered during acknowledgement */
+  acknowledgementNote?: string;
   /** When the alarm was acknowledged */
   acknowledgedAt?: number;
   /** When the alarm cleared (returned to normal) */
@@ -190,6 +207,7 @@ export interface Alarm {
 /** Alarm suppression record */
 export interface AlarmSuppression {
   tagId: string;
+  disposition: Exclude<AlarmDisposition, 'IN_SERVICE'>;
   suppressedAt: number;
   suppressedBy: string;
   reason: string;

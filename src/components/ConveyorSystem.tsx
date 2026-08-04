@@ -1,6 +1,7 @@
 import React, { useRef, useMemo, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Text, Html } from '@react-three/drei';
+import { Html } from '@react-three/drei';
+import { SceneText as Text } from './shared/SceneText';
 import * as THREE from 'three';
 import { useShallow } from 'zustand/react/shallow';
 import { audioManager } from '../utils/audioManager';
@@ -15,9 +16,41 @@ import {
   SAFETY_MATERIALS,
   SHARED_GEOMETRIES,
 } from '../utils/sharedMaterials';
-import { POLYGON_OFFSET } from '../constants/renderLayers';
+import { FLOOR_LAYERS, POLYGON_OFFSET, RENDER_ORDER } from '../constants/renderLayers';
 import { shouldRunThisFrame } from '../utils/frameThrottle';
 import { useModelTextures } from '../utils/machineTextures';
+import { createColorDataTexture, createLinearDataTexture } from '../utils/textureGenerator';
+import { getFlourSackMaps } from '../textures/grain';
+
+// Shared, immutable normal-scale for belt materials (inline `new THREE.Vector2`
+// in JSX re-created the object every render, forcing a material prop diff).
+// Raised from 0.5: the belt normal map is now the only thing carrying cleat
+// relief, so it has to be readable at grazing angles.
+const BELT_NORMAL_SCALE = new THREE.Vector2(0.85, 0.85);
+
+// === BELT KINEMATICS ====================================================
+// Every rate that the eye can compare is derived from ONE number. Before this,
+// belt surface UV ran at 1.2 units/s, bags at 4-6 units/s and the drive roller
+// rim at 0.36 units/s - cargo visibly slid along a stalled belt.
+
+/** Belt surface speed in world units/sec at productionSpeed 1. */
+const BELT_LINEAR_SPEED = 5.0;
+/** World units covered by one texture tile (belt `repeat.x = length / 4`). */
+const WORLD_UNITS_PER_TILE = 4;
+/** Texture tiles per second at productionSpeed 1. */
+const BELT_UV_RATE = BELT_LINEAR_SPEED / WORLD_UNITS_PER_TILE;
+
+/**
+ * Roller spin is DELIBERATELY not derived from `BELT_LINEAR_SPEED`.
+ *
+ * Physically correct rim speed on a 0.12 m roller is 41.7 rad/s. Roller
+ * matrices are rewritten on a 3-frame throttle, i.e. a ~0.05 s step, which is
+ * 2.08 rad per update against a 12-segment cylinder whose angular period is
+ * 0.524 rad - the roller would strobe or appear to counter-rotate at
+ * productionSpeed 1. These rates read as "spinning fast" without aliasing.
+ */
+const DRIVE_ROLLER_SPIN = 3; // rad/sec at productionSpeed 1
+const IDLER_ROLLER_SPIN = 5; // rad/sec at productionSpeed 1
 
 // Module-level registry for centralized conveyor audio updates
 const conveyorAudioRegistry = new Map<string, { position: THREE.Vector3; isRunning: boolean }>();
@@ -76,65 +109,282 @@ const SUPPORT_LEG_POSITIONS = [-25, -15, -5, 5, 15, 25] as const;
 const ROLLER_SUPPORT_POSITIONS = [-10, 0, 10] as const;
 
 // Pre-computed arrays for iteration (avoid Array.from on each render)
-const DRIVE_ROLLER_INDICES = Array.from({ length: 13 }); // 55/4 ≈ 13 rollers
 
 // Bag movement boundary (wraps from +BOUNDARY to -BOUNDARY)
 const BAG_BOUNDARY = 28;
 
-// Module-level conveyor belt texture singleton (created once, never disposed)
-// This avoids the useState+useEffect pattern which causes extra renders
-let conveyorBeltTextureCache: THREE.CanvasTexture | null = null;
+// === BELT SURFACE TEXTURES ==============================================
+//
+// The old belt map drew its ridges as `fillRect(0, y, size, 3)` - full-width
+// bars at constant V, i.e. running ALONG the travel axis. Scrolling offset.x
+// slid those bars along their own length and produced no perceptible motion.
+// The one feature that WAS constant in U was a `#3b82f6` centre stripe, so the
+// only motion cue on the belt was a row of bright blue bars.
+//
+// Cleats now run ACROSS the belt (constant U, spanning V) and are backed by a
+// matching normal and roughness map generated from ONE height field.
 
-const createConveyorBeltTexture = (): THREE.CanvasTexture => {
-  if (conveyorBeltTextureCache) return conveyorBeltTextureCache;
+/** Generated tile resolution. */
+const BELT_TILE_PX = 512;
+/**
+ * Cleats per tile. A tile is 4 world units, so 8 gives a 0.5 m cleat pitch:
+ * 64 px per cleat (well above the ~4-6 px mip floor) and, at
+ * BELT_LINEAR_SPEED, only 0.33 cleat of travel per 60 Hz frame even at
+ * productionSpeed 2 - comfortably clear of temporal aliasing.
+ */
+const BELT_CLEATS_PER_TILE = 8;
+/** Height-to-slope gain for the belt normal map. */
+const BELT_NORMAL_AMPLITUDE = 12;
 
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
+interface BeltTextureSet {
+  readonly map: THREE.DataTexture;
+  readonly normal: THREE.DataTexture;
+  readonly roughness: THREE.DataTexture;
+}
 
-  // Base belt color - dark rubber
-  ctx.fillStyle = '#1f2937';
-  ctx.fillRect(0, 0, size, size);
+let beltTextureSourceCache: BeltTextureSet | null = null;
 
-  // Add horizontal ridges
-  for (let y = 0; y < size; y += 16) {
-    // Ridge highlight
-    ctx.fillStyle = '#374151';
-    ctx.fillRect(0, y, size, 3);
-    // Ridge shadow
-    ctx.fillStyle = '#111827';
-    ctx.fillRect(0, y + 12, size, 2);
-  }
-
-  // Add subtle texture noise (use seeded random for consistency)
-  const imageData = ctx.getImageData(0, 0, size, size);
-  for (let i = 0; i < imageData.data.length; i += 4) {
-    // Use deterministic noise based on pixel index
-    const noise = Math.sin(i * 0.1) * 0.5 * 10;
-    imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
-    imageData.data[i + 1] = Math.max(0, Math.min(255, imageData.data[i + 1] + noise));
-    imageData.data[i + 2] = Math.max(0, Math.min(255, imageData.data[i + 2] + noise));
-  }
-  ctx.putImageData(imageData, 0, 0);
-
-  // Add center guide line
-  ctx.fillStyle = '#3b82f6';
-  ctx.fillRect(size / 2 - 2, 0, 4, size);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(10, 1);
-
-  conveyorBeltTextureCache = texture;
-  return texture;
+const smoothstep = (edge0: number, edge1: number, x: number): number => {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
 };
 
-// Hook that returns the cached texture (no state, no effects, no re-renders)
-const useConveyorBeltTexture = (): THREE.CanvasTexture => {
-  return useMemo(() => createConveyorBeltTexture(), []);
+/**
+ * Build the belt albedo / normal / roughness trio.
+ *
+ * Lazy: ~0.8 MB of CPU pixel work that must not land in the startup critical
+ * path. The first mounted belt pays for it, every later belt clones.
+ */
+const createBeltTextureSet = (): BeltTextureSet => {
+  if (beltTextureSourceCache) return beltTextureSourceCache;
+
+  const size = BELT_TILE_PX;
+  const pitch = size / BELT_CLEATS_PER_TILE;
+
+  // Cleat profile along U (belt travel): 8 px rise, 16 px crown, 8 px fall,
+  // then a flat valley for the rest of the pitch.
+  const cleat = new Float32Array(size);
+  for (let x = 0; x < size; x++) {
+    const p = x % pitch;
+    cleat[x] = smoothstep(0, 8, p) * (1 - smoothstep(pitch * 0.375, pitch * 0.5, p));
+  }
+
+  // Lane profile across V: worn-down edges, and a polished centre lane where
+  // product has been riding.
+  const lane = new Float32Array(size);
+  const laneMask = new Float32Array(size);
+  for (let y = 0; y < size; y++) {
+    const v = y / size;
+    const edge = smoothstep(0, 0.06, v) * (1 - smoothstep(0.94, 1, v));
+    const centre = 1 - smoothstep(0.16, 0.2, Math.abs(v - 0.5));
+    laneMask[y] = centre;
+    lane[y] = (0.45 + 0.55 * edge) * (1 - 0.45 * centre);
+  }
+
+  const height = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      // Deterministic rubber grain. Periods ~18 px and ~13 px, both above the
+      // mip floor, so this survives minification instead of averaging flat.
+      const grain = Math.sin(x * 0.35 + y * 0.21) * 0.5 + Math.sin(x * 0.11 - y * 0.47 + 1.7) * 0.5;
+      height[y * size + x] = cleat[x] * lane[y] + grain * 0.04;
+    }
+  }
+
+  const albedo = new Uint8Array(size * size * 4);
+  const normal = new Uint8Array(size * size * 4);
+  const roughness = new Uint8Array(size * size * 4);
+
+  // Dark rubber. Authored against the sRGB transfer function - verified
+  // offline at mean 0.052 linear (valley 0.020, crown 0.130), which is real
+  // conveyor-rubber reflectance.
+  //
+  // These bytes are NOT the old ones. The previous canvas was never tagged
+  // sRGB, so `#1f2937` was fed to the shader as 0.122 linear; tagging that same
+  // byte correctly would have dropped it to 0.014 - i.e. black - which is the
+  // opposite of fixing "belts read as flat dark quads".
+  const valley = [54, 56, 60];
+  const crown = [96, 100, 106];
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4;
+      const hc = Math.min(1, Math.max(0, cleat[x] * lane[y]));
+
+      // --- albedo -------------------------------------------------------
+      const noise = Math.sin((x * 7 + y * 13) * 0.1) * 5;
+      // Polished lane sits slightly darker and much shinier than the cleats.
+      const laneDarken = 1 - 0.12 * laneMask[y];
+      for (let c = 0; c < 3; c++) {
+        const value = (valley[c] + (crown[c] - valley[c]) * hc) * laneDarken + noise;
+        albedo[i + c] = Math.max(0, Math.min(255, Math.round(value)));
+      }
+      albedo[i + 3] = 255;
+
+      // --- normal (signed central differences, X and Y independent) ------
+      const xm = (x - 1 + size) % size;
+      const xp = (x + 1) % size;
+      const ym = (y - 1 + size) % size;
+      const yp = (y + 1) % size;
+      const dhdx = (height[y * size + xp] - height[y * size + xm]) * BELT_NORMAL_AMPLITUDE;
+      const dhdy = (height[yp * size + x] - height[ym * size + x]) * BELT_NORMAL_AMPLITUDE;
+      const nx = -dhdx;
+      const ny = -dhdy;
+      const len = Math.sqrt(nx * nx + ny * ny + 1);
+      normal[i] = Math.round(((nx / len) * 0.5 + 0.5) * 255);
+      normal[i + 1] = Math.round(((ny / len) * 0.5 + 0.5) * 255);
+      normal[i + 2] = Math.round((1 / len) * 0.5 * 255 + 127.5);
+      normal[i + 3] = 255;
+
+      // --- roughness ----------------------------------------------------
+      // Written to R, G AND B: three samples `roughnessMap.g`. An R-only map
+      // multiplies material roughness by zero.
+      const rough = (0.92 - 0.37 * hc) * (1 - laneMask[y]) + 0.42 * laneMask[y];
+      const byte = Math.round(Math.max(0, Math.min(1, rough)) * 255);
+      roughness[i] = byte;
+      roughness[i + 1] = byte;
+      roughness[i + 2] = byte;
+      roughness[i + 3] = 255;
+    }
+  }
+
+  beltTextureSourceCache = {
+    map: createColorDataTexture(albedo, size, size), // sRGB - hand-authored albedo
+    normal: createLinearDataTexture(normal, size, size), // linear - data, not colour
+    roughness: createLinearDataTexture(roughness, size, size),
+  };
+  return beltTextureSourceCache;
+};
+
+/**
+ * Each conveyor owns its animated texture transforms. Sharing the module-level
+ * source directly makes every mounted belt advance the same offset each frame.
+ * three keeps separate `mapTransform` / `normalMapTransform` /
+ * `roughnessMapTransform` uniforms, so all three offsets must be advanced in
+ * lockstep or the relief slides off the albedo.
+ */
+const useConveyorBeltTextures = (length: number, anisotropy: number): BeltTextureSet => {
+  const source = useMemo(() => createBeltTextureSet(), []);
+
+  const textures = useMemo(() => {
+    const repeatX = Math.max(1, length / WORLD_UNITS_PER_TILE);
+    const cloneBelt = (texture: THREE.DataTexture): THREE.DataTexture => {
+      const clone = texture.clone();
+      clone.wrapS = THREE.RepeatWrapping;
+      clone.wrapT = THREE.RepeatWrapping;
+      clone.repeat.set(repeatX, 1);
+      // A 55 m belt at 0.4-0.65 resolution scale shimmers badly without this.
+      clone.anisotropy = anisotropy;
+      clone.needsUpdate = true;
+      return clone;
+    };
+    return {
+      map: cloneBelt(source.map),
+      normal: cloneBelt(source.normal),
+      roughness: cloneBelt(source.roughness),
+    };
+  }, [length, source, anisotropy]);
+
+  useEffect(
+    () => () => {
+      textures.map.dispose();
+      textures.normal.dispose();
+      textures.roughness.dispose();
+    },
+    [textures]
+  );
+
+  return textures;
+};
+
+// === BELT CONTACT DECAL =================================================
+
+let beltContactTextureCache: THREE.DataTexture | null = null;
+
+/**
+ * 1x64 vertical alpha ramp used as an ambient contact shadow under each belt.
+ *
+ * A 55 m x 2.2 m structure floating 0.5 m off the floor laid down almost
+ * nothing, so the belt read as pasted onto the slab. One triangle pair and one
+ * texture fetch reads as contact darkening at EVERY tier - including `low`,
+ * where there is no shadow-casting light at all.
+ */
+const getBeltContactTexture = (): THREE.DataTexture => {
+  if (beltContactTextureCache) return beltContactTextureCache;
+
+  const height = 64;
+  const data = new Uint8Array(height * 4);
+  for (let y = 0; y < height; y++) {
+    const v = (y + 0.5) / height;
+    const t = Math.abs(v * 2 - 1);
+    const alpha = 0.42 * (1 - smoothstep(0.5, 1, t));
+    data[y * 4] = 0;
+    data[y * 4 + 1] = 0;
+    data[y * 4 + 2] = 0;
+    data[y * 4 + 3] = Math.round(alpha * 255);
+  }
+
+  beltContactTextureCache = createColorDataTexture(data, 1, height);
+  return beltContactTextureCache;
+};
+
+let beltContactMaterialCache: THREE.MeshBasicMaterial | null = null;
+
+const getBeltContactMaterial = (): THREE.MeshBasicMaterial => {
+  if (beltContactMaterialCache) return beltContactMaterialCache;
+  beltContactMaterialCache = new THREE.MeshBasicMaterial({
+    color: '#000000',
+    map: getBeltContactTexture(),
+    transparent: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: POLYGON_OFFSET.standard.factor,
+    polygonOffsetUnits: POLYGON_OFFSET.standard.units,
+    toneMapped: false,
+  });
+  return beltContactMaterialCache;
+};
+
+/**
+ * Ambient contact shadow under a belt run.
+ *
+ * Mounted by `ConveyorSystem` in WORLD space rather than inside `ConveyorBelt`:
+ * the central spine belt is wrapped in a group that already carries the 0.5
+ * riser and a 90-degree Y rotation, so a decal positioned relative to the belt
+ * component would float half a metre above the floor on that run.
+ *
+ * Y and polygon offset both come from `renderLayers.ts` - never invent a new
+ * floor height (see the z-fighting decision tree in CLAUDE.md).
+ */
+const BeltContactShadow: React.FC<{
+  x: number;
+  z: number;
+  length: number;
+  width?: number;
+  rotationY?: number;
+}> = React.memo(({ x, z, length, width = 3.2, rotationY = 0 }) => (
+  <mesh
+    position={[x, FLOOR_LAYERS.wornPrimary, z]}
+    rotation={[-Math.PI / 2, 0, rotationY]}
+    renderOrder={RENDER_ORDER.floorEffects}
+    material={getBeltContactMaterial()}
+  >
+    <planeGeometry args={[length, width]} />
+  </mesh>
+));
+
+const cloneConveyorTexture = (
+  source: THREE.Texture | null | undefined,
+  repeatX: number
+): THREE.Texture | null => {
+  if (!source) return null;
+
+  const texture = source.clone();
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(repeatX, 1);
+  texture.needsUpdate = true;
+  return texture;
 };
 
 // Centralized audio manager component - updates all conveyors in one pass
@@ -168,7 +418,6 @@ const BagAnimationManager: React.FC<{
   productionSpeed: number;
 }> = ({ productionSpeed }) => {
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
-  const quality = useGraphicsStore(useShallow((state) => state.graphics.quality));
 
   useFrame((_, delta) => {
     // PERFORMANCE: Skip when tab hidden or production stopped
@@ -176,13 +425,11 @@ const BagAnimationManager: React.FC<{
     // Skip if no bags registered
     if (bagAnimationRegistry.size === 0) return;
 
-    // Throttle based on quality (ultra=1, high=2, medium=3, low=4)
-    const movementThrottle =
-      quality === 'ultra' ? 1 : quality === 'high' ? 2 : quality === 'medium' ? 3 : 4;
-    if (!shouldRunThisFrame(movementThrottle)) return;
-
-    // Cap delta to prevent huge jumps when tab regains focus (max 100ms)
-    const cappedDelta = Math.min(delta * movementThrottle, 0.1);
+    // Deliberately NOT throttled. This loop is <= 60 iterations of two float
+    // ops; at a 3-frame throttle bags advanced 0.25 world units per step, which
+    // is visible stepping against a belt surface that now scrolls at 60 Hz.
+    // Cap delta to prevent huge jumps when tab regains focus (max 100ms).
+    const cappedDelta = Math.min(delta, 0.1);
 
     // Update all bags in a single pass (visual only - no production counting)
     bagAnimationRegistry.forEach((state) => {
@@ -249,7 +496,9 @@ export const ConveyorSystem = React.memo<ConveyorSystemProps>(({ productionSpeed
       _bags.push({
         id: `bag-${i}`,
         position: [(Math.random() - 0.5) * 50, 1.1, 24], // Updated to z=24
-        speed: 4 + Math.random() * 2,
+        // Bags ride the belt: exactly belt surface speed, no per-bag variation.
+        // The randomised initial X above is what keeps the wrap staggered.
+        speed: BELT_LINEAR_SPEED,
         rotation: (Math.random() - 0.5) * 0.1,
         // Batch tracking
         batchNumber: generateBatchNumber(i),
@@ -267,6 +516,20 @@ export const ConveyorSystem = React.memo<ConveyorSystemProps>(({ productionSpeed
 
       {/* Centralized bag animation manager - updates all bags in ONE useFrame */}
       <BagAnimationManager productionSpeed={productionSpeed} />
+
+      {/* Ambient contact darkening on the floor beneath every belt run. One
+          triangle pair + one texture fetch each; works at EVERY tier including
+          `low`, where there is no shadow-casting light at all.
+
+          KEEP IN SYNC with the belt placements immediately below: the x/z here
+          mirror <MemoizedConveyorBelt z=24 len=55>, <RollerConveyor z=21> and
+          the rotated central spine belt at z=-1. They live out here, not inside
+          ConveyorBelt, because the spine belt's wrapper group already carries
+          the 0.5 riser and a 90-degree Y rotation - a decal positioned relative
+          to the belt component would float half a metre off the floor there. */}
+      <BeltContactShadow x={0} z={24} length={55} />
+      <BeltContactShadow x={0} z={21} length={30} width={3.6} />
+      <BeltContactShadow x={0} z={-1} length={38} rotationY={Math.PI / 2} />
 
       {/* Main conveyor belt structure - moved to z=24 to align with packers at z=25 */}
       <MemoizedConveyorBelt position={[0, 0.5, 24]} length={55} productionSpeed={productionSpeed} />
@@ -286,6 +549,26 @@ export const ConveyorSystem = React.memo<ConveyorSystemProps>(({ productionSpeed
 
       {/* Roller conveyor to packing with enhanced details - moved to z=21 */}
       <RollerConveyor position={[0, 0.5, 21]} productionSpeed={productionSpeed} />
+
+      {/* Central spine conveyor - longitudinal belt filling the reserved centre gap that
+          runs down the middle of the mill (silos z=-22 toward packing). Oriented along Z
+          via a 90deg Y rotation; spans z=-20..18 at x=0 to match the central-conveyor-belt
+          pathfinding obstacle declared in MillScene (x[-1.8,1.8] z[-20,18]). Without this,
+          the reserved gap + obstacle were a "ghost" (empty floor that agents detoured). */}
+      <group position={[0, 0.5, -1]} rotation={[0, Math.PI / 2, 0]}>
+        <MemoizedConveyorBelt
+          position={[0, 0, 0]}
+          length={38}
+          productionSpeed={productionSpeed}
+          enableAudio={false}
+        />
+      </group>
+      {/* Support legs for the central belt (each rotated 90deg to straddle it in x) */}
+      {[-16, -10, -4, 2, 8, 14].map((zPos) => (
+        <group key={`central-leg-${zPos}`} position={[0, 0, zPos]} rotation={[0, Math.PI / 2, 0]}>
+          <SupportLeg position={[0, 0, 0]} />
+        </group>
+      ))}
 
       {/* Tension adjustment mechanisms */}
       <TensionMechanism position={[-27.5, 0.5, 24]} />
@@ -439,42 +722,55 @@ export const ConveyorBelt: React.FC<{
 }> = ({ position, length, productionSpeed, enableAudio = true }) => {
   const beltRef = useRef<THREE.Mesh>(null);
   const driveRollerRef = useRef<THREE.Group>(null);
+  // Roller count derived from the belt's actual length (one every 4 units,
+  // inset 2 from each end). The old module-level 13-roller constant was tuned
+  // for the length=55 main belt (this formula still yields 13 there) and left
+  // rollers floating 4-12 units past the end of the shorter length=38 central
+  // spine belt.
+  const driveRollerIndices = useMemo(
+    () => Array.from({ length: Math.max(1, Math.floor((length - 4) / 4) + 1) }),
+    [length]
+  );
   const posX = position[0];
   const posY = position[1];
   const posZ = position[2];
   const conveyorId = `conveyor-main-${posX}-${posZ}`;
-  const beltTexture = useConveyorBeltTexture();
-  const { quality, enableProceduralTextures } = useGraphicsStore(
+  const { quality, enableProceduralTextures, anisotropyLevel } = useGraphicsStore(
     useShallow((state) => ({
       quality: state.graphics.quality,
       enableProceduralTextures: state.graphics.enableProceduralTextures,
+      anisotropyLevel: state.graphics.anisotropyLevel,
     }))
   );
+  const beltTextures = useConveyorBeltTextures(length, anisotropyLevel);
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   // Throttle roller animation more aggressively on non-ultra to cut per-frame work
   const movementThrottle = quality === 'ultra' ? 1 : 3;
 
   // Load conveyor PBR textures (high/ultra only)
-  const conveyorTextures = useModelTextures('conveyor');
-
-  // Configure texture tiling for belt length
-  useMemo(() => {
+  const sourceConveyorTextures = useModelTextures('conveyor');
+  const conveyorTextures = useMemo(() => {
     const repeatX = Math.max(1, length / 4);
-    const repeatY = 1;
+    return {
+      color: cloneConveyorTexture(sourceConveyorTextures.color, repeatX),
+      normal: cloneConveyorTexture(sourceConveyorTextures.normal, repeatX),
+      roughness: cloneConveyorTexture(sourceConveyorTextures.roughness, repeatX),
+    };
+  }, [
+    length,
+    sourceConveyorTextures.color,
+    sourceConveyorTextures.normal,
+    sourceConveyorTextures.roughness,
+  ]);
 
-    if (conveyorTextures.color) {
-      conveyorTextures.color.wrapS = conveyorTextures.color.wrapT = THREE.RepeatWrapping;
-      conveyorTextures.color.repeat.set(repeatX, repeatY);
-    }
-    if (conveyorTextures.normal) {
-      conveyorTextures.normal.wrapS = conveyorTextures.normal.wrapT = THREE.RepeatWrapping;
-      conveyorTextures.normal.repeat.set(repeatX, repeatY);
-    }
-    if (conveyorTextures.roughness) {
-      conveyorTextures.roughness.wrapS = conveyorTextures.roughness.wrapT = THREE.RepeatWrapping;
-      conveyorTextures.roughness.repeat.set(repeatX, repeatY);
-    }
-  }, [conveyorTextures, length]);
+  useEffect(
+    () => () => {
+      conveyorTextures.color?.dispose();
+      conveyorTextures.normal?.dispose();
+      conveyorTextures.roughness?.dispose();
+    },
+    [conveyorTextures]
+  );
 
   // Position vector for audio registry (reused, never recreated)
   const positionVec = useMemo(() => new THREE.Vector3(posX, posY, posZ), [posX, posY, posZ]);
@@ -490,42 +786,66 @@ export const ConveyorBelt: React.FC<{
     };
   }, [conveyorId, enableAudio, posX, posY, posZ, positionVec]);
 
+  // Exactly one map set is bound and scrolled. `enableMachineTextures` is
+  // currently false on every tier so the KTX2 path is dead, but if it is turned
+  // back on the procedural normal/roughness must not be silently dropped.
+  const activeMaps = useMemo(
+    () =>
+      conveyorTextures.color
+        ? {
+            map: conveyorTextures.color,
+            normal: conveyorTextures.normal ?? undefined,
+            roughness: conveyorTextures.roughness ?? undefined,
+          }
+        : {
+            map: beltTextures.map,
+            normal: beltTextures.normal,
+            roughness: beltTextures.roughness,
+          },
+    [conveyorTextures, beltTextures]
+  );
+
   useFrame((_, delta) => {
     // PERFORMANCE: Skip animations when tab hidden or production stopped
     if (!isTabVisible || productionSpeed === 0) return;
     // Skip animations on low graphics
     if (quality === 'low') return;
+
+    // UV SCROLL RUNS EVERY FRAME, OUTSIDE THE THROTTLE. This is three float
+    // writes. At the previous 3-frame throttle the belt advanced a full cleat
+    // per update and simply looked stationary - the 60 Hz write is a
+    // requirement of the cleats reading as motion at all, not polish.
+    const uvDelta = Math.min(delta, 0.1);
+    const scrollAmount = uvDelta * productionSpeed * BELT_UV_RATE;
+    // three keeps a SEPARATE transform uniform per map slot, so all three
+    // offsets must advance together or the relief slides off the albedo.
+    activeMaps.map.offset.x = (activeMaps.map.offset.x + scrollAmount) % 1;
+    if (activeMaps.normal) {
+      activeMaps.normal.offset.x = (activeMaps.normal.offset.x + scrollAmount) % 1;
+    }
+    if (activeMaps.roughness) {
+      activeMaps.roughness.offset.x = (activeMaps.roughness.offset.x + scrollAmount) % 1;
+    }
+
+    // Roller matrix work stays throttled - see DRIVE_ROLLER_SPIN.
     if (!shouldRunThisFrame(movementThrottle)) return;
-
-    // Cap delta to prevent huge jumps when tab regains focus (max 100ms)
     const cappedDelta = Math.min(delta * movementThrottle, 0.1);
-
-    // Animate belt texture scrolling - wrap to prevent float precision issues
-    const scrollAmount = cappedDelta * productionSpeed * 0.3;
-    if (beltTexture) {
-      beltTexture.offset.x = (beltTexture.offset.x + scrollAmount) % 1;
-    }
-    // Also animate PBR textures if available
-    if (conveyorTextures.color) {
-      conveyorTextures.color.offset.x = (conveyorTextures.color.offset.x + scrollAmount) % 1;
-    }
-    if (conveyorTextures.normal) {
-      conveyorTextures.normal.offset.x = (conveyorTextures.normal.offset.x + scrollAmount) % 1;
-    }
-    if (conveyorTextures.roughness) {
-      conveyorTextures.roughness.offset.x =
-        (conveyorTextures.roughness.offset.x + scrollAmount) % 1;
-    }
 
     // Animate drive rollers - wrap to prevent float precision issues
     if (driveRollerRef.current) {
       driveRollerRef.current.rotation.z =
-        (driveRollerRef.current.rotation.z + cappedDelta * productionSpeed * 3) % (Math.PI * 2);
+        (driveRollerRef.current.rotation.z + cappedDelta * productionSpeed * DRIVE_ROLLER_SPIN) %
+        (Math.PI * 2);
     }
     // Audio updates now handled by centralized ConveyorAudioManager
   });
 
   const showDetails = enableProceduralTextures;
+  // The motor housing is the only detail group that sits OUTSIDE the frame box
+  // (z=1.3 against a frame half-depth of 1.1), so it is the only one worth
+  // ungating. The 13 drive rollers per belt are fully enclosed by that frame -
+  // showing them costs draw calls for geometry the camera can never see.
+  const showMotor = quality !== 'low';
 
   return (
     <group position={position}>
@@ -533,12 +853,16 @@ export const ConveyorBelt: React.FC<{
       <mesh ref={beltRef} receiveShadow position={[0, 0.3, 0]}>
         <boxGeometry args={[length, 0.1, 2]} />
         <meshStandardMaterial
-          color={conveyorTextures.color ? '#ffffff' : undefined}
-          map={conveyorTextures.color || beltTexture}
-          normalMap={conveyorTextures.normal}
-          normalScale={conveyorTextures.normal ? new THREE.Vector2(0.5, 0.5) : undefined}
-          roughnessMap={conveyorTextures.roughness}
-          roughness={0.8}
+          // No `color`: the albedo map is now correctly tagged sRGB, so any
+          // tint here would multiply the same hue in twice.
+          map={activeMaps.map}
+          normalMap={activeMaps.normal}
+          normalScale={BELT_NORMAL_SCALE}
+          roughnessMap={activeMaps.roughness}
+          // 1.0 so the roughness map is the sole authority (three multiplies).
+          roughness={1}
+          metalness={0}
+          envMapIntensity={0.55}
         />
       </mesh>
 
@@ -550,7 +874,7 @@ export const ConveyorBelt: React.FC<{
 
       {/* Drive rollers at intervals - NO SHADOWS for small rotating parts */}
       {showDetails &&
-        DRIVE_ROLLER_INDICES.map((_, i) => {
+        driveRollerIndices.map((_, i) => {
           const x = -length / 2 + 2 + i * 4;
           return (
             <group key={i} ref={i === 0 ? driveRollerRef : undefined} position={[x, 0.15, 0]}>
@@ -589,7 +913,7 @@ export const ConveyorBelt: React.FC<{
         })}
 
       {/* Motor housing at one end */}
-      {showDetails && (
+      {showMotor && (
         <group position={[-length / 2 + 1, -0.1, 1.3]}>
           <mesh castShadow>
             <boxGeometry args={[0.8, 0.6, 0.5]} />
@@ -726,7 +1050,8 @@ export const RollerConveyor: React.FC<{
     for (let i = 0; i < ROLLER_COUNT; i++) {
       const speedVariation = 1 + Math.sin(i * 0.5) * 0.1;
       rotationsRef.current[i] =
-        (rotationsRef.current[i] + cappedDelta * productionSpeed * 5 * speedVariation) %
+        (rotationsRef.current[i] +
+          cappedDelta * productionSpeed * IDLER_ROLLER_SPIN * speedVariation) %
         (Math.PI * 2);
 
       // Update instance matrix with new rotation (reuse module-level Euler)
@@ -741,7 +1066,10 @@ export const RollerConveyor: React.FC<{
     // Audio updates now handled by centralized ConveyorAudioManager
   });
 
-  const showDetails = enableProceduralTextures;
+  // `enableProceduralTextures` is false on every tier, so this used to hide the
+  // axles unconditionally. They are one instanced draw call; gate them on the
+  // tier instead and leave the store flag meaning "generate texture atlases".
+  const showDetails = enableProceduralTextures || quality !== 'low';
 
   return (
     <group position={position}>
@@ -763,10 +1091,15 @@ export const RollerConveyor: React.FC<{
 
       {/* Instanced Rollers - 25 rollers in 1 draw call - NO SHADOW for rotating parts */}
       <instancedMesh ref={rollersRef} args={[ROLLER_GEOMETRY, undefined, ROLLER_COUNT]}>
+        {/* KEPT as a colour, not reset to white: this material has NO albedo
+            map, so `color` IS its albedo (and, at metalness 0.8, its specular
+            F0 tint). Lifted to a galvanised-steel F0 and given envMapIntensity
+            now that scene.environment exists for it to reflect. */}
         <meshStandardMaterial
-          color={showDetails ? '#ffffff' : '#94a3b8'}
-          metalness={0.8}
-          roughness={0.2}
+          color="#c8ccd0"
+          metalness={0.85}
+          roughness={0.28}
+          envMapIntensity={1.15}
         />
       </instancedMesh>
 
@@ -802,6 +1135,101 @@ export const RollerConveyor: React.FC<{
   );
 };
 
+// === FLOUR SACK ==========================================================
+
+/**
+ * Slumped sack silhouette, built ONCE at module level.
+ *
+ * The bags were 60 identical sharp-edged boxes. A subdivided box with its
+ * middle ring pushed outward and its top gathered reads as a filled sack for
+ * zero runtime cost - the alternative (per-bag geometry) would allocate 60
+ * BufferGeometries.
+ */
+const createFlourSackGeometry = (): THREE.BufferGeometry => {
+  const geometry = new THREE.BoxGeometry(0.6, 0.5, 0.9, 3, 2, 3);
+  const position = geometry.attributes.position as THREE.BufferAttribute;
+
+  for (let i = 0; i < position.count; i++) {
+    let x = position.getX(i);
+    const y = position.getY(i);
+    let z = position.getZ(i);
+
+    // Bulge outward through the middle, pinned at the flat top and bottom.
+    const bulge = 0.055 * (1 - Math.min(1, Math.abs(y) / 0.25));
+    const radial = Math.hypot(x, z);
+    if (radial > 1e-4) {
+      x += (x / radial) * bulge;
+      z += (z / radial) * bulge;
+    }
+
+    // Gathered, sewn top.
+    if (y > 0.15) {
+      const pinch = 1 - 0.35 * ((y - 0.15) / 0.1);
+      x *= pinch;
+      z *= pinch;
+    }
+
+    position.setXYZ(i, x, y, z);
+  }
+
+  position.needsUpdate = true;
+  geometry.computeVertexNormals();
+  return geometry;
+};
+
+let flourSackGeometryCache: THREE.BufferGeometry | null = null;
+const getFlourSackGeometry = (): THREE.BufferGeometry => {
+  if (!flourSackGeometryCache) flourSackGeometryCache = createFlourSackGeometry();
+  return flourSackGeometryCache;
+};
+
+/**
+ * Two shared sack materials (idle + hovered) instead of 60 inline ones.
+ *
+ * `color` is WHITE on purpose. The grain generator's bytes are now correctly
+ * tagged sRGB, so the albedo map already carries the cloth hue; the old
+ * `#fef3c7` was compensating for the map not being bound at all and would now
+ * multiply the same cream in twice.
+ */
+let flourSackMaterialCache: {
+  base: THREE.MeshStandardMaterial;
+  hovered: THREE.MeshStandardMaterial;
+} | null = null;
+
+const getFlourSackMaterials = () => {
+  if (flourSackMaterialCache) return flourSackMaterialCache;
+
+  const source = getFlourSackMaps();
+  const tile = (texture: THREE.Texture): THREE.Texture => {
+    const clone = texture.clone();
+    clone.wrapS = THREE.RepeatWrapping;
+    clone.wrapT = THREE.RepeatWrapping;
+    clone.repeat.set(2, 2);
+    clone.needsUpdate = true;
+    return clone;
+  };
+
+  const base = new THREE.MeshStandardMaterial({
+    color: '#ffffff',
+    map: tile(source.map),
+    normalMap: tile(source.normal),
+    normalScale: new THREE.Vector2(0.6, 0.6),
+    roughnessMap: tile(source.roughness),
+    roughness: 1,
+    metalness: 0,
+    envMapIntensity: 0.7,
+  });
+
+  const hovered = base.clone();
+  hovered.emissive = new THREE.Color('#fbbf24');
+  // Stays under 1.0 linear, so this is safe on `low` where there is no composer
+  // and `toneMapped` clamping would flatten a brighter value to white.
+  hovered.emissiveIntensity = 0.12;
+
+  flourSackMaterialCache = { base, hovered };
+  return flourSackMaterialCache;
+};
+
 // FlourBagMesh - now uses centralized animation via BagAnimationManager (15-60 bags → 1 useFrame)
 const FlourBagMesh: React.FC<{ data: FlourBag }> = React.memo(({ data }) => {
   const ref = useRef<THREE.Group>(null);
@@ -827,8 +1255,12 @@ const FlourBagMesh: React.FC<{ data: FlourBag }> = React.memo(({ data }) => {
     };
   }, [data.id, data.speed, data.position]);
 
+  // The troika <Text> labels below stay gated on `enableProceduralTextures`
+  // (false on every tier). Each label is a separate draw call with its own SDF
+  // atlas upload; 60 bags x 2 labels is 120 calls against a ~1200-call scene.
   const showDetails = enableProceduralTextures;
   const qualityColor = QUALITY_COLORS[data.quality];
+  const sackMaterials = getFlourSackMaterials();
 
   // Extract position values for stable initial position (animated via ref after mount)
   const initPosX = data.position[0];
@@ -848,15 +1280,12 @@ const FlourBagMesh: React.FC<{ data: FlourBag }> = React.memo(({ data }) => {
       onPointerOut={() => setHovered(false)}
     >
       {/* Bag body - main object keeps shadow */}
-      <mesh castShadow position={[0, 0.25, 0]}>
-        <boxGeometry args={[0.6, 0.5, 0.9]} />
-        <meshStandardMaterial
-          color={hovered ? '#fff7ed' : '#fef3c7'}
-          roughness={0.9}
-          emissive={hovered ? '#fbbf24' : '#000000'}
-          emissiveIntensity={hovered ? 0.1 : 0}
-        />
-      </mesh>
+      <mesh
+        castShadow
+        position={[0, 0.25, 0]}
+        geometry={getFlourSackGeometry()}
+        material={hovered ? sackMaterials.hovered : sackMaterials.base}
+      />
 
       {/* Quality-colored label stripe - z offset increased to 0.48 to prevent z-fighting with bag front face at z=0.45 */}
       <mesh position={[0, 0.25, 0.48]}>

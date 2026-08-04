@@ -15,6 +15,7 @@ export const SpatialAudioTracker: React.FC = () => {
   // PERF FIX: Use getState() instead of subscription to avoid re-renders on gameTime change
   const lastCameraPosRef = useRef<[number, number, number]>([Infinity, Infinity, Infinity]);
   const lastGameTimeRef = useRef<number | null>(null);
+  const lastWeatherRef = useRef<string | null>(null);
 
   useFrame(() => {
     // Spatial audio is fine at ~30fps; throttle to cut per-frame overhead
@@ -33,10 +34,14 @@ export const SpatialAudioTracker: React.FC = () => {
 
     // Update time-of-day audio only when the store value changes
     // PERF FIX: Read from getState() instead of subscription
-    const gameTime = useGameSimulationStore.getState().gameTime;
+    const { gameTime, weather } = useGameSimulationStore.getState();
     if (lastGameTimeRef.current !== gameTime) {
       audioManager.updateTimeOfDay(gameTime);
       lastGameTimeRef.current = gameTime;
+    }
+    if (lastWeatherRef.current !== weather) {
+      audioManager.updateWeather(weather);
+      lastWeatherRef.current = weather;
     }
   });
 

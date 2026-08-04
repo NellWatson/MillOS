@@ -6,45 +6,67 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 
+export type TruckDock = 'receiving' | 'shipping';
+
+export interface DockSchedule {
+  truckDocked: boolean;
+  nextArrivalMinutes: number;
+  lastDepartureSimulationMinutes: number | null;
+  departureCount: number;
+}
+
 export interface TruckScheduleState {
-  receiving: {
-    truckDocked: boolean;
-    nextArrivalMinutes: number;
-    lastDeparture: Date | null;
-  };
-  shipping: {
-    truckDocked: boolean;
-    nextArrivalMinutes: number;
-    lastDeparture: Date | null;
-  };
+  receiving: DockSchedule;
+  shipping: DockSchedule;
 }
 
 export interface TruckScheduleStore {
   truckSchedule: TruckScheduleState;
-  setTruckDocked: (dock: 'receiving' | 'shipping', docked: boolean) => void;
-  updateNextArrival: (dock: 'receiving' | 'shipping', minutes: number) => void;
-  recordTruckDeparture: (dock: 'receiving' | 'shipping') => void;
+  setTruckDocked: (dock: TruckDock, docked: boolean) => void;
+  updateNextArrival: (dock: TruckDock, minutes: number) => void;
+  recordTruckDeparture: (dock: TruckDock, simulationMinutes: number) => void;
   isAnyTruckDocked: () => boolean;
-  getTimeUntilNextArrival: (dock: 'receiving' | 'shipping') => number;
+  getTimeUntilNextArrival: (dock: TruckDock) => number;
   tickArrivals: (deltaMinutes: number) => void;
+  resetTruckSchedule: () => void;
 }
 
-const initialTruckSchedule: TruckScheduleState = {
+const ARRIVAL_CADENCE_MINUTES = {
+  receiving: [12, 18, 24, 15],
+  shipping: [20, 14, 26, 17],
+} as const satisfies Record<TruckDock, readonly number[]>;
+
+/**
+ * Deterministic arrival cadence used by replays and runtime scheduling.
+ * departureCount is one-based: the first completed departure selects item 0.
+ */
+export function getDeterministicNextArrivalMinutes(
+  dock: TruckDock,
+  departureCount: number
+): number {
+  const cadence = ARRIVAL_CADENCE_MINUTES[dock];
+  const safeCount = Number.isFinite(departureCount) ? Math.max(1, Math.trunc(departureCount)) : 1;
+  return cadence[(safeCount - 1) % cadence.length];
+}
+
+const createInitialTruckSchedule = (): TruckScheduleState => ({
   receiving: {
     truckDocked: false,
     nextArrivalMinutes: 15,
-    lastDeparture: null,
+    lastDepartureSimulationMinutes: null,
+    departureCount: 0,
   },
   shipping: {
     truckDocked: false,
     nextArrivalMinutes: 20,
-    lastDeparture: null,
+    lastDepartureSimulationMinutes: null,
+    departureCount: 0,
   },
-};
+});
 
 export const useTruckScheduleStore = create<TruckScheduleStore>()(
   subscribeWithSelector((set, get) => ({
-    truckSchedule: initialTruckSchedule,
+    truckSchedule: createInitialTruckSchedule(),
 
     setTruckDocked: (dock, docked) =>
       set((state) => ({
@@ -57,29 +79,37 @@ export const useTruckScheduleStore = create<TruckScheduleStore>()(
         },
       })),
 
-    updateNextArrival: (dock, minutes) =>
+    updateNextArrival: (dock, minutes) => {
+      if (!Number.isFinite(minutes)) return;
       set((state) => ({
         truckSchedule: {
           ...state.truckSchedule,
           [dock]: {
             ...state.truckSchedule[dock],
-            nextArrivalMinutes: minutes,
+            nextArrivalMinutes: Math.max(0, minutes),
           },
         },
-      })),
+      }));
+    },
 
-    recordTruckDeparture: (dock) =>
-      set((state) => ({
-        truckSchedule: {
-          ...state.truckSchedule,
-          [dock]: {
-            ...state.truckSchedule[dock],
-            truckDocked: false,
-            lastDeparture: new Date(),
-            nextArrivalMinutes: 10 + Math.random() * 20, // 10-30 minutes
+    recordTruckDeparture: (dock, simulationMinutes) => {
+      if (!Number.isFinite(simulationMinutes) || simulationMinutes < 0) return;
+      set((state) => {
+        const departureCount = state.truckSchedule[dock].departureCount + 1;
+        return {
+          truckSchedule: {
+            ...state.truckSchedule,
+            [dock]: {
+              ...state.truckSchedule[dock],
+              truckDocked: false,
+              lastDepartureSimulationMinutes: simulationMinutes,
+              departureCount,
+              nextArrivalMinutes: getDeterministicNextArrivalMinutes(dock, departureCount),
+            },
           },
-        },
-      })),
+        };
+      });
+    },
 
     isAnyTruckDocked: () => {
       const { truckSchedule } = get();
@@ -88,7 +118,8 @@ export const useTruckScheduleStore = create<TruckScheduleStore>()(
 
     getTimeUntilNextArrival: (dock) => get().truckSchedule[dock].nextArrivalMinutes,
 
-    tickArrivals: (deltaMinutes: number) =>
+    tickArrivals: (deltaMinutes: number) => {
+      if (!Number.isFinite(deltaMinutes) || deltaMinutes <= 0) return;
       set((state) => {
         const newReceiving = { ...state.truckSchedule.receiving };
         const newShipping = { ...state.truckSchedule.shipping };
@@ -120,6 +151,9 @@ export const useTruckScheduleStore = create<TruckScheduleStore>()(
             shipping: newShipping,
           },
         };
-      }),
+      });
+    },
+
+    resetTruckSchedule: () => set({ truckSchedule: createInitialTruckSchedule() }),
   }))
 );

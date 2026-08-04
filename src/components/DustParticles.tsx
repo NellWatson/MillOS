@@ -1,4 +1,12 @@
-import React, { useRef, useMemo, createContext, useContext, useCallback, useEffect } from 'react';
+import React, {
+  useRef,
+  useMemo,
+  createContext,
+  useContext,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+} from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { FACTORY_ZONE_Z } from '../constants/factoryLayout';
@@ -7,6 +15,59 @@ import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useProductionStore } from '../stores/productionStore';
 import { shouldRunThisFrame, getThrottleLevel } from '../utils/frameThrottle';
 import { useShallow } from 'zustand/react/shallow';
+import { useReducedMotion } from '../hooks/useReducedMotion';
+import { createColorDataTexture } from '../utils/textureGenerator';
+import {
+  buildSpoutRoutes,
+  spoutMachineKey,
+  SPOUT_PIPE_RADIUS,
+  type SpoutRoute,
+} from './flow/spoutRoutes';
+
+// ============================================================
+// Shared particle sprite
+// ============================================================
+
+/**
+ * One 32x32 radial-falloff sprite, shared by every point-based system here.
+ *
+ * Without it a `pointsMaterial` draws an opaque SQUARE: grain and steam popped
+ * as hard-edged tiles against everything behind them. The soft edge is also
+ * what makes the geometry-intersection seam nearly invisible without a scene
+ * depth texture - a particle's contribution is already ~0 at its silhouette.
+ */
+let particleSpriteCache: THREE.DataTexture | null = null;
+
+const getParticleSprite = (): THREE.DataTexture => {
+  if (particleSpriteCache) return particleSpriteCache;
+
+  const size = 32;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4;
+      const dx = (x + 0.5) / size - 0.5;
+      const dy = (y + 0.5) / size - 0.5;
+      const d = Math.min(1, Math.sqrt(dx * dx + dy * dy) * 2);
+      const linear = 1 - d;
+      // Smoothstep the falloff so the sprite has no visible ring at any mip.
+      const alpha = linear * linear * (3 - 2 * linear);
+      data[i] = 255;
+      data[i + 1] = 255;
+      data[i + 2] = 255;
+      data[i + 3] = Math.round(alpha * 255);
+    }
+  }
+
+  const texture = createColorDataTexture(data, size, size);
+  // gl_PointCoord runs 0..1 across the sprite; repeat wrapping would fold the
+  // falloff back on itself at the edges.
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+  particleSpriteCache = texture;
+  return texture;
+};
 
 // ============================================================
 // Dust Animation Manager - Centralized useFrame for all particle systems
@@ -27,7 +88,15 @@ interface DustParticlesEntry {
 interface GrainFlowEntry {
   type: 'grainFlow';
   particlesRef: React.RefObject<THREE.Points | null>;
-  velocities: Float32Array;
+  routes: readonly SpoutRoute[];
+  /** Normalised arc position along the assigned route, 0..1. */
+  progress: Float32Array;
+  /** Per-particle speed jitter so product does not travel as a rigid comb. */
+  rates: Float32Array;
+  /** Which route each particle rides. */
+  routeIndex: Uint16Array;
+  /** In-bore offset (x,y,z) keeping product inside the pipe wall. */
+  jitter: Float32Array;
   count: number;
   throttleLevel: number;
   speedMultiplier: number; // Production speed multiplier
@@ -38,6 +107,7 @@ interface MachineSteamEntry {
   particlesRef: React.RefObject<THREE.Points | null>;
   velocities: Float32Array;
   lifetimes: Float32Array;
+  lifeAttr: React.RefObject<THREE.BufferAttribute | null>;
   count: number;
   steamType: 'steam' | 'dust' | 'exhaust';
 }
@@ -54,6 +124,7 @@ const DustAnimationContext = createContext<DustAnimationContextValue | null>(nul
 export const DustAnimationManager: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const entriesRef = useRef<Map<string, DustEntry>>(new Map());
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const prefersReducedMotion = useReducedMotion();
 
   const register = useCallback((id: string, entry: DustEntry) => {
     entriesRef.current.set(id, entry);
@@ -66,15 +137,21 @@ export const DustAnimationManager: React.FC<{ children: React.ReactNode }> = ({ 
   useFrame((_, delta) => {
     if (!isTabVisible) return;
 
+    // Accessibility gate. Every system here now SEEDS itself on mount, so under
+    // `prefers-reduced-motion` the fields are still rendered - they simply hold
+    // still. Previously the gate left dust as an unwritten (zero-matrix, black)
+    // buffer, which is why it never appeared at all.
+    if (prefersReducedMotion) return;
+
     entriesRef.current.forEach((entry) => {
       switch (entry.type) {
         case 'dustParticles':
           if (!shouldRunThisFrame(entry.throttleLevel)) return;
-          animateDustParticles(entry);
+          animateDustParticles(entry, true);
           break;
         case 'grainFlow':
           if (!shouldRunThisFrame(entry.throttleLevel)) return;
-          animateGrainFlow(entry);
+          animateGrainFlow(entry, delta);
           break;
         case 'machineSteam':
           if (!shouldRunThisFrame(3)) return;
@@ -96,7 +173,16 @@ function useDustAnimation() {
 }
 
 // Pure animation functions
-function animateDustParticles(entry: DustParticlesEntry) {
+
+/**
+ * Write every dust instance's matrix and colour.
+ *
+ * `advance` is false for the mount-time seed pass. three zero-fills
+ * `instanceMatrix` and the colour buffer, so without a seed every mote carried
+ * a degenerate zero matrix and a pure-black vertex colour until the first
+ * animation tick - and never got one at all under reduced motion.
+ */
+function animateDustParticles(entry: DustParticlesEntry, advance: boolean) {
   if (!entry.meshRef.current) return;
   const mesh = entry.meshRef.current;
   const particles = entry.pool.particles;
@@ -109,19 +195,21 @@ function animateDustParticles(entry: DustParticlesEntry) {
       continue;
     }
 
-    particle.lifetime++;
+    if (advance) {
+      particle.lifetime++;
 
-    if (particle.lifetime > particle.maxLifetime) {
-      particle.t = Math.random() * 100;
-      particle.xFactor = -40 + Math.random() * 80;
-      particle.yFactor = Math.random() * 25;
-      particle.zFactor = -30 + Math.random() * 60;
-      particle.lifetime = 0;
-      particle.maxLifetime = 200 + Math.random() * 300;
+      if (particle.lifetime > particle.maxLifetime) {
+        particle.t = Math.random() * 100;
+        particle.xFactor = -40 + Math.random() * 80;
+        particle.yFactor = Math.random() * 25;
+        particle.zFactor = -30 + Math.random() * 60;
+        particle.lifetime = 0;
+        particle.maxLifetime = 200 + Math.random() * 300;
+      }
     }
 
     const { factor, speed, xFactor, yFactor, zFactor } = particle;
-    particle.t += speed;
+    if (advance) particle.t += speed;
     const t = particle.t;
 
     const s = Math.max(0.3, Math.cos(t) * 0.5 + 0.5);
@@ -135,7 +223,10 @@ function animateDustParticles(entry: DustParticlesEntry) {
 
     const lightIntensity = entry.isDaytime ? isInLightShaft(x, y, z) : 0;
 
-    const scaleMultiplier = 1 + lightIntensity * 1.5;
+    // Motes swell AND brighten inside a shaft. With additive blending
+    // brightness IS presence, so the old +0.004/+0.047/+0.22 colour nudge made
+    // the shafts effectively invisible.
+    const scaleMultiplier = 1 + lightIntensity * 2.5;
     const finalScale = s * 0.8 * scaleMultiplier;
 
     tempPosition.set(x, y, z);
@@ -144,12 +235,10 @@ function animateDustParticles(entry: DustParticlesEntry) {
 
     mesh.setMatrixAt(i, tempMatrix);
 
-    const baseR = 0.996;
-    const baseG = 0.953;
-    const baseB = 0.78;
-    entry.colorArray[i * 3] = baseR + lightIntensity * 0.004;
-    entry.colorArray[i * 3 + 1] = baseG + lightIntensity * 0.047;
-    entry.colorArray[i * 3 + 2] = baseB + lightIntensity * 0.22;
+    const gain = 0.18 + 1.9 * lightIntensity;
+    entry.colorArray[i * 3] = 0.996 * gain;
+    entry.colorArray[i * 3 + 1] = 0.953 * gain;
+    entry.colorArray[i * 3 + 2] = 0.78 * gain;
   }
 
   mesh.instanceMatrix.needsUpdate = true;
@@ -159,27 +248,41 @@ function animateDustParticles(entry: DustParticlesEntry) {
   }
 }
 
-function animateGrainFlow(entry: GrainFlowEntry) {
-  if (!entry.particlesRef.current) return;
-  const posArray = entry.particlesRef.current.geometry.attributes.position.array as Float32Array;
+/** World units/sec of product travel down a spouting run at productionSpeed 1. */
+const GRAIN_FLOW_SPEED = 6.0;
 
-  // Scale velocity by production speed (higher speed = faster grain flow)
-  const speedScale = entry.speedMultiplier;
+// Module-level scratch - no allocation inside the frame loop.
+const _grainPoint = new THREE.Vector3();
+
+function animateGrainFlow(entry: GrainFlowEntry, delta: number) {
+  const points = entry.particlesRef.current;
+  if (!points || entry.routes.length === 0) return;
+  const posAttr = points.geometry.attributes.position as THREE.BufferAttribute;
+  const posArray = posAttr.array as Float32Array;
+
+  // The old integrator added a raw per-frame velocity with no `delta`, so grain
+  // fell at a rate proportional to framerate AND inversely proportional to the
+  // quality throttle - 4x slower on low than on ultra.
+  const cappedDelta = Math.min(delta * entry.throttleLevel, 0.1);
+  const step = cappedDelta * entry.speedMultiplier * GRAIN_FLOW_SPEED;
 
   for (let i = 0; i < entry.count; i++) {
+    const route = entry.routes[entry.routeIndex[i] % entry.routes.length];
+    let t = entry.progress[i] + (step * entry.rates[i]) / Math.max(1, route.length);
+    if (t >= 1) t -= Math.floor(t);
+    entry.progress[i] = t;
+
+    route.curve.getPointAt(t, _grainPoint);
+
     const idx = i * 3;
-
-    posArray[idx] += entry.velocities[idx] * speedScale;
-    posArray[idx + 1] += entry.velocities[idx + 1] * speedScale;
-    posArray[idx + 2] += entry.velocities[idx + 2] * speedScale;
-
-    if (posArray[idx + 1] < 2) {
-      posArray[idx] = (Math.random() - 0.5) * 30;
-      posArray[idx + 1] = 18 + Math.random() * 5;
-      posArray[idx + 2] = -15;
-    }
+    posArray[idx] = _grainPoint.x + entry.jitter[idx];
+    posArray[idx + 1] = _grainPoint.y + entry.jitter[idx + 1];
+    posArray[idx + 2] = _grainPoint.z + entry.jitter[idx + 2];
   }
-  entry.particlesRef.current.geometry.attributes.position.needsUpdate = true;
+
+  posAttr.needsUpdate = true;
+  // Positions span the whole pipe network; recomputing per frame would cost
+  // more than it saves, so the bounds are set once at seed time.
 }
 
 function animateMachineSteam(entry: MachineSteamEntry, delta: number) {
@@ -214,6 +317,9 @@ function animateMachineSteam(entry: MachineSteamEntry, delta: number) {
   }
 
   entry.particlesRef.current.geometry.attributes.position.needsUpdate = true;
+  // `lifetimes` is bound directly as the `aLife` attribute: the shader grows and
+  // fades each puff over its own life, so puffs no longer pop in at full opacity.
+  if (entry.lifeAttr.current) entry.lifeAttr.current.needsUpdate = true;
 }
 
 interface DustParticlesProps {
@@ -351,12 +457,87 @@ class ParticlePool {
   }
 }
 
+// ============================================================
+// Dust mote material
+// ============================================================
+
+/** FIXED literal, never a timestamp - a changing cache key recompiles the
+ *  program every frame (see CLAUDE.md, "Shader Cache Key Bug"). */
+const DUST_MOTE_CACHE_KEY = 'millos-dust-mote-v1';
+
+/**
+ * Camera-facing additive mote.
+ *
+ * Two triangles instead of a 36-vertex dodecahedron, always facing the camera,
+ * with a radial alpha falloff so it reads as an out-of-focus speck rather than
+ * a polygon. `depthTest` stays ON (motes are correctly occluded by geometry);
+ * `depthWrite` is off so they never occlude each other.
+ */
+const createDustMoteMaterial = (): THREE.MeshBasicMaterial => {
+  const material = new THREE.MeshBasicMaterial({
+    // White. The instance colours below are authoritative; a tint here would
+    // multiply the same hue in twice.
+    color: '#ffffff',
+    vertexColors: true,
+    transparent: true,
+    opacity: 1,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+  });
+
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec2 vMoteUv;
+        varying float vMoteViewZ;`
+      )
+      .replace(
+        '#include <project_vertex>',
+        `// Billboard around the instance's translation. The instance SCALE is
+        // read back explicitly: it carries both the light-shaft size response
+        // and the zero-scale used to hide pooled-but-inactive motes, so
+        // dropping it would make every inactive particle visible.
+        float moteScale = length( instanceMatrix[ 0 ].xyz );
+        vec4 mvPosition = modelViewMatrix * vec4( ( instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xyz, 1.0 );
+        mvPosition.xy += position.xy * moteScale;
+        gl_Position = projectionMatrix * mvPosition;
+        vMoteUv = uv;
+        vMoteViewZ = - mvPosition.z;`
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec2 vMoteUv;
+        varying float vMoteViewZ;`
+      )
+      .replace(
+        '#include <opaque_fragment>',
+        `float moteFalloff = 1.0 - smoothstep( 0.16, 0.5, length( vMoteUv - 0.5 ) );
+        // Near-camera ramp. This is an APPROXIMATION of a soft particle: it
+        // removes the near-clip pop, but without a scene depth texture a mote
+        // still terminates where it meets geometry. The radial falloff above is
+        // what keeps that seam from reading as a hard edge.
+        moteFalloff *= smoothstep( 0.6, 2.5, vMoteViewZ );
+        diffuseColor.a *= moteFalloff;
+        #include <opaque_fragment>`
+      );
+  };
+
+  material.customProgramCacheKey = () => DUST_MOTE_CACHE_KEY;
+  return material;
+};
+
 export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
   const mesh = useRef<THREE.InstancedMesh>(null);
   const idRef = useRef(`dustParticles-${Math.random().toString(36).slice(2, 9)}`);
   const context = useDustAnimation();
-  // const gameTime = useGameSimulationStore((state) => state.gameTime); // Replaced with shallow selector below
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const prefersReducedMotion = useReducedMotion();
 
   // PERF: Only re-render when daytime status changes, not every tick
   const isDaytime = useGameSimulationStore(
@@ -378,13 +559,16 @@ export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
   const pool = useMemo(() => new ParticlePool(count), [count]);
 
   // Ensure correct number of active particles
-  useMemo(() => {
+  useEffect(() => {
     pool.setActiveCount(effectiveCount);
   }, [pool, effectiveCount]);
 
   // Pre-allocated color array for vertex colors
   const colorArray = useMemo(() => new Float32Array(count * 3).fill(0), [count]);
   const colorAttr = useRef<THREE.InstancedBufferAttribute | null>(null);
+
+  const material = useMemo(() => createDustMoteMaterial(), []);
+  useEffect(() => () => material.dispose(), [material]);
 
   // Hidden matrix for inactive particles (scaled to 0)
   const hiddenMatrix = useMemo(() => {
@@ -399,16 +583,37 @@ export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
   // Throttle particle updates based on graphics quality (200+ particles is expensive)
   const throttleLevel = getThrottleLevel(quality);
 
-  // Set proper bounding sphere for frustum culling
-  // Particles span roughly x: [-40, 40], y: [5, 30], z: [-30, 30]
-  useEffect(() => {
-    if (mesh.current && mesh.current.geometry) {
-      mesh.current.geometry.boundingSphere = new THREE.Sphere(
-        new THREE.Vector3(0, 17.5, 0), // Center of particle volume
-        60 // Radius encompassing all possible particle positions
-      );
-    }
-  }, [count]);
+  // Seed matrices and colours BEFORE the first frame, and pin the culling
+  // volume.
+  //
+  // `InstancedMesh` carries its own `boundingSphere` field, and
+  // `Frustum.intersectsObject` prefers it over the geometry's - so the old
+  // `mesh.geometry.boundingSphere = ...` assignment did nothing for culling,
+  // and three instead auto-computed a sphere from the (then all-zero) instance
+  // matrices: radius 0 at the world origin. Assign the object-level sphere.
+  useLayoutEffect(() => {
+    const instanced = mesh.current;
+    if (!instanced) return;
+
+    pool.setActiveCount(effectiveCount);
+    animateDustParticles(
+      {
+        type: 'dustParticles',
+        meshRef: mesh,
+        pool,
+        colorArray,
+        colorAttr,
+        hiddenMatrix,
+        count,
+        isDaytime,
+        throttleLevel,
+      },
+      false
+    );
+
+    // Particles span roughly x: [-40, 40], y: [5, 30], z: [-30, 30]
+    instanced.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 17.5, 0), 60);
+  }, [count, effectiveCount, pool, colorArray, hiddenMatrix, isDaytime, throttleLevel]);
 
   // Register with manager if available
   useEffect(() => {
@@ -431,19 +636,22 @@ export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
   // Fallback useFrame when not in manager context
   useFrame(() => {
     if (context) return; // Manager handles animation
-    if (!mesh.current || !isEnabled || !isTabVisible) return;
+    if (!mesh.current || !isEnabled || !isTabVisible || prefersReducedMotion) return;
     if (!shouldRunThisFrame(throttleLevel)) return;
-    animateDustParticles({
-      type: 'dustParticles',
-      meshRef: mesh,
-      pool,
-      colorArray,
-      colorAttr,
-      hiddenMatrix,
-      count,
-      isDaytime,
-      throttleLevel,
-    });
+    animateDustParticles(
+      {
+        type: 'dustParticles',
+        meshRef: mesh,
+        pool,
+        colorArray,
+        colorAttr,
+        hiddenMatrix,
+        count,
+        isDaytime,
+        throttleLevel,
+      },
+      true
+    );
   });
 
   // Return null if disabled (after all hooks have been called)
@@ -456,10 +664,13 @@ export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
     <instancedMesh
       ref={mesh}
       args={[undefined, undefined, count]}
+      material={material}
       frustumCulled={true}
       key={`dust-particles-${count}`}
     >
-      <dodecahedronGeometry args={[0.04, 0]}>
+      {/* Two triangles per mote, billboarded in the vertex shader - the old
+          dodecahedron was 36 vertices and still read as a hard polygon. */}
+      <planeGeometry args={[0.09, 0.09]}>
         <instancedBufferAttribute
           ref={colorAttr}
           attach="attributes-color"
@@ -468,15 +679,28 @@ export const DustParticles: React.FC<DustParticlesProps> = ({ count }) => {
           itemSize={3}
           args={[colorArray, 3]}
         />
-      </dodecahedronGeometry>
-      <meshBasicMaterial color="#fef3c7" transparent opacity={0.5} vertexColors />
+      </planeGeometry>
     </instancedMesh>
   );
 };
 
-// Grain particles flowing through pipes (visual effect) - with pooling
+// ============================================================
+// Grain flow (product travelling inside the spouting network)
+// ============================================================
+
+const GRAIN_FLOW_COUNT = 200;
+
+/** Linear-space tints per route family. Vertex colours are NOT colour-managed
+ *  by three, so the sRGB hex has to be converted here. */
+const GRAIN_FAMILY_COLORS = {
+  intake: new THREE.Color('#e8c86a'),
+  pneumatic: new THREE.Color('#efd9a0'),
+  finished: new THREE.Color('#f0e3c2'),
+} as const;
+
 export const GrainFlow: React.FC = () => {
   const particlesRef = useRef<THREE.Points>(null);
+  const colorAttrRef = useRef<THREE.BufferAttribute>(null);
   const idRef = useRef(`grainFlow-${Math.random().toString(36).slice(2, 9)}`);
   const context = useDustAnimation();
   const { enableGrainFlow, quality } = useGraphicsStore(
@@ -488,27 +712,80 @@ export const GrainFlow: React.FC = () => {
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const isEnabled = enableGrainFlow;
 
-  const count = 200;
+  // Read the machine layout directly rather than take it as a prop, so this
+  // component needs no MillScene change to learn where the pipes are.
+  const machines = useProductionStore(useShallow((state) => state.machines));
+  const machineKey = useMemo(() => spoutMachineKey(machines), [machines]);
+  // Keyed on the layout string, not the machines array: status ticks every
+  // simulation step and would otherwise rebuild every curve with it.
+  const routes = useMemo(() => buildSpoutRoutes(machines), [machineKey]);
 
-  // Pre-allocated arrays for better memory management
-  const { positions, velocities } = useMemo(() => {
-    const pos = new Float32Array(count * 3);
-    const vel = new Float32Array(count * 3);
+  const count = GRAIN_FLOW_COUNT;
+
+  const buffers = useMemo(() => {
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3).fill(1);
+    const progress = new Float32Array(count);
+    const rates = new Float32Array(count);
+    const routeIndex = new Uint16Array(count);
+    const jitter = new Float32Array(count * 3);
 
     for (let i = 0; i < count; i++) {
-      // Position along pipe paths
-      pos[i * 3] = (Math.random() - 0.5) * 30;
-      pos[i * 3 + 1] = 5 + Math.random() * 15;
-      pos[i * 3 + 2] = -15 + Math.random() * 20;
-
-      // Pre-compute velocities with slight variation
-      vel[i * 3] = 0;
-      vel[i * 3 + 1] = -0.04 - Math.random() * 0.02; // Gravity
-      vel[i * 3 + 2] = 0.015 + Math.random() * 0.01; // Forward
+      progress[i] = Math.random();
+      rates[i] = 0.85 + Math.random() * 0.3;
+      // Uniform-ish disc inside the bore so product hugs the pipe wall the way
+      // pneumatically conveyed grain actually does.
+      const angle = Math.random() * Math.PI * 2;
+      const radius = Math.sqrt(Math.random()) * SPOUT_PIPE_RADIUS * 0.7;
+      jitter[i * 3] = Math.cos(angle) * radius;
+      jitter[i * 3 + 1] = Math.sin(angle) * radius * 0.6;
+      jitter[i * 3 + 2] = Math.sin(angle) * radius;
     }
 
-    return { positions: pos, velocities: vel };
-  }, []);
+    return { positions, colors, progress, rates, routeIndex, jitter };
+  }, [count]);
+
+  const sprite = useMemo(() => getParticleSprite(), []);
+
+  // Assign particles to routes, tint them by family and seed their positions.
+  // Runs on mount and whenever the layout changes - never per frame.
+  useLayoutEffect(() => {
+    const points = particlesRef.current;
+    if (!points || routes.length === 0) return;
+
+    const { positions, colors, routeIndex, progress, jitter } = buffers;
+    const point = new THREE.Vector3();
+
+    for (let i = 0; i < count; i++) {
+      const index = i % routes.length;
+      routeIndex[i] = index;
+      const route = routes[index];
+
+      const tint = GRAIN_FAMILY_COLORS[route.family];
+      colors[i * 3] = tint.r;
+      colors[i * 3 + 1] = tint.g;
+      colors[i * 3 + 2] = tint.b;
+
+      route.curve.getPointAt(progress[i], point);
+      positions[i * 3] = point.x + jitter[i * 3];
+      positions[i * 3 + 1] = point.y + jitter[i * 3 + 1];
+      positions[i * 3 + 2] = point.z + jitter[i * 3 + 2];
+    }
+
+    const geometry = points.geometry;
+    geometry.attributes.position.needsUpdate = true;
+    if (colorAttrRef.current) colorAttrRef.current.needsUpdate = true;
+
+    // Bound the whole ROUTE NETWORK, not the seeded sample. Positions are
+    // rewritten every frame; a sphere fitted to one instant's sample would pop
+    // particles in and out as they travel to the ends of their runs.
+    const bounds = new THREE.Box3();
+    routes.forEach((route) => {
+      route.curve.points.forEach((controlPoint) => bounds.expandByPoint(controlPoint));
+    });
+    bounds.expandByScalar(SPOUT_PIPE_RADIUS + 0.5);
+    geometry.boundingSphere = bounds.getBoundingSphere(new THREE.Sphere());
+  }, [routes, buffers, count]);
 
   // Throttle grain flow updates
   const throttleLevel = getThrottleLevel(quality);
@@ -516,38 +793,44 @@ export const GrainFlow: React.FC = () => {
   // Get production speed for velocity scaling
   const productionSpeed = useProductionStore((state) => state.productionSpeed);
 
-  // Register with manager if available
-  useEffect(() => {
-    if (context && isEnabled) {
-      context.register(idRef.current, {
-        type: 'grainFlow',
-        particlesRef,
-        velocities,
-        count,
-        throttleLevel,
-        speedMultiplier: productionSpeed,
-      });
-      return () => context.unregister(idRef.current);
-    }
-  }, [context, isEnabled, velocities, throttleLevel, productionSpeed]);
-
-  // Fallback useFrame when not in manager context
-  useFrame(() => {
-    if (context) return; // Manager handles animation
-    if (!particlesRef.current || !isEnabled || !isTabVisible) return;
-    if (!shouldRunThisFrame(throttleLevel)) return;
-    animateGrainFlow({
+  const entry = useMemo<GrainFlowEntry>(
+    () => ({
       type: 'grainFlow',
       particlesRef,
-      velocities,
+      routes,
+      progress: buffers.progress,
+      rates: buffers.rates,
+      routeIndex: buffers.routeIndex,
+      jitter: buffers.jitter,
       count,
       throttleLevel,
       speedMultiplier: productionSpeed,
-    });
+    }),
+    [routes, buffers, count, throttleLevel, productionSpeed]
+  );
+
+  // Register with manager if available. Machines load asynchronously, so on the
+  // normal startup path `routes` is empty for the first few frames; `entry`
+  // depends on `routes`, so this re-registers as soon as the layout arrives.
+  useEffect(() => {
+    if (context && isEnabled && routes.length > 0) {
+      context.register(idRef.current, entry);
+      return () => context.unregister(idRef.current);
+    }
+  }, [context, isEnabled, entry, routes]);
+
+  // Fallback useFrame when not in manager context
+  useFrame((_, delta) => {
+    if (context) return; // Manager handles animation
+    if (!particlesRef.current || !isEnabled || !isTabVisible) return;
+    if (!shouldRunThisFrame(throttleLevel)) return;
+    animateGrainFlow(entry, delta);
   });
 
-  // Return null if disabled (after all hooks have been called)
-  if (!isEnabled) {
+  // Return null if disabled (after all hooks have been called).
+  // Also bail with no routes: the position buffer would still be all zeros and
+  // would render 200 points piled on the world origin.
+  if (!isEnabled || routes.length === 0) {
     return null;
   }
 
@@ -557,12 +840,28 @@ export const GrainFlow: React.FC = () => {
         <bufferAttribute
           attach="attributes-position"
           count={count}
-          array={positions}
+          array={buffers.positions}
           itemSize={3}
-          args={[positions, 3]}
+          args={[buffers.positions, 3]}
+        />
+        <bufferAttribute
+          ref={colorAttrRef}
+          attach="attributes-color"
+          count={count}
+          array={buffers.colors}
+          itemSize={3}
+          args={[buffers.colors, 3]}
         />
       </bufferGeometry>
-      <pointsMaterial size={0.12} color="#fcd34d" transparent opacity={0.8} sizeAttenuation />
+      <pointsMaterial
+        size={0.09}
+        map={sprite}
+        vertexColors
+        transparent
+        opacity={0.95}
+        depthWrite={false}
+        sizeAttenuation
+      />
     </points>
   );
 };
@@ -628,6 +927,71 @@ export const AtmosphericHaze: React.FC = () => {
   );
 };
 
+// ============================================================
+// Machine steam / dust vents
+// ============================================================
+
+const MACHINE_STEAM_CACHE_KEY = 'millos-machine-steam-v1';
+
+/**
+ * Steam material with per-point life response.
+ *
+ * `lifetimes` is bound straight to the geometry as `aLife`, so the shader can
+ * grow each puff as it rises and fade it in and out over its own life. Before
+ * this, `lifetimes` only decided when to respawn: every puff popped to full
+ * opacity the instant it recycled.
+ */
+const createMachineSteamMaterial = (
+  color: string,
+  size: number,
+  opacity: number
+): THREE.PointsMaterial => {
+  const material = new THREE.PointsMaterial({
+    color,
+    size,
+    opacity,
+    map: getParticleSprite(),
+    transparent: true,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        attribute float aLife;
+        varying float vLifeAlpha;`
+      )
+      .replace(
+        '#include <logdepthbuf_vertex>',
+        `// Puffs expand as they rise - the single strongest cue that reads as
+        // vapour rather than dots. Clamped because gl_PointSize above the
+        // driver's ALIASED_POINT_SIZE_RANGE is silently clamped anyway.
+        gl_PointSize *= 1.0 + 1.6 * aLife;
+        gl_PointSize = clamp( gl_PointSize, 1.0, 64.0 );
+        vLifeAlpha = smoothstep( 0.0, 0.12, aLife ) * ( 1.0 - smoothstep( 0.55, 1.0, aLife ) );
+        #include <logdepthbuf_vertex>`
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying float vLifeAlpha;`
+      )
+      .replace(
+        '#include <alphatest_fragment>',
+        `diffuseColor.a *= vLifeAlpha;
+        #include <alphatest_fragment>`
+      );
+  };
+
+  material.customProgramCacheKey = () => MACHINE_STEAM_CACHE_KEY;
+  return material;
+};
+
 // Machine steam/dust effect for industrial atmosphere
 interface MachineSteamProps {
   position: [number, number, number];
@@ -637,9 +1001,11 @@ interface MachineSteamProps {
 
 const MachineSteamParticle: React.FC<MachineSteamProps> = ({ position, type, intensity = 1 }) => {
   const particlesRef = useRef<THREE.Points>(null);
+  const lifeAttrRef = useRef<THREE.BufferAttribute>(null);
   const idRef = useRef(`machineSteam-${Math.random().toString(36).slice(2, 9)}`);
   const context = useDustAnimation();
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const prefersReducedMotion = useReducedMotion();
   const count = type === 'dust' ? 30 : 20;
 
   const { positions, velocities, lifetimes } = useMemo(() => {
@@ -664,46 +1030,53 @@ const MachineSteamParticle: React.FC<MachineSteamProps> = ({ position, type, int
     return { positions: pos, velocities: vel, lifetimes: life };
   }, [count, type]);
 
+  const color = type === 'steam' ? '#e2e8f0' : type === 'dust' ? '#d4a574' : '#9ca3af';
+  const baseOpacity = type === 'steam' ? 0.34 : 0.44;
+  const baseSize = type === 'steam' ? 0.34 : 0.2;
+
+  const material = useMemo(
+    () => createMachineSteamMaterial(color, baseSize * intensity, baseOpacity * intensity),
+    [color, baseSize, baseOpacity, intensity]
+  );
+  useEffect(() => () => material.dispose(), [material]);
+
+  const entry = useMemo<MachineSteamEntry>(
+    () => ({
+      type: 'machineSteam',
+      particlesRef,
+      velocities,
+      lifetimes,
+      lifeAttr: lifeAttrRef,
+      count,
+      steamType: type,
+    }),
+    [velocities, lifetimes, count, type]
+  );
+
   // Register with manager if available
   useEffect(() => {
     if (context) {
-      context.register(idRef.current, {
-        type: 'machineSteam',
-        particlesRef,
-        velocities,
-        lifetimes,
-        count,
-        steamType: type,
-      });
+      context.register(idRef.current, entry);
       return () => context.unregister(idRef.current);
     }
-  }, [context, velocities, lifetimes, count, type]);
+  }, [context, entry]);
 
   // Fallback useFrame when not in manager context
   useFrame((_, delta) => {
     if (context) return; // Manager handles animation
-    if (!particlesRef.current || !isTabVisible) return;
+    if (!particlesRef.current || !isTabVisible || prefersReducedMotion) return;
     if (!shouldRunThisFrame(3)) return;
-    animateMachineSteam(
-      {
-        type: 'machineSteam',
-        particlesRef,
-        velocities,
-        lifetimes,
-        count,
-        steamType: type,
-      },
-      delta
-    );
+    animateMachineSteam(entry, delta);
   });
-
-  const color = type === 'steam' ? '#e2e8f0' : type === 'dust' ? '#d4a574' : '#9ca3af';
-  const opacity = type === 'steam' ? 0.3 : 0.4;
-  const size = type === 'steam' ? 0.15 : 0.08;
 
   // Use key to force remount when count changes, preventing buffer resize error
   return (
-    <points ref={particlesRef} position={position} key={`steam-${count}-${type}`}>
+    <points
+      ref={particlesRef}
+      position={position}
+      material={material}
+      key={`steam-${count}-${type}`}
+    >
       <bufferGeometry>
         <bufferAttribute
           attach="attributes-position"
@@ -712,126 +1085,83 @@ const MachineSteamParticle: React.FC<MachineSteamProps> = ({ position, type, int
           itemSize={3}
           args={[positions, 3]}
         />
+        <bufferAttribute
+          ref={lifeAttrRef}
+          attach="attributes-aLife"
+          count={count}
+          array={lifetimes}
+          itemSize={1}
+          args={[lifetimes, 1]}
+        />
       </bufferGeometry>
-      <pointsMaterial
-        size={size * intensity}
-        color={color}
-        transparent
-        opacity={opacity * intensity}
-        sizeAttenuation
-        depthWrite={false}
-      />
     </points>
   );
 };
 
-// Steam vents component - renders multiple steam sources near machines
-// Uses distance-based culling to only render nearby steam sources
+// Machine positions from MillScene zones:
+// Zone 2 (z=-6): Roller Mills - hot grinding process creates steam/heat
+// Zone 3 (z=6, y=9): Plansifters - dust from sifting
+// Zone 4 (z=25): Packers - dust from packaging
+const STEAM_SOURCES: {
+  position: [number, number, number];
+  type: 'steam' | 'dust' | 'exhaust';
+  intensity: number;
+}[] = [
+  // Roller mill steam vents (grinding creates heat)
+  { position: [-18, 4, FACTORY_ZONE_Z.milling], type: 'steam', intensity: 0.8 },
+  { position: [-10, 4, FACTORY_ZONE_Z.milling], type: 'steam', intensity: 0.7 },
+  { position: [-2, 4, FACTORY_ZONE_Z.milling], type: 'exhaust', intensity: 0.6 },
+  { position: [6, 4, FACTORY_ZONE_Z.milling], type: 'steam', intensity: 0.9 },
+  { position: [14, 4, FACTORY_ZONE_Z.milling], type: 'exhaust', intensity: 0.7 },
+
+  // Plansifter dust (sifting creates fine flour dust)
+  { position: [-12, 12, FACTORY_ZONE_Z.sifting], type: 'dust', intensity: 1 },
+  { position: [0, 12, FACTORY_ZONE_Z.sifting], type: 'dust', intensity: 0.9 },
+  { position: [12, 12, FACTORY_ZONE_Z.sifting], type: 'dust', intensity: 0.8 },
+
+  // Packer dust (packaging creates airborne flour)
+  { position: [-15, 3, FACTORY_ZONE_Z.packing], type: 'dust', intensity: 0.7 },
+  { position: [0, 3, FACTORY_ZONE_Z.packing], type: 'dust', intensity: 0.8 },
+  { position: [15, 3, FACTORY_ZONE_Z.packing], type: 'dust', intensity: 0.6 },
+];
+
+// Steam vents component - renders multiple steam sources near machines.
+//
+// Distance culling used to write the camera position into React state twice a
+// second. Each write re-rendered this component, changed the child key set and
+// remounted every `<points>` - a fresh BufferGeometry and Float32Array upload,
+// forever. The vents are now permanently mounted and culled by toggling
+// `.visible` inside the frame loop: zero React renders, zero reallocation.
 export const MachineSteamVents: React.FC = () => {
   const quality = useGraphicsStore((state) => state.graphics.quality);
   const isEnabled = quality !== 'low';
-  const [cameraX, setCameraX] = React.useState(0);
-  const [cameraZ, setCameraZ] = React.useState(0);
-  const lastUpdateRef = useRef(0);
-
-  // Update camera position for distance culling (throttled to every 500ms)
-  useFrame(({ camera, clock }) => {
-    const now = clock.elapsedTime;
-    if (now - lastUpdateRef.current > 0.5) {
-      lastUpdateRef.current = now;
-      setCameraX(camera.position.x);
-      setCameraZ(camera.position.z);
-    }
-  });
-
-  // Machine positions from MillScene zones:
-  // Zone 2 (z=-6): Roller Mills - hot grinding process creates steam/heat
-  // Zone 3 (z=6, y=9): Plansifters - dust from sifting
-  // Zone 4 (z=25): Packers - dust from packaging
-
-  const steamSources = useMemo(
-    () => [
-      // Roller mill steam vents (grinding creates heat)
-      {
-        position: [-18, 4, FACTORY_ZONE_Z.milling] as [number, number, number],
-        type: 'steam' as const,
-        intensity: 0.8,
-      },
-      {
-        position: [-10, 4, FACTORY_ZONE_Z.milling] as [number, number, number],
-        type: 'steam' as const,
-        intensity: 0.7,
-      },
-      {
-        position: [-2, 4, FACTORY_ZONE_Z.milling] as [number, number, number],
-        type: 'exhaust' as const,
-        intensity: 0.6,
-      },
-      {
-        position: [6, 4, FACTORY_ZONE_Z.milling] as [number, number, number],
-        type: 'steam' as const,
-        intensity: 0.9,
-      },
-      {
-        position: [14, 4, FACTORY_ZONE_Z.milling] as [number, number, number],
-        type: 'exhaust' as const,
-        intensity: 0.7,
-      },
-
-      // Plansifter dust (sifting creates fine flour dust)
-      {
-        position: [-12, 12, FACTORY_ZONE_Z.sifting] as [number, number, number],
-        type: 'dust' as const,
-        intensity: 1,
-      },
-      {
-        position: [0, 12, FACTORY_ZONE_Z.sifting] as [number, number, number],
-        type: 'dust' as const,
-        intensity: 0.9,
-      },
-      {
-        position: [12, 12, FACTORY_ZONE_Z.sifting] as [number, number, number],
-        type: 'dust' as const,
-        intensity: 0.8,
-      },
-
-      // Packer dust (packaging creates airborne flour)
-      {
-        position: [-15, 3, FACTORY_ZONE_Z.packing] as [number, number, number],
-        type: 'dust' as const,
-        intensity: 0.7,
-      },
-      {
-        position: [0, 3, FACTORY_ZONE_Z.packing] as [number, number, number],
-        type: 'dust' as const,
-        intensity: 0.8,
-      },
-      {
-        position: [15, 3, FACTORY_ZONE_Z.packing] as [number, number, number],
-        type: 'dust' as const,
-        intensity: 0.6,
-      },
-    ],
-    []
-  );
+  const groupRef = useRef<THREE.Group>(null);
 
   // Distance threshold for culling steam sources (in world units)
   const cullDistance = quality === 'ultra' ? 60 : quality === 'high' ? 50 : 40;
 
-  // On medium quality, reduce number of sources; also apply distance culling
-  const activeSources = useMemo(() => {
-    const qualityFiltered =
-      quality === 'medium' ? steamSources.filter((_, i) => i % 2 === 0) : steamSources;
+  // On medium quality, render half the sources. Depends on `quality` only, so
+  // the child list is stable between renders.
+  const activeSources = useMemo(
+    () => (quality === 'medium' ? STEAM_SOURCES.filter((_, i) => i % 2 === 0) : STEAM_SOURCES),
+    [quality]
+  );
 
-    // Apply distance culling based on camera position
+  useFrame(({ camera }) => {
+    const group = groupRef.current;
+    if (!group) return;
+    // Visibility only; cheap enough to leave un-throttled, but there is no
+    // reason to run it at full rate.
+    if (!shouldRunThisFrame(10)) return;
+
     const cullDistSq = cullDistance * cullDistance;
-    return qualityFiltered.filter((source) => {
-      const dx = source.position[0] - cameraX;
-      const dz = source.position[2] - cameraZ;
-      const distSq = dx * dx + dz * dz;
-      return distSq < cullDistSq;
-    });
-  }, [steamSources, quality, cullDistance, cameraX, cameraZ]);
+    for (let i = 0; i < group.children.length; i++) {
+      const child = group.children[i];
+      const dx = child.position.x - camera.position.x;
+      const dz = child.position.z - camera.position.z;
+      child.visible = dx * dx + dz * dz < cullDistSq;
+    }
+  });
 
   // Return null if disabled (after all hooks have been called)
   if (!isEnabled) {
@@ -839,7 +1169,7 @@ export const MachineSteamVents: React.FC = () => {
   }
 
   return (
-    <group>
+    <group ref={groupRef}>
       {activeSources.map((source) => (
         <MachineSteamParticle
           key={`steam-${source.position[0]}-${source.position[2]}`}

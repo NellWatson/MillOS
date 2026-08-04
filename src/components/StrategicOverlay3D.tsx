@@ -6,7 +6,8 @@
  */
 
 import React, { useMemo } from 'react';
-import { Text, Billboard } from '@react-three/drei';
+import { Billboard } from '@react-three/drei';
+import { SceneText as Text } from './shared/SceneText';
 import { useAIConfigStore } from '../stores/aiConfigStore';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -19,10 +20,9 @@ export const StrategicOverlay3D: React.FC = () => {
   const materialRef = React.useRef<THREE.MeshBasicMaterial>(null);
 
   useFrame((state) => {
-    if (materialRef.current) {
-      const pulse = Math.sin(state.clock.elapsedTime * 2) * 0.2 + 0.8;
-      materialRef.current.opacity = pulse;
-    }
+    if (!showStrategicOverlay || !materialRef.current) return;
+    const pulse = Math.sin(state.clock.elapsedTime * 2) * 0.2 + 0.8;
+    materialRef.current.opacity = pulse;
   });
 
   // Get the top priority - prefer legacy string priorities for display, fall back to structured

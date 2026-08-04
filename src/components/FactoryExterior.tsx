@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useEffect, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { Text } from '@react-three/drei';
+import { SceneText as Text } from './shared/SceneText';
 import { useFrame, ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
@@ -12,13 +12,17 @@ import {
   FLOOR_LAYERS,
   POLYGON_OFFSET,
   RENDER_ORDER,
+  SURFACE_LAYERS,
   WATER_LAYERS,
 } from '../constants/renderLayers';
+import { SITE_LAYOUT } from '../constants/siteLayout';
+import { createCelestialState, sampleAtmosphere, sampleCelestial } from '../simulation/atmosphere';
 import {
   calculateShippingTruckState,
   calculateReceivingTruckState,
 } from './truckbay/useTruckPhysics';
-import { PROCEDURAL_TEXTURES } from '../utils/sharedMaterials';
+import { PROCEDURAL_TEXTURES, TREE_MATERIALS } from '../utils/sharedMaterials';
+import { generateMachineORM } from '../textures';
 // OUTDOOR_MATERIALS removed - grass plane now handled by TerrainGround
 import { GasStation } from './GasStationInstanced';
 import {
@@ -30,10 +34,18 @@ import {
   PARKLAND_BENCHES,
   FRONT_PARKLAND_TREES,
   FRONT_PARKLAND_BENCHES,
+  TREE_FOLIAGE_VARIANTS,
+  TREE_FOLIAGE_MATERIALS,
+  treeJitterFromPosition,
 } from './exterior/ExteriorVegetation';
+import {
+  createOrganicLakeBankGeometry,
+  createOrganicLakeSurfaceGeometry,
+} from './exterior/organicLakeGeometry';
 interface FactoryExteriorProps {
   floorWidth?: number;
   floorDepth?: number;
+  showFactoryShell?: boolean;
 }
 
 // Realistic grass colors
@@ -45,26 +57,279 @@ const GRASS_COLORS = {
   meadow: '#4d7a50', // Meadow grass
 };
 
+const PROPANE_COMPOUND_CENTRE = SITE_LAYOUT.serviceYard.propaneCompound.position;
+
+// ---------------------------------------------------------------------------
+// SHARED EXTERIOR SURFACE TEXTURES
+// ---------------------------------------------------------------------------
+// `Texture.clone()` shares `.source`, so a tiling variant costs a second
+// sampler binding and no extra GPU upload. Deliberately few clones exist: the
+// merge key in `performance/StaticMeshBatch.tsx` includes texture identity and
+// repeat, so one clone per call site would splinter every road into its own
+// batch group. Three tarmac tilings cover every paved surface on the site.
+//
+// COLOUR SPACE - READ BEFORE CHANGING ANY `color` BELOW.
+// `generateTarmac`/`generateBrick`/`generateConcrete` author sRGB bytes and
+// return them through `createColorDataTexture`, which tags SRGBColorSpace, so
+// the sampled albedo is already the correct linear reflectance (~0.055 for
+// weathered asphalt). A non-white `color` on a mesh carrying one of these maps
+// multiplies the same hue a second time. Surfaces that gain a map here
+// therefore take `#ffffff`, or a deliberate hue-preserving lift where the tint
+// encodes a distinct variant - never the old dark compensating hex.
+const cloneTiledTexture = (source: THREE.Texture, x: number, y: number): THREE.Texture => {
+  const texture = source.clone();
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(x, y);
+  return texture;
+};
+
+/** Footpaths and small forecourt aprons. */
+const TARMAC_PATH_MAP = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacColor, 4, 4);
+const TARMAC_PATH_ROUGHNESS = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacRoughness, 4, 4);
+/** Carriageways - access roads, connecting roads, bridge decks. */
+const TARMAC_ROAD_MAP = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacColor, 12, 12);
+const TARMAC_ROAD_ROUGHNESS = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacRoughness, 12, 12);
+/** Large open pours - car parks, station forecourts. */
+const TARMAC_LOT_MAP = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacColor, 25, 25);
+const TARMAC_LOT_ROUGHNESS = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacRoughness, 25, 25);
+
+/** Coarse brick for the 6m Victorian tunnel portal. */
+const PORTAL_BRICK_MAP = cloneTiledTexture(PROCEDURAL_TEXTURES.brickColor, 2, 3);
+const PORTAL_BRICK_NORMAL = cloneTiledTexture(PROCEDURAL_TEXTURES.brickNormal, 2, 3);
+const PORTAL_BRICK_NORMAL_SCALE = new THREE.Vector2(0.45, 0.45);
+/** Cast/rendered concrete for outbuilding walls and stone dressings. */
+const OUTBUILDING_CONCRETE_ROUGHNESS = cloneTiledTexture(
+  PROCEDURAL_TEXTURES.concreteRoughness,
+  3,
+  2
+);
+const OUTBUILDING_PANEL_NORMAL = cloneTiledTexture(PROCEDURAL_TEXTURES.panelNormal, 3, 2);
+const OUTBUILDING_NORMAL_SCALE = new THREE.Vector2(0.14, 0.14);
+
+// ---------------------------------------------------------------------------
+// ROAD PAINT
+// ---------------------------------------------------------------------------
+// Markings were `meshBasicMaterial` at pure #ffffff / #f1c40f: unlit, so they
+// never darkened through the day/night cycle, never took the sun's shadow, and
+// never sat in the same tonal range as the surface they are painted on - flat
+// cut-out quads floating on the asphalt. Real thermoplastic road paint is a
+// chalky off-white that weathers grey, and it is lit.
+//
+// These are spread onto `<meshStandardMaterial>` rather than being shared
+// material instances because each call site still supplies its own
+// polygonOffset pair, which is what holds the paint above the road. The
+// material TYPE, `receiveShadow` and `renderOrder` are all components of the
+// StaticMeshBatch merge key, so every marking in the file is converted in one
+// pass - a partial conversion would split one merge group into two.
+const ROAD_PAINT_WHITE = {
+  color: '#d8d4c8',
+  roughness: 0.78,
+  metalness: 0,
+  // A small emissive floor keeps markings legible under the night ambient
+  // instead of going fully black, without making them glow in daylight.
+  emissive: '#141310',
+  emissiveIntensity: 0.2,
+  depthWrite: false,
+} as const;
+
+const ROAD_PAINT_YELLOW = {
+  ...ROAD_PAINT_WHITE,
+  color: '#d9bb3f',
+  emissive: '#151004',
+} as const;
+
+// ---------------------------------------------------------------------------
+// PERIMETER FENCE
+// ---------------------------------------------------------------------------
+// The fence frames the whole site and had no map of any kind. The panel normal
+// runs ALONG each member (1x8 up a post, 24x1 down a rail) so the grain reads
+// as drawn steel rather than a tiled patch, and metalness drops because these
+// are painted sections - the same reasoning as the silo volumes.
+// CHANNEL ORDER MATTERS. `PROCEDURAL_TEXTURES.brushedMetal` is
+// generateBrushedMetal, which packs R=roughness, G=metalness, B=AO - three
+// reads a roughnessMap from GREEN, so binding it here would silently multiply
+// roughness by the METALNESS channel. `generateMachineORM` is the glTF order
+// (R=AO, G=roughness, B=metal) and is what this file must use. The 512/vertical
+// /96 variant is already built by machineSurfaces.ts and
+// OptimizedFactoryInfrastructure.tsx, and `getTexture` memoises on that key, so
+// this is a cache hit: no extra generation pass and no extra GPU upload.
+// Do NOT also bind it as a metalnessMap - its B channel is a constant 1.
+const FENCE_ORM = generateMachineORM(512, 'vertical', 96);
+const FENCE_POST_NORMAL = cloneTiledTexture(PROCEDURAL_TEXTURES.panelNormal, 1, 8);
+const FENCE_POST_ROUGHNESS = cloneTiledTexture(FENCE_ORM, 1, 8);
+const FENCE_RAIL_NORMAL = cloneTiledTexture(PROCEDURAL_TEXTURES.panelNormal, 24, 1);
+const FENCE_RAIL_ROUGHNESS = cloneTiledTexture(FENCE_ORM, 24, 1);
+const FENCE_NORMAL_SCALE = new THREE.Vector2(0.2, 0.2);
+
+const FENCE_POST_SURFACE = {
+  color: '#37474f',
+  roughness: 0.72,
+  metalness: 0.1,
+  normalMap: FENCE_POST_NORMAL,
+  normalScale: FENCE_NORMAL_SCALE,
+  roughnessMap: FENCE_POST_ROUGHNESS,
+} as const;
+
+const FENCE_RAIL_SURFACE = {
+  color: '#455a64',
+  roughness: 0.72,
+  metalness: 0.1,
+  normalMap: FENCE_RAIL_NORMAL,
+  normalScale: FENCE_NORMAL_SCALE,
+  roughnessMap: FENCE_RAIL_ROUGHNESS,
+} as const;
+
+// Shared surface for the untextured outbuilding shells. No albedo map, so each
+// call site KEEPS its own `color` - with no map the colour is the albedo and
+// resetting it would flatten every shed to the same hue.
+const OUTBUILDING_SURFACE = {
+  roughness: 0.85,
+  normalMap: OUTBUILDING_PANEL_NORMAL,
+  normalScale: OUTBUILDING_NORMAL_SCALE,
+  roughnessMap: OUTBUILDING_CONCRETE_ROUGHNESS,
+} as const;
+
+// ---------------------------------------------------------------------------
+// GROUND CONTACT BLOBS
+// ---------------------------------------------------------------------------
+// ONE module-level unit plane, scaled per instance. `StaticMeshBatch` keys
+// instancing on `geometrySignature`, which includes geometry `parameters` but
+// NOT the matrix scale, so a shared unit plane collapses every blob in a cell
+// into a single InstancedMesh. Writing `<planeGeometry args={[w, h]} />` per
+// prop would turn one draw call back into one per blob.
+const GROUND_BLOB_GEOMETRY = new THREE.PlaneGeometry(1, 1);
+
+// One shared material as well as one shared geometry: transparent materials are
+// rejected by `getInstanceColor`, so blobs can only ever instance (never merge),
+// and instancing wants an identical material signature across every blob.
+// Built lazily because `CAR_SHADOW_TEXTURE` is declared further down the file.
+let groundBlobMaterial: THREE.MeshBasicMaterial | null = null;
+const getGroundBlobMaterial = (): THREE.MeshBasicMaterial => {
+  if (!groundBlobMaterial) {
+    groundBlobMaterial = new THREE.MeshBasicMaterial({
+      map: CAR_SHADOW_TEXTURE,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
+    });
+  }
+  return groundBlobMaterial;
+};
+
+/** Y datum for contact blobs: just above `TerrainGround`'s 0.05 default. */
+const GROUND_BLOB_Y = 0.06;
+
+// ---------------------------------------------------------------------------
+// GRAVITY WEATHERING
+// ---------------------------------------------------------------------------
+// `PROCEDURAL_TEXTURES.rust` is generateRustPattern(256, 0.3, 'down') - built
+// with a downward streak bias and a real alpha channel (alpha = rust
+// intensity, zero where clean), and until now it had no consumer at all.
+//
+// Deliberately a decal quad and NOT an `onBeforeCompile` injection:
+// `StaticMeshBatch.isSupportedMaterial` rejects any material carrying an own
+// `onBeforeCompile` or `customProgramCacheKey`, so a shader-based weathering
+// layer would evict every wall it touched from batching permanently. Decals
+// leave the base materials batch-eligible.
+//
+// Same instancing discipline as GroundBlob: one module-level unit plane and one
+// module-level material, sized through the mesh `scale`. Transparent materials
+// can only instance, never merge, so shared geometry is what keeps this cheap.
+const GRIME_GEOMETRY = new THREE.PlaneGeometry(1, 1);
+const GRIME_MATERIAL = new THREE.MeshBasicMaterial({
+  map: PROCEDURAL_TEXTURES.rust,
+  transparent: true,
+  opacity: 0.28,
+  depthWrite: false,
+  polygonOffset: true,
+  polygonOffsetFactor: POLYGON_OFFSET.standard.factor,
+  polygonOffsetUnits: POLYGON_OFFSET.standard.units,
+});
+
+/**
+ * A rain-streak / rust-bleed decal on a vertical surface. Keep one plane per
+ * wall face: two overlapping transparent quads on the same wall sort by
+ * distance and can flicker against each other. Place only BELOW a horizontal
+ * edge where water would actually run - applied uniformly it reads as smeared
+ * dirt rather than gravity.
+ */
+const GrimeStreak: React.FC<{
+  position: [number, number, number];
+  width: number;
+  height: number;
+  rotation?: [number, number, number];
+}> = React.memo(({ position, width, height, rotation }) => (
+  <mesh
+    geometry={GRIME_GEOMETRY}
+    material={GRIME_MATERIAL}
+    position={position}
+    rotation={rotation}
+    scale={[width, height, 1]}
+  />
+));
+GrimeStreak.displayName = 'GrimeStreak';
+
+/**
+ * Soft contact darkening under a static yard prop. The sun shadow frustum does
+ * not reach the outer yard (parking lot, tunnel, gas station, lake), and there
+ * is no shadow pass at all on `low`, so without this props meet the ground on a
+ * hard unshaded seam. Deliberately not the CuteCar y=0.01, which is below the
+ * terrain and survives only on its polygonOffset.
+ *
+ * Overlapping blobs double-darken (alpha over alpha), so keep neighbours at
+ * least one radius apart, and keep them away from the displaced terrain within
+ * ~20 units of the river canyon at z=-145 where a flat quad would clip.
+ */
+const GroundBlob: React.FC<{
+  /** Ground-plane centre; Y is fixed to the blob datum. */
+  position: [number, number];
+  /** World-space diameter along X. */
+  scale: number;
+  /** World-space diameter along Z; defaults to `scale`. */
+  scaleZ?: number;
+  /** Override for props standing on their own foundation slab. */
+  y?: number;
+}> = React.memo(({ position, scale, scaleZ, y = GROUND_BLOB_Y }) => (
+  <mesh
+    geometry={GROUND_BLOB_GEOMETRY}
+    material={getGroundBlobMaterial()}
+    position={[position[0], y, position[1]]}
+    rotation={[-Math.PI / 2, 0, 0]}
+    scale={[scale, scaleZ ?? scale, 1]}
+    renderOrder={RENDER_ORDER.floorEffects}
+  />
+));
+GroundBlob.displayName = 'GroundBlob';
+
 // Simple low-poly tree component
+// Foliage: irregular icosahedron clusters merged into ONE geometry per variant
+// (module-level, shared with the instanced parkland trees — single source in
+// ExteriorVegetation.tsx) so each tree costs 2 draw calls (trunk + canopy).
 const SimpleTree: React.FC<{ position: [number, number, number]; scale?: number }> = React.memo(
-  ({ position, scale = 1 }) => (
-    <group position={position} scale={scale}>
-      {/* Trunk */}
-      <mesh position={[0, 1.5, 0]} castShadow>
-        <cylinderGeometry args={[0.3, 0.4, 3, 6]} />
-        <meshStandardMaterial color="#5d4037" roughness={0.9} />
-      </mesh>
-      {/* Foliage - simple cone */}
-      <mesh position={[0, 4.5, 0]} castShadow>
-        <coneGeometry args={[2, 5, 6]} />
-        <meshStandardMaterial color="#2e7d32" roughness={0.8} />
-      </mesh>
-      <mesh position={[0, 6.5, 0]} castShadow>
-        <coneGeometry args={[1.5, 3.5, 6]} />
-        <meshStandardMaterial color="#388e3c" roughness={0.8} />
-      </mesh>
-    </group>
-  )
+  ({ position, scale = 1 }) => {
+    // Deterministic per-tree variant, rotation and scale jitter from position hash
+    const { variant, rotY, jitter } = useMemo(() => treeJitterFromPosition(position), [position]);
+
+    return (
+      <group position={position} scale={scale * jitter} rotation={[0, rotY, 0]}>
+        {/* Trunk - shared bark-textured material */}
+        <mesh position={[0, 1.5, 0]} castShadow>
+          <cylinderGeometry args={[0.3, 0.4, 3, 6]} />
+          <primitive object={TREE_MATERIALS.trunk} attach="material" />
+        </mesh>
+        {/* Canopy - merged icosahedron cluster, single draw call */}
+        <mesh
+          geometry={TREE_FOLIAGE_VARIANTS[variant]}
+          material={TREE_FOLIAGE_MATERIALS[variant]}
+          castShadow
+        />
+      </group>
+    );
+  }
 );
 
 // Simple park bench
@@ -92,37 +357,154 @@ const ParkBench: React.FC<{ position: [number, number, number]; rotation?: numbe
   )
 );
 
-// Small office building
+// Small office building - module-level shared materials (procedural stucco walls)
+const officeWallColor = PROCEDURAL_TEXTURES.stuccoColor.clone();
+const officeWallNormal = PROCEDURAL_TEXTURES.stuccoNormal.clone();
+officeWallColor.wrapS = officeWallColor.wrapT = THREE.RepeatWrapping;
+officeWallNormal.wrapS = officeWallNormal.wrapT = THREE.RepeatWrapping;
+officeWallColor.repeat.set(3, 2);
+officeWallNormal.repeat.set(3, 2);
+
+const OFFICE_MATERIALS = {
+  wall: new THREE.MeshStandardMaterial({
+    color: '#8fa3ad',
+    roughness: 0.8,
+    map: officeWallColor,
+    normalMap: officeWallNormal,
+    normalScale: new THREE.Vector2(0.3, 0.3),
+  }),
+  trim: new THREE.MeshStandardMaterial({ color: '#546e7a', roughness: 0.6 }),
+  frame: new THREE.MeshStandardMaterial({ color: '#37474f', roughness: 0.5, metalness: 0.4 }),
+  glassDay: new THREE.MeshStandardMaterial({ color: '#90caf9', metalness: 0.3, roughness: 0.15 }),
+  glassNight: new THREE.MeshStandardMaterial({
+    color: '#ffd28a',
+    emissive: '#ffb74d',
+    emissiveIntensity: 0.9,
+    roughness: 0.3,
+  }),
+  hvac: new THREE.MeshStandardMaterial({ color: '#9e9e9e', roughness: 0.5, metalness: 0.5 }),
+  door: new THREE.MeshStandardMaterial({ color: '#5d4037', roughness: 0.8 }),
+};
+
+// Inset window with thin frame; glass sits behind the frame so it reads recessed
+const OfficeWindow: React.FC<{
+  position: [number, number, number];
+  lit: boolean;
+  width?: number;
+  height?: number;
+}> = React.memo(({ position, lit, width = 2, height = 2.5 }) => (
+  <group position={position}>
+    {/* Frame - top/bottom/left/right, slightly proud of the wall */}
+    <mesh position={[0, height / 2, 0.06]} material={OFFICE_MATERIALS.frame}>
+      <boxGeometry args={[width + 0.12, 0.1, 0.1]} />
+    </mesh>
+    <mesh position={[0, -height / 2, 0.06]} material={OFFICE_MATERIALS.frame}>
+      <boxGeometry args={[width + 0.12, 0.1, 0.1]} />
+    </mesh>
+    <mesh position={[-width / 2, 0, 0.06]} material={OFFICE_MATERIALS.frame}>
+      <boxGeometry args={[0.1, height + 0.12, 0.1]} />
+    </mesh>
+    <mesh position={[width / 2, 0, 0.06]} material={OFFICE_MATERIALS.frame}>
+      <boxGeometry args={[0.1, height + 0.12, 0.1]} />
+    </mesh>
+    {/* Glass - recessed behind the frame */}
+    <mesh
+      position={[0, 0, 0.02]}
+      material={lit ? OFFICE_MATERIALS.glassNight : OFFICE_MATERIALS.glassDay}
+      userData={{ dynamic: true }}
+    >
+      <planeGeometry args={[width, height]} />
+    </mesh>
+  </group>
+));
+OfficeWindow.displayName = 'OfficeWindow';
+
 export const SmallOffice: React.FC<{
   position: [number, number, number];
   size?: [number, number, number];
   rotation?: number;
-}> = React.memo(({ position, size = [12, 8, 10], rotation = 0 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
-    {/* Main building */}
-    <mesh position={[0, size[1] / 2, 0]} castShadow receiveShadow>
-      <boxGeometry args={[size[0], size[1], size[2]]} />
-      <meshStandardMaterial color="#78909c" roughness={0.7} />
-    </mesh>
-    {/* Roof */}
-    <mesh position={[0, size[1] + 0.3, 0]} castShadow>
-      <boxGeometry args={[size[0] + 0.5, 0.6, size[2] + 0.5]} />
-      <meshStandardMaterial color="#546e7a" roughness={0.6} />
-    </mesh>
-    {/* Windows - front (raised to avoid overlap with door) */}
-    {[-3, 0, 3].map((x, i) => (
-      <mesh key={`front-${i}`} position={[x, size[1] / 2 + 0.8, size[2] / 2 + 0.05]}>
-        <planeGeometry args={[2, 2.5]} />
-        <meshStandardMaterial color="#90caf9" metalness={0.3} roughness={0.2} />
+}> = React.memo(({ position, size = [12, 8, 10], rotation = 0 }) => {
+  const isNight = useGameSimulationStore(
+    useShallow((state) => state.gameTime >= 20 || state.gameTime < 6)
+  );
+
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      {/* Main building - procedural stucco walls */}
+      <mesh
+        position={[0, size[1] / 2, 0]}
+        castShadow
+        receiveShadow
+        material={OFFICE_MATERIALS.wall}
+      >
+        <boxGeometry args={[size[0], size[1], size[2]]} />
       </mesh>
-    ))}
-    {/* Door */}
-    <mesh position={[0, 1.2, size[2] / 2 + 0.05]}>
-      <planeGeometry args={[1.5, 2.4]} />
-      <meshStandardMaterial color="#5d4037" roughness={0.8} />
-    </mesh>
-  </group>
-));
+      {/* Roof slab */}
+      <mesh position={[0, size[1] + 0.15, 0]} castShadow material={OFFICE_MATERIALS.trim}>
+        <boxGeometry args={[size[0] + 0.3, 0.3, size[2] + 0.3]} />
+      </mesh>
+      {/* Parapet - four low walls around the roof edge */}
+      <mesh
+        position={[0, size[1] + 0.55, size[2] / 2 + 0.1]}
+        castShadow
+        material={OFFICE_MATERIALS.trim}
+      >
+        <boxGeometry args={[size[0] + 0.5, 0.5, 0.15]} />
+      </mesh>
+      <mesh
+        position={[0, size[1] + 0.55, -(size[2] / 2 + 0.1)]}
+        castShadow
+        material={OFFICE_MATERIALS.trim}
+      >
+        <boxGeometry args={[size[0] + 0.5, 0.5, 0.15]} />
+      </mesh>
+      <mesh
+        position={[size[0] / 2 + 0.1, size[1] + 0.55, 0]}
+        castShadow
+        material={OFFICE_MATERIALS.trim}
+      >
+        <boxGeometry args={[0.15, 0.5, size[2] + 0.5]} />
+      </mesh>
+      <mesh
+        position={[-(size[0] / 2 + 0.1), size[1] + 0.55, 0]}
+        castShadow
+        material={OFFICE_MATERIALS.trim}
+      >
+        <boxGeometry args={[0.15, 0.5, size[2] + 0.5]} />
+      </mesh>
+      {/* Rooftop HVAC unit */}
+      <group position={[size[0] / 5, size[1] + 0.75, -size[2] / 6]}>
+        <mesh castShadow material={OFFICE_MATERIALS.hvac}>
+          <boxGeometry args={[2, 0.9, 1.4]} />
+        </mesh>
+        {/* Fan grille on top */}
+        <mesh
+          position={[0, 0.47, 0]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          material={OFFICE_MATERIALS.frame}
+        >
+          <circleGeometry args={[0.5, 12]} />
+        </mesh>
+      </group>
+      {/* Windows - front (raised to avoid overlap with door); middle bay dark for variety */}
+      {[-3, 0, 3].map((x, i) => (
+        <OfficeWindow
+          key={`front-${i}`}
+          position={[x, size[1] / 2 + 0.8, size[2] / 2 + 0.01]}
+          lit={isNight && i !== 1}
+        />
+      ))}
+      {/* Door with frame */}
+      <mesh position={[0, 1.2, size[2] / 2 + 0.02]} material={OFFICE_MATERIALS.door}>
+        <planeGeometry args={[1.5, 2.4]} />
+      </mesh>
+      <mesh position={[0, 2.45, size[2] / 2 + 0.05]} material={OFFICE_MATERIALS.frame}>
+        <boxGeometry args={[1.7, 0.1, 0.08]} />
+      </mesh>
+    </group>
+  );
+});
+SmallOffice.displayName = 'SmallOffice';
 
 // Nissen hut - semi-cylindrical corrugated building
 const NissenHut: React.FC<{
@@ -333,11 +715,11 @@ const FenceSection: React.FC<{
   }, [postCount, start, dx, dz, dummy]);
 
   return (
-    <group>
+    <group name="factory-exterior-content">
       {/* Fence posts - instanced */}
       <instancedMesh ref={meshRef} args={[undefined, undefined, postCount]} castShadow>
         <boxGeometry args={[0.15, 2.4, 0.15]} />
-        <meshStandardMaterial color="#37474f" roughness={0.7} metalness={0.2} />
+        <meshStandardMaterial {...FENCE_POST_SURFACE} />
       </instancedMesh>
 
       {/* Horizontal rails */}
@@ -345,20 +727,23 @@ const FenceSection: React.FC<{
         position={[(start[0] + end[0]) / 2, 0, (start[2] + end[2]) / 2]}
         rotation={[0, -angle, 0]}
       >
+        {/* Rails thickened 0.08 -> 0.11: at 190 units of run the old section
+            was sub-pixel from any exterior camera and the fence read as three
+            aliasing hairlines rather than a structure. */}
         {/* Top rail */}
         <mesh position={[0, 2.2, 0]} castShadow>
-          <boxGeometry args={[0.08, 0.08, length]} />
-          <meshStandardMaterial color="#455a64" roughness={0.6} metalness={0.3} />
+          <boxGeometry args={[0.11, 0.11, length]} />
+          <meshStandardMaterial {...FENCE_RAIL_SURFACE} />
         </mesh>
         {/* Middle rail */}
         <mesh position={[0, 1.2, 0]} castShadow>
-          <boxGeometry args={[0.08, 0.08, length]} />
-          <meshStandardMaterial color="#455a64" roughness={0.6} metalness={0.3} />
+          <boxGeometry args={[0.11, 0.11, length]} />
+          <meshStandardMaterial {...FENCE_RAIL_SURFACE} />
         </mesh>
         {/* Bottom rail */}
         <mesh position={[0, 0.4, 0]} castShadow>
-          <boxGeometry args={[0.08, 0.08, length]} />
-          <meshStandardMaterial color="#455a64" roughness={0.6} metalness={0.3} />
+          <boxGeometry args={[0.11, 0.11, length]} />
+          <meshStandardMaterial {...FENCE_RAIL_SURFACE} />
         </mesh>
       </group>
     </group>
@@ -372,6 +757,304 @@ const WATER_COLORS = {
   surface: '#3d6ab0', // Blue surface reflection
   edge: '#1e3a5a', // Water edge/shore
   pond: '#2563eb', // Bright blue for decorative ponds
+};
+
+// The former `WATER_DEPTH_MATERIALS` pair is gone. Every consumer painted a
+// full-footprint MeshStandardMaterial plane a few centimetres BENEATH an
+// opaque (`transparent: false`, `gl_FragColor.a = 1.0`) water surface of the
+// same outline and the same rotation, at a lower `renderOrder`, so it was
+// rasterised first and then completely overdrawn: one wasted draw call and one
+// wasted full-lit PBR fill each, now with four point lights, a shadowed sun and
+// an IBL lookup per fragment. Removing them also closes a latent artefact - the
+// water vertex shader displaces +/-0.035 in Y, which is larger than the 0.03
+// gap the pond left, so wave troughs cut through and flashed the plane. That is
+// exactly the failure the `Lake` comment below records as already fixed by
+// deleting its own equivalent disc.
+
+const waterMaterials = new Set<THREE.ShaderMaterial>();
+const DEFAULT_WATER_FLOW = [0.25, 1] as const;
+
+// Sky palette for the water's analytic reflection. Two stops plus a twilight
+// push is enough: the reflection is a broad, low-frequency term and a real
+// probe would cost a render target this budget does not have.
+const WATER_ZENITH_DAY = new THREE.Color('#3f7fd0');
+const WATER_ZENITH_NIGHT = new THREE.Color('#0a1024');
+const WATER_HORIZON_DAY = new THREE.Color('#cfe3f2');
+const WATER_HORIZON_NIGHT = new THREE.Color('#141c2e');
+const WATER_HORIZON_TWILIGHT = new THREE.Color('#e0995c');
+const WATER_OVERCAST = new THREE.Color('#9aa7b0');
+const WATER_SUN_TINT = new THREE.Color('#fff2d5');
+// useFrame scratch - never allocate per frame.
+const _waterZenith = new THREE.Color();
+const _waterHorizon = new THREE.Color();
+const _waterSun = new THREE.Color();
+const _waterCelestial = createCelestialState();
+
+const WaterAnimationManager: React.FC = () => {
+  useFrame(() => {
+    const { gameDay, gameTime, weather, isTabVisible } = useGameSimulationStore.getState();
+    if (!isTabVisible) return;
+    if (waterMaterials.size === 0) return;
+    const atmosphere = sampleAtmosphere(gameDay, gameTime, weather);
+    const celestial = sampleCelestial(atmosphere, _waterCelestial);
+    const daylight = atmosphere.daylight * atmosphere.lightMultiplier;
+    const time = atmosphere.simulationMinutes * 0.38;
+
+    _waterZenith.copy(WATER_ZENITH_NIGHT).lerp(WATER_ZENITH_DAY, daylight);
+    _waterHorizon.copy(WATER_HORIZON_NIGHT).lerp(WATER_HORIZON_DAY, daylight);
+    _waterHorizon.lerp(WATER_HORIZON_TWILIGHT, Math.min(1, atmosphere.twilight) * 0.55);
+    // Cloud cover flattens both stops toward a grey overcast dome.
+    const overcast = atmosphere.cloudCoverage * 0.7;
+    _waterZenith.lerp(WATER_OVERCAST, overcast);
+    _waterHorizon.lerp(WATER_OVERCAST, overcast);
+    _waterSun.copy(WATER_SUN_TINT).multiplyScalar(celestial.sunOpacity * (0.35 + daylight * 0.65));
+
+    waterMaterials.forEach((material) => {
+      const uniforms = material.uniforms;
+      uniforms.uTime.value = time;
+      uniforms.uWetness.value = atmosphere.wetness;
+      uniforms.uDaylight.value = daylight;
+      uniforms.uSkyZenith.value.copy(_waterZenith);
+      uniforms.uSkyHorizon.value.copy(_waterHorizon);
+      uniforms.uSunColour.value.copy(_waterSun);
+      uniforms.uSunDirection.value.set(
+        celestial.sunDirection[0],
+        celestial.sunDirection[1],
+        celestial.sunDirection[2]
+      );
+    });
+  });
+  return null;
+};
+
+interface UnifiedWaterSurfaceMaterialProps {
+  deep?: string;
+  shallow?: string;
+  reflection?: string;
+  flowSpeed?: number;
+  flowDirection?: readonly [number, number];
+  opacity?: number;
+  radial?: boolean;
+  /**
+   * Measure shore distance ACROSS the flow only. A river or canal is authored
+   * as a run of separate plane segments, so a four-sided edge distance puts a
+   * full-strength foam band 1-2 units in from every segment END - a ladder of
+   * bright transverse bars down the watercourse, doubled where the 0.5-unit
+   * segment overlaps stack. Lakes and ponds are `radial` and unaffected.
+   */
+  crossOnly?: boolean;
+}
+
+const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = ({
+  deep = '#153747',
+  shallow = '#3f7f8c',
+  reflection = '#b9dce3',
+  flowSpeed = 0.25,
+  flowDirection = DEFAULT_WATER_FLOW,
+  opacity = 0.88,
+  radial = false,
+  crossOnly = false,
+}) => {
+  const flowX = flowDirection[0];
+  const flowY = flowDirection[1];
+  const material = useMemo(() => {
+    const direction = new THREE.Vector2(flowX, flowY);
+    if (direction.lengthSq() < 0.0001) direction.set(0, 1);
+    direction.normalize();
+    const crossFlow = new THREE.Vector2(-direction.y, direction.x);
+    // The three ripple axes are constant for the life of the material. They
+    // used to be `normalize()`d once PER FRAGMENT; hoisting them to uniforms is
+    // bit-identical output for three fewer inverse square roots per pixel.
+    const rippleA = crossFlow.clone().multiplyScalar(0.16).add(direction).normalize();
+    const rippleB = crossFlow.clone().multiplyScalar(-0.31).add(direction).normalize();
+    const rippleC = crossFlow.clone().multiplyScalar(0.48).add(direction).normalize();
+    const value = new THREE.ShaderMaterial({
+      name: 'MillOS Unified Water Surface',
+      uniforms: {
+        uTime: { value: 0 },
+        uDeep: { value: new THREE.Color(deep) },
+        uShallow: { value: new THREE.Color(shallow) },
+        uReflection: { value: new THREE.Color(reflection) },
+        uFlowDirection: { value: direction },
+        uCrossFlow: { value: crossFlow },
+        uRippleA: { value: rippleA },
+        uRippleB: { value: rippleB },
+        uRippleC: { value: rippleC },
+        uFlowSpeed: { value: flowSpeed },
+        uOpacity: { value: opacity },
+        uRadial: { value: radial ? 1 : 0 },
+        uCrossOnly: { value: crossOnly ? 1 : 0 },
+        uWetness: { value: 0 },
+        uDaylight: { value: 1 },
+        uSkyZenith: { value: WATER_ZENITH_DAY.clone() },
+        uSkyHorizon: { value: WATER_HORIZON_DAY.clone() },
+        uSunColour: { value: WATER_SUN_TINT.clone() },
+        uSunDirection: { value: new THREE.Vector3(0.35, 0.86, 0.37) },
+      },
+      vertexShader: `
+        uniform float uTime;
+        uniform vec2 uFlowDirection;
+        uniform vec2 uCrossFlow;
+        uniform float uFlowSpeed;
+        varying vec2 vUv;
+        varying float vWave;
+        varying vec3 vWorldPosition;
+        varying vec3 vWorldNormal;
+        void main() {
+          vUv = uv;
+          vec2 crossFlow = uCrossFlow;
+          float along = dot(position.xy, uFlowDirection);
+          float across = dot(position.xy, crossFlow);
+          float waveA = sin(along * 0.32 + uTime * uFlowSpeed);
+          float waveB = cos(across * 0.44 - uTime * uFlowSpeed * 0.71);
+          vWave = (waveA + waveB) * 0.5;
+          vec2 waveDerivative =
+            cos(along * 0.32 + uTime * uFlowSpeed) * 0.32 * uFlowDirection
+            - sin(across * 0.44 - uTime * uFlowSpeed * 0.71) * 0.44 * crossFlow;
+          vec2 heightDerivative = waveDerivative * 0.0175;
+          vec3 displaced = position;
+          displaced.z += vWave * 0.035;
+          vec3 localNormal = normalize(vec3(-heightDerivative.x, -heightDerivative.y, 1.0));
+          vWorldNormal = normalize(mat3(modelMatrix) * localNormal);
+          vWorldPosition = (modelMatrix * vec4(displaced, 1.0)).xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uDeep;
+        uniform vec3 uShallow;
+        uniform vec3 uReflection;
+        uniform vec2 uRippleA;
+        uniform vec2 uRippleB;
+        uniform vec2 uRippleC;
+        uniform float uTime;
+        uniform float uFlowSpeed;
+        uniform float uOpacity;
+        uniform float uRadial;
+        uniform float uCrossOnly;
+        uniform float uWetness;
+        uniform float uDaylight;
+        uniform vec3 uSkyZenith;
+        uniform vec3 uSkyHorizon;
+        uniform vec3 uSunColour;
+        uniform vec3 uSunDirection;
+        varying vec2 vUv;
+        varying float vWave;
+        varying vec3 vWorldPosition;
+        varying vec3 vWorldNormal;
+        void main() {
+          vec2 centred = vUv * 2.0 - 1.0;
+
+          // Three travelling wave trains. The axes arrive pre-normalised as
+          // uniforms; keeping the raw phases lets the analytic derivatives
+          // below reuse them instead of evaluating a second set of sines.
+          float phaseA = dot(vUv, uRippleA) * 38.0 + uTime * uFlowSpeed * 1.62;
+          float phaseC = dot(vUv, uRippleC) * 23.0 + uTime * uFlowSpeed * 0.63;
+          float rippleA = sin(phaseA);
+          float phaseB =
+            dot(vUv, uRippleB) * 59.0 - uTime * uFlowSpeed * 1.09 + rippleA * 0.72;
+          float rippleB = sin(phaseB);
+          float rippleC = cos(phaseC);
+          float ripples = rippleA * 0.56 + rippleB * 0.27 + rippleC * 0.11 + vWave * 0.06;
+
+          // DEPTH IS DISTANCE FROM THE BANK, not a UV ramp. The old
+          // 0.48 + vUv.y * 0.16 gradient ran across the mesh regardless of
+          // where the shore actually was, so one side of every pond read as
+          // permanently deeper than the other.
+          // planeGeometry maps UV.x across the mesh width, so crossEdge is the
+          // cross-stream distance to the bank; boxEdge also counts the two
+          // ends, which is what a pond-shaped plane wants and a river does not.
+          float crossEdge = min(vUv.x, 1.0 - vUv.x);
+          float boxEdge = min(crossEdge, min(vUv.y, 1.0 - vUv.y));
+          float linearEdge = mix(boxEdge, crossEdge, uCrossOnly);
+          float radialEdge = 1.0 - length(centred);
+          float edge = max(mix(linearEdge, radialEdge, uRadial), 0.0);
+          float depth = clamp(smoothstep(0.0, 0.34, edge) + ripples * 0.045, 0.0, 1.0);
+          vec3 colour = mix(uShallow, uDeep, depth);
+
+          // Micro-relief from the analytic derivatives of the same three wave
+          // trains. The vertex stage carries the long swell; this is the
+          // centimetre chop that makes the reflection break up. No texture
+          // fetch, no second pass - purely ALU, which is the budget we have.
+          vec2 slope =
+            cos(phaseA) * 38.0 * 0.0040 * uRippleA
+            + cos(phaseB) * 59.0 * 0.0016 * uRippleB
+            - sin(phaseC) * 23.0 * 0.0030 * uRippleC;
+          vec3 normal = normalize(vWorldNormal + vec3(slope.x, 0.0, slope.y));
+
+          vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
+          float fresnel = pow(1.0 - max(dot(normal, viewDirection), 0.0), 4.0);
+
+          // Reflection without a render target: bounce the view ray off the
+          // perturbed normal and read a two-stop analytic sky whose colours are
+          // pushed every frame from the same atmosphere sample that drives the
+          // real sky, sun and fog.
+          vec3 reflected = reflect(-viewDirection, normal);
+          vec3 skyColour = mix(uSkyHorizon, uSkyZenith, sqrt(clamp(reflected.y, 0.0, 1.0)));
+          vec3 reflectionColour = mix(uReflection, skyColour, 0.75);
+          float reflectance = clamp(0.03 + fresnel * 0.72, 0.0, 0.85);
+          colour = mix(colour, reflectionColour, reflectance);
+
+          // Specular sun: a tight glitter lobe plus a broad sheen. Both are
+          // tone-mapped with the rest of the frame (this shader ends in
+          // <tonemapping_fragment>), so they roll off on the no-composer path
+          // instead of clipping to a flat white blob.
+          float sunAlignment = max(dot(reflected, uSunDirection), 0.0);
+          float glitter = pow(sunAlignment, 160.0) * 1.6 + pow(sunAlignment, 24.0) * 0.10;
+          colour += uSunColour * glitter * uDaylight;
+
+          float crestSignal = rippleA * 0.7 + rippleB * 0.22 + rippleC * 0.08;
+          float crest = smoothstep(0.70, 0.98, crestSignal);
+          colour = mix(colour, uReflection, crest * (0.05 + 0.06 * uDaylight));
+
+          // Shore foam that breathes with the swell rather than a static rim,
+          // with a finer lace line right on the waterline.
+          float swell = sin(uTime * uFlowSpeed * 0.9 + crestSignal * 1.7) * 0.5 + 0.5;
+          float foamBand = 1.0 - smoothstep(0.0, 0.055 + swell * 0.030, edge);
+          float lace = smoothstep(0.45, 1.0, foamBand) * (0.55 + 0.45 * rippleB);
+          vec3 foamColour = mix(vec3(0.72, 0.82, 0.83), uReflection, 0.35);
+          colour = mix(colour, foamColour, clamp(foamBand * 0.42 + lace * 0.30, 0.0, 0.85));
+
+          // Damp margin so the bank mesh and the water meet on a wet
+          // transition rather than a cut edge.
+          float shore = smoothstep(0.0, 0.03, edge);
+          colour = mix(vec3(0.16, 0.26, 0.26), colour, shore);
+
+          colour = mix(uDeep * 0.92, colour, clamp(uOpacity, 0.0, 1.0));
+          // Unlit shader: without this the water stayed full daylight blue at
+          // midnight while every lit surface around it went dark.
+          colour *= mix(0.42, 1.0, clamp(uDaylight + uWetness * 0.08, 0.0, 1.0));
+
+          gl_FragColor = vec4(colour, 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }
+      `,
+      transparent: false,
+      depthWrite: true,
+      // DoubleSide retained. A flat ground quad has no backfacing triangles
+      // seen from above, so FrontSide would cull nothing - while
+      // AnimatedRiverWater sits at y=-10 inside a 12-deep canyon, where a
+      // first-person eye on the canyon floor would be BELOW the surface and
+      // the water would simply vanish. No gain, real risk.
+      side: THREE.DoubleSide,
+    });
+    // MANUALLY VERSIONED, never derived from time or randomness - see the
+    // documented `Date.now()` cache-key bug. Bump this whenever the shader
+    // source above changes or a stale cached program will be reused.
+    value.customProgramCacheKey = () => 'millos-unified-water-v6';
+    return value;
+  }, [crossOnly, deep, flowSpeed, flowX, flowY, opacity, radial, reflection, shallow]);
+
+  useEffect(() => {
+    waterMaterials.add(material);
+    return () => {
+      waterMaterials.delete(material);
+      material.dispose();
+    };
+  }, [material]);
+
+  return <primitive object={material} attach="material" />;
 };
 
 // Still canal water surface - shiny reflective without animation
@@ -389,30 +1072,31 @@ const StillCanalWater: React.FC<{
   const waterY = 0.15;
 
   return (
-    <mesh
-      position={[position[0], waterY, position[2]]}
-      rotation={[-Math.PI / 2, 0, 0]}
-      receiveShadow
-      renderOrder={RENDER_ORDER.waterSurface}
-    >
-      <planeGeometry args={[safeWidth, safeLength]} />
-      <meshStandardMaterial
-        color={WATER_COLORS.shallow}
-        metalness={0.3}
-        roughness={0.1}
-        envMapIntensity={1.5}
-        transparent
-        opacity={0.9}
-        depthWrite={false}
-        polygonOffset
-        polygonOffsetFactor={-4}
-        polygonOffsetUnits={-4}
-      />
-    </mesh>
+    <group>
+      {/* No depth plane: it sat 0.04 below an opaque surface of identical
+          outline and was overdrawn every frame. See the note above the
+          `waterMaterials` set. */}
+      <mesh
+        position={[position[0], waterY, position[2]]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        receiveShadow
+        renderOrder={RENDER_ORDER.waterSurface}
+      >
+        <planeGeometry args={[safeWidth, safeLength]} />
+        <UnifiedWaterSurfaceMaterial
+          deep={WATER_COLORS.deep}
+          shallow={WATER_COLORS.shallow}
+          reflection="#b9dce3"
+          flowSpeed={0.12}
+          opacity={0.9}
+          crossOnly
+        />
+      </mesh>
+    </group>
   );
 };
 
-// Animated flowing river water surface
+// Animated river surface using the same bounded shader family as canals and lakes.
 const AnimatedRiverWater: React.FC<{
   width: number;
   length: number;
@@ -420,141 +1104,30 @@ const AnimatedRiverWater: React.FC<{
   rotation?: [number, number, number];
   flowSpeed?: number;
 }> = ({ width, length, position = [0, 0, 0], rotation = [-Math.PI / 2, 0, 0], flowSpeed = 1 }) => {
-  // CRITICAL: Guard against NaN/zero dimensions to prevent PlaneGeometry errors
   const safeWidth = Number.isFinite(width) && width > 0 ? width : 10;
   const safeLength = Number.isFinite(length) && length > 0 ? length : 10;
 
-  // Keep uniforms in a ref so they persist and can be mutated
-  const uniforms = useRef({
-    time: { value: 0 },
-    waterColor: { value: new THREE.Color(WATER_COLORS.shallow) },
-    deepColor: { value: new THREE.Color(WATER_COLORS.deep) },
-    foamColor: { value: new THREE.Color('#a8d5e5') },
-    flowSpeed: { value: flowSpeed },
-  });
-
-  const vertexShader = `
-    varying vec2 vUv;
-    varying vec3 vPosition;
-    uniform float time;
-    uniform float flowSpeed;
-
-    void main() {
-      vUv = uv;
-      vPosition = position;
-
-      // Flowing wave displacement
-      vec3 pos = position;
-      float wave = sin(pos.x * 0.3 + time * flowSpeed * 2.0) * 0.15;
-      wave += sin(pos.y * 0.4 + time * flowSpeed * 1.5) * 0.1;
-      wave += sin((pos.x + pos.y) * 0.2 + time * flowSpeed * 2.5) * 0.12;
-      // Cross-current ripples
-      wave += sin(pos.x * 0.8 - time * flowSpeed * 3.0) * 0.05;
-      pos.z += wave;
-
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-    }
-  `;
-
-  const fragmentShader = `
-    uniform vec3 waterColor;
-    uniform vec3 deepColor;
-    uniform vec3 foamColor;
-    uniform float time;
-    uniform float flowSpeed;
-    varying vec2 vUv;
-    varying vec3 vPosition;
-
-    // Noise functions
-    float hash(vec2 p) {
-      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-    }
-
-    float noise(vec2 p) {
-      vec2 i = floor(p);
-      vec2 f = fract(p);
-      f = f * f * (3.0 - 2.0 * f);
-      float a = hash(i);
-      float b = hash(i + vec2(1.0, 0.0));
-      float c = hash(i + vec2(0.0, 1.0));
-      float d = hash(i + vec2(1.0, 1.0));
-      return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-    }
-
-    void main() {
-      // Flowing UV - water moves downstream
-      vec2 flowUV = vUv;
-      flowUV.y += time * flowSpeed * 0.15;
-      flowUV.x += sin(time * flowSpeed * 0.5 + vUv.y * 3.0) * 0.02;
-
-      // Multi-layer ripples for current
-      float ripple1 = sin(vPosition.x * 0.5 + vPosition.y * 0.3 + time * flowSpeed * 3.0) * 0.5 + 0.5;
-      float ripple2 = sin(vPosition.x * 0.8 - time * flowSpeed * 4.0) * 0.5 + 0.5;
-      float ripple3 = sin((vPosition.x * 0.3 + vPosition.y * 0.6) + time * flowSpeed * 2.0) * 0.5 + 0.5;
-
-      float ripples = ripple1 * 0.4 + ripple2 * 0.35 + ripple3 * 0.25;
-
-      // Caustic patterns
-      float caustic1 = noise(flowUV * 6.0 + time * flowSpeed * 0.8);
-      float caustic2 = noise(flowUV * 10.0 - time * flowSpeed * 0.6);
-      float caustics = (caustic1 + caustic2) * 0.5;
-      caustics = pow(caustics, 1.3);
-
-      // Foam/white water patterns - more on peaks
-      float foamNoise = noise(flowUV * 15.0 + time * flowSpeed * 1.2);
-      float foam = smoothstep(0.6, 0.9, ripples * foamNoise);
-
-      // Depth variation - center is deeper
-      float centerDist = abs(vUv.x - 0.5) * 2.0;
-      float depthFactor = 1.0 - centerDist * 0.5;
-
-      // Base color mixing
-      vec3 color = mix(deepColor, waterColor, depthFactor * 0.7 + caustics * 0.3);
-
-      // Add shimmer highlights
-      float shimmer = ripples * caustics;
-      shimmer = smoothstep(0.3, 0.7, shimmer);
-      color = mix(color, foamColor, shimmer * 0.25);
-
-      // Add foam streaks
-      color = mix(color, foamColor, foam * 0.4);
-
-      // Sparkle highlights
-      float sparkle = pow(max(ripples, caustics), 10.0);
-      color += vec3(1.0, 0.98, 0.95) * sparkle * 0.5;
-
-      // Edge darkening for depth illusion
-      float edgeFade = smoothstep(0.0, 0.15, vUv.x) * smoothstep(1.0, 0.85, vUv.x);
-
-      gl_FragColor = vec4(color, 0.9 * edgeFade);
-    }
-  `;
-
-  // Update time uniform every frame
-  useFrame((state) => {
-    uniforms.current.time.value = state.clock.elapsedTime;
-  });
-
-  // Honor explicit Y position - allows water to be placed in carved channels
-  const adjustedPosition: [number, number, number] = [position[0], position[1], position[2]];
-
   return (
-    <mesh
-      position={adjustedPosition}
-      rotation={rotation}
-      receiveShadow
-      renderOrder={RENDER_ORDER.waterSurface}
-    >
-      <planeGeometry args={[safeWidth, safeLength, 32, 32]} />
-      <shaderMaterial
-        uniforms={uniforms.current}
-        vertexShader={vertexShader}
-        fragmentShader={fragmentShader}
-        transparent
-        side={THREE.DoubleSide}
-        depthWrite={false}
-      />
-    </mesh>
+    <group>
+      {/* Depth plane removed - fully occluded by the opaque surface below. */}
+      <mesh
+        position={position}
+        rotation={rotation}
+        receiveShadow
+        renderOrder={RENDER_ORDER.waterSurface}
+      >
+        <planeGeometry args={[safeWidth, safeLength, 24, 24]} />
+        <UnifiedWaterSurfaceMaterial
+          deep="#123746"
+          shallow="#3b7d8a"
+          reflection="#c0e1e6"
+          flowSpeed={Math.max(0.08, flowSpeed * 0.42)}
+          flowDirection={[0.16, 1]}
+          opacity={0.9}
+          crossOnly
+        />
+      </mesh>
+    </group>
   );
 };
 
@@ -576,7 +1149,7 @@ const Canal: React.FC<{
       {/* Water depth effect */}
       <mesh position={[0, -0.8, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[safeWidth - 1.5, safeLength - 1]} />
-        <meshBasicMaterial color="#0a2a3a" transparent opacity={0.6} />
+        <meshBasicMaterial color="#0a2a3a" transparent opacity={0.6} depthWrite={false} />
       </mesh>
       {/* Left canal wall */}
       <mesh position={[-safeWidth / 2, 0.3, 0]} castShadow receiveShadow>
@@ -617,6 +1190,14 @@ const Canal: React.FC<{
 };
 
 // English Narrowboat - cute traditional canal boat with roses and castles style
+const CANAL_PORTHOLE_GLASS_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#add8e6',
+  emissive: '#000000',
+  emissiveIntensity: 0,
+  metalness: 0.5,
+  roughness: 0.1,
+});
+
 export const CanalBoat: React.FC<{
   position: [number, number, number];
   rotation?: number;
@@ -632,6 +1213,13 @@ export const CanalBoat: React.FC<{
     const isNight = useGameSimulationStore(
       useShallow((state) => state.gameTime >= 20 || state.gameTime < 6)
     );
+    useEffect(() => {
+      CANAL_PORTHOLE_GLASS_MATERIAL.color.set(isNight ? '#ffaa00' : '#add8e6');
+      CANAL_PORTHOLE_GLASS_MATERIAL.emissive.set(isNight ? '#ffaa00' : '#000000');
+      CANAL_PORTHOLE_GLASS_MATERIAL.emissiveIntensity = isNight ? 2 : 0;
+      CANAL_PORTHOLE_GLASS_MATERIAL.metalness = isNight ? 0.15 : 0.5;
+      CANAL_PORTHOLE_GLASS_MATERIAL.roughness = isNight ? 0.35 : 0.1;
+    }, [isNight]);
 
     // Narrowboat dimensions (scaled for scene)
     const boatLength = 12;
@@ -719,18 +1307,13 @@ export const CanalBoat: React.FC<{
                   <cylinderGeometry args={[0.25, 0.25, 0.1, 16]} />
                   <meshStandardMaterial color="#d4af37" metalness={0.8} roughness={0.2} />
                 </mesh>
-                <mesh rotation={[0, 0, Math.PI / 2]} position={[0.02, 0, 0]}>
+                <mesh
+                  rotation={[0, 0, Math.PI / 2]}
+                  position={[0.02, 0, 0]}
+                  userData={{ dynamic: true }}
+                >
                   <cylinderGeometry args={[0.2, 0.2, 0.1, 16]} />
-                  {isNight ? (
-                    <meshStandardMaterial
-                      color="#ffaa00"
-                      emissive="#ffaa00"
-                      emissiveIntensity={2}
-                      toneMapped={false}
-                    />
-                  ) : (
-                    <meshStandardMaterial color="#add8e6" metalness={0.5} roughness={0.1} />
-                  )}
+                  <primitive object={CANAL_PORTHOLE_GLASS_MATERIAL} attach="material" />
                 </mesh>
               </group>
               {/* Starboard */}
@@ -739,18 +1322,13 @@ export const CanalBoat: React.FC<{
                   <cylinderGeometry args={[0.25, 0.25, 0.1, 16]} />
                   <meshStandardMaterial color="#d4af37" metalness={0.8} roughness={0.2} />
                 </mesh>
-                <mesh rotation={[0, 0, Math.PI / 2]} position={[-0.02, 0, 0]}>
+                <mesh
+                  rotation={[0, 0, Math.PI / 2]}
+                  position={[-0.02, 0, 0]}
+                  userData={{ dynamic: true }}
+                >
                   <cylinderGeometry args={[0.2, 0.2, 0.1, 16]} />
-                  {isNight ? (
-                    <meshStandardMaterial
-                      color="#ffaa00"
-                      emissive="#ffaa00"
-                      emissiveIntensity={2}
-                      toneMapped={false}
-                    />
-                  ) : (
-                    <meshStandardMaterial color="#add8e6" metalness={0.5} roughness={0.1} />
-                  )}
+                  <primitive object={CANAL_PORTHOLE_GLASS_MATERIAL} attach="material" />
                 </mesh>
               </group>
             </React.Fragment>
@@ -816,7 +1394,8 @@ export const CanalBoat: React.FC<{
         <group position={[0, 0.8, boatLength / 2 - 1.2]}>
           <mesh rotation={[-0.4, 0, 0]}>
             <boxGeometry args={[boatWidth - 0.4, 0.8, 0.05]} />
-            <meshStandardMaterial color="#222" transparent opacity={0.4} />
+            {/* depthWrite off: this fill is coplanar with the wireframe frame below */}
+            <meshStandardMaterial color="#222" transparent opacity={0.4} depthWrite={false} />
           </mesh>
           <mesh rotation={[-0.4, 0, 0]} position={[0, 0, 0]}>
             <boxGeometry args={[boatWidth - 0.4, 0.8, 0.05]} />
@@ -839,7 +1418,7 @@ export const CanalBoat: React.FC<{
         {/* Water Reflection / Shadow */}
         <mesh position={[0, -0.2, 0]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[boatWidth + 0.5, boatLength + 1]} />
-          <meshBasicMaterial color="#000" transparent opacity={0.3} />
+          <meshBasicMaterial color="#000" transparent opacity={0.3} depthWrite={false} />
         </mesh>
       </group>
     );
@@ -856,34 +1435,38 @@ const Lake: React.FC<{
   // "computeBoundingSphere(): Computed radius is NaN" errors in THREE.js
   const safeW = Number.isFinite(size?.[0]) && size[0] > 0 ? size[0] : 20;
   const safeH = Number.isFinite(size?.[1]) && size[1] > 0 ? size[1] : 20;
-  const maxDim = Math.max(safeW, safeH);
-
-  // Ensure all radii are positive and finite
-  const mainRadius = Math.max(0.1, maxDim / 2 - 1);
-  const deepRadius = Math.max(0.1, maxDim / 3);
-  const shoreRadius = Math.max(0.1, maxDim / 2 + 2);
+  const mainRadiusX = Math.max(0.1, safeW / 2 - 1);
+  const mainRadiusZ = Math.max(0.1, safeH / 2 - 1);
+  const shoreRadiusX = Math.max(0.1, safeW / 2 + 2);
+  const shoreRadiusZ = Math.max(0.1, safeH / 2 + 2);
+  const waterGeometry = useMemo(
+    () => createOrganicLakeSurfaceGeometry(mainRadiusX, mainRadiusZ),
+    [mainRadiusX, mainRadiusZ]
+  );
+  const bankGeometry = useMemo(
+    () => createOrganicLakeBankGeometry(mainRadiusX, mainRadiusZ, shoreRadiusX, shoreRadiusZ),
+    [mainRadiusX, mainRadiusZ, shoreRadiusX, shoreRadiusZ]
+  );
+  useEffect(
+    () => () => {
+      waterGeometry.dispose();
+      bankGeometry.dispose();
+    },
+    [bankGeometry, waterGeometry]
+  );
   // grassRadius removed - grass now handled by TerrainGround system
 
   return (
     <group position={position}>
       {/* Grass around lake - REMOVED: now handled by TerrainGround system */}
-      {/* Sandy shoreline - raised above TerrainGround (y=0.05) */}
+      {/* One organic bank mesh replaces the exposed concentric shoreline disc. */}
       <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <circleGeometry args={[shoreRadius, 32]} />
-        <meshStandardMaterial
-          color="#c9b896"
-          roughness={0.95}
-          depthWrite={false}
-          polygonOffset
-          polygonOffsetFactor={-2}
-          polygonOffsetUnits={-2}
-        />
+        <primitive object={bankGeometry} attach="geometry" />
+        <meshStandardMaterial vertexColors roughness={0.96} metalness={0} />
       </mesh>
-      {/* Deep center - below terrain for depth illusion */}
-      <mesh position={[0, WATER_LAYERS.deepChannel, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[deepRadius, 24]} />
-        <meshBasicMaterial color="#1d4ed8" transparent opacity={0.9} />
-      </mesh>
+      {/* The opaque water shader carries its own depth gradient. Keeping a
+          second disc directly beneath its animated wave troughs caused the
+          two surfaces to cross and flash dark triangles at dusk. */}
       {/* Main water surface - must be above TerrainGround (y=0.05) */}
       <mesh
         position={[0, 0.15, 0]}
@@ -891,17 +1474,14 @@ const Lake: React.FC<{
         receiveShadow
         renderOrder={RENDER_ORDER.waterSurface}
       >
-        <circleGeometry args={[mainRadius, 32]} />
-        <meshStandardMaterial
-          color={WATER_COLORS.pond}
-          metalness={0.7}
-          roughness={0.15}
-          transparent
+        <primitive object={waterGeometry} attach="geometry" />
+        <UnifiedWaterSurfaceMaterial
+          deep="#143b48"
+          shallow="#4a8790"
+          reflection="#c4e0e4"
+          flowSpeed={0.1}
           opacity={0.85}
-          depthWrite={false}
-          polygonOffset
-          polygonOffsetFactor={-4}
-          polygonOffsetUnits={-4}
+          radial
         />
       </mesh>
       {/* Reeds/vegetation patches */}
@@ -1311,6 +1891,7 @@ const AnimatedFrog: React.FC<{
   hopOffset?: number;
 }> = ({ position, rotation = 0, hopOffset = 0 }) => {
   const frogRef = useRef<THREE.Group>(null);
+  const heartCounter = useRef(0);
   const [isExcited, setIsExcited] = useState(false);
   const [hearts, setHearts] = useState<{ id: number; pos: [number, number, number] }[]>([]);
 
@@ -1318,7 +1899,7 @@ const AnimatedFrog: React.FC<{
     e.stopPropagation();
     setIsExcited(true);
     playCritterSound('frog');
-    const id = Date.now();
+    const id = ++heartCounter.current;
     setHearts((prev: { id: number; pos: [number, number, number] }[]) => [
       ...prev,
       { id, pos: [0, 0.5, 0] },
@@ -1538,7 +2119,11 @@ const Pond: React.FC<{
           polygonOffsetUnits={-2}
         />
       </mesh>
-      {/* Water surface - must be above TerrainGround (y=0.05) */}
+      {/* Water surface - must be above TerrainGround (y=0.05).
+          The 0.12 depth disc that used to sit here was both invisible (opaque
+          surface of the same radius 0.03 above it) and actively harmful: the
+          wave displacement is +/-0.035, so troughs cut below 0.12 and flashed
+          it through. */}
       <mesh
         position={[0, 0.15, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
@@ -1546,16 +2131,13 @@ const Pond: React.FC<{
         renderOrder={RENDER_ORDER.waterSurface}
       >
         <circleGeometry args={[radius - 0.5, 24]} />
-        <meshStandardMaterial
-          color={WATER_COLORS.pond}
-          metalness={0.7}
-          roughness={0.15}
-          transparent
+        <UnifiedWaterSurfaceMaterial
+          deep="#183f4b"
+          shallow="#4c8990"
+          reflection="#c6e2e2"
+          flowSpeed={0.08}
           opacity={0.9}
-          depthWrite={false}
-          polygonOffset
-          polygonOffsetFactor={-4}
-          polygonOffsetUnits={-4}
+          radial
         />
       </mesh>
       {/* Lily pads with frogs */}
@@ -2147,7 +2729,9 @@ const BrickCarport: React.FC<{
         <mesh key={`pillar-${i}`} position={[x, height / 2, z]} castShadow receiveShadow>
           <boxGeometry args={[0.5, height, 0.5]} />
           <meshStandardMaterial
-            color="#b5836d"
+            // Was #b5836d, compensating for the albedo being read as linear.
+            // brickColor is sRGB-tagged now, so any tint double-multiplies.
+            color="#ffffff"
             roughness={0.85}
             map={PROCEDURAL_TEXTURES.brickColor}
             normalMap={PROCEDURAL_TEXTURES.brickNormal}
@@ -2177,7 +2761,9 @@ const BrickCarport: React.FC<{
       <mesh position={[0, 0.02, -depth / 4]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[width, depth]} />
         <meshStandardMaterial
-          color="#b0b0b0"
+          // Was #b0b0b0 - same compensating tint; cobblestone measured 3.9x
+          // darker after the colour-space fix, so the tint has to go.
+          color="#ffffff"
           roughness={0.9}
           map={PROCEDURAL_TEXTURES.cobblestoneColor}
           normalMap={PROCEDURAL_TEXTURES.cobblestoneNormal}
@@ -2230,10 +2816,13 @@ const GravelPath: React.FC<{
   const safeWidth = Number.isFinite(width) && width > 0 ? width : 2;
   const safeLength = Number.isFinite(rawLength) && rawLength > 0 ? rawLength : 0.1;
 
+  // Hue-preserving lifts over a shared tarmac albedo. Each keeps its own cast
+  // (gravel warm and pale, paved neutral, cobble browner) so the three path
+  // types still read apart, but none of them re-multiplies the map's hue.
   const colors = {
-    gravel: '#9ca3af',
-    paved: '#6b7280',
-    cobble: '#78716c',
+    gravel: '#e6e0d2',
+    paved: '#c9ced2',
+    cobble: '#d8cec2',
   };
 
   // Paths must be ABOVE TerrainGround (y=0.05) to prevent z-fighting
@@ -2247,6 +2836,8 @@ const GravelPath: React.FC<{
         <meshStandardMaterial
           color={colors[type]}
           roughness={0.95}
+          map={TARMAC_PATH_MAP}
+          roughnessMap={TARMAC_PATH_ROUGHNESS}
           depthWrite={false}
           polygonOffset
           polygonOffsetFactor={-2}
@@ -2279,21 +2870,26 @@ const GravelPath: React.FC<{
 const CurvedPath: React.FC<{
   position: [number, number, number];
   radius: number;
+  radiusZ?: number;
   startAngle: number;
   endAngle: number;
   width?: number;
   type?: 'gravel' | 'paved';
-}> = ({ position, radius, startAngle, endAngle, width = 2, type = 'gravel' }) => {
-  const segments = 12;
+}> = ({ position, radius, radiusZ, startAngle, endAngle, width = 2, type = 'gravel' }) => {
+  const segments = Math.max(8, Math.ceil(Math.abs(endAngle - startAngle) / (Math.PI / 16)));
   const angleStep = (endAngle - startAngle) / segments;
 
   // CRITICAL: Guard against NaN/zero dimensions to prevent PlaneGeometry errors
   const safeWidth = Number.isFinite(width) && width > 0 ? width : 2;
   const safeRadius = Number.isFinite(radius) && radius > 0 ? radius : 1;
+  const safeRadiusZ = Number.isFinite(radiusZ) && (radiusZ ?? 0) > 0 ? (radiusZ ?? 1) : safeRadius;
 
+  // Same hue-preserving lift as GravelPath: the tarmac map now supplies the
+  // albedo, so these tints only carry the warm/neutral cast that tells the two
+  // path types apart.
   const colors = {
-    gravel: '#9ca3af',
-    paved: '#6b7280',
+    gravel: '#dcd6c6',
+    paved: '#bfc6cb',
   };
 
   // Paths must be ABOVE TerrainGround (y=0.05) to prevent z-fighting
@@ -2305,33 +2901,32 @@ const CurvedPath: React.FC<{
         const angle1 = startAngle + i * angleStep;
         const angle2 = startAngle + (i + 1) * angleStep;
         const x1 = Math.cos(angle1) * safeRadius;
-        const z1 = Math.sin(angle1) * safeRadius;
+        const z1 = Math.sin(angle1) * safeRadiusZ;
         const x2 = Math.cos(angle2) * safeRadius;
-        const z2 = Math.sin(angle2) * safeRadius;
+        const z2 = Math.sin(angle2) * safeRadiusZ;
         const midX = (x1 + x2) / 2;
         const midZ = (z1 + z2) / 2;
         const rawSegLength = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(z2 - z1, 2));
         const safeSegLength =
           Number.isFinite(rawSegLength) && rawSegLength > 0 ? rawSegLength : 0.1;
-        const segAngle = Math.atan2(x2 - x1, z2 - z1);
+        const segAngle = Math.atan2(z2 - z1, x2 - x1);
 
         return (
-          <mesh
-            key={i}
-            position={[midX, 0, midZ]}
-            rotation={[-Math.PI / 2, 0, -segAngle]}
-            receiveShadow
-          >
-            <planeGeometry args={[safeWidth, safeSegLength + 0.1]} />
-            <meshStandardMaterial
-              color={colors[type]}
-              roughness={0.95}
-              depthWrite={false}
-              polygonOffset
-              polygonOffsetFactor={-2}
-              polygonOffsetUnits={-2}
-            />
-          </mesh>
+          <group key={i} position={[midX, 0, midZ]} rotation={[0, -segAngle, 0]}>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+              <planeGeometry args={[safeSegLength + 0.25, safeWidth]} />
+              <meshStandardMaterial
+                color={colors[type]}
+                roughness={0.95}
+                map={TARMAC_PATH_MAP}
+                roughnessMap={TARMAC_PATH_ROUGHNESS}
+                depthWrite={false}
+                polygonOffset
+                polygonOffsetFactor={-2}
+                polygonOffsetUnits={-2}
+              />
+            </mesh>
+          </group>
         );
       })}
     </group>
@@ -3028,19 +3623,25 @@ export const GrainSilo: React.FC<{
     {/* Main cylindrical body */}
     <mesh position={[0, height / 2, 0]} castShadow receiveShadow>
       <cylinderGeometry args={[radius, radius, height, 24]} />
-      <meshStandardMaterial color={color} roughness={0.6} metalness={0.4} />
+      {/* PAINTED steel, so dielectric. These metalness values are tuned
+          against the sky-derived PMREM on `scene.environment`
+          (environmentIntensity 0.30); if that probe is removed or its
+          intensity changes materially, revisit them together. Bare hardware
+          (ladder, cage, vents) deliberately keeps its high metalness so the
+          fitting/volume contrast reads. */}
+      <meshStandardMaterial color={color} roughness={0.66} metalness={0.15} />
     </mesh>
     {/* Corrugated texture rings */}
     {Array.from({ length: Math.floor(height / 3) }).map((_, i) => (
       <mesh key={`ring-${i}`} position={[0, 1.5 + i * 3, 0]} castShadow>
         <torusGeometry args={[radius + 0.05, 0.08, 8, 24]} />
-        <meshStandardMaterial color="#64748b" roughness={0.5} metalness={0.5} />
+        <meshStandardMaterial color="#64748b" roughness={0.62} metalness={0.15} />
       </mesh>
     ))}
     {/* Conical roof */}
     <mesh position={[0, height + radius * 0.4, 0]} castShadow>
       <coneGeometry args={[radius + 0.3, radius * 0.8, 24]} />
-      <meshStandardMaterial color="#475569" roughness={0.5} metalness={0.5} />
+      <meshStandardMaterial color="#475569" roughness={0.58} metalness={0.2} />
     </mesh>
     {/* Roof cap/vent */}
     <mesh position={[0, height + radius * 0.8, 0]} castShadow>
@@ -3083,6 +3684,13 @@ export const GrainSilo: React.FC<{
       <cylinderGeometry args={[radius + 0.5, radius + 0.8, 0.6, 24]} />
       <meshStandardMaterial color="#6b7280" roughness={0.9} />
     </mesh>
+    {/* Contact darkening at the terrain datum. The opaque foundation ring
+        (outer radius +0.8) writes depth first and rejects the middle of the
+        blob, so what survives is the soft annulus spreading out from the
+        plinth - which is what a ground shadow actually looks like. Putting the
+        blob on TOP of the ring instead would leave its outer rim floating
+        0.55 above the ground. */}
+    <GroundBlob position={[0, 0]} scale={radius * 3.1} />
     {/* Company marking on silo - curved to wrap around cylinder */}
     <CurvedText text="MillOS" radius={radius} height={height * 0.6} fontSize={2} color="#1e293b" />
   </group>
@@ -3299,16 +3907,18 @@ export const StorageTank: React.FC<{
     {/* Main cylindrical tank body */}
     <mesh position={[0, radius + 1.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow receiveShadow>
       <cylinderGeometry args={[radius, radius, length, 16]} />
-      <meshStandardMaterial color={color} roughness={0.4} metalness={0.5} />
+      {/* Painted pressure vessel, not polished steel - see the note on
+          GrainSilo about the environment probe these values assume. */}
+      <meshStandardMaterial color={color} roughness={0.55} metalness={0.18} />
     </mesh>
     {/* End caps - hemispherical */}
     <mesh position={[-length / 2, radius + 1.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
       <sphereGeometry args={[radius, 12, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
-      <meshStandardMaterial color={color} roughness={0.4} metalness={0.5} />
+      <meshStandardMaterial color={color} roughness={0.55} metalness={0.18} />
     </mesh>
     <mesh position={[length / 2, radius + 1.5, 0]} rotation={[0, 0, -Math.PI / 2]} castShadow>
       <sphereGeometry args={[radius, 12, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
-      <meshStandardMaterial color={color} roughness={0.4} metalness={0.5} />
+      <meshStandardMaterial color={color} roughness={0.55} metalness={0.18} />
     </mesh>
     {/* Support legs - 4 saddle supports */}
     {[-length / 3, length / 3].map((x, i) => (
@@ -3337,6 +3947,7 @@ export const StorageTank: React.FC<{
         </mesh>
       </group>
     ))}
+    <GroundBlob position={[0, 0]} scale={length + 3} scaleZ={radius * 3.4} />
     {/* Pipe fittings on top */}
     <mesh position={[0, radius * 2 + 1.5, 0]} castShadow>
       <cylinderGeometry args={[0.3, 0.3, 0.8, 8]} />
@@ -3485,6 +4096,11 @@ export const CuteCar: React.FC<{
       <mesh position={[cabinX, cabinY, 0]} castShadow>
         <boxGeometry args={[d.cabinLength, d.cabinHeight, d.bodyWidth - 0.1]} />
         <meshStandardMaterial color={color} roughness={0.35} metalness={0.4} />
+      </mesh>
+      {/* Roof cap - inset box softens the hard cabin roofline */}
+      <mesh position={[cabinX, cabinY + d.cabinHeight / 2 + 0.025, 0]} castShadow>
+        <boxGeometry args={[d.cabinLength * 0.82, 0.06, (d.bodyWidth - 0.1) * 0.82]} />
+        <meshStandardMaterial color={color} roughness={0.3} metalness={0.45} />
       </mesh>
 
       {/* Window pillars - A and C combined per side */}
@@ -3682,17 +4298,17 @@ export const CuteCar: React.FC<{
         </group>
       )}
 
-      {/* Shadow underneath - just above the surface the car sits on */}
+      {/* Shadow underneath - soft radial-gradient blob (alpha falloff, no hard edges) */}
       <mesh
         position={[0, 0.01, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
         renderOrder={RENDER_ORDER.floorEffects}
       >
-        <planeGeometry args={[d.bodyLength + 0.5, d.bodyWidth + 0.3]} />
+        <planeGeometry args={[d.bodyLength + 1.2, d.bodyWidth + 0.9]} />
         <meshBasicMaterial
-          color="#000000"
+          map={CAR_SHADOW_TEXTURE}
           transparent
-          opacity={0.15}
+          opacity={0.85}
           depthWrite={false}
           polygonOffset
           polygonOffsetFactor={-4}
@@ -3702,6 +4318,26 @@ export const CuteCar: React.FC<{
     </group>
   );
 });
+
+// Shared soft radial-gradient shadow blob for parked cars (created once at module load)
+const createCarShadowTexture = (): THREE.CanvasTexture => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const grad = ctx.createRadialGradient(32, 32, 6, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(0,0,0,0.55)');
+    grad.addColorStop(0.6, 'rgba(0,0,0,0.3)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 64);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+};
+const CAR_SHADOW_TEXTURE = createCarShadowTexture();
 
 // Car colors palette - fun and varied
 const CAR_COLORS = [
@@ -3776,9 +4412,10 @@ const ParkingLot: React.FC<{
       <mesh position={[0, asphaltY, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[totalWidth + 4, totalDepth + 4]} />
         <meshStandardMaterial
-          color="#374151"
+          color="#ffffff"
           roughness={0.9}
-          depthWrite={false}
+          map={TARMAC_LOT_MAP}
+          roughnessMap={TARMAC_LOT_ROUGHNESS}
           polygonOffset
           polygonOffsetFactor={-2}
           polygonOffsetUnits={-2}
@@ -3801,12 +4438,12 @@ const ParkingLot: React.FC<{
               key={`divider-${row}-${spot}`}
               position={[spot * spotWidth - totalWidth / 2, 0, 0]}
               rotation={[-Math.PI / 2, 0, 0]}
+              receiveShadow
               renderOrder={RENDER_ORDER.floorMarkings}
             >
               <planeGeometry args={[0.15, spotDepth - 0.5]} />
-              <meshBasicMaterial
-                color="#ffffff"
-                depthWrite={false}
+              <meshStandardMaterial
+                {...ROAD_PAINT_WHITE}
                 polygonOffset
                 polygonOffsetFactor={POLYGON_OFFSET.exteriorOverlay.factor}
                 polygonOffsetUnits={POLYGON_OFFSET.exteriorOverlay.units}
@@ -3817,15 +4454,15 @@ const ParkingLot: React.FC<{
           <mesh
             position={[0, 0, spotDepth / 2 - 0.25]}
             rotation={[-Math.PI / 2, 0, 0]}
+            receiveShadow
             renderOrder={RENDER_ORDER.floorMarkings}
           >
             <planeGeometry args={[totalWidth, 0.15]} />
-            <meshBasicMaterial
-              color="#ffffff"
-              depthWrite={false}
+            <meshStandardMaterial
+              {...ROAD_PAINT_WHITE}
               polygonOffset
-              polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
-              polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
+              polygonOffsetFactor={POLYGON_OFFSET.exteriorOverlay.factor}
+              polygonOffsetUnits={POLYGON_OFFSET.exteriorOverlay.units}
             />
           </mesh>
         </group>
@@ -3904,8 +4541,20 @@ const TunnelEntrance: React.FC<{
 }> = ({ position, rotation = 0, length = 14 }) => {
   const tunnelWidth = 9;
   const tunnelHeight = 6;
-  const brickColor = '#8d4004'; // Victorian Red Brick
-  const stoneColor = '#a89f91'; // Portland Stone details
+  // Victorian Red Brick. The albedo is now the procedural brick map, whose
+  // bytes are sRGB-tagged and already carry the right reflectance, so the tint
+  // is white - the old flat `#8d4004` would multiply the same hue twice and
+  // render the portal near-black. Coarse 2x3 repeat suits a 6m opening.
+  const brickSurface = {
+    color: '#ffffff',
+    map: PORTAL_BRICK_MAP,
+    normalMap: PORTAL_BRICK_NORMAL,
+    normalScale: PORTAL_BRICK_NORMAL_SCALE,
+    roughness: 0.88,
+  } as const;
+  // Portland Stone dressings keep their colour: with no albedo map the `color`
+  // IS the albedo. They gain only a roughness break-up map.
+  const stoneColor = '#a89f91';
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
@@ -3914,8 +4563,13 @@ const TunnelEntrance: React.FC<{
       <mesh position={[0, 0.15, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[tunnelWidth - 1, length + 2]} />
         <meshStandardMaterial
-          color="#292524"
+          // Hue-preserving lift, not a reset to white: this is damp tarmac
+          // under a portal, so it stays warmer and darker than the open road
+          // while the map now supplies the aggregate and the wear polish.
+          color="#b0a89f"
           roughness={0.9}
+          map={TARMAC_ROAD_MAP}
+          roughnessMap={TARMAC_ROAD_ROUGHNESS}
           polygonOffset
           polygonOffsetFactor={-2}
           polygonOffsetUnits={-2}
@@ -3939,7 +4593,17 @@ const TunnelEntrance: React.FC<{
             Math.PI,
           ]}
         />
-        <meshStandardMaterial color="#3e2723" roughness={0.9} side={THREE.DoubleSide} />
+        <meshStandardMaterial
+          // Soot-blackened lining: a deliberate dark variant of the same brick,
+          // lifted well above the old flat #3e2723 because the map now carries
+          // most of the darkness itself.
+          color="#9a8880"
+          roughness={0.92}
+          map={PORTAL_BRICK_MAP}
+          normalMap={PORTAL_BRICK_NORMAL}
+          normalScale={PORTAL_BRICK_NORMAL_SCALE}
+          side={THREE.DoubleSide}
+        />
       </mesh>
 
       {/* ===== ENTRANCE FACADE (Main visual part) ===== */}
@@ -3950,60 +4614,95 @@ const TunnelEntrance: React.FC<{
           {/* Left Column */}
           <mesh position={[-tunnelWidth / 2 - 1, tunnelHeight / 2, 0]} castShadow>
             <boxGeometry args={[3, tunnelHeight + 2, 1.2]} />
-            <meshStandardMaterial color={brickColor} roughness={0.8} />
+            <meshStandardMaterial {...brickSurface} />
           </mesh>
           {/* Right Column */}
           <mesh position={[tunnelWidth / 2 + 1, tunnelHeight / 2, 0]} castShadow>
             <boxGeometry args={[3, tunnelHeight + 2, 1.2]} />
-            <meshStandardMaterial color={brickColor} roughness={0.8} />
+            <meshStandardMaterial {...brickSurface} />
           </mesh>
           {/* Top Section */}
           <mesh position={[0, tunnelHeight + 1.5, 0]} castShadow>
             <boxGeometry args={[tunnelWidth + 5, 3, 1.2]} />
-            <meshStandardMaterial color={brickColor} roughness={0.8} />
+            <meshStandardMaterial {...brickSurface} />
           </mesh>
         </group>
+
+        {/* Rain streaking down the brick columns from under the cornice.
+            SURFACE_LAYERS.decal off the 1.2-deep column face (front at z=0.6). */}
+        {[-tunnelWidth / 2 - 1, tunnelWidth / 2 + 1].map((x) => (
+          <GrimeStreak
+            key={`portal-grime-${x}`}
+            position={[x, tunnelHeight / 2 - 0.6, 0.6 + SURFACE_LAYERS.decal]}
+            width={2.4}
+            height={5.4}
+          />
+        ))}
 
         {/* Stone Archway Trim */}
         <mesh position={[0, tunnelHeight / 2 - 0.5, 0.65]} rotation={[0, 0, Math.PI]}>
           {/* Custom shape for arch outline could be complex, using torus segment for approximation */}
           <torusGeometry args={[tunnelWidth / 2, 0.6, 8, 16, Math.PI]} />
-          <meshStandardMaterial color={stoneColor} roughness={0.6} />
+          <meshStandardMaterial
+            color={stoneColor}
+            roughness={0.82}
+            roughnessMap={OUTBUILDING_CONCRETE_ROUGHNESS}
+          />
         </mesh>
 
         {/* Keystone */}
         <mesh position={[0, tunnelHeight / 2 + tunnelWidth / 2 + 0.5, 0.7]} castShadow>
           <boxGeometry args={[1.2, 1.5, 1.4]} />
-          <meshStandardMaterial color={stoneColor} roughness={0.5} />
+          <meshStandardMaterial
+            color={stoneColor}
+            roughness={0.78}
+            roughnessMap={OUTBUILDING_CONCRETE_ROUGHNESS}
+          />
         </mesh>
 
         {/* Base Plinths (Stone) */}
         <mesh position={[-tunnelWidth / 2 - 1, 1, 0.1]} castShadow>
           <boxGeometry args={[3.2, 2, 1.4]} />
-          <meshStandardMaterial color={stoneColor} roughness={0.7} />
+          <meshStandardMaterial
+            color={stoneColor}
+            roughness={0.84}
+            roughnessMap={OUTBUILDING_CONCRETE_ROUGHNESS}
+          />
         </mesh>
         <mesh position={[tunnelWidth / 2 + 1, 1, 0.1]} castShadow>
           <boxGeometry args={[3.2, 2, 1.4]} />
-          <meshStandardMaterial color={stoneColor} roughness={0.7} />
+          <meshStandardMaterial
+            color={stoneColor}
+            roughness={0.84}
+            roughnessMap={OUTBUILDING_CONCRETE_ROUGHNESS}
+          />
         </mesh>
 
         {/* Cornice / Coping Stones at top */}
         <mesh position={[0, tunnelHeight + 3, 0]} castShadow>
           <boxGeometry args={[tunnelWidth + 6, 0.6, 1.6]} />
-          <meshStandardMaterial color={stoneColor} roughness={0.7} />
+          <meshStandardMaterial
+            color={stoneColor}
+            roughness={0.84}
+            roughnessMap={OUTBUILDING_CONCRETE_ROUGHNESS}
+          />
         </mesh>
 
         {/* Decorative Parapet on top */}
         <group position={[0, tunnelHeight + 4, 0]}>
           <mesh position={[0, -0.2, 0]}>
             <boxGeometry args={[tunnelWidth + 5, 0.8, 1]} />
-            <meshStandardMaterial color={brickColor} roughness={0.8} />
+            <meshStandardMaterial {...brickSurface} />
           </mesh>
           {/* Spikes/Finials */}
           {[-6, -3, 0, 3, 6].map((x) => (
             <mesh position={[x, 0.8, 0]} key={x}>
               <sphereGeometry args={[0.4]} />
-              <meshStandardMaterial color={stoneColor} />
+              <meshStandardMaterial
+                color={stoneColor}
+                roughness={0.84}
+                roughnessMap={OUTBUILDING_CONCRETE_ROUGHNESS}
+              />
             </mesh>
           ))}
         </group>
@@ -4026,7 +4725,11 @@ const TunnelEntrance: React.FC<{
         <group position={[0, tunnelHeight + 2, 0.65]}>
           <mesh>
             <boxGeometry args={[3, 1, 0.1]} />
-            <meshStandardMaterial color={stoneColor} />
+            <meshStandardMaterial
+              color={stoneColor}
+              roughness={0.84}
+              roughnessMap={OUTBUILDING_CONCRETE_ROUGHNESS}
+            />
           </mesh>
           <Text
             position={[0, 0, 0.06]}
@@ -4044,15 +4747,27 @@ const TunnelEntrance: React.FC<{
       <group position={[0, 0, length / 2 + 0.1]}>
         <mesh position={[0, tunnelHeight / 2, 0]} castShadow>
           <boxGeometry args={[tunnelWidth + 2, tunnelHeight + 1, 1]} />
-          <meshStandardMaterial color={brickColor} roughness={0.8} />
+          <meshStandardMaterial {...brickSurface} />
         </mesh>
         <mesh position={[0, tunnelHeight + 1, 0]} castShadow>
           <boxGeometry args={[tunnelWidth + 4, 1.5, 1]} />
-          <meshStandardMaterial color={brickColor} roughness={0.8} />
+          <meshStandardMaterial {...brickSurface} />
         </mesh>
+        {[-tunnelWidth / 2 - 1.6, tunnelWidth / 2 + 1.6].map((x) => (
+          <GrimeStreak
+            key={`exit-grime-${x}`}
+            position={[x, tunnelHeight / 2 + 0.4, 0.5 + SURFACE_LAYERS.decal]}
+            width={2.2}
+            height={4.6}
+          />
+        ))}
         <mesh position={[0, tunnelHeight + 1.8, 0]} castShadow>
           <boxGeometry args={[tunnelWidth + 4.4, 0.4, 1.2]} />
-          <meshStandardMaterial color={stoneColor} roughness={0.7} />
+          <meshStandardMaterial
+            color={stoneColor}
+            roughness={0.84}
+            roughnessMap={OUTBUILDING_CONCRETE_ROUGHNESS}
+          />
         </mesh>
       </group>
 
@@ -4094,8 +4809,10 @@ const ConnectingRoad: React.FC<{
       <mesh position={[midX, roadY, midZ]} rotation={[-Math.PI / 2, 0, angle]} receiveShadow>
         <planeGeometry args={[width, length]} />
         <meshStandardMaterial
-          color="#374151"
+          color="#ffffff"
           roughness={0.85}
+          map={TARMAC_ROAD_MAP}
+          roughnessMap={TARMAC_ROAD_ROUGHNESS}
           depthWrite={false}
           polygonOffset
           polygonOffsetFactor={-2}
@@ -4111,11 +4828,11 @@ const ConnectingRoad: React.FC<{
           midZ + Math.sin(angle) * (width / 2 - 0.2),
         ]}
         rotation={[-Math.PI / 2, 0, angle]}
+        receiveShadow
       >
         <planeGeometry args={[0.15, length]} />
-        <meshBasicMaterial
-          color="#ffffff"
-          depthWrite={false}
+        <meshStandardMaterial
+          {...ROAD_PAINT_WHITE}
           polygonOffset
           polygonOffsetFactor={-3}
           polygonOffsetUnits={-3}
@@ -4128,11 +4845,11 @@ const ConnectingRoad: React.FC<{
           midZ - Math.sin(angle) * (width / 2 - 0.2),
         ]}
         rotation={[-Math.PI / 2, 0, angle]}
+        receiveShadow
       >
         <planeGeometry args={[0.15, length]} />
-        <meshBasicMaterial
-          color="#ffffff"
-          depthWrite={false}
+        <meshStandardMaterial
+          {...ROAD_PAINT_WHITE}
           polygonOffset
           polygonOffsetFactor={-3}
           polygonOffsetUnits={-3}
@@ -4145,10 +4862,15 @@ const ConnectingRoad: React.FC<{
         const x = start[0] + dx * t;
         const z = start[2] + dz * t;
         return (
-          <mesh key={`dash-${i}`} position={[x, linesY, z]} rotation={[-Math.PI / 2, 0, angle]}>
+          <mesh
+            key={`dash-${i}`}
+            position={[x, linesY, z]}
+            rotation={[-Math.PI / 2, 0, angle]}
+            receiveShadow
+          >
             <planeGeometry args={[0.15, 2]} />
-            <meshBasicMaterial
-              color="#fbbf24"
+            <meshStandardMaterial
+              {...ROAD_PAINT_YELLOW}
               depthWrite={false}
               polygonOffset
               polygonOffsetFactor={-3}
@@ -4502,7 +5224,7 @@ const CheckpointBarrier: React.FC<{
 };
 
 // Factory exterior walls with large signs - positioned OUTSIDE the existing factory elements
-export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
+export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShell = true }) => {
   // Wall dimensions - positioned outside the factory floor
   const wallHeight = 20; // Same height for ALL walls
   const wallThickness = 0.4;
@@ -4514,9 +5236,13 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
   const buildingFrontZ = 48; // Front wall Z (behind the z=42 front doors)
   const buildingBackZ = -48; // Back wall Z (behind the z=-45 back doors)
 
-  // Dock opening dimensions - single centered opening for one truck lane
-  const dockOpeningWidth = 10; // Width of the door
-  const dockOpeningHeight = 10;
+  // Dock opening dimensions - per-wall widths match the <OpenDockOpening> frames
+  // mounted in MillScene (shipping front width=30, receiving back width=18); height
+  // matches the 14-tall frames so the steel frame/bollards/stripes frame a real hole,
+  // not solid wall.
+  const frontDockOpeningWidth = 30; // matches <OpenDockOpening width={30}> shipping
+  const backDockOpeningWidth = 18; // matches <OpenDockOpening width={18}> receiving
+  const dockOpeningHeight = 14;
 
   // Colors
   const wallColor = '#475569';
@@ -4549,6 +5275,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
 
   return (
     <group>
+      <WaterAnimationManager />
       {/* ========== EXTERIOR GRASS GROUND ========== */}
       {/* DISABLED: Replaced by TerrainGround unified terrain system */}
       {/* This plane at y=-0.2 was occluding the river channel displacement (y=-2.52) */}
@@ -4559,946 +5286,990 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       </mesh>
       */}
 
-      {/* ========== FRONT WALL (Z+) with single centered dock opening ========== */}
-      {/* Left section - FULL HEIGHT - extends PAST side wall for clean corner */}
-      <mesh
-        position={[
-          -((buildingHalfWidth + wallThickness) / 2 + dockOpeningWidth / 4),
-          wallHeight / 2,
-          buildingFrontZ,
-        ]}
-        castShadow
-        receiveShadow
-      >
-        <boxGeometry
-          args={[
-            buildingHalfWidth + wallThickness - dockOpeningWidth / 2,
-            wallHeight,
-            wallThickness,
-          ]}
-        />
-        <meshStandardMaterial
-          color={wallColor}
-          roughness={0.8}
-          metalness={0.2}
-          side={THREE.DoubleSide}
-          normalMap={PROCEDURAL_TEXTURES.panelNormal}
-          normalScale={new THREE.Vector2(0.2, 0.2)}
-        />
-      </mesh>
+      {showFactoryShell && (
+        <>
+          {/* ========== FRONT WALL (Z+) with single centered dock opening ========== */}
+          {/* Left section - FULL HEIGHT - extends PAST side wall for clean corner */}
+          <mesh
+            position={[
+              -((buildingHalfWidth + wallThickness) / 2 + frontDockOpeningWidth / 4),
+              wallHeight / 2,
+              buildingFrontZ,
+            ]}
+            castShadow
+            receiveShadow
+          >
+            <boxGeometry
+              args={[
+                buildingHalfWidth + wallThickness - frontDockOpeningWidth / 2,
+                wallHeight,
+                wallThickness,
+              ]}
+            />
+            <meshStandardMaterial
+              color={wallColor}
+              roughness={0.8}
+              metalness={0.2}
+              side={THREE.DoubleSide}
+              normalMap={PROCEDURAL_TEXTURES.panelNormal}
+              normalScale={new THREE.Vector2(0.2, 0.2)}
+            />
+          </mesh>
 
-      {/* Right section - FULL HEIGHT - extends PAST side wall for clean corner */}
-      <mesh
-        position={[
-          (buildingHalfWidth + wallThickness) / 2 + dockOpeningWidth / 4,
-          wallHeight / 2,
-          buildingFrontZ,
-        ]}
-        castShadow
-        receiveShadow
-      >
-        <boxGeometry
-          args={[
-            buildingHalfWidth + wallThickness - dockOpeningWidth / 2,
-            wallHeight,
-            wallThickness,
-          ]}
-        />
-        <meshStandardMaterial
-          color={wallColor}
-          roughness={0.8}
-          metalness={0.2}
-          side={THREE.DoubleSide}
-          normalMap={PROCEDURAL_TEXTURES.panelNormal}
-          normalScale={new THREE.Vector2(0.2, 0.2)}
-        />
-      </mesh>
+          {/* Right section - FULL HEIGHT - extends PAST side wall for clean corner */}
+          <mesh
+            position={[
+              (buildingHalfWidth + wallThickness) / 2 + frontDockOpeningWidth / 4,
+              wallHeight / 2,
+              buildingFrontZ,
+            ]}
+            castShadow
+            receiveShadow
+          >
+            <boxGeometry
+              args={[
+                buildingHalfWidth + wallThickness - frontDockOpeningWidth / 2,
+                wallHeight,
+                wallThickness,
+              ]}
+            />
+            <meshStandardMaterial
+              color={wallColor}
+              roughness={0.8}
+              metalness={0.2}
+              side={THREE.DoubleSide}
+              normalMap={PROCEDURAL_TEXTURES.panelNormal}
+              normalScale={new THREE.Vector2(0.2, 0.2)}
+            />
+          </mesh>
 
-      {/* Section above the centered dock opening */}
-      <mesh
-        position={[0, wallHeight - (wallHeight - dockOpeningHeight) / 2, buildingFrontZ]}
-        castShadow
-        receiveShadow
-      >
-        <boxGeometry args={[dockOpeningWidth, wallHeight - dockOpeningHeight, wallThickness]} />
-        <meshStandardMaterial
-          color={wallColor}
-          roughness={0.8}
-          metalness={0.2}
-          side={THREE.DoubleSide}
-          normalMap={PROCEDURAL_TEXTURES.panelNormal}
-          normalScale={new THREE.Vector2(0.2, 0.2)}
-        />
-      </mesh>
+          {/* Section above the centered dock opening */}
+          <mesh
+            position={[0, wallHeight - (wallHeight - dockOpeningHeight) / 2, buildingFrontZ]}
+            castShadow
+            receiveShadow
+          >
+            <boxGeometry
+              args={[frontDockOpeningWidth, wallHeight - dockOpeningHeight, wallThickness]}
+            />
+            <meshStandardMaterial
+              color={wallColor}
+              roughness={0.8}
+              metalness={0.2}
+              side={THREE.DoubleSide}
+              normalMap={PROCEDURAL_TEXTURES.panelNormal}
+              normalScale={new THREE.Vector2(0.2, 0.2)}
+            />
+          </mesh>
 
-      {/* Front wall trim */}
-      <mesh position={[0, wallHeight + 0.3, buildingFrontZ]}>
-        <boxGeometry args={[buildingHalfWidth * 2 + 1, 0.6, 0.8]} />
-        <meshStandardMaterial
-          color={trimColor}
-          roughness={0.6}
-          metalness={0.4}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
+          {/* Front wall trim */}
+          <mesh position={[0, wallHeight + 0.3, buildingFrontZ]}>
+            <boxGeometry args={[buildingHalfWidth * 2 + 1, 0.6, 0.8]} />
+            <meshStandardMaterial
+              color={trimColor}
+              roughness={0.6}
+              metalness={0.4}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
 
-      {/* ========== FRONT PERSONNEL ENTRANCES - Realistic Industrial Style ========== */}
-      {/* Left main entrance at x=-45 - doors positioned 1.5 units in front of wall */}
-      <group position={[-45, 0, buildingFrontZ + 1.5]}>
-        {/* Concrete entrance platform/steps */}
-        <mesh position={[0, 0.2, 1.5]} castShadow receiveShadow>
-          <boxGeometry args={[5, 0.4, 4]} />
-          <meshStandardMaterial color="#6b7280" roughness={0.9} />
-        </mesh>
-        <mesh position={[0, 0.08, 3.5]} castShadow receiveShadow>
-          <boxGeometry args={[5, 0.16, 1.5]} />
-          <meshStandardMaterial color="#6b7280" roughness={0.9} />
-        </mesh>
-        {/* Door surround - protruding frame structure */}
-        <mesh position={[0, 1.8, -0.3]} castShadow>
-          <boxGeometry args={[4.5, 3.8, 1]} />
-          <meshStandardMaterial color="#4b5563" roughness={0.7} metalness={0.3} />
-        </mesh>
-        {/* Door opening recess */}
-        <mesh position={[0, 1.6, 0.1]}>
-          <boxGeometry args={[3.2, 3.2, 0.5]} />
-          <meshStandardMaterial color="#1f2937" roughness={0.9} />
-        </mesh>
-        {/* Double doors - industrial blue */}
-        <mesh position={[-0.75, 1.55, 0.4]} castShadow>
-          <boxGeometry args={[1.4, 3, 0.15]} />
-          <meshStandardMaterial color="#1e3a5f" roughness={0.5} metalness={0.4} />
-        </mesh>
-        <mesh position={[0.75, 1.55, 0.4]} castShadow>
-          <boxGeometry args={[1.4, 3, 0.15]} />
-          <meshStandardMaterial color="#1e3a5f" roughness={0.5} metalness={0.4} />
-        </mesh>
-        {/* Glass panels on doors */}
-        <mesh position={[-0.75, 1.9, 0.5]}>
-          <boxGeometry args={[1, 2, 0.04]} />
-          <meshStandardMaterial
-            color="#87ceeb"
-            transparent
-            opacity={0.5}
-            metalness={0.6}
-            roughness={0.1}
-          />
-        </mesh>
-        <mesh position={[0.75, 1.9, 0.5]}>
-          <boxGeometry args={[1, 2, 0.04]} />
-          <meshStandardMaterial
-            color="#87ceeb"
-            transparent
-            opacity={0.5}
-            metalness={0.6}
-            roughness={0.1}
-          />
-        </mesh>
-        {/* Door handles - vertical pull bars */}
-        <mesh position={[-0.2, 1.5, 0.55]}>
-          <boxGeometry args={[0.08, 0.7, 0.08]} />
-          <meshStandardMaterial color="#d4d4d4" metalness={0.8} roughness={0.2} />
-        </mesh>
-        <mesh position={[0.2, 1.5, 0.55]}>
-          <boxGeometry args={[0.08, 0.7, 0.08]} />
-          <meshStandardMaterial color="#d4d4d4" metalness={0.8} roughness={0.2} />
-        </mesh>
-        {/* Metal awning/canopy */}
-        <mesh position={[0, 3.9, 0.8]} castShadow>
-          <boxGeometry args={[5, 0.15, 2.5]} />
-          <meshStandardMaterial color="#374151" roughness={0.5} metalness={0.5} />
-        </mesh>
-        {/* Awning support brackets */}
-        <mesh position={[-2, 3.4, 0.3]} rotation={[0.5, 0, 0]} castShadow>
-          <boxGeometry args={[0.12, 1, 0.12]} />
-          <meshStandardMaterial color="#4b5563" metalness={0.5} />
-        </mesh>
-        <mesh position={[2, 3.4, 0.3]} rotation={[0.5, 0, 0]} castShadow>
-          <boxGeometry args={[0.12, 1, 0.12]} />
-          <meshStandardMaterial color="#4b5563" metalness={0.5} />
-        </mesh>
-        {/* Handrails */}
-        <mesh position={[-2.3, 0.6, 1.5]} castShadow>
-          <boxGeometry args={[0.1, 1.2, 0.1]} />
-          <meshStandardMaterial color="#6b7280" metalness={0.6} />
-        </mesh>
-        <mesh position={[2.3, 0.6, 1.5]} castShadow>
-          <boxGeometry args={[0.1, 1.2, 0.1]} />
-          <meshStandardMaterial color="#6b7280" metalness={0.6} />
-        </mesh>
-        <mesh position={[-2.3, 1.2, 2]} castShadow>
-          <boxGeometry args={[0.1, 0.1, 4]} />
-          <meshStandardMaterial color="#6b7280" metalness={0.6} />
-        </mesh>
-        <mesh position={[2.3, 1.2, 2]} castShadow>
-          <boxGeometry args={[0.1, 0.1, 4]} />
-          <meshStandardMaterial color="#6b7280" metalness={0.6} />
-        </mesh>
-        {/* Yellow safety bollards */}
-        <mesh position={[-3.2, 0.5, 2.5]} castShadow>
-          <cylinderGeometry args={[0.18, 0.18, 1, 12]} />
-          <meshStandardMaterial color="#eab308" roughness={0.5} />
-        </mesh>
-        <mesh position={[3.2, 0.5, 2.5]} castShadow>
-          <cylinderGeometry args={[0.18, 0.18, 1, 12]} />
-          <meshStandardMaterial color="#eab308" roughness={0.5} />
-        </mesh>
-        {/* Exterior light fixture */}
-        <mesh position={[0, 4.2, 0]} castShadow>
-          <boxGeometry args={[0.6, 0.35, 0.5]} />
-          <meshStandardMaterial color="#374151" roughness={0.5} metalness={0.4} />
-        </mesh>
-        <mesh position={[0, 4.05, 0.3]}>
-          <boxGeometry args={[0.4, 0.2, 0.25]} />
-          <meshBasicMaterial color="#fef3c7" />
-        </mesh>
-      </group>
-
-      {/* Right staff entrance at x=45 - doors positioned 1.5 units in front of wall */}
-      <group position={[45, 0, buildingFrontZ + 1.5]}>
-        {/* Concrete entrance platform/steps */}
-        <mesh position={[0, 0.2, 1.5]} castShadow receiveShadow>
-          <boxGeometry args={[5, 0.4, 4]} />
-          <meshStandardMaterial color="#6b7280" roughness={0.9} />
-        </mesh>
-        <mesh position={[0, 0.08, 3.5]} castShadow receiveShadow>
-          <boxGeometry args={[5, 0.16, 1.5]} />
-          <meshStandardMaterial color="#6b7280" roughness={0.9} />
-        </mesh>
-        {/* Door surround - protruding frame structure */}
-        <mesh position={[0, 1.8, -0.3]} castShadow>
-          <boxGeometry args={[4.5, 3.8, 1]} />
-          <meshStandardMaterial color="#4b5563" roughness={0.7} metalness={0.3} />
-        </mesh>
-        {/* Door opening recess */}
-        <mesh position={[0, 1.6, 0.1]}>
-          <boxGeometry args={[3.2, 3.2, 0.5]} />
-          <meshStandardMaterial color="#1f2937" roughness={0.9} />
-        </mesh>
-        {/* Double doors - industrial blue */}
-        <mesh position={[-0.75, 1.55, 0.4]} castShadow>
-          <boxGeometry args={[1.4, 3, 0.15]} />
-          <meshStandardMaterial color="#1e3a5f" roughness={0.5} metalness={0.4} />
-        </mesh>
-        <mesh position={[0.75, 1.55, 0.4]} castShadow>
-          <boxGeometry args={[1.4, 3, 0.15]} />
-          <meshStandardMaterial color="#1e3a5f" roughness={0.5} metalness={0.4} />
-        </mesh>
-        {/* Glass panels on doors */}
-        <mesh position={[-0.75, 1.9, 0.5]}>
-          <boxGeometry args={[1, 2, 0.04]} />
-          <meshStandardMaterial
-            color="#87ceeb"
-            transparent
-            opacity={0.5}
-            metalness={0.6}
-            roughness={0.1}
-          />
-        </mesh>
-        <mesh position={[0.75, 1.9, 0.5]}>
-          <boxGeometry args={[1, 2, 0.04]} />
-          <meshStandardMaterial
-            color="#87ceeb"
-            transparent
-            opacity={0.5}
-            metalness={0.6}
-            roughness={0.1}
-          />
-        </mesh>
-        {/* Door handles - vertical pull bars */}
-        <mesh position={[-0.2, 1.5, 0.55]}>
-          <boxGeometry args={[0.08, 0.7, 0.08]} />
-          <meshStandardMaterial color="#d4d4d4" metalness={0.8} roughness={0.2} />
-        </mesh>
-        <mesh position={[0.2, 1.5, 0.55]}>
-          <boxGeometry args={[0.08, 0.7, 0.08]} />
-          <meshStandardMaterial color="#d4d4d4" metalness={0.8} roughness={0.2} />
-        </mesh>
-        {/* Metal awning/canopy */}
-        <mesh position={[0, 3.9, 0.8]} castShadow>
-          <boxGeometry args={[5, 0.15, 2.5]} />
-          <meshStandardMaterial color="#374151" roughness={0.5} metalness={0.5} />
-        </mesh>
-        {/* Awning support brackets */}
-        <mesh position={[-2, 3.4, 0.3]} rotation={[0.5, 0, 0]} castShadow>
-          <boxGeometry args={[0.12, 1, 0.12]} />
-          <meshStandardMaterial color="#4b5563" metalness={0.5} />
-        </mesh>
-        <mesh position={[2, 3.4, 0.3]} rotation={[0.5, 0, 0]} castShadow>
-          <boxGeometry args={[0.12, 1, 0.12]} />
-          <meshStandardMaterial color="#4b5563" metalness={0.5} />
-        </mesh>
-        {/* Handrails */}
-        <mesh position={[-2.3, 0.6, 1.5]} castShadow>
-          <boxGeometry args={[0.1, 1.2, 0.1]} />
-          <meshStandardMaterial color="#6b7280" metalness={0.6} />
-        </mesh>
-        <mesh position={[2.3, 0.6, 1.5]} castShadow>
-          <boxGeometry args={[0.1, 1.2, 0.1]} />
-          <meshStandardMaterial color="#6b7280" metalness={0.6} />
-        </mesh>
-        <mesh position={[-2.3, 1.2, 2]} castShadow>
-          <boxGeometry args={[0.1, 0.1, 4]} />
-          <meshStandardMaterial color="#6b7280" metalness={0.6} />
-        </mesh>
-        <mesh position={[2.3, 1.2, 2]} castShadow>
-          <boxGeometry args={[0.1, 0.1, 4]} />
-          <meshStandardMaterial color="#6b7280" metalness={0.6} />
-        </mesh>
-        {/* Yellow safety bollards */}
-        <mesh position={[-3.2, 0.5, 2.5]} castShadow>
-          <cylinderGeometry args={[0.18, 0.18, 1, 12]} />
-          <meshStandardMaterial color="#eab308" roughness={0.5} />
-        </mesh>
-        <mesh position={[3.2, 0.5, 2.5]} castShadow>
-          <cylinderGeometry args={[0.18, 0.18, 1, 12]} />
-          <meshStandardMaterial color="#eab308" roughness={0.5} />
-        </mesh>
-        {/* Exterior light fixture */}
-        <mesh position={[0, 4.2, 0]} castShadow>
-          <boxGeometry args={[0.6, 0.35, 0.5]} />
-          <meshStandardMaterial color="#374151" roughness={0.5} metalness={0.4} />
-        </mesh>
-        <mesh position={[0, 4.05, 0.3]}>
-          <boxGeometry args={[0.4, 0.2, 0.25]} />
-          <meshBasicMaterial color="#fef3c7" />
-        </mesh>
-      </group>
-
-      {/* ========== FRONT SIGN - Large Red Sign (similar to truck signage) ========== */}
-      <group position={[0, wallHeight / 2 + 2, buildingFrontZ + 1.5]}>
-        {/* Main sign background - Red like the truck signs */}
-        <mesh frustumCulled={false}>
-          <boxGeometry args={[80, 10, 0.5]} />
-          <meshBasicMaterial color="#dc2626" />
-        </mesh>
-        {/* Gold trim border */}
-        <mesh position={[0, 0, 0.3]} frustumCulled={false}>
-          <boxGeometry args={[82, 10.6, 0.15]} />
-          <meshBasicMaterial color="#fbbf24" />
-        </mesh>
-        {/* Inner red panel */}
-        <mesh position={[0, 0, 0.4]} frustumCulled={false}>
-          <boxGeometry args={[79, 9.5, 0.1]} />
-          <meshBasicMaterial color="#b91c1c" />
-        </mesh>
-        {/* Company name */}
-        <Text
-          position={[0, 1.5, 0.6]}
-          fontSize={5}
-          color="#ffffff"
-          anchorX="center"
-          anchorY="middle"
-          fontWeight="bold"
-          outlineWidth={0.1}
-          outlineColor="#7f1d1d"
-        >
-          MillOS GRAIN MILL
-        </Text>
-        {/* Tagline */}
-        <Text
-          position={[0, -2.5, 0.6]}
-          fontSize={1.8}
-          color="#fef3c7"
-          anchorX="center"
-          anchorY="middle"
-        >
-          EST. 1952 • QUALITY FLOUR PRODUCTS
-        </Text>
-      </group>
-
-      {/* ========== BACK WALL (Z-) with dock opening ========== */}
-      {/* Left section - FULL HEIGHT - extends PAST side wall for clean corner */}
-      <mesh
-        position={[
-          -((buildingHalfWidth + wallThickness) / 2 + dockOpeningWidth / 4),
-          wallHeight / 2,
-          buildingBackZ,
-        ]}
-        castShadow
-        receiveShadow
-      >
-        <boxGeometry
-          args={[
-            buildingHalfWidth + wallThickness - dockOpeningWidth / 2,
-            wallHeight,
-            wallThickness,
-          ]}
-        />
-        <meshStandardMaterial
-          color={wallColor}
-          roughness={0.8}
-          metalness={0.2}
-          side={THREE.DoubleSide}
-          normalMap={PROCEDURAL_TEXTURES.panelNormal}
-          normalScale={new THREE.Vector2(0.2, 0.2)}
-        />
-      </mesh>
-      {/* Right section - FULL HEIGHT - extends PAST side wall for clean corner */}
-      <mesh
-        position={[
-          (buildingHalfWidth + wallThickness) / 2 + dockOpeningWidth / 4,
-          wallHeight / 2,
-          buildingBackZ,
-        ]}
-        castShadow
-        receiveShadow
-      >
-        <boxGeometry
-          args={[
-            buildingHalfWidth + wallThickness - dockOpeningWidth / 2,
-            wallHeight,
-            wallThickness,
-          ]}
-        />
-        <meshStandardMaterial
-          color={wallColor}
-          roughness={0.8}
-          metalness={0.2}
-          side={THREE.DoubleSide}
-          normalMap={PROCEDURAL_TEXTURES.panelNormal}
-          normalScale={new THREE.Vector2(0.2, 0.2)}
-        />
-      </mesh>
-      {/* Section above dock opening - matches wall height */}
-      <mesh
-        position={[0, wallHeight - (wallHeight - dockOpeningHeight) / 2, buildingBackZ]}
-        castShadow
-        receiveShadow
-      >
-        <boxGeometry args={[dockOpeningWidth, wallHeight - dockOpeningHeight, wallThickness]} />
-        <meshStandardMaterial
-          color={wallColor}
-          roughness={0.8}
-          metalness={0.2}
-          side={THREE.DoubleSide}
-          normalMap={PROCEDURAL_TEXTURES.panelNormal}
-          normalScale={new THREE.Vector2(0.2, 0.2)}
-        />
-      </mesh>
-
-      {/* Back wall trim */}
-      <mesh position={[0, wallHeight + 0.3, buildingBackZ]}>
-        <boxGeometry args={[buildingHalfWidth * 2 + 1, 0.6, 0.8]} />
-        <meshStandardMaterial
-          color={trimColor}
-          roughness={0.6}
-          metalness={0.4}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
-
-      {/* ========== BACK EMERGENCY EXITS - Realistic Industrial Style ========== */}
-      {/* Left emergency exit at x=-45 - positioned 1.5 units out from wall */}
-      <group position={[-45, 0, buildingBackZ - 1.5]} rotation={[0, Math.PI, 0]}>
-        {/* Concrete landing pad */}
-        <mesh position={[0, 0.15, 1.5]} castShadow receiveShadow>
-          <boxGeometry args={[4, 0.3, 3.5]} />
-          <meshStandardMaterial color="#6b7280" roughness={0.9} />
-        </mesh>
-        {/* Door surround - protruding frame structure */}
-        <mesh position={[0, 1.6, -0.2]} castShadow>
-          <boxGeometry args={[3.5, 3.4, 0.8]} />
-          <meshStandardMaterial color="#4b5563" roughness={0.7} metalness={0.3} />
-        </mesh>
-        {/* Door opening recess */}
-        <mesh position={[0, 1.5, 0.15]}>
-          <boxGeometry args={[2.5, 3, 0.4]} />
-          <meshStandardMaterial color="#1f2937" roughness={0.9} />
-        </mesh>
-        {/* Steel fire door - industrial green */}
-        <mesh position={[0, 1.5, 0.4]} castShadow>
-          <boxGeometry args={[2, 2.8, 0.12]} />
-          <meshStandardMaterial color="#365314" roughness={0.6} metalness={0.4} />
-        </mesh>
-        {/* Small reinforced window */}
-        <mesh position={[0, 2.1, 0.5]}>
-          <boxGeometry args={[0.5, 0.6, 0.03]} />
-          <meshStandardMaterial
-            color="#64748b"
-            transparent
-            opacity={0.5}
-            metalness={0.6}
-            roughness={0.2}
-          />
-        </mesh>
-        {/* Wire mesh on window */}
-        <mesh position={[0, 2.1, 0.52]}>
-          <boxGeometry args={[0.48, 0.58, 0.01]} />
-          <meshStandardMaterial color="#374151" wireframe transparent opacity={0.6} />
-        </mesh>
-        {/* Crash bar / panic hardware */}
-        <mesh position={[0, 1.3, 0.5]}>
-          <boxGeometry args={[1.5, 0.12, 0.1]} />
-          <meshStandardMaterial color="#9ca3af" metalness={0.7} roughness={0.3} />
-        </mesh>
-        {/* Door closer at top */}
-        <mesh position={[0.6, 2.75, 0.45]}>
-          <boxGeometry args={[0.5, 0.15, 0.1]} />
-          <meshStandardMaterial color="#374151" metalness={0.5} />
-        </mesh>
-        {/* EXIT sign above door - standard emergency */}
-        <mesh position={[0, 3.4, 0.3]}>
-          <boxGeometry args={[1, 0.45, 0.1]} />
-          <meshStandardMaterial color="#dc2626" emissive="#dc2626" emissiveIntensity={0.5} />
-        </mesh>
-        {/* Running man pictogram area */}
-        <mesh position={[0, 3.4, 0.36]}>
-          <boxGeometry args={[0.8, 0.35, 0.02]} />
-          <meshBasicMaterial color="#ffffff" />
-        </mesh>
-        {/* Wall-mounted emergency light */}
-        <mesh position={[0, 3.8, 0.2]} castShadow>
-          <boxGeometry args={[0.6, 0.22, 0.15]} />
-          <meshStandardMaterial color="#e5e7eb" roughness={0.4} />
-        </mesh>
-        <mesh position={[0, 3.7, 0.3]}>
-          <boxGeometry args={[0.5, 0.1, 0.06]} />
-          <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.6} />
-        </mesh>
-        {/* Kick plate at bottom of door */}
-        <mesh position={[0, 0.25, 0.48]}>
-          <boxGeometry args={[1.9, 0.4, 0.03]} />
-          <meshStandardMaterial color="#6b7280" metalness={0.6} roughness={0.4} />
-        </mesh>
-        {/* Yellow hazard stripes on ground */}
-        <mesh position={[0, FLOOR_LAYERS.safetyMain, 2]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[3.5, 2]} />
-          <meshStandardMaterial
-            color="#eab308"
-            roughness={0.8}
-            polygonOffset
-            polygonOffsetFactor={POLYGON_OFFSET.standard.factor}
-            polygonOffsetUnits={POLYGON_OFFSET.standard.units}
-          />
-        </mesh>
-      </group>
-
-      {/* Right emergency exit at x=45 - positioned 1.5 units out from wall */}
-      <group position={[45, 0, buildingBackZ - 1.5]} rotation={[0, Math.PI, 0]}>
-        {/* Concrete landing pad */}
-        <mesh position={[0, 0.15, 1.5]} castShadow receiveShadow>
-          <boxGeometry args={[4, 0.3, 3.5]} />
-          <meshStandardMaterial color="#6b7280" roughness={0.9} />
-        </mesh>
-        {/* Door surround - protruding frame structure */}
-        <mesh position={[0, 1.6, -0.2]} castShadow>
-          <boxGeometry args={[3.5, 3.4, 0.8]} />
-          <meshStandardMaterial color="#4b5563" roughness={0.7} metalness={0.3} />
-        </mesh>
-        {/* Door opening recess */}
-        <mesh position={[0, 1.5, 0.15]}>
-          <boxGeometry args={[2.5, 3, 0.4]} />
-          <meshStandardMaterial color="#1f2937" roughness={0.9} />
-        </mesh>
-        {/* Steel fire door - industrial green */}
-        <mesh position={[0, 1.5, 0.4]} castShadow>
-          <boxGeometry args={[2, 2.8, 0.12]} />
-          <meshStandardMaterial color="#365314" roughness={0.6} metalness={0.4} />
-        </mesh>
-        {/* Small reinforced window */}
-        <mesh position={[0, 2.1, 0.5]}>
-          <boxGeometry args={[0.5, 0.6, 0.03]} />
-          <meshStandardMaterial
-            color="#64748b"
-            transparent
-            opacity={0.5}
-            metalness={0.6}
-            roughness={0.2}
-          />
-        </mesh>
-        {/* Wire mesh on window */}
-        <mesh position={[0, 2.1, 0.52]}>
-          <boxGeometry args={[0.48, 0.58, 0.01]} />
-          <meshStandardMaterial color="#374151" wireframe transparent opacity={0.6} />
-        </mesh>
-        {/* Crash bar / panic hardware */}
-        <mesh position={[0, 1.3, 0.5]}>
-          <boxGeometry args={[1.5, 0.12, 0.1]} />
-          <meshStandardMaterial color="#9ca3af" metalness={0.7} roughness={0.3} />
-        </mesh>
-        {/* Door closer at top */}
-        <mesh position={[0.6, 2.75, 0.45]}>
-          <boxGeometry args={[0.5, 0.15, 0.1]} />
-          <meshStandardMaterial color="#374151" metalness={0.5} />
-        </mesh>
-        {/* EXIT sign above door - standard emergency */}
-        <mesh position={[0, 3.4, 0.3]}>
-          <boxGeometry args={[1, 0.45, 0.1]} />
-          <meshStandardMaterial color="#dc2626" emissive="#dc2626" emissiveIntensity={0.5} />
-        </mesh>
-        {/* Running man pictogram area */}
-        <mesh position={[0, 3.4, 0.36]}>
-          <boxGeometry args={[0.8, 0.35, 0.02]} />
-          <meshBasicMaterial color="#ffffff" />
-        </mesh>
-        {/* Wall-mounted emergency light */}
-        <mesh position={[0, 3.8, 0.2]} castShadow>
-          <boxGeometry args={[0.6, 0.22, 0.15]} />
-          <meshStandardMaterial color="#e5e7eb" roughness={0.4} />
-        </mesh>
-        <mesh position={[0, 3.7, 0.3]}>
-          <boxGeometry args={[0.5, 0.1, 0.06]} />
-          <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.6} />
-        </mesh>
-        {/* Kick plate at bottom of door */}
-        <mesh position={[0, 0.25, 0.48]}>
-          <boxGeometry args={[1.9, 0.4, 0.03]} />
-          <meshStandardMaterial color="#6b7280" metalness={0.6} roughness={0.4} />
-        </mesh>
-        {/* Yellow hazard stripes on ground */}
-        <mesh position={[0, FLOOR_LAYERS.safetyMain, 2]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[3.5, 2]} />
-          <meshStandardMaterial
-            color="#eab308"
-            roughness={0.8}
-            polygonOffset
-            polygonOffsetFactor={POLYGON_OFFSET.standard.factor}
-            polygonOffsetUnits={POLYGON_OFFSET.standard.units}
-          />
-        </mesh>
-      </group>
-
-      {/* ========== BACK SIGN - Large Red Sign (matching front sign) ========== */}
-      <group position={[0, wallHeight / 2 + 2, buildingBackZ - 1.5]} rotation={[0, Math.PI, 0]}>
-        {/* Main sign background - Red like the truck signs */}
-        <mesh frustumCulled={false}>
-          <boxGeometry args={[80, 10, 0.5]} />
-          <meshBasicMaterial color="#dc2626" />
-        </mesh>
-        {/* Gold trim border */}
-        <mesh position={[0, 0, 0.3]} frustumCulled={false}>
-          <boxGeometry args={[82, 10.6, 0.15]} />
-          <meshBasicMaterial color="#fbbf24" />
-        </mesh>
-        {/* Inner red panel */}
-        <mesh position={[0, 0, 0.4]} frustumCulled={false}>
-          <boxGeometry args={[79, 9.5, 0.1]} />
-          <meshBasicMaterial color="#b91c1c" />
-        </mesh>
-        {/* Company name */}
-        <Text
-          position={[0, 1.5, 0.6]}
-          fontSize={5}
-          color="#ffffff"
-          anchorX="center"
-          anchorY="middle"
-          fontWeight="bold"
-          outlineWidth={0.1}
-          outlineColor="#7f1d1d"
-        >
-          MillOS GRAIN MILL
-        </Text>
-        {/* Tagline */}
-        <Text
-          position={[0, -2.5, 0.6]}
-          fontSize={1.8}
-          color="#fef3c7"
-          anchorX="center"
-          anchorY="middle"
-        >
-          EST. 1952 • QUALITY FLOUR PRODUCTS
-        </Text>
-      </group>
-
-      {/* ========== LEFT SIDE WALL (X-) with personnel door ========== */}
-      {/* Side walls end INSIDE front/back walls - front/back walls wrap around corners */}
-      {/* Personnel door opening in the wall - West Exit */}
-      {(() => {
-        const sideWallLength = Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2;
-        const doorWidth = 3;
-        const doorHeight = 3;
-        const doorZ = 0;
-        const frontSegmentLength = sideWallLength / 2 - doorWidth / 2;
-        const backSegmentLength = sideWallLength / 2 - doorWidth / 2;
-        const frontSegmentZ = doorZ + doorWidth / 2 + frontSegmentLength / 2;
-        const backSegmentZ = doorZ - doorWidth / 2 - backSegmentLength / 2;
-
-        return (
-          <>
-            {/* Front section of left wall */}
-            <mesh
-              position={[-buildingHalfWidth, wallHeight / 2, frontSegmentZ]}
-              castShadow
-              receiveShadow
-            >
-              <boxGeometry args={[wallThickness, wallHeight, frontSegmentLength]} />
+          {/* ========== FRONT PERSONNEL ENTRANCES - Realistic Industrial Style ========== */}
+          {/* Left main entrance at x=-45 - doors positioned 1.5 units in front of wall */}
+          <group position={[-45, 0, buildingFrontZ + 1.5]}>
+            {/* Concrete entrance platform/steps */}
+            <mesh position={[0, 0.2, 1.5]} castShadow receiveShadow>
+              <boxGeometry args={[5, 0.4, 4]} />
+              <meshStandardMaterial color="#6b7280" roughness={0.9} />
+            </mesh>
+            <mesh position={[0, 0.08, 3.5]} castShadow receiveShadow>
+              <boxGeometry args={[5, 0.16, 1.5]} />
+              <meshStandardMaterial color="#6b7280" roughness={0.9} />
+            </mesh>
+            {/* Door surround - protruding frame structure */}
+            <mesh position={[0, 1.8, -0.3]} castShadow>
+              <boxGeometry args={[4.5, 3.8, 1]} />
+              <meshStandardMaterial color="#4b5563" roughness={0.7} metalness={0.3} />
+            </mesh>
+            {/* Door opening recess */}
+            <mesh position={[0, 1.6, 0.1]}>
+              <boxGeometry args={[3.2, 3.2, 0.5]} />
+              <meshStandardMaterial color="#1f2937" roughness={0.9} />
+            </mesh>
+            {/* Double doors - industrial blue */}
+            <mesh position={[-0.75, 1.55, 0.4]} castShadow>
+              <boxGeometry args={[1.4, 3, 0.15]} />
+              <meshStandardMaterial color="#1e3a5f" roughness={0.5} metalness={0.4} />
+            </mesh>
+            <mesh position={[0.75, 1.55, 0.4]} castShadow>
+              <boxGeometry args={[1.4, 3, 0.15]} />
+              <meshStandardMaterial color="#1e3a5f" roughness={0.5} metalness={0.4} />
+            </mesh>
+            {/* Glass panels on doors */}
+            <mesh position={[-0.75, 1.9, 0.5]}>
+              <boxGeometry args={[1, 2, 0.04]} />
               <meshStandardMaterial
-                color={wallColor}
-                roughness={0.8}
-                metalness={0.2}
-                side={THREE.DoubleSide}
+                color="#87ceeb"
+                transparent
+                opacity={0.5}
+                metalness={0.6}
+                roughness={0.1}
               />
             </mesh>
-            {/* Back section of left wall */}
-            <mesh
-              position={[-buildingHalfWidth, wallHeight / 2, backSegmentZ]}
-              castShadow
-              receiveShadow
-            >
-              <boxGeometry args={[wallThickness, wallHeight, backSegmentLength]} />
+            <mesh position={[0.75, 1.9, 0.5]}>
+              <boxGeometry args={[1, 2, 0.04]} />
               <meshStandardMaterial
-                color={wallColor}
-                roughness={0.8}
-                metalness={0.2}
-                side={THREE.DoubleSide}
+                color="#87ceeb"
+                transparent
+                opacity={0.5}
+                metalness={0.6}
+                roughness={0.1}
               />
             </mesh>
-            {/* Section above door opening */}
-            <mesh
-              position={[-buildingHalfWidth, doorHeight + (wallHeight - doorHeight) / 2, doorZ]}
-              castShadow
-              receiveShadow
-            >
-              <boxGeometry args={[wallThickness, wallHeight - doorHeight, doorWidth]} />
-              <meshStandardMaterial
-                color={wallColor}
-                roughness={0.8}
-                metalness={0.2}
-                side={THREE.DoubleSide}
-              />
+            {/* Door handles - vertical pull bars */}
+            <mesh position={[-0.2, 1.5, 0.55]}>
+              <boxGeometry args={[0.08, 0.7, 0.08]} />
+              <meshStandardMaterial color="#d4d4d4" metalness={0.8} roughness={0.2} />
             </mesh>
-            {/* West Personnel Door - exterior side */}
-            <group position={[-buildingHalfWidth - 0.3, 0, doorZ]} rotation={[0, Math.PI / 2, 0]}>
-              <mesh position={[0, doorHeight / 2, 0]} castShadow>
-                <boxGeometry args={[doorWidth + 0.3, doorHeight + 0.15, 0.15]} />
-                <meshStandardMaterial color="#374151" roughness={0.6} metalness={0.3} />
-              </mesh>
-              <mesh position={[0, doorHeight / 2, 0.08]}>
-                <boxGeometry args={[doorWidth - 0.3, doorHeight - 0.2, 0.1]} />
-                <meshStandardMaterial color="#1f2937" roughness={0.8} />
-              </mesh>
-              <mesh position={[-0.7, doorHeight / 2, 0.15]} castShadow>
-                <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
-                <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
-              </mesh>
-              <mesh position={[0.7, doorHeight / 2, 0.15]} castShadow>
-                <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
-                <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
-              </mesh>
-              <mesh position={[-0.7, doorHeight * 0.65, 0.2]}>
-                <boxGeometry args={[0.6, 0.8, 0.02]} />
-                <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
-              </mesh>
-              <mesh position={[0.7, doorHeight * 0.65, 0.2]}>
-                <boxGeometry args={[0.6, 0.8, 0.02]} />
-                <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
-              </mesh>
-              <mesh position={[-0.7, doorHeight * 0.4, 0.2]}>
-                <boxGeometry args={[0.8, 0.08, 0.05]} />
-                <meshBasicMaterial color="#fbbf24" />
-              </mesh>
-              <mesh position={[0.7, doorHeight * 0.4, 0.2]}>
-                <boxGeometry args={[0.8, 0.08, 0.05]} />
-                <meshBasicMaterial color="#fbbf24" />
-              </mesh>
-              <mesh position={[0, doorHeight + 0.4, 0.1]}>
-                <boxGeometry args={[1.5, 0.4, 0.08]} />
-                <meshStandardMaterial color="#dc2626" emissive="#dc2626" emissiveIntensity={0.3} />
-              </mesh>
-              <mesh position={[0, doorHeight + 0.7, 0.1]}>
-                <boxGeometry args={[0.6, 0.15, 0.1]} />
-                <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.5} />
-              </mesh>
-            </group>
-            {/* West Personnel Door - interior side */}
-            <group position={[-buildingHalfWidth + 0.3, 0, doorZ]} rotation={[0, -Math.PI / 2, 0]}>
-              <mesh position={[0, doorHeight / 2, 0]} castShadow>
-                <boxGeometry args={[doorWidth + 0.3, doorHeight + 0.15, 0.15]} />
-                <meshStandardMaterial color="#374151" roughness={0.6} metalness={0.3} />
-              </mesh>
-              <mesh position={[-0.7, doorHeight / 2, 0.15]} castShadow>
-                <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
-                <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
-              </mesh>
-              <mesh position={[0.7, doorHeight / 2, 0.15]} castShadow>
-                <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
-                <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
-              </mesh>
-              <mesh position={[-0.7, doorHeight * 0.65, 0.2]}>
-                <boxGeometry args={[0.6, 0.8, 0.02]} />
-                <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
-              </mesh>
-              <mesh position={[0.7, doorHeight * 0.65, 0.2]}>
-                <boxGeometry args={[0.6, 0.8, 0.02]} />
-                <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
-              </mesh>
-              <mesh position={[-0.7, doorHeight * 0.4, 0.2]}>
-                <boxGeometry args={[0.8, 0.08, 0.05]} />
-                <meshBasicMaterial color="#fbbf24" />
-              </mesh>
-              <mesh position={[0.7, doorHeight * 0.4, 0.2]}>
-                <boxGeometry args={[0.8, 0.08, 0.05]} />
-                <meshBasicMaterial color="#fbbf24" />
-              </mesh>
-              <mesh position={[0, doorHeight + 0.4, 0.1]}>
-                <boxGeometry args={[1.5, 0.4, 0.08]} />
-                <meshStandardMaterial color="#dc2626" emissive="#dc2626" emissiveIntensity={0.3} />
-              </mesh>
-            </group>
-          </>
-        );
-      })()}
-      <mesh position={[-buildingHalfWidth, wallHeight + 0.3, 0]}>
-        <boxGeometry
-          args={[0.8, 0.6, Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2 + 0.5]}
-        />
-        <meshStandardMaterial
-          color={trimColor}
-          roughness={0.6}
-          metalness={0.4}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
+            <mesh position={[0.2, 1.5, 0.55]}>
+              <boxGeometry args={[0.08, 0.7, 0.08]} />
+              <meshStandardMaterial color="#d4d4d4" metalness={0.8} roughness={0.2} />
+            </mesh>
+            {/* Metal awning/canopy */}
+            <mesh position={[0, 3.9, 0.8]} castShadow>
+              <boxGeometry args={[5, 0.15, 2.5]} />
+              <meshStandardMaterial color="#374151" roughness={0.5} metalness={0.5} />
+            </mesh>
+            {/* Awning support brackets */}
+            <mesh position={[-2, 3.4, 0.3]} rotation={[0.5, 0, 0]} castShadow>
+              <boxGeometry args={[0.12, 1, 0.12]} />
+              <meshStandardMaterial color="#4b5563" metalness={0.5} />
+            </mesh>
+            <mesh position={[2, 3.4, 0.3]} rotation={[0.5, 0, 0]} castShadow>
+              <boxGeometry args={[0.12, 1, 0.12]} />
+              <meshStandardMaterial color="#4b5563" metalness={0.5} />
+            </mesh>
+            {/* Handrails */}
+            <mesh position={[-2.3, 0.6, 1.5]} castShadow>
+              <boxGeometry args={[0.1, 1.2, 0.1]} />
+              <meshStandardMaterial color="#6b7280" metalness={0.6} />
+            </mesh>
+            <mesh position={[2.3, 0.6, 1.5]} castShadow>
+              <boxGeometry args={[0.1, 1.2, 0.1]} />
+              <meshStandardMaterial color="#6b7280" metalness={0.6} />
+            </mesh>
+            <mesh position={[-2.3, 1.2, 2]} castShadow>
+              <boxGeometry args={[0.1, 0.1, 4]} />
+              <meshStandardMaterial color="#6b7280" metalness={0.6} />
+            </mesh>
+            <mesh position={[2.3, 1.2, 2]} castShadow>
+              <boxGeometry args={[0.1, 0.1, 4]} />
+              <meshStandardMaterial color="#6b7280" metalness={0.6} />
+            </mesh>
+            {/* Yellow safety bollards */}
+            <mesh position={[-3.2, 0.5, 2.5]} castShadow>
+              <cylinderGeometry args={[0.18, 0.18, 1, 12]} />
+              <meshStandardMaterial color="#eab308" roughness={0.5} />
+            </mesh>
+            <mesh position={[3.2, 0.5, 2.5]} castShadow>
+              <cylinderGeometry args={[0.18, 0.18, 1, 12]} />
+              <meshStandardMaterial color="#eab308" roughness={0.5} />
+            </mesh>
+            {/* Exterior light fixture */}
+            <mesh position={[0, 4.2, 0]} castShadow>
+              <boxGeometry args={[0.6, 0.35, 0.5]} />
+              <meshStandardMaterial color="#374151" roughness={0.5} metalness={0.4} />
+            </mesh>
+            <mesh position={[0, 4.05, 0.3]}>
+              <boxGeometry args={[0.4, 0.2, 0.25]} />
+              <meshBasicMaterial color="#fef3c7" />
+            </mesh>
+          </group>
 
-      {/* ========== RIGHT SIDE WALL (X+) with personnel door ========== */}
-      {/* Personnel door opening in the wall - East Exit */}
-      {(() => {
-        const sideWallLength = Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2;
-        const doorWidth = 3;
-        const doorHeight = 3;
-        const doorZ = 0;
-        const frontSegmentLength = sideWallLength / 2 - doorWidth / 2;
-        const backSegmentLength = sideWallLength / 2 - doorWidth / 2;
-        const frontSegmentZ = doorZ + doorWidth / 2 + frontSegmentLength / 2;
-        const backSegmentZ = doorZ - doorWidth / 2 - backSegmentLength / 2;
+          {/* Right staff entrance at x=45 - doors positioned 1.5 units in front of wall */}
+          <group position={[45, 0, buildingFrontZ + 1.5]}>
+            {/* Concrete entrance platform/steps */}
+            <mesh position={[0, 0.2, 1.5]} castShadow receiveShadow>
+              <boxGeometry args={[5, 0.4, 4]} />
+              <meshStandardMaterial color="#6b7280" roughness={0.9} />
+            </mesh>
+            <mesh position={[0, 0.08, 3.5]} castShadow receiveShadow>
+              <boxGeometry args={[5, 0.16, 1.5]} />
+              <meshStandardMaterial color="#6b7280" roughness={0.9} />
+            </mesh>
+            {/* Door surround - protruding frame structure */}
+            <mesh position={[0, 1.8, -0.3]} castShadow>
+              <boxGeometry args={[4.5, 3.8, 1]} />
+              <meshStandardMaterial color="#4b5563" roughness={0.7} metalness={0.3} />
+            </mesh>
+            {/* Door opening recess */}
+            <mesh position={[0, 1.6, 0.1]}>
+              <boxGeometry args={[3.2, 3.2, 0.5]} />
+              <meshStandardMaterial color="#1f2937" roughness={0.9} />
+            </mesh>
+            {/* Double doors - industrial blue */}
+            <mesh position={[-0.75, 1.55, 0.4]} castShadow>
+              <boxGeometry args={[1.4, 3, 0.15]} />
+              <meshStandardMaterial color="#1e3a5f" roughness={0.5} metalness={0.4} />
+            </mesh>
+            <mesh position={[0.75, 1.55, 0.4]} castShadow>
+              <boxGeometry args={[1.4, 3, 0.15]} />
+              <meshStandardMaterial color="#1e3a5f" roughness={0.5} metalness={0.4} />
+            </mesh>
+            {/* Glass panels on doors */}
+            <mesh position={[-0.75, 1.9, 0.5]}>
+              <boxGeometry args={[1, 2, 0.04]} />
+              <meshStandardMaterial
+                color="#87ceeb"
+                transparent
+                opacity={0.5}
+                metalness={0.6}
+                roughness={0.1}
+              />
+            </mesh>
+            <mesh position={[0.75, 1.9, 0.5]}>
+              <boxGeometry args={[1, 2, 0.04]} />
+              <meshStandardMaterial
+                color="#87ceeb"
+                transparent
+                opacity={0.5}
+                metalness={0.6}
+                roughness={0.1}
+              />
+            </mesh>
+            {/* Door handles - vertical pull bars */}
+            <mesh position={[-0.2, 1.5, 0.55]}>
+              <boxGeometry args={[0.08, 0.7, 0.08]} />
+              <meshStandardMaterial color="#d4d4d4" metalness={0.8} roughness={0.2} />
+            </mesh>
+            <mesh position={[0.2, 1.5, 0.55]}>
+              <boxGeometry args={[0.08, 0.7, 0.08]} />
+              <meshStandardMaterial color="#d4d4d4" metalness={0.8} roughness={0.2} />
+            </mesh>
+            {/* Metal awning/canopy */}
+            <mesh position={[0, 3.9, 0.8]} castShadow>
+              <boxGeometry args={[5, 0.15, 2.5]} />
+              <meshStandardMaterial color="#374151" roughness={0.5} metalness={0.5} />
+            </mesh>
+            {/* Awning support brackets */}
+            <mesh position={[-2, 3.4, 0.3]} rotation={[0.5, 0, 0]} castShadow>
+              <boxGeometry args={[0.12, 1, 0.12]} />
+              <meshStandardMaterial color="#4b5563" metalness={0.5} />
+            </mesh>
+            <mesh position={[2, 3.4, 0.3]} rotation={[0.5, 0, 0]} castShadow>
+              <boxGeometry args={[0.12, 1, 0.12]} />
+              <meshStandardMaterial color="#4b5563" metalness={0.5} />
+            </mesh>
+            {/* Handrails */}
+            <mesh position={[-2.3, 0.6, 1.5]} castShadow>
+              <boxGeometry args={[0.1, 1.2, 0.1]} />
+              <meshStandardMaterial color="#6b7280" metalness={0.6} />
+            </mesh>
+            <mesh position={[2.3, 0.6, 1.5]} castShadow>
+              <boxGeometry args={[0.1, 1.2, 0.1]} />
+              <meshStandardMaterial color="#6b7280" metalness={0.6} />
+            </mesh>
+            <mesh position={[-2.3, 1.2, 2]} castShadow>
+              <boxGeometry args={[0.1, 0.1, 4]} />
+              <meshStandardMaterial color="#6b7280" metalness={0.6} />
+            </mesh>
+            <mesh position={[2.3, 1.2, 2]} castShadow>
+              <boxGeometry args={[0.1, 0.1, 4]} />
+              <meshStandardMaterial color="#6b7280" metalness={0.6} />
+            </mesh>
+            {/* Yellow safety bollards */}
+            <mesh position={[-3.2, 0.5, 2.5]} castShadow>
+              <cylinderGeometry args={[0.18, 0.18, 1, 12]} />
+              <meshStandardMaterial color="#eab308" roughness={0.5} />
+            </mesh>
+            <mesh position={[3.2, 0.5, 2.5]} castShadow>
+              <cylinderGeometry args={[0.18, 0.18, 1, 12]} />
+              <meshStandardMaterial color="#eab308" roughness={0.5} />
+            </mesh>
+            {/* Exterior light fixture */}
+            <mesh position={[0, 4.2, 0]} castShadow>
+              <boxGeometry args={[0.6, 0.35, 0.5]} />
+              <meshStandardMaterial color="#374151" roughness={0.5} metalness={0.4} />
+            </mesh>
+            <mesh position={[0, 4.05, 0.3]}>
+              <boxGeometry args={[0.4, 0.2, 0.25]} />
+              <meshBasicMaterial color="#fef3c7" />
+            </mesh>
+          </group>
 
-        return (
-          <>
-            {/* Front section of right wall */}
-            <mesh
-              position={[buildingHalfWidth, wallHeight / 2, frontSegmentZ]}
-              castShadow
-              receiveShadow
+          {/* ========== FRONT SIGN - Large Red Sign (similar to truck signage) ========== */}
+          <group position={[0, wallHeight / 2 + 2, buildingFrontZ + 1.5]}>
+            {/* Main sign background - Red like the truck signs */}
+            <mesh frustumCulled={false}>
+              <boxGeometry args={[80, 10, 0.5]} />
+              <meshBasicMaterial color="#dc2626" />
+            </mesh>
+            {/* Gold trim border */}
+            <mesh position={[0, 0, 0.3]} frustumCulled={false}>
+              <boxGeometry args={[82, 10.6, 0.15]} />
+              <meshBasicMaterial color="#fbbf24" />
+            </mesh>
+            {/* Inner red panel */}
+            <mesh position={[0, 0, 0.4]} frustumCulled={false}>
+              <boxGeometry args={[79, 9.5, 0.1]} />
+              <meshBasicMaterial color="#b91c1c" />
+            </mesh>
+            {/* Company name */}
+            <Text
+              position={[0, 1.5, 0.6]}
+              fontSize={5}
+              color="#ffffff"
+              anchorX="center"
+              anchorY="middle"
+              fontWeight="bold"
+              outlineWidth={0.1}
+              outlineColor="#7f1d1d"
             >
-              <boxGeometry args={[wallThickness, wallHeight, frontSegmentLength]} />
+              MillOS GRAIN MILL
+            </Text>
+            {/* Tagline */}
+            <Text
+              position={[0, -2.5, 0.6]}
+              fontSize={1.8}
+              color="#fef3c7"
+              anchorX="center"
+              anchorY="middle"
+            >
+              EST. 1952 • QUALITY FLOUR PRODUCTS
+            </Text>
+          </group>
+
+          {/* ========== BACK WALL (Z-) with dock opening ========== */}
+          {/* Left section - FULL HEIGHT - extends PAST side wall for clean corner */}
+          <mesh
+            position={[
+              -((buildingHalfWidth + wallThickness) / 2 + backDockOpeningWidth / 4),
+              wallHeight / 2,
+              buildingBackZ,
+            ]}
+            castShadow
+            receiveShadow
+          >
+            <boxGeometry
+              args={[
+                buildingHalfWidth + wallThickness - backDockOpeningWidth / 2,
+                wallHeight,
+                wallThickness,
+              ]}
+            />
+            <meshStandardMaterial
+              color={wallColor}
+              roughness={0.8}
+              metalness={0.2}
+              side={THREE.DoubleSide}
+              normalMap={PROCEDURAL_TEXTURES.panelNormal}
+              normalScale={new THREE.Vector2(0.2, 0.2)}
+            />
+          </mesh>
+          {/* Right section - FULL HEIGHT - extends PAST side wall for clean corner */}
+          <mesh
+            position={[
+              (buildingHalfWidth + wallThickness) / 2 + backDockOpeningWidth / 4,
+              wallHeight / 2,
+              buildingBackZ,
+            ]}
+            castShadow
+            receiveShadow
+          >
+            <boxGeometry
+              args={[
+                buildingHalfWidth + wallThickness - backDockOpeningWidth / 2,
+                wallHeight,
+                wallThickness,
+              ]}
+            />
+            <meshStandardMaterial
+              color={wallColor}
+              roughness={0.8}
+              metalness={0.2}
+              side={THREE.DoubleSide}
+              normalMap={PROCEDURAL_TEXTURES.panelNormal}
+              normalScale={new THREE.Vector2(0.2, 0.2)}
+            />
+          </mesh>
+          {/* Section above dock opening - matches wall height */}
+          <mesh
+            position={[0, wallHeight - (wallHeight - dockOpeningHeight) / 2, buildingBackZ]}
+            castShadow
+            receiveShadow
+          >
+            <boxGeometry
+              args={[backDockOpeningWidth, wallHeight - dockOpeningHeight, wallThickness]}
+            />
+            <meshStandardMaterial
+              color={wallColor}
+              roughness={0.8}
+              metalness={0.2}
+              side={THREE.DoubleSide}
+              normalMap={PROCEDURAL_TEXTURES.panelNormal}
+              normalScale={new THREE.Vector2(0.2, 0.2)}
+            />
+          </mesh>
+
+          {/* Back wall trim */}
+          <mesh position={[0, wallHeight + 0.3, buildingBackZ]}>
+            <boxGeometry args={[buildingHalfWidth * 2 + 1, 0.6, 0.8]} />
+            <meshStandardMaterial
+              color={trimColor}
+              roughness={0.6}
+              metalness={0.4}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+
+          {/* ========== BACK EMERGENCY EXITS - Realistic Industrial Style ========== */}
+          {/* Left emergency exit at x=-45 - positioned 1.5 units out from wall */}
+          <group position={[-45, 0, buildingBackZ - 1.5]} rotation={[0, Math.PI, 0]}>
+            {/* Concrete landing pad */}
+            <mesh position={[0, 0.15, 1.5]} castShadow receiveShadow>
+              <boxGeometry args={[4, 0.3, 3.5]} />
+              <meshStandardMaterial color="#6b7280" roughness={0.9} />
+            </mesh>
+            {/* Door surround - protruding frame structure */}
+            <mesh position={[0, 1.6, -0.2]} castShadow>
+              <boxGeometry args={[3.5, 3.4, 0.8]} />
+              <meshStandardMaterial color="#4b5563" roughness={0.7} metalness={0.3} />
+            </mesh>
+            {/* Door opening recess */}
+            <mesh position={[0, 1.5, 0.15]}>
+              <boxGeometry args={[2.5, 3, 0.4]} />
+              <meshStandardMaterial color="#1f2937" roughness={0.9} />
+            </mesh>
+            {/* Steel fire door - industrial green */}
+            <mesh position={[0, 1.5, 0.4]} castShadow>
+              <boxGeometry args={[2, 2.8, 0.12]} />
+              <meshStandardMaterial color="#365314" roughness={0.6} metalness={0.4} />
+            </mesh>
+            {/* Small reinforced window */}
+            <mesh position={[0, 2.1, 0.5]}>
+              <boxGeometry args={[0.5, 0.6, 0.03]} />
               <meshStandardMaterial
-                color={wallColor}
-                roughness={0.8}
-                metalness={0.2}
-                side={THREE.DoubleSide}
+                color="#64748b"
+                transparent
+                opacity={0.5}
+                metalness={0.6}
+                roughness={0.2}
               />
             </mesh>
-            {/* Back section of right wall */}
-            <mesh
-              position={[buildingHalfWidth, wallHeight / 2, backSegmentZ]}
-              castShadow
-              receiveShadow
-            >
-              <boxGeometry args={[wallThickness, wallHeight, backSegmentLength]} />
+            {/* Wire mesh on window */}
+            <mesh position={[0, 2.1, 0.52]}>
+              <boxGeometry args={[0.48, 0.58, 0.01]} />
+              <meshStandardMaterial color="#374151" wireframe transparent opacity={0.6} />
+            </mesh>
+            {/* Crash bar / panic hardware */}
+            <mesh position={[0, 1.3, 0.5]}>
+              <boxGeometry args={[1.5, 0.12, 0.1]} />
+              <meshStandardMaterial color="#9ca3af" metalness={0.7} roughness={0.3} />
+            </mesh>
+            {/* Door closer at top */}
+            <mesh position={[0.6, 2.75, 0.45]}>
+              <boxGeometry args={[0.5, 0.15, 0.1]} />
+              <meshStandardMaterial color="#374151" metalness={0.5} />
+            </mesh>
+            {/* EXIT sign above door - standard emergency */}
+            <mesh position={[0, 3.4, 0.3]}>
+              <boxGeometry args={[1, 0.45, 0.1]} />
+              <meshStandardMaterial color="#dc2626" emissive="#dc2626" emissiveIntensity={0.5} />
+            </mesh>
+            {/* Running man pictogram area */}
+            <mesh position={[0, 3.4, 0.36]}>
+              <boxGeometry args={[0.8, 0.35, 0.02]} />
+              <meshBasicMaterial color="#ffffff" />
+            </mesh>
+            {/* Wall-mounted emergency light */}
+            <mesh position={[0, 3.8, 0.2]} castShadow>
+              <boxGeometry args={[0.6, 0.22, 0.15]} />
+              <meshStandardMaterial color="#e5e7eb" roughness={0.4} />
+            </mesh>
+            <mesh position={[0, 3.7, 0.3]}>
+              <boxGeometry args={[0.5, 0.1, 0.06]} />
+              <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.6} />
+            </mesh>
+            {/* Kick plate at bottom of door */}
+            <mesh position={[0, 0.25, 0.48]}>
+              <boxGeometry args={[1.9, 0.4, 0.03]} />
+              <meshStandardMaterial color="#6b7280" metalness={0.6} roughness={0.4} />
+            </mesh>
+            {/* Yellow hazard stripes on ground */}
+            <mesh position={[0, FLOOR_LAYERS.safetyMain, 2]} rotation={[-Math.PI / 2, 0, 0]}>
+              <planeGeometry args={[3.5, 2]} />
               <meshStandardMaterial
-                color={wallColor}
+                color="#eab308"
                 roughness={0.8}
-                metalness={0.2}
-                side={THREE.DoubleSide}
+                polygonOffset
+                polygonOffsetFactor={POLYGON_OFFSET.standard.factor}
+                polygonOffsetUnits={POLYGON_OFFSET.standard.units}
               />
             </mesh>
-            {/* Section above door opening */}
-            <mesh
-              position={[buildingHalfWidth, doorHeight + (wallHeight - doorHeight) / 2, doorZ]}
-              castShadow
-              receiveShadow
-            >
-              <boxGeometry args={[wallThickness, wallHeight - doorHeight, doorWidth]} />
+          </group>
+
+          {/* Right emergency exit at x=45 - positioned 1.5 units out from wall */}
+          <group position={[45, 0, buildingBackZ - 1.5]} rotation={[0, Math.PI, 0]}>
+            {/* Concrete landing pad */}
+            <mesh position={[0, 0.15, 1.5]} castShadow receiveShadow>
+              <boxGeometry args={[4, 0.3, 3.5]} />
+              <meshStandardMaterial color="#6b7280" roughness={0.9} />
+            </mesh>
+            {/* Door surround - protruding frame structure */}
+            <mesh position={[0, 1.6, -0.2]} castShadow>
+              <boxGeometry args={[3.5, 3.4, 0.8]} />
+              <meshStandardMaterial color="#4b5563" roughness={0.7} metalness={0.3} />
+            </mesh>
+            {/* Door opening recess */}
+            <mesh position={[0, 1.5, 0.15]}>
+              <boxGeometry args={[2.5, 3, 0.4]} />
+              <meshStandardMaterial color="#1f2937" roughness={0.9} />
+            </mesh>
+            {/* Steel fire door - industrial green */}
+            <mesh position={[0, 1.5, 0.4]} castShadow>
+              <boxGeometry args={[2, 2.8, 0.12]} />
+              <meshStandardMaterial color="#365314" roughness={0.6} metalness={0.4} />
+            </mesh>
+            {/* Small reinforced window */}
+            <mesh position={[0, 2.1, 0.5]}>
+              <boxGeometry args={[0.5, 0.6, 0.03]} />
               <meshStandardMaterial
-                color={wallColor}
-                roughness={0.8}
-                metalness={0.2}
-                side={THREE.DoubleSide}
+                color="#64748b"
+                transparent
+                opacity={0.5}
+                metalness={0.6}
+                roughness={0.2}
               />
             </mesh>
-            {/* East Personnel Door - exterior side */}
-            <group position={[buildingHalfWidth + 0.3, 0, doorZ]} rotation={[0, -Math.PI / 2, 0]}>
-              <mesh position={[0, doorHeight / 2, 0]} castShadow>
-                <boxGeometry args={[doorWidth + 0.3, doorHeight + 0.15, 0.15]} />
-                <meshStandardMaterial color="#374151" roughness={0.6} metalness={0.3} />
-              </mesh>
-              <mesh position={[0, doorHeight / 2, 0.08]}>
-                <boxGeometry args={[doorWidth - 0.3, doorHeight - 0.2, 0.1]} />
-                <meshStandardMaterial color="#1f2937" roughness={0.8} />
-              </mesh>
-              <mesh position={[-0.7, doorHeight / 2, 0.15]} castShadow>
-                <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
-                <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
-              </mesh>
-              <mesh position={[0.7, doorHeight / 2, 0.15]} castShadow>
-                <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
-                <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
-              </mesh>
-              <mesh position={[-0.7, doorHeight * 0.65, 0.2]}>
-                <boxGeometry args={[0.6, 0.8, 0.02]} />
-                <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
-              </mesh>
-              <mesh position={[0.7, doorHeight * 0.65, 0.2]}>
-                <boxGeometry args={[0.6, 0.8, 0.02]} />
-                <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
-              </mesh>
-              <mesh position={[-0.7, doorHeight * 0.4, 0.2]}>
-                <boxGeometry args={[0.8, 0.08, 0.05]} />
-                <meshBasicMaterial color="#fbbf24" />
-              </mesh>
-              <mesh position={[0.7, doorHeight * 0.4, 0.2]}>
-                <boxGeometry args={[0.8, 0.08, 0.05]} />
-                <meshBasicMaterial color="#fbbf24" />
-              </mesh>
-              <mesh position={[0, doorHeight + 0.4, 0.1]}>
-                <boxGeometry args={[1.5, 0.4, 0.08]} />
-                <meshStandardMaterial color="#dc2626" emissive="#dc2626" emissiveIntensity={0.3} />
-              </mesh>
-              <mesh position={[0, doorHeight + 0.7, 0.1]}>
-                <boxGeometry args={[0.6, 0.15, 0.1]} />
-                <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.5} />
-              </mesh>
-            </group>
-            {/* East Personnel Door - interior side */}
-            <group position={[buildingHalfWidth - 0.3, 0, doorZ]} rotation={[0, Math.PI / 2, 0]}>
-              <mesh position={[0, doorHeight / 2, 0]} castShadow>
-                <boxGeometry args={[doorWidth + 0.3, doorHeight + 0.15, 0.15]} />
-                <meshStandardMaterial color="#374151" roughness={0.6} metalness={0.3} />
-              </mesh>
-              <mesh position={[-0.7, doorHeight / 2, 0.15]} castShadow>
-                <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
-                <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
-              </mesh>
-              <mesh position={[0.7, doorHeight / 2, 0.15]} castShadow>
-                <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
-                <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
-              </mesh>
-              <mesh position={[-0.7, doorHeight * 0.65, 0.2]}>
-                <boxGeometry args={[0.6, 0.8, 0.02]} />
-                <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
-              </mesh>
-              <mesh position={[0.7, doorHeight * 0.65, 0.2]}>
-                <boxGeometry args={[0.6, 0.8, 0.02]} />
-                <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
-              </mesh>
-              <mesh position={[-0.7, doorHeight * 0.4, 0.2]}>
-                <boxGeometry args={[0.8, 0.08, 0.05]} />
-                <meshBasicMaterial color="#fbbf24" />
-              </mesh>
-              <mesh position={[0.7, doorHeight * 0.4, 0.2]}>
-                <boxGeometry args={[0.8, 0.08, 0.05]} />
-                <meshBasicMaterial color="#fbbf24" />
-              </mesh>
-              <mesh position={[0, doorHeight + 0.4, 0.1]}>
-                <boxGeometry args={[1.5, 0.4, 0.08]} />
-                <meshStandardMaterial color="#dc2626" emissive="#dc2626" emissiveIntensity={0.3} />
-              </mesh>
-            </group>
-          </>
-        );
-      })()}
-      <mesh position={[buildingHalfWidth, wallHeight + 0.3, 0]}>
-        <boxGeometry
-          args={[0.8, 0.6, Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2 + 0.5]}
-        />
-        <meshStandardMaterial
-          color={trimColor}
-          roughness={0.6}
-          metalness={0.4}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
+            {/* Wire mesh on window */}
+            <mesh position={[0, 2.1, 0.52]}>
+              <boxGeometry args={[0.48, 0.58, 0.01]} />
+              <meshStandardMaterial color="#374151" wireframe transparent opacity={0.6} />
+            </mesh>
+            {/* Crash bar / panic hardware */}
+            <mesh position={[0, 1.3, 0.5]}>
+              <boxGeometry args={[1.5, 0.12, 0.1]} />
+              <meshStandardMaterial color="#9ca3af" metalness={0.7} roughness={0.3} />
+            </mesh>
+            {/* Door closer at top */}
+            <mesh position={[0.6, 2.75, 0.45]}>
+              <boxGeometry args={[0.5, 0.15, 0.1]} />
+              <meshStandardMaterial color="#374151" metalness={0.5} />
+            </mesh>
+            {/* EXIT sign above door - standard emergency */}
+            <mesh position={[0, 3.4, 0.3]}>
+              <boxGeometry args={[1, 0.45, 0.1]} />
+              <meshStandardMaterial color="#dc2626" emissive="#dc2626" emissiveIntensity={0.5} />
+            </mesh>
+            {/* Running man pictogram area */}
+            <mesh position={[0, 3.4, 0.36]}>
+              <boxGeometry args={[0.8, 0.35, 0.02]} />
+              <meshBasicMaterial color="#ffffff" />
+            </mesh>
+            {/* Wall-mounted emergency light */}
+            <mesh position={[0, 3.8, 0.2]} castShadow>
+              <boxGeometry args={[0.6, 0.22, 0.15]} />
+              <meshStandardMaterial color="#e5e7eb" roughness={0.4} />
+            </mesh>
+            <mesh position={[0, 3.7, 0.3]}>
+              <boxGeometry args={[0.5, 0.1, 0.06]} />
+              <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.6} />
+            </mesh>
+            {/* Kick plate at bottom of door */}
+            <mesh position={[0, 0.25, 0.48]}>
+              <boxGeometry args={[1.9, 0.4, 0.03]} />
+              <meshStandardMaterial color="#6b7280" metalness={0.6} roughness={0.4} />
+            </mesh>
+            {/* Yellow hazard stripes on ground */}
+            <mesh position={[0, FLOOR_LAYERS.safetyMain, 2]} rotation={[-Math.PI / 2, 0, 0]}>
+              <planeGeometry args={[3.5, 2]} />
+              <meshStandardMaterial
+                color="#eab308"
+                roughness={0.8}
+                polygonOffset
+                polygonOffsetFactor={POLYGON_OFFSET.standard.factor}
+                polygonOffsetUnits={POLYGON_OFFSET.standard.units}
+              />
+            </mesh>
+          </group>
+
+          {/* ========== BACK SIGN - Large Red Sign (matching front sign) ========== */}
+          <group position={[0, wallHeight / 2 + 2, buildingBackZ - 1.5]} rotation={[0, Math.PI, 0]}>
+            {/* Main sign background - Red like the truck signs */}
+            <mesh frustumCulled={false}>
+              <boxGeometry args={[80, 10, 0.5]} />
+              <meshBasicMaterial color="#dc2626" />
+            </mesh>
+            {/* Gold trim border */}
+            <mesh position={[0, 0, 0.3]} frustumCulled={false}>
+              <boxGeometry args={[82, 10.6, 0.15]} />
+              <meshBasicMaterial color="#fbbf24" />
+            </mesh>
+            {/* Inner red panel */}
+            <mesh position={[0, 0, 0.4]} frustumCulled={false}>
+              <boxGeometry args={[79, 9.5, 0.1]} />
+              <meshBasicMaterial color="#b91c1c" />
+            </mesh>
+            {/* Company name */}
+            <Text
+              position={[0, 1.5, 0.6]}
+              fontSize={5}
+              color="#ffffff"
+              anchorX="center"
+              anchorY="middle"
+              fontWeight="bold"
+              outlineWidth={0.1}
+              outlineColor="#7f1d1d"
+            >
+              MillOS GRAIN MILL
+            </Text>
+            {/* Tagline */}
+            <Text
+              position={[0, -2.5, 0.6]}
+              fontSize={1.8}
+              color="#fef3c7"
+              anchorX="center"
+              anchorY="middle"
+            >
+              EST. 1952 • QUALITY FLOUR PRODUCTS
+            </Text>
+          </group>
+
+          {/* ========== LEFT SIDE WALL (X-) with personnel door ========== */}
+          {/* Side walls end INSIDE front/back walls - front/back walls wrap around corners */}
+          {/* Personnel door opening in the wall - West Exit */}
+          {(() => {
+            const sideWallLength = Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2;
+            const doorWidth = 3;
+            const doorHeight = 3;
+            const doorZ = 0;
+            const frontSegmentLength = sideWallLength / 2 - doorWidth / 2;
+            const backSegmentLength = sideWallLength / 2 - doorWidth / 2;
+            const frontSegmentZ = doorZ + doorWidth / 2 + frontSegmentLength / 2;
+            const backSegmentZ = doorZ - doorWidth / 2 - backSegmentLength / 2;
+
+            return (
+              <>
+                {/* Front section of left wall */}
+                <mesh
+                  position={[-buildingHalfWidth, wallHeight / 2, frontSegmentZ]}
+                  castShadow
+                  receiveShadow
+                >
+                  <boxGeometry args={[wallThickness, wallHeight, frontSegmentLength]} />
+                  <meshStandardMaterial
+                    color={wallColor}
+                    roughness={0.8}
+                    metalness={0.2}
+                    side={THREE.DoubleSide}
+                  />
+                </mesh>
+                {/* Back section of left wall */}
+                <mesh
+                  position={[-buildingHalfWidth, wallHeight / 2, backSegmentZ]}
+                  castShadow
+                  receiveShadow
+                >
+                  <boxGeometry args={[wallThickness, wallHeight, backSegmentLength]} />
+                  <meshStandardMaterial
+                    color={wallColor}
+                    roughness={0.8}
+                    metalness={0.2}
+                    side={THREE.DoubleSide}
+                  />
+                </mesh>
+                {/* Section above door opening */}
+                <mesh
+                  position={[-buildingHalfWidth, doorHeight + (wallHeight - doorHeight) / 2, doorZ]}
+                  castShadow
+                  receiveShadow
+                >
+                  <boxGeometry args={[wallThickness, wallHeight - doorHeight, doorWidth]} />
+                  <meshStandardMaterial
+                    color={wallColor}
+                    roughness={0.8}
+                    metalness={0.2}
+                    side={THREE.DoubleSide}
+                  />
+                </mesh>
+                {/* West Personnel Door - exterior side */}
+                <group
+                  position={[-buildingHalfWidth - 0.3, 0, doorZ]}
+                  rotation={[0, Math.PI / 2, 0]}
+                >
+                  <mesh position={[0, doorHeight / 2, 0]} castShadow>
+                    <boxGeometry args={[doorWidth + 0.3, doorHeight + 0.15, 0.15]} />
+                    <meshStandardMaterial color="#374151" roughness={0.6} metalness={0.3} />
+                  </mesh>
+                  <mesh position={[0, doorHeight / 2, 0.08]}>
+                    <boxGeometry args={[doorWidth - 0.3, doorHeight - 0.2, 0.1]} />
+                    <meshStandardMaterial color="#1f2937" roughness={0.8} />
+                  </mesh>
+                  <mesh position={[-0.7, doorHeight / 2, 0.15]} castShadow>
+                    <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
+                    <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
+                  </mesh>
+                  <mesh position={[0.7, doorHeight / 2, 0.15]} castShadow>
+                    <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
+                    <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
+                  </mesh>
+                  <mesh position={[-0.7, doorHeight * 0.65, 0.2]}>
+                    <boxGeometry args={[0.6, 0.8, 0.02]} />
+                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                  </mesh>
+                  <mesh position={[0.7, doorHeight * 0.65, 0.2]}>
+                    <boxGeometry args={[0.6, 0.8, 0.02]} />
+                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                  </mesh>
+                  <mesh position={[-0.7, doorHeight * 0.4, 0.2]}>
+                    <boxGeometry args={[0.8, 0.08, 0.05]} />
+                    <meshBasicMaterial color="#fbbf24" />
+                  </mesh>
+                  <mesh position={[0.7, doorHeight * 0.4, 0.2]}>
+                    <boxGeometry args={[0.8, 0.08, 0.05]} />
+                    <meshBasicMaterial color="#fbbf24" />
+                  </mesh>
+                  <mesh position={[0, doorHeight + 0.4, 0.1]}>
+                    <boxGeometry args={[1.5, 0.4, 0.08]} />
+                    <meshStandardMaterial
+                      color="#dc2626"
+                      emissive="#dc2626"
+                      emissiveIntensity={0.3}
+                    />
+                  </mesh>
+                  <mesh position={[0, doorHeight + 0.7, 0.1]}>
+                    <boxGeometry args={[0.6, 0.15, 0.1]} />
+                    <meshStandardMaterial
+                      color="#22c55e"
+                      emissive="#22c55e"
+                      emissiveIntensity={0.5}
+                    />
+                  </mesh>
+                </group>
+                {/* West Personnel Door - interior side */}
+                <group
+                  position={[-buildingHalfWidth + 0.3, 0, doorZ]}
+                  rotation={[0, -Math.PI / 2, 0]}
+                >
+                  <mesh position={[0, doorHeight / 2, 0]} castShadow>
+                    <boxGeometry args={[doorWidth + 0.3, doorHeight + 0.15, 0.15]} />
+                    <meshStandardMaterial color="#374151" roughness={0.6} metalness={0.3} />
+                  </mesh>
+                  <mesh position={[-0.7, doorHeight / 2, 0.15]} castShadow>
+                    <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
+                    <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
+                  </mesh>
+                  <mesh position={[0.7, doorHeight / 2, 0.15]} castShadow>
+                    <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
+                    <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
+                  </mesh>
+                  <mesh position={[-0.7, doorHeight * 0.65, 0.2]}>
+                    <boxGeometry args={[0.6, 0.8, 0.02]} />
+                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                  </mesh>
+                  <mesh position={[0.7, doorHeight * 0.65, 0.2]}>
+                    <boxGeometry args={[0.6, 0.8, 0.02]} />
+                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                  </mesh>
+                  <mesh position={[-0.7, doorHeight * 0.4, 0.2]}>
+                    <boxGeometry args={[0.8, 0.08, 0.05]} />
+                    <meshBasicMaterial color="#fbbf24" />
+                  </mesh>
+                  <mesh position={[0.7, doorHeight * 0.4, 0.2]}>
+                    <boxGeometry args={[0.8, 0.08, 0.05]} />
+                    <meshBasicMaterial color="#fbbf24" />
+                  </mesh>
+                  <mesh position={[0, doorHeight + 0.4, 0.1]}>
+                    <boxGeometry args={[1.5, 0.4, 0.08]} />
+                    <meshStandardMaterial
+                      color="#dc2626"
+                      emissive="#dc2626"
+                      emissiveIntensity={0.3}
+                    />
+                  </mesh>
+                </group>
+              </>
+            );
+          })()}
+          <mesh position={[-buildingHalfWidth, wallHeight + 0.3, 0]}>
+            <boxGeometry
+              args={[0.8, 0.6, Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2 + 0.5]}
+            />
+            <meshStandardMaterial
+              color={trimColor}
+              roughness={0.6}
+              metalness={0.4}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+
+          {/* ========== RIGHT SIDE WALL (X+) with personnel door ========== */}
+          {/* Personnel door opening in the wall - East Exit */}
+          {(() => {
+            const sideWallLength = Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2;
+            const doorWidth = 3;
+            const doorHeight = 3;
+            const doorZ = 0;
+            const frontSegmentLength = sideWallLength / 2 - doorWidth / 2;
+            const backSegmentLength = sideWallLength / 2 - doorWidth / 2;
+            const frontSegmentZ = doorZ + doorWidth / 2 + frontSegmentLength / 2;
+            const backSegmentZ = doorZ - doorWidth / 2 - backSegmentLength / 2;
+
+            return (
+              <>
+                {/* Front section of right wall */}
+                <mesh
+                  position={[buildingHalfWidth, wallHeight / 2, frontSegmentZ]}
+                  castShadow
+                  receiveShadow
+                >
+                  <boxGeometry args={[wallThickness, wallHeight, frontSegmentLength]} />
+                  <meshStandardMaterial
+                    color={wallColor}
+                    roughness={0.8}
+                    metalness={0.2}
+                    side={THREE.DoubleSide}
+                  />
+                </mesh>
+                {/* Back section of right wall */}
+                <mesh
+                  position={[buildingHalfWidth, wallHeight / 2, backSegmentZ]}
+                  castShadow
+                  receiveShadow
+                >
+                  <boxGeometry args={[wallThickness, wallHeight, backSegmentLength]} />
+                  <meshStandardMaterial
+                    color={wallColor}
+                    roughness={0.8}
+                    metalness={0.2}
+                    side={THREE.DoubleSide}
+                  />
+                </mesh>
+                {/* Section above door opening */}
+                <mesh
+                  position={[buildingHalfWidth, doorHeight + (wallHeight - doorHeight) / 2, doorZ]}
+                  castShadow
+                  receiveShadow
+                >
+                  <boxGeometry args={[wallThickness, wallHeight - doorHeight, doorWidth]} />
+                  <meshStandardMaterial
+                    color={wallColor}
+                    roughness={0.8}
+                    metalness={0.2}
+                    side={THREE.DoubleSide}
+                  />
+                </mesh>
+                {/* East Personnel Door - exterior side */}
+                <group
+                  position={[buildingHalfWidth + 0.3, 0, doorZ]}
+                  rotation={[0, -Math.PI / 2, 0]}
+                >
+                  <mesh position={[0, doorHeight / 2, 0]} castShadow>
+                    <boxGeometry args={[doorWidth + 0.3, doorHeight + 0.15, 0.15]} />
+                    <meshStandardMaterial color="#374151" roughness={0.6} metalness={0.3} />
+                  </mesh>
+                  <mesh position={[0, doorHeight / 2, 0.08]}>
+                    <boxGeometry args={[doorWidth - 0.3, doorHeight - 0.2, 0.1]} />
+                    <meshStandardMaterial color="#1f2937" roughness={0.8} />
+                  </mesh>
+                  <mesh position={[-0.7, doorHeight / 2, 0.15]} castShadow>
+                    <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
+                    <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
+                  </mesh>
+                  <mesh position={[0.7, doorHeight / 2, 0.15]} castShadow>
+                    <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
+                    <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
+                  </mesh>
+                  <mesh position={[-0.7, doorHeight * 0.65, 0.2]}>
+                    <boxGeometry args={[0.6, 0.8, 0.02]} />
+                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                  </mesh>
+                  <mesh position={[0.7, doorHeight * 0.65, 0.2]}>
+                    <boxGeometry args={[0.6, 0.8, 0.02]} />
+                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                  </mesh>
+                  <mesh position={[-0.7, doorHeight * 0.4, 0.2]}>
+                    <boxGeometry args={[0.8, 0.08, 0.05]} />
+                    <meshBasicMaterial color="#fbbf24" />
+                  </mesh>
+                  <mesh position={[0.7, doorHeight * 0.4, 0.2]}>
+                    <boxGeometry args={[0.8, 0.08, 0.05]} />
+                    <meshBasicMaterial color="#fbbf24" />
+                  </mesh>
+                  <mesh position={[0, doorHeight + 0.4, 0.1]}>
+                    <boxGeometry args={[1.5, 0.4, 0.08]} />
+                    <meshStandardMaterial
+                      color="#dc2626"
+                      emissive="#dc2626"
+                      emissiveIntensity={0.3}
+                    />
+                  </mesh>
+                  <mesh position={[0, doorHeight + 0.7, 0.1]}>
+                    <boxGeometry args={[0.6, 0.15, 0.1]} />
+                    <meshStandardMaterial
+                      color="#22c55e"
+                      emissive="#22c55e"
+                      emissiveIntensity={0.5}
+                    />
+                  </mesh>
+                </group>
+                {/* East Personnel Door - interior side */}
+                <group
+                  position={[buildingHalfWidth - 0.3, 0, doorZ]}
+                  rotation={[0, Math.PI / 2, 0]}
+                >
+                  <mesh position={[0, doorHeight / 2, 0]} castShadow>
+                    <boxGeometry args={[doorWidth + 0.3, doorHeight + 0.15, 0.15]} />
+                    <meshStandardMaterial color="#374151" roughness={0.6} metalness={0.3} />
+                  </mesh>
+                  <mesh position={[-0.7, doorHeight / 2, 0.15]} castShadow>
+                    <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
+                    <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
+                  </mesh>
+                  <mesh position={[0.7, doorHeight / 2, 0.15]} castShadow>
+                    <boxGeometry args={[1.2, doorHeight - 0.4, 0.08]} />
+                    <meshStandardMaterial color="#dc2626" roughness={0.5} metalness={0.3} />
+                  </mesh>
+                  <mesh position={[-0.7, doorHeight * 0.65, 0.2]}>
+                    <boxGeometry args={[0.6, 0.8, 0.02]} />
+                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                  </mesh>
+                  <mesh position={[0.7, doorHeight * 0.65, 0.2]}>
+                    <boxGeometry args={[0.6, 0.8, 0.02]} />
+                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                  </mesh>
+                  <mesh position={[-0.7, doorHeight * 0.4, 0.2]}>
+                    <boxGeometry args={[0.8, 0.08, 0.05]} />
+                    <meshBasicMaterial color="#fbbf24" />
+                  </mesh>
+                  <mesh position={[0.7, doorHeight * 0.4, 0.2]}>
+                    <boxGeometry args={[0.8, 0.08, 0.05]} />
+                    <meshBasicMaterial color="#fbbf24" />
+                  </mesh>
+                  <mesh position={[0, doorHeight + 0.4, 0.1]}>
+                    <boxGeometry args={[1.5, 0.4, 0.08]} />
+                    <meshStandardMaterial
+                      color="#dc2626"
+                      emissive="#dc2626"
+                      emissiveIntensity={0.3}
+                    />
+                  </mesh>
+                </group>
+              </>
+            );
+          })()}
+          <mesh position={[buildingHalfWidth, wallHeight + 0.3, 0]}>
+            <boxGeometry
+              args={[0.8, 0.6, Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2 + 0.5]}
+            />
+            <meshStandardMaterial
+              color={trimColor}
+              roughness={0.6}
+              metalness={0.4}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        </>
+      )}
 
       {/* CORNER COLUMNS REMOVED - were causing visual protrusion issues */}
 
@@ -5560,21 +6331,19 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       <group position={[20, 0, 195]}>
         {/* Road surface - DISABLED: handled by TerrainGround */}
         {/* Road edge lines - white - raised above terrain */}
-        <mesh position={[-7.5, 0.09, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[-7.5, 0.09, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[0.3, 170]} />
-          <meshBasicMaterial
-            color="#ffffff"
-            depthWrite={false}
+          <meshStandardMaterial
+            {...ROAD_PAINT_WHITE}
             polygonOffset
             polygonOffsetFactor={-3}
             polygonOffsetUnits={-3}
           />
         </mesh>
-        <mesh position={[7.5, 0.09, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[7.5, 0.09, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[0.3, 170]} />
-          <meshBasicMaterial
-            color="#ffffff"
-            depthWrite={false}
+          <meshStandardMaterial
+            {...ROAD_PAINT_WHITE}
             polygonOffset
             polygonOffsetFactor={-3}
             polygonOffsetUnits={-3}
@@ -5586,11 +6355,11 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
             key={`front-dash-${i}`}
             position={[0, 0.09, -75 + i * 10]}
             rotation={[-Math.PI / 2, 0, 0]}
+            receiveShadow
           >
             <planeGeometry args={[0.25, 5]} />
-            <meshBasicMaterial
-              color="#f1c40f"
-              depthWrite={false}
+            <meshStandardMaterial
+              {...ROAD_PAINT_YELLOW}
               polygonOffset
               polygonOffsetFactor={-3}
               polygonOffsetUnits={-3}
@@ -5604,21 +6373,19 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       <group position={[-20, 0, -195]}>
         {/* Road surface - DISABLED: handled by TerrainGround */}
         {/* Road edge lines - white - raised above terrain */}
-        <mesh position={[-7.5, 0.09, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[-7.5, 0.09, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[0.3, 170]} />
-          <meshBasicMaterial
-            color="#ffffff"
-            depthWrite={false}
+          <meshStandardMaterial
+            {...ROAD_PAINT_WHITE}
             polygonOffset
             polygonOffsetFactor={-3}
             polygonOffsetUnits={-3}
           />
         </mesh>
-        <mesh position={[7.5, 0.09, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[7.5, 0.09, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[0.3, 170]} />
-          <meshBasicMaterial
-            color="#ffffff"
-            depthWrite={false}
+          <meshStandardMaterial
+            {...ROAD_PAINT_WHITE}
             polygonOffset
             polygonOffsetFactor={-3}
             polygonOffsetUnits={-3}
@@ -5630,11 +6397,11 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
             key={`back-dash-${i}`}
             position={[0, 0.09, -75 + i * 10]}
             rotation={[-Math.PI / 2, 0, 0]}
+            receiveShadow
           >
             <planeGeometry args={[0.25, 5]} />
-            <meshBasicMaterial
-              color="#f1c40f"
-              depthWrite={false}
+            <meshStandardMaterial
+              {...ROAD_PAINT_YELLOW}
               polygonOffset
               polygonOffsetFactor={-3}
               polygonOffsetUnits={-3}
@@ -5652,10 +6419,15 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
           <boxGeometry args={[18, 0.6, 70]} />
           <meshStandardMaterial color="#4b5563" roughness={0.85} />
         </mesh>
-        {/* Road surface markings */}
-        <mesh position={[0, 0.61, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        {/* Carriageway wearing course on top of the structural deck */}
+        <mesh position={[0, 0.61, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[16, 68]} />
-          <meshStandardMaterial color="#374151" roughness={0.9} />
+          <meshStandardMaterial
+            color="#ffffff"
+            roughness={0.9}
+            map={TARMAC_ROAD_MAP}
+            roughnessMap={TARMAC_ROAD_ROUGHNESS}
+          />
         </mesh>
         {/* Guard rails */}
         {[-1, 1].map((side, i) => (
@@ -5717,24 +6489,28 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
 
       {/* ========== PARKLAND AREA (Front-right) - trees/benches use instanced versions ========== */}
       <group position={[75, 0, 100]}>
-        {/* Grass patch - lowered and using polygonOffset to prevent z-fighting */}
-        <mesh position={[0, -0.15, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-          <circleGeometry args={[18, 16]} />
-          <meshStandardMaterial
-            color={GRASS_COLORS.park}
-            roughness={0.95}
-            polygonOffset
-            polygonOffsetFactor={POLYGON_OFFSET.exteriorBase.factor}
-            polygonOffsetUnits={POLYGON_OFFSET.exteriorBase.units}
-          />
-        </mesh>
+        {/* Grass disc DELETED. It sat at y=-0.15 with exteriorBase polygonOffset
+            (authored against the old -0.02 ground datum) while TerrainGround
+            renders at y=0.05 with a splat-mapped, textured grass channel: the
+            disc was either fully buried - a draw call and a shadow receiver for
+            nothing - or punching through as a flat untextured green patch on
+            otherwise textured ground. Raising its Y is NOT the fix; that puts
+            untextured green beside textured green and reintroduces the boundary
+            seam the EXTERIOR_LAYERS comment block warns against. If a distinct
+            parkland tint is wanted it belongs in
+            terrain/splatMapGenerator.ts, which is the terrain owner's file. */}
 
         {/* Trees and benches now rendered via instanced components */}
 
         {/* Small path - raised to y=0.15 to prevent z-fighting with grass and other surfaces */}
         <mesh position={[0, 0.15, -12]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[3, 8]} />
-          <meshStandardMaterial color="#9e9e9e" roughness={0.85} />
+          <meshStandardMaterial
+            color="#c9ced2"
+            roughness={0.85}
+            map={TARMAC_PATH_MAP}
+            roughnessMap={TARMAC_PATH_ROUGHNESS}
+          />
         </mesh>
       </group>
       {/* Front parkland instanced trees/benches (absolute positions) */}
@@ -5744,16 +6520,18 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       {/* ========== SMALL OFFICE BUILDINGS ========== */}
       {/* Admin office - front left outside fence */}
       <SmallOffice position={[-45, 0, 110]} size={[14, 7, 10]} rotation={0} />
+      <GroundBlob position={[-45, 110]} scale={19} scaleZ={15} />
 
       {/* Security/visitor office - near front gate */}
       <group position={[-25, 0, 115]}>
+        <GroundBlob position={[0, 0]} scale={9.5} scaleZ={8.5} />
         <mesh position={[0, 2, 0]} castShadow receiveShadow>
           <boxGeometry args={[6, 4, 5]} />
-          <meshStandardMaterial color="#607d8b" roughness={0.7} />
+          <meshStandardMaterial color="#607d8b" {...OUTBUILDING_SURFACE} />
         </mesh>
         <mesh position={[0, 4.3, 0]} castShadow>
           <boxGeometry args={[6.5, 0.5, 5.5]} />
-          <meshStandardMaterial color="#455a64" roughness={0.6} />
+          <meshStandardMaterial color="#455a64" {...OUTBUILDING_SURFACE} />
         </mesh>
         {/* Window */}
         <mesh position={[0, 2.2, 2.55]}>
@@ -5774,14 +6552,15 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
 
       {/* Maintenance shed - back area */}
       <group position={[80, 0, -75]}>
+        <GroundBlob position={[0, 0]} scale={14} scaleZ={12} />
         <mesh position={[0, 2.5, 0]} castShadow receiveShadow>
           <boxGeometry args={[10, 5, 8]} />
-          <meshStandardMaterial color="#6d4c41" roughness={0.85} />
+          <meshStandardMaterial color="#6d4c41" {...OUTBUILDING_SURFACE} />
         </mesh>
         {/* Pitched roof */}
         <mesh position={[0, 5.5, 0]} rotation={[0, 0, 0]} castShadow>
           <boxGeometry args={[11, 1, 9]} />
-          <meshStandardMaterial color="#5d4037" roughness={0.8} />
+          <meshStandardMaterial color="#5d4037" {...OUTBUILDING_SURFACE} />
         </mesh>
         {/* Large door */}
         <mesh position={[0, 1.5, 4.05]}>
@@ -5800,10 +6579,11 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
         [90, 0],
       ].map(([x, z], i) => (
         <group key={`lamp-${i}`} position={[x, 0, z]}>
+          <GroundBlob position={[0, 0]} scale={2.4} />
           {/* Pole */}
           <mesh position={[0, 3, 0]} castShadow>
             <cylinderGeometry args={[0.1, 0.15, 6, 8]} />
-            <meshStandardMaterial color="#37474f" roughness={0.6} metalness={0.3} />
+            <meshStandardMaterial color="#37474f" roughness={0.68} metalness={0.12} />
           </mesh>
           {/* Lamp head */}
           <mesh position={[0, 6.2, 0]}>
@@ -5821,11 +6601,15 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       {/* ========== PARKING AREA MARKINGS (Front) ========== */}
       <group position={[60, 0.01, 70]}>
         {[0, 1, 2, 3, 4].map((i) => (
-          <mesh key={`parking-${i}`} position={[i * 4 - 8, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <mesh
+            key={`parking-${i}`}
+            position={[i * 4 - 8, 0, 0]}
+            rotation={[-Math.PI / 2, 0, 0]}
+            receiveShadow
+          >
             <planeGeometry args={[0.15, 5]} />
-            <meshBasicMaterial
-              color="#ffffff"
-              depthWrite={false}
+            <meshStandardMaterial
+              {...ROAD_PAINT_WHITE}
               polygonOffset
               polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
               polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
@@ -5836,6 +6620,10 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
 
       {/* ========== GAS STATION ========== */}
       <GasStation position={[-85, 0, 140]} rotation={0} />
+      {/* Shop block contact shadow. The station's own canopy columns are an
+          InstancedMesh inside GasStationInstanced and are thin enough that the
+          real sun shadow carries them on high/ultra. */}
+      <GroundBlob position={[-97, 140]} scale={11} scaleZ={13} />
 
       {/* Caravan parked behind gas station */}
       <Caravan position={[-100, 0, 125]} rotation={0.3} color="#f5e6d3" />
@@ -5850,6 +6638,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
 
       {/* Tunnel entrance - connects to external road network */}
       <TunnelEntrance position={[160, 0, 50]} rotation={Math.PI / 2} length={15} />
+      <GroundBlob position={[160, 50]} scale={22} scaleZ={26} />
 
       {/* Connecting road from tunnel exit to parking lot */}
       <ConnectingRoad start={[147, 0, 50]} end={[135, 0, 50]} width={6} />
@@ -5873,25 +6662,30 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       {/* ========== NISSEN HUTS ========== */}
       {/* Storage hut near back fence */}
       <NissenHut position={[-75, 0, -100]} length={14} rotation={0} />
+      <GroundBlob position={[-75, -100]} scale={12} scaleZ={18} />
       {/* Equipment hut near side */}
       <NissenHut position={[85, 0, -100]} length={10} rotation={Math.PI / 2} />
+      <GroundBlob position={[85, -100]} scale={14} scaleZ={12} />
 
       {/* ========== OFFICE APARTMENT BUILDINGS ========== */}
       {/* Main office block - front left (moved right to not occlude kiosk parasol) */}
       <OfficeApartment position={[-78, 0, 95]} floors={4} rotation={0} />
+      <GroundBlob position={[-78, 95]} scale={20} scaleZ={16} />
       {/* Smaller office block - back right */}
       <OfficeApartment position={[100, 0, -100]} floors={3} rotation={Math.PI} />
+      <GroundBlob position={[100, -100]} scale={18} scaleZ={14} />
 
       {/* ========== ADDITIONAL SMALL BUILDINGS ========== */}
       {/* Weighbridge office */}
       <group position={[30, 0, 120]}>
+        <GroundBlob position={[0, 0]} scale={7} scaleZ={6} />
         <mesh position={[0, 1.5, 0]} castShadow receiveShadow>
           <boxGeometry args={[4, 3, 3]} />
-          <meshStandardMaterial color="#90a4ae" roughness={0.7} />
+          <meshStandardMaterial color="#90a4ae" {...OUTBUILDING_SURFACE} />
         </mesh>
         <mesh position={[0, 3.2, 0]} castShadow>
           <boxGeometry args={[4.5, 0.4, 3.5]} />
-          <meshStandardMaterial color="#607d8b" roughness={0.6} />
+          <meshStandardMaterial color="#607d8b" {...OUTBUILDING_SURFACE} />
         </mesh>
         <mesh position={[0, 1.5, 1.55]}>
           <planeGeometry args={[3, 2]} />
@@ -5915,13 +6709,14 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
 
       {/* Substation */}
       <group position={[-70, 0, -60]}>
+        <GroundBlob position={[0, 0]} scale={8} scaleZ={7} />
         <mesh position={[0, 2, 0]} castShadow receiveShadow>
           <boxGeometry args={[5, 4, 4]} />
-          <meshStandardMaterial color="#78909c" roughness={0.7} />
+          <meshStandardMaterial color="#78909c" {...OUTBUILDING_SURFACE} />
         </mesh>
         <mesh position={[0, 4.3, 0]} castShadow>
           <boxGeometry args={[5.5, 0.4, 4.5]} />
-          <meshStandardMaterial color="#546e7a" roughness={0.6} />
+          <meshStandardMaterial color="#546e7a" {...OUTBUILDING_SURFACE} />
         </mesh>
         {/* Warning sign */}
         <mesh position={[2.55, 2, 0]} rotation={[0, Math.PI / 2, 0]}>
@@ -5952,10 +6747,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       {/* Second parkland area - back left (trees/benches use instanced versions) */}
       {/* Moved further from riverbank (was z=-110, now z=-90) */}
       <group position={[-85, 0, -90]}>
-        <mesh position={[0, -0.1, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-          <circleGeometry args={[12, 12]} />
-          <meshStandardMaterial color={GRASS_COLORS.lawn} roughness={0.95} />
-        </mesh>
+        {/* Second sub-terrain grass disc deleted for the same reason. */}
         {/* Trees and bench now rendered via instanced components */}
       </group>
       {/* Parkland instanced trees/benches (absolute positions) */}
@@ -6284,9 +7076,18 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       <StorageTank position={[75, 0, -15]} length={8} radius={2.5} rotation={0} color="#e5e7eb" />
       <StorageTank position={[75, 0, 0]} length={10} radius={3} rotation={0} color="#d1d5db" />
 
-      {/* Propane tanks - utility area near back */}
-      <PropaneTank position={[80, 0, 25]} height={5} radius={1.5} />
-      <PropaneTank position={[85, 0, 25]} height={4} radius={1.2} />
+      {/* Propane tanks sit on the east utility pad, clear of the maintenance
+          garage footprint, its west-facing doors, and the truck apron. */}
+      <PropaneTank
+        position={[PROPANE_COMPOUND_CENTRE[0] - 2.5, 0, PROPANE_COMPOUND_CENTRE[2]]}
+        height={5}
+        radius={1.5}
+      />
+      <PropaneTank
+        position={[PROPANE_COMPOUND_CENTRE[0] + 2.5, 0, PROPANE_COMPOUND_CENTRE[2]]}
+        height={4}
+        radius={1.2}
+      />
 
       {/* Additional grain silos - outside the main building */}
       <GrainSilo position={[-85, 0, 30]} radius={6} height={35} color="#94a3b8" />
@@ -6315,7 +7116,8 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = () => {
       {/* Lakeside walking path - around the lake */}
       <CurvedPath
         position={[120, 0, 120]}
-        radius={22}
+        radius={24.5}
+        radiusZ={19.5}
         startAngle={0}
         endAngle={Math.PI * 2}
         width={2}

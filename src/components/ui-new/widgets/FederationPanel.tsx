@@ -43,15 +43,54 @@ import { ConceptTooltip } from './ConceptTooltip';
 // CONSTANTS
 // ============================================================================
 
+// Full static Tailwind classes (no string interpolation) so the JIT compiler
+// always generates them and this file does not depend on the same literals
+// happening to exist in other scanned files.
 const LEARNING_TYPE_CONFIG: Record<
   LearningType,
-  { label: string; color: string; icon: React.ComponentType<{ className?: string }> }
+  {
+    label: string;
+    iconBg: string;
+    iconText: string;
+    badge: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }
 > = {
-  'bas-config': { label: 'BAMS Config', color: 'cyan', icon: RefreshCw },
-  process: { label: 'Process', color: 'blue', icon: TrendingUp },
-  'ai-improvement': { label: 'AI Improvement', color: 'violet', icon: Lightbulb },
-  'crisis-response': { label: 'Crisis Response', color: 'orange', icon: AlertCircle },
-  flourishing: { label: 'Flourishing', color: 'green', icon: Star },
+  'bas-config': {
+    label: 'BAS Config',
+    iconBg: 'bg-cyan-500/20',
+    iconText: 'text-cyan-400',
+    badge: 'bg-cyan-500/20 text-cyan-300',
+    icon: RefreshCw,
+  },
+  process: {
+    label: 'Process',
+    iconBg: 'bg-blue-500/20',
+    iconText: 'text-blue-400',
+    badge: 'bg-blue-500/20 text-blue-300',
+    icon: TrendingUp,
+  },
+  'ai-improvement': {
+    label: 'AI Improvement',
+    iconBg: 'bg-violet-500/20',
+    iconText: 'text-violet-400',
+    badge: 'bg-violet-500/20 text-violet-300',
+    icon: Lightbulb,
+  },
+  'crisis-response': {
+    label: 'Crisis Response',
+    iconBg: 'bg-orange-500/20',
+    iconText: 'text-orange-400',
+    badge: 'bg-orange-500/20 text-orange-300',
+    icon: AlertCircle,
+  },
+  flourishing: {
+    label: 'Flourishing',
+    iconBg: 'bg-green-500/20',
+    iconText: 'text-green-400',
+    badge: 'bg-green-500/20 text-green-300',
+    icon: Star,
+  },
 };
 
 // ============================================================================
@@ -71,15 +110,13 @@ const LearningCard: React.FC<LearningCardProps> = ({ learning, onAdopt, onReject
   return (
     <div className="bg-slate-800/50 rounded-lg p-2.5 border border-slate-700/50">
       <div className="flex items-start gap-2">
-        <div className={`p-1.5 rounded bg-${config.color}-500/20 flex-shrink-0`}>
-          <Icon className={`w-3 h-3 text-${config.color}-400`} />
+        <div className={`p-1.5 rounded ${config.iconBg} flex-shrink-0`}>
+          <Icon className={`w-3 h-3 ${config.iconText}`} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-0.5">
             <span className="text-[10px] font-medium text-white truncate">{learning.title}</span>
-            <span
-              className={`text-[8px] px-1 py-0.5 rounded bg-${config.color}-500/20 text-${config.color}-300 flex-shrink-0`}
-            >
+            <span className={`text-[8px] px-1 py-0.5 rounded ${config.badge} flex-shrink-0`}>
               {config.label}
             </span>
           </div>
@@ -203,22 +240,22 @@ export const FederationPanel: React.FC = () => {
           <div className="bg-slate-800/50 rounded p-1.5 text-center">
             <Building2 className="w-3 h-3 mx-auto mb-0.5 text-violet-400" />
             <div className="text-[10px] font-bold text-white">{federation.memberUnits.length}</div>
-            <div className="text-[7px] text-slate-500">Members</div>
+            <div className="text-[7px] text-slate-400">Members</div>
           </div>
           <div className="bg-slate-800/50 rounded p-1.5 text-center">
             <Lightbulb className="w-3 h-3 mx-auto mb-0.5 text-amber-400" />
             <div className="text-[10px] font-bold text-white">{availableLearnings.length}</div>
-            <div className="text-[7px] text-slate-500">Learnings</div>
+            <div className="text-[7px] text-slate-400">Learnings</div>
           </div>
           <div className="bg-slate-800/50 rounded p-1.5 text-center">
             <Check className="w-3 h-3 mx-auto mb-0.5 text-green-400" />
             <div className="text-[10px] font-bold text-white">{adoptedCount}</div>
-            <div className="text-[7px] text-slate-500">Adopted</div>
+            <div className="text-[7px] text-slate-400">Adopted</div>
           </div>
           <div className="bg-slate-800/50 rounded p-1.5 text-center">
             <ArrowLeftRight className="w-3 h-3 mx-auto mb-0.5 text-cyan-400" />
             <div className="text-[10px] font-bold text-white">{activeExchanges.length}</div>
-            <div className="text-[7px] text-slate-500">Exchanges</div>
+            <div className="text-[7px] text-slate-400">Exchanges</div>
           </div>
         </div>
       </div>
@@ -247,7 +284,7 @@ export const FederationPanel: React.FC = () => {
                 key={learning.id}
                 learning={learning}
                 onAdopt={() => adoptLearning(learning.id)}
-                onReject={() => rejectLearning(learning.id, 'Not applicable')}
+                onReject={() => rejectLearning(learning.id, 'no reason given')}
               />
             ))}
           </div>
@@ -262,6 +299,8 @@ export const FederationPanel: React.FC = () => {
             audioManager.playClick?.();
           }}
           className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-white transition-colors"
+          aria-expanded={showMembers}
+          aria-controls="federation-members"
         >
           <span className="flex items-center gap-1">
             <Building2 className="w-3 h-3" />
@@ -274,6 +313,7 @@ export const FederationPanel: React.FC = () => {
         <AnimatePresence>
           {showMembers && (
             <motion.div
+              id="federation-members"
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
@@ -332,6 +372,8 @@ export const FederationPanel: React.FC = () => {
             audioManager.playClick?.();
           }}
           className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-white transition-colors"
+          aria-expanded={showResources}
+          aria-controls="federation-resources"
         >
           <span className="flex items-center gap-1">
             <Wallet className="w-3 h-3" />
@@ -343,6 +385,7 @@ export const FederationPanel: React.FC = () => {
         <AnimatePresence>
           {showResources && (
             <motion.div
+              id="federation-resources"
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}

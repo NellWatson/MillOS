@@ -1,69 +1,103 @@
-import React, { useMemo, useEffect, useRef, Suspense, useCallback } from 'react';
+import React, { useMemo, useEffect, useRef, Suspense, useCallback, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Environment, Text } from '@react-three/drei';
+import { Environment } from '@react-three/drei';
+import { SceneText as Text } from './shared/SceneText';
 import * as THREE from 'three';
 
 // Import static assets so Vite handles base path correctly
 import warehouseHdrUrl from '/hdri/warehouse.hdr?url';
-import { MachinesContainer, MachineSimulationController } from './Machines';
-import { ConveyorSystem } from './ConveyorSystem';
-// Using new optimized worker system with centralized animation manager
-import { WorkerSystemNew as WorkerSystem } from './WorkerSystemNew';
-import { FactoryInfrastructure } from './FactoryInfrastructure';
-import { SpoutingSystem } from './SpoutingSystem';
+import { CompactMachinesContainer as MachinesContainer } from './machines/CompactMachines';
+import { MachineSimulationController } from './machines/MachineSimulationController';
 import { DustParticles, GrainFlow, MachineSteamVents, DustAnimationManager } from './DustParticles';
-import { FactoryExterior } from './FactoryExterior';
-import { FairytaleCastle } from './scenery/FairytaleCastle';
-import { FarmArea } from './FarmArea';
-import { VillageArea } from './VillageArea';
-import { TerrainGround } from './terrain';
-import { OpenDockOpening } from './infrastructure/OpenDockOpening';
-import { ForkliftSystem, ForkliftData } from './ForkliftSystem';
-import { FactoryEnvironment } from './Environment';
+import { OptimizedFactoryInfrastructure } from './infrastructure/OptimizedFactoryInfrastructure';
+import type { ForkliftData } from './ForkliftSystem';
+import { OptimizedFactoryEnvironment } from './environment/OptimizedFactoryEnvironment';
+import { ENVIRONMENT_INTENSITY } from './environment/SceneEnvironmentIBL';
 import { CentralTickProvider, useUnifiedGameTick } from '../systems';
-import { HolographicDisplays } from './HolographicDisplays';
-import { CascadeVisualization } from './CascadeVisualization';
-import { StrategicOverlay3D } from './StrategicOverlay3D';
-import { ZoneAccentLights } from './ZoneAccentLights';
 import { ProductionFlowVisualization } from './ProductionFlowVisualization';
 import { useAIConfigStore } from '../stores/aiConfigStore';
-import { BlueprintMode } from './blueprint';
 import { WorkerPersonalityLayer } from './workers/WorkerPersonalityLayer';
-import { PostProcessing } from './PostProcessing';
+import { recoverableLazy } from '../utils/recoverableLazy';
+import ErrorBoundary from './ErrorBoundary';
+import { StaticMeshBatch } from './performance/StaticMeshBatch';
 
-// Lazy load heavy 3D components to reduce initial bundle
-const TruckBay = React.lazy(() =>
-  import('./TruckBay')
-    .then((m) => ({ default: m.TruckBay }))
-    .catch(() => {
-      // Failed to load TruckBay - return null component
-      return { default: () => null };
-    })
+// Lazy load heavy optional layers while preserving the complete authored world.
+// Quality changes may reduce effects and geometry density, but never swap the
+// user into a different factory or remove the surrounding site.
+const TruckBay = recoverableLazy(() =>
+  import('./TruckBay').then((module) => ({ default: module.TruckBay }))
 );
-const AmbientDetailsGroup = React.lazy(() =>
-  import('./AmbientDetails')
-    .then((m) => ({ default: m.AmbientDetailsGroup }))
-    .catch(() => {
-      // Failed to load AmbientDetailsGroup - return null component
-      return { default: () => null };
-    })
+const AuthoredFactoryExterior = recoverableLazy(() =>
+  import('./FactoryExterior').then((module) => ({ default: module.FactoryExterior }))
 );
-import { VisibleChaos } from './VisibleChaos';
-import { FactoryEnvironmentSystem } from './FactoryEnvironment';
-import { MaintenanceSystem } from './MaintenanceSystem';
+const AuthoredCastle = recoverableLazy(() =>
+  import('./scenery/FairytaleCastle').then((module) => ({ default: module.FairytaleCastle }))
+);
+const AuthoredFarm = recoverableLazy(() =>
+  import('./FarmArea').then((module) => ({ default: module.FarmArea }))
+);
+const AuthoredVillage = recoverableLazy(() =>
+  import('./VillageArea').then((module) => ({ default: module.VillageArea }))
+);
+const AuthoredTerrain = recoverableLazy(() =>
+  import('./terrain').then((module) => ({ default: module.TerrainGround }))
+);
+const AuthoredDockOpening = recoverableLazy(() =>
+  import('./infrastructure/OpenDockOpening').then((module) => ({
+    default: module.OpenDockOpening,
+  }))
+);
+const OperationalConveyors = recoverableLazy(() =>
+  import('./ConveyorSystem').then((module) => ({ default: module.ConveyorSystem }))
+);
+const OperationalPersonnel = recoverableLazy(() =>
+  import('./WorkerSystemNew').then((module) => ({ default: module.WorkerSystemNew }))
+);
+const OperationalForklifts = recoverableLazy(() =>
+  import('./ForkliftSystem').then((module) => ({ default: module.ForkliftSystem }))
+);
+const OperationalRemotePlayers = recoverableLazy(() =>
+  import('./multiplayer/RemotePlayersGroup').then((module) => ({
+    default: module.RemotePlayersGroup,
+  }))
+);
+const EnhancedHolographicDisplays = recoverableLazy(() =>
+  import('./HolographicDisplays').then((module) => ({
+    default: module.HolographicDisplays,
+  }))
+);
+const OptionalCascadeVisualization = recoverableLazy(() =>
+  import('./CascadeVisualization').then((module) => ({
+    default: module.CascadeVisualization,
+  }))
+);
+const OptionalStrategicOverlay = recoverableLazy(() =>
+  import('./StrategicOverlay3D').then((module) => ({ default: module.StrategicOverlay3D }))
+);
+const OptionalBlueprintMode = recoverableLazy(() =>
+  import('./blueprint').then((module) => ({ default: module.BlueprintMode }))
+);
+const HighDetailSpoutingSystem = recoverableLazy(() =>
+  import('./SpoutingSystem').then((module) => ({ default: module.SpoutingSystem }))
+);
+const PostProcessing = recoverableLazy(() =>
+  import('./PostProcessing').then((module) => ({ default: module.PostProcessing }))
+);
+const VisibleChaos = recoverableLazy(() =>
+  import('./VisibleChaos').then((module) => ({ default: module.VisibleChaos }))
+);
 import { useMoodSimulation, useBilateralAlignmentSimulation } from './WorkerMoodOverlay';
-import { RemotePlayersGroup } from './multiplayer';
 import { MachineData, MachineType, WorkerData } from '../types';
-import { useGraphicsStore } from '../stores/graphicsStore';
+import { useGraphicsStore, isPostProcessingActive } from '../stores/graphicsStore';
 import { useProductionStore } from '../stores/productionStore';
 import { useSafetyStore } from '../stores/safetyStore';
 import { useGameSimulationStore, FIRE_DRILL_EXITS } from '../stores/gameSimulationStore';
+import { useCameraPositionStore } from '../stores/useCameraPositionStore';
 import { positionRegistry, Obstacle } from '../utils/positionRegistry';
 import { useShallow } from 'zustand/react/shallow';
 import { CameraBoundsTracker } from './CameraController';
-import { useCameraPositionStore } from '../stores/useCameraPositionStore';
 import { FLOOR_LAYERS, RENDER_ORDER, POLYGON_OFFSET } from '../constants/renderLayers';
-import { FACTORY_ZONE_Z } from '../constants/factoryLayout';
+import { SITE_LAYOUT } from '../constants/siteLayout';
 
 /**
  * WireframeController - Applies wireframe mode to all scene materials when enabled
@@ -367,10 +401,6 @@ interface MillSceneProps {
   onSelectForklift?: (data: ForkliftData) => void;
 }
 
-const FLOOR_SIZE_X = 120; // Wide enough for interior operations
-const FLOOR_SIZE_Z = 160; // Extended for front/back truck yards
-const FLOOR_SIZE = 120; // Legacy reference for components using single value
-
 export const MillScene: React.FC<MillSceneProps> = ({
   productionSpeed,
   showZones,
@@ -378,6 +408,24 @@ export const MillScene: React.FC<MillSceneProps> = ({
   onSelectMachine,
   onSelectWorker,
 }) => {
+  const [authoredSiteReady, setAuthoredSiteReady] = useState(
+    () => typeof document !== 'undefined' && document.documentElement.dataset.sceneReady === 'true'
+  );
+
+  // Paint the operational factory first, then mount the complete authored site
+  // once. This keeps the village, farms, water, yards, and landmarks continuously
+  // present during play without making their initial construction block the first
+  // useful frame.
+  useEffect(() => {
+    if (document.documentElement.dataset.sceneReady === 'true') {
+      setAuthoredSiteReady(true);
+      return;
+    }
+    const revealAuthoredSite = (): void => setAuthoredSiteReady(true);
+    window.addEventListener('millos:first-frame', revealAuthoredSite, { once: true });
+    return () => window.removeEventListener('millos:first-frame', revealAuthoredSite);
+  }, []);
+
   // PERF DEBUG: Track renders
   // trackRender('MillScene');
 
@@ -403,14 +451,12 @@ export const MillScene: React.FC<MillSceneProps> = ({
 
     // ZONE 1: Raw Material Storage (Silos) - Back Row
     const siloNames = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon'];
-    for (let i = -2; i <= 2; i++) {
-      // Deterministic metrics based on machine index (no Math.random)
-      const idx = i + 2; // 0-4
+    SITE_LAYOUT.machines.silos.forEach((anchor, idx) => {
       _machines.push({
-        id: `silo-${idx}`, // silo-0 to silo-4
+        id: anchor.id,
         name: `Silo ${siloNames[idx]}`,
         type: MachineType.SILO,
-        position: [i * 9, 0, FACTORY_ZONE_Z.silos],
+        position: [...anchor.position],
         size: [4.5, 16, 4.5],
         rotation: 0,
         status: 'running',
@@ -425,22 +471,20 @@ export const MillScene: React.FC<MillSceneProps> = ({
         lastMaintenance: '2024-01-15',
         nextMaintenance: '2024-04-15',
       });
-    }
+    });
 
     // ZONE 2: Milling Floor (Roller Mills)
     // Names use "R.M." format for proper TTS pronunciation in PA announcements
-    const millNames = ['R.M. 101', 'R.M. 102', 'R.M. 103', 'R.M. 104', 'R.M. 105', 'R.M. 106'];
-    const millIds = ['101', '102', '103', '104', '105', '106'];
-    let millIndex = 0;
-    for (let i = -3; i <= 3; i += 1.5) {
-      if (Math.abs(i) < 0.5) continue;
-      // Deterministic metrics based on mill position
-      const idx = millIndex;
+    // Exactly 4 roller mills are placed (the loop below skips the centre x=0 for the
+    // central spine conveyor), so the name/id arrays are 4 long. (Were 6; rm-105/106
+    // were never built.)
+    const millNames = ['R.M. 101', 'R.M. 102', 'R.M. 103', 'R.M. 104'];
+    SITE_LAYOUT.machines.rollerMills.forEach((anchor, idx) => {
       _machines.push({
-        id: `rm-${millIds[millIndex]}`, // rm-101 to rm-106
-        name: millNames[millIndex],
+        id: anchor.id,
+        name: millNames[idx],
         type: MachineType.ROLLER_MILL,
-        position: [i * 5, 0, FACTORY_ZONE_Z.milling],
+        position: [...anchor.position],
         size: [3.5, 5, 3.5],
         rotation: 0,
         status: 'running',
@@ -455,19 +499,16 @@ export const MillScene: React.FC<MillSceneProps> = ({
         lastMaintenance: '2024-02-01',
         nextMaintenance: '2024-05-01',
       });
-      millIndex++;
-    }
+    });
 
     // ZONE 3: Sifting (Plansifters) - Elevated
     const sifterNames = ['Sifter A', 'Sifter B', 'Sifter C'];
-    for (let i = -1; i <= 1; i++) {
-      // Deterministic metrics based on sifter position
-      const idx = i + 1; // 0-2
+    SITE_LAYOUT.machines.sifters.forEach((anchor, idx) => {
       _machines.push({
-        id: `sifter-${['a', 'b', 'c'][idx]}`, // sifter-a, sifter-b, sifter-c
+        id: anchor.id,
         name: sifterNames[idx],
         type: MachineType.PLANSIFTER,
-        position: [i * 14, 9, FACTORY_ZONE_Z.sifting],
+        position: [...anchor.position],
         size: [7, 7, 7],
         rotation: 0,
         status: 'running',
@@ -482,18 +523,16 @@ export const MillScene: React.FC<MillSceneProps> = ({
         lastMaintenance: '2024-01-20',
         nextMaintenance: '2024-04-20',
       });
-    }
+    });
 
     // ZONE 4: Packaging (Packers) - Moved forward to z=25 for more space
     const packerNames = ['Pack Line 1', 'Pack Line 2', 'Pack Line 3'];
-    for (let i = -1; i <= 1; i++) {
-      // Deterministic metrics based on packer position
-      const idx = i + 1; // 0-2
+    SITE_LAYOUT.machines.packers.forEach((anchor, idx) => {
       _machines.push({
-        id: `packer-${idx}`, // packer-0, packer-1, packer-2
+        id: anchor.id,
         name: packerNames[idx],
         type: MachineType.PACKER,
-        position: [i * 8, 0, FACTORY_ZONE_Z.packing],
+        position: [...anchor.position],
         size: [4, 6, 4],
         rotation: Math.PI,
         status: 'running',
@@ -508,7 +547,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
         lastMaintenance: '2024-02-10',
         nextMaintenance: '2024-05-10',
       });
-    }
+    });
 
     return _machines;
   }, []);
@@ -518,36 +557,32 @@ export const MillScene: React.FC<MillSceneProps> = ({
     const obs: Obstacle[] = [];
     const WORKER_PADDING = 1.0; // Extra padding around machines
 
-    // SILOS (Zone 1, z=-22) - including legs and hopper
-    // Silos have size [4.5, 16, 4.5] at positions [i*9, 0, -22]
-    for (let i = -2; i <= 2; i++) {
-      const x = i * 9;
+    SITE_LAYOUT.machines.silos.forEach((anchor) => {
+      const [x, , z] = anchor.position;
       obs.push({
-        id: `silo-obs-${i}`,
+        id: `${anchor.id}-obstacle`,
         minX: x - 2.25 - WORKER_PADDING,
         maxX: x + 2.25 + WORKER_PADDING,
-        minZ: FACTORY_ZONE_Z.silos - 2.25 - WORKER_PADDING,
-        maxZ: FACTORY_ZONE_Z.silos + 2.25 + WORKER_PADDING,
+        minZ: z - 2.25 - WORKER_PADDING,
+        maxZ: z + 2.25 + WORKER_PADDING,
       });
-    }
+    });
 
-    // ROLLER MILLS (Zone 2, z=-6)
-    // Mills have size [3.5, 5, 3.5] at positions [i*5, 0, -6] for i in [-3, -1.5, 1.5, 3]
-    for (const i of [-3, -1.5, 1.5, 3]) {
-      const x = i * 5;
+    SITE_LAYOUT.machines.rollerMills.forEach((anchor) => {
+      const [x, , z] = anchor.position;
       obs.push({
-        id: `mill-obs-${i}`,
+        id: `${anchor.id}-obstacle`,
         minX: x - 1.75 - WORKER_PADDING,
         maxX: x + 1.75 + WORKER_PADDING,
-        minZ: FACTORY_ZONE_Z.milling - 1.75 - WORKER_PADDING,
-        maxZ: FACTORY_ZONE_Z.milling + 1.75 + WORKER_PADDING,
+        minZ: z - 1.75 - WORKER_PADDING,
+        maxZ: z + 1.75 + WORKER_PADDING,
       });
-    }
+    });
 
     // PLANSIFTERS (Zone 3, z=6) - elevated at y=9, but have hanging cables
     // Workers can walk under these, but the cables at corners need small obstacles
-    for (let i = -1; i <= 1; i++) {
-      const x = i * 14;
+    SITE_LAYOUT.machines.sifters.forEach((anchor) => {
+      const [x, , z] = anchor.position;
       // Just mark small cable anchor points at corners (not full machine footprint)
       const cablePositions = [
         [-3.2, -3.2],
@@ -557,27 +592,25 @@ export const MillScene: React.FC<MillSceneProps> = ({
       ];
       cablePositions.forEach(([dx, dz], idx) => {
         obs.push({
-          id: `sifter-cable-${i}-${idx}`,
+          id: `${anchor.id}-cable-${idx}`,
           minX: x + dx - 0.3,
           maxX: x + dx + 0.3,
-          minZ: FACTORY_ZONE_Z.sifting + dz - 0.3,
-          maxZ: FACTORY_ZONE_Z.sifting + dz + 0.3,
+          minZ: z + dz - 0.3,
+          maxZ: z + dz + 0.3,
         });
       });
-    }
+    });
 
-    // PACKERS (Zone 4, z=25)
-    // Packers have size [4, 6, 4] at positions [i*8, 0, 25]
-    for (let i = -1; i <= 1; i++) {
-      const x = i * 8;
+    SITE_LAYOUT.machines.packers.forEach((anchor) => {
+      const [x, , z] = anchor.position;
       obs.push({
-        id: `packer-obs-${i}`,
+        id: `${anchor.id}-obstacle`,
         minX: x - 2 - WORKER_PADDING,
         maxX: x + 2 + WORKER_PADDING,
-        minZ: FACTORY_ZONE_Z.packing - 2 - WORKER_PADDING,
-        maxZ: FACTORY_ZONE_Z.packing + 2 + WORKER_PADDING,
+        minZ: z - 2 - WORKER_PADDING,
+        maxZ: z + 2 + WORKER_PADDING,
       });
-    }
+    });
 
     // CONVEYOR SYSTEM OBSTACLES - Full belt structures
     // Workers and forklifts must walk around the conveyors
@@ -692,7 +725,6 @@ export const MillScene: React.FC<MillSceneProps> = ({
   }, [obstacles]);
 
   // Sync machines with store on mount
-  // Sync machines with store on mount
   useEffect(() => {
     // Only set if store is empty
     if (useProductionStore.getState().machines.length === 0) {
@@ -706,13 +738,26 @@ export const MillScene: React.FC<MillSceneProps> = ({
   const displayMachines = machines;
 
   // PERFORMANCE: Consolidated store subscriptions with useShallow to prevent unnecessary re-renders
-  const { graphicsQuality, perfDebug } = useGraphicsStore(
-    useShallow((state) => ({
-      graphicsQuality: state.graphics.quality,
-      perfDebug: state.graphics.perfDebug,
-    }))
-  );
+  const { graphicsQuality, perfDebug, postProcessingEnabled, enableAnisotropicReflections } =
+    useGraphicsStore(
+      useShallow((state) => ({
+        graphicsQuality: state.graphics.quality,
+        perfDebug: state.graphics.perfDebug,
+        enableAnisotropicReflections: state.graphics.enableAnisotropicReflections,
+        // Shared with PostProcessing.tsx's own mount check. These two must
+        // agree exactly: if this says mount and the component returns null,
+        // the composer never forces NoToneMapping and the grade silently
+        // does not apply. A tier that only tone maps and grades still counts.
+        postProcessingEnabled: isPostProcessingActive(state.graphics),
+      }))
+    );
+  const useEnhancedQualityLayers = graphicsQuality === 'high' || graphicsQuality === 'ultra';
+  const useUltraQualityLayers = graphicsQuality === 'ultra';
   const isLowGraphics = graphicsQuality === 'low';
+  // Static batching must not rebuild at the live day/night boundary. Every
+  // time-reactive mesh opts out locally, so the large authored batches can
+  // remain stable while windows, lamps, and clocks update in place.
+  const staticBatchRevision = graphicsQuality;
   const terrainResolution =
     graphicsQuality === 'ultra' || graphicsQuality === 'high'
       ? 1024
@@ -726,60 +771,61 @@ export const MillScene: React.FC<MillSceneProps> = ({
         ? 64
         : 1;
   const terrainEnableRiverChannel = graphicsQuality !== 'low';
-
-  // Camera-based visibility culling - hide interior when outside, hide exterior when inside
-  // Exception: In dock zones (near open dock openings), show BOTH interior and exterior
-  const isCameraInside = useCameraPositionStore((state) => state.isCameraInside);
-  const isCameraInDockZone = useCameraPositionStore((state) => state.isCameraInDockZone);
+  const { isCameraInside, isCameraInDockZone } = useCameraPositionStore(
+    useShallow((state) => ({
+      isCameraInside: state.isCameraInside,
+      isCameraInDockZone: state.isCameraInDockZone,
+    }))
+  );
 
   // AI Visualization toggles (all default OFF)
   const showCascadeVisualization = useAIConfigStore((state) => state.showCascadeVisualization);
 
-  // Show interior when inside OR in dock transition zone
-  const showInterior = isCameraInside || isCameraInDockZone;
-  // Show exterior when outside OR in dock transition zone
-  const showExterior = !isCameraInside || isCameraInDockZone;
-
   return (
-    <group>
+    <group name="world-root">
       {/* Wireframe mode controller - responds to enableWireframe toggle */}
       <WireframeController />
 
-      {/* Atmospheric fog for depth - Bruno Simon style */}
-      {/* Linear fog with dark blue-gray color, subtle enough not to obscure gameplay */}
-      {!isLowGraphics && <fog attach="fog" args={['#1a1a2e', 150, 550]} />}
-
-      {/* Internal Dock Elements - Shipping and Receiving */}
-      {/* These large black doors link the interior and exterior visually */}
-      {showInterior && !isLowGraphics && (
-        <>
-          {/* Shipping Dock (Front) */}
-          <OpenDockOpening
-            position={[0, 0, 48]}
-            rotation={0}
-            width={30}
-            height={14}
-            label="SHIPPING"
-          />
-          {/* Receiving Dock (Back) */}
-          <OpenDockOpening
-            position={[0, 0, -48]}
-            rotation={Math.PI}
-            width={18}
-            height={14}
-            label="RECEIVING"
-          />
-        </>
+      {/* Internal dock openings remain mounted with the exterior site so the
+          factory reads as one continuous navigable world. */}
+      {authoredSiteReady && !isLowGraphics && (
+        <StaticMeshBatch name="authored-dock-openings" revision={staticBatchRevision}>
+          <>
+            <AuthoredDockOpening
+              position={[0, 0, 48]}
+              rotation={0}
+              width={30}
+              height={14}
+              label="SHIPPING"
+            />
+            <AuthoredDockOpening
+              position={[0, 0, -48]}
+              rotation={Math.PI}
+              width={18}
+              height={14}
+              label="RECEIVING"
+            />
+          </>
+        </StaticMeshBatch>
       )}
 
-      {/* HDRI Environment for realistic reflections - disable on low */}
-      {/* Uses local HDRI to avoid network dependency on GitHub CDN */}
-      {/* CRITICAL: Wrapped in its own Suspense to prevent blocking the entire scene during load */}
-      {/* Intensity increased from 0.55 to 0.8 for better metal reflections */}
-      {!isLowGraphics && (
-        <Suspense fallback={null}>
-          <Environment files={warehouseHdrUrl} background={false} environmentIntensity={0.8} />
-        </Suspense>
+      {/* The local HDRI is an explicit cinematic reflection option. Keeping it
+          behind the reflection toggle avoids a multi-second PMREM compile and
+          whole-site shading cost in the ordinary Ultra preset. */}
+      {useUltraQualityLayers && enableAnisotropicReflections && (
+        <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
+          <Suspense fallback={null}>
+            {/* Shares the default rig's weight rather than carrying its own
+                0.28. The two paths write the same `scene.environmentIntensity`
+                and swapping between them should change WHAT is reflected, not
+                how much of the scene's fill comes from reflection. */}
+            <Environment
+              files={warehouseHdrUrl}
+              background={false}
+              environmentIntensity={ENVIRONMENT_INTENSITY}
+            />
+          </Suspense>
+        </ErrorBoundary>
       )}
 
       {/* CENTRALIZED TICK SYSTEM - Replaces CoreGameTimeSystem */}
@@ -789,100 +835,114 @@ export const MillScene: React.FC<MillSceneProps> = ({
       {/* OLD: <CoreGameTimeSystem /> - disabled, replaced by CentralTickProvider */}
 
       {/* Environment & Lighting */}
-      {!perfDebug?.disableEnvironment && <FactoryEnvironment />}
-      {/* Zone Accent Lights - colored lights for each factory zone */}
-      {!isLowGraphics && <ZoneAccentLights enabled={!perfDebug?.disableEnvironment} />}
+      <group name="world-environment">
+        {!perfDebug?.disableEnvironment && <OptimizedFactoryEnvironment />}
+      </group>
 
-      {/* Camera bounds tracker for inside/outside detection */}
+      {/* Camera bounds remain useful to controls and UI, but never gate scene existence. */}
       <CameraBoundsTracker />
 
       {/* Main Systems - Respect perfDebug toggles for A/B testing */}
-      {/* PERFORMANCE: Interior systems only render when camera is inside factory or in dock zone */}
-      {showInterior && !perfDebug?.disableMachines && (
-        <MachinesContainer initialMachines={displayMachines} onSelect={onSelectMachine} />
-      )}
-      {showInterior && !isLowGraphics && !perfDebug?.disableMachines && (
-        <SpoutingSystem machines={displayMachines} />
-      )}
-      {/* Production Flow Visualization - animated lines between machines (medium+ only) */}
-      {showInterior && !isLowGraphics && <ProductionFlowVisualization />}
-      {/* CRITICAL: Wrapped in Suspense to prevent MeshReflectorMaterial from breaking scene on quality change */}
-      <Suspense fallback={null}>
-        <FactoryInfrastructure
-          floorSize={FLOOR_SIZE}
-          floorWidth={FLOOR_SIZE_X}
-          floorDepth={FLOOR_SIZE_Z}
-          showZones={showZones}
-        />
-      </Suspense>
+      <group name="world-factory-process">
+        {!perfDebug?.disableMachines && (
+          <MachinesContainer initialMachines={displayMachines} onSelect={onSelectMachine} />
+        )}
+        {!isLowGraphics && !perfDebug?.disableMachines && (
+          <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
+            <Suspense fallback={null}>
+              <HighDetailSpoutingSystem machines={displayMachines} />
+            </Suspense>
+          </ErrorBoundary>
+        )}
+        {!isLowGraphics && <ProductionFlowVisualization />}
+      </group>
+      <group name="world-factory-infrastructure">
+        <OptimizedFactoryInfrastructure showZones={showZones} />
+      </group>
 
       {/* Dynamic Elements - Respect perfDebug toggles */}
-      {/* PERFORMANCE: Interior systems only render when camera is inside factory or in dock zone */}
-      {showInterior && !perfDebug?.disableConveyorSystem && (
-        <ConveyorSystem productionSpeed={productionSpeed} />
-      )}
-      {showInterior && !perfDebug?.disableWorkerSystem && (
-        <WorkerSystem onSelectWorker={onSelectWorker} />
-      )}
+      <group name="world-conveyors">
+        {authoredSiteReady && !perfDebug?.disableConveyorSystem && (
+          <OperationalConveyors productionSpeed={productionSpeed} />
+        )}
+      </group>
+      <group name="world-personnel">
+        {authoredSiteReady && !perfDebug?.disableWorkerSystem && (
+          <OperationalPersonnel onSelectWorker={onSelectWorker} />
+        )}
+      </group>
       {/* Worker Personality Visualization - mood auras, thoughts, relationships */}
-      {showInterior && (graphicsQuality === 'high' || graphicsQuality === 'ultra') && (
+      {useEnhancedQualityLayers && (
         <WorkerPersonalityLayer showAuras={true} showThoughts={true} showRelationships={false} />
       )}
       {/* Remote multiplayer players */}
-      <RemotePlayersGroup />
-      {showInterior && !perfDebug?.disableForkliftSystem && (
-        <ForkliftSystem showSpeedZones={showZones} onSelectForklift={onSelectForklift} />
-      )}
-      {/* TruckBay - exterior loading/unloading area */}
-      {showExterior &&
-        (graphicsQuality === 'medium' ||
-          graphicsQuality === 'high' ||
-          graphicsQuality === 'ultra') &&
-        !perfDebug?.disableTruckBay && (
-          <Suspense fallback={null}>
-            <TruckBay productionSpeed={productionSpeed} />
-          </Suspense>
+      <group name="world-forklifts">
+        {authoredSiteReady && !perfDebug?.disableForkliftSystem && (
+          <OperationalForklifts showSpeedZones={showZones} onSelectForklift={onSelectForklift} />
         )}
-
-      {/* Exterior terrain */}
-      <group visible={showExterior}>
-        <TerrainGround
-          debug={false}
-          resolution={terrainResolution}
-          segments={terrainSegments}
-          enableRiverChannel={terrainEnableRiverChannel}
-        />
+      </group>
+      {/* The authored truck bay includes the garage, service yard, docks, and trucks. */}
+      <group name="world-logistics">
+        {authoredSiteReady && <OperationalRemotePlayers />}
+        {authoredSiteReady && !isLowGraphics && !perfDebug?.disableTruckBay && (
+          <StaticMeshBatch name="authored-truck-yard" revision={staticBatchRevision}>
+            <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
+              <Suspense fallback={null}>
+                <TruckBay productionSpeed={productionSpeed} />
+              </Suspense>
+            </ErrorBoundary>
+          </StaticMeshBatch>
+        )}
       </group>
 
-      {/* Factory exterior walls and signage */}
-      {showExterior && <FactoryExterior />}
-
-      {/* Fairytale Castle - Global Landmark (Always Rendered to prevent culling issues) */}
-      {/* Positioned near the tunnel entrance, sunken into terrain */}
-      <FairytaleCastle position={[45, 0, -200]} scale={1.5} rotation={[0, -Math.PI / 4, 0]} />
-
-      {showExterior && <FarmArea />}
-      {/* Full-detail village with all charming features */}
-      {showExterior && <VillageArea />}
+      {/* The complete authored exterior remains present from every camera position. */}
+      <group name="world-terrain">
+        {authoredSiteReady && !perfDebug?.disableTerrain && (
+          <AuthoredTerrain
+            debug={false}
+            resolution={terrainResolution}
+            segments={terrainSegments}
+            enableRiverChannel={terrainEnableRiverChannel}
+          />
+        )}
+      </group>
+      {authoredSiteReady && (
+        <>
+          <StaticMeshBatch name="authored-factory-exterior" revision={staticBatchRevision}>
+            <AuthoredFactoryExterior showFactoryShell={false} />
+          </StaticMeshBatch>
+          <StaticMeshBatch name="authored-castle" revision={staticBatchRevision}>
+            <AuthoredCastle
+              position={SITE_LAYOUT.landmarks.castle.position}
+              scale={SITE_LAYOUT.landmarks.castle.scale}
+              rotation={SITE_LAYOUT.landmarks.castle.rotation}
+            />
+          </StaticMeshBatch>
+          <StaticMeshBatch name="authored-farm" revision={staticBatchRevision}>
+            <AuthoredFarm />
+          </StaticMeshBatch>
+          <StaticMeshBatch name="authored-village" revision={staticBatchRevision}>
+            <AuthoredVillage />
+          </StaticMeshBatch>
+        </>
+      )}
 
       {/* Theme Hospital-inspired Mood & Chaos Systems */}
-      {/* PERFORMANCE: Interior-only, scaled by quality level */}
-      {showInterior && (
-        <VisibleChaos
-          qualityScale={
-            graphicsQuality === 'ultra'
-              ? 1.0
-              : graphicsQuality === 'high'
-                ? 0.75
-                : graphicsQuality === 'medium'
-                  ? 0.5
-                  : 0.25
-          }
-        />
-      )}
-      {showInterior && graphicsQuality === 'ultra' && <FactoryEnvironmentSystem />}
-      {showInterior && graphicsQuality === 'ultra' && <MaintenanceSystem />}
-
+      <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
+        <Suspense fallback={null}>
+          <VisibleChaos
+            qualityScale={
+              graphicsQuality === 'ultra'
+                ? 1
+                : graphicsQuality === 'high'
+                  ? 0.75
+                  : graphicsQuality === 'medium'
+                    ? 0.5
+                    : 0.25
+            }
+          />
+        </Suspense>
+      </ErrorBoundary>
       {/* Incident Heat Map Visualization */}
       <IncidentHeatMap />
 
@@ -890,43 +950,66 @@ export const MillScene: React.FC<MillSceneProps> = ({
       <FireDrillExitMarkers />
 
       {/* AI Cascade Visualization - shows production flow stress (default OFF, toggle with 'K') */}
-      {showCascadeVisualization && <CascadeVisualization />}
+      {authoredSiteReady && showCascadeVisualization && <OptionalCascadeVisualization />}
 
       {/* Strategic Overlay 3D - floating priority text above factory (default OFF, toggle with 'J') */}
-      <StrategicOverlay3D />
+      {authoredSiteReady && <OptionalStrategicOverlay />}
 
       {/* Blueprint Mode - architectural overlay (toggle with Ctrl+B) */}
-      <BlueprintMode />
+      {authoredSiteReady && <OptionalBlueprintMode />}
 
-      {/* Post-processing effects - Bloom, Vignette, SSAO, DoF (controlled by graphics settings) */}
-      <PostProcessing />
+      {/* The composer now mounts on medium and above, so this subtree survives
+          tier changes rather than being absent at every tier. `graphicsQuality`
+          stays in `resetKeys` deliberately: ErrorBoundary only acts on it when
+          `state.hasError` is already true, and it puts no key on its children,
+          so a tier change cannot remount the N8AO pass on the healthy path. In
+          the error path PostProcessing is unmounted anyway, which makes a
+          quality change a legitimate recovery trigger. */}
+      {postProcessingEnabled && (
+        <ErrorBoundary fallback={null} resetKeys={[postProcessingEnabled, graphicsQuality]}>
+          <Suspense fallback={null}>
+            <PostProcessing />
+          </Suspense>
+        </ErrorBoundary>
+      )}
 
       {/* Physics Simulation Controller - Isolated from render tree */}
       <MachineSimulationController />
 
       {/* Atmospheric Effects - heavily reduced for performance */}
-      {/* PERFORMANCE: Interior-only particle effects */}
-      {showInterior && graphicsQuality !== 'low' && (
+      {graphicsQuality !== 'low' && (
         <DustAnimationManager>
+          {/* This prop is the POOL SIZE, and `DustParticles` activates
+              `Math.min(count, graphics.dustParticleCount)` of it. Medium's
+              store value is 30, so raising 30 here alone buys nothing and
+              leaves the extra instances allocated and permanently hidden -
+              move `GRAPHICS_PRESETS.medium.dustParticleCount` with it or not
+              at all. High and ultra are the other way round: the store's 180
+              and 500 leave these numbers as the binding cap. */}
           <DustParticles
             count={graphicsQuality === 'ultra' ? 150 : graphicsQuality === 'high' ? 80 : 30}
           />
-          {(graphicsQuality === 'high' || graphicsQuality === 'ultra') && <GrainFlow />}
-          {(graphicsQuality === 'high' || graphicsQuality === 'ultra') && <MachineSteamVents />}
+          {/* Both now mount wherever this block does, i.e. above 'low'. They
+              were gated to high/ultra a second time inside a branch that has
+              already excluded 'low', which left medium with pipes carrying no
+              grain and machines venting nothing. Each component does its own
+              tier scaling from here: GrainFlow is one `<points>` draw of 200
+              particles and defers to `graphics.enableGrainFlow`, and
+              MachineSteamVents already halves its source list on medium and
+              culls at 40 units, so medium mounts 6 vents rather than 11. */}
+          <GrainFlow />
+          <MachineSteamVents />
         </DustAnimationManager>
       )}
 
-      {/* Holographic Displays - interior only, high/ultra */}
-      {showInterior && (graphicsQuality === 'high' || graphicsQuality === 'ultra') && (
-        <HolographicDisplays />
+      {authoredSiteReady && useUltraQualityLayers && (isCameraInside || isCameraInDockZone) && (
+        <EnhancedHolographicDisplays />
       )}
 
-      {/* Ambient Details - interior only, ultra */}
-      {showInterior && graphicsQuality === 'ultra' && (
-        <Suspense fallback={null}>
-          <AmbientDetailsGroup />
-        </Suspense>
-      )}
+      {/* Legacy environment, maintenance and ambient-detail worlds stay
+          quarantined. Mounting them here duplicated the authored site and
+          collapsed Ultra frame pacing. Ultra enriches the same world through
+          HDRI, holograms, texture filtering and longer LOD distances instead. */}
     </group>
   );
 };

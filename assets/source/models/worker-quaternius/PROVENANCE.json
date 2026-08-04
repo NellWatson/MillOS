@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 2,
+  "retrievedAt": "2026-07-31",
+  "publisher": "Quaternius",
+  "license": "CC0-1.0",
+  "sourcePacks": [
+    {
+      "name": "Ultimate Modular Men Pack",
+      "sourcePage": "https://quaternius.com/packs/ultimatemodularcharacters.html",
+      "publicFolder": "https://drive.google.com/drive/folders/1USAAquX2JJWuA2m6zol0KUkFe3UkZ8zX",
+      "selectedFile": "Individual Characters/glTF/Worker.gltf",
+      "publicFileId": "14d8n7IDnnlnGt_uiATnNg3uvi_4dyd9V",
+      "preservedAs": "worker-masculine-source.gltf",
+      "sha256": "e49f8ec0f8a7de72dd26b1c01e6413c9a87a9116eeee21f9364ccd36bc286335"
+    },
+    {
+      "name": "Ultimate Modular Women Pack",
+      "sourcePage": "https://quaternius.com/packs/ultimatemodularwomen.html",
+      "publicFolder": "https://drive.google.com/drive/folders/1720N9IGyQHXYvtvZJzazhxtTTlz-y2Vf",
+      "selectedFile": "Individual Characters/glTF/Worker.gltf",
+      "publicFileId": "1iwF_fqDErPH9uyol6NmS-MnzGgsZ5ejV",
+      "preservedAs": "worker-feminine-source.gltf",
+      "sha256": "e2bfc1039f429e870a0119e274c2dd45f6304f00c39f4570dfeb9ed4d97a063d"
+    }
+  ],
+  "licenseRecord": {
+    "file": "LICENSE-MODULAR-CC0.txt",
+    "sha256": "e8dbf915a2b82229913e301a0787696611241bdefec4832bc084f54161db1efe"
+  },
+  "runtimeDerivatives": [
+    {
+      "file": "../../../../public/models/worker/worker-masculine.glb",
+      "sha256": "f35b1f2e59a602f4714649a2078c8979d7399e60006b306e462c7095dd3ed691"
+    },
+    {
+      "file": "../../../../public/models/worker/worker-feminine.glb",
+      "sha256": "3efd72f23b8d329a6a60bdca4e75e4e67142b23e912f4d1508976ffe17de9a45"
+    }
+  ],
+  "transformation": {
+    "script": "scripts/normalize-model-assets.mjs",
+    "description": "Selects nine semantic clips from each model authored animation set, normalizes each character to 1.72 metres, grounds and centres the scene, and emits a self-contained texture-free GLB. Runtime materials provide identity and role variants without changing the source geometry.",
+    "clipMap": {
+      "worker-idle": "Idle",
+      "worker-walk": "Walk",
+      "worker-run": "Run",
+      "worker-break": "Idle_Neutral",
+      "worker-inspect": "Interact",
+      "worker-repair": "Interact",
+      "worker-supervise": "Idle_Neutral",
+      "worker-radio": "Wave",
+      "worker-sample": "Interact"
+    }
+  }
+}

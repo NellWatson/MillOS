@@ -184,6 +184,16 @@ export function useAudioMuted(): boolean {
   return useSyncExternalStore(subscribe, selectMuted, selectMuted);
 }
 
+/**
+ * Becomes true after the first user gesture has unlocked the shared audio
+ * context. Vehicle and machine loops use this edge to start once, rather than
+ * making an autoplay attempt during mount and remaining silent thereafter.
+ */
+export function useAudioInitialized(): boolean {
+  const selectInitialized = useCallback(() => audioManager.initialized, []);
+  return useSyncExternalStore(subscribe, selectInitialized, selectInitialized);
+}
+
 export function useAudioVolume(): number {
   const selectVolume = useCallback(() => audioManager.volume, []);
   return useSyncExternalStore(subscribe, selectVolume, selectVolume);

@@ -69,36 +69,50 @@ const SprintButton: React.FC = () => {
  * Contains the D-pad, sprint button (in FPS mode), and mobile panel.
  * Should only be rendered on mobile/touch devices.
  */
-export const MobileControlsOverlay: React.FC = () => {
+interface MobileControlsOverlayProps {
+  showTouchControls?: boolean;
+}
+
+export const MobileControlsOverlay: React.FC<MobileControlsOverlayProps> = ({
+  showTouchControls = true,
+}) => {
   const { mobilePanelVisible, mobilePanelContent, closeMobilePanel } = useMobileControlStore();
   const fpsMode = useUIStore((s) => s.fpsMode);
 
   return (
     <div className="fixed inset-0 pointer-events-none z-30">
-      {/* Camera preset menu - top right, only in orbit mode */}
-      {!fpsMode && (
-        <div className="absolute top-4 right-4">
-          <CameraPresetMenu />
-        </div>
-      )}
+      <div
+        className="contents"
+        aria-hidden={mobilePanelVisible ? true : undefined}
+        inert={mobilePanelVisible ? true : undefined}
+      >
+        {/* Camera preset menu - top right, only in orbit mode */}
+        {showTouchControls && !fpsMode && (
+          <div className="absolute top-4 right-4">
+            <CameraPresetMenu />
+          </div>
+        )}
 
-      {/* D-Pad - bottom left */}
-      <div className="absolute bottom-24 left-4">
-        <DPad />
+        {/* D-Pad - bottom left */}
+        {showTouchControls && (
+          <div className="absolute bottom-24 left-4">
+            <DPad />
+          </div>
+        )}
+
+        {/* Sprint button - bottom right, only in FPS mode */}
+        {showTouchControls && fpsMode && (
+          <div
+            className="absolute bottom-28 right-4"
+            style={{
+              marginBottom: 'max(16px, env(safe-area-inset-bottom))',
+              marginRight: 'max(16px, env(safe-area-inset-right))',
+            }}
+          >
+            <SprintButton />
+          </div>
+        )}
       </div>
-
-      {/* Sprint button - bottom right, only in FPS mode */}
-      {fpsMode && (
-        <div
-          className="absolute bottom-28 right-4"
-          style={{
-            marginBottom: 'max(16px, env(safe-area-inset-bottom))',
-            marginRight: 'max(16px, env(safe-area-inset-right))',
-          }}
-        >
-          <SprintButton />
-        </div>
-      )}
 
       {/* Mobile Panel */}
       <MobilePanel

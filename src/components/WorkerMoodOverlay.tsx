@@ -7,7 +7,8 @@
 
 import React, { useRef, useMemo, createContext, useContext, useCallback, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Html, Billboard, Text } from '@react-three/drei';
+import { Html, Billboard } from '@react-three/drei';
+import { SceneText as Text } from './shared/SceneText';
 import * as THREE from 'three';
 import { useShallow } from 'zustand/react/shallow';
 import { useWorkerMoodStore } from '../stores/workerMoodStore';
@@ -244,11 +245,10 @@ const SpeechBubble: React.FC<SpeechBubbleProps> = React.memo(({ text, position, 
                 bottom: '-8px',
                 left: '50%',
                 transform: 'translateX(-50%)',
-                width: 0,
-                height: 0,
-                borderLeft: '6px solid transparent',
-                borderRight: '6px solid transparent',
-                borderTop: `8px solid ${bubbleColor}`,
+                width: '12px',
+                height: '8px',
+                background: bubbleColor,
+                clipPath: 'polygon(0 0, 100% 0, 50% 100%)',
               }}
             />
             <div
@@ -257,11 +257,10 @@ const SpeechBubble: React.FC<SpeechBubbleProps> = React.memo(({ text, position, 
                 bottom: '-5px',
                 left: '50%',
                 transform: 'translateX(-50%)',
-                width: 0,
-                height: 0,
-                borderLeft: '5px solid transparent',
-                borderRight: '5px solid transparent',
-                borderTop: '6px solid white',
+                width: '10px',
+                height: '6px',
+                background: 'white',
+                clipPath: 'polygon(0 0, 100% 0, 50% 100%)',
               }}
             />
           </div>
@@ -530,15 +529,22 @@ export const useMoodSimulation = () => {
  * Ticks:
  * - Safety report store (report aging, willingness decay)
  * - Emergent cooperation store (action completion, random triggers)
+ * - Breakdown store (breakdown simulation)
+ * - Flourishing store
+ *
+ * AUTHORITATIVE DRIVER: this hook is the ONLY driver for
+ * tickBreakdownSimulation and tickEmergentCooperation. Do not add these
+ * ticks elsewhere (e.g. Environment.tsx OrphanedStoresTicker used to
+ * duplicate them at double rate with ~100x-off deltaMinutes units).
  */
 export const useBilateralAlignmentSimulation = () => {
   const lastTickRef = useRef(Date.now());
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
-  const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
 
   useFrame(() => {
-    // PERFORMANCE: Skip on low quality
-    if (graphicsQuality === 'low') return;
+    // NOTE: runs on all quality levels (throttled to one store tick per 5s,
+    // negligible cost) - it is the sole driver for these simulations, so
+    // skipping on low quality would freeze breakdowns/cooperation entirely.
     if (!isTabVisible) return;
 
     const now = Date.now();
@@ -546,7 +552,14 @@ export const useBilateralAlignmentSimulation = () => {
 
     // PERFORMANCE: Tick only every 5 seconds to reduce store updates
     if (deltaMs >= 5000) {
-      const deltaMinutes = deltaMs / 1000; // Convert to game minutes
+      // Cap deltaMs to prevent huge time jumps after the tab becomes visible
+      // again (useFrame is gated by isTabVisible, so lastTickRef can lag by the
+      // entire hidden duration). Without this, a single post-refocus tick passes
+      // a massive deltaMinutes into the simulations, instantly cratering values
+      // like reportingWillingness (-0.5 * deltaMinutes, clamped to 0). Mirrors
+      // the cap already applied in useMoodSimulation above.
+      const cappedDeltaMs = Math.min(deltaMs, 6000);
+      const deltaMinutes = cappedDeltaMs / 1000; // Convert to game minutes
 
       useSafetyReportStore.getState().tickSafetySimulation(deltaMinutes);
       useEmergentCooperationStore.getState().tickEmergentCooperation(deltaMinutes);

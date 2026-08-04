@@ -14,7 +14,7 @@
  * - Phase-based scenarios with engagement metrics
  */
 
-import React, { useEffect, useRef, useMemo, memo } from 'react';
+import React, { useEffect, useRef, useMemo, useState, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Play,
@@ -41,11 +41,22 @@ import {
   Sparkles,
   Eye,
   Compass,
+  Landmark,
+  HeartHandshake,
+  Network,
+  Scale,
+  GitBranch,
 } from 'lucide-react';
 import { useScenarioStore, getCategoryColor, formatTime } from '../../../stores/scenarioStore';
-import type { Scenario, ScenarioEvent, ScenarioPhase } from '../../../stores/scenarioStore';
+import type {
+  Scenario,
+  ScenarioEvent,
+  ScenarioPhase,
+  ScenarioChoice,
+} from '../../../stores/scenarioStore';
 import { useBASStore } from '../../../stores/basStore';
 import { useStabilityStore } from '../../../stores/stabilityStore';
+import { useVotingStore } from '../../../stores/votingStore';
 import { useShallow } from 'zustand/react/shallow';
 import { audioManager } from '../../../utils/audioManager';
 
@@ -60,6 +71,11 @@ const SCENARIO_ICONS: Record<string, React.ComponentType<{ className?: string }>
   TrendingUp,
   Moon,
   Gamepad2,
+  // BAS scenarios
+  Landmark,
+  HeartHandshake,
+  Network,
+  Scale,
 };
 
 // =============================================================================
@@ -149,8 +165,13 @@ const PlaybackControls: React.FC<PlaybackControlsProps> = memo(
             ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
             : 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
         }`}
+        aria-label={isPlaying ? 'Pause scenario' : 'Play scenario'}
       >
-        {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+        {isPlaying ? (
+          <Pause className="w-4 h-4" aria-hidden="true" />
+        ) : (
+          <Play className="w-4 h-4" aria-hidden="true" />
+        )}
       </button>
 
       {/* Stop */}
@@ -160,8 +181,9 @@ const PlaybackControls: React.FC<PlaybackControlsProps> = memo(
           audioManager.playClick?.();
         }}
         className="p-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all"
+        aria-label="Stop scenario"
       >
-        <Square className="w-4 h-4" />
+        <Square className="w-4 h-4" aria-hidden="true" />
       </button>
 
       {/* Speed controls */}
@@ -398,7 +420,7 @@ const EngagementMetricsDisplay: React.FC<EngagementMetricsDisplayProps> = ({
             ? 'Work feels like a game that produces something real'
             : engagementScore >= 50
               ? 'Engagement emerging - consider increasing autonomy or transparency'
-              : 'Work feels forced - BAMS configuration needs adjustment'}
+              : 'Work feels forced - BAS configuration needs adjustment'}
         </p>
       </div>
     </div>
@@ -437,11 +459,17 @@ const Timeline: React.FC<TimelineProps> = ({ scenario, currentTime, triggeredEve
                     ? 'bg-pink-500'
                     : event.type === 'engagement_change'
                       ? 'bg-cyan-500'
-                      : 'bg-yellow-500';
+                      : event.type === 'choice_point'
+                        ? 'bg-violet-500'
+                        : event.type === 'vote_called'
+                          ? 'bg-emerald-500'
+                          : 'bg-yellow-500';
 
           return (
             <div
               key={index}
+              role="img"
+              aria-label={event.description}
               className={`absolute top-0 bottom-0 w-1 ${eventColor} ${
                 isTriggered ? 'opacity-100' : 'opacity-40'
               }`}
@@ -526,7 +554,11 @@ const EventLog: React.FC<EventLogProps> = ({ events, triggeredEvents, scenarioId
                   ? 'text-pink-400 bg-pink-500/10'
                   : event.type === 'engagement_change'
                     ? 'text-cyan-400 bg-cyan-500/10'
-                    : 'text-yellow-400 bg-yellow-500/10';
+                    : event.type === 'choice_point'
+                      ? 'text-violet-400 bg-violet-500/10'
+                      : event.type === 'vote_called'
+                        ? 'text-emerald-400 bg-emerald-500/10'
+                        : 'text-yellow-400 bg-yellow-500/10';
 
         return (
           <motion.div
@@ -677,6 +709,112 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, onRestart, onE
 };
 
 // =============================================================================
+// CHOICE POINT MODAL
+// =============================================================================
+
+const CHOICE_EFFECT_LABELS: Record<keyof ScenarioChoice['effects'], string> = {
+  friction: 'Friction',
+  delay: 'Delay',
+  trust: 'Trust',
+  solidarity: 'Solidarity',
+  relationshipHealth: 'Relationship',
+  federationTrust: 'Federation',
+};
+
+/** friction/delay going up is bad; every other effect going up is good */
+const NEGATIVE_WHEN_POSITIVE: (keyof ScenarioChoice['effects'])[] = ['friction', 'delay'];
+
+const ChoiceEffectChips: React.FC<{ effects: ScenarioChoice['effects'] }> = ({ effects }) => (
+  <div className="flex flex-wrap gap-1 mt-1">
+    {(Object.entries(effects) as [keyof ScenarioChoice['effects'], number][]).map(
+      ([key, value]) => {
+        if (!Number.isFinite(value) || value === 0) return null;
+        const isBad = NEGATIVE_WHEN_POSITIVE.includes(key) ? value > 0 : value < 0;
+        return (
+          <span
+            key={key}
+            className={`text-[8px] px-1.5 py-0.5 rounded font-mono ${
+              isBad ? 'bg-red-500/15 text-red-400' : 'bg-green-500/15 text-green-400'
+            }`}
+          >
+            {CHOICE_EFFECT_LABELS[key]} {value > 0 ? '+' : ''}
+            {Math.round(value * 100)}
+          </span>
+        );
+      }
+    )}
+  </div>
+);
+
+interface ChoicePointModalProps {
+  event: ScenarioEvent;
+  outcome: string | null;
+  onSelect: (choice: ScenarioChoice) => void;
+  onContinue: () => void;
+}
+
+const ChoicePointModal: React.FC<ChoicePointModalProps> = ({
+  event,
+  outcome,
+  onSelect,
+  onContinue,
+}) => (
+  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-auto p-4">
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95, y: 10 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Scenario decision point"
+      className="w-full max-w-md bg-slate-900 border border-violet-500/40 rounded-lg shadow-2xl overflow-hidden"
+    >
+      {/* Header */}
+      <div className="p-3 border-b border-slate-700/50 bg-violet-500/10">
+        <div className="flex items-center gap-2">
+          <GitBranch className="w-4 h-4 text-violet-400" />
+          <span className="text-sm font-bold text-white">Decision Point</span>
+          <span className="ml-auto text-[9px] text-violet-300">Scenario paused</span>
+        </div>
+        <p className="text-[11px] text-slate-300 mt-2">{event.description}</p>
+      </div>
+
+      {/* Body */}
+      <div className="p-3 space-y-2">
+        {outcome === null ? (
+          event.choices?.map((choice) => (
+            <button
+              key={choice.id}
+              onClick={() => onSelect(choice)}
+              className="w-full text-left p-2.5 rounded-lg border border-slate-600/50 bg-slate-800/60 hover:border-violet-500/50 hover:bg-slate-700/60 transition-all"
+            >
+              <span className="text-xs font-medium text-white">{choice.label}</span>
+              <p className="text-[9px] text-slate-400 mt-0.5">{choice.description}</p>
+              <ChoiceEffectChips effects={choice.effects} />
+            </button>
+          ))
+        ) : (
+          <>
+            <div className="p-2.5 rounded-lg bg-violet-500/10 border border-violet-500/30">
+              <div className="flex items-start gap-1.5">
+                <Sparkles className="w-3 h-3 text-violet-400 mt-0.5 flex-shrink-0" />
+                <p className="text-[10px] text-slate-200">{outcome}</p>
+              </div>
+            </div>
+            <button
+              onClick={onContinue}
+              className="w-full flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 transition-all text-xs font-medium"
+            >
+              <Play className="w-3 h-3" />
+              Continue Scenario
+            </button>
+          </>
+        )}
+      </div>
+    </motion.div>
+  </div>
+);
+
+// =============================================================================
 // MAIN COMPONENT
 // =============================================================================
 
@@ -700,10 +838,40 @@ export const ScenarioPlayground: React.FC = () => {
     recordStability,
     recordEngagement,
     recordAxisChange,
+    recordChoice,
+    recordBASEffect,
     markEventTriggered,
     calculateResults,
     getPendingEvents,
-  } = useScenarioStore();
+  } = useScenarioStore(
+    // Subscribe to the used slice only — the bare useScenarioStore() form
+    // re-rendered this 1000+ line widget on EVERY store mutation.
+    useShallow((state) => ({
+      availableScenarios: state.availableScenarios,
+      activeScenario: state.activeScenario,
+      isPlaying: state.isPlaying,
+      currentTime: state.currentTime,
+      speed: state.speed,
+      currentPhase: state.currentPhase,
+      results: state.results,
+      completedScenarios: state.completedScenarios,
+      triggeredEvents: state.triggeredEvents,
+      startScenario: state.startScenario,
+      pauseScenario: state.pauseScenario,
+      resumeScenario: state.resumeScenario,
+      stopScenario: state.stopScenario,
+      setSpeed: state.setSpeed,
+      tick: state.tick,
+      recordStability: state.recordStability,
+      recordEngagement: state.recordEngagement,
+      recordAxisChange: state.recordAxisChange,
+      recordChoice: state.recordChoice,
+      recordBASEffect: state.recordBASEffect,
+      markEventTriggered: state.markEventTriggered,
+      calculateResults: state.calculateResults,
+      getPendingEvents: state.getPendingEvents,
+    }))
+  );
 
   // BAS Store for applying scenario axes
   const { axes, setAxis } = useBASStore(
@@ -727,9 +895,28 @@ export const ScenarioPlayground: React.FC = () => {
   const lastTickRef = useRef<number>(Date.now());
   const lastAxisRef = useRef<string>(JSON.stringify(axes));
 
+  // Choice point modal state: the scenario is paused while a choice is open
+  const [activeChoice, setActiveChoice] = useState<ScenarioEvent | null>(null);
+  const [choiceOutcome, setChoiceOutcome] = useState<string | null>(null);
+
+  // Clear any dangling choice modal when the scenario is stopped/exited
+  useEffect(() => {
+    if (!activeScenario) {
+      setActiveChoice(null);
+      setChoiceOutcome(null);
+    }
+  }, [activeScenario]);
+
   // Tick loop
   useEffect(() => {
     if (!isPlaying || !activeScenario) return;
+
+    // Reset the tick reference when (re)starting: lastTickRef is initialized
+    // at MOUNT, so without this the first tick's delta included the whole
+    // mount-to-start browsing time (and pause durations on resume), making the
+    // scenario timeline jump forward - short scenarios could complete on their
+    // very first tick.
+    lastTickRef.current = Date.now();
 
     const interval = setInterval(() => {
       const now = Date.now();
@@ -817,19 +1004,57 @@ export const ScenarioPlayground: React.FC = () => {
               updateFriction('engagement-friction', Math.abs(event.magnitude) * 0.3);
             }
             break;
+          case 'choice_point':
+            // Core BAS decision mechanic: pause the scenario and surface the
+            // choice modal. Effects apply when the player selects an option.
+            if (event.choices && event.choices.length > 0) {
+              pauseScenario();
+              setChoiceOutcome(null);
+              setActiveChoice(event);
+            }
+            break;
+          case 'vote_called': {
+            // Surface a real vote in the Democratic Voting panel
+            const voting = useVotingStore.getState();
+            const vote = voting.createAIBehaviorVote(
+              `${activeScenario.name}: Worker Vote`,
+              event.description,
+              [
+                { label: 'Approve', description: 'Support the proposal as described.' },
+                { label: 'Reject', description: 'Decline the proposal.' },
+              ]
+            );
+            voting.openVote(vote.id);
+            voting.generateAIAnalysis(vote.id);
+            break;
+          }
+          case 'relationship_change':
+            // Positive shifts ease collaboration friction; negative shifts add it
+            recordBASEffect({ relationshipHealth: event.magnitude });
+            updateFriction('relationship-health', -event.magnitude * 0.3);
+            break;
+          case 'solidarity_test':
+            recordBASEffect({ solidarity: event.magnitude });
+            updateFriction('solidarity', -event.magnitude * 0.1);
+            break;
+          case 'federation_request':
+            // An incoming request strains capacity (delay); resolution events
+            // carry negative magnitude and relieve it
+            recordBASEffect({ federationTrust: -event.magnitude * 0.05 });
+            updateDelay('federation-request', event.magnitude * 0.2);
+            break;
+          case 'ai_preference':
+            // The AI signalling a concern introduces mild coordination friction
+            updateFriction('ai-preference', event.magnitude * 0.1);
+            break;
         }
       }
     });
-
-    // Check for scenario completion
-    if (currentTime >= activeScenario.duration && !results) {
-      const finalStability = getStabilityPercentage();
-      calculateResults(axes, finalStability);
-    }
   }, [
     currentTime,
     activeScenario,
     isPlaying,
+    axes,
     getStabilityPercentage,
     recordStability,
     recordEngagement,
@@ -838,10 +1063,21 @@ export const ScenarioPlayground: React.FC = () => {
     updateFriction,
     updateDelay,
     updateResourceRates,
-    results,
-    calculateResults,
-    axes,
+    pauseScenario,
+    recordBASEffect,
   ]);
+
+  // Scenario completion - deliberately NOT gated on isPlaying: the store's
+  // tick() clamps currentTime to duration AND flips isPlaying to false in one
+  // atomic set() (scenarioStore.ts ~1511), so there is never a render where
+  // currentTime >= duration while isPlaying is still true. Keeping the
+  // completion check inside the isPlaying-gated effect above made
+  // calculateResults unreachable - the results/grade screen never appeared.
+  useEffect(() => {
+    if (activeScenario && !results && currentTime >= activeScenario.duration) {
+      calculateResults(axes, getStabilityPercentage());
+    }
+  }, [activeScenario, results, currentTime, axes, calculateResults, getStabilityPercentage]);
 
   const handleStartScenario = (id: string) => {
     startScenario(id);
@@ -860,6 +1096,32 @@ export const ScenarioPlayground: React.FC = () => {
 
   const handleExit = () => {
     stopScenario();
+    audioManager.playClick?.();
+  };
+
+  // Apply the selected choice's effects and show its outcome text
+  const handleChoiceSelect = (choice: ScenarioChoice) => {
+    if (choice.effects.friction) {
+      updateFriction('choice-effect', choice.effects.friction);
+    }
+    if (choice.effects.delay) {
+      updateDelay('choice-effect', choice.effects.delay);
+    }
+    if (choice.effects.trust) {
+      // Trust eases collaboration friction (and distrust adds it)
+      updateFriction('choice-trust', -choice.effects.trust * 0.5);
+    }
+    // Records the choice id into the scenario result's basMetrics and
+    // accumulates solidarity/relationship/federation deltas
+    recordChoice(choice.id, choice.effects);
+    setChoiceOutcome(choice.outcome);
+    audioManager.playClick?.();
+  };
+
+  const handleChoiceContinue = () => {
+    setActiveChoice(null);
+    setChoiceOutcome(null);
+    resumeScenario();
     audioManager.playClick?.();
   };
 
@@ -989,7 +1251,7 @@ export const ScenarioPlayground: React.FC = () => {
               <p className="text-[8px] text-slate-500 text-center">
                 {isEngagementScenario
                   ? 'Adjust Autonomy or Information Access to strengthen the engagement signature'
-                  : 'Adjust the Five Axes in the BAMS panel to respond to events'}
+                  : 'Adjust the Five Axes in the BAS panel to respond to events'}
               </p>
             </motion.div>
           )}
@@ -1007,6 +1269,16 @@ export const ScenarioPlayground: React.FC = () => {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Choice Point Modal - pauses the scenario until the player decides */}
+      {activeChoice && (
+        <ChoicePointModal
+          event={activeChoice}
+          outcome={choiceOutcome}
+          onSelect={handleChoiceSelect}
+          onContinue={handleChoiceContinue}
+        />
+      )}
     </motion.div>
   );
 };

@@ -189,9 +189,16 @@ export class HistorianRouter implements IHistorian {
   ): Promise<Record<string, TagHistoryPoint[]>> {
     const result: Record<string, TagHistoryPoint[]> = {};
 
-    // Parallel fetch for all tags
+    // Parallel fetch for all tags. Per-tag isolation: a single tag's local-store
+    // (or remote) rejection must not fail the whole batch and discard every other
+    // tag's blended data (Record partial-result contract).
     const promises = tagIds.map(async (tagId) => {
-      result[tagId] = await this.getBlendedData(tagId, startTime, endTime, mode, options);
+      try {
+        result[tagId] = await this.getBlendedData(tagId, startTime, endTime, mode, options);
+      } catch (err) {
+        logger.warn(`[HistorianRouter] getMultipleTagHistory failed for ${tagId}`, err);
+        result[tagId] = [];
+      }
     });
 
     await Promise.all(promises);
@@ -211,6 +218,16 @@ export class HistorianRouter implements IHistorian {
     const cutoffTime = now - this.localRetentionMs;
     const startMs = startTime.getTime();
     const endMs = endTime.getTime();
+
+    // Validate the time range before delegating to any adapter.
+    // Guards against Invalid Date (.toISOString() throws inside adapters),
+    // reversed ranges (start > end), and non-finite interval/intervalMs options.
+    if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) {
+      logger.warn(
+        `[HistorianRouter] Invalid time range for ${tagId}: ${startTime.toString()} -> ${endTime.toString()}`
+      );
+      return [];
+    }
 
     // Case 1: All data within local retention window
     if (startMs >= cutoffTime) {
@@ -300,6 +317,12 @@ export class HistorianRouter implements IHistorian {
     intervalMs: number
   ): TagHistoryPoint[] {
     if (points.length === 0) return [];
+
+    // A non-positive interval would make the loop below never advance (infinite loop).
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+      logger.warn(`[HistorianRouter] Invalid interpolation interval: ${intervalMs}`);
+      return [];
+    }
 
     const result: TagHistoryPoint[] = [];
     const startMs = startTime.getTime();

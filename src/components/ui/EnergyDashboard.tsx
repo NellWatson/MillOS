@@ -26,6 +26,7 @@ import {
   Gauge,
   Server,
   Shield,
+  GripVertical,
 } from 'lucide-react';
 import { useProductionStore } from '../../stores/productionStore';
 import { useGameSimulationStore } from '../../stores';
@@ -39,6 +40,8 @@ import {
   getMachineEnergy,
 } from '../../utils/energyCalculations';
 import { MachineType } from '../../types';
+
+const SIMULATED_GRID_INTENSITY_KG_PER_KWH = 0.4;
 
 export const EnergyDashboard: React.FC = () => {
   const showEnergyDashboard = useAIConfigStore((state) => state.showEnergyDashboard);
@@ -74,7 +77,7 @@ export const EnergyDashboard: React.FC = () => {
         ? runningMachines.reduce((sum, m) => sum + m.metrics.load, 0) / runningMachines.length
         : 0;
 
-    // Total energy calculation
+    // Total instantaneous demand calculation.
     const totalEnergy = emergencyActive
       ? emergencyLoad.total
       : Math.round(totalMachineEnergy + facilityLoad.total);
@@ -87,8 +90,8 @@ export const EnergyDashboard: React.FC = () => {
     const rate = isPeakHours ? 0.15 : 0.08;
     const estimatedCostPerHour = totalEnergy * rate;
 
-    // Carbon footprint: ~0.4 kg CO2 per kWh (UK grid average)
-    const carbonKg = totalEnergy * 0.4;
+    // Scenario estimate. This is an explicit simulation factor, not live grid data.
+    const carbonKg = totalEnergy * SIMULATED_GRID_INTENSITY_KG_PER_KWH;
 
     return {
       machineStats,
@@ -133,7 +136,7 @@ export const EnergyDashboard: React.FC = () => {
             <Zap className="w-4 h-4 text-emerald-400" />
           </div>
           <span className="text-sm font-medium text-white">Energy Dashboard</span>
-          <span className="text-[9px] text-slate-500">⋮⋮</span>
+          <GripVertical className="w-3 h-3 text-slate-500" aria-hidden="true" />
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-slate-400 font-mono">{formatTime(metrics.hour)}</span>
@@ -170,19 +173,19 @@ export const EnergyDashboard: React.FC = () => {
                 <div className="text-red-300 font-mono">
                   {formatNumber(metrics.emergencyLoad.lighting)}
                 </div>
-                <div className="text-slate-500">Lighting (30%)</div>
+                <div className="text-slate-400">Lighting (30%)</div>
               </div>
               <div className="text-center">
                 <div className="text-red-300 font-mono">
                   {formatNumber(metrics.emergencyLoad.hvac)}
                 </div>
-                <div className="text-slate-500">HVAC (50%)</div>
+                <div className="text-slate-400">HVAC (50%)</div>
               </div>
               <div className="text-center">
                 <div className="text-red-300 font-mono">
                   {formatNumber(metrics.emergencyLoad.baseSystems)}
                 </div>
-                <div className="text-slate-500">Base Systems</div>
+                <div className="text-slate-400">Base Systems</div>
               </div>
             </div>
           </div>
@@ -194,10 +197,10 @@ export const EnergyDashboard: React.FC = () => {
             className={`text-3xl font-bold ${emergencyActive ? 'text-red-400' : 'text-emerald-400'}`}
           >
             {formatNumber(metrics.totalEnergy)}
-            <span className="text-sm font-normal text-slate-400 ml-1">kWh</span>
+            <span className="text-sm font-normal text-slate-400 ml-1">kW</span>
           </div>
-          <div className="text-[10px] text-slate-500 mt-0.5">
-            {emergencyActive ? 'Emergency consumption' : 'Current consumption'}
+          <div className="text-[10px] text-slate-400 mt-0.5">
+            {emergencyActive ? 'Emergency demand' : 'Current demand'}
           </div>
         </div>
 
@@ -205,16 +208,24 @@ export const EnergyDashboard: React.FC = () => {
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-xs font-medium text-slate-300">
             <Factory className="w-3.5 h-3.5 text-cyan-400" />
-            Machine Energy (kWh)
+            Machine Demand (kW)
           </div>
           <div className="bg-slate-800/50 rounded-lg overflow-hidden">
             <table className="w-full text-[10px]">
               <thead>
                 <tr className="border-b border-slate-700/50">
-                  <th className="text-left py-1.5 px-2 text-slate-400 font-normal">Type</th>
-                  <th className="text-center py-1.5 px-1 text-green-400 font-normal">Running</th>
-                  <th className="text-center py-1.5 px-1 text-slate-500 font-normal">Idle</th>
-                  <th className="text-right py-1.5 px-2 text-cyan-400 font-normal">Now</th>
+                  <th scope="col" className="text-left py-1.5 px-2 text-slate-400 font-normal">
+                    Type
+                  </th>
+                  <th scope="col" className="text-center py-1.5 px-1 text-green-400 font-normal">
+                    Running
+                  </th>
+                  <th scope="col" className="text-center py-1.5 px-1 text-slate-500 font-normal">
+                    Idle
+                  </th>
+                  <th scope="col" className="text-right py-1.5 px-2 text-cyan-400 font-normal">
+                    Now
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -268,7 +279,7 @@ export const EnergyDashboard: React.FC = () => {
                   style={{ width: `${metrics.avgLoadFactor}%` }}
                 />
               </div>
-              <div className="text-[9px] text-slate-500 mt-1">70-100% of base energy</div>
+              <div className="text-[9px] text-slate-400 mt-1">70-100% of base energy</div>
             </div>
 
             {/* Warning Status */}
@@ -292,7 +303,7 @@ export const EnergyDashboard: React.FC = () => {
               >
                 {metrics.warningCount > 0 ? `+10% (${metrics.warningCount})` : 'None'}
               </div>
-              <div className="text-[9px] text-slate-500">Inefficient operation</div>
+              <div className="text-[9px] text-slate-400">Inefficient operation</div>
             </div>
 
             {/* Maintenance Due */}
@@ -318,7 +329,7 @@ export const EnergyDashboard: React.FC = () => {
                   ? `+5-25% (${metrics.maintenanceDueCount})`
                   : 'None'}
               </div>
-              <div className="text-[9px] text-slate-500">Within 24hrs</div>
+              <div className="text-[9px] text-slate-400">Within 24hrs</div>
             </div>
 
             {/* Overdue Maintenance */}
@@ -342,7 +353,7 @@ export const EnergyDashboard: React.FC = () => {
               >
                 {metrics.overdueCount > 0 ? `+25% (${metrics.overdueCount})` : 'None'}
               </div>
-              <div className="text-[9px] text-slate-500">Max penalty</div>
+              <div className="text-[9px] text-slate-400">Max penalty</div>
             </div>
           </div>
         </div>
@@ -360,11 +371,11 @@ export const EnergyDashboard: React.FC = () => {
                 <Lightbulb className="w-3.5 h-3.5 text-yellow-400" />
                 <div>
                   <span className="text-slate-300">Lighting</span>
-                  <div className="text-[9px] text-slate-500">8 kWh day → 35 kWh night</div>
+                  <div className="text-[9px] text-slate-400">8 kW day to 35 kW night</div>
                 </div>
               </div>
               <span className="text-yellow-400 font-mono">
-                {formatNumber(metrics.facilityLoad.lighting)} kWh
+                {formatNumber(metrics.facilityLoad.lighting)} kW
               </span>
             </div>
 
@@ -374,11 +385,11 @@ export const EnergyDashboard: React.FC = () => {
                 <ThermometerSun className="w-3.5 h-3.5 text-orange-400" />
                 <div>
                   <span className="text-slate-300">HVAC</span>
-                  <div className="text-[9px] text-slate-500">20→30→45→35 kWh curve</div>
+                  <div className="text-[9px] text-slate-400">20 to 30 to 45 to 35 kW curve</div>
                 </div>
               </div>
               <span className="text-orange-400 font-mono">
-                {formatNumber(metrics.facilityLoad.hvac)} kWh
+                {formatNumber(metrics.facilityLoad.hvac)} kW
               </span>
             </div>
 
@@ -388,10 +399,10 @@ export const EnergyDashboard: React.FC = () => {
                 <Shield className="w-3.5 h-3.5 text-slate-400" />
                 <div>
                   <span className="text-slate-300">Other</span>
-                  <div className="text-[9px] text-slate-500">Security, IT, fire systems</div>
+                  <div className="text-[9px] text-slate-400">Security, IT, fire systems</div>
                 </div>
               </div>
-              <span className="text-slate-400 font-mono">{metrics.facilityLoad.other} kWh</span>
+              <span className="text-slate-400 font-mono">{metrics.facilityLoad.other} kW</span>
             </div>
           </div>
         </div>
@@ -399,12 +410,12 @@ export const EnergyDashboard: React.FC = () => {
         {/* Cost & Carbon */}
         <div className="pt-2 border-t border-slate-700/50 space-y-2">
           <div className="flex items-center justify-between text-xs">
-            <span className="text-slate-400">Est. Cost/hr</span>
+            <span className="text-slate-400">Simulation cost / h</span>
             <span
               className={`font-mono ${metrics.isPeakHours ? 'text-amber-400' : 'text-emerald-400'}`}
             >
               ${formatNumber(metrics.estimatedCostPerHour, 2)}
-              <span className="text-[9px] text-slate-500 ml-1">
+              <span className="text-[9px] text-slate-400 ml-1">
                 ({metrics.isPeakHours ? '$0.15' : '$0.08'}/kWh)
               </span>
             </span>
@@ -412,11 +423,14 @@ export const EnergyDashboard: React.FC = () => {
           <div className="flex items-center justify-between text-xs">
             <div className="flex items-center gap-1.5">
               <Leaf className="w-3 h-3 text-green-400" />
-              <span className="text-slate-400">Carbon/hr</span>
+              <span className="text-slate-400">Scenario carbon / h</span>
             </div>
             <span className="text-green-400 font-mono">
               {formatNumber(metrics.carbonKg)} kg CO₂
             </span>
+          </div>
+          <div className="text-[9px] text-slate-500 text-right">
+            Simulation factor: {SIMULATED_GRID_INTENSITY_KG_PER_KWH.toFixed(2)} kg CO₂/kWh
           </div>
         </div>
 

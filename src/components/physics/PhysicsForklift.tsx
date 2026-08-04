@@ -13,6 +13,8 @@ import * as THREE from 'three';
 import { positionRegistry } from '../../utils/positionRegistry';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useSafetyStore } from '../../stores/safetyStore';
+import { useProductionStore } from '../../stores/productionStore';
+import { isForkliftSimulationPaused } from '../../simulation/forkliftRoute';
 import {
   PHYSICS_CONFIG,
   COLLISION_FILTERS,
@@ -84,6 +86,7 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
   const operationRef = useRef<ForkliftOperation>('traveling');
   const operationTimerRef = useRef(0);
   const operationDurationRef = useRef(0);
+  const operationCargoTransferredRef = useRef(false);
 
   // Direction tracking for position registry
   const directionRef = useRef(new THREE.Vector3());
@@ -94,7 +97,10 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
   // Game state
   const isTabVisible = useGameSimulationStore((s) => s.isTabVisible);
   const emergencyDrillMode = useGameSimulationStore((s) => s.emergencyDrillMode);
+  const gameSpeed = useGameSimulationStore((s) => s.gameSpeed);
   const forkliftEmergencyStop = useSafetyStore((s) => s.forkliftEmergencyStop);
+  const productionSpeed = useProductionStore((s) => s.productionSpeed);
+  const simulationPaused = isForkliftSimulationPaused(productionSpeed, gameSpeed);
 
   // Collision groups
   const collisionGroups = useMemo(
@@ -126,9 +132,13 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
       const pos = rigidBodyRef.current.translation();
       const dir = directionRef.current;
 
-      // isStopped should include emergency drill mode AND loading/unloading operations
-      // This ensures workers treat halted forklifts (during operations) correctly
-      const isStopped = emergencyDrillMode || operationRef.current !== 'traveling';
+      // isStopped should include emergency drill mode, standalone E-stop, AND loading/unloading operations
+      // This ensures workers treat halted forklifts (during operations or E-stop) correctly
+      const isStopped =
+        emergencyDrillMode ||
+        forkliftEmergencyStop ||
+        simulationPaused ||
+        operationRef.current !== 'traveling';
 
       // Register with position registry for collision avoidance
       positionRegistry.register(data.id, pos.x, pos.z, 'forklift', dir.x, dir.z, isStopped);
@@ -136,7 +146,7 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
       // Notify parent of position update
       onPositionUpdate?.(pos.x, pos.z, rotation);
     },
-    [data.id, emergencyDrillMode, onPositionUpdate]
+    [data.id, emergencyDrillMode, forkliftEmergencyStop, onPositionUpdate, simulationPaused]
   );
 
   useFrame((_state, delta) => {
@@ -145,6 +155,7 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
     const rb = rigidBodyRef.current;
     const pos = rb.translation();
     const cappedDelta = Math.min(delta, 0.1);
+    const simulationDelta = cappedDelta * Math.max(0, productionSpeed);
 
     frameCountRef.current++;
 
@@ -156,16 +167,23 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
       return;
     }
 
+    if (simulationPaused) {
+      rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      updatePosition(0);
+      return;
+    }
+
     // === LOADING/UNLOADING OPERATION ===
     if (operationRef.current !== 'traveling') {
-      operationTimerRef.current += cappedDelta;
+      operationTimerRef.current += simulationDelta;
 
       // Guard against zero/negative duration to prevent NaN
       const duration = Math.max(0.1, operationDurationRef.current);
       const progress = Math.min(1, operationTimerRef.current / duration);
 
       // Toggle cargo at midpoint
-      if (progress >= 0.5 && progress < 0.5 + cappedDelta / operationDurationRef.current) {
+      if (progress >= 0.5 && !operationCargoTransferredRef.current) {
+        operationCargoTransferredRef.current = true;
         if (operationRef.current === 'loading') {
           setHasCargo(true);
         } else if (operationRef.current === 'unloading') {
@@ -176,6 +194,7 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
       // Operation complete
       if (progress >= 1) {
         operationTimerRef.current = 0;
+        operationCargoTransferredRef.current = false;
         operationRef.current = 'traveling';
         onOperationChange?.('traveling');
 
@@ -203,6 +222,15 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
 
     // Check if arrived at waypoint
     if (distance < 0.5) {
+      // Defensive: pathActions may be shorter than path if the two arrays ever
+      // diverge (e.g. a route edited in one array only). Without this guard,
+      // an out-of-range action is undefined and action.type below would throw
+      // inside useFrame, killing the render loop. Mirrors ForkliftSystem.tsx.
+      if (pathIndexRef.current >= data.pathActions.length) {
+        pathIndexRef.current = (pathIndexRef.current + 1) % data.path.length;
+        currentTargetRef.current.set(...data.path[pathIndexRef.current]);
+        return;
+      }
       // Check for action at this waypoint
       const action = data.pathActions[pathIndexRef.current];
       const currentlyHasCargo = hasCargoRef.current;
@@ -211,6 +239,7 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
         // Start loading operation
         operationTimerRef.current = 0;
         operationDurationRef.current = action.duration;
+        operationCargoTransferredRef.current = false;
         operationRef.current = 'loading';
         onOperationChange?.('loading');
         rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
@@ -220,6 +249,7 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
         // Start unloading operation
         operationTimerRef.current = 0;
         operationDurationRef.current = action.duration;
+        operationCargoTransferredRef.current = false;
         operationRef.current = 'unloading';
         onOperationChange?.('unloading');
         rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
@@ -236,15 +266,18 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
     const dir = directionRef.current;
     rb.applyImpulse(
       {
-        x: dir.x * PHYSICS_CONFIG.forklift.moveForce * cappedDelta,
+        x: dir.x * PHYSICS_CONFIG.forklift.moveForce * simulationDelta,
         y: 0,
-        z: dir.z * PHYSICS_CONFIG.forklift.moveForce * cappedDelta,
+        z: dir.z * PHYSICS_CONFIG.forklift.moveForce * simulationDelta,
       },
       true
     );
 
     // Clamp velocity
-    clampVelocity(rb, PHYSICS_CONFIG.forklift.maxLinearVelocity);
+    clampVelocity(
+      rb,
+      Math.min(data.speed, PHYSICS_CONFIG.forklift.maxLinearVelocity) * productionSpeed
+    );
 
     // Calculate rotation to face direction
     const vel = rb.linvel();

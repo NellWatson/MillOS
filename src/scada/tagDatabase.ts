@@ -1,12 +1,13 @@
 /**
  * SCADA Tag Database for MillOS
  *
- * Complete definition of 90+ SCADA tags covering all 4 production zones:
+ * Complete definition of 86 SCADA tags covering all 4 production zones:
  * - Zone 1: Silos (raw material storage)
  * - Zone 2: Roller Mills (milling floor)
  * - Zone 3: Plansifters (sifting)
  * - Zone 4: Packers (packaging)
  * - Utility: Ambient and system-wide measurements
+ * - Operations: Conserved material flow, dispatch and maintenance supply
  *
  * Naming Convention: AREA.TAG_TYPE.INSTANCE.ATTRIBUTE
  * - AREA: Equipment area (SILO_ALPHA, RM101, SIFTER_A, PACKER_1, AMBIENT, UTILITY)
@@ -125,11 +126,11 @@ const siloTags: TagDefinition[] = SILO_NAMES.flatMap((name, idx) => [
 ]);
 
 // ============================================================================
-// Zone 2: Roller Mills (6 mills x 6 tags = 36 tags)
+// Zone 2: Roller Mills (4 mills x 6 tags = 24 tags)
 // ============================================================================
 
-const MILL_IDS = ['rm-101', 'rm-102', 'rm-103', 'rm-104', 'rm-105', 'rm-106'];
-const MILL_NUMBERS = ['101', '102', '103', '104', '105', '106'];
+const MILL_IDS = ['rm-101', 'rm-102', 'rm-103', 'rm-104'];
+const MILL_NUMBERS = ['101', '102', '103', '104'];
 
 const rollerMillTags: TagDefinition[] = MILL_NUMBERS.flatMap((num, idx) => [
   // Roll Speed
@@ -686,18 +687,165 @@ const utilityTags: TagDefinition[] = [
   },
 ];
 
+/** Stable IDs used by the material-flow bridge and operator workspace. */
+export const OPERATION_TAG_IDS = {
+  rawInventory: 'OPERATIONS.WT001.PV',
+  inProcess: 'OPERATIONS.WT002.PV',
+  finishedGoods: 'OPERATIONS.WT003.PV',
+  packerFlow: 'OPERATIONS.FT001.PV',
+  materialBalanceError: 'OPERATIONS.WT004.PV',
+  lastReceiving: 'OPERATIONS.WT005.PV',
+  lastShipping: 'OPERATIONS.WT006.PV',
+  partsStock: 'MAINT.QT001.PV',
+  shippingReleased: 'QUALITY.ZS001.PV',
+} as const;
+
+const operationalTags: TagDefinition[] = [
+  {
+    id: OPERATION_TAG_IDS.rawInventory,
+    name: 'Raw Grain Inventory',
+    description: 'Conserved grain held in the five intake silos',
+    dataType: 'FLOAT32',
+    accessMode: 'READ',
+    engUnit: 't',
+    engLow: 0,
+    engHigh: 250,
+    alarmLo: 25,
+    alarmLoLo: 10,
+    deadband: 1,
+    machineId: 'operations',
+    group: 'WEIGHT',
+    simulation: { baseValue: 100, noiseAmplitude: 0, driftRate: 0 },
+  },
+  {
+    id: OPERATION_TAG_IDS.inProcess,
+    name: 'Material In Process',
+    description: 'Material in machine buffers and conveyor transit',
+    dataType: 'FLOAT32',
+    accessMode: 'READ',
+    engUnit: 't',
+    engLow: 0,
+    engHigh: 60,
+    machineId: 'operations',
+    group: 'WEIGHT',
+    simulation: { baseValue: 5, noiseAmplitude: 0, driftRate: 0 },
+  },
+  {
+    id: OPERATION_TAG_IDS.finishedGoods,
+    name: 'Finished Goods Inventory',
+    description: 'Packaged flour and semolina awaiting dispatch',
+    dataType: 'FLOAT32',
+    accessMode: 'READ',
+    engUnit: 't',
+    engLow: 0,
+    engHigh: 15,
+    machineId: 'operations',
+    group: 'WEIGHT',
+    simulation: { baseValue: 0.6, noiseAmplitude: 0, driftRate: 0 },
+  },
+  {
+    id: OPERATION_TAG_IDS.packerFlow,
+    name: 'Final Packing Flow',
+    description: 'Causal final-stage production throughput',
+    dataType: 'FLOAT32',
+    accessMode: 'READ',
+    engUnit: 't/h',
+    engLow: 0,
+    engHigh: 400,
+    machineId: 'operations',
+    group: 'FLOW',
+    simulation: { baseValue: 270, noiseAmplitude: 0, driftRate: 0 },
+  },
+  {
+    id: OPERATION_TAG_IDS.materialBalanceError,
+    name: 'Material Balance Error',
+    description: 'Difference between expected and accounted conserved material',
+    dataType: 'FLOAT64',
+    accessMode: 'READ',
+    engUnit: 'kg',
+    engLow: -100,
+    engHigh: 100,
+    alarmHi: 5,
+    alarmHiHi: 20,
+    alarmLo: -5,
+    alarmLoLo: -20,
+    deadband: 0.1,
+    machineId: 'operations',
+    group: 'WEIGHT',
+    simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+  },
+  {
+    id: OPERATION_TAG_IDS.lastReceiving,
+    name: 'Last Receiving Manifest',
+    description: 'Actual grain mass unloaded by the latest receiving truck',
+    dataType: 'FLOAT32',
+    accessMode: 'READ',
+    engUnit: 't',
+    engLow: 0,
+    engHigh: 20,
+    machineId: 'operations',
+    group: 'WEIGHT',
+    simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+  },
+  {
+    id: OPERATION_TAG_IDS.lastShipping,
+    name: 'Last Shipping Manifest',
+    description: 'Actual finished-goods mass loaded by the latest shipping truck',
+    dataType: 'FLOAT32',
+    accessMode: 'READ',
+    engUnit: 't',
+    engLow: 0,
+    engHigh: 10,
+    machineId: 'operations',
+    group: 'WEIGHT',
+    simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+  },
+  {
+    id: OPERATION_TAG_IDS.partsStock,
+    name: 'Maintenance Parts Stock',
+    description: 'Total on-hand bearings, belts, filters, motors and sensors',
+    dataType: 'INT16',
+    accessMode: 'READ',
+    engUnit: 'items',
+    engLow: 0,
+    engHigh: 100,
+    alarmLo: 10,
+    alarmLoLo: 5,
+    deadband: 1,
+    machineId: 'maintenance',
+    group: 'STATUS',
+    simulation: { baseValue: 50, noiseAmplitude: 0, driftRate: 0 },
+  },
+  {
+    id: OPERATION_TAG_IDS.shippingReleased,
+    name: 'Shipping Quality Release',
+    description: 'QC interlock: 1 permits dispatch, 0 holds the shipping truck',
+    dataType: 'BOOL',
+    accessMode: 'READ',
+    engUnit: 'released',
+    engLow: 0,
+    engHigh: 1,
+    alarmLo: 0.5,
+    deadband: 0,
+    machineId: 'quality',
+    group: 'STATUS',
+    simulation: { baseValue: 1, noiseAmplitude: 0, driftRate: 0 },
+  },
+];
+
 // ============================================================================
 // Complete Tag Database Export
 // ============================================================================
 
-/** All SCADA tags for MillOS (90+ tags) */
+/** All SCADA tags for MillOS (87 tags) */
 export const MILL_TAGS: TagDefinition[] = [
   ...siloTags, // 20 tags
-  ...rollerMillTags, // 36 tags
+  ...rollerMillTags, // 24 tags (4 mills x 6)
   ...plansifterTags, // 12 tags
   ...packerTags, // 12 tags
   ...utilityTags, // 10 tags
-]; // Total: 90 tags
+  ...operationalTags, // 9 tags
+]; // Total: 87 tags
 
 /** Get tags by machine ID */
 export function getTagsByMachine(machineId: string): TagDefinition[] {
@@ -730,6 +878,6 @@ export function getTagsWithAlarms(): TagDefinition[] {
   );
 }
 
-// Tag database loaded: 90 tags total
-// Zone 1 (Silos): 20 tags, Zone 2 (Mills): 36 tags, Zone 3 (Sifters): 12 tags
-// Zone 4 (Packers): 12 tags, Utility: 10 tags
+// Tag database loaded: 86 tags total
+// Zone 1 (Silos): 20 tags, Zone 2 (Mills): 24 tags, Zone 3 (Sifters): 12 tags
+// Zone 4 (Packers): 12 tags, Utility: 10 tags, Operations: 8 tags

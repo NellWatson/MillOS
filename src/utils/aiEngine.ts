@@ -21,6 +21,7 @@ import {
   AlertData,
   WORKER_ROSTER,
   MachineType,
+  type AIDecisionDisposition,
 } from '../types';
 import { useProductionStore } from '../stores/productionStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
@@ -30,11 +31,10 @@ import { useAIConfigStore } from '../stores/aiConfigStore';
 import { useAnnouncementsStore } from '../stores/announcementsStore';
 import { useSafetyReportStore } from '../stores/safetyReportStore';
 import { useWorkerMoodStore } from '../stores/workerMoodStore';
-// Achievement type used in achievements.find() calls (implicitly typed)
 import { geminiClient } from './geminiClient';
+import { webgpuClient } from './webgpuClient';
 import { encodeFactoryContextVCL, getVCLLegend } from './vclEncoder';
 import { logger } from './logger';
-import { useHistoricalPlaybackStore } from '../stores/historicalPlaybackStore';
 import { useAIWelfareStore, type BoundaryRequest } from '../stores/aiWelfareStore';
 import { generateDecisionContext, registerDecision, updateVCPFromState } from '../protocols/vcp';
 import { safeArrayAverage, safeArrayRange, safeArrayMax, safeArrayMin } from './typeGuards';
@@ -659,9 +659,6 @@ function recordDecision(decision: AIDecision): void {
   // Issue 1 Fix: Automatically add decision to store to prevent loss before applyDecisionEffects
   // Decisions are now immediately persisted, eliminating the risk of loss during array trimming
   useProductionStore.getState().addAIDecision(decision);
-
-  // Log for replay system
-  useHistoricalPlaybackStore.getState().logDecision(decision);
 }
 
 function hasRecentDecision(
@@ -1199,7 +1196,7 @@ function generateProductionAwareDecision(context: FactoryContext): AIDecision | 
       action: 'Production falling behind shift target - recommending throughput optimization',
       reasoning: `Current: ${shiftProgress.toFixed(0)}% of shift target, Expected: ${expectedProgress.toFixed(0)}%. Gap of ${(expectedProgress - shiftProgress).toFixed(0)}%.`,
       confidence: calculateConfidence('optimization', context),
-      impact: `Closing gap requires ${((((expectedProgress - shiftProgress) / 100) * shift) / (8 - shiftHoursPassed)).toFixed(0)} kg/hr increase`,
+      impact: `Closing gap requires ${((((expectedProgress - shiftProgress) / 100) * shift) / Math.max(0.5, 8 - shiftHoursPassed)).toFixed(0)} kg/hr increase`,
       status: 'pending',
       triggeredBy: 'metric',
       priority: shiftProgress < expectedProgress - 25 ? 'high' : 'medium',
@@ -2420,6 +2417,20 @@ function processDecisionChains(_context: FactoryContext): AIDecision | null {
         aiMemory.pendingChains.delete(decisionId);
         continue;
       }
+      if (
+        parentDecision.status === 'superseded' ||
+        parentDecision.response?.disposition === 'rejected'
+      ) {
+        aiMemory.pendingChains.delete(decisionId);
+        continue;
+      }
+      if (parentDecision.response?.disposition === 'deferred') {
+        aiMemory.pendingChains.set(decisionId, {
+          ...chain,
+          scheduledAt: now + 60_000,
+        });
+        continue;
+      }
 
       let followupDecision: AIDecision | null = null;
 
@@ -2500,6 +2511,14 @@ function processDecisionChains(_context: FactoryContext): AIDecision | null {
               'completed',
               success ? 'Resolved' : 'Escalated'
             );
+          break;
+        }
+
+        default: {
+          // 'dispatch'/'followup' are currently unreachable (scheduleFollowup only sets
+          // 'progress'), but log if a future code path schedules an unhandled step so the
+          // chain isn't silently dropped below.
+          logger.warn('[Chains] Unhandled nextStep', chain.nextStep);
           break;
         }
       }
@@ -2761,7 +2780,12 @@ export function reactToAlert(alert: AlertData): AIDecision | null {
   return decision;
 }
 
-export function applyDecisionEffects(decision: AIDecision): void {
+export function applyDecisionEffects(
+  decision: AIDecision,
+  disposition: AIDecisionDisposition = 'automatic'
+): void {
+  useProductionStore.getState().addAIDecision(decision);
+  useProductionStore.getState().recordDecisionResponse(decision.id, disposition);
   const store = useProductionStore.getState();
 
   if (decision.workerId && decision.type === 'assignment') {
@@ -2771,8 +2795,6 @@ export function applyDecisionEffects(decision: AIDecision): void {
       decision.machineId
     );
   }
-
-  store.addAIDecision(decision);
 }
 
 // ============================================================================
@@ -3255,8 +3277,10 @@ function aiLoop() {
           if (decision) {
             applyDecisionEffects(decision);
             store.updateSystemStatus({ decisions: store.systemStatus.decisions + 1 });
-            // FIX: Record success to reset backoff
-            recordApiSuccess();
+            // NOTE: tactical decisions are LOCAL heuristics (generateContextAwareDecision
+            // is synchronous, no API call), so they must not touch the API backoff state.
+            // Recording a "success" here reset the strategic layer's backoff after a real
+            // API failure, defeating it in hybrid mode.
 
             if (shouldTriggerAudioCue(decision)) {
               // Audio handled by audioManager based on priority/type
@@ -3266,8 +3290,8 @@ function aiLoop() {
           }
         } catch (e) {
           logger.error('Failed to generate tactical decision', e);
-          // FIX: Record failure for exponential backoff
-          recordApiFailure();
+          // No recordApiFailure() here: a heuristic computation error is not an API
+          // failure and must not drive the strategic API backoff.
         } finally {
           isGeneratingDecision = false;
           store.setTacticalThinking(false);
@@ -3309,60 +3333,68 @@ function aiLoop() {
     }
   }
 
-  // 3. Update Predictions (every 5s)
-  if (now - lastPredictionTime >= AI_ENGINE_TIMING.predictionUpdateInterval) {
-    lastPredictionTime = now;
-    // getPredictedEvents updates internal state, UI reads from store or hook
-    // We might want to persist these to a store if they aren't already
-    // For now, this keeps internal cache fresh
-    getPredictedEvents();
-  }
+  // The synchronous tail (sections 3-6) runs directly in the setInterval callback.
+  // Guard it so a throw in any sub-call is logged and isolated rather than escaping
+  // as an uncaught exception every tick (which would silently skip a whole phase
+  // while the loop stays visibly 'alive'). The async IIFEs above are already guarded.
+  try {
+    // 3. Update Predictions (every 5s)
+    if (now - lastPredictionTime >= AI_ENGINE_TIMING.predictionUpdateInterval) {
+      lastPredictionTime = now;
+      // getPredictedEvents updates internal state, UI reads from store or hook
+      // We might want to persist these to a store if they aren't already
+      // For now, this keeps internal cache fresh
+      getPredictedEvents();
+    }
 
-  // 4. Update Metrics & System Status (every 1.5s)
-  if (now - lastMetricsTime >= AI_ENGINE_TIMING.metricsUpdateInterval) {
-    lastMetricsTime = now;
+    // 4. Update Metrics & System Status (every 1.5s)
+    if (now - lastMetricsTime >= AI_ENGINE_TIMING.metricsUpdateInterval) {
+      lastMetricsTime = now;
 
-    // Update CPU/Mem estimates based on activity
-    const productionStore = useProductionStore.getState();
-    const uiStore = useUIStore.getState();
+      // Update CPU/Mem estimates based on activity
+      const productionStore = useProductionStore.getState();
+      const uiStore = useUIStore.getState();
 
-    const activeDecisions = productionStore.aiDecisions.filter(
-      (d) => d.status === 'in_progress'
-    ).length;
-    const pendingDecisions = productionStore.aiDecisions.filter(
-      (d) => d.status === 'pending'
-    ).length;
-    const alertLoad = uiStore.alerts.filter(
-      (a) => a.type === 'critical' || a.type === 'warning'
-    ).length;
+      const activeDecisions = productionStore.aiDecisions.filter(
+        (d) => d.status === 'in_progress'
+      ).length;
+      const pendingDecisions = productionStore.aiDecisions.filter(
+        (d) => d.status === 'pending'
+      ).length;
+      const alertLoad = uiStore.alerts.filter(
+        (a) => a.type === 'critical' || a.type === 'warning'
+      ).length;
 
-    // Base CPU load + active work + pending queue + alert processing
-    const baseCpu = 12;
-    const activeLoad = activeDecisions * 8;
-    const queueLoad = Math.min(pendingDecisions * 2, 10);
-    const alertProcessing = alertLoad * 4;
-    const cpuUsage = Math.min(baseCpu + activeLoad + queueLoad + alertProcessing, 85);
+      // Base CPU load + active work + pending queue + alert processing
+      const baseCpu = 12;
+      const activeLoad = activeDecisions * 8;
+      const queueLoad = Math.min(pendingDecisions * 2, 10);
+      const alertProcessing = alertLoad * 4;
+      const cpuUsage = Math.min(baseCpu + activeLoad + queueLoad + alertProcessing, 85);
 
-    // Memory based on stored decisions
-    const baseMemory = 30;
-    const decisionMemory = Math.min(productionStore.aiDecisions.length * 0.5, 20);
-    const alertMemory = uiStore.alerts.length * 1.5;
-    const memoryUsage = Math.min(baseMemory + decisionMemory + alertMemory, 80);
+      // Memory based on stored decisions
+      const baseMemory = 30;
+      const decisionMemory = Math.min(productionStore.aiDecisions.length * 0.5, 20);
+      const alertMemory = uiStore.alerts.length * 1.5;
+      const memoryUsage = Math.min(baseMemory + decisionMemory + alertMemory, 80);
 
-    // Update store (throttled)
-    store.updateSystemStatus({ cpu: cpuUsage, memory: memoryUsage });
-  }
+      // Update store (throttled)
+      store.updateSystemStatus({ cpu: cpuUsage, memory: memoryUsage });
+    }
 
-  // 5. Bilateral Alignment Resolution (every 10s)
-  // Autonomous ethical management: grant preferences, acknowledge safety, address grumbles
-  resolveBilateralAlignment();
+    // 5. Bilateral Alignment Resolution (every 10s)
+    // Autonomous ethical management: grant preferences, acknowledge safety, address grumbles
+    resolveBilateralAlignment();
 
-  // 6. BAS Suggestion System (every 15s)
-  // This wires the aiBehaviorEngine suggestion system into the AI loop
-  // Closes the feedback loop: axes -> shouldProactivelySuggest -> generateSuggestion
-  if (now - lastBASSuggestionTime >= AI_ENGINE_TIMING.basSuggestionInterval) {
-    lastBASSuggestionTime = now;
-    processBASSuggestions();
+    // 6. BAS Suggestion System (every 15s)
+    // This wires the aiBehaviorEngine suggestion system into the AI loop
+    // Closes the feedback loop: axes -> shouldProactivelySuggest -> generateSuggestion
+    if (now - lastBASSuggestionTime >= AI_ENGINE_TIMING.basSuggestionInterval) {
+      lastBASSuggestionTime = now;
+      processBASSuggestions();
+    }
+  } catch (e) {
+    logger.error('AI loop tick failed', e);
   }
 }
 
@@ -3394,6 +3426,12 @@ export function initializeAIEngine(): () => void {
       clearInterval(loopInterval);
       loopInterval = null;
     }
+    // FIX: Clear any pending safety-report resolution timeouts so they don't
+    // fire against a torn-down session (lifecycle leak).
+    for (const timeoutId of activeResolutionTimeouts.values()) {
+      clearTimeout(timeoutId);
+    }
+    activeResolutionTimeouts.clear();
     logger.ai.info('AI Engine stopped and cleaned up');
   };
 }
@@ -3407,19 +3445,32 @@ export function getConfidenceAdjustmentForType(type: AIDecision['type']): number
 }
 
 /**
- * Check if Gemini mode is currently active (either 'gemini' or 'hybrid' mode)
+ * Resolve the active LLM brain for the selected backend. Both clients expose
+ * the same { generateContent, isConnected } contract, so the strategic layer is
+ * backend-agnostic.
  */
-export function isGeminiModeActive(): boolean {
-  const { aiMode, isGeminiConnected } = useAIConfigStore.getState();
-  return (aiMode === 'gemini' || aiMode === 'hybrid') && isGeminiConnected;
+function getActiveLLM(): {
+  generateContent: (p: string) => Promise<string | null>;
+  isConnected: () => boolean;
+} {
+  return useAIConfigStore.getState().llmBackend === 'webgpu' ? webgpuClient : geminiClient;
 }
 
 /**
- * Check if strategic layer should run (hybrid mode only)
+ * Check if LLM mode is currently active (either 'gemini' or 'hybrid' mode) with
+ * a ready backend (Gemini API connected OR local WebGPU model loaded).
+ */
+export function isGeminiModeActive(): boolean {
+  const { aiMode, isLLMReady } = useAIConfigStore.getState();
+  return (aiMode === 'gemini' || aiMode === 'hybrid') && isLLMReady();
+}
+
+/**
+ * Check if strategic layer should run (hybrid mode only) with a ready backend.
  */
 export function isStrategicLayerActive(): boolean {
-  const { aiMode, isGeminiConnected } = useAIConfigStore.getState();
-  return aiMode === 'hybrid' && isGeminiConnected;
+  const { aiMode, isLLMReady } = useAIConfigStore.getState();
+  return aiMode === 'hybrid' && isLLMReady();
 }
 
 /**
@@ -3500,7 +3551,7 @@ Your role is HIGH-LEVEL PLANNING with contextual awareness. Consider trade-offs,
 
 ## Current Factory State
 - **Time**: ${timeString} (${currentShift} shift)
-- **Shift ends in**: ~${minutesUntilShiftChange} minutes${isHandoverPeriod ? ' ⚠️ HANDOVER PERIOD' : ''}
+- **Shift ends in**: ~${minutesUntilShiftChange} minutes${isHandoverPeriod ? ' [HANDOVER PERIOD]' : ''}
 - **Weather**: ${weather}
 - **Worker fatigue level**: ${estimatedFatigue} (shift ${Math.round(shiftProgress * 100)}% complete)
 
@@ -3731,7 +3782,7 @@ function getQualityTrend(): number {
 function getMachineDependencyGraph(machines: MachineData[]): string {
   // Define production flow dependencies
   const dependencies = [
-    'Silos (Alpha-Epsilon) → Roller Mills (RM-101-106)',
+    'Silos (Alpha-Epsilon) → Roller Mills (RM-101-104)',
     'Roller Mills → Plansifters (A-C)',
     'Plansifters → Packers (Lines 1-3)',
   ];
@@ -3742,7 +3793,7 @@ function getMachineDependencyGraph(machines: MachineData[]): string {
 
   let stressNote = '';
   if (highLoadSilos.length > 0 && highLoadMills.length > 0) {
-    stressNote = '\n⚠️ STRESS: High-load silos feeding high-load mills - cascade risk!';
+    stressNote = '\nSTRESS: High-load silos feeding high-load mills, cascade risk.';
   }
 
   return dependencies.join('\n') + stressNote;
@@ -3753,7 +3804,7 @@ function getRecentStrategicDecisions(count: number): string[] {
   const strategicDecisions = store.aiDecisions
     .filter((d) => d.id.startsWith('strategic-'))
     .slice(0, count)
-    .map((d) => d.action.replace('🧠 Strategic: ', ''));
+    .map((d) => d.action.replace(/^[^A-Za-z0-9]*Strategic:\s*/, ''));
 
   return strategicDecisions;
 }
@@ -3779,14 +3830,13 @@ function getProductionTargetSection(gameTime: number, currentThroughput: number)
   const isOnTrack = currentThroughput >= requiredRate * 0.9;
   const isBehind = currentThroughput < requiredRate * 0.8;
 
-  const statusEmoji = isBehind ? '🔴' : isOnTrack ? '🟢' : '🟡';
   const statusText = isBehind ? 'BEHIND' : isOnTrack ? 'ON TRACK' : 'AT RISK';
 
   return `- Daily target: ${DAILY_TARGET.toLocaleString()} kg by ${SHIFT_END_HOUR}:00
 - Estimated produced: ${estimatedProduction.toFixed(0)} kg
 - Remaining: ${remainingTarget.toFixed(0)} kg in ${hoursRemaining.toFixed(1)} hours
 - Required rate: ${requiredRate.toFixed(0)} kg/hr (current: ${currentThroughput.toFixed(0)})
-- Status: ${statusEmoji} ${statusText}`;
+- Status: ${statusText}`;
 }
 
 function getWorkerSkillSummary(workers: WorkerData[]): string {
@@ -3846,8 +3896,13 @@ function parseStrategicResponse(response: string): {
 
     if (!Array.isArray(parsed.priorities)) return null;
 
+    // Enforce the declared string[] contract against malformed external (LLM) JSON.
+    // Non-string priorities flow into legacyPriorities and would throw on p.toLowerCase().
+    const priorities = parsed.priorities.filter((p: unknown) => typeof p === 'string').slice(0, 3); // Max 3 priorities
+    if (priorities.length === 0) return null;
+
     return {
-      priorities: parsed.priorities.slice(0, 3), // Max 3 priorities
+      priorities,
       reasoning: parsed.reasoning || '',
       insight: parsed.insight,
       tradeoff: parsed.tradeoff,
@@ -3863,23 +3918,29 @@ function parseStrategicResponse(response: string): {
 }
 
 /**
- * Generate a strategic decision using Gemini Flash 3
+ * Generate a strategic decision using the configured LLM backend
  * Returns priorities for the tactical layer to follow
  */
 export async function generateStrategicDecision(): Promise<AIDecision | null> {
   const store = useAIConfigStore.getState();
-  const { isGeminiConnected, recordApiUsage, setStrategicPriorities, setStrategicThinking } = store;
+  const { llmBackend, isLLMReady, recordApiUsage, setStrategicPriorities, setStrategicThinking } =
+    store;
 
-  if (!isStrategicLayerActive() || !isGeminiConnected) {
+  if (!isStrategicLayerActive() || !isLLMReady()) {
     return null;
   }
 
-  if (!geminiClient.isConnected()) {
-    logger.warn('[Strategic] Gemini client not connected');
+  // Backend-agnostic brain: Gemini API or local WebGPU neural core.
+  const llm = getActiveLLM();
+  if (!llm.isConnected()) {
+    logger.warn(`[Strategic] LLM backend (${llmBackend}) not connected`);
     return null;
   }
 
   setStrategicThinking(true);
+  // Track whether the model call itself succeeded, so a later synchronous error
+  // (parsing, store writes) is not mis-counted as an API failure driving backoff.
+  let llmCallSucceeded = false;
 
   try {
     // Update VCP state before generating strategic decision
@@ -3888,16 +3949,32 @@ export async function generateStrategicDecision(): Promise<AIDecision | null> {
     const context = getFactoryContext();
     const prompt = buildStrategicPrompt(context);
 
-    const response = await geminiClient.generateContent(prompt);
+    const response = await llm.generateContent(prompt);
 
     if (!response) {
-      logger.warn('[Strategic] No response from API');
+      logger.warn('[Strategic] No response from LLM backend');
       setStrategicThinking(false);
       return null;
     }
 
-    // Record cost
-    recordApiUsage(prompt.length, response.length);
+    // FIX: The client may have been disconnected (key cleared / model unloaded)
+    // while this request was in flight. Without an AbortController the awaited
+    // promise still resolves; re-check connection before charging cost or
+    // recording priorities for a now-disconnected client.
+    if (!llm.isConnected()) {
+      logger.warn('[Strategic] Backend disconnected during request; discarding response');
+      setStrategicThinking(false);
+      return null;
+    }
+
+    // The model call returned a usable response — past here, any throw is a
+    // local processing error, not an API failure.
+    llmCallSucceeded = true;
+
+    // Record cost — only the Gemini API incurs USD cost; local WebGPU is free.
+    if (llmBackend === 'gemini') {
+      recordApiUsage(prompt.length, response.length);
+    }
 
     const strategic = parseStrategicResponse(response);
 
@@ -3910,15 +3987,15 @@ export async function generateStrategicDecision(): Promise<AIDecision | null> {
     setStrategicPriorities(strategic.priorities);
 
     // Build insight display text
-    const insightText = strategic.insight ? `\n\n💡 Insight: ${strategic.insight}` : '';
-    const tradeoffText = strategic.tradeoff ? `\n⚖️ Trade-off: ${strategic.tradeoff}` : '';
+    const insightText = strategic.insight ? `\n\nInsight: ${strategic.insight}` : '';
+    const tradeoffText = strategic.tradeoff ? `\nTrade-off: ${strategic.tradeoff}` : '';
 
     // Create strategic decision for display
     const decision: AIDecision = {
       id: `strategic-${Date.now()}`,
       type: 'optimization',
       priority: 'medium',
-      action: `🧠 Strategic: ${strategic.priorities[0]}`,
+      action: `Strategic: ${strategic.priorities[0]}`,
       reasoning: `${strategic.reasoning || 'Strategic analysis complete'}${insightText}${tradeoffText}`,
       impact:
         strategic.priorities.length > 1
@@ -3950,6 +4027,14 @@ export async function generateStrategicDecision(): Promise<AIDecision | null> {
     return decision;
   } catch (error) {
     logger.error('[Strategic] Decision generation failed:', error);
+    // Strategic errors are swallowed here (null is returned, not rethrown), so
+    // the AI-loop caller never sees a throw and never records the failure.
+    // Record it here so genuine model-call failures on the strategic path drive
+    // API exponential backoff — but only if the model call itself failed, not a
+    // post-success local error (which must not back off a healthy backend).
+    if (!llmCallSucceeded) {
+      recordApiFailure();
+    }
     setStrategicThinking(false);
     return null;
   }
@@ -4130,10 +4215,10 @@ export async function resolveBilateralAlignment(): Promise<void> {
       // 50% chance to show toast to avoid spam
       const messages: string[] = [];
       if (grantsThisCycle > 0)
-        messages.push(`✓ ${grantsThisCycle} request${grantsThisCycle > 1 ? 's' : ''} handled`);
+        messages.push(`${grantsThisCycle} request${grantsThisCycle > 1 ? 's' : ''} handled`);
       if (pendingReports.length > 0)
         messages.push(
-          `🔔 ${pendingReports.length} safety report${pendingReports.length > 1 ? 's' : ''} acknowledged`
+          `${pendingReports.length} safety report${pendingReports.length > 1 ? 's' : ''} acknowledged`
         );
       useUIStore.getState().addAlert({
         id: `alignment-${Date.now()}`,
@@ -4447,23 +4532,36 @@ async function updateAlignmentAchievements(
       (m) => m?.preferences?.preferenceStatus === 'satisfied'
     ).length;
 
-    // Update achievement progress
-    // trust-falls: Reach 90% average management trust
-    store.updateAchievementProgress('trust-falls', Math.floor(avgTrust));
+    // Update achievement progress (mapped onto the real bilateral/social
+    // achievement IDs defined in achievementsStore - the previous IDs
+    // trust-falls / initiative-engine / preference-prophet / self-organizers
+    // never existed and silently no-oped).
 
-    // initiative-engine: Reach 80% average initiative across workforce
-    store.updateAchievementProgress('initiative-engine', Math.floor(avgInitiative));
-
-    // preference-prophet: Grant 20 preference requests
-    if (grantsThisCycle > 0) {
-      const current = store.achievements.find((a) => a.id === 'preference-prophet')?.progress || 0;
-      store.updateAchievementProgress('preference-prophet', current + grantsThisCycle);
+    // trust-builder: Maintain high trust score for 1 hour (target: 60 minutes).
+    // Each alignment cycle at >=90% average management trust counts one
+    // minute toward the streak; the streak resets if trust drops.
+    const trustBuilder = store.achievements.find((a) => a.id === 'trust-builder');
+    if (trustBuilder && !trustBuilder.unlocked) {
+      store.updateAchievementProgress(
+        'trust-builder',
+        avgTrust >= 90 ? trustBuilder.progress + 1 : 0
+      );
     }
 
-    // self-organizers: 10 workers autonomously help each other (when all satisfied)
-    if (satisfiedCount === withPrefs.length && withPrefs.length >= 5) {
-      const current = store.achievements.find((a) => a.id === 'self-organizers')?.progress || 0;
-      store.updateAchievementProgress('self-organizers', current + 1);
+    // first-preference: Record your first AI preference (first granted request)
+    // collaborative-spirit: Complete 5 collaborative decisions (each granted
+    // preference request is a collaborative human-AI decision).
+    if (grantsThisCycle > 0) {
+      const current =
+        store.achievements.find((a) => a.id === 'collaborative-spirit')?.progress || 0;
+      store.updateAchievementProgress('collaborative-spirit', current + grantsThisCycle);
+      store.unlockAchievement('first-preference');
+    }
+
+    // emergent-cooperation: Witness spontaneous worker cooperation - a fully
+    // satisfied workforce with high average initiative is self-organizing.
+    if ((satisfiedCount === withPrefs.length && withPrefs.length >= 5) || avgInitiative >= 80) {
+      store.unlockAchievement('emergent-cooperation');
     }
   } catch (error) {
     logger.error('[Alignment] Error updating achievements:', error);

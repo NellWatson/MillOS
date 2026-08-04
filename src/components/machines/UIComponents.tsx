@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useEffect } from 'react';
+import React, { useRef, useMemo, useEffect, useId } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
@@ -21,6 +21,9 @@ export const ControlPanel: React.FC<{
 
   const ledMaterials = useRef<THREE.MeshStandardMaterial[]>([]);
   const screenMaterial = useRef<THREE.MeshStandardMaterial>(null);
+  // Stable panel identity for the registry, kept constant across status changes
+  // (previously a fresh Math.random() id was generated on every status transition).
+  const panelId = useId();
 
   // Initialize material refs array
   if (ledMaterials.current.length === 0) {
@@ -40,7 +43,7 @@ export const ControlPanel: React.FC<{
   // Register with manager
   useEffect(() => {
     if (!enabled) return;
-    const id = `panel-${Math.random()}`;
+    const id = `panel-${panelId}`;
 
     // Ensure screen material is ready
     if (screenMaterial.current) {
@@ -52,7 +55,7 @@ export const ControlPanel: React.FC<{
     }
 
     return () => unregisterPanel(id);
-  }, [enabled, status]);
+  }, [enabled, status, panelId]);
 
   if (!enabled) return null;
 
@@ -263,13 +266,15 @@ export const SCADAValueOverlay: React.FC<{
   return (
     <Html position={position} center distanceFactor={15}>
       <div className="bg-slate-900/85 backdrop-blur px-2 py-1 rounded border border-slate-700/50 min-w-[80px] pointer-events-none">
-        <div className="text-[8px] text-slate-500 uppercase tracking-wider mb-0.5">SCADA Live</div>
+        <div className="text-[8px] text-slate-500 uppercase tracking-wider mb-0.5">
+          SCADA SIMULATED
+        </div>
         <div className="space-y-0.5">
           {tagValues.temperature !== undefined && (
             <div className="flex items-center justify-between gap-2">
               <span className="text-[9px] text-slate-400">Temp</span>
               <span className="text-[10px] font-mono font-bold" style={{ color: temperatureColor }}>
-                {tagValues.temperature.toFixed(1)}C
+                {tagValues.temperature.toFixed(1)}&deg;C
               </span>
             </div>
           )}

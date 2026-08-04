@@ -22,6 +22,33 @@
 import * as THREE from 'three';
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { gpuResourceManager } from './GPUResourceManager';
+import { useGraphicsStore } from '../stores/graphicsStore';
+
+/**
+ * Anisotropic filtering level for every texture this module uploads.
+ *
+ * `graphics.anisotropyLevel` (1/4/8/16 across the low/medium/high/ultra
+ * presets) is live configuration, not decoration - `TerrainGround` and
+ * `ConveyorSystem` both read it. Without it, mipmapped ground and belt
+ * surfaces go to mush at grazing angles: trilinear filtering picks one mip
+ * per fragment from the worst-axis footprint, so a surface receding toward the
+ * horizon is over-blurred long before it is far away. Anisotropy is the fix
+ * for exactly that, and on any GPU this project targets it is close to free.
+ *
+ * Deliberately NOT capped below the store value: three clamps to
+ * `renderer.capabilities.getMaxAnisotropy()` at upload time anyway, and
+ * capping here would make the JPG and KTX2 paths disagree on sampler state
+ * for the same logical texture.
+ *
+ * @returns The configured level, or 4 if the store is unreachable.
+ */
+export function resolveAnisotropy(): number {
+  try {
+    return Math.max(1, useGraphicsStore.getState().graphics.anisotropyLevel ?? 4);
+  } catch {
+    return 4;
+  }
+}
 
 // Singleton KTX2 loader (reused across all loads)
 let ktx2Loader: KTX2Loader | null = null;
@@ -31,7 +58,9 @@ let isKTX2Supported = true;
 const compressedTextureCache = new Map<string, THREE.CompressedTexture | THREE.Texture | null>();
 
 // Transcoder path (Basis Universal WASM files)
-const TRANSCODER_PATH = '/libs/basis/';
+// Built from BASE_URL so versioned/subpath deploys resolve the WASM correctly
+// (matches the convention in machineTextures.ts / modelLoader.ts).
+const TRANSCODER_PATH = `${import.meta.env.BASE_URL}libs/basis/`;
 
 /**
  * Initialize the KTX2 loader with WebGL renderer
@@ -59,14 +88,24 @@ export function isCompressionAvailable(): boolean {
 /**
  * Load a compressed texture with automatic fallback
  *
+ * Sampler state is resolved once, at load. The cache below is keyed on path
+ * alone, so a later quality change does not re-filter already-resolved
+ * textures - acceptable, because the presets that enable these paths at all
+ * sit at the top of the anisotropy range.
+ *
  * @param ktx2Path Path to the KTX2 file (e.g., '/textures/wood.ktx2')
  * @param fallbackPath Optional fallback path (defaults to same name with .jpg)
  * @param owner Owner ID for GPU resource tracking
+ * @param colorSpace Set for albedo only. Omit for normal/roughness/AO data
+ *   maps, which must stay on three's default. `KTX2Loader` derives this from
+ *   the file's DFD transfer function; `TextureLoader` derives nothing, so the
+ *   fallback path needs it passed in to match.
  */
 export async function loadCompressedTexture(
   ktx2Path: string,
   fallbackPath?: string,
-  owner: string = 'texture-loader'
+  owner: string = 'texture-loader',
+  colorSpace?: THREE.ColorSpace
 ): Promise<THREE.Texture | THREE.CompressedTexture> {
   // Check cache first
   const cacheKey = ktx2Path;
@@ -83,6 +122,8 @@ export async function loadCompressedTexture(
             tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
             tex.minFilter = THREE.LinearMipmapLinearFilter;
             tex.magFilter = THREE.LinearFilter;
+            tex.anisotropy = resolveAnisotropy();
+            if (colorSpace) tex.colorSpace = colorSpace;
             resolve(tex);
           },
           undefined,
@@ -100,17 +141,21 @@ export async function loadCompressedTexture(
 
   // Fallback to standard texture
   const fallback = fallbackPath || ktx2Path.replace('.ktx2', '.jpg');
-  const texture = await loadStandardTexture(fallback, owner);
+  const texture = await loadStandardTexture(fallback, owner, colorSpace);
   compressedTextureCache.set(cacheKey, texture);
   return texture;
 }
 
 /**
  * Load a standard texture (JPG/PNG) with GPU resource tracking
+ *
+ * @param colorSpace Set for albedo only - see `loadCompressedTexture`. Omitted
+ *   by default so existing data-map callers keep three's default behaviour.
  */
 export async function loadStandardTexture(
   path: string,
-  owner: string = 'texture-loader'
+  owner: string = 'texture-loader',
+  colorSpace?: THREE.ColorSpace
 ): Promise<THREE.Texture> {
   return new Promise((resolve, reject) => {
     const loader = new THREE.TextureLoader();
@@ -120,6 +165,8 @@ export async function loadStandardTexture(
         texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
         texture.minFilter = THREE.LinearMipmapLinearFilter;
         texture.magFilter = THREE.LinearFilter;
+        texture.anisotropy = resolveAnisotropy();
+        if (colorSpace) texture.colorSpace = colorSpace;
         gpuResourceManager.register('texture', texture, owner, { priority: 'normal' });
         resolve(texture);
       },

@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "units": "metres",
+  "coordinateSystem": {
+    "up": "+Y",
+    "forward": "+Z",
+    "origin": "bottom-centre"
+  },
+  "assets": [
+    {
+      "id": "forklift",
+      "file": "forklift/forklift.glb",
+      "role": "hero-vehicle",
+      "source": "https://sketchfab.com/3d-models/forklift-d40cae50e04145dd997cdca415cd72ad",
+      "license": "CC-BY-4.0",
+      "attribution": "Forklift by Mantas Stankaitis",
+      "selfContained": true,
+      "maxFileBytes": 460000,
+      "maxMaterials": 6,
+      "maxTextures": 0,
+      "maxRenderVertices": 135000,
+      "bounds": {
+        "width": [0.9, 1.0],
+        "height": [1.75, 1.85],
+        "length": [2.45, 2.6],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "Wheels.B_1",
+        "Wheels.F_3",
+        "lift01_11",
+        "lift02_9",
+        "forklift-hydraulic02-poles-19",
+        "forklift-hydraulic01-poles-23"
+      ],
+      "requiredAnimations": [
+        "fork-cycle",
+        "fork-lower",
+        "fork-raise",
+        "wheels-forward",
+        "wheels-reverse"
+      ]
+    },
+    {
+      "id": "worker",
+      "file": "worker/worker.glb",
+      "role": "compatibility-character",
+      "source": "https://kenney.nl/assets/animated-characters-protagonists",
+      "license": "CC0-1.0",
+      "attribution": "Animated Characters Protagonists by Kenney",
+      "selfContained": true,
+      "maxFileBytes": 100000,
+      "maxMaterials": 1,
+      "maxTextures": 0,
+      "maxRenderVertices": 20000,
+      "bounds": {
+        "width": [1.64, 1.67],
+        "height": [1.7, 1.73],
+        "length": [0.47, 0.49],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": ["Root", "Hips", "Head", "characterMedium"],
+      "requiredAnimations": ["worker-idle", "worker-run"]
+    },
+    {
+      "id": "worker-masculine",
+      "file": "worker/worker-masculine.glb",
+      "role": "animated-personnel-character",
+      "source": "https://quaternius.com/packs/ultimatemodularcharacters.html",
+      "license": "CC0-1.0",
+      "attribution": "Ultimate Modular Men Pack by Quaternius",
+      "selfContained": true,
+      "maxFileBytes": 1400000,
+      "maxMaterials": 11,
+      "maxTextures": 0,
+      "maxRenderVertices": 16000,
+      "bounds": {
+        "width": [1.53, 1.56],
+        "height": [1.71, 1.73],
+        "length": [0.35, 0.37],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": ["Root", "Hips", "Chest", "Head", "Wrist.L", "Wrist.R"],
+      "requiredAnimations": [
+        "worker-idle",
+        "worker-walk",
+        "worker-run",
+        "worker-break",
+        "worker-inspect",
+        "worker-repair",
+        "worker-supervise",
+        "worker-radio",
+        "worker-sample"
+      ]
+    },
+    {
+      "id": "worker-feminine",
+      "file": "worker/worker-feminine.glb",
+      "role": "animated-personnel-character",
+      "source": "https://quaternius.com/packs/ultimatemodularwomen.html",
+      "license": "CC0-1.0",
+      "attribution": "Ultimate Modular Women Pack by Quaternius",
+      "selfContained": true,
+      "maxFileBytes": 1500000,
+      "maxMaterials": 9,
+      "maxTextures": 0,
+      "maxRenderVertices": 19000,
+      "bounds": {
+        "width": [1.51, 1.54],
+        "height": [1.71, 1.73],
+        "length": [0.32, 0.35],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": ["Root", "Hips", "Chest", "Head", "Wrist.L", "Wrist.R"],
+      "requiredAnimations": [
+        "worker-idle",
+        "worker-walk",
+        "worker-run",
+        "worker-break",
+        "worker-inspect",
+        "worker-repair",
+        "worker-supervise",
+        "worker-radio",
+        "worker-sample"
+      ]
+    }
+  ],
+  "quarantined": [
+    {
+      "id": "silo-unity-detail-tank",
+      "sourceFile": "../../assets/source/models/machines/silo-unity-original.glb",
+      "reason": "Broken external texture reference and incorrect 0.42 metre tank geometry. Runtime uses the authored instanced silo system."
+    }
+  ]
+}

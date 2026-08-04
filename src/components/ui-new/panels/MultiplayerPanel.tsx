@@ -25,6 +25,7 @@ import {
   useIsHost,
 } from '../../../stores/multiplayerStore';
 import { getMultiplayerManager, destroyMultiplayerManager } from '../../../multiplayer';
+import { sanitizePlayerName, sanitizeRoomCode } from '../../../utils/sanitize';
 
 export const MultiplayerPanel: React.FC = () => {
   const [playerName, setPlayerName] = useState('');
@@ -40,7 +41,7 @@ export const MultiplayerPanel: React.FC = () => {
   const localPlayerName = useMultiplayerStore((s) => s.localPlayerName);
   const localPlayerColor = useMultiplayerStore((s) => s.localPlayerColor);
   const localPlayerId = useMultiplayerStore((s) => s.localPlayerId);
-  const remotePlayers = useMultiplayerStore((s) => s._remotePlayersArray);
+  const remotePlayers = useMultiplayerStore((s) => s._remoteRosterArray);
   const averageLatency = useMultiplayerStore((s) => s.averageLatencyMs);
   const unreadChatCount = useMultiplayerStore((s) => s.unreadChatCount);
   const chatMessages = useMultiplayerStore((s) => s.chatMessages);
@@ -82,7 +83,8 @@ export const MultiplayerPanel: React.FC = () => {
   }, []);
 
   const handleCreateRoom = useCallback(async () => {
-    if (!playerName.trim()) {
+    const name = sanitizePlayerName(playerName);
+    if (!name) {
       setError('Please enter your name');
       return;
     }
@@ -91,9 +93,9 @@ export const MultiplayerPanel: React.FC = () => {
     setIsConnecting(true);
 
     try {
-      setLocalPlayerName(playerName.trim());
+      setLocalPlayerName(name);
       const manager = getMultiplayerManager();
-      await manager.hostRoom(playerName.trim());
+      await manager.hostRoom(name);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create room');
     } finally {
@@ -102,11 +104,13 @@ export const MultiplayerPanel: React.FC = () => {
   }, [playerName, setLocalPlayerName]);
 
   const handleJoinRoom = useCallback(async () => {
-    if (!playerName.trim()) {
+    const name = sanitizePlayerName(playerName);
+    if (!name) {
       setError('Please enter your name');
       return;
     }
-    if (!joinCode.trim() || joinCode.trim().length !== 6) {
+    const code = sanitizeRoomCode(joinCode);
+    if (!code) {
       setError('Please enter a valid 6-character room code');
       return;
     }
@@ -115,9 +119,9 @@ export const MultiplayerPanel: React.FC = () => {
     setIsConnecting(true);
 
     try {
-      setLocalPlayerName(playerName.trim());
+      setLocalPlayerName(name);
       const manager = getMultiplayerManager();
-      await manager.joinRoom(joinCode.trim().toUpperCase(), playerName.trim());
+      await manager.joinRoom(code, name);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to join room');
     } finally {
@@ -173,6 +177,12 @@ export const MultiplayerPanel: React.FC = () => {
         <span className="text-sm font-medium">
           {isActive ? `${remotePlayers.length + 1} Players Connected` : 'Join or Create a Room'}
         </span>
+      </div>
+
+      <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-100">
+        <strong className="font-semibold">Trusted friends, experimental.</strong> The host owns the
+        simulation state and accepts shared commands. Verify the room code out of band. The session
+        ends for guests if the host leaves.
       </div>
 
       {/* Not connected - Show create/join options */}
@@ -247,7 +257,10 @@ export const MultiplayerPanel: React.FC = () => {
 
           {/* Error message */}
           {error && (
-            <div className="text-red-400 text-xs text-center bg-red-500/10 rounded-lg p-2">
+            <div
+              role="alert"
+              className="text-red-400 text-xs text-center bg-red-500/10 rounded-lg p-2"
+            >
               {error}
             </div>
           )}
@@ -467,7 +480,7 @@ export const MultiplayerPanel: React.FC = () => {
                       aria-disabled={!chatMessage.trim()}
                       aria-label="Send message"
                       title={!chatMessage.trim() ? 'Enter a message to send' : 'Send message'}
-                      className="p-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded transition-colors"
+                      className="p-1.5 bg-blue-700 hover:bg-blue-600 disabled:bg-slate-700 disabled:text-white/40 text-white rounded transition-colors"
                     >
                       <Send className="w-4 h-4" aria-hidden="true" />
                     </button>
