@@ -1,0 +1,163 @@
+[
+ {
+  "name": "castle_watchtower_base",
+  "scale": [1.5, 1.5, 1.5],
+  "distance": 120,
+  "note": "CylinderGeometry(2.5,3,24,16) - 9 m at the foot, 36 m tall (54 m at the site scale of 1.5). One uniform cone taper for the whole shaft; no plinth, no spur. After: plinth, weathered talus, two stages divided by a set-back, near-vertical upper shaft. Segments unchanged at 16.",
+  "before": { "kind": "cylinder", "args": [2.5, 3, 24, 16] },
+  "after": {
+   "kind": "profile",
+   "segments": 16,
+   "points": [
+    [0.0, -12.0],
+    [3.0, -12.0],
+    [3.0, -11.45],
+    [2.94, -11.15],
+    [2.72, -8.2],
+    [2.68, 0.4],
+    [2.52, 1.1],
+    [2.5, 12.0],
+    [0.0, 12.0]
+   ]
+  }
+ },
+ {
+  "name": "castle_watchtower_corbel",
+  "scale": [1.5, 1.5, 1.5],
+  "distance": 18,
+  "note": "CylinderGeometry(3.2,2.5,1,16) - a plain inverted-taper collar 14.4 m across. After: machicolation splay off the tower face, a vertical parapet wall, a chamfered coping the merlons stand on. Segments unchanged at 16.",
+  "before": { "kind": "cylinder", "args": [3.2, 2.5, 1, 16] },
+  "after": {
+   "kind": "profile",
+   "segments": 16,
+   "points": [
+    [0.0, -0.5],
+    [2.5, -0.5],
+    [2.52, -0.42],
+    [3.2, -0.06],
+    [3.2, 0.36],
+    [3.12, 0.46],
+    [3.08, 0.5],
+    [0.0, 0.5]
+   ]
+  }
+ },
+ {
+  "name": "castle_watchtower_merlon",
+  "scale": [1.5, 1.5, 1.5],
+  "distance": 5,
+  "note": "NEW - there is no prior geometry, so 'before' is the naive plain block a merlon would otherwise be, which also fixes the envelope the designed one has to hold. 4 sides on purpose: crenellation is the one feature on this tower that must NOT be round.",
+  "before": {
+   "kind": "prism",
+   "sides": 4,
+   "points": [
+    [0.0, -0.5],
+    [0.6, -0.5],
+    [0.6, 0.5],
+    [0.0, 0.5]
+   ]
+  },
+  "after": {
+   "kind": "prism",
+   "sides": 4,
+   "points": [
+    [0.0, -0.5],
+    [0.6, -0.5],
+    [0.585, 0.2],
+    [0.565, 0.34],
+    [0.5, 0.45],
+    [0.3, 0.5],
+    [0.0, 0.5]
+   ]
+  }
+ },
+ {
+  "name": "castle_watchtower_spire",
+  "scale": [1.5, 1.5, 1.5],
+  "distance": 45,
+  "note": "ConeGeometry(3.5,12,16) - a smooth 10.5 m x 18 m cone whose base ring swallowed the corbel course and the top 1.5 m of the tower. After: a narrow drum that springs from inside the parapet, a soffit sweeping out to a bell-cast eave, then a slender concave spire. Same max radius, same y range; the WIDEST RING MOVES UP 3.4 units so the parapet is no longer buried.",
+  "before": { "kind": "cone", "args": [3.5, 12, 16] },
+  "after": {
+   "kind": "profile",
+   "segments": 16,
+   "points": [
+    [0.0, -6.0],
+    [2.05, -6.0],
+    [2.13, -4.4],
+    [2.15, -3.3],
+    [2.62, -3.06],
+    [3.14, -2.78],
+    [3.5, -2.6],
+    [3.46, -2.44],
+    [3.18, -2.18],
+    [2.78, -1.8],
+    [2.23, -0.4],
+    [1.69, 1.1],
+    [1.2, 2.5],
+    [0.77, 3.7],
+    [0.42, 4.7],
+    [0.25, 5.2],
+    [0.14, 5.55],
+    [0.06, 5.85],
+    [0.0, 6.0]
+   ]
+  }
+ },
+ {
+  "name": "castle_gate_turret_body",
+  "scale": [1.5, 1.5, 1.5],
+  "distance": 45,
+  "note": "CylinderGeometry(1.5,1.8,12,16) - 5.4 m across at the foot, 18 m tall, one uniform taper and a flat top. After: plinth, talus, near-vertical shaft, a corbelled head that oversails, then a set-in drum for the roof to spring from. Segments unchanged at 16; one geometry now shared by both turrets.",
+  "before": { "kind": "cylinder", "args": [1.5, 1.8, 12, 16] },
+  "after": {
+   "kind": "profile",
+   "segments": 16,
+   "points": [
+    [0.0, -6.0],
+    [1.8, -6.0],
+    [1.8, -5.66],
+    [1.75, -5.48],
+    [1.56, -4.28],
+    [1.52, -3.92],
+    [1.46, 3.3],
+    [1.6, 3.62],
+    [1.74, 3.98],
+    [1.74, 4.22],
+    [1.66, 4.4],
+    [1.3, 4.52],
+    [1.3, 6.0],
+    [0.0, 6.0]
+   ]
+  }
+ },
+ {
+  "name": "castle_gate_turret_cap",
+  "scale": [1.5, 1.5, 1.5],
+  "distance": 22,
+  "note": "ConeGeometry(2,5,16) - a smooth 6 m x 7.5 m cone sleeved 2.2 m down over the turret shaft, no eave and no finial. After: a bell-cast eave that oversails the corbelled head, a steeper concave pitch, and a ball-and-spike finial. Same max radius and y range; the widest ring moves up 0.4 unit so the head reads.",
+  "before": { "kind": "cone", "args": [2, 5, 16] },
+  "after": {
+   "kind": "profile",
+   "segments": 16,
+   "points": [
+    [0.0, -2.5],
+    [1.4, -2.5],
+    [1.62, -2.32],
+    [2.0, -2.1],
+    [1.96, -1.96],
+    [1.82, -1.72],
+    [1.66, -1.45],
+    [1.25, -0.6],
+    [0.86, 0.3],
+    [0.52, 1.1],
+    [0.29, 1.65],
+    [0.15, 2.05],
+    [0.34, 2.2],
+    [0.15, 2.34],
+    [0.08, 2.43],
+    [0.02, 2.5],
+    [0.0, 2.5]
+   ]
+  }
+ }
+]

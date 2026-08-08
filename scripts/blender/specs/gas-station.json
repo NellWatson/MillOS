@@ -1,0 +1,130 @@
+[
+ {
+  "name": "gas_sign_pole",
+  "before": { "kind": "cylinder", "args": [0.15, 0.15, 8, 16] },
+  "after": {
+   "kind": "profile",
+   "segments": 16,
+   "points": [
+    [0.0, -4.0],
+    [0.15, -4.0],
+    [0.15, -2.88],
+    [0.144, -2.8],
+    [0.12, -2.62],
+    [0.12, -2.48],
+    [0.116, -2.4],
+    [0.104, 0.22],
+    [0.102, 0.34],
+    [0.132, 0.42],
+    [0.132, 0.76],
+    [0.092, 0.8],
+    [0.092, 4.0],
+    [0.0, 4.0]
+   ]
+  },
+  "scale": [1, 1, 1],
+  "distance": 20.0,
+  "note": "pylon: 1.12 m ground shroud, conical transition, tapered shaft, mounting shoe under the cabinet"
+ },
+ {
+  "name": "gas_canopy_column",
+  "before": { "kind": "cylinder", "args": [0.25, 0.25, 5, 16] },
+  "after": {
+   "kind": "profile",
+   "segments": 16,
+   "points": [
+    [0.0, -2.5],
+    [0.25, -2.5],
+    [0.25, -1.56],
+    [0.236, -1.48],
+    [0.198, -1.43],
+    [0.198, -1.36],
+    [0.18, -1.3],
+    [0.18, 1.24],
+    [0.194, 1.32],
+    [0.25, 1.82],
+    [0.25, 1.9],
+    [0.205, 1.96],
+    [0.205, 2.5],
+    [0.0, 2.5]
+   ]
+  },
+  "scale": [1, 1, 1],
+  "distance": 11.0,
+  "note": "clad pillar: 940 mm kick skirt, collar, slim clad shaft, conical haunch into the fascia soffit"
+ },
+ {
+  "name": "gas_canopy_column_close",
+  "before": { "kind": "cylinder", "args": [0.25, 0.25, 5, 16] },
+  "after": {
+   "kind": "profile",
+   "segments": 16,
+   "points": [
+    [0.0, -2.5],
+    [0.25, -2.5],
+    [0.25, -1.56],
+    [0.236, -1.48],
+    [0.198, -1.43],
+    [0.198, -1.36],
+    [0.18, -1.3],
+    [0.18, 1.24],
+    [0.194, 1.32],
+    [0.25, 1.82],
+    [0.25, 1.9],
+    [0.205, 1.96],
+    [0.205, 2.5],
+    [0.0, 2.5]
+   ]
+  },
+  "scale": [1, 1, 1],
+  "distance": 5.0,
+  "note": "the same column at walking distance - the forecourt is walkable, so this is the close check"
+ },
+ {
+  "name": "gas_nozzle_spout",
+  "before": { "kind": "cylinder", "args": [0.015, 0.012, 0.12, 6] },
+  "after": {
+   "kind": "prism",
+   "sides": 6,
+   "points": [
+    [0.0, -0.06],
+    [0.0084, -0.06],
+    [0.0104, -0.057],
+    [0.0092, -0.053],
+    [0.0092, -0.013],
+    [0.011, -0.008],
+    [0.011, 0.009],
+    [0.015, 0.015],
+    [0.015, 0.034],
+    [0.0126, 0.041],
+    [0.0126, 0.06],
+    [0.0, 0.06]
+   ]
+  },
+  "scale": [1, 1, 1],
+  "distance": 0.45,
+  "note": "slim 18 mm barrel, rolled tip, splash sleeve, full-width vapour boot, boss. 6 sides holds the envelope"
+ },
+ {
+  "name": "gas_hose_connector",
+  "before": { "kind": "cylinder", "args": [0.035, 0.035, 0.06, 6] },
+  "after": {
+   "kind": "prism",
+   "sides": 6,
+   "points": [
+    [0.0, -0.03],
+    [0.03, -0.03],
+    [0.03, -0.0245],
+    [0.0262, -0.02],
+    [0.035, -0.014],
+    [0.035, 0.012],
+    [0.028, 0.0225],
+    [0.028, 0.03],
+    [0.0, 0.03]
+   ]
+  },
+  "scale": [1, 1, 1],
+  "distance": 0.35,
+  "note": "hex union nut: flange washer, chamfered wrench flats, 56 mm ferrule seating the 50 mm hose"
+ }
+]

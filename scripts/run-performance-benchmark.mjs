@@ -45,6 +45,7 @@ Usage:
 
 Options:
   --base-url=<url>          Reuse an existing preview instead of starting one
+  --port=<number>           Local preview port when --base-url is absent; default 4173
   --channel=<name>          Browser channel, defaults to chrome; use an empty value for bundled Chromium
   --quality=<tier>          low, medium, high, or ultra; default medium
   --device-scale-factor=<n> Browser device scale factor, from 1 to 3; default 2
@@ -78,6 +79,7 @@ function finiteNumber(value, fallback, minimum, maximum) {
 
 const options = {
   baseUrl: readArgument('base-url', ''),
+  previewPort: finiteNumber(readArgument('port', '4173'), 4173, 1024, 65535),
   durationSeconds: finiteNumber(readArgument('duration', '10'), 10, 2, 300),
   warmupSeconds: finiteNumber(readArgument('warmup', '5'), 5, 0, 60),
   scenes: readArgument('scenes', DEFAULT_SCENES.join(','))
@@ -155,18 +157,42 @@ async function startPreview() {
     throw new Error('dist/index.html is missing. Run npm run build before the benchmark.');
   });
 
-  const url = 'http://127.0.0.1:4173';
+  const url = `http://127.0.0.1:${options.previewPort}`;
   const viteEntry = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
+  let previewStderr = '';
   previewProcess = spawn(
     process.execPath,
-    [viteEntry, 'preview', '--host', '127.0.0.1', '--port', '4173'],
+    [
+      viteEntry,
+      'preview',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(options.previewPort),
+      '--strictPort',
+    ],
     {
       cwd: ROOT,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, BROWSER: 'none' },
     }
   );
-  await waitForServer(url);
+  previewProcess.stderr.on('data', (chunk) => {
+    previewStderr += chunk;
+  });
+  await Promise.race([
+    waitForServer(url),
+    new Promise((_, reject) => {
+      previewProcess.once('exit', (code) => {
+        reject(
+          new Error(
+            `Preview exited before becoming ready on port ${options.previewPort} ` +
+              `(code ${String(code)}): ${previewStderr.trim() || 'no stderr'}`
+          )
+        );
+      });
+    }),
+  ]);
   return url;
 }
 

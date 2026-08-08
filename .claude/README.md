@@ -15,6 +15,7 @@ This directory contains custom Claude Code agents and slash commands tailored fo
 | `/zone-audit` | Audit machine positions against factory zone layout |
 | `/graphics-check` | Check for flickering-prone patterns in 3D code |
 | `/review-change` | Review recent git changes against quality standards |
+| `/art-loop` | Run one round of the adversarial visual-fidelity loop (capture, judge, fix, prove) |
 | `/dev` | Start the Vite development server |
 
 ### Specialized Agents
@@ -27,6 +28,15 @@ This directory contains custom Claude Code agents and slash commands tailored fo
 | `graphics-debugger` | When encountering flickering, z-fighting, or visual artifacts |
 | `millos-architecture-guard` | Before structural changes, adding components, or state changes |
 | `ai-integration-specialist` | For Gemini API work, AI decisions, or AICommandCenter updates |
+| `visual-fidelity-judge` | Grading an art-review capture against the fixed fidelity rubric |
+| `blind-ab-judge` | Deciding whether a visual iteration helped, from staged blind pairs |
+
+The two judges carry YAML frontmatter, so they are spawnable directly as
+`subagent_type`. The six older agents above are prompt references rather than
+registered agents; add frontmatter to any of them that should become spawnable.
+The judges are used by the loop in `docs/VISUAL_FIDELITY_LOOP.md`:
+`npm run capture:art` -> judge -> fix -> `npm run review:stage-ab` -> blind judge,
+with `npm run benchmark:runtime` as the conjoined budget gate.
 
 ---
 

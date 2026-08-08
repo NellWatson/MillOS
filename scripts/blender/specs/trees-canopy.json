@@ -1,0 +1,298 @@
+[
+  {
+    "name": "oak_trunk",
+    "before": {
+      "kind": "cylinder",
+      "args": [0.18, 0.32, 2.6, 12]
+    },
+    "after": {
+      "kind": "profile",
+      "segments": 12,
+      "points": [
+        [0.0, -1.3],
+        [0.32, -1.3],
+        [0.29, -1.245],
+        [0.256, -1.16],
+        [0.232, -1.055],
+        [0.223, -0.94],
+        [0.211, -0.74],
+        [0.203, -0.3],
+        [0.196, 0.22],
+        [0.189, 0.76],
+        [0.18, 1.3],
+        [0.0, 1.3]
+      ]
+    },
+    "scale": [1.0, 1.0, 1.0],
+    "distance": 8.0,
+    "note": "InstancedFoliage createTrunkGeometry(OAK_TRUNK_PROFILE), was CylinderGeometry(0.18,0.32,2.6,12) - 0.64 m across at the foot, 2.6 m tall. Straight cone -> root flare, knee, concave bole taper."
+  },
+  {
+    "name": "birch_trunk",
+    "before": {
+      "kind": "cylinder",
+      "args": [0.1, 0.16, 3.1, 12]
+    },
+    "after": {
+      "kind": "profile",
+      "segments": 12,
+      "points": [
+        [0.0, -1.55],
+        [0.16, -1.55],
+        [0.142, -1.5],
+        [0.126, -1.428],
+        [0.12, -1.33],
+        [0.117, -1.0],
+        [0.114, -0.4],
+        [0.11, 0.3],
+        [0.105, 0.95],
+        [0.1, 1.55],
+        [0.0, 1.55]
+      ]
+    },
+    "scale": [1.0, 1.0, 1.0],
+    "distance": 8.5,
+    "note": "InstancedFoliage createTrunkGeometry(BIRCH_TRUNK_PROFILE), was CylinderGeometry(0.1,0.16,3.1,12) - birch: a tight basal swell over a long clean bole, deliberately NOT the oak's buttress flare."
+  },
+  {
+    "name": "pine_trunk",
+    "before": {
+      "kind": "cylinder",
+      "args": [0.12, 0.24, 3.0, 12]
+    },
+    "after": {
+      "kind": "profile",
+      "segments": 12,
+      "points": [
+        [0.0, -1.5],
+        [0.24, -1.5],
+        [0.211, -1.432],
+        [0.187, -1.33],
+        [0.174, -1.19],
+        [0.163, -0.85],
+        [0.157, -0.58],
+        [0.164, -0.47],
+        [0.148, -0.43],
+        [0.141, 0.0],
+        [0.136, 0.34],
+        [0.142, 0.43],
+        [0.128, 0.47],
+        [0.12, 1.5],
+        [0.0, 1.5]
+      ]
+    },
+    "scale": [1.0, 1.0, 1.0],
+    "distance": 8.5,
+    "note": "InstancedFoliage createTrunkGeometry(PINE_TRUNK_PROFILE), was CylinderGeometry(0.12,0.24,3.0,12) - conifer: modest flare, strong straight taper, two branch-whorl collars."
+  },
+  {
+    "name": "parkland_trunk",
+    "before": {
+      "kind": "cylinder",
+      "args": [0.3, 0.4, 3.0, 12]
+    },
+    "after": {
+      "kind": "profile",
+      "segments": 12,
+      "points": [
+        [0.0, -1.5],
+        [0.4, -1.5],
+        [0.362, -1.428],
+        [0.332, -1.33],
+        [0.316, -1.19],
+        [0.31, -0.85],
+        [0.307, -0.3],
+        [0.305, 0.3],
+        [0.302, 0.9],
+        [0.3, 1.5],
+        [0.0, 1.5]
+      ]
+    },
+    "scale": [1.0, 1.0, 1.0],
+    "distance": 9.5,
+    "note": "ExteriorVegetation createTreeGeometries trunk - 0.8 m across, the widest trunk on the site. Linear cone -> columnar bole on a flared foot."
+  },
+  {
+    "name": "oak_canopy_silhouette",
+    "before": {
+      "kind": "profile",
+      "segments": 32,
+      "points": [
+        [0.0, -1.26],
+        [0.146, -1.26],
+        [0.146, -1.025],
+        [0.349, -0.973],
+        [0.553, -0.869],
+        [0.685, -0.765],
+        [0.837, -0.583],
+        [0.914, -0.44],
+        [0.969, -0.284],
+        [0.993, -0.154],
+        [0.999, 0.041],
+        [0.981, 0.197],
+        [0.932, 0.366],
+        [0.841, 0.548],
+        [0.762, 0.652],
+        [0.576, 0.821],
+        [0.419, 0.912],
+        [0.235, 0.977],
+        [0.077, 1.003],
+        [0.077, 1.081],
+        [0.0, 1.081]
+      ]
+    },
+    "after": {
+      "kind": "profile",
+      "segments": 32,
+      "points": [
+        [0.0, -1.03],
+        [0.124, -1.03],
+        [0.341, -0.996],
+        [0.49, -0.951],
+        [0.813, -0.816],
+        [0.913, -0.737],
+        [0.963, -0.669],
+        [0.997, -0.579],
+        [0.989, -0.387],
+        [1.018, -0.184],
+        [1.072, -0.049],
+        [1.082, 0.064],
+        [1.029, 0.278],
+        [0.886, 0.459],
+        [0.826, 0.673],
+        [0.711, 0.831],
+        [0.634, 0.887],
+        [0.547, 0.921],
+        [0.274, 0.932],
+        [0.073, 1.0],
+        [0.0, 1.0]
+      ]
+    },
+    "scale": [1.85, 1.55, 1.85],
+    "distance": 17.0,
+    "note": "NOT shipped geometry. This is the VISIBLE silhouette of the 8-card cage - the envelope of each card's inscribed alpha blob - measured off the real card table by the companion card-cage rig. Shipped geometry stays 8 quads / 96 verts. Before = a radially symmetric ball; after = a crown with weight below the midline and off-axis lobes. Drift printed here is silhouette drift, deliberate: the quad AABB is preserved exactly in x/z and reduced in y (see the TS comment)."
+  },
+  {
+    "name": "pine_canopy_silhouette",
+    "before": {
+      "kind": "profile",
+      "segments": 32,
+      "points": [
+        [0.0, -1.124],
+        [0.111, -1.124],
+        [0.111, -1.03],
+        [0.369, -0.959],
+        [0.456, -0.912],
+        [0.669, -0.746],
+        [0.719, -0.676],
+        [0.75, -0.581],
+        [0.75, -0.475],
+        [0.713, -0.357],
+        [0.9, -0.345],
+        [0.699, -0.333],
+        [0.648, -0.062],
+        [0.448, 0.268],
+        [0.46, 0.493],
+        [0.78, 0.504],
+        [0.46, 0.516],
+        [0.454, 0.563],
+        [0.397, 0.575],
+        [0.46, 0.917],
+        [0.069, 0.929],
+        [0.016, 1.0],
+        [0.0, 1.0]
+      ]
+    },
+    "after": {
+      "kind": "profile",
+      "segments": 32,
+      "points": [
+        [0.0, -1.03],
+        [0.197, -1.03],
+        [0.51, -0.996],
+        [0.694, -0.951],
+        [0.835, -0.872],
+        [0.867, -0.782],
+        [0.833, -0.68],
+        [0.758, -0.601],
+        [0.42, -0.387],
+        [0.586, -0.297],
+        [0.633, -0.207],
+        [0.632, -0.139],
+        [0.558, -0.038],
+        [0.332, 0.12],
+        [0.438, 0.188],
+        [0.478, 0.256],
+        [0.477, 0.323],
+        [0.406, 0.425],
+        [0.245, 0.56],
+        [0.305, 0.628],
+        [0.274, 0.729],
+        [0.008, 1.0],
+        [0.0, 1.0]
+      ]
+    },
+    "scale": [1.45, 1.9, 1.45],
+    "distance": 17.0,
+    "note": "NOT shipped geometry - the visible silhouette of the 8-card conifer cage. Before = a smooth teardrop (a cone in card form). After = a three-whorl sawtooth: 0.87 skirt, notch to 0.42, whorl 0.63, notch to 0.33, whorl 0.48, notch to 0.25, leader to a point."
+  },
+  {
+    "name": "parkland_canopy_silhouette",
+    "before": {
+      "kind": "profile",
+      "segments": 32,
+      "points": [
+        [0.0, -1.279],
+        [0.118, -1.279],
+        [0.118, -1.029],
+        [0.302, -0.99],
+        [0.53, -0.884],
+        [0.669, -0.779],
+        [0.829, -0.595],
+        [0.955, -0.332],
+        [1.0, -0.042],
+        [0.992, 0.129],
+        [0.955, 0.3],
+        [0.899, 0.445],
+        [0.792, 0.616],
+        [0.685, 0.734],
+        [0.488, 0.879],
+        [0.342, 0.945],
+        [0.132, 0.998],
+        [0.132, 1.09],
+        [0.0, 1.09]
+      ]
+    },
+    "after": {
+      "kind": "profile",
+      "segments": 32,
+      "points": [
+        [0.0, -1.03],
+        [0.124, -1.03],
+        [0.341, -0.996],
+        [0.49, -0.951],
+        [0.806, -0.827],
+        [0.92, -0.737],
+        [0.967, -0.669],
+        [0.999, -0.579],
+        [0.987, -0.398],
+        [1.018, -0.184],
+        [1.076, -0.026],
+        [1.082, 0.075],
+        [1.067, 0.177],
+        [1.024, 0.289],
+        [0.89, 0.459],
+        [0.826, 0.673],
+        [0.711, 0.831],
+        [0.634, 0.887],
+        [0.547, 0.921],
+        [0.274, 0.932],
+        [0.073, 1.0],
+        [0.0, 1.0]
+      ]
+    },
+    "scale": [2.45, 1.95, 2.45],
+    "distance": 22.0,
+    "note": "NOT shipped geometry - the same dome card table at the parkland variant's 4.9 m crown width, the largest tree on the site."
+  }
+]
