@@ -1,7 +1,7 @@
 /**
  * SCADA Tag Database for MillOS
  *
- * Complete definition of 86 SCADA tags covering all 4 production zones:
+ * Complete SCADA definition covering all 4 production zones:
  * - Zone 1: Silos (raw material storage)
  * - Zone 2: Roller Mills (milling floor)
  * - Zone 3: Plansifters (sifting)
@@ -16,6 +16,7 @@
  * - ATTRIBUTE: PV=process value, SP=setpoint, CMD=command
  */
 
+import { UTILITY_ASSET_DEFINITIONS } from '../constants/utilityAssets';
 import { TagDefinition } from './types';
 
 // ============================================================================
@@ -687,6 +688,100 @@ const utilityTags: TagDefinition[] = [
   },
 ];
 
+export interface UtilityAssetTagIds {
+  level: string;
+  temperature: string;
+  pressure: string;
+}
+
+const utilityAssetArea = (assetId: string): string =>
+  assetId
+    .replace(/^utility-/, 'UTILITY_')
+    .replaceAll('-', '_')
+    .toUpperCase();
+
+/** Stable SCADA identities for the instruments mounted on each visible vessel. */
+export const getUtilityAssetTagIds = (assetId: string): UtilityAssetTagIds => {
+  const area = utilityAssetArea(assetId);
+  return {
+    level: `${area}.LT001.PV`,
+    temperature: `${area}.TT001.PV`,
+    pressure: `${area}.PT001.PV`,
+  };
+};
+
+export const UTILITY_ASSET_TAG_IDS: Readonly<Record<string, UtilityAssetTagIds>> =
+  Object.fromEntries(
+    UTILITY_ASSET_DEFINITIONS.map((asset) => [asset.id, getUtilityAssetTagIds(asset.id)])
+  );
+
+const utilityAssetTags: TagDefinition[] = UTILITY_ASSET_DEFINITIONS.flatMap((asset) => {
+  const ids = UTILITY_ASSET_TAG_IDS[asset.id];
+  const isPressurised = asset.kind === 'lpg_vessel';
+  return [
+    {
+      id: ids.level,
+      name: `${asset.label} Level`,
+      description: `${asset.contents} level in ${asset.label}`,
+      dataType: 'FLOAT32' as const,
+      accessMode: 'READ' as const,
+      engUnit: '%',
+      engLow: 0,
+      engHigh: 100,
+      alarmLo: 20,
+      alarmLoLo: 10,
+      deadband: 0.5,
+      machineId: asset.id,
+      group: 'LEVEL' as const,
+      simulation: {
+        baseValue: asset.nominalLevelPercent,
+        noiseAmplitude: 0,
+        driftRate: 0,
+      },
+    },
+    {
+      id: ids.temperature,
+      name: `${asset.label} Temperature`,
+      description: `${asset.contents} bulk temperature in ${asset.label}`,
+      dataType: 'FLOAT32' as const,
+      accessMode: 'READ' as const,
+      engUnit: 'C',
+      engLow: -40,
+      engHigh: 80,
+      alarmHi: isPressurised ? 40 : 38,
+      alarmHiHi: isPressurised ? 50 : 48,
+      deadband: 0.5,
+      machineId: asset.id,
+      group: 'TEMPERATURE' as const,
+      simulation: {
+        baseValue: asset.nominalTemperatureC,
+        noiseAmplitude: 0,
+        driftRate: 0,
+      },
+    },
+    {
+      id: ids.pressure,
+      name: `${asset.label} Pressure`,
+      description: `${asset.contents} vessel pressure in ${asset.label}`,
+      dataType: 'FLOAT32' as const,
+      accessMode: 'READ' as const,
+      engUnit: 'bar',
+      engLow: 0,
+      engHigh: isPressurised ? 16 : 2,
+      alarmHi: isPressurised ? 10 : 0.6,
+      alarmHiHi: isPressurised ? 12 : 1,
+      deadband: isPressurised ? 0.1 : 0.02,
+      machineId: asset.id,
+      group: 'PRESSURE' as const,
+      simulation: {
+        baseValue: asset.nominalPressureBar,
+        noiseAmplitude: 0,
+        driftRate: 0,
+      },
+    },
+  ];
+});
+
 /** Stable IDs used by the material-flow bridge and operator workspace. */
 export const OPERATION_TAG_IDS = {
   rawInventory: 'OPERATIONS.WT001.PV',
@@ -902,15 +997,16 @@ const operationalTags: TagDefinition[] = [
 // Complete Tag Database Export
 // ============================================================================
 
-/** All SCADA tags for MillOS (87 tags) */
+/** All process, utility, and operational SCADA tags for MillOS. */
 export const MILL_TAGS: TagDefinition[] = [
   ...siloTags, // 20 tags
   ...rollerMillTags, // 24 tags (4 mills x 6)
   ...plansifterTags, // 12 tags
   ...packerTags, // 12 tags
   ...utilityTags, // 10 tags
+  ...utilityAssetTags, // 15 tags (5 visible vessels x 3 instruments)
   ...operationalTags, // 13 tags
-]; // Total: 91 tags
+];
 
 /** Get tags by machine ID */
 export function getTagsByMachine(machineId: string): TagDefinition[] {

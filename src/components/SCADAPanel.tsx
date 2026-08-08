@@ -71,7 +71,7 @@ import type {
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { processTrendHistory, TREND_QUALITY_SUFFIX, type TrendRow } from '../scada/trendProcessing';
-import { OPERATION_TAG_IDS } from '../scada/tagDatabase';
+import { OPERATION_TAG_IDS, UTILITY_ASSET_TAG_IDS } from '../scada/tagDatabase';
 import { useMaterialFlowStore } from '../stores/materialFlowStore';
 import { useBreakdownStore } from '../stores/breakdownStore';
 import { useQCLabStore } from '../stores/qcLabStore';
@@ -374,6 +374,27 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
       maintenanceDowntime: read(OPERATION_TAG_IDS.maintenanceDowntime),
     };
   }, [values]);
+
+  const utilityTelemetry = useMemo(
+    () =>
+      campaign.utilityAssets.map((asset) => {
+        const tagIds = UTILITY_ASSET_TAG_IDS[asset.id];
+        const read = (tagId: string | undefined, fallback: number): number => {
+          const value = tagId ? values.get(tagId)?.value : undefined;
+          return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+        };
+        const levelPercent = read(tagIds?.level, asset.levelPercent);
+        return {
+          ...asset,
+          levelPercent,
+          temperatureC: read(tagIds?.temperature, asset.temperatureC),
+          pressureBar: read(tagIds?.pressure, asset.pressureBar),
+          status: levelPercent <= 10 ? 'critical' : levelPercent <= 20 ? 'low' : 'normal',
+          quality: tagIds ? (values.get(tagIds.level)?.quality ?? 'STALE') : 'STALE',
+        };
+      }),
+    [campaign.utilityAssets, values]
+  );
 
   const eventTimeline = useMemo(
     () =>
@@ -1355,11 +1376,11 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                     Utility vessel telemetry
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Simulated local instrumentation for the visible tank farm and LPG compound.
+                    Historian-linked instruments for the visible tank farm and LPG compound.
                   </p>
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                  {campaign.utilityAssets.map((asset) => (
+                  {utilityTelemetry.map((asset) => (
                     <article
                       key={asset.id}
                       className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5"
@@ -1376,7 +1397,8 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                                 ? 'bg-amber-400'
                                 : 'bg-emerald-400'
                           }`}
-                          aria-label={`${asset.status} level`}
+                          aria-label={`${asset.status} level, ${asset.quality.toLowerCase()} signal`}
+                          title={`${asset.quality} signal`}
                         />
                       </div>
                       <div className="mt-1 font-mono text-sm font-semibold text-white">

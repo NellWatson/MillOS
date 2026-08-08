@@ -12,7 +12,7 @@
 
 import { logger } from './utils/logger';
 import { scadaToStoreMetrics } from './scada/SCADABridge';
-import { OPERATION_TAG_IDS } from './scada/tagDatabase';
+import { OPERATION_TAG_IDS, UTILITY_ASSET_TAG_IDS } from './scada/tagDatabase';
 import type { MachineData } from './types';
 
 // Re-export everything from the new stores
@@ -37,6 +37,10 @@ import { initializeSCADA, shutdownSCADA } from './scada/SCADAService';
 import { useProductionStore, useUIStore } from './stores';
 import { useMaterialFlowStore, type MaterialFlowState } from './stores/materialFlowStore';
 import {
+  useOperationsCampaignStore,
+  type UtilityAssetTelemetry,
+} from './stores/operationsCampaignStore';
+import {
   useBreakdownStore,
   type MaintenanceWorkOrder,
   type PartsInventory,
@@ -52,7 +56,8 @@ export function buildOperationalTelemetry(
   flow: MaterialFlowState,
   parts: PartsInventory,
   qcLab: QCLabState,
-  workOrders: MaintenanceWorkOrder[] = []
+  workOrders: MaintenanceWorkOrder[] = [],
+  utilityAssets: readonly UtilityAssetTelemetry[] = []
 ): Record<string, number> {
   let totalInventoryKg = 0;
   let rawInventoryKg = 0;
@@ -101,7 +106,7 @@ export function buildOperationalTelemetry(
     (workOrder) => workOrder.phase !== 'returned_to_service'
   );
 
-  return {
+  const values: Record<string, number> = {
     [OPERATION_TAG_IDS.rawInventory]: rawInventoryKg / 1000,
     [OPERATION_TAG_IDS.inProcess]: inProcessKg / 1000,
     [OPERATION_TAG_IDS.finishedGoods]: finishedGoodsKg / 1000,
@@ -122,6 +127,16 @@ export function buildOperationalTelemetry(
       0
     ),
   };
+
+  utilityAssets.forEach((asset) => {
+    const tagIds = UTILITY_ASSET_TAG_IDS[asset.id];
+    if (!tagIds) return;
+    values[tagIds.level] = asset.levelPercent;
+    values[tagIds.temperature] = asset.temperatureC;
+    values[tagIds.pressure] = asset.pressureBar;
+  });
+
+  return values;
 }
 
 /**
@@ -190,7 +205,8 @@ export function initializeSCADASync(): () => void {
           useMaterialFlowStore.getState(),
           useBreakdownStore.getState().partsInventory,
           useQCLabStore.getState().qcLab,
-          useBreakdownStore.getState().workOrders
+          useBreakdownStore.getState().workOrders,
+          useOperationsCampaignStore.getState().utilityAssets
         );
         const nextSignature = Object.values(values)
           .map((value) => value.toFixed(3))
@@ -206,8 +222,9 @@ export function initializeSCADASync(): () => void {
         syncOperationalTelemetry,
         { fireImmediately: true }
       );
+      const unsubUtilityAssets = useOperationsCampaignStore.subscribe(syncOperationalTelemetry);
       syncOperationalTelemetry();
-      cleanupFunctions.push(unsubMaterialFlow, unsubMaintenance, unsubQuality);
+      cleanupFunctions.push(unsubMaterialFlow, unsubMaintenance, unsubQuality, unsubUtilityAssets);
 
       // 3. SCADA → STORE: Sync critical alarms to alerts
       // This displays SCADA alarms in the main UI alert system
