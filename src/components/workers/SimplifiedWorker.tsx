@@ -76,10 +76,15 @@ export const SimplifiedWorker: React.FC<SimplifiedWorkerProps> = React.memo(
 
         {appearance.hasVest && (
           <>
+            {/* Seated 7.4 mm further in than before: the redesigned
+                `mediumTorso` narrows the chest from r 0.2507 to 0.2433 at this
+                height, and the bars are flat plates pinned in z, so leaving
+                them at 0.158 lifted them off the body the torso reshape was
+                supposed to sit them on. */}
             {[1.34, 1.12].map((y) => (
               <mesh
                 key={y}
-                position={[0, y, 0.158]}
+                position={[0, y, 0.1506]}
                 geometry={GEO.mediumStripe}
                 material={MAT.reflective}
               />
