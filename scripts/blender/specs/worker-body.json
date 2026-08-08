@@ -1,0 +1,121 @@
+[
+ {
+  "name": "torso",
+  "note": "DetailedWorker chest. Cylinder(0.29,0.215,0.52,20) drawn at [1,1,0.5] inside a 0.9 root - 0.52 m across, 0.47 m tall. Redesign: waist pinch, rib flare, pectoral shelf, shoulder line, trapezius slope into the neck root. Max radius 0.290 is moved ABOVE the vest's top edge so the vest can stay proud of it; see the vest entry.",
+  "before": { "kind": "cylinder", "args": [0.29, 0.215, 0.52, 20] },
+  "after": {
+   "kind": "profile",
+   "segments": 20,
+   "points": [
+    [0.000, -0.2600],
+    [0.226, -0.2600],
+    [0.212, -0.1960],
+    [0.232, -0.1150],
+    [0.248, -0.0200],
+    [0.262,  0.0750],
+    [0.272,  0.1450],
+    [0.281,  0.1960],
+    [0.290,  0.2300],
+    [0.256,  0.2490],
+    [0.188,  0.2585],
+    [0.000,  0.2600]
+   ]
+  },
+  "scale": [1, 1, 0.5],
+  "distance": 3.5
+ },
+ {
+  "name": "waist",
+  "note": "DetailedWorker abdomen. Cylinder(0.215,0.225,0.27,20) at [1,1,0.52] - a near-straight tube that flared DOWNWARD into the belt. Redesign puts the hip crown mid-height and tucks both rims in: the top rim slides inside the shirt hem, the bottom rim sits over the belt.",
+  "before": { "kind": "cylinder", "args": [0.215, 0.225, 0.27, 20] },
+  "after": {
+   "kind": "profile",
+   "segments": 20,
+   "points": [
+    [0.000, -0.1350],
+    [0.212, -0.1350],
+    [0.222, -0.1040],
+    [0.225, -0.0450],
+    [0.221,  0.0300],
+    [0.213,  0.0900],
+    [0.208,  0.1350],
+    [0.000,  0.1350]
+   ]
+  },
+  "scale": [1, 1, 0.52],
+  "distance": 3.5
+ },
+ {
+  "name": "vest",
+  "note": "Hi-vis vest. Cylinder(0.3,0.225,0.535,20) at [1,1,0.5], offset +0.006 in z - it tapered in lockstep with the torso, so it read as a slightly larger cylinder. Redesign: bound hem band with a binding groove, a skirt that swells back to the body, a constant armhole band the sleeve clears, and a rolled shoulder yoke whose edge tucks under the shirt.",
+  "before": { "kind": "cylinder", "args": [0.3, 0.225, 0.535, 20] },
+  "after": {
+   "kind": "profile",
+   "segments": 20,
+   "points": [
+    [0.000, -0.2675],
+    [0.244, -0.2675],
+    [0.244, -0.2420],
+    [0.233, -0.2330],
+    [0.259, -0.1950],
+    [0.268, -0.1650],
+    [0.269,  0.0450],
+    [0.281,  0.1150],
+    [0.297,  0.2150],
+    [0.300,  0.2460],
+    [0.300,  0.2570],
+    [0.286,  0.2650],
+    [0.246,  0.2675],
+    [0.000,  0.2675]
+   ]
+  },
+  "scale": [1, 1, 0.5],
+  "distance": 3.5
+ },
+ {
+  "name": "mediumTorso",
+  "note": "SimplifiedWorker body - the PERMANENT medium-LOD figure, and the medium-LOD vest too (the material swaps to hi-vis orange). Cylinder(0.27,0.205,0.64,8) at [1,1,0.56] was a monotonic wedge whose widest ring was its top rim, so the silhouette read as a plant pot with a floating head. Redesign gives it a shoulder line below a trapezius slope, a chest, a waist and a hip. Segment count deliberately stays at 8: A/B rendered at the true 24 m viewing distance, 8 and 12 are indistinguishable, and 8 keeps its facets coincident with mediumWaist. Preview distance below is 4 m so this frame is legible as a shape document; the realistic-distance judgement was made in the assembly renders.",
+  "before": { "kind": "cylinder", "args": [0.27, 0.205, 0.64, 8] },
+  "after": {
+   "kind": "profile",
+   "segments": 8,
+   "points": [
+    [0.000, -0.3200],
+    [0.205, -0.3200],
+    [0.232, -0.2450],
+    [0.238, -0.1800],
+    [0.228, -0.0600],
+    [0.222,  0.0100],
+    [0.238,  0.1000],
+    [0.252,  0.1800],
+    [0.265,  0.2450],
+    [0.270,  0.2830],
+    [0.236,  0.3060],
+    [0.166,  0.3200],
+    [0.000,  0.3200]
+   ]
+  },
+  "scale": [1, 1, 0.56],
+  "distance": 4.0
+ },
+ {
+  "name": "mediumWaist",
+  "note": "SimplifiedWorker hips and thigh mass, in pants colour. Cylinder(0.205,0.22,0.24,8) flared DOWNWARD, which reads as a flared skirt above two legs. Redesign reverses that: hip crown at the top, converging to the thigh mass so the leg capsules emerge from under it. Max radius 0.22 and the y range are unchanged - only where the maximum SITS moves.",
+  "before": { "kind": "cylinder", "args": [0.205, 0.22, 0.24, 8] },
+  "after": {
+   "kind": "profile",
+   "segments": 8,
+   "points": [
+    [0.000, -0.1200],
+    [0.203, -0.1200],
+    [0.213, -0.0700],
+    [0.220, -0.0100],
+    [0.216,  0.0600],
+    [0.201,  0.1200],
+    [0.000,  0.1200]
+   ]
+  },
+  "scale": [1, 1, 0.56],
+  "distance": 4.0
+ }
+]

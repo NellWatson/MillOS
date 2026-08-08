@@ -1,0 +1,1003 @@
+[
+ {
+  "name": "pipe_flange",
+  "before": {
+   "kind": "cylinder",
+   "args": [
+    0.22,
+    0.22,
+    0.12,
+    12
+   ]
+  },
+  "after": {
+   "kind": "profile",
+   "segments": 12,
+   "points": [
+    [
+     0.14,
+     -0.06
+    ],
+    [
+     0.188,
+     -0.06
+    ],
+    [
+     0.194,
+     -0.0545
+    ],
+    [
+     0.202,
+     -0.04
+    ],
+    [
+     0.202,
+     -0.0355
+    ],
+    [
+     0.216,
+     -0.0355
+    ],
+    [
+     0.22,
+     -0.0315
+    ],
+    [
+     0.22,
+     -0.0145
+    ],
+    [
+     0.216,
+     -0.0105
+    ],
+    [
+     0.196,
+     -0.008
+    ],
+    [
+     0.196,
+     0.008
+    ],
+    [
+     0.216,
+     0.0105
+    ],
+    [
+     0.22,
+     0.0145
+    ],
+    [
+     0.22,
+     0.0315
+    ],
+    [
+     0.216,
+     0.0355
+    ],
+    [
+     0.202,
+     0.0355
+    ],
+    [
+     0.202,
+     0.04
+    ],
+    [
+     0.194,
+     0.0545
+    ],
+    [
+     0.188,
+     0.06
+    ],
+    [
+     0.14,
+     0.06
+    ]
+   ]
+  },
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "distance": 1.6,
+  "note": "SpoutingSystem PIPE_FLANGE. Bolted spout joint - two weld-neck half-flanges back to back: tapered hub, flat back face, chamfered plate rim, 24 mm joint groove. Hub roots tuck to r0.14 - under the 0.1472 apothem of the low-tier 6-sided tube, so the open lathe ends are hidden. Envelope r0.22 y+-0.06 preserved. Segments stay at 12 to match the tube's high-tier radialSegments."
+ },
+ {
+  "name": "pipe_flange_far",
+  "before": {
+   "kind": "cylinder",
+   "args": [
+    0.22,
+    0.22,
+    0.12,
+    12
+   ]
+  },
+  "after": {
+   "kind": "profile",
+   "segments": 12,
+   "points": [
+    [
+     0.14,
+     -0.06
+    ],
+    [
+     0.188,
+     -0.06
+    ],
+    [
+     0.194,
+     -0.0545
+    ],
+    [
+     0.202,
+     -0.04
+    ],
+    [
+     0.202,
+     -0.0355
+    ],
+    [
+     0.216,
+     -0.0355
+    ],
+    [
+     0.22,
+     -0.0315
+    ],
+    [
+     0.22,
+     -0.0145
+    ],
+    [
+     0.216,
+     -0.0105
+    ],
+    [
+     0.196,
+     -0.008
+    ],
+    [
+     0.196,
+     0.008
+    ],
+    [
+     0.216,
+     0.0105
+    ],
+    [
+     0.22,
+     0.0145
+    ],
+    [
+     0.22,
+     0.0315
+    ],
+    [
+     0.216,
+     0.0355
+    ],
+    [
+     0.202,
+     0.0355
+    ],
+    [
+     0.202,
+     0.04
+    ],
+    [
+     0.194,
+     0.0545
+    ],
+    [
+     0.188,
+     0.06
+    ],
+    [
+     0.14,
+     0.06
+    ]
+   ]
+  },
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "distance": 3.6,
+  "note": "Same flange, framed to the pixel footprint of a 7 m look up at a ceiling-height run - the check that the joint groove survives distance."
+ },
+ {
+  "name": "tension_pulley",
+  "before": {
+   "kind": "cylinder",
+   "args": [
+    0.2,
+    0.2,
+    2,
+    16
+   ]
+  },
+  "after": {
+   "kind": "profile",
+   "segments": 16,
+   "points": [
+    [
+     0,
+     -0.984
+    ],
+    [
+     0.046,
+     -0.984
+    ],
+    [
+     0.052,
+     -0.978
+    ],
+    [
+     0.052,
+     -0.97
+    ],
+    [
+     0.058,
+     -0.964
+    ],
+    [
+     0.15,
+     -0.964
+    ],
+    [
+     0.166,
+     -0.98
+    ],
+    [
+     0.1848,
+     -1
+    ],
+    [
+     0.1878,
+     -0.997
+    ],
+    [
+     0.1878,
+     -0.92
+    ],
+    [
+     0.194,
+     -0.6
+    ],
+    [
+     0.1985,
+     -0.3
+    ],
+    [
+     0.2,
+     0
+    ],
+    [
+     0.1985,
+     0.3
+    ],
+    [
+     0.194,
+     0.6
+    ],
+    [
+     0.1878,
+     0.92
+    ],
+    [
+     0.1878,
+     0.997
+    ],
+    [
+     0.1848,
+     1
+    ],
+    [
+     0.166,
+     0.98
+    ],
+    [
+     0.15,
+     0.964
+    ],
+    [
+     0.058,
+     0.964
+    ],
+    [
+     0.052,
+     0.97
+    ],
+    [
+     0.052,
+     0.978
+    ],
+    [
+     0.046,
+     0.984
+    ],
+    [
+     0,
+     0.984
+    ]
+   ]
+  },
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "distance": 3.4,
+  "note": "ConveyorSystem TensionMechanism head pulley, 0.4 m x 2 m. Crowned shell (0.1878 at the faces to 0.2000 at mid-span, 12 mm - the belt-tracking barrel), 3 mm rim chamfer so the face still reads square, dished end disc recessed 36 mm, raised hub boss. Envelope r0.2 y+-1.0 preserved."
+ },
+ {
+  "name": "tension_pulley_end",
+  "before": {
+   "kind": "cylinder",
+   "args": [
+    0.2,
+    0.2,
+    0.5,
+    16
+   ]
+  },
+  "after": {
+   "kind": "profile",
+   "segments": 16,
+   "points": [
+    [
+     0,
+     -0.234
+    ],
+    [
+     0.046,
+     -0.234
+    ],
+    [
+     0.052,
+     -0.228
+    ],
+    [
+     0.052,
+     -0.22
+    ],
+    [
+     0.058,
+     -0.214
+    ],
+    [
+     0.15,
+     -0.214
+    ],
+    [
+     0.166,
+     -0.23
+    ],
+    [
+     0.1848,
+     -0.25
+    ],
+    [
+     0.1878,
+     -0.247
+    ],
+    [
+     0.1878,
+     -0.17
+    ],
+    [
+     0.194,
+     0.15
+    ],
+    [
+     0.2,
+     0.25
+    ],
+    [
+     0,
+     0.25
+    ]
+   ]
+  },
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "distance": 1.15,
+  "note": "DESIGN CROP of tension_pulley - identical end numbers, barrel truncated and shifted +0.75 so the end disc fills frame. The harness camera is broadside, so the crop is read through scratch three_quarter_preview.py."
+ },
+ {
+  "name": "idler_roller",
+  "before": {
+   "kind": "cylinder",
+   "args": [
+    0.15,
+    0.15,
+    2,
+    16
+   ]
+  },
+  "after": {
+   "kind": "profile",
+   "segments": 16,
+   "points": [
+    [
+     0,
+     -0.978
+    ],
+    [
+     0.042,
+     -0.978
+    ],
+    [
+     0.048,
+     -0.972
+    ],
+    [
+     0.048,
+     -0.966
+    ],
+    [
+     0.054,
+     -0.962
+    ],
+    [
+     0.098,
+     -0.962
+    ],
+    [
+     0.104,
+     -0.968
+    ],
+    [
+     0.104,
+     -0.994
+    ],
+    [
+     0.11,
+     -1
+    ],
+    [
+     0.133,
+     -1
+    ],
+    [
+     0.142,
+     -0.991
+    ],
+    [
+     0.15,
+     -0.983
+    ],
+    [
+     0.15,
+     0.983
+    ],
+    [
+     0.142,
+     0.991
+    ],
+    [
+     0.133,
+     1
+    ],
+    [
+     0.11,
+     1
+    ],
+    [
+     0.104,
+     0.994
+    ],
+    [
+     0.104,
+     0.968
+    ],
+    [
+     0.098,
+     0.962
+    ],
+    [
+     0.054,
+     0.962
+    ],
+    [
+     0.048,
+     0.966
+    ],
+    [
+     0.048,
+     0.972
+    ],
+    [
+     0.042,
+     0.978
+    ],
+    [
+     0,
+     0.978
+    ]
+   ]
+  },
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "distance": 3.4,
+  "note": "ConveyorSystem RollerConveyor idler, 0.3 m x 2 m, x25 instanced. Barrel is STRAIGHT on purpose - a gravity roller is not crowned; the design is all in the end: 8 mm rolled rim chamfer, 26 mm rim face, 38 mm bearing pocket, hub boss standing 16 mm PROUD of that pocket floor (an earlier pass sank it 56 mm inboard - a second counterbore, not a boss). Envelope r0.15 y+-1.0 preserved."
+ },
+ {
+  "name": "idler_roller_end",
+  "before": {
+   "kind": "cylinder",
+   "args": [
+    0.15,
+    0.15,
+    0.5,
+    16
+   ]
+  },
+  "after": {
+   "kind": "profile",
+   "segments": 16,
+   "points": [
+    [
+     0,
+     -0.228
+    ],
+    [
+     0.042,
+     -0.228
+    ],
+    [
+     0.048,
+     -0.222
+    ],
+    [
+     0.048,
+     -0.216
+    ],
+    [
+     0.054,
+     -0.212
+    ],
+    [
+     0.098,
+     -0.212
+    ],
+    [
+     0.104,
+     -0.218
+    ],
+    [
+     0.104,
+     -0.244
+    ],
+    [
+     0.11,
+     -0.25
+    ],
+    [
+     0.133,
+     -0.25
+    ],
+    [
+     0.142,
+     -0.241
+    ],
+    [
+     0.15,
+     -0.233
+    ],
+    [
+     0.15,
+     0.25
+    ],
+    [
+     0,
+     0.25
+    ]
+   ]
+  },
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "distance": 1.15,
+  "note": "DESIGN CROP of idler_roller - identical end numbers, shifted +0.75."
+ },
+ {
+  "name": "roller_axle_rejected",
+  "before": {
+   "kind": "cylinder",
+   "args": [
+    0.05,
+    0.05,
+    0.1,
+    8
+   ]
+  },
+  "after": {
+   "kind": "profile",
+   "segments": 8,
+   "points": [
+    [
+     0,
+     -0.05
+    ],
+    [
+     0.04,
+     -0.05
+    ],
+    [
+     0.05,
+     -0.04
+    ],
+    [
+     0.05,
+     -0.026
+    ],
+    [
+     0.034,
+     -0.02
+    ],
+    [
+     0.034,
+     0.02
+    ],
+    [
+     0.05,
+     0.026
+    ],
+    [
+     0.05,
+     0.04
+    ],
+    [
+     0.04,
+     0.05
+    ],
+    [
+     0,
+     0.05
+    ]
+   ]
+  },
+  "scale": [
+   1,
+   1,
+   1
+  ],
+  "distance": 0.5,
+  "note": "REJECTED, kept as the evidence. Waisted two-collar spring-axle stub. At the real 0.1 m x 0.1 m size it renders as two soft octagonal lumps, not hardware; a hex prism (the physically right answer) cannot hold the envelope because a regular hexagon's max|x| and max|z| differ by 13.4%. AXLE_GEOMETRY is left as-is."
+ },
+ {
+  "name": "pipe_column",
+  "before": {
+   "kind": "cylinder",
+   "args": [
+    1,
+    1,
+    1,
+    12
+   ]
+  },
+  "after": {
+   "kind": "profile",
+   "segments": 12,
+   "points": [
+    [
+     0,
+     -0.5
+    ],
+    [
+     1,
+     -0.5
+    ],
+    [
+     1,
+     -0.47909
+    ],
+    [
+     0.94,
+     -0.47727
+    ],
+    [
+     0.78,
+     -0.47727
+    ],
+    [
+     0.78,
+     0.47818
+    ],
+    [
+     0.94,
+     0.48
+    ],
+    [
+     1,
+     0.48182
+    ],
+    [
+     1,
+     0.49818
+    ],
+    [
+     0.94,
+     0.5
+    ],
+    [
+     0,
+     0.5
+    ]
+   ]
+  },
+  "scale": [
+   0.1,
+   11,
+   0.1
+  ],
+  "distance": 19,
+  "note": "SpoutingSystem PIPE_SUPPORT vertical, instanced at [0.1, 10-12, 0.1]. Grout pedestal at the floor, slim 0.156 m shaft, capital collar under the cross beam. Mid-height is deliberately bare - at 11 m tall and 0.2 m across the camera only ever reads the foot and the head. Envelope r1.0 y+-0.5 preserved."
+ },
+ {
+  "name": "pipe_column_base",
+  "before": {
+   "kind": "profile",
+   "segments": 12,
+   "points": [
+    [
+     0,
+     0
+    ],
+    [
+     1,
+     0
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     0,
+     1
+    ]
+   ]
+  },
+  "after": {
+   "kind": "profile",
+   "segments": 12,
+   "points": [
+    [
+     0,
+     0
+    ],
+    [
+     1,
+     0
+    ],
+    [
+     1,
+     0.02091
+    ],
+    [
+     0.94,
+     0.02273
+    ],
+    [
+     0.78,
+     0.02273
+    ],
+    [
+     0.78,
+     0.97818
+    ],
+    [
+     0.94,
+     0.98
+    ],
+    [
+     1,
+     0.98182
+    ],
+    [
+     1,
+     0.99818
+    ],
+    [
+     0.94,
+     1
+    ],
+    [
+     0,
+     1
+    ]
+   ]
+  },
+  "scale": [
+   0.1,
+   11,
+   0.1
+  ],
+  "distance": 1.6,
+  "note": "DESIGN CROP - pipe_column shifted +0.5 in unit y so the 0.23 m pedestal sits at the camera target."
+ },
+ {
+  "name": "pipe_column_top",
+  "before": {
+   "kind": "profile",
+   "segments": 12,
+   "points": [
+    [
+     0,
+     -1
+    ],
+    [
+     1,
+     -1
+    ],
+    [
+     1,
+     0
+    ],
+    [
+     0,
+     0
+    ]
+   ]
+  },
+  "after": {
+   "kind": "profile",
+   "segments": 12,
+   "points": [
+    [
+     0,
+     -1
+    ],
+    [
+     1,
+     -1
+    ],
+    [
+     1,
+     -0.97909
+    ],
+    [
+     0.94,
+     -0.97727
+    ],
+    [
+     0.78,
+     -0.97727
+    ],
+    [
+     0.78,
+     -0.02182
+    ],
+    [
+     0.94,
+     -0.02
+    ],
+    [
+     1,
+     -0.01818
+    ],
+    [
+     1,
+     -0.00182
+    ],
+    [
+     0.94,
+     0
+    ],
+    [
+     0,
+     0
+    ]
+   ]
+  },
+  "scale": [
+   0.1,
+   11,
+   0.1
+  ],
+  "distance": 1.6,
+  "note": "DESIGN CROP - pipe_column shifted -0.5 so the capital collar sits at the camera target."
+ },
+ {
+  "name": "pipe_crossbeam",
+  "before": {
+   "kind": "cylinder",
+   "args": [
+    1,
+    1,
+    1,
+    12
+   ]
+  },
+  "after": {
+   "kind": "profile",
+   "segments": 12,
+   "points": [
+    [
+     0,
+     -0.5
+    ],
+    [
+     1,
+     -0.5
+    ],
+    [
+     1,
+     -0.49333
+    ],
+    [
+     0.8,
+     -0.48667
+    ],
+    [
+     0.8,
+     -0.2
+    ],
+    [
+     0.95,
+     -0.19333
+    ],
+    [
+     0.95,
+     -0.17333
+    ],
+    [
+     0.8,
+     -0.16667
+    ],
+    [
+     0.8,
+     0.16667
+    ],
+    [
+     0.95,
+     0.17333
+    ],
+    [
+     0.95,
+     0.19333
+    ],
+    [
+     0.8,
+     0.2
+    ],
+    [
+     0.8,
+     0.48667
+    ],
+    [
+     1,
+     0.49333
+    ],
+    [
+     1,
+     0.5
+    ],
+    [
+     0,
+     0.5
+    ]
+   ]
+  },
+  "scale": [
+   0.08,
+   3,
+   0.08
+  ],
+  "distance": 5.2,
+  "note": "SpoutingSystem PIPE_SUPPORT cross beam, instanced at [0.08, 3, 0.08] rotated 90deg about Z. Bolted end plates, slimmed 0.128 m web, two U-bolt clamp saddles. Split from the column geometry: one unit cylinder cannot serve a 11 m column and a 3 m strut once either has features. Envelope r1.0 y+-0.5 preserved."
+ }
+]

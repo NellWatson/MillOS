@@ -14,6 +14,8 @@
     "bench": "vitest bench",
     "benchmark:runtime": "node scripts/run-performance-benchmark.mjs",
     "benchmark:runtime:report": "node scripts/run-performance-benchmark.mjs --report-only",
+    "capture:art": "node scripts/capture-art-review.mjs",
+    "review:stage-ab": "node scripts/stage-blind-ab.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "lint": "eslint src",
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,css}\"",
