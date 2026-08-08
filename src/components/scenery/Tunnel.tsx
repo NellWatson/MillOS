@@ -15,9 +15,13 @@
  * of them needs a picking proxy the way `raycastSiloShell` does.
  */
 
-import React from 'react';
+import React, { useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { TUNNEL_MATERIALS, PROCEDURAL_TEXTURES } from '../../utils/sharedMaterials';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
+import { createAtmosphereState, sampleAtmosphere } from '../../simulation/atmosphere';
+import { getCulvertWaterHeight } from '../../simulation/ambientWorld';
 
 interface TunnelProps {
   position: [number, number, number];
@@ -236,6 +240,7 @@ const DRAINAGE_PIPE = createDrainagePipeGeometry();
 const CULVERT_END_RING = createCulvertEndRingGeometry();
 const CORRUGATED_CULVERT = createCorrugatedCulvertGeometry();
 const BRICK_ARCH = createBrickArchGeometry();
+const _culvertAtmosphere = createAtmosphereState();
 
 /**
  * Drainage Culvert - precast concrete pipe for water drainage
@@ -253,6 +258,26 @@ const BRICK_ARCH = createBrickArchGeometry();
  */
 export const DrainageCulvert: React.FC<TunnelProps> = React.memo(
   ({ position, rotation = 0, length = 5, radius = 0.8 }) => {
+    const waterRef = useRef<THREE.Mesh>(null);
+
+    useFrame((_, delta) => {
+      if (!waterRef.current) return;
+      const { gameDay, gameTime, weather, isTabVisible } = useGameSimulationStore.getState();
+      if (!isTabVisible) return;
+      const atmosphere = sampleAtmosphere(gameDay, gameTime, weather, _culvertAtmosphere);
+      const targetHeight = getCulvertWaterHeight(
+        radius,
+        atmosphere.wetness,
+        atmosphere.precipitation
+      );
+      waterRef.current.position.y = THREE.MathUtils.damp(
+        waterRef.current.position.y,
+        targetHeight,
+        3,
+        Math.min(delta, 0.1)
+      );
+    });
+
     return (
       <group position={position} rotation={[0, rotation, 0]}>
         {/* Jointed precast barrel */}
@@ -285,7 +310,7 @@ export const DrainageCulvert: React.FC<TunnelProps> = React.memo(
         </mesh>
 
         {/* Water surface inside */}
-        <mesh position={[0, -radius * 0.4, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh ref={waterRef} position={[0, -radius * 0.52, 0]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[length, radius * 1.2]} />
           <primitive object={TUNNEL_MATERIALS.water} attach="material" />
         </mesh>

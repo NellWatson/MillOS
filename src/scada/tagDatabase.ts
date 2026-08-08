@@ -93,7 +93,9 @@ const siloTags: TagDefinition[] = SILO_NAMES.flatMap((name, idx) => [
     machineId: SILO_IDS[idx],
     group: 'HUMIDITY' as const,
     simulation: {
-      baseValue: 12 + Math.random() * 2,
+      // Stable per-silo baseline keeps benchmark captures and replay sessions
+      // reproducible while the adapter still supplies live measurement noise.
+      baseValue: [12.4, 13.1, 12.7, 13.6, 12.2][idx],
       noiseAmplitude: 0.15,
       driftRate: 0.0005,
       correlatedWith: ['AMBIENT.HT001.PV'],
@@ -1039,6 +1041,7 @@ export function getTagsWithAlarms(): TagDefinition[] {
   );
 }
 
-// Tag database loaded: 86 tags total
+// Tag database loaded: 106 tags total
 // Zone 1 (Silos): 20 tags, Zone 2 (Mills): 24 tags, Zone 3 (Sifters): 12 tags
-// Zone 4 (Packers): 12 tags, Utility: 10 tags, Operations: 8 tags
+// Zone 4 (Packers): 12 tags, Utility: 10 tags, Visible utility assets: 15 tags,
+// Operations: 13 tags

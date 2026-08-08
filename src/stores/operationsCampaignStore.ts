@@ -206,6 +206,7 @@ export interface IncidentEffect {
   energyMultiplier: number;
   qualityPenalty: number;
   dispatchBlocked: boolean;
+  vehicleSpeedMultiplier: number;
 }
 
 interface OperationsCampaignState {
@@ -426,6 +427,7 @@ export const INCIDENT_DEFINITIONS: Record<
       energyMultiplier: 1.08,
       qualityPenalty: 0,
       dispatchBlocked: false,
+      vehicleSpeedMultiplier: 1,
     },
   },
   dust_filter_pressure: {
@@ -439,6 +441,7 @@ export const INCIDENT_DEFINITIONS: Record<
       energyMultiplier: 1.12,
       qualityPenalty: 3,
       dispatchBlocked: false,
+      vehicleSpeedMultiplier: 1,
     },
   },
   power_sag: {
@@ -452,6 +455,7 @@ export const INCIDENT_DEFINITIONS: Record<
       energyMultiplier: 0.7,
       qualityPenalty: 1,
       dispatchBlocked: false,
+      vehicleSpeedMultiplier: 1,
     },
   },
   delayed_truck: {
@@ -465,6 +469,7 @@ export const INCIDENT_DEFINITIONS: Record<
       energyMultiplier: 1,
       qualityPenalty: 0,
       dispatchBlocked: false,
+      vehicleSpeedMultiplier: 1,
     },
   },
   supplier_contamination: {
@@ -478,6 +483,7 @@ export const INCIDENT_DEFINITIONS: Record<
       energyMultiplier: 1,
       qualityPenalty: 10,
       dispatchBlocked: true,
+      vehicleSpeedMultiplier: 1,
     },
   },
   packaging_shortage: {
@@ -491,6 +497,7 @@ export const INCIDENT_DEFINITIONS: Record<
       energyMultiplier: 0.88,
       qualityPenalty: 0,
       dispatchBlocked: false,
+      vehicleSpeedMultiplier: 1,
     },
   },
   severe_rain: {
@@ -504,6 +511,7 @@ export const INCIDENT_DEFINITIONS: Record<
       energyMultiplier: 1.06,
       qualityPenalty: 1,
       dispatchBlocked: false,
+      vehicleSpeedMultiplier: 0.55,
     },
   },
   understaffing: {
@@ -517,6 +525,7 @@ export const INCIDENT_DEFINITIONS: Record<
       energyMultiplier: 1.03,
       qualityPenalty: 4,
       dispatchBlocked: false,
+      vehicleSpeedMultiplier: 1,
     },
   },
 };
@@ -746,6 +755,7 @@ function combinedIncidentEffect(incidents: ReadonlyArray<OperationalIncident>): 
     energyMultiplier: 1,
     qualityPenalty: 0,
     dispatchBlocked: false,
+    vehicleSpeedMultiplier: 1,
   };
   incidents.forEach((incident) => {
     if (incident.phase === 'resolved') return;
@@ -755,10 +765,12 @@ function combinedIncidentEffect(incidents: ReadonlyArray<OperationalIncident>): 
     effect.energyMultiplier *= 1 + (definition.energyMultiplier - 1) * mitigation;
     effect.qualityPenalty += definition.qualityPenalty * mitigation;
     effect.dispatchBlocked ||= definition.dispatchBlocked && incident.phase !== 'mitigated';
+    effect.vehicleSpeedMultiplier *= 1 - (1 - definition.vehicleSpeedMultiplier) * mitigation;
   });
   effect.productionMultiplier = clamp(effect.productionMultiplier, 0.2, 1);
   effect.energyMultiplier = clamp(effect.energyMultiplier, 0.5, 1.5);
   effect.qualityPenalty = clamp(effect.qualityPenalty, 0, 30);
+  effect.vehicleSpeedMultiplier = clamp(effect.vehicleSpeedMultiplier, 0.25, 1);
   return effect;
 }
 

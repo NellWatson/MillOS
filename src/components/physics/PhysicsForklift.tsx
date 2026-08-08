@@ -48,6 +48,7 @@ interface PhysicsForkliftProps {
   onCargoChange?: (hasCargo: boolean) => void;
   onOperationChange?: (operation: ForkliftOperation) => void;
   canPerformAction?: (action: 'pickup' | 'dropoff') => boolean;
+  vehicleSpeedMultiplier?: number;
 }
 
 // Helper to clamp velocity magnitude
@@ -75,6 +76,7 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
   onCargoChange,
   onOperationChange,
   canPerformAction,
+  vehicleSpeedMultiplier = 1,
 }) => {
   const rigidBodyRef = useRef<RapierRigidBody>(null);
 
@@ -287,7 +289,9 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
     // Clamp velocity
     clampVelocity(
       rb,
-      Math.min(data.speed, PHYSICS_CONFIG.forklift.maxLinearVelocity) * productionSpeed
+      Math.min(data.speed, PHYSICS_CONFIG.forklift.maxLinearVelocity) *
+        productionSpeed *
+        Math.max(0, vehicleSpeedMultiplier)
     );
 
     // Calculate rotation to face direction

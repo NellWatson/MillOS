@@ -11,6 +11,7 @@ import {
   getVisibleSiteCells,
   getVisibleSiteCellsForView,
   isPointInPortalTransition,
+  routeIntersectsBoundsXZ,
 } from '../siteLayout';
 
 describe('canonical site layout', () => {
@@ -79,6 +80,53 @@ describe('canonical site layout', () => {
 
     const lounge = getServiceAssetBounds(SITE_LAYOUT.serviceYard.driverLounge);
     expect(lounge.minX).toBeGreaterThan(SITE_LAYOUT.docks.shipping.apron.maxX);
+  });
+
+  it('keeps canonical forklift swept corridors clear of machines and service assets', () => {
+    const routes = Object.values(SITE_LAYOUT.routes.forklifts);
+    const obstacles = createMachineObstacles(0.35);
+    const serviceAssets = Object.values(SITE_LAYOUT.serviceYard).map((asset) => ({
+      id: asset.id,
+      bounds: getServiceAssetBounds(asset),
+    }));
+
+    for (const route of routes) {
+      route.points.forEach((point) => expect(containsPoint(FACTORY_BOUNDS, ...point)).toBe(true));
+      for (const obstacle of obstacles) {
+        expect(routeIntersectsBoundsXZ(route, obstacle), `${route.id} hits ${obstacle.id}`).toBe(
+          false
+        );
+      }
+      for (const asset of serviceAssets) {
+        expect(routeIntersectsBoundsXZ(route, asset.bounds), `${route.id} hits ${asset.id}`).toBe(
+          false
+        );
+      }
+    }
+  });
+
+  it('keeps forklift swept corridors outside conveyor and central dock hazards', () => {
+    const shipping = SITE_LAYOUT.routes.forklifts.shipping;
+    const receiving = SITE_LAYOUT.routes.forklifts.receiving;
+
+    expect(routeIntersectsBoundsXZ(shipping, SITE_LAYOUT.routeHazards.mainConveyor.bounds)).toBe(
+      false
+    );
+    expect(routeIntersectsBoundsXZ(shipping, SITE_LAYOUT.routeHazards.rollerConveyor.bounds)).toBe(
+      false
+    );
+    expect(routeIntersectsBoundsXZ(receiving, SITE_LAYOUT.routeHazards.mainConveyor.bounds)).toBe(
+      false
+    );
+    expect(routeIntersectsBoundsXZ(receiving, SITE_LAYOUT.routeHazards.rollerConveyor.bounds)).toBe(
+      false
+    );
+    expect(routeIntersectsBoundsXZ(shipping, SITE_LAYOUT.routeHazards.shippingDock.bounds)).toBe(
+      false
+    );
+    expect(routeIntersectsBoundsXZ(receiving, SITE_LAYOUT.routeHazards.receivingDock.bounds)).toBe(
+      false
+    );
   });
 
   it('keeps authored landscape districts separated from the factory and service yard', () => {

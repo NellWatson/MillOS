@@ -868,6 +868,8 @@ const WaterAnimationManager: React.FC = () => {
       const uniforms = material.uniforms;
       uniforms.uTime.value = time;
       uniforms.uWetness.value = atmosphere.wetness;
+      uniforms.uPrecipitation.value = atmosphere.precipitation;
+      uniforms.uWind.value = atmosphere.wind;
       uniforms.uDaylight.value = daylight;
       uniforms.uSkyZenith.value.copy(_waterZenith);
       uniforms.uSkyHorizon.value.copy(_waterHorizon);
@@ -940,6 +942,8 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
         uRadial: { value: radial ? 1 : 0 },
         uCrossOnly: { value: crossOnly ? 1 : 0 },
         uWetness: { value: 0 },
+        uPrecipitation: { value: 0 },
+        uWind: { value: 0.2 },
         uDaylight: { value: 1 },
         uSkyZenith: { value: WATER_ZENITH_DAY.clone() },
         uSkyHorizon: { value: WATER_HORIZON_DAY.clone() },
@@ -951,6 +955,7 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
         uniform vec2 uFlowDirection;
         uniform vec2 uCrossFlow;
         uniform float uFlowSpeed;
+        uniform float uWind;
         varying vec2 vUv;
         varying float vWave;
         varying vec3 vWorldPosition;
@@ -966,9 +971,10 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
           vec2 waveDerivative =
             cos(along * 0.32 + uTime * uFlowSpeed) * 0.32 * uFlowDirection
             - sin(across * 0.44 - uTime * uFlowSpeed * 0.71) * 0.44 * crossFlow;
-          vec2 heightDerivative = waveDerivative * 0.0175;
+          float windAmplitude = mix(0.75, 1.45, clamp(uWind, 0.0, 1.0));
+          vec2 heightDerivative = waveDerivative * 0.0175 * windAmplitude;
           vec3 displaced = position;
-          displaced.z += vWave * 0.035;
+          displaced.z += vWave * 0.035 * windAmplitude;
           vec3 localNormal = normalize(vec3(-heightDerivative.x, -heightDerivative.y, 1.0));
           vWorldNormal = normalize(mat3(modelMatrix) * localNormal);
           vWorldPosition = (modelMatrix * vec4(displaced, 1.0)).xyz;
@@ -988,6 +994,7 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
         uniform float uRadial;
         uniform float uCrossOnly;
         uniform float uWetness;
+        uniform float uPrecipitation;
         uniform float uDaylight;
         uniform vec3 uSkyZenith;
         uniform vec3 uSkyHorizon;
@@ -1010,7 +1017,18 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
             dot(vUv, uRippleB) * 59.0 - uTime * uFlowSpeed * 1.09 + rippleA * 0.72;
           float rippleB = sin(phaseB);
           float rippleC = cos(phaseC);
-          float ripples = rippleA * 0.56 + rippleB * 0.27 + rippleC * 0.11 + vWave * 0.06;
+          vec2 rainTile = fract(vWorldPosition.xz * 0.19) - 0.5;
+          float rainDistance = length(rainTile);
+          float rainRipple =
+            sin(rainDistance * 46.0 - uTime * 2.1) *
+            (1.0 - smoothstep(0.08, 0.5, rainDistance)) *
+            uPrecipitation;
+          float ripples =
+            rippleA * 0.54 +
+            rippleB * 0.26 +
+            rippleC * 0.10 +
+            vWave * 0.06 +
+            rainRipple * 0.08;
 
           // DEPTH IS DISTANCE FROM THE BANK, not a UV ramp. The old
           // 0.48 + vUv.y * 0.16 gradient ran across the mesh regardless of
@@ -1035,7 +1053,9 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
             cos(phaseA) * 38.0 * 0.0040 * uRippleA
             + cos(phaseB) * 59.0 * 0.0016 * uRippleB
             - sin(phaseC) * 23.0 * 0.0030 * uRippleC;
-          vec3 normal = normalize(vWorldNormal + vec3(slope.x, 0.0, slope.y));
+          vec3 normal = normalize(
+            vWorldNormal + vec3(slope.x + rainRipple * 0.018, 0.0, slope.y - rainRipple * 0.018)
+          );
 
           vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
           float fresnel = pow(1.0 - max(dot(normal, viewDirection), 0.0), 4.0);
@@ -1097,7 +1117,7 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
     // MANUALLY VERSIONED, never derived from time or randomness - see the
     // documented `Date.now()` cache-key bug. Bump this whenever the shader
     // source above changes or a stale cached program will be reused.
-    value.customProgramCacheKey = () => 'millos-unified-water-v6';
+    value.customProgramCacheKey = () => 'millos-unified-water-v7';
     return value;
   }, [crossOnly, deep, flowSpeed, flowX, flowY, opacity, radial, reflection, shallow]);
 

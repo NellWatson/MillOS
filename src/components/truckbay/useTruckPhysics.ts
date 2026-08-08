@@ -44,6 +44,13 @@ export function isTruckGuidingPhase(phase: TruckPhase): boolean {
   return phase === 'backing' || phase === 'final_adjustment';
 }
 
+/** Gate motion follows the truck cycle rather than an unrelated decorative timer. */
+export function isTruckGateOpenPhase(phase: TruckPhase): boolean {
+  return (
+    phase === 'entering' || phase === 'slowing' || phase === 'accelerating' || phase === 'leaving'
+  );
+}
+
 /** Subtle loaded-trailer suspension compression, bounded against bad telemetry. */
 export function resolveTrailerLoadSettle(loadRatio: number): number {
   if (!Number.isFinite(loadRatio)) return 0;

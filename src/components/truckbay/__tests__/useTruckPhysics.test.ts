@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { SITE_LAYOUT } from '../../../constants/siteLayout';
+import {
+  SITE_LAYOUT,
+  getServiceAssetBounds,
+  routeIntersectsBoundsXZ,
+  type VehicleRouteAnchor,
+} from '../../../constants/siteLayout';
 import {
   TRUCK_CYCLE_SECONDS,
   TRUCK_PHASE_DURATIONS,
@@ -10,6 +15,7 @@ import {
   getTruckPhase,
   getTruckScheduleStatus,
   isTruckDockedPhase,
+  isTruckGateOpenPhase,
   isTruckGuidingPhase,
   resolveTrailerLoadSettle,
 } from '../useTruckPhysics';
@@ -17,7 +23,33 @@ import {
 const angleDistance = (a: number, b: number): number =>
   Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
 
+const sampleTruckRoute = (
+  id: string,
+  calculateState: typeof calculateShippingTruckState
+): VehicleRouteAnchor => ({
+  id,
+  vehicle: 'truck',
+  points: Array.from({ length: TRUCK_CYCLE_SECONDS * 20 + 1 }, (_, index) => {
+    const cycle = index / 20;
+    const state = calculateState(cycle, cycle);
+    return [state.x, 0, state.z] as const;
+  }),
+  // 3.2 m trailer width plus mirrors and a manoeuvring margin.
+  halfWidth: 2.25,
+  closed: false,
+});
+
 describe('deterministic truck service controller', () => {
+  it('opens entrance gates only while a truck is crossing the site boundary', () => {
+    expect(isTruckGateOpenPhase('entering')).toBe(true);
+    expect(isTruckGateOpenPhase('slowing')).toBe(true);
+    expect(isTruckGateOpenPhase('turning_in')).toBe(false);
+    expect(isTruckGateOpenPhase('docked')).toBe(false);
+    expect(isTruckGateOpenPhase('turning_out')).toBe(false);
+    expect(isTruckGateOpenPhase('accelerating')).toBe(true);
+    expect(isTruckGateOpenPhase('leaving')).toBe(true);
+  });
+
   it('settles the trailer progressively without accepting invalid load telemetry', () => {
     expect(resolveTrailerLoadSettle(0)).toBe(0);
     expect(resolveTrailerLoadSettle(0.5)).toBeCloseTo(0.04);
@@ -74,6 +106,22 @@ describe('deterministic truck service controller', () => {
       expect(receiving.z).toBeCloseTo(-shipping.z);
       expect(angleDistance(receiving.rotation, shipping.rotation + Math.PI)).toBeLessThan(1e-8);
       expect(receiving.speed).toBe(shipping.speed);
+    }
+  });
+
+  it('keeps both complete truck sweeps clear of authored service-yard assets', () => {
+    const routes = [
+      sampleTruckRoute('shipping-truck', calculateShippingTruckState),
+      sampleTruckRoute('receiving-truck', calculateReceivingTruckState),
+    ];
+
+    for (const route of routes) {
+      for (const asset of Object.values(SITE_LAYOUT.serviceYard)) {
+        expect(
+          routeIntersectsBoundsXZ(route, getServiceAssetBounds(asset, true)),
+          `${route.id} enters ${asset.id} service clearance`
+        ).toBe(false);
+      }
     }
   });
 

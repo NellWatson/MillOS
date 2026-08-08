@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useRef, useEffect, useId, useLayoutEffect, useMemo, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { SceneText } from './shared/SceneText';
 import * as THREE from 'three';
@@ -9,6 +9,7 @@ import { useProductionStore } from '../stores/productionStore';
 import { selectSafetyHoldActive, useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useMaterialFlowStore } from '../stores/materialFlowStore';
+import { useOperationsCampaignStore } from '../stores/operationsCampaignStore';
 import { FLOOR_LAYERS, POLYGON_OFFSET, RENDER_ORDER } from '../constants/renderLayers';
 import { SITE_LAYOUT } from '../constants/siteLayout';
 import {
@@ -24,6 +25,7 @@ import {
   getTruckBenchmarkControllerStart,
   getTruckScheduleStatus,
   isTruckDockedPhase,
+  isTruckGateOpenPhase,
   isTruckGuidingPhase,
   TRUCK_CYCLE_SECONDS,
   type TruckAnimState,
@@ -31,6 +33,7 @@ import {
 } from './truckbay/useTruckPhysics';
 import { OptimizedTruckVisual, TRUCK_WHEEL_RADIUS } from './truckbay/OptimizedTruckBay';
 import { getRuntimeMode } from '../runtime/runtimeMode';
+import { PROCEDURAL_TEXTURES } from '../utils/sharedMaterials';
 // Import animation system functions and TruckAnimationManager
 import {
   TruckAnimationManager,
@@ -51,6 +54,49 @@ import {
 interface TruckBayProps {
   productionSpeed: number;
 }
+
+const cloneYardTexture = (
+  source: THREE.Texture,
+  repeatX: number,
+  repeatY: number
+): THREE.Texture => {
+  const texture = source.clone();
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(repeatX, repeatY);
+  return texture;
+};
+
+const YARD_TARMAC_MAP = cloneYardTexture(PROCEDURAL_TEXTURES.tarmacColor, 18, 18);
+const YARD_TARMAC_ROUGHNESS = cloneYardTexture(PROCEDURAL_TEXTURES.tarmacRoughness, 18, 18);
+const ROAD_TARMAC_MAP = cloneYardTexture(PROCEDURAL_TEXTURES.tarmacColor, 4, 28);
+const ROAD_TARMAC_ROUGHNESS = cloneYardTexture(PROCEDURAL_TEXTURES.tarmacRoughness, 4, 28);
+const APRON_CONCRETE_MAP = cloneYardTexture(PROCEDURAL_TEXTURES.concreteColor, 6, 5);
+const APRON_CONCRETE_ROUGHNESS = cloneYardTexture(PROCEDURAL_TEXTURES.concreteRoughness, 6, 5);
+
+// Authored colour textures decode as sRGB. Keep their material tint white so
+// the yard retains aggregate detail instead of multiplying it into black.
+const YARD_TARMAC_SURFACE = {
+  color: '#ffffff',
+  map: YARD_TARMAC_MAP,
+  roughnessMap: YARD_TARMAC_ROUGHNESS,
+  roughness: 1,
+  metalness: 0,
+} as const;
+const ROAD_TARMAC_SURFACE = {
+  color: '#ffffff',
+  map: ROAD_TARMAC_MAP,
+  roughnessMap: ROAD_TARMAC_ROUGHNESS,
+  roughness: 1,
+  metalness: 0,
+} as const;
+const APRON_CONCRETE_SURFACE = {
+  color: '#ffffff',
+  map: APRON_CONCRETE_MAP,
+  roughnessMap: APRON_CONCRETE_ROUGHNESS,
+  roughness: 0.92,
+  metalness: 0,
+} as const;
 
 // Stable module-level work-area bounds for warehouse workers. Hoisted out of
 // the JSX so their object identity is constant across renders; passing inline
@@ -1600,12 +1646,13 @@ const DockPlate: React.FC<{ position: [number, number, number]; isDeployed: bool
   isDeployed,
 }) => {
   const plateRef = useRef<THREE.Mesh>(null);
+  const plateId = useId();
 
   useEffect(() => {
     if (!plateRef.current) return;
-    const plateId = `dockplate-${Math.random()}`;
+    const animationId = `dockplate-${plateId}`;
 
-    registerAnimation(plateId, 'lerp', plateRef.current, {
+    registerAnimation(animationId, 'lerp', plateRef.current, {
       target: isDeployed ? -0.15 : 0,
       speed: 0.05,
       property: 'rotation',
@@ -1613,9 +1660,9 @@ const DockPlate: React.FC<{ position: [number, number, number]; isDeployed: bool
     });
 
     return () => {
-      unregisterAnimation(plateId);
+      unregisterAnimation(animationId);
     };
-  }, [isDeployed]);
+  }, [isDeployed, plateId]);
 
   return (
     <group position={position}>
@@ -2333,29 +2380,25 @@ const FuelIsland: React.FC<{ position: [number, number, number]; rotation?: numb
 );
 
 // Guard Shack at Entrance Gate
-const GuardShack: React.FC<{ position: [number, number, number]; rotation?: number }> = ({
-  position,
-  rotation = 0,
-}) => {
+const GuardShack: React.FC<{
+  position: [number, number, number];
+  rotation?: number;
+  gateOpen: boolean;
+}> = ({ position, rotation = 0, gateOpen }) => {
   const gateRef = useRef<THREE.Mesh>(null);
-  const gateOpenRef = useRef(false);
-  const animId = useRef(`guard-${Math.random().toString(36).substr(2, 9)}`);
+  const guardId = useId();
 
   useEffect(() => {
-    const id = animId.current;
-    registerAnimation(id, 'custom', null, {}, (time) => {
-      const shouldOpen = Math.sin(time * 0.3) > 0.5;
-      gateOpenRef.current = shouldOpen;
-      if (gateRef.current) {
-        gateRef.current.rotation.y = THREE.MathUtils.lerp(
-          gateRef.current.rotation.y,
-          shouldOpen ? -Math.PI / 2 : 0,
-          0.05
-        );
-      }
+    if (!gateRef.current) return;
+    const animationId = `guard-${guardId}`;
+    registerAnimation(animationId, 'lerp', gateRef.current, {
+      target: gateOpen ? -Math.PI / 2 : 0,
+      speed: 0.07,
+      property: 'rotation',
+      axis: 'y',
     });
-    return () => unregisterAnimation(id);
-  }, []);
+    return () => unregisterAnimation(animationId);
+  }, [gateOpen, guardId]);
   return (
     <group position={position} rotation={[0, rotation, 0]}>
       <mesh position={[0, 1.4, 0]}>
@@ -2552,12 +2595,12 @@ const RoadTunnel: React.FC<{
       {/* Road into tunnel */}
       <mesh position={[0, 0.05, -tunnelDepth / 2]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[roadWidth, tunnelDepth]} />
-        <meshStandardMaterial color="#1a1a1a" roughness={0.95} />
+        <meshStandardMaterial {...ROAD_TARMAC_SURFACE} />
       </mesh>
       {/* Road approach */}
       <mesh position={[0, 0.06, 10]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[roadWidth, 20]} />
-        <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+        <meshStandardMaterial {...ROAD_TARMAC_SURFACE} />
       </mesh>
 
       {/* Center line marking */}
@@ -2951,11 +2994,13 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
     docked: isTruckDockedPhase(initialShippingState.phase),
     doorsOpen: initialShippingState.doorsOpen,
     guiding: isTruckGuidingPhase(initialShippingState.phase),
+    gateOpen: isTruckGateOpenPhase(initialShippingState.phase),
   }));
   const [receivingDockVisual, setReceivingDockVisual] = useState(() => ({
     docked: isTruckDockedPhase(initialReceivingState.phase),
     doorsOpen: initialReceivingState.doorsOpen,
     guiding: isTruckGuidingPhase(initialReceivingState.phase),
+    gateOpen: isTruckGateOpenPhase(initialReceivingState.phase),
   }));
   const shippingDockVisualRef = useRef(shippingDockVisual);
   const receivingDockVisualRef = useRef(receivingDockVisual);
@@ -2991,6 +3036,9 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
   const audioReady = useAudioInitialized();
   const showDecorativeAnimations = graphicsQuality === 'ultra';
   const yardLampsEnabled = useYardLampsEnabled();
+  const vehicleSpeedMultiplier = useOperationsCampaignStore(
+    (state) => state.getIncidentEffect().vehicleSpeedMultiplier
+  );
 
   useEffect(() => {
     if (!audioReady) return undefined;
@@ -3049,7 +3097,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
     }
     simulationTimeInitializedRef.current = true;
     priorSimulationTimeRef.current = simulationTime;
-    const controllerDelta = safetyHoldActive ? 0 : simulationDelta * 0.45;
+    const controllerDelta = safetyHoldActive ? 0 : simulationDelta * 0.45 * vehicleSpeedMultiplier;
     controllerTimeRef.current += controllerDelta;
     const adjustedTime = controllerTimeRef.current;
 
@@ -3085,15 +3133,18 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
       const priorVisual = shippingDockVisualRef.current;
       const shippingGuiding = isTruckGuidingPhase(truckState.phase);
+      const shippingGateOpen = isTruckGateOpenPhase(truckState.phase);
       if (
         priorVisual.docked !== shippingDocked ||
         priorVisual.doorsOpen !== truckState.doorsOpen ||
-        priorVisual.guiding !== shippingGuiding
+        priorVisual.guiding !== shippingGuiding ||
+        priorVisual.gateOpen !== shippingGateOpen
       ) {
         const nextVisual = {
           docked: shippingDocked,
           doorsOpen: truckState.doorsOpen,
           guiding: shippingGuiding,
+          gateOpen: shippingGateOpen,
         };
         shippingDockVisualRef.current = nextVisual;
         setShippingDockVisual(nextVisual);
@@ -3176,15 +3227,18 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
       const priorVisual = receivingDockVisualRef.current;
       const receivingGuiding = isTruckGuidingPhase(truckState.phase);
+      const receivingGateOpen = isTruckGateOpenPhase(truckState.phase);
       if (
         priorVisual.docked !== receivingDocked ||
         priorVisual.doorsOpen !== truckState.doorsOpen ||
-        priorVisual.guiding !== receivingGuiding
+        priorVisual.guiding !== receivingGuiding ||
+        priorVisual.gateOpen !== receivingGateOpen
       ) {
         const nextVisual = {
           docked: receivingDocked,
           doorsOpen: truckState.doorsOpen,
           guiding: receivingGuiding,
+          gateOpen: receivingGateOpen,
         };
         receivingDockVisualRef.current = nextVisual;
         setReceivingDockVisual(nextVisual);
@@ -3301,7 +3355,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           {/* Sunken groove floor */}
           <mesh position={[0, -0.3, 0]} receiveShadow>
             <boxGeometry args={[4.5, 0.1, 18]} />
-            <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+            <meshStandardMaterial {...YARD_TARMAC_SURFACE} />
           </mesh>
           {/* Groove side walls */}
           <mesh position={[-2.4, -0.15, 0]}>
@@ -3398,13 +3452,13 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Main truck yard asphalt - raised to y=0.08 to prevent z-fighting with main asphalt at y=-0.05 */}
         <mesh position={[0, 0.08, 30]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[60, 60]} />
-          <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+          <meshStandardMaterial {...YARD_TARMAC_SURFACE} />
         </mesh>
 
         {/* Dock apron - raised to y=0.12 to be above truck yard asphalt */}
         <mesh position={[0, 0.12, 8]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[20, 16]} />
-          <meshStandardMaterial color="#374151" roughness={0.85} />
+          <meshStandardMaterial {...APRON_CONCRETE_SURFACE} />
         </mesh>
 
         {/* Road markings - raised to y=0.16 to be above dock apron at y=0.12 */}
@@ -3528,7 +3582,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Road extension connecting truck yard to tunnel */}
         <mesh position={[20, 0.07, 115]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[10, 120]} />
-          <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+          <meshStandardMaterial {...ROAD_TARMAC_SURFACE} />
         </mesh>
         {/* Road center line */}
         <mesh position={[20, 0.09, 115]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -3544,7 +3598,11 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             <WeightScale position={[0, 0, 52]} rotation={0} />
 
             {/* Guard shack at entrance - relocated to periphery */}
-            <GuardShack position={[45, 0, 60]} rotation={-Math.PI / 2} />
+            <GuardShack
+              position={[45, 0, 60]}
+              rotation={-Math.PI / 2}
+              gateOpen={shippingDockVisual.gateOpen}
+            />
 
             {/* Intercom call box at guard shack - relocated with guard shack */}
             <IntercomCallBox position={[40, 0, 60]} rotation={-Math.PI / 2} />
@@ -3718,7 +3776,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           {/* Sunken groove floor */}
           <mesh position={[0, -0.3, 0]} receiveShadow>
             <boxGeometry args={[4.5, 0.1, 18]} />
-            <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+            <meshStandardMaterial {...YARD_TARMAC_SURFACE} />
           </mesh>
           {/* Groove side walls */}
           <mesh position={[-2.4, -0.15, 0]}>
@@ -3813,13 +3871,13 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Main truck yard asphalt - raised to y=0.08 to prevent z-fighting with main asphalt at y=-0.05 */}
         <mesh position={[0, 0.08, -30]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[60, 60]} />
-          <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+          <meshStandardMaterial {...YARD_TARMAC_SURFACE} />
         </mesh>
 
         {/* Dock apron - raised to y=0.12 to be above truck yard asphalt */}
         <mesh position={[0, 0.12, -8]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[20, 16]} />
-          <meshStandardMaterial color="#374151" roughness={0.85} />
+          <meshStandardMaterial {...APRON_CONCRETE_SURFACE} />
         </mesh>
 
         {/* Road markings - raised to y=0.16 to be above dock apron at y=0.12 */}
@@ -3943,7 +4001,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Road extension connecting truck yard to tunnel */}
         <mesh position={[-20, 0.07, -115]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[10, 120]} />
-          <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+          <meshStandardMaterial {...ROAD_TARMAC_SURFACE} />
         </mesh>
         {/* Road center line */}
         <mesh position={[-20, 0.09, -115]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -3958,7 +4016,11 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             <WeightScale position={[0, 0, -52]} rotation={Math.PI} />
 
             {/* Guard shack at entrance - relocated to periphery */}
-            <GuardShack position={[-45, 0, -60]} rotation={Math.PI / 2} />
+            <GuardShack
+              position={[-45, 0, -60]}
+              rotation={Math.PI / 2}
+              gateOpen={receivingDockVisual.gateOpen}
+            />
 
             {/* Intercom call box at guard shack - relocated with guard shack */}
             <IntercomCallBox position={[-40, 0, -60]} rotation={Math.PI / 2} />

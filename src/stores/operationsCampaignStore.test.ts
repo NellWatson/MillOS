@@ -212,6 +212,23 @@ describe('operationsCampaignStore', () => {
     ).toBe('resolved');
   });
 
+  it('slows yard vehicles during severe rain and restores them through mitigation', () => {
+    const store = useOperationsCampaignStore.getState();
+    const incident = store.triggerIncident('severe_rain')!;
+
+    expect(store.getIncidentEffect().vehicleSpeedMultiplier).toBeCloseTo(0.55);
+
+    store.mitigateIncident(incident.id);
+    expect(
+      useOperationsCampaignStore.getState().getIncidentEffect().vehicleSpeedMultiplier
+    ).toBeCloseTo(0.775);
+
+    store.resolveIncident(incident.id);
+    expect(useOperationsCampaignStore.getState().getIncidentEffect().vehicleSpeedMultiplier).toBe(
+      1
+    );
+  });
+
   it('closes a causal report when the simulation crosses a shift boundary', () => {
     const store = useOperationsCampaignStore.getState();
     store.tickCampaign(

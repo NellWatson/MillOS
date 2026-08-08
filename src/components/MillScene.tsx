@@ -889,7 +889,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
       {/* The authored truck bay includes the garage, service yard, docks, and trucks. */}
       <group name="world-logistics">
         {authoredSiteReady && <OperationalRemotePlayers />}
-        {authoredSiteReady && !isLowGraphics && !perfDebug?.disableTruckBay && (
+        {authoredSiteReady && !perfDebug?.disableTruckBay && (
           <StaticMeshBatch name="authored-truck-yard" revision={staticBatchRevision}>
             <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
               <Suspense fallback={null}>

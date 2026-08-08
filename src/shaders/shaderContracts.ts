@@ -163,7 +163,7 @@ export const ACTIVE_SHADER_CONTRACTS: readonly ActiveShaderContract[] = [
     qualityVariants: ['low', 'medium', 'high', 'ultra'],
     uniformOwner: 'AnimatedWater memoized material, registered in the module `waterMaterials` set',
     timeSource: 'simulation',
-    cacheKey: 'millos-unified-water-v6',
+    cacheKey: 'millos-unified-water-v7',
     disposalOwner: 'AnimatedWater cleanup effect disposes and deregisters',
     fallbackMaterial: 'flat calibrated deep-water colour',
   },

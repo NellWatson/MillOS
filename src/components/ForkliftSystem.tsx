@@ -17,6 +17,7 @@ import { ForkliftModel } from './models';
 import { shouldRunThisFrame } from '../utils/frameThrottle';
 import { ForkliftData } from '../types';
 import { POLYGON_OFFSET } from '../constants/renderLayers';
+import { SITE_LAYOUT } from '../constants/siteLayout';
 import {
   createRoundedForkliftRoute,
   canPerformForkliftLogisticsAction,
@@ -390,16 +391,16 @@ interface CrossingZone {
   type: 'conveyor' | 'intersection';
 }
 
-const CROSSING_ZONES: CrossingZone[] = [
-  // Main conveyor crossing zone (z=24, with buffer)
-  { id: 'main-conveyor', xMin: -28, xMax: 28, zMin: 22, zMax: 26, type: 'conveyor' },
-  // Roller conveyor crossing zone (z=21, with buffer)
-  { id: 'roller-conveyor', xMin: -16, xMax: 16, zMin: 19, zMax: 23, type: 'conveyor' },
-  // Shipping dock approach (front, z=40-50)
-  { id: 'shipping-dock', xMin: -20, xMax: 20, zMin: 40, zMax: 50, type: 'intersection' },
-  // Receiving dock approach (back, z=-50 to -40)
-  { id: 'receiving-dock', xMin: -20, xMax: 20, zMin: -50, zMax: -40, type: 'intersection' },
-];
+const CROSSING_ZONES: CrossingZone[] = Object.values(SITE_LAYOUT.routeHazards).map(
+  ({ id, type, bounds }) => ({
+    id,
+    type,
+    xMin: bounds.minX,
+    xMax: bounds.maxX,
+    zMin: bounds.minZ,
+    zMax: bounds.maxZ,
+  })
+);
 
 // Check if a position is within any crossing zone
 const isInCrossingZone = (x: number, z: number): CrossingZone | null => {
@@ -546,16 +547,7 @@ export const ForkliftSystem: React.FC<ForkliftSystemProps> = ({
             // Must stay outside those bounds - approach from side at x=15
             // IMPORTANT: Break room at [35,0,25] (x:32-38, z:22.5-27.5) and
             // Toilet block at [35,0,35] (x:31-39, z:32.5-37.5) - route around east side
-            path: [
-              [28, 0, 20], // Packing area (pickup point) - west of break room
-              [45, 0, 20], // Move east to clear corridor
-              [45, 0, 42], // Move north along east corridor (clear of toilet block)
-              [24, 0, 42], // Approach shipping dock from side (outside platform x=18)
-              [24, 0, 44], // At dock edge (dropoff point) - just outside z=44 obstacle boundary
-              [24, 0, 42], // Pull back from dock
-              [45, 0, 42], // Return to east corridor
-              [45, 0, 20], // Head south
-            ],
+            path: SITE_LAYOUT.routes.forklifts.shipping.points.map((point) => [...point]),
             pathActions: [
               { type: 'pickup', duration: 2.0 }, // Load pallet at packing area
               { type: 'none', duration: 0 },
@@ -578,14 +570,7 @@ export const ForkliftSystem: React.FC<ForkliftSystemProps> = ({
             // Receiving route: Receiving dock (back, z=-50) -> Silo area
             // IMPORTANT: Dock platform obstacle is x:-10 to 10, z:-54 to -44
             // Must stay outside - approach from side at x=-15
-            path: [
-              [-35, 0, -43], // At receiving dock edge (pickup point) - aligned with corridor
-              [-35, 0, -38], // Pull out
-              [-35, 0, -30], // West corridor (center lane to avoid all collisions)
-              [-35, 0, -22], // Near silos (dropoff point)
-              [-35, 0, -30], // Return to west corridor
-              [-35, 0, -38], // Approach receiving dock
-            ],
+            path: SITE_LAYOUT.routes.forklifts.receiving.points.map((point) => [...point]),
             pathActions: [
               { type: 'pickup', duration: 2.0 }, // Load at receiving dock
               { type: 'none', duration: 0 },
@@ -688,6 +673,9 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       releasedFinishedKg: state.execution.releasedFinishedKg,
       loadStatus: state.execution.dispatchLoad.status,
     }))
+  );
+  const vehicleSpeedMultiplier = useOperationsCampaignStore(
+    (state) => state.getIncidentEffect().vehicleSpeedMultiplier
   );
   const canPerformWaypointAction = useCallback(
     (action: 'pickup' | 'dropoff'): boolean => {
@@ -1118,7 +1106,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
         currentTarget.current.set(...data.path[pathIndexRef.current]);
       }
     } else if (isSafeToMove) {
-      const effectiveSpeed = data.speed * speedMultiplier;
+      const effectiveSpeed = data.speed * speedMultiplier * vehicleSpeedMultiplier;
       const brakingSpeed = Math.sqrt(Math.max(0, 2 * 3.8 * (distance - 0.2)));
       const desiredSpeed = Math.min(effectiveSpeed, brakingSpeed);
       currentSpeedRef.current = moveTowards(
@@ -1271,6 +1259,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
             onCargoChange={handleCargoChange}
             onOperationChange={handleOperationChange}
             canPerformAction={canPerformWaypointAction}
+            vehicleSpeedMultiplier={vehicleSpeedMultiplier}
           >
             {forkliftContent}
           </PhysicsForklift>

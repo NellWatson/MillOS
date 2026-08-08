@@ -10,6 +10,16 @@ import { SimulationAdapter } from '../adapters/SimulationAdapter';
 import { MILL_TAGS } from '../tagDatabase';
 
 describe('SCADA Integration', () => {
+  it('keeps the complete tag registry unique and its authored baselines deterministic', () => {
+    expect(MILL_TAGS).toHaveLength(106);
+    expect(new Set(MILL_TAGS.map((tag) => tag.id)).size).toBe(MILL_TAGS.length);
+
+    const siloMoistureBaselines = MILL_TAGS.filter((tag) => tag.id.endsWith('.MT001.PV')).map(
+      (tag) => tag.simulation?.baseValue
+    );
+    expect(siloMoistureBaselines).toEqual([12.4, 13.1, 12.7, 13.6, 12.2]);
+  });
+
   let service: SCADAService;
 
   beforeEach(async () => {
