@@ -151,13 +151,19 @@ export const FireExtinguisherStation: React.FC<{ position: [number, number, numb
         </mesh>
       </group>
 
-      {/* Floor marking ring */}
+      {/* Floor marking ring - 1.0 m across, the largest round part on the
+          station and the only one seen flat-on from a walking camera. At 16
+          segments its facet chord is 195 mm, so the "circle" read as an
+          octagon-ish polygon painted on the floor. 32 is the smallest
+          multiple of 4 that gets the chord under 100 mm (24 -> 131 mm,
+          28 -> 112 mm, 32 -> 98 mm); staying on a multiple of 4 keeps the
+          0.4/0.5 radii exact on both axes. +32 verts per station. */}
       <mesh
         position={[0, FLOOR_LAYERS.safetyMain, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
         renderOrder={RENDER_ORDER.floorMarkings}
       >
-        <ringGeometry args={[0.4, 0.5, 16]} />
+        <ringGeometry args={[0.4, 0.5, 32]} />
         <meshStandardMaterial
           color="#ef4444"
           transparent
@@ -275,13 +281,20 @@ export const EmergencyShower: React.FC<{ position: [number, number, number] }> =
         </mesh>
       </group>
 
-      {/* Base drain */}
+      {/* Base drain - same 1.0 m outer diameter as the extinguisher station's
+          floor ring, so it gets the same 32 segments for the same reason: at 16
+          the 195 mm facet chord reads as a polygon on a surface the camera
+          looks straight down at. Matching the count keeps every 1 m floor
+          marking in here faceted alike; the two rings are metres apart on
+          separate layers, so this is consistency, not a z-fighting fix.
+          Multiple of 4 keeps the 0.3/0.5 radii exact on both axes.
+          +32 verts per shower. */}
       <mesh
         position={[0, FLOOR_LAYERS.wornPrimary, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
         renderOrder={RENDER_ORDER.floorEffects}
       >
-        <ringGeometry args={[0.3, 0.5, 16]} />
+        <ringGeometry args={[0.3, 0.5, 32]} />
         <meshStandardMaterial
           color="#fbbf24"
           polygonOffset

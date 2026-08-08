@@ -34,6 +34,32 @@ import { WindDriver } from '../scenery/WindDriver';
  *
  * Sized to the previous canopies (blobs spanned y 4.4-6.6 at radius ~1.1-1.9),
  * so no exterior tree changes height or footprint.
+ *
+ * All three take the DOME crown layout (see `createCanopyCage`): three
+ * overlapping masses weighted below the midline plus three off-axis lobes,
+ * instead of the radially symmetric ball the cards used to form. The x/z
+ * BOUNDING BOX is bit-identical (both layouts hand `CROWN_RIM` to a card at
+ * yaw 0 and one at yaw PI/2). The VISIBLE crown is not: the inscribed leaf
+ * blob's half-width goes 0.999 -> 1.082 radii, so a crown is ~8% wider at its
+ * widest azimuth than it was, which is the point of the lumpier layout.
+ *
+ * The cage's BOUNDING BOX moves in y, at BOTH ends, and by an amount that
+ * depends on the radius:height ratio - so it is a per-variant number, not one
+ * number:
+ *
+ *   variant 0 (2.45 x 1.95): y 2.805..7.425 -> 3.292..7.250  (+486 / -175 mm)
+ *   variant 1 (2.75 x 2.25): y 2.846..8.142 -> 3.383..7.950  (+537 / -192 mm)
+ *   variant 2 (2.20 x 1.80): y 2.717..6.924 -> 3.146..6.800  (+429 / -123 mm)
+ *
+ * All six numbers are a SHRINK, and every one of them was a tilted card's
+ * swung CORNER - transparent, since the leaf atlas cuts a disc out of each
+ * cell - and not foliage anyone saw. At every azimuth the old crown's lowest
+ * visible leaf sat slightly ABOVE where the new one sits, so the standing gap
+ * down to the 3 m trunk top narrows rather than widening. Nothing reads the
+ * extent: FactoryExterior draws these at the tree transform (both the
+ * instanced path and the individual `SimpleTree`), the mulch decals are placed
+ * from trunk positions, and no collider or layout number is derived from a
+ * canopy. The bounding sphere only tightens, so culling cannot pop.
  */
 export const TREE_FOLIAGE_VARIANTS = [
   createCanopyCage({ radius: 2.45, height: 1.95, centerY: 5.3, taper: 0 }),
@@ -65,8 +91,59 @@ export const treeJitterFromPosition = (position: [number, number, number]) => {
   };
 };
 
+/**
+ * Parkland trunk: a columnar bole standing on a flared foot.
+ *
+ * This was `CylinderGeometry(0.3, 0.4, 3, 12)` - a straight cone. On the
+ * WIDEST trunk on the site (0.8 m at the base, up to 1.14 m once a 1.3 scale
+ * and 1.1 jitter are applied, standing in parkland you walk into) a straight
+ * cone reads as a lamp post. A mature park tree is the opposite shape: the
+ * bole is very nearly a cylinder for its whole visible length and all the
+ * spread is in the root flare, which is here concentrated into the bottom
+ * 0.31 m as a concave swell 0.40 -> 0.316 with a knee where it meets the bole.
+ * Previewed at 9.5 m in scripts/blender/machine_part_preview.py against
+ * scripts/blender/specs/trees-canopy.json.
+ *
+ * Twelve radial segments is unchanged and is NOT the change here - the chord
+ * argument for it still holds (2 x 0.4 x sin 15 deg = 0.207 m against 0.400 m
+ * at 6 sides), as does the point that 6 segments put no vertex at theta 90/270
+ * and so measured 0.693 m on X against 0.800 m on Z. (FactoryExterior's
+ * individual `SimpleTree` path still holds a 6-segment cylinder copy of this;
+ * that is a different file's edit.)
+ *
+ * ENVELOPE: opens at (0.4, -1.5), closes at (0.3, +1.5) and only ever dips
+ * inside the straight line between - max radius and y range bit-identical to
+ * the cylinder, verified at 0.00 mm by the preview harness. One shared
+ * geometry through one InstancedMesh: 76 -> 143 vertices, once, for every
+ * exterior tree at any count.
+ */
+const PARKLAND_TRUNK_PROFILE: readonly (readonly [number, number])[] = [
+  [0.0, -1.5],
+  [0.4, -1.5], // flare foot - envelope max radius
+  [0.362, -1.428],
+  [0.332, -1.33],
+  [0.316, -1.19], // knee
+  [0.31, -0.85],
+  [0.307, -0.3],
+  [0.305, 0.3],
+  [0.302, 0.9],
+  [0.3, 1.5], // envelope top radius / max y
+  [0.0, 1.5],
+];
+
 const createTreeGeometries = () => {
-  const trunk = new THREE.CylinderGeometry(0.3, 0.4, 3, 6);
+  const trunk = new THREE.LatheGeometry(
+    PARKLAND_TRUNK_PROFILE.map(([r, y]) => new THREE.Vector2(r, y)),
+    12
+  );
+  // LatheGeometry lays v out by profile INDEX, which would squeeze the bark map
+  // into the flare; CylinderGeometry (what this replaces) lays it out linearly
+  // in height, and TREE_MATERIALS.trunk maps its bark ClampToEdge at repeat 1.
+  // Re-deriving v from y keeps the bark density exactly where it was.
+  const pos = trunk.getAttribute('position');
+  const uv = trunk.getAttribute('uv');
+  for (let i = 0; i < uv.count; i += 1) uv.setY(i, (pos.getY(i) + 1.5) / 3);
+  uv.needsUpdate = true;
   trunk.translate(0, 1.5, 0);
 
   return { trunk };
@@ -97,6 +174,19 @@ const createBenchGeometries = () => {
 
 // Create geometries once at module load
 const TREE_GEOMETRIES = createTreeGeometries();
+
+/**
+ * The designed parkland trunk, shared with `FactoryExterior`'s individual
+ * `SimpleTree`.
+ *
+ * `SimpleTree` held its own inline `cylinderGeometry args={[0.3, 0.4, 3, 6]}` -
+ * a straight 6-sided cone - and is live at six call sites, so six exterior
+ * trees stood next to the 24 instanced ones wearing the shape this profile
+ * replaced. Exporting the geometry rather than copying the numbers is what
+ * stops the two paths drifting apart again. Already translated so its base sits
+ * at y = 0.
+ */
+export const SHARED_TREE_TRUNK = TREE_GEOMETRIES.trunk;
 const BENCH_GEOMETRIES = createBenchGeometries();
 
 // ============================================================

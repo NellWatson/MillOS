@@ -361,9 +361,23 @@ export const GodRays: React.FC<{
 
   return (
     <group position={position} rotation={rotation}>
-      {/* Light beam cone (volumetric effect) */}
+      {/*
+        Light beam cone (volumetric effect).
+
+        4 m across at the base, so the beam OUTLINE is what reads - and the
+        unlit meshBasicMaterial gives the facets no shading to hide behind. 16
+        sides leaves a 38 mm sagitta (1.9% of the radius); 24 puts it at 17 mm
+        (0.86%), matching the mill's own ~4 m parts. 24 is divisible by 4, so
+        the base still measures exactly +/-2 on X and Z.
+
+        Kept in step with the identical cone in ambient/atmosphere.tsx, which
+        must not drift apart from this one. Note there is a THIRD copy of
+        GodRays inlined in components/AmbientDetails.tsx (~line 1887); it is
+        still at 16 segments and was deliberately left alone here because it
+        lives outside this module. Fold it in if that monolith is ever revived.
+      */}
       <mesh>
-        <coneGeometry args={[2, 8, 16, 1, true]} />
+        <coneGeometry args={[2, 8, 24, 1, true]} />
         <meshBasicMaterial
           color="#fef3c7"
           transparent
