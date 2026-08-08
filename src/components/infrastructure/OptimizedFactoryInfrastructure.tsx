@@ -14,7 +14,73 @@ import {
 
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
 const UNIT_PLANE = new THREE.PlaneGeometry(1, 1);
-const UNIT_CYLINDER = new THREE.CylinderGeometry(1, 1, 1, 10);
+/**
+ * The dock safety bollard, and nothing else in this file.
+ *
+ * Drawn at [0.24, 1.3, 0.24] through a four-instance `InstancedMesh`: a 0.48 m
+ * post standing 1.3 m out of the slab, flanking both dock approaches. It is
+ * read at the range a truck or a forklift passes it - roughly 3 to 10 m - not
+ * from across the site.
+ *
+ * It was `CylinderGeometry(1, 1, 1, 16)`, a flat-topped tube. A tube is the one
+ * thing a bollard is not, and no segment count fixes that. Three features carry
+ * at that range, and all three are in this profile:
+ *
+ *   - A GROUT COLLAR: a short vertical wall at the envelope's max radius with a
+ *     chamfered top. It plants a hard horizontal line where the post meets the
+ *     floor instead of letting the tube run into it.
+ *   - A LONG PLAIN SHAFT, 0.392 m across and 0.73 m of it unbroken - thinner
+ *     than the collar, and the step is the point. So is the length: the plain
+ *     run has to dominate. Previewed with two bands spread down the shaft as
+ *     well, and that reads as a fire hydrant; one band does not.
+ *   - ONE BAND standing 30 mm PROUD at 70% of the height, then a seat lip under
+ *     a shallow pressed dome cap. The shared safety-yellow material carries no
+ *     map, so a painted stripe would be invisible - a proud band survives on the
+ *     SILHOUETTE, which is the only channel this part has. A near-hemispherical
+ *     cap merges with the shaft into a bullet nose, so the cap is deliberately
+ *     shallow and the seat lip is what keeps it reading as a separate part.
+ *
+ * The profile is designed in metres and divided down, because the instance
+ * scale is 5.4:1 anisotropic - a cap drawn hemispherical in unit space renders
+ * as a vertical spike.
+ *
+ * ENVELOPE IDENTICAL to the cylinder it replaces: radius 1.0 at the collar rim,
+ * y in [-0.5, 0.5]. Every instance matrix and neighbour relationship is
+ * untouched, and the shaft narrowing to 0.392 m mates with nothing - the nearest
+ * portal jamb is 2.2 m away.
+ *
+ * 20 segments is a multiple of 4, so a vertex lands on each of +/-X and +/-Z and
+ * the post measures its nominal radius in plan; it also holds the flat-of-facet
+ * error on the shaft to 2.4 mm. One shared module-level geometry behind one
+ * `InstancedMesh`, so 357 vertices (up from 100) is a one-off scene cost at any
+ * instance count. The mesh carries no pointer handlers and no custom raycast, so
+ * no picking proxy is needed - compare `raycastSiloShell` in
+ * `machines/CompactMachines.tsx`, where densifying a picked mesh cost 6.6 ms.
+ */
+function createPortalBollardGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -0.5), // underside centre - keeps the mesh watertight
+    new THREE.Vector2(1.0, -0.5), // collar rim - envelope max radius
+    new THREE.Vector2(1.0, -0.45769), // collar wall, vertical
+    new THREE.Vector2(0.92667, -0.43831), // collar chamfer
+    new THREE.Vector2(0.81667, -0.41154), // cove into the shaft
+    new THREE.Vector2(0.81667, 0.15069), // 0.73 m of unbroken shaft
+    new THREE.Vector2(0.88542, 0.15969), // band lead-in
+    new THREE.Vector2(0.94167, 0.16769), // band, 30 mm proud
+    new THREE.Vector2(0.94167, 0.23692),
+    new THREE.Vector2(0.88542, 0.24492), // band run-out
+    new THREE.Vector2(0.81667, 0.25392),
+    new THREE.Vector2(0.81667, 0.42), // neck
+    new THREE.Vector2(0.85833, 0.43308), // seat lip - the cap overhangs the tube
+    new THREE.Vector2(0.793, 0.45869), // pressed dome
+    new THREE.Vector2(0.60693, 0.4804),
+    new THREE.Vector2(0.32847, 0.49491),
+    new THREE.Vector2(0.0, 0.5), // apex - envelope max y
+  ];
+  return new THREE.LatheGeometry(profile, 20);
+}
+
+const PORTAL_BOLLARD = createPortalBollardGeometry();
 
 /**
  * The interior slab gets its own geometry rather than sharing `UNIT_PLANE` with
@@ -1457,7 +1523,7 @@ function PortalFrames() {
       <InstancedBoxes instances={frames} material={MATERIALS.steel} castShadow receiveShadow />
       <instancedMesh
         ref={bollardRef}
-        args={[UNIT_CYLINDER, MATERIALS.safetyLit, bollards.length]}
+        args={[PORTAL_BOLLARD, MATERIALS.safetyLit, bollards.length]}
         castShadow
         receiveShadow
       />

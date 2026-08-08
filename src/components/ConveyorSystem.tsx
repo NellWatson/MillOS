@@ -667,6 +667,64 @@ const SupportLeg: React.FC<{ position: [number, number, number] }> = React.memo(
   );
 });
 
+/**
+ * Head pulley for the tension mechanisms at both ends of the main belt.
+ *
+ * Rendered 0.4 m across x 2 m long at x = +-27.5, sitting proud of its frame
+ * at the belt terminus - the only conveyor drum the camera can walk up to.
+ * It was two inline `CylinderGeometry(0.2, 0.2, 2, 16)` allocations, i.e. two
+ * bare tubes; this is one shared geometry with the three things that identify
+ * a drive pulley:
+ *
+ *   - a CROWN. The shell swells from 0.1878 at the faces to 0.2000 at
+ *     mid-span - 12 mm of barrel, which is what makes a belt self-track. Real
+ *     crown is ~1% and would be invisible; 6% reads as a barrel in silhouette
+ *     and concentrates the specular band on the centreline, which is the whole
+ *     point of having it.
+ *   - a 3 mm rim chamfer. Short segment beside a long one, so LatheGeometry's
+ *     length-weighted normal average leaves the face reading square. Earlier
+ *     passes used a 7 mm chamfer and the whole drum previewed as a pill.
+ *   - a DISHED END DISC recessed 36 mm inside the rim plane, with a raised hub
+ *     boss at its centre. The end is what you see standing beside the pulley,
+ *     and it was previously a flat blank.
+ *
+ * Envelope identical to the cylinder it replaces - max radius 0.2 at the crown
+ * apex, y in [-1, 1] at the rim edges - so the pulley still spans the 2 m belt
+ * width exactly and sits in the same 2.4 m frame.
+ */
+function createTensionPulleyGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -0.984), // hub boss face centre (closes the end)
+    new THREE.Vector2(0.046, -0.984), // hub boss OD
+    new THREE.Vector2(0.052, -0.978), // boss chamfer
+    new THREE.Vector2(0.052, -0.97), // boss wall
+    new THREE.Vector2(0.058, -0.964), // boss root fillet
+    new THREE.Vector2(0.15, -0.964), // end disc face, recessed 36 mm
+    new THREE.Vector2(0.166, -0.98), // disc dish
+    new THREE.Vector2(0.1848, -1.0), // shell rim edge - envelope y min
+    new THREE.Vector2(0.1878, -0.997), // 3 mm rim chamfer
+    new THREE.Vector2(0.1878, -0.92), // shell, straight before the crown
+    new THREE.Vector2(0.194, -0.6), // crown rise
+    new THREE.Vector2(0.1985, -0.3),
+    new THREE.Vector2(0.2, 0.0), // crown apex - envelope max radius
+    new THREE.Vector2(0.1985, 0.3),
+    new THREE.Vector2(0.194, 0.6),
+    new THREE.Vector2(0.1878, 0.92),
+    new THREE.Vector2(0.1878, 0.997),
+    new THREE.Vector2(0.1848, 1.0), // envelope y max
+    new THREE.Vector2(0.166, 0.98),
+    new THREE.Vector2(0.15, 0.964),
+    new THREE.Vector2(0.058, 0.964),
+    new THREE.Vector2(0.052, 0.97),
+    new THREE.Vector2(0.052, 0.978),
+    new THREE.Vector2(0.046, 0.984),
+    new THREE.Vector2(0.0, 0.984),
+  ];
+  return new THREE.LatheGeometry(profile, 16);
+}
+
+const TENSION_PULLEY_GEOMETRY = createTensionPulleyGeometry();
+
 // Belt tension adjustment mechanism - using shared materials
 const TensionMechanism: React.FC<{ position: [number, number, number] }> = React.memo(
   ({ position }) => {
@@ -677,11 +735,14 @@ const TensionMechanism: React.FC<{ position: [number, number, number] }> = React
           <boxGeometry args={[0.6, 0.4, 2.4]} />
           <primitive object={METAL_MATERIALS.paintedMediumGray} attach="material" />
         </mesh>
-        {/* End roller - NO SHADOW for small roller */}
-        <mesh position={[0, 0.05, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.2, 0.2, 2, 16]} />
-          <primitive object={METAL_MATERIALS.steel} attach="material" />
-        </mesh>
+        {/* Head pulley - NO SHADOW for small roller. Shared module-level
+            geometry: the inline constructor here allocated one per mechanism. */}
+        <mesh
+          position={[0, 0.05, 0]}
+          rotation={[Math.PI / 2, 0, 0]}
+          geometry={TENSION_PULLEY_GEOMETRY}
+          material={METAL_MATERIALS.steel}
+        />
         {/* Tension screws - no shadow for small parts */}
         <mesh position={[0.35, 0, -1]} rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[0.05, 0.05, 0.3, 8]} />
@@ -706,6 +767,15 @@ const TensionMechanism: React.FC<{ position: [number, number, number] }> = React
 );
 
 // Shared geometries and materials for drive rollers (created once at module level to avoid GC pressure)
+//
+// NOT redesigned, deliberately: these three are dead geometry. The group that
+// draws them is gated on `showDetails = enableProceduralTextures`, which is
+// `false` on all four presets (graphicsStore.ts, GRAPHICS_PRESETS low/medium/
+// high/ultra), and even ungated the rollers sit at y in [0, 0.3] inside a
+// frame box that spans [-0.25, 0.25] under a belt slab at [0.25, 0.35] - fully
+// enclosed, as the comment on `showMotor` below already says. The conveyor drum
+// that IS visible is the tension mechanism's head pulley; see
+// `createTensionPulleyGeometry`.
 const DRIVE_ROLLER_MAIN_GEOMETRY = new THREE.CylinderGeometry(0.12, 0.12, 1.9, 12);
 const DRIVE_ROLLER_CAP_GEOMETRY = new THREE.CylinderGeometry(0.15, 0.15, 0.05, 12);
 const DRIVE_ROLLER_BEARING_GEOMETRY = new THREE.BoxGeometry(0.15, 0.15, 0.08);
@@ -949,8 +1019,71 @@ export const ConveyorBelt: React.FC<{
 // Memoize ConveyorBelt to prevent re-renders when productionSpeed changes
 const MemoizedConveyorBelt = React.memo(ConveyorBelt);
 
+/**
+ * Gravity-conveyor idler, rendered 0.3 m across x 2 m long and instanced 25
+ * times down the packing line. It stands 25 mm proud of the side rails, so it
+ * is the one conveyor part the camera looks straight down at.
+ *
+ * The barrel is DELIBERATELY straight. A drive drum is crowned so the belt
+ * tracks (`createTensionPulleyGeometry` above); a free-spinning gravity roller
+ * is not, and crowning one would be wrong hardware rather than extra detail.
+ * Looking down the line you read 25 roller ENDS, so the whole design went
+ * there: an 8 mm rolled rim chamfer, a 26 mm rim face, a 38 mm bearing pocket,
+ * and a hub boss standing 16 mm PROUD of that pocket floor, on the axis the
+ * axle stub at z = +-1.05 runs out along. Proud, not sunk: an earlier pass put
+ * the hub face 56 mm inboard - deeper than the 38 mm floor it was supposed to
+ * rise from - which builds a second counterbore, not a boss. Previewed from a
+ * 30-degree elevation (the machine_part_preview camera is broadside and
+ * physically cannot see an end face) and again at 9 degrees, because a shallow
+ * recess and a low dome are the same image until something casts a shadow.
+ *
+ * Envelope identical to `CylinderGeometry(0.15, 0.15, 2, 16)` - max radius
+ * 0.15 on the barrel, y in [-1, 1] at the rim faces - so the rollers still
+ * meet the axle stubs and clear the rails at z = +-1.2.
+ */
+function createIdlerRollerGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -0.978), // hub boss face centre (closes the end)
+    new THREE.Vector2(0.042, -0.978), // hub boss OD, 16 mm proud of the floor
+    new THREE.Vector2(0.048, -0.972), // boss face chamfer
+    new THREE.Vector2(0.048, -0.966), // boss wall
+    new THREE.Vector2(0.054, -0.962), // boss root fillet, down on the floor
+    new THREE.Vector2(0.098, -0.962), // bearing pocket floor, 38 mm deep
+    new THREE.Vector2(0.104, -0.968), // pocket wall fillet
+    new THREE.Vector2(0.104, -0.994), // pocket wall
+    new THREE.Vector2(0.11, -1.0), // pocket mouth chamfer - envelope y min
+    new THREE.Vector2(0.133, -1.0), // rim face, 26 mm annulus
+    new THREE.Vector2(0.142, -0.991), // rolled rim chamfer
+    new THREE.Vector2(0.15, -0.983), // chamfer meets the barrel - max radius
+    new THREE.Vector2(0.15, 0.983), // straight barrel
+    new THREE.Vector2(0.142, 0.991),
+    new THREE.Vector2(0.133, 1.0), // envelope y max
+    new THREE.Vector2(0.11, 1.0),
+    new THREE.Vector2(0.104, 0.994),
+    new THREE.Vector2(0.104, 0.968),
+    new THREE.Vector2(0.098, 0.962),
+    new THREE.Vector2(0.054, 0.962),
+    new THREE.Vector2(0.048, 0.966),
+    new THREE.Vector2(0.048, 0.972),
+    new THREE.Vector2(0.042, 0.978),
+    new THREE.Vector2(0.0, 0.978),
+  ];
+  return new THREE.LatheGeometry(profile, 16);
+}
+
 // Shared geometries for instanced rollers (created once at module level)
-const ROLLER_GEOMETRY = new THREE.CylinderGeometry(0.15, 0.15, 2, 16);
+const ROLLER_GEOMETRY = createIdlerRollerGeometry();
+/**
+ * Axle stub, left as a plain 8-sided slug on purpose.
+ *
+ * A waisted two-collar spring axle was designed and previewed
+ * (`roller_axle_rejected` in scripts/blender/specs/conveyors-spouting.json):
+ * at the true 0.1 m x 0.1 m size it rendered as two soft octagonal lumps
+ * rather than hardware. The physically correct answer - a hex prism - cannot
+ * hold the envelope, because a regular hexagon's max|x| and max|z| differ by
+ * 13.4% and the harness reports that as 6.7 mm of drift. An octagonal slug at
+ * this size is already inside the site's stylization budget.
+ */
 const AXLE_GEOMETRY = new THREE.CylinderGeometry(0.05, 0.05, 0.1, 8);
 const ROLLER_COUNT = 25;
 
@@ -1054,9 +1187,18 @@ export const RollerConveyor: React.FC<{
           cappedDelta * productionSpeed * IDLER_ROLLER_SPIN * speedVariation) %
         (Math.PI * 2);
 
-      // Update instance matrix with new rotation (reuse module-level Euler)
+      // Update instance matrix with new rotation (reuse module-level Euler).
+      //
+      // The spin goes in the Y slot, NOT Z. three composes an 'XYZ' Euler as
+      // Rx * Ry * Rz, so the Z term is applied to the vector FIRST, before the
+      // X term stands the cylinder up: `set(PI/2, 0, theta)` swung the roller
+      // axis from +Z at theta=0 to -X at theta=PI/2, i.e. every roller slewed
+      // from across the line to along it as it "span". Verified against three
+      // directly - (0,1,0) through set(PI/2, 0, PI/2) lands at (-1, 0, 0),
+      // through set(PI/2, theta, 0) it stays (0, 0, 1) for every theta.
+      // A smooth tube half hid this; the designed roller ends do not.
       tempPosition.set(-12 + i * 1, 0.25, 0);
-      _tempEuler.set(Math.PI / 2, 0, rotationsRef.current[i]);
+      _tempEuler.set(Math.PI / 2, rotationsRef.current[i], 0);
       tempQuaternion.setFromEuler(_tempEuler);
       tempMatrix.compose(tempPosition, tempQuaternion, tempScale);
       rollersRef.current.setMatrixAt(i, tempMatrix);
