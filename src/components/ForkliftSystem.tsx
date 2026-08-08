@@ -197,10 +197,17 @@ const WarningLight = React.memo<{
           toneMapped
         />
       </mesh>
-      {/* Sweeping light wedge - additive, so it only ever adds fill. */}
+      {/* Sweeping light wedge - additive, so it only ever adds fill.
+          16 radial segments, not 8. The cone is 1.1 m across and its material is
+          unlit and constant-opacity, so what the eye gets is a hard coverage
+          edge: at 8 that edge is a visible octagon on a metre-wide glow, which
+          reads as a faceted cone rather than as light. The rotation is not paid
+          for by the facets - the radial wobble 8 of them buy is 42 mm on a
+          550 mm radius at 0.16 opacity - so smoothing costs the sweep nothing.
+          16 stays divisible by 4, so the 0.55 m base radius is unchanged. */}
       <group ref={sweepRef}>
         <mesh position={[0, 0.02, 0]} renderOrder={8}>
-          <coneGeometry args={[0.55, 0.9, 8, 1, true]} />
+          <coneGeometry args={[0.55, 0.9, 16, 1, true]} />
           <meshBasicMaterial
             color={color}
             transparent

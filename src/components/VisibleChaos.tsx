@@ -371,9 +371,15 @@ const GrainSpill: React.FC<{ event: ChaosEvent }> = React.memo(({ event }) => {
   return (
     <group ref={groupRef} position={[event.position[0], 0, event.position[2]]}>
       {/* Main spill pile - fixed-radius cone; animateGrainSpill grows it via
-          object scale (starts near-zero to avoid a one-frame full-size pop). */}
+          object scale (starts near-zero to avoid a one-frame full-size pop).
+          At full scale it is a 1.6 m mound only 0.3 m tall, so the base outline
+          is effectively the whole silhouette: 8 sides sat 61 mm inside the true
+          circle and read as an octagonal tent rather than spilt grain. 16 takes
+          that to 15 mm, stays divisible by 4 so the base keeps its exact 0.8
+          radius on both axes, and costs 35 -> 67 verts on a mesh that only
+          exists while a spill event is running. */}
       <mesh ref={pileRef} position={[0, 0.1, 0]} scale={0.001} castShadow>
-        <coneGeometry args={[0.8, 0.3, 8]} />
+        <coneGeometry args={[0.8, 0.3, 16]} />
         <meshStandardMaterial color="#d4a574" roughness={0.9} />
       </mesh>
 

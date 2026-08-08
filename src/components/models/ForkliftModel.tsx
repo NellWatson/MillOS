@@ -197,6 +197,101 @@ interface ForkliftModelProps {
   grime?: number;
 }
 
+/**
+ * Compact-LOD tyre, 0.64 m across and 0.24 m wide.
+ *
+ * Drawn through the four-instance wheel `InstancedMesh`, so this is the only
+ * round silhouette on an otherwise all-box model and the one part the eye
+ * watches turn. `CylinderGeometry(0.32, 0.32, 0.24, 20)` was a bare drum: a
+ * coin face-on, a sharp-cornered puck edge-on.
+ *
+ * Four features, all of which are still legible at 8 m (previewed at that
+ * distance, and this LOD is drawn out to the 62 m tier cutoff):
+ *  - a cushion-tyre tread held at full radius across the middle 128 mm,
+ *  - a tight shoulder round-over in the outer 56 mm of each side, which is the
+ *    single cue that separates a rubber tyre from a cut cylinder,
+ *  - a rim flange stepped 14 mm proud of the wheel disc, so the tyre stands off
+ *    the rim the way a bead does,
+ *  - a hub pan dished 22 mm into the wheel face, which is the entire face-on
+ *    read - without it the wheel is a flat disc.
+ *
+ * SYMMETRIC ON PURPOSE. Every wheel shares one `compactWheelOrientation`
+ * quaternion, and that rotation sends the geometry's +Y face outboard on the
+ * left pair and inboard on the right. One-sided detail - a hub cap on a single
+ * face - would show on one side of the vehicle and be buried in the chassis on
+ * the other.
+ *
+ * Envelope is byte-identical to the cylinder it replaces: max radius exactly
+ * 0.32, which is both `FORKLIFT_WHEEL_RADIUS` (the spin integrator's divisor)
+ * and the ground-contact radius, and y in [-0.12, 0.12]. The 20 radial segments
+ * are carried over unchanged - the 100 mm facet argued for below still holds,
+ * and the count also fixes the inscribed polygon's Z half-extent, so moving it
+ * would drift the envelope on an axis nothing here needs to move.
+ *
+ * Designed and previewed in scripts/blender/specs/forklift-vehicles.json.
+ */
+function createCompactWheelGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -0.084), // hub pan floor centre, dished into the face
+    new THREE.Vector2(0.062, -0.084), // pan floor
+    new THREE.Vector2(0.076, -0.106), // pan wall out to the wheel disc
+    new THREE.Vector2(0.13, -0.106), // rim disc face
+    new THREE.Vector2(0.148, -0.12), // rim flange - widest axial face
+    new THREE.Vector2(0.25, -0.12), // bead sidewall
+    new THREE.Vector2(0.296, -0.111), // sidewall turns into the shoulder
+    new THREE.Vector2(0.315, -0.09), // shoulder round-over
+    new THREE.Vector2(0.32, -0.064), // tread reaches full radius
+    new THREE.Vector2(0.32, 0.064), // flat tread band - envelope max radius
+    new THREE.Vector2(0.315, 0.09),
+    new THREE.Vector2(0.296, 0.111),
+    new THREE.Vector2(0.25, 0.12),
+    new THREE.Vector2(0.148, 0.12),
+    new THREE.Vector2(0.13, 0.106),
+    new THREE.Vector2(0.076, 0.106),
+    new THREE.Vector2(0.062, 0.084),
+    new THREE.Vector2(0.0, 0.084),
+  ];
+  return new THREE.LatheGeometry(profile, 20);
+}
+
+/**
+ * Compact-LOD rotating beacon, 0.16 m across and 0.13 m tall.
+ *
+ * Mounted at y = 2.19, the highest point on the vehicle and so the only part
+ * regularly read against open sky rather than against the mill behind it.
+ * `CylinderGeometry(0.08, 0.08, 0.13, 10)` gave it a flat top, which reads as a
+ * drum rather than a lamp.
+ *
+ * Two constraints make this profile unusually spare, and both are worth
+ * stating. The cab roof's top face is at y = 2.13 - local y = -0.06 - so the
+ * bottom 5 mm of this profile is inside the roof and any detail spent there is
+ * invisible. And at the distances this LOD covers, the whole lamp is under ten
+ * pixels tall, so lens fresnel rings would average to a plain cylinder one mip
+ * level down. Everything therefore goes into the silhouette above the roof
+ * line: a narrow mounting collar, a skirt flaring to full radius, a short
+ * barrel, and a dome. The dome also earns its place on the emissive, which has
+ * somewhere for its highlight to fall off instead of clipping across a flat lid.
+ *
+ * Envelope unchanged: max radius 0.08, y in [-0.065, 0.065]. The 10 segments
+ * carry over from the cylinder deliberately - a 0.16 m lamp does not need more,
+ * and any other count moves the inscribed polygon's Z half-extent by ~3.9 mm.
+ */
+function createCompactBeaconGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -0.065), // base cap centre, buried in the roof
+    new THREE.Vector2(0.062, -0.065),
+    new THREE.Vector2(0.068, -0.056), // mounting collar, emerging from the roof
+    new THREE.Vector2(0.068, -0.04),
+    new THREE.Vector2(0.08, -0.033), // lens skirt flares to full radius
+    new THREE.Vector2(0.08, 0.012), // lens barrel - envelope max radius
+    new THREE.Vector2(0.074, 0.03), // shoulder turns in
+    new THREE.Vector2(0.057, 0.048), // dome
+    new THREE.Vector2(0.031, 0.0605),
+    new THREE.Vector2(0.0, 0.065), // apex - envelope max y
+  ];
+  return new THREE.LatheGeometry(profile, 10);
+}
+
 // Low quality retains a deliberately small shared visual. Medium and above use
 // the authored derivative, which remains inside the measured draw-call budget.
 const compactForkliftGeometry = {
@@ -208,12 +303,27 @@ const compactForkliftGeometry = {
   mast: new THREE.BoxGeometry(0.11, 2.2, 0.13),
   detailBox: new THREE.BoxGeometry(1, 1, 1),
   fork: new THREE.BoxGeometry(0.13, 0.08, 1.35),
-  // Radius matched EXACTLY to FORKLIFT_WHEEL_RADIUS, which is the divisor the
-  // spin integrator uses. The old 0.31 against a 0.32 divisor slipped 3%.
-  wheel: new THREE.CylinderGeometry(FORKLIFT_WHEEL_RADIUS, FORKLIFT_WHEEL_RADIUS, 0.24, 16),
+  // Shaped tyre, not a drum - see createCompactWheelGeometry. Max radius is
+  // still exactly FORKLIFT_WHEEL_RADIUS, which is the divisor the spin
+  // integrator uses; the old 0.31 against a 0.32 divisor slipped 3%.
+  // 20 radial segments, matching the ProceduralForklift tyre below: at 16 the
+  // 0.64 m rim facets 125 mm, which reads while it spins, and 20 takes that to
+  // 100 mm. All of it lands on ONE shared geometry drawn through the wheel
+  // InstancedMesh - a one-off, not per wheel or per vehicle. Divisible by 4, so
+  // the 0.32 m radius that sets ground contact is byte-identical.
+  wheel: createCompactWheelGeometry(),
   pallet: new THREE.BoxGeometry(0.94, 0.12, 0.86),
   load: new THREE.BoxGeometry(0.84, 0.55, 0.76),
-  beacon: new THREE.CylinderGeometry(0.08, 0.08, 0.13, 10),
+  beacon: createCompactBeaconGeometry(),
+  // Deliberately still a torus. Two dished-lathe replacements were designed and
+  // previewed (compactSteeringWheelREJECTED in the spec cited above) and both
+  // rendered as a solid lid. A steering wheel is defined by its spokes, its hub
+  // and the OPEN sectors between them, and none of those is a surface of
+  // revolution; at 0.148 radius against 0.0156 half-thickness the part is 1:19
+  // flat, so no lathe dish is deep enough to separate rim from web, and
+  // LatheGeometry averages normals along the whole profile, which blurs the one
+  // step that might have read. The hoop at least keeps the hole, which is this
+  // part's entire silhouette at 0.3 m behind 0.5-opacity glass.
   steeringWheel: new THREE.TorusGeometry(0.13, 0.018, 6, 14),
 };
 

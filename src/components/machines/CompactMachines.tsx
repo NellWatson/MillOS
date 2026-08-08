@@ -33,7 +33,10 @@ const ROUNDED_BOX = new RoundedBoxGeometry(1, 1, 1, 3, 0.08);
  * a soft lozenge on one axis and a hard card on the other. That mismatch is
  * most of the "toy blocks" silhouette. Every plate-shaped part uses this 0.02
  * radius instead, which lands between 0.002 and 0.16 m - a plausible pressed
- * edge at every scale it is used at. Bodies and sacks keep the soft fillet.
+ * edge at every scale it is used at. `ROUNDED_BOX` is now down to the packer's
+ * fill head and its sacks, which are small and near-cubic enough that the soft
+ * fillet is right for both; the three machine bodies that used to share it are
+ * designed housings, further down.
  */
 const THIN_PLATE = new RoundedBoxGeometry(1, 1, 1, 1, 0.02);
 const SILO_BODY = new THREE.CylinderGeometry(1, 1, 1, 16);
@@ -153,8 +156,8 @@ const SILO_ROOF = createSiloRoofGeometry();
  * are a one-off scene cost (measured: 629 -> 1385 across every part here,
  * +756 for the entire machine bank at any instance count) rather than a
  * per-instance one, and none of these meshes carries pointer handlers - the
- * four `InteractiveInstances` use `ROUNDED_BOX` and `SILO_SHELL` - so none of
- * them needs a picking proxy the way the corrugated shell does.
+ * four `InteractiveInstances` use `SILO_SHELL` and the three machine housings
+ * below - so none of them needs a picking proxy the way those do.
  */
 const SILO_OUTLET = new THREE.CylinderGeometry(0.42, 1, 1, 24); // 4.1 m across
 const SILO_RING = new THREE.CylinderGeometry(1.03, 1.03, 0.08, 32); // matches shell
@@ -170,6 +173,388 @@ const BEACON = new THREE.SphereGeometry(1, 12, 8);
  * part by 1.2 mm on the squashed Z axis - the axis buried in the body panel.
  */
 const FAN_GRILLE = new THREE.TorusGeometry(1, 0.1, 8, 32);
+
+// ===========================================================================
+// MACHINE HOUSINGS
+// ===========================================================================
+
+/** `[sx, sz, y]`: the half-extents 0.5 scaled independently per axis. */
+type HousingProfilePoint = readonly [number, number, number];
+
+/**
+ * Plan fillet, in UNIT space, shared by all three housings.
+ *
+ * `ROUNDED_BOX`'s 0.08 became a 0.38 m radius on the mill and read as a soft
+ * plastic block; 0.032 lands between 0.11 and 0.21 m across the three bodies -
+ * a folded-plate edge rather than a moulding. Two arc segments is deliberate:
+ * the normals are analytic, so the fillet SHADES as a continuous sweep while
+ * the silhouette stays a crisp two-facet chamfer. Rendered against 0.045 over
+ * three segments (scripts/blender/specs/machine-bodies.json,
+ * `mill_body_softcorner`) and chosen on the frames.
+ *
+ * It must also stay small: the `electricalWarning` placard on the mill reaches
+ * unit |x| 0.477 and the flat face only runs to 0.5 - corner. At 0.08 that
+ * placard's outer edge hung 106 mm off the curve; at 0.032 it is 20 mm.
+ */
+const MACHINE_HOUSING_CORNER = 0.032;
+const MACHINE_HOUSING_ARC = 2;
+
+/**
+ * One ring of the housing loft: a rounded rectangle in XZ with its exact
+ * outward normals.
+ *
+ * The corner arcs run BETWEEN the flats, so the arc end points are the tangent
+ * points and no flat needs points of its own. That is what lets a single ring
+ * carry a dead-flat wall and a smoothly swept fillet at once: the analytic
+ * normal at an arc end is already the adjacent flat's normal, so there is no
+ * seam to hide and no averaging to bow the flat.
+ */
+function machineHousingRing(
+  halfX: number,
+  halfZ: number,
+  corner: number,
+  arc: number
+): { readonly points: number[]; readonly normals: number[] } {
+  const radius = Math.min(corner, halfX * 0.98, halfZ * 0.98);
+  const insetX = halfX - radius;
+  const insetZ = halfZ - radius;
+  const centres = [
+    [insetX, insetZ],
+    [-insetX, insetZ],
+    [-insetX, -insetZ],
+    [insetX, -insetZ],
+  ] as const;
+  const points: number[] = [];
+  const normals: number[] = [];
+  for (let quadrant = 0; quadrant < 4; quadrant += 1) {
+    const [centreX, centreZ] = centres[quadrant];
+    for (let step = 0; step <= arc; step += 1) {
+      const angle = (quadrant * Math.PI) / 2 + ((Math.PI / 2) * step) / arc;
+      const normalX = Math.cos(angle);
+      const normalZ = Math.sin(angle);
+      points.push(centreX + radius * normalX, centreZ + radius * normalZ);
+      normals.push(normalX, normalZ);
+    }
+  }
+  return { points, normals };
+}
+
+/**
+ * Moulded cast housing for a box machine: a rounded rectangle lofted up a
+ * designed vertical profile.
+ *
+ * The mill, sifter and packer bodies were one `RoundedBoxGeometry(1,1,1,3,0.08)`
+ * shared between them - a 0.38 m fillet on a 4.8 m block, which reads as a
+ * rounded plastic crate from anywhere on the site. They are also the four
+ * objects a user clicks, so they are the machines whose shape has to carry.
+ *
+ * A LATHE cannot replace them, and that is the whole design constraint here.
+ * Every panel, recess, screen, accent strip and placard on these machines is a
+ * flat quad glued to a flat face at a hand-tuned world Z, and three of those
+ * placards are positioned in `machineDecals.ts`. Revolving the mill body moves
+ * its front face back by 0.63 m at the ends of the 3.5 m control strip and
+ * leaves every one of those quads hanging in the air.
+ *
+ * A loft can. `sx` and `sz` scale the half-extents INDEPENDENTLY, so the front
+ * face stays pinned at sz = 1.0 across the whole band where the trim lives
+ * while the side walls batter, step and chamfer freely. Every profile in this
+ * file was designed and previewed that way
+ * (scripts/blender/machine_body_preview.py, spec `specs/machine-bodies.json`).
+ *
+ * ENVELOPE. Unit half-extents are exactly 0.5 on all three axes - the same as
+ * the `RoundedBoxGeometry` replaced - so no instance matrix moves. Every
+ * profile therefore has to reach sx = 1.0 somewhere, sz = 1.0 somewhere, and
+ * span y -0.5 to 0.5. Nothing in the repo pins this the way
+ * `machinePartGeometry.test.ts` pins the silo parts: that test's expectation
+ * table is keyed on `MACHINE_PART_GEOMETRY`, so adding these three would make
+ * the table's type incomplete in a file this change may not edit. Treat the
+ * 0.5 / 0.5 / 0.5 contract stated here as the pin.
+ *
+ * COST. 192-264 triangles each against the rounded box's 588, and 208-286
+ * vertices against its 1764 - the box spent most of its budget subdividing
+ * flat faces that needed two triangles. Three shared module-level geometries
+ * across the whole machine bank, so this is a one-off scene cost at any
+ * instance count.
+ *
+ * NORMALS are written analytically rather than left to `computeVertexNormals`.
+ * `machineSurfaces.ts` injects an edge-wear term, `pow(1 - abs(dot(viewDir,
+ * normal)), 4)`, that paints bare metal along silhouette edges - the shading
+ * normal is a visible surface feature on these materials, not just lighting.
+ * Averaged normals would bow every flat wall and band that term across the
+ * corner facets. Vertices are not shared between courses either: every
+ * transition in a profile is a deliberate crease.
+ *
+ * UVs put one unit of u on each of the four faces and run v from 0 at the base
+ * to 1 at the top, which is what `BoxGeometry` does - so the existing
+ * `band(HOUSING_ORM, ...)` and `band(PANEL_NORMAL, ...)` tuning still lands one
+ * panel grid per face. The u distribution is measured ONCE off the widest ring
+ * and reused on every course; measuring per ring would shear the panel grid
+ * across each battered section, because a narrower ring has a shorter
+ * perimeter and the same vertical corner would land at a different u.
+ */
+function createMachineHousingGeometry(
+  profile: readonly HousingProfilePoint[],
+  corner = MACHINE_HOUSING_CORNER,
+  arc = MACHINE_HOUSING_ARC
+): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  let widest = profile[0];
+  for (const point of profile) {
+    if (point[0] * point[1] > widest[0] * widest[1]) widest = point;
+  }
+  const reference = machineHousingRing(0.5 * widest[0], 0.5 * widest[1], corner, arc);
+  const ringCount = reference.points.length / 2;
+  const along = [0];
+  for (let index = 0; index < ringCount; index += 1) {
+    const next = (index + 1) % ringCount;
+    along.push(
+      along[index] +
+        Math.hypot(
+          reference.points[next * 2] - reference.points[index * 2],
+          reference.points[next * 2 + 1] - reference.points[index * 2 + 1]
+        )
+    );
+  }
+  const perimeter = along[ringCount];
+  const u = along.map((length) => (4 * length) / perimeter);
+
+  for (let course = 0; course < profile.length - 1; course += 1) {
+    const [lowerX, lowerZ, lowerY] = profile[course];
+    const [upperX, upperZ, upperY] = profile[course + 1];
+    const lower = machineHousingRing(0.5 * lowerX, 0.5 * lowerZ, corner, arc);
+    const upper = machineHousingRing(0.5 * upperX, 0.5 * upperZ, corner, arc);
+    const base = positions.length / 3;
+    for (let step = 0; step <= ringCount; step += 1) {
+      // The last sample repeats the first position so u can reach 4 and wrap
+      // without a texture seam mid-face.
+      const ring = step % ringCount;
+      const ax = lower.points[ring * 2];
+      const az = lower.points[ring * 2 + 1];
+      const bx = upper.points[ring * 2];
+      const bz = upper.points[ring * 2 + 1];
+      // Profile tangent crossed into the ring tangent is the surface normal.
+      //
+      // The ring tangent comes from the ANALYTIC plan normal, not from a
+      // difference of neighbouring ring points: on a flat face the previous
+      // sample is round a corner arc and the next is the far end of the flat,
+      // so a central difference is not parallel to the flat and tilts the
+      // wall's normal by half a degree. Under a fourth-power fresnel that is a
+      // faint barrel gradient down a 4.8 m panel. Perpendicular to the plan
+      // normal is exact on flats and on arcs alike.
+      const tangentX = bx - ax;
+      const tangentY = upperY - lowerY;
+      const tangentZ = bz - az;
+      const ringX = -lower.normals[ring * 2 + 1];
+      const ringZ = lower.normals[ring * 2];
+      let normalX = tangentY * ringZ;
+      let normalY = tangentZ * ringX - tangentX * ringZ;
+      let normalZ = -tangentY * ringX;
+      const length = Math.hypot(normalX, normalY, normalZ);
+      if (length < 1e-9) {
+        // A course of zero height: fall back to the ring's own plan normal.
+        normalX = lower.normals[ring * 2];
+        normalY = 0;
+        normalZ = lower.normals[ring * 2 + 1];
+      } else {
+        normalX /= length;
+        normalY /= length;
+        normalZ /= length;
+        if (normalX * lower.normals[ring * 2] + normalZ * lower.normals[ring * 2 + 1] < 0) {
+          normalX = -normalX;
+          normalY = -normalY;
+          normalZ = -normalZ;
+        }
+      }
+      positions.push(ax, lowerY, az, bx, upperY, bz);
+      normals.push(normalX, normalY, normalZ, normalX, normalY, normalZ);
+      uvs.push(u[step], lowerY + 0.5, u[step], upperY + 0.5);
+    }
+    for (let step = 0; step < ringCount; step += 1) {
+      // lower[j], upper[j], upper[j+1], lower[j+1] - the winding that puts the
+      // face normal on the same side as the analytic vertex normals above.
+      const quad = base + step * 2;
+      indices.push(quad, quad + 1, quad + 3, quad, quad + 3, quad + 2);
+    }
+  }
+
+  // Caps. Never seen - a base plate swallows the bottom of every one of these
+  // and a hopper cone sits on the top - but an open shell reads as a hole the
+  // moment the camera clips inside a machine.
+  for (const [sample, sign] of [
+    [profile[0], -1],
+    [profile[profile.length - 1], 1],
+  ] as const) {
+    const [scaleX, scaleZ, y] = sample;
+    const ring = machineHousingRing(0.5 * scaleX, 0.5 * scaleZ, corner, arc);
+    const centre = positions.length / 3;
+    positions.push(0, y, 0);
+    normals.push(0, sign, 0);
+    uvs.push(0.5, 0.5);
+    for (let step = 0; step < ringCount; step += 1) {
+      positions.push(ring.points[step * 2], y, ring.points[step * 2 + 1]);
+      normals.push(0, sign, 0);
+      uvs.push(ring.points[step * 2] + 0.5, ring.points[step * 2 + 1] + 0.5);
+    }
+    for (let step = 0; step < ringCount; step += 1) {
+      const first = centre + 1 + step;
+      const second = centre + 1 + ((step + 1) % ringCount);
+      if (sign < 0) indices.push(centre, first, second);
+      else indices.push(centre, second, first);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  return geometry;
+}
+
+/**
+ * Roller mill housing, drawn at [4.8, 4.7, 3.8] - 4.8 m across, 4.7 m tall.
+ *
+ * A roller mill is a heavy roll chamber with a lighter feed section bolted on
+ * top, and that two-part mass is the silhouette worth having: a splayed foot
+ * where the casing meets its plinth, a parallel full-section roll chamber, a
+ * bolted split line at 62% height, then a battered feeder deck narrowing 0.5 m
+ * per side into a chamfered top deck. The deck bevel is the highest-value
+ * feature of the three - the site camera looks DOWN on the machine floor, and a
+ * square top edge is most of what made these read as cardboard.
+ *
+ * sz is pinned at 1.0 from the plinth to y 0.462 because the whole front face
+ * is occupied: the control strip, the inspection recess, the HMI screen, the
+ * accent bar and the `electricalWarning` placard from `machineDecals.ts` all
+ * sit against z = 1.9 m. The batter is spent on x, where only the vent bank and
+ * the drive motor touch the wall and both sit below the split line.
+ *
+ * An entasis belly was designed, rendered and rejected: at 20 m it is
+ * indistinguishable from a straight wall and it costs an extra profile course.
+ * The study is `mill_body_straight` against `mill_body_belly` in
+ * scripts/blender/specs/machine-bodies.json - the belly holds the same unit
+ * envelope, so the two frames differ on silhouette alone. It also loses
+ * something: swelling to the envelope mid-wall means the wall no longer
+ * arrives at the split line at full section, and the ledge shallows out.
+ */
+const MILL_HOUSING_PROFILE: readonly HousingProfilePoint[] = [
+  [0.9, 0.9, -0.5], // foot underside, buried in the 5.2 x 4.4 m base plate
+  [0.945, 0.945, -0.44], // top of the base plate: the casing becomes visible
+  [1.0, 1.0, -0.398], // splayed foot lands on the full roll-chamber section
+  [1.0, 1.0, 0.2], // roll chamber, parallel and at full envelope
+  [0.962, 1.0, 0.228], // split line: the feeder deck bolts on inset
+  [0.918, 1.0, 0.345], // battered feeder deck
+  [0.88, 1.0, 0.462], // deck top, clear of the accent bar (which ends at 0.460)
+  [0.792, 0.944, 0.5], // chamfered top deck; the hopper flange seats on it
+];
+
+/**
+ * Plansifter casing, drawn at [6.5, 3.35, 5.65] - 6.5 m across, 3.35 m tall.
+ *
+ * A plansifter is a stack of sieve frames clamped together and hung from canes,
+ * not a cast box, so this profile is built as four frame courses stepping
+ * inward above each of the four tray flanges. The trays already stand 0.15 m
+ * proud of the casing, so each step turns a tray into a read flange with a
+ * shadow line under it - the banding does the work the smooth block could not.
+ *
+ * The underframe chamfers in below the lowest course: the casing is suspended
+ * and deliberately does not touch its platform, and a tucked base says that
+ * where a flat-bottomed box said the opposite.
+ *
+ * The hood lands on 0.8615 x 0.8496, which is exactly the 5.6 x 4.8 m lid
+ * instanced above it - the lid now sits flush on the casing instead of floating
+ * as a smaller plate on a bigger box.
+ *
+ * sz is pinned at 1.0 to y 0.400: the service panel, HMI screen, accent bar and
+ * the `hazardChevron` band from `machineDecals.ts` are all on the front face.
+ * All four keep the clearances they had, so this reshape needed no trim moved.
+ */
+const SIFTER_HOUSING_PROFILE: readonly HousingProfilePoint[] = [
+  [0.88, 0.88, -0.5], // underframe base - the casing hangs clear of its deck
+  [0.958, 0.958, -0.44], // underframe chamfer top
+  [1.0, 1.0, -0.405], // course 1; the hazard band starts at -0.403
+  [1.0, 1.0, -0.33],
+  [0.984, 1.0, -0.31], // step above tray 1
+  [0.984, 1.0, -0.095],
+  [0.966, 1.0, -0.075], // step above tray 2
+  [0.966, 1.0, 0.15],
+  [0.946, 1.0, 0.17], // step above tray 3
+  [0.946, 1.0, 0.4], // course 4, up to the hood
+  [0.8615, 0.8496, 0.5], // hood, landing exactly on the 5.6 x 4.8 m lid
+];
+
+/**
+ * Bagging cabinet, drawn at [3.7, 4.75, 3.45] - 3.7 m across, 4.75 m tall.
+ *
+ * A bagger is a weigh cabinet oversailing an open frame, with the sack hanging
+ * in the bay underneath. This profile builds that: a splayed foot, a support
+ * frame drawn in 0.19 m per side and 0.27 m front and back, a steep lip where
+ * the cabinet oversails it, then the full instrument face, a split line and a
+ * chamfered hood.
+ *
+ * The bay is not decoration - the fill head, the two bag guides, the guards and
+ * the sack are already instanced in front of it, and they now stand in a recess
+ * instead of against a flat wall. Round 2 set the front back but kept the
+ * section nearly full width and it read as a second box stacked under the
+ * first; narrowing both axes is what made it read as a frame.
+ *
+ * Its lower section was free to move because every placard on this body sits
+ * HIGH, not because there are none: `namePlate` and `lockoutRoundel` from
+ * `machineDecals.ts` bottom out at unit y -0.042, clear above the oversail lip
+ * at -0.095, and the `hazardChevron` is glued to the base plate rather than to
+ * the casing. So nothing below -0.095 is spoken for - which is not true of the
+ * mill or the sifter. Above the lip, sz is pinned at 1.0 to y 0.470 for the
+ * control panel, the screen and the accent bar.
+ */
+const PACKER_HOUSING_PROFILE: readonly HousingProfilePoint[] = [
+  [0.88, 0.86, -0.5], // foot underside, buried in the 4.5 x 4.25 m base plate
+  [0.925, 0.885, -0.44], // top of the base plate: splayed foot
+  [0.9, 0.845, -0.395], // support frame - the sack bay
+  [0.9, 0.845, -0.15],
+  [1.0, 1.0, -0.095], // the cabinet oversails the frame on a steep lip
+  [1.0, 1.0, 0.3], // instrument face, full envelope
+  [0.976, 1.0, 0.332], // split line under the hood
+  [0.93, 1.0, 0.47], // battered hood
+  // Chamfered top deck. Unlike the mill's, this deck is narrower than the cone
+  // that lands on it: `packerHopper` is 1.7 m in radius against a 1.55 m
+  // half-width here, so the flange oversails the deck by up to 0.12 m in x.
+  // That reads as a hopper skirt, which is what it would be - but it is an
+  // overhang, not a seat, and shrinking the chamfer is what would remove it.
+  [0.836, 0.95, 0.5],
+];
+
+const MILL_BODY = createMachineHousingGeometry(MILL_HOUSING_PROFILE);
+const SIFTER_BODY = createMachineHousingGeometry(SIFTER_HOUSING_PROFILE);
+const PACKER_BODY = createMachineHousingGeometry(PACKER_HOUSING_PROFILE);
+
+/**
+ * Picking proxy for the three housings, same trick as `raycastSiloShell`.
+ *
+ * These are the meshes a user clicks, so R3F raycasts them on every pointer
+ * move, against 3 to 4 instances each. The housings hold the same unit envelope
+ * as the rounded box they replace, so `UNIT_BOX` - 12 triangles - is that
+ * envelope exactly: hit testing against it is 16 to 22 times cheaper than
+ * against the drawn geometry, and roughly 49 times cheaper than the 588-triangle
+ * rounded box was testing against ITSELF before this change. The only
+ * difference a user could ever notice is a hit registering inside a corner
+ * chamfer, at most 0.11 m of a 3.7 m machine.
+ */
+function raycastMachineHousing(
+  this: THREE.InstancedMesh,
+  raycaster: THREE.Raycaster,
+  intersects: THREE.Intersection[]
+) {
+  const rendered = this.geometry;
+  this.geometry = UNIT_BOX;
+  try {
+    THREE.InstancedMesh.prototype.raycast.call(this, raycaster, intersects);
+  } finally {
+    this.geometry = rendered;
+  }
+}
 
 /**
  * The shared machine part geometry, exposed so the unit-envelope contract can
@@ -536,11 +921,15 @@ function CompactMachineSet({
           [6.8, 0.13, 5.95]
         );
       }
+      // 3.85 -> 3.68: the only trim in this file the housing reshape moved. The
+      // drive drum's inner face butts against the casing side wall, and the
+      // sifter's frame courses batter that wall in to 3.07 m by the drum's
+      // height. Left at 3.85 the drum would hang 0.20 m off the casing.
       setInstanceMatrix(
         sifterDriveRef.current,
         index,
         object,
-        [x + 3.85, y + 2.2, z],
+        [x + 3.68, y + 2.2, z],
         [0.62, 1.15, 0.62],
         [0, 0, Math.PI / 2]
       );
@@ -922,7 +1311,8 @@ function CompactMachineSet({
 
       <InteractiveInstances
         meshRef={millBodyRef}
-        geometry={ROUNDED_BOX}
+        geometry={MILL_BODY}
+        raycast={raycastMachineHousing}
         material={MATERIALS.mill}
         count={subsets.mills.length}
         machines={subsets.mills}
@@ -985,7 +1375,8 @@ function CompactMachineSet({
 
       <InteractiveInstances
         meshRef={sifterBodyRef}
-        geometry={ROUNDED_BOX}
+        geometry={SIFTER_BODY}
+        raycast={raycastMachineHousing}
         material={MATERIALS.sifter}
         count={subsets.sifters.length}
         machines={subsets.sifters}
@@ -1047,7 +1438,8 @@ function CompactMachineSet({
 
       <InteractiveInstances
         meshRef={packerBodyRef}
-        geometry={ROUNDED_BOX}
+        geometry={PACKER_BODY}
+        raycast={raycastMachineHousing}
         material={MATERIALS.packer}
         count={subsets.packers.length}
         machines={subsets.packers}

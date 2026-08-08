@@ -80,6 +80,209 @@ const DRIVER_LOUNGE_POSITION = [...SITE_LAYOUT.serviceYard.driverLounge.position
 ];
 
 /**
+ * DESIGNED LATHE PROFILES FOR THE YARD'S ROUND HARDWARE.
+ *
+ * Almost everything in this file is a box, so the handful of round parts carry
+ * the whole "this is real equipment" read - and all three of them were the same
+ * omission: a `CylinderGeometry` whose only shape information was two radii. A
+ * truncated cone is what a part looks like when nobody drew it. It is not what a
+ * roof vent, a weather cap or a pipe bollard looks like, and on the vent cap it
+ * was actively wrong: `CylinderGeometry(0.55, 0.38, ...)` flares OUTWARD going
+ * up, so the thing meant to shed rain off the stack was modelled as a bowl that
+ * would collect it.
+ *
+ * Each profile below was drawn, previewed and revised in Blender
+ * (`scripts/blender/machine_part_preview.py --spec
+ * scripts/blender/specs/dock-vents-tanks.json`) at both a design distance and
+ * the distance the camera actually gets, and the numbers here are transcribed
+ * from the approved run rather than retyped from intent. Every one keeps the
+ * EXACT unit envelope of the cylinder it replaces - nominal max radius and y
+ * range, bit-identical - because these parts sit against neighbours placed by
+ * hand-tuned offsets.
+ *
+ * ONE CAVEAT ON "ENVELOPE", stated because the harness prints it. Both vent
+ * profiles run 16 radial segments where the cylinders they replace ran 10, so
+ * the harness reports 26.92 mm (cap) / 20.56 mm (stack) of half-extent growth
+ * on one lateral axis. That is the 16-gon putting a vertex where the 10-gon
+ * left a flat: the faceted hull growing out toward the nominal circle, not the
+ * part growing. Nothing sits beside the vent on that roof, so it changes no
+ * clearance. The bollard kept 12 segments and drifts 0.00 mm on every axis.
+ *
+ * COST. All three were inline `<cylinderGeometry>` elements, so every mesh
+ * allocated its own buffer - four separate geometries for the four bollards
+ * alone. Hoisting them to module scope makes each a single shared
+ * `BufferGeometry`, which is the win these three actually get.
+ *
+ * It is NOT a one-off GPU cost, and the difference matters for the bollards.
+ * `MillScene` wraps this whole file in `<StaticMeshBatch name="authored-truck-
+ * yard">`, whose merge pass runs before its instance pass and whose threshold
+ * is `MINIMUM_MERGE_MESHES = 4`. Four bollards, one geometry, one material,
+ * one 80 m cell - they hit that threshold exactly, so they go down the MERGE
+ * path, and `createMergedGeometry` calls `toNonIndexed()`: 1224 vertices baked
+ * per bollard, 4896 for the pad, against 576 for the four cylinders. Four
+ * kilo-verts is nothing next to the yard's trucks and docks, and the pad is a
+ * walk-past object that earns its silhouette - but the profile is paid four
+ * times, not once, and anyone adding a fifth bollard or a denser profile here
+ * should know that before doing it.
+ *
+ * None of these meshes carries a pointer handler - there are none anywhere in
+ * this file - so none needs the picking proxy that `SILO_SHELL` needs in
+ * CompactMachines.tsx.
+ */
+
+/**
+ * Roof vent stack on the maintenance garage.
+ *
+ * Rendered 1.2 m tall and 0.84 m across, standing on the garage ridge at
+ * y = 6.45 where its only backdrop is sky. The `CylinderGeometry(0.34, 0.42,
+ * 1.2, 10)` it replaces had the silhouette of a lampshade: a smooth taper that
+ * said nothing about how the stack meets the roof or what happens at the top.
+ *
+ * Four features replace that taper, and all four still read at 12 m in the
+ * preview: a crisp roof-flashing flange at the base (also the widest point, so
+ * it carries the envelope), a downward-flaring storm collar 130 mm above it, a
+ * slip-coupling band in the upper third that gives the pipe a legible scale,
+ * and a rolled throat rim at the top. The barrel between them is dead straight,
+ * because pipe is straight and that straightness is what reads as rolled sheet
+ * rather than turned pottery.
+ *
+ * The throat rim tops out at radius 0.354, deliberately 18 mm inside the 0.372
+ * collar on the underside of `ROOF_VENT_CAP`, so the seated cap and the stack
+ * never present near-coincident cylindrical faces to the depth buffer.
+ *
+ * Envelope preserved exactly: max radius 0.42, y in [-0.6, 0.6].
+ */
+function createRoofVentStackGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -0.6), // base cap centre
+    new THREE.Vector2(0.42, -0.6), // roof-flashing flange rim - envelope max radius
+    new THREE.Vector2(0.417, -0.574), // flange edge thickness
+    new THREE.Vector2(0.362, -0.536), // flange cone climbs to the pipe
+    new THREE.Vector2(0.352, -0.512),
+    new THREE.Vector2(0.35, -0.47),
+    new THREE.Vector2(0.398, -0.464), // storm collar - wide bottom rim, sheds onto the flashing
+    new THREE.Vector2(0.396, -0.446),
+    new THREE.Vector2(0.356, -0.392), // collar tapers up, tight to the pipe
+    new THREE.Vector2(0.349, -0.376),
+    new THREE.Vector2(0.348, 0.282), // straight barrel run
+    new THREE.Vector2(0.366, 0.29), // slip-coupling band
+    new THREE.Vector2(0.366, 0.334),
+    new THREE.Vector2(0.344, 0.342),
+    new THREE.Vector2(0.342, 0.556), // throat
+    new THREE.Vector2(0.354, 0.574), // rolled throat rim - stays inside the cap collar
+    new THREE.Vector2(0.336, 0.6), // rim inner edge - envelope max y
+    new THREE.Vector2(0.0, 0.6),
+  ];
+  return new THREE.LatheGeometry(profile, 16);
+}
+
+const ROOF_VENT_STACK = createRoofVentStackGeometry();
+
+/**
+ * Weather cap for the garage roof vent.
+ *
+ * 1.1 m across and only 0.16 m deep, so there is no room for a bell. What fits
+ * a 1:7 aspect ratio is the pressed weather cap: a shallow convex crown that
+ * turns down hard at the rim into a vertical drip band.
+ *
+ * THE CROWN IS CONVEX ON PURPOSE, AND THIS IS THE WHOLE DESIGN. Slope grows
+ * monotonically from the apex outwards - 0.013, 0.042, 0.090, 0.169, 0.300,
+ * 0.524, 1.0, then the 4.4 roll into the 46 mm vertical band. A revision that
+ * paired a near-flat brim with a STEEPER conical crown was previewed and
+ * rejected: that ordering is dome curvature inverted, and while it read well
+ * head-on, the elevated assembly preview showed it as a shallow BOWL - the
+ * exact wrong read the original `CylinderGeometry(0.55, 0.38, ...)` already
+ * had. The camera here looks down at the crown far more often than it sees the
+ * silhouette, so top-down convexity outranks profile crispness. Two earlier
+ * revisions failed differently: a plain domed lens read as a contact lens, and
+ * a centre boss added to it read as a nipple.
+ *
+ * The underside is not decorative. It carries a throat collar (radius 0.372 to
+ * 0.408) that hangs 10 mm below the stack's top rim, so the cap seats on the
+ * pipe instead of floating above it - confirmed in an assembly preview taken
+ * from BELOW the brim line, the only view from which a gap could show. The
+ * collar's arch between throat and rim keeps the lowest point of the geometry
+ * at the rim, where a drip edge belongs.
+ *
+ * Envelope preserved exactly: max radius 0.55, y in [-0.08, 0.08]. The rim
+ * reaches BOTH limits at the same vertex, which is the drip edge.
+ */
+function createRoofVentCapGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -0.02), // underside centre, clear of the stack throat
+    new THREE.Vector2(0.33, -0.024),
+    new THREE.Vector2(0.368, -0.05), // throat collar inner face drops
+    new THREE.Vector2(0.372, -0.08), // collar inner bottom - envelope min y
+    new THREE.Vector2(0.408, -0.08), // collar bottom, sleeved over the stack rim
+    new THREE.Vector2(0.444, -0.058),
+    new THREE.Vector2(0.502, -0.048), // underside arch
+    new THREE.Vector2(0.534, -0.058),
+    new THREE.Vector2(0.55, -0.08), // DRIP EDGE - envelope max radius AND min y
+    new THREE.Vector2(0.55, -0.034), // vertical drip band, 46 mm
+    new THREE.Vector2(0.545, -0.012), // rim roll - slope 4.4
+    new THREE.Vector2(0.522, 0.011), // slope 1.0
+    new THREE.Vector2(0.48, 0.033), // slope 0.524
+    new THREE.Vector2(0.42, 0.051), // slope 0.300
+    new THREE.Vector2(0.34, 0.0645), // slope 0.169
+    new THREE.Vector2(0.24, 0.0735), // slope 0.090
+    new THREE.Vector2(0.12, 0.0785), // slope 0.042
+    new THREE.Vector2(0.0, 0.08), // apex - slope 0.013 - envelope max y
+  ];
+  return new THREE.LatheGeometry(profile, 16);
+}
+
+const ROOF_VENT_CAP = createRoofVentCapGeometry();
+
+/**
+ * Safety bollard for the dumpster pad.
+ *
+ * 0.36 m across and 0.8 m tall at ground level, so this is a walk-past object
+ * and the preview was judged at 2.4 m and 8 m. `CylinderGeometry(0.15, 0.18,
+ * 0.8, 12)` gave a flat-topped tapered post - a traffic cone with the point cut
+ * off. A real pipe bollard is the opposite shape: a constant-diameter pipe with
+ * a grout skirt where it enters the slab and a pressed dome welded on top.
+ *
+ * The dome is what does the work. A true hemisphere read as a bullet in the
+ * first preview, so this is a 0.132 x 0.150 pressed dome springing off an 8 mm
+ * cap lip - the lip is the weld bead, and it is what stops the head reading as
+ * one continuous extrusion. A proud band at mid-height carries the reflective
+ * wrap and gives the shaft a scale reference.
+ *
+ * Envelope preserved exactly: max radius 0.18 at the skirt, y in [-0.4, 0.4]
+ * with the dome apex landing on 0.4 rather than overshooting it. A true
+ * hemisphere springing from the same 0.15 shoulder at y = 0.268 would apex at
+ * 0.418 and drift the envelope by 18 mm.
+ *
+ * All four bollards on the pad share this one geometry; they were four separate
+ * inline cylinders before.
+ */
+function createYardBollardGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -0.4), // base centre
+    new THREE.Vector2(0.18, -0.4), // grout skirt rim - envelope max radius
+    new THREE.Vector2(0.178, -0.366), // skirt edge band
+    new THREE.Vector2(0.156, -0.33), // skirt cone up to the pipe
+    new THREE.Vector2(0.151, -0.312),
+    new THREE.Vector2(0.15, -0.06), // pipe shaft
+    new THREE.Vector2(0.16, -0.05), // reflective band, stepped proud
+    new THREE.Vector2(0.16, 0.062),
+    new THREE.Vector2(0.15, 0.072),
+    new THREE.Vector2(0.15, 0.236),
+    new THREE.Vector2(0.158, 0.244), // cap lip - the weld bead
+    new THREE.Vector2(0.158, 0.262),
+    new THREE.Vector2(0.15, 0.268), // pressed dome springs off the lip
+    new THREE.Vector2(0.1427, 0.3088),
+    new THREE.Vector2(0.1214, 0.3456),
+    new THREE.Vector2(0.0882, 0.3748),
+    new THREE.Vector2(0.0464, 0.3935),
+    new THREE.Vector2(0.0, 0.4), // dome apex - envelope max y
+  ];
+  return new THREE.LatheGeometry(profile, 12);
+}
+
+const YARD_BOLLARD = createYardBollardGeometry();
+
+/**
  * AUTHORED SIGNAGE, HIDDEN WHEN IT CANNOT BE READ.
  *
  * Every label in this file is a troika `Text`, and troika text is the one thing
@@ -1132,15 +1335,15 @@ const DumpsterArea: React.FC<{ position: [number, number, number]; rotation?: nu
         <meshStandardMaterial color="#22c55e" />
       </mesh>
     </group>
-    {/* Bollards to protect dumpsters */}
+    {/* Bollards to protect dumpsters. One shared YARD_BOLLARD lathe across all
+        four, in place of four separately allocated cylinders. */}
     {[
       [-4, -2],
       [-4, 2],
       [4, -2],
       [4, 2],
     ].map(([x, z], i) => (
-      <mesh key={i} position={[x, 0.4, z]}>
-        <cylinderGeometry args={[0.15, 0.18, 0.8, 12]} />
+      <mesh key={i} geometry={YARD_BOLLARD} position={[x, 0.4, z]}>
         <meshStandardMaterial color="#fbbf24" roughness={0.6} />
       </mesh>
     ))}
@@ -5120,13 +5323,34 @@ const MaintenanceBay: React.FC<{ position: [number, number, number]; rotation?: 
         <meshStandardMaterial color="#fef3c7" emissive="#fef3c7" emissiveIntensity={0.4} />
       </mesh>
     ))}
+    {/*
+      ROOF VENT. The stack and its weather cap are the only drawn silhouettes on
+      this roof, seven metres up with nothing behind them but sky, and both were
+      bare truncated cones. They are now designed lathe profiles - see
+      ROOF_VENT_STACK and ROOF_VENT_CAP at the top of this file for what each
+      feature is and why it survives to viewing distance.
+
+      The two positions here are load-bearing and unchanged. The group at
+      y = 7.05 puts the stack's flashing flange at y = 6.45, sitting 24 mm above
+      the tilted roof slab, whose upper surface is at y = 6.426 directly under
+      x = 2.8 - sub-pixel at this height, and a pre-existing offset this change
+      deliberately does not disturb. The cap's local y = 0.67 puts its
+      throat collar bottom at 0.59, ten millimetres below the stack's 0.60 top
+      rim, which is what makes the cap read as seated rather than floating. Both
+      geometries keep the exact nominal envelope of the cylinders they replace,
+      so those two numbers still mean what they meant.
+
+      Radial segments go 10 -> 16 on both parts, matched to each other so the
+      stack and cap facet seams line up instead of beating against each other.
+      That is the one dimension in which these two grew: the DESIGNED LATHE
+      PROFILES header at the top of this file states what the 16-gon does to
+      the measured half-extents and why nothing on this roof cares.
+    */}
     <group position={[2.8, 7.05, -1.2]}>
-      <mesh castShadow>
-        <cylinderGeometry args={[0.34, 0.42, 1.2, 10]} />
+      <mesh geometry={ROOF_VENT_STACK} castShadow>
         <meshStandardMaterial color="#617078" roughness={0.45} metalness={0.62} />
       </mesh>
-      <mesh position={[0, 0.67, 0]} castShadow>
-        <cylinderGeometry args={[0.55, 0.38, 0.16, 10]} />
+      <mesh geometry={ROOF_VENT_CAP} position={[0, 0.67, 0]} castShadow>
         <meshStandardMaterial color="#38484f" roughness={0.52} metalness={0.52} />
       </mesh>
     </group>
