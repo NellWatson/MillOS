@@ -61,25 +61,9 @@ export const GodRays: React.FC<{
 
   return (
     <group position={position} rotation={rotation}>
-      {/*
-        Light beam cone (volumetric effect).
-
-        4 m across at the base and 8 m long. The loading dock door further down
-        is larger still, but it is all boxes; this is by far the widest ROUND
-        part in the file - roughly 17x the next one, the 0.24 m vent cap - so it
-        is the only one here whose faceting can read at all. The beam's OUTLINE
-        is all the eye has to go on, and the unlit meshBasicMaterial gives the
-        facets no shading to hide behind. At 16 sides the sagitta is 38 mm,
-        1.9% of the radius; 24 puts it at 17 mm (0.86%), the same ratio the
-        mill's own ~4 m parts are built at (CompactMachines SILO_OUTLET/HOPPER,
-        24 segments).
-
-        24 is divisible by 4, so the base still measures exactly +/-2 on X and Z
-        and the authored beam spread is unchanged. Cost is 8 triangles per shaft:
-        the apex ring is degenerate, so an open cone is one triangle per segment.
-      */}
+      {/* Light beam cone (volumetric effect) */}
       <mesh>
-        <coneGeometry args={[2, 8, 24, 1, true]} />
+        <coneGeometry args={[2, 8, 16, 1, true]} />
         <meshBasicMaterial
           color="#fef3c7"
           transparent
