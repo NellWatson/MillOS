@@ -23,6 +23,7 @@ import {
   createWorkerAnimationData,
   workerDeterministicFraction,
 } from './workerAnimationTypes';
+import type { WorkerWorkAction } from '../components/workers/workerTypes';
 import { AnimationFeatures, GraphicsQuality, getFeaturesForQuality } from './animationFeatures';
 import { positionRegistry, EntityPosition } from '../utils/positionRegistry';
 import { getThrottleLevel } from '../utils/frameThrottle';
@@ -269,6 +270,15 @@ export class WorkerAnimationManager {
     const data = this.workers.get(id);
     if (data) {
       data.status = status;
+    }
+  }
+
+  /** Keep task-driven work gestures in sync without resetting position or gait. */
+  updateWorkerAssignment(id: string, task: string, workAction: WorkerWorkAction): void {
+    const data = this.workers.get(id);
+    if (data) {
+      data.task = task;
+      data.workAction = workAction;
     }
   }
 
@@ -1219,6 +1229,13 @@ export function useWorkerAnimationManager(
     [manager]
   );
 
+  const updateWorkerAssignment = useCallback(
+    (id: string, task: string, workAction: WorkerWorkAction) => {
+      manager.updateWorkerAssignment(id, task, workAction);
+    },
+    [manager]
+  );
+
   const updateRefs = useCallback(
     (id: string, refs: WorkerPoseRefs) => {
       manager.updateRefs(id, refs);
@@ -1233,8 +1250,9 @@ export function useWorkerAnimationManager(
       getLOD,
       onLodChange,
       updateWorkerStatus,
+      updateWorkerAssignment,
       updateRefs,
     }),
-    [register, getLOD, onLodChange, updateWorkerStatus, updateRefs]
+    [register, getLOD, onLodChange, updateWorkerStatus, updateWorkerAssignment, updateRefs]
   );
 }

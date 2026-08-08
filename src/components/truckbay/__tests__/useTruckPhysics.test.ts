@@ -11,12 +11,20 @@ import {
   getTruckScheduleStatus,
   isTruckDockedPhase,
   isTruckGuidingPhase,
+  resolveTrailerLoadSettle,
 } from '../useTruckPhysics';
 
 const angleDistance = (a: number, b: number): number =>
   Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
 
 describe('deterministic truck service controller', () => {
+  it('settles the trailer progressively without accepting invalid load telemetry', () => {
+    expect(resolveTrailerLoadSettle(0)).toBe(0);
+    expect(resolveTrailerLoadSettle(0.5)).toBeCloseTo(0.04);
+    expect(resolveTrailerLoadSettle(1)).toBeCloseTo(0.08);
+    expect(resolveTrailerLoadSettle(2)).toBeCloseTo(0.08);
+    expect(resolveTrailerLoadSettle(Number.NaN)).toBe(0);
+  });
   it('starts benchmark cameras on visible near-dock manoeuvres', () => {
     const shippingStart = getTruckBenchmarkControllerStart('shipping');
     const receivingStart = getTruckBenchmarkControllerStart('receiving');

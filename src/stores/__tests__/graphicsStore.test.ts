@@ -430,12 +430,8 @@ describe('GraphicsStore', () => {
       // `enableMachineDetail` is separate from `enableMachineColorVariation`,
       // which is per-instance tint only. Low draws the bare silhouette.
       //
-      // UNCONSUMED AS OF THIS CHANGE. The key was added ahead of the reader in
-      // `machines/CompactMachines.tsx`, which currently tiers its decal and
-      // wear layers off `enableMachineColorVariation` instead. This assertion
-      // exists to hold that contract, NOT to certify a live flag - if
-      // CompactMachines never reads it, delete the key and this test together
-      // rather than letting it join the DEAD SETTINGS list in graphicsStore.ts.
+      // The live `CompactMachines.tsx` path reads this independently from
+      // per-instance colour variation and gates the placard draw call.
       expect(GRAPHICS_PRESETS.low.enableMachineDetail).toBe(false);
       expect(GRAPHICS_PRESETS.medium.enableMachineDetail).toBe(true);
       expect(GRAPHICS_PRESETS.high.enableMachineDetail).toBe(true);
@@ -578,7 +574,7 @@ describe('GraphicsStore', () => {
     });
   });
 
-  describe('Persisted Migration (v2 -> v3 -> v4)', () => {
+  describe('Persisted Migration (v2 -> v3 -> v4 -> v5)', () => {
     // The rebuilt pipeline changes what the post-processing keys mean. Without
     // a migration, `merge` -> sanitizeGraphicsSettings and then
     // onRehydrateStorage both carry the old values forward on top of the new
@@ -590,8 +586,8 @@ describe('GraphicsStore', () => {
         graphics: Record<string, unknown>;
       };
 
-    it('is versioned past 3', () => {
-      expect(persistOptions.version).toBe(4);
+    it('is versioned past 4', () => {
+      expect(persistOptions.version).toBe(5);
     });
 
     it('resets post-processing keys to the preset and drops the retired ones', () => {
@@ -666,7 +662,7 @@ describe('GraphicsStore', () => {
       const quality: GraphicsQuality = 'ultra';
       const migrated = runMigrate(
         { graphics: { quality, enableVignette: false, enableColorGrade: false } },
-        4
+        5
       );
       expect(migrated.graphics.enableVignette).toBe(false);
       expect(migrated.graphics.enableColorGrade).toBe(false);
@@ -712,6 +708,23 @@ describe('GraphicsStore', () => {
       );
       expect(migrated.graphics.enableGrainFlow).toBe(false);
       expect(migrated.graphics.dustParticleCount).toBe(24);
+    });
+
+    it('retires zero-reader graphics keys without disturbing real settings', () => {
+      const migrated = runMigrate(
+        {
+          graphics: {
+            quality: 'high',
+            enableMachineLOD: false,
+            enableTextureFiltering: false,
+            anisotropyLevel: 16,
+          },
+        },
+        4
+      );
+      expect(migrated.graphics).not.toHaveProperty('enableMachineLOD');
+      expect(migrated.graphics).not.toHaveProperty('enableTextureFiltering');
+      expect(migrated.graphics.anisotropyLevel).toBe(16);
     });
 
     it('carries the v4 repair through sanitisation, which is what reaches the store', () => {

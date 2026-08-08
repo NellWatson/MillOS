@@ -51,6 +51,57 @@ describe('operational scenario scoring and debrief', () => {
     expect(scenario?.learningObjectives).toHaveLength(5);
   });
 
+  it('offers the complete operational incident library with live campaign links', () => {
+    const operationalScenarios = useScenarioStore
+      .getState()
+      .availableScenarios.filter((scenario) => scenario.category === 'operational');
+    expect(operationalScenarios).toHaveLength(8);
+    expect(
+      new Set(operationalScenarios.map((scenario) => scenario.operationalIncidentKind))
+    ).toEqual(
+      new Set([
+        'bearing_overheat',
+        'dust_filter_pressure',
+        'power_sag',
+        'delayed_truck',
+        'supplier_contamination',
+        'packaging_shortage',
+        'severe_rain',
+        'understaffing',
+      ])
+    );
+    operationalScenarios.forEach((scenario) => {
+      expect(scenario.operationalPlaybook?.length).toBeGreaterThanOrEqual(3);
+      expect(
+        scenario.events.filter((event) => event.type === 'choice_point').length
+      ).toBeGreaterThanOrEqual(3);
+    });
+  });
+
+  it('uses the selected incident playbook in its debrief', () => {
+    const store = useScenarioStore.getState();
+    store.startScenario('operations-power-sag');
+    const scenario = useScenarioStore.getState().activeScenario!;
+    ['power_sag-contain', 'power_sag-control', 'power_sag-recover'].forEach((choiceId) => {
+      const event = scenario.events.find((candidate) =>
+        candidate.choices?.some((choice) => choice.id === choiceId)
+      )!;
+      const choice = event.choices!.find((candidate) => candidate.id === choiceId)!;
+      useScenarioStore.setState({ currentTime: event.time + 1 });
+      useScenarioStore.getState().recordChoice(choice.id, choice.effects, {
+        eventDescription: event.description,
+        eventTime: event.time,
+        outcome: choice.outcome,
+      });
+    });
+    useScenarioStore.setState({ currentTime: scenario.duration, stabilityReadings: [82, 86] });
+    useScenarioStore.getState().calculateResults(FINAL_AXES, 86);
+
+    expect(useScenarioStore.getState().results?.operationalMetrics?.recommendedResponse).toEqual(
+      scenario.operationalPlaybook
+    );
+  });
+
   it('scores the evidence-led path materially above an unsafe dispatch path', () => {
     const strong = runPath([
       'contain-stop-hold-notify',

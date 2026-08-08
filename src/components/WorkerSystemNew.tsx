@@ -195,6 +195,25 @@ const Worker: React.FC<WorkerProps> = React.memo(
       manager.updateWorkerStatus(data.id, data.status);
     }, [data.id, data.status, manager]);
 
+    useEffect(() => {
+      const assignmentAction =
+        data.status === 'break'
+          ? 'none'
+          : data.currentTask.toLowerCase().includes('sampling') ||
+              data.currentTask.toLowerCase().includes('quality')
+            ? 'sample'
+            : data.currentTask.toLowerCase().includes('repair') ||
+                data.currentTask.toLowerCase().includes('maintenance')
+              ? 'repair'
+              : data.currentTask.toLowerCase().includes('inspect') ||
+                  data.currentTask.toLowerCase().includes('safety')
+                ? 'inspect'
+                : data.currentTask.toLowerCase().includes('coordinat')
+                  ? 'supervise'
+                  : appearance.workAction;
+      manager.updateWorkerAssignment(data.id, data.currentTask, assignmentAction);
+    }, [appearance.workAction, data.currentTask, data.id, data.status, manager]);
+
     // Icon based on role
     const getRoleIcon = useCallback(() => {
       const iconClass = 'w-6 h-6';

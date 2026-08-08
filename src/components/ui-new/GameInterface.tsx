@@ -234,11 +234,12 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   }, [activeMode]);
 
   // Handler for Dock interactions
-  const handleModeChange = (mode: DockMode) => {
-    const activeElement = document.activeElement;
-    if (activeElement instanceof HTMLElement) {
-      sidebarTriggerRef.current = activeElement;
-    }
+  const handleModeChange = (mode: DockMode, trigger?: HTMLElement) => {
+    const exactTrigger =
+      trigger ??
+      document.querySelector<HTMLElement>(`[data-dock-mode="${mode}"]`) ??
+      (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    sidebarTriggerRef.current = exactTrigger;
 
     if (
       activeMode === mode &&

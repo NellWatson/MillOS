@@ -52,7 +52,7 @@ describe('Dock Component', () => {
     render(<Dock activeMode="overview" onModeChange={handleModeChange} />);
 
     fireEvent.click(screen.getByLabelText('AI Partner'));
-    expect(handleModeChange).toHaveBeenCalledWith('ai');
+    expect(handleModeChange).toHaveBeenCalledWith('ai', screen.getByLabelText('AI Partner'));
   });
 
   it('groups secondary workspaces and view controls behind one menu', () => {
@@ -61,7 +61,10 @@ describe('Dock Component', () => {
 
     fireEvent.click(screen.getByLabelText('More workspaces and view controls'));
     fireEvent.click(screen.getByRole('menuitem', { name: /Multiplayer/ }));
-    expect(handleModeChange).toHaveBeenCalledWith('multiplayer');
+    expect(handleModeChange).toHaveBeenCalledWith(
+      'multiplayer',
+      screen.getByLabelText('More workspaces and view controls')
+    );
   });
 
   it('has accessible labels for screen readers', () => {

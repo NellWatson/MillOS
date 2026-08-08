@@ -9,6 +9,7 @@ import { HeartParticle } from './effects/HeartParticle';
 import { useModelTextures } from '../utils/machineTextures';
 import { useProductionStore } from '../stores/productionStore';
 import {
+  EXTERIOR_LAYERS,
   FLOOR_LAYERS,
   POLYGON_OFFSET,
   RENDER_ORDER,
@@ -16,6 +17,7 @@ import {
   WATER_LAYERS,
 } from '../constants/renderLayers';
 import { SITE_LAYOUT } from '../constants/siteLayout';
+import { UTILITY_ASSET_DEFINITIONS } from '../constants/utilityAssets';
 import { createCelestialState, sampleAtmosphere, sampleCelestial } from '../simulation/atmosphere';
 import {
   calculateShippingTruckState,
@@ -58,6 +60,52 @@ const GRASS_COLORS = {
 };
 
 const PROPANE_COMPOUND_CENTRE = SITE_LAYOUT.serviceYard.propaneCompound.position;
+const UTILITY_TANK_FARM_CENTRE = SITE_LAYOUT.serviceYard.utilityTankFarm.position;
+
+const tankPaintMaterials = new Map<string, THREE.MeshStandardMaterial>();
+const getTankPaintMaterial = (color: string): THREE.MeshStandardMaterial => {
+  const cached = tankPaintMaterials.get(color);
+  if (cached) return cached;
+  const material = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.64,
+    metalness: 0.03,
+    envMapIntensity: 0.72,
+  });
+  tankPaintMaterials.set(color, material);
+  return material;
+};
+
+const TANK_SUPPORT_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#64707a',
+  roughness: 0.68,
+  metalness: 0.08,
+});
+const TANK_FITTING_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#7c8991',
+  roughness: 0.48,
+  metalness: 0.22,
+});
+const UTILITY_CONCRETE_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#a9afb0',
+  roughness: 0.92,
+  metalness: 0,
+});
+const UTILITY_CURB_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#858d8e',
+  roughness: 0.88,
+  metalness: 0,
+});
+const UTILITY_RAIL_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#aeb8ba',
+  roughness: 0.58,
+  metalness: 0.18,
+});
+const UTILITY_SAFETY_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#e4a90c',
+  roughness: 0.58,
+  metalness: 0.04,
+});
 
 // ---------------------------------------------------------------------------
 // SHARED EXTERIOR SURFACE TEXTURES
@@ -3897,108 +3945,147 @@ export const LoadingDockCanopy: React.FC<{
 
 // Industrial storage tank - horizontal cylindrical tank with legs
 export const StorageTank: React.FC<{
+  assetId?: string;
   position: [number, number, number];
   length?: number;
   radius?: number;
   rotation?: number;
   color?: string;
-}> = ({ position, length = 8, radius = 2.5, rotation = 0, color = '#e5e7eb' }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
-    {/* Main cylindrical tank body */}
-    <mesh position={[0, radius + 1.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow receiveShadow>
-      <cylinderGeometry args={[radius, radius, length, 16]} />
-      {/* Painted pressure vessel, not polished steel - see the note on
-          GrainSilo about the environment probe these values assume. */}
-      <meshStandardMaterial color={color} roughness={0.55} metalness={0.18} />
-    </mesh>
-    {/* End caps - hemispherical */}
-    <mesh position={[-length / 2, radius + 1.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-      <sphereGeometry args={[radius, 12, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
-      <meshStandardMaterial color={color} roughness={0.55} metalness={0.18} />
-    </mesh>
-    <mesh position={[length / 2, radius + 1.5, 0]} rotation={[0, 0, -Math.PI / 2]} castShadow>
-      <sphereGeometry args={[radius, 12, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
-      <meshStandardMaterial color={color} roughness={0.55} metalness={0.18} />
-    </mesh>
-    {/* Support legs - 4 saddle supports */}
-    {[-length / 3, length / 3].map((x, i) => (
-      <group key={`legs-${i}`} position={[x, 0, 0]}>
-        {/* Left leg */}
-        <mesh position={[0, 0.75, -radius * 0.7]} castShadow>
-          <boxGeometry args={[0.4, 1.5, 0.4]} />
-          <meshStandardMaterial color="#4b5563" roughness={0.6} metalness={0.4} />
-        </mesh>
-        {/* Right leg */}
-        <mesh position={[0, 0.75, radius * 0.7]} castShadow>
-          <boxGeometry args={[0.4, 1.5, 0.4]} />
-          <meshStandardMaterial color="#4b5563" roughness={0.6} metalness={0.4} />
-        </mesh>
-        {/* Cross brace */}
-        <mesh position={[0, 0.4, 0]} castShadow>
-          <boxGeometry args={[0.3, 0.3, radius * 1.4]} />
-          <meshStandardMaterial color="#4b5563" roughness={0.6} metalness={0.4} />
-        </mesh>
-        {/* Saddle */}
-        <mesh position={[0, 1.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-          <cylinderGeometry
-            args={[radius + 0.1, radius + 0.1, 0.6, 12, 1, false, Math.PI, Math.PI]}
-          />
-          <meshStandardMaterial color="#374151" roughness={0.5} metalness={0.5} />
-        </mesh>
-      </group>
-    ))}
-    <GroundBlob position={[0, 0]} scale={length + 3} scaleZ={radius * 3.4} />
-    {/* Pipe fittings on top */}
-    <mesh position={[0, radius * 2 + 1.5, 0]} castShadow>
-      <cylinderGeometry args={[0.3, 0.3, 0.8, 8]} />
-      <meshStandardMaterial color="#6b7280" roughness={0.4} metalness={0.6} />
-    </mesh>
-    <mesh position={[length / 4, radius * 2 + 1.5, 0]} castShadow>
-      <cylinderGeometry args={[0.2, 0.2, 0.6, 8]} />
-      <meshStandardMaterial color="#6b7280" roughness={0.4} metalness={0.6} />
-    </mesh>
-    {/* Ladder access */}
-    <group position={[0, 0, -radius - 0.2]}>
-      <mesh position={[0, radius + 1.5, 0]} castShadow>
-        <boxGeometry args={[0.08, radius * 2 + 1, 0.08]} />
-        <meshStandardMaterial color="#fbbf24" roughness={0.4} metalness={0.5} />
+  accentColor?: string;
+  label?: string;
+}> = ({
+  assetId,
+  position,
+  length = 8,
+  radius = 2.5,
+  rotation = 0,
+  color = '#e5e7eb',
+  accentColor = '#2f6f8f',
+  label = 'UTILITY',
+}) => {
+  const bodyMaterial = getTankPaintMaterial(color);
+  const accentMaterial = getTankPaintMaterial(accentColor);
+  const centreY = radius + 1.5;
+
+  return (
+    <group
+      position={position}
+      rotation={[0, rotation, 0]}
+      name={assetId}
+      userData={{ assetId, equipmentType: 'utility-tank' }}
+    >
+      {/* A single watertight capsule replaces the former overlapping cylinder
+          and hemisphere trio. Those intersections were a strong AO and
+          self-shadowing risk at the exact surfaces that rendered black.
+          Painted steel is dielectric, so the shell uses a low-metalness finish. */}
+      <mesh position={[0, centreY, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+        <capsuleGeometry args={[radius, length, 8, 24]} />
+        <primitive object={bodyMaterial} attach="material" />
       </mesh>
-      <mesh position={[0.3, radius + 1.5, 0]} castShadow>
-        <boxGeometry args={[0.08, radius * 2 + 1, 0.08]} />
-        <meshStandardMaterial color="#fbbf24" roughness={0.4} metalness={0.5} />
-      </mesh>
-      {/* Rungs */}
-      {Array.from({ length: 8 }).map((_, i) => (
-        <mesh key={`rung-${i}`} position={[0.15, 0.5 + i * 0.5, 0]} castShadow>
-          <boxGeometry args={[0.25, 0.04, 0.04]} />
-          <meshStandardMaterial color="#fbbf24" roughness={0.4} metalness={0.5} />
+      {/* Identification bands make the vessel orientation readable even in
+          overcast and night lighting without adding a light or emissive hack. */}
+      {[-length / 3, length / 3].map((x) => (
+        <mesh
+          key={`band-${x}`}
+          position={[x, centreY, 0]}
+          rotation={[0, Math.PI / 2, 0]}
+          castShadow
+        >
+          <torusGeometry args={[radius + 0.035, 0.085, 8, 24]} />
+          <primitive object={accentMaterial} attach="material" />
         </mesh>
       ))}
+      {/* Support legs - 4 saddle supports */}
+      {[-length / 3, length / 3].map((x, i) => (
+        <group key={`legs-${i}`} position={[x, 0, 0]}>
+          {/* Left leg */}
+          <mesh position={[0, 0.75, -radius * 0.7]} castShadow>
+            <boxGeometry args={[0.4, 1.5, 0.4]} />
+            <primitive object={TANK_SUPPORT_MATERIAL} attach="material" />
+          </mesh>
+          {/* Right leg */}
+          <mesh position={[0, 0.75, radius * 0.7]} castShadow>
+            <boxGeometry args={[0.4, 1.5, 0.4]} />
+            <primitive object={TANK_SUPPORT_MATERIAL} attach="material" />
+          </mesh>
+          {/* Cross brace */}
+          <mesh position={[0, 0.4, 0]} castShadow>
+            <boxGeometry args={[0.3, 0.3, radius * 1.4]} />
+            <primitive object={TANK_SUPPORT_MATERIAL} attach="material" />
+          </mesh>
+          {/* Saddle */}
+          <mesh position={[0, 1.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+            <cylinderGeometry
+              args={[radius + 0.1, radius + 0.1, 0.6, 12, 1, false, Math.PI, Math.PI]}
+            />
+            <primitive object={TANK_SUPPORT_MATERIAL} attach="material" />
+          </mesh>
+        </group>
+      ))}
+      <GroundBlob position={[0, 0]} scale={length + 3} scaleZ={radius * 3.4} />
+      {/* Pipe fittings on top */}
+      <mesh position={[0, radius * 2 + 1.62, 0]} castShadow>
+        <cylinderGeometry args={[0.3, 0.3, 0.8, 8]} />
+        <primitive object={TANK_FITTING_MATERIAL} attach="material" />
+      </mesh>
+      <mesh position={[length / 4, radius * 2 + 1.58, 0]} castShadow>
+        <cylinderGeometry args={[0.2, 0.2, 0.6, 8]} />
+        <primitive object={TANK_FITTING_MATERIAL} attach="material" />
+      </mesh>
+      {/* Ladder access */}
+      <group position={[0, 0, -radius - 0.2]}>
+        <mesh position={[0, radius + 1.5, 0]} castShadow>
+          <boxGeometry args={[0.08, radius * 2 + 1, 0.08]} />
+          <meshStandardMaterial color="#fbbf24" roughness={0.4} metalness={0.5} />
+        </mesh>
+        <mesh position={[0.3, radius + 1.5, 0]} castShadow>
+          <boxGeometry args={[0.08, radius * 2 + 1, 0.08]} />
+          <meshStandardMaterial color="#fbbf24" roughness={0.4} metalness={0.5} />
+        </mesh>
+        {/* Rungs */}
+        {Array.from({ length: 8 }).map((_, i) => (
+          <mesh key={`rung-${i}`} position={[0.15, 0.5 + i * 0.5, 0]} castShadow>
+            <boxGeometry args={[0.25, 0.04, 0.04]} />
+            <meshStandardMaterial color="#fbbf24" roughness={0.4} metalness={0.5} />
+          </mesh>
+        ))}
+      </group>
+      <Text
+        position={[0, centreY, radius + 0.08]}
+        fontSize={0.42}
+        color="#27343a"
+        anchorX="center"
+        anchorY="middle"
+        fontWeight="bold"
+      >
+        {label}
+      </Text>
     </group>
-  </group>
-);
+  );
+};
 
 // Propane tank - smaller vertical cylindrical tank
 export const PropaneTank: React.FC<{
+  assetId?: string;
   position: [number, number, number];
   height?: number;
   radius?: number;
-}> = ({ position, height = 4, radius = 1.2 }) => (
-  <group position={position}>
-    {/* Main cylindrical body */}
-    <mesh position={[0, height / 2 + 0.5, 0]} castShadow receiveShadow>
-      <cylinderGeometry args={[radius, radius, height, 12]} />
-      <meshStandardMaterial color="#f5f5f5" roughness={0.3} metalness={0.4} />
-    </mesh>
-    {/* Domed top */}
-    <mesh position={[0, height + 0.5, 0]} castShadow>
-      <sphereGeometry args={[radius, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
-      <meshStandardMaterial color="#f5f5f5" roughness={0.3} metalness={0.4} />
-    </mesh>
-    {/* Domed bottom */}
-    <mesh position={[0, 0.5, 0]} rotation={[Math.PI, 0, 0]} castShadow>
-      <sphereGeometry args={[radius, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
-      <meshStandardMaterial color="#f5f5f5" roughness={0.3} metalness={0.4} />
+  color?: string;
+  accentColor?: string;
+}> = ({
+  assetId,
+  position,
+  height = 4,
+  radius = 1.2,
+  color = '#f1f3ef',
+  accentColor = '#b83a32',
+}) => (
+  <group position={position} name={assetId} userData={{ assetId, equipmentType: 'lpg-vessel' }}>
+    {/* One watertight pressure vessel avoids the self-shadowing seams created
+        by the former cylinder and two intersecting hemispheres. */}
+    <mesh position={[0, (height + radius) / 2 + 0.5, 0]} castShadow>
+      <capsuleGeometry args={[radius, Math.max(0.5, height - radius), 8, 20]} />
+      <primitive object={getTankPaintMaterial(color)} attach="material" />
     </mesh>
     {/* Support legs - 3 legs */}
     {[0, (Math.PI * 2) / 3, (Math.PI * 4) / 3].map((angle, i) => (
@@ -4012,11 +4099,11 @@ export const PropaneTank: React.FC<{
       </mesh>
     ))}
     {/* Valve assembly on top */}
-    <mesh position={[0, height + radius + 0.3, 0]} castShadow>
+    <mesh position={[0, height + radius + 0.75, 0]} castShadow>
       <cylinderGeometry args={[0.15, 0.2, 0.4, 8]} />
       <meshStandardMaterial color="#374151" roughness={0.4} metalness={0.6} />
     </mesh>
-    <mesh position={[0, height + radius + 0.6, 0]} castShadow>
+    <mesh position={[0, height + radius + 1.05, 0]} castShadow>
       <boxGeometry args={[0.4, 0.2, 0.4]} />
       <meshStandardMaterial color="#1f2937" roughness={0.4} metalness={0.6} />
     </mesh>
@@ -4028,10 +4115,123 @@ export const PropaneTank: React.FC<{
     {/* Warning stripe band */}
     <mesh position={[0, height * 0.3 + 0.5, 0]} castShadow>
       <cylinderGeometry args={[radius + 0.02, radius + 0.02, 0.3, 12]} />
-      <meshStandardMaterial color="#dc2626" roughness={0.5} />
+      <primitive object={getTankPaintMaterial(accentColor)} attach="material" />
     </mesh>
   </group>
 );
+
+const UtilityTankFarm: React.FC = React.memo(() => (
+  <group position={UTILITY_TANK_FARM_CENTRE} name="utility-tank-farm">
+    {/* Raised containment pad. Its underside meets the shared exterior datum,
+        so it neither floats nor competes with TerrainGround. */}
+    <mesh position={[0, EXTERIOR_LAYERS.ground + 0.09, 0]} receiveShadow>
+      <boxGeometry args={[22, 0.18, 42]} />
+      <primitive object={UTILITY_CONCRETE_MATERIAL} attach="material" />
+    </mesh>
+    {/* Low bund walls contain a spill while keeping the vessels readable from
+        the yard camera and leaving the west-side service access unobstructed. */}
+    {[
+      { position: [0, 0.23, -21] as [number, number, number], size: [22, 0.34, 0.28] },
+      { position: [0, 0.23, 21] as [number, number, number], size: [22, 0.34, 0.28] },
+      { position: [11, 0.23, 0] as [number, number, number], size: [0.28, 0.34, 42] },
+      { position: [-11, 0.23, -12] as [number, number, number], size: [0.28, 0.34, 18] },
+      { position: [-11, 0.23, 12] as [number, number, number], size: [0.28, 0.34, 18] },
+    ].map(({ position, size }, index) => (
+      <mesh key={`tank-bund-${index}`} position={position} castShadow receiveShadow>
+        <boxGeometry args={size as [number, number, number]} />
+        <primitive object={UTILITY_CURB_MATERIAL} attach="material" />
+      </mesh>
+    ))}
+    {UTILITY_ASSET_DEFINITIONS.filter((asset) => asset.compound === 'tank_farm').map((asset) => (
+      <StorageTank
+        key={asset.id}
+        assetId={asset.id}
+        position={[...asset.relativePosition]}
+        length={asset.length}
+        radius={asset.radius}
+        color={asset.color}
+        accentColor={asset.accentColor}
+        label={asset.label}
+      />
+    ))}
+  </group>
+));
+UtilityTankFarm.displayName = 'UtilityTankFarm';
+
+const PropaneSafetyCompound: React.FC = React.memo(() => {
+  const railSegments: Array<{
+    position: [number, number, number];
+    size: [number, number, number];
+  }> = [
+    { position: [0, 1.25, -4.5], size: [12, 0.1, 0.1] },
+    { position: [0, 1.25, 4.5], size: [12, 0.1, 0.1] },
+    { position: [6, 1.25, 0], size: [0.1, 0.1, 9] },
+    { position: [-6, 1.25, -3.25], size: [0.1, 0.1, 2.5] },
+    { position: [-6, 1.25, 3.25], size: [0.1, 0.1, 2.5] },
+    { position: [0, 2.2, -4.5], size: [12, 0.1, 0.1] },
+    { position: [0, 2.2, 4.5], size: [12, 0.1, 0.1] },
+    { position: [6, 2.2, 0], size: [0.1, 0.1, 9] },
+    { position: [-6, 2.2, -3.25], size: [0.1, 0.1, 2.5] },
+    { position: [-6, 2.2, 3.25], size: [0.1, 0.1, 2.5] },
+  ];
+
+  return (
+    <group position={PROPANE_COMPOUND_CENTRE} name="propane-safety-compound">
+      <mesh position={[0, EXTERIOR_LAYERS.ground + 0.08, 0]} receiveShadow>
+        <boxGeometry args={[12, 0.16, 9]} />
+        <primitive object={UTILITY_CONCRETE_MATERIAL} attach="material" />
+      </mesh>
+      {[
+        [-6, -4.5],
+        [-6, -2],
+        [-6, 2],
+        [-6, 4.5],
+        [6, -4.5],
+        [6, 4.5],
+      ].map(([x, z], index) => (
+        <mesh key={`lpg-post-${index}`} position={[x, 1.2, z]} castShadow>
+          <boxGeometry args={[0.14, 2.4, 0.14]} />
+          <primitive object={UTILITY_RAIL_MATERIAL} attach="material" />
+        </mesh>
+      ))}
+      {railSegments.map(({ position, size }, index) => (
+        <mesh key={`lpg-rail-${index}`} position={position} castShadow>
+          <boxGeometry args={size} />
+          <primitive object={UTILITY_RAIL_MATERIAL} attach="material" />
+        </mesh>
+      ))}
+      {[-3, 0, 3].map((z) => (
+        <mesh key={`lpg-bollard-${z}`} position={[-6.6, 0.72, z]} castShadow>
+          <cylinderGeometry args={[0.13, 0.16, 1.4, 10]} />
+          <primitive object={UTILITY_SAFETY_MATERIAL} attach="material" />
+        </mesh>
+      ))}
+      {UTILITY_ASSET_DEFINITIONS.filter((asset) => asset.compound === 'propane').map((asset) => (
+        <PropaneTank
+          key={asset.id}
+          assetId={asset.id}
+          position={[...asset.relativePosition]}
+          height={asset.height}
+          radius={asset.radius}
+          color={asset.color}
+          accentColor={asset.accentColor}
+        />
+      ))}
+      <Text
+        position={[6.08, 2.95, 0]}
+        rotation={[0, Math.PI / 2, 0]}
+        fontSize={0.34}
+        color="#7f1d1d"
+        anchorX="center"
+        anchorY="middle"
+        fontWeight="bold"
+      >
+        LPG · NO IGNITION SOURCES
+      </Text>
+    </group>
+  );
+});
+PropaneSafetyCompound.displayName = 'PropaneSafetyCompound';
 
 // Optimized car component - good looks with efficient rendering
 // Uses React.memo, reduced geometry segments, consolidated meshes
@@ -7071,23 +7271,10 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
       <ConveyorBridge start={[-70, 35, -20]} end={[-75, 25, 10]} />
       <ConveyorBridge start={[-58, 12, 0]} end={[-58, 12, -40]} />
 
-      {/* Storage tanks - east side industrial area */}
-      <StorageTank position={[75, 0, -30]} length={10} radius={3} rotation={0} color="#d1d5db" />
-      <StorageTank position={[75, 0, -15]} length={8} radius={2.5} rotation={0} color="#e5e7eb" />
-      <StorageTank position={[75, 0, 0]} length={10} radius={3} rotation={0} color="#d1d5db" />
-
-      {/* Propane tanks sit on the east utility pad, clear of the maintenance
-          garage footprint, its west-facing doors, and the truck apron. */}
-      <PropaneTank
-        position={[PROPANE_COMPOUND_CENTRE[0] - 2.5, 0, PROPANE_COMPOUND_CENTRE[2]]}
-        height={5}
-        radius={1.5}
-      />
-      <PropaneTank
-        position={[PROPANE_COMPOUND_CENTRE[0] + 2.5, 0, PROPANE_COMPOUND_CENTRE[2]]}
-        height={4}
-        radius={1.2}
-      />
+      {/* Utility compounds use the site-layout anchors as their sole placement
+          authority, including containment, access control and safety clearance. */}
+      <UtilityTankFarm />
+      <PropaneSafetyCompound />
 
       {/* Additional grain silos - outside the main building */}
       <GrainSilo position={[-85, 0, 30]} radius={6} height={35} color="#94a3b8" />

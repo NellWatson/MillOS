@@ -61,6 +61,7 @@ import { useStabilityStore } from '../../../stores/stabilityStore';
 import { useVotingStore } from '../../../stores/votingStore';
 import { useQCLabStore } from '../../../stores/qcLabStore';
 import { useMaterialFlowStore } from '../../../stores/materialFlowStore';
+import { useOperationsCampaignStore } from '../../../stores/operationsCampaignStore';
 import { useShallow } from 'zustand/react/shallow';
 import { audioManager } from '../../../utils/audioManager';
 
@@ -1082,6 +1083,12 @@ export const ScenarioPlayground: React.FC = () => {
     }
   }, [activeScenario?.id, currentTime, setAxis]);
 
+  useEffect(() => {
+    if (activeScenario?.operationalIncidentKind && currentTime === 0) {
+      useOperationsCampaignStore.getState().triggerIncident(activeScenario.operationalIncidentKind);
+    }
+  }, [activeScenario?.id, activeScenario?.operationalIncidentKind, currentTime]);
+
   // Track axis changes
   useEffect(() => {
     const currentAxesStr = JSON.stringify(axes);
@@ -1262,12 +1269,15 @@ export const ScenarioPlayground: React.FC = () => {
         .filter((batch) => batch.availableKg > 0 && batch.disposition !== 'shipped')
         .map((batch) => batch.id);
       if (choice.id === 'contain-stop-hold-notify' || choice.id === 'hold-everything-unscoped') {
-        qc.triggerContaminationAlert({
-          batchIds: availableBatchIds,
-          severity: choice.id === 'contain-stop-hold-notify' ? 'high' : 'medium',
-          operator: 'Scenario operator',
-          operatorNote: 'Contamination-at-dispatch training interlock',
-        });
+        const hasOpenAlert = qc.qcLab.contaminationAlerts.some((alert) => !alert.resolved);
+        if (!hasOpenAlert) {
+          qc.triggerContaminationAlert({
+            batchIds: availableBatchIds,
+            severity: choice.id === 'contain-stop-hold-notify' ? 'high' : 'medium',
+            operator: 'Scenario operator',
+            operatorNote: 'Contamination-at-dispatch training interlock',
+          });
+        }
       } else if (
         choice.id === 'recall-affected-release-clear' ||
         choice.id === 'destroy-all-finished-goods'
@@ -1310,6 +1320,26 @@ export const ScenarioPlayground: React.FC = () => {
                 'Unsafe training choice: visual inspection override'
               )
           );
+      }
+
+      const incidentKind = activeScenario.operationalIncidentKind;
+      if (incidentKind) {
+        const operations = useOperationsCampaignStore.getState();
+        const incident = operations.incidents.find(
+          (candidate) => candidate.kind === incidentKind && candidate.phase !== 'resolved'
+        );
+        if (incident) {
+          if (choice.id.endsWith('-contain') || choice.id === 'contain-stop-hold-notify') {
+            operations.acknowledgeIncident(incident.id);
+          } else if (choice.id.endsWith('-control')) {
+            operations.mitigateIncident(incident.id);
+          } else if (
+            choice.id.endsWith('-recover') ||
+            choice.id === 'verify-interlock-handover-restart'
+          ) {
+            operations.resolveIncident(incident.id);
+          }
+        }
       }
     }
     // Record exact timing, consequence, BAS effects, and operational objective deltas.

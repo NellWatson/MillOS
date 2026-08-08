@@ -1,30 +1,22 @@
 /**
- * Host Migration Handler
+ * Host Loss Handler
  *
- * Handles the case when the host disconnects from the session.
- * For now, this is a simple implementation that notifies remaining players.
- *
- * Future enhancements could include:
- * - Automatic host migration to the player with lowest latency
- * - State transfer to new host
- * - Seamless reconnection
+ * Ends a guest session cleanly when its host disconnects. MillOS v0.40 does
+ * not elect a replacement host or transfer authoritative state.
  */
 
 import { useMultiplayerStore } from '../stores/multiplayerStore';
 
 /**
- * Check if we need to handle host migration
- * Called when the host connection is lost (for guest players)
+ * Handle loss of the authoritative host connection for guest players.
  */
 export function handleHostDisconnect(): void {
   const store = useMultiplayerStore.getState();
 
   if (store.isHost) {
-    // We are the host, nothing to migrate
+    // A host cannot lose its own authoritative connection.
     return;
   }
-
-  // Host disconnected - reset to disconnected state
 
   // Clear multiplayer session state while preserving the player's name
   store.leaveRoom();
@@ -35,20 +27,4 @@ export function handleHostDisconnect(): void {
       detail: { message: 'The host has left the session. The session has ended.' },
     })
   );
-}
-
-/**
- * In a full implementation, this would:
- * 1. Elect a new host (lowest latency, or by join order)
- * 2. Transfer game state to new host
- * 3. Re-establish connections with new host
- * 4. Resume the session
- *
- * For the MVP, we simply end the session when the host leaves.
- */
-export function attemptHostMigration(): boolean {
-  // TODO(roadmap): not implemented in MVP and currently has no callers.
-  // Kept as an intentional placeholder for future host-migration support.
-  // Return false to indicate migration failed.
-  return false;
 }

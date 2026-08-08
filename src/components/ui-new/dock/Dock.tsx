@@ -32,7 +32,7 @@ export type DockMode =
 
 interface DockProps {
   activeMode: DockMode;
-  onModeChange: (mode: DockMode) => void;
+  onModeChange: (mode: DockMode, trigger?: HTMLElement) => void;
   onDatalinksOpen?: () => void;
 }
 
@@ -116,17 +116,17 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
   }, []);
 
   // On mobile, clicking a dock item opens the mobile panel instead of sidebar
-  const handleModeChange = (mode: DockMode) => {
+  const handleModeChange = (mode: DockMode, trigger?: HTMLElement) => {
     if (isCompactLayout) {
       openMobilePanel(mode);
     } else {
-      onModeChange(mode);
+      onModeChange(mode, trigger);
     }
   };
 
   const handleMoreModeChange = (mode: DockMode) => {
     moreMenuTriggerRef.current?.focus();
-    handleModeChange(mode);
+    handleModeChange(mode, moreMenuTriggerRef.current ?? undefined);
     setMoreOpen(false);
   };
 
@@ -153,7 +153,7 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
         icon={<Factory size={24} />}
         label="Mill Overview"
         isActive={activeMode === 'overview'}
-        onClick={() => handleModeChange('overview')}
+        onClick={(trigger) => handleModeChange('overview', trigger)}
         isMobile={isCompactLayout}
       />
       <DockItem
@@ -161,7 +161,7 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
         icon={<Brain size={24} />}
         label="AI Partner"
         isActive={activeMode === 'ai'}
-        onClick={() => handleModeChange('ai')}
+        onClick={(trigger) => handleModeChange('ai', trigger)}
         isMobile={isCompactLayout}
       />
       <DockItem
@@ -169,7 +169,7 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
         icon={<Activity size={24} />}
         label="Simulated SCADA"
         isActive={activeMode === 'scada'}
-        onClick={() => handleModeChange('scada')}
+        onClick={(trigger) => handleModeChange('scada', trigger)}
         isMobile={isCompactLayout}
       />
       {!isCompactLayout && (
@@ -178,7 +178,7 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
           icon={<HardHat size={24} />}
           label="Workforce"
           isActive={activeMode === 'workforce'}
-          onClick={() => handleModeChange('workforce')}
+          onClick={(trigger) => handleModeChange('workforce', trigger)}
           isMobile={isCompactLayout}
         />
       )}
@@ -188,7 +188,7 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
           icon={<Heart size={24} />}
           label="Bilateral Autonomy System (BAS)"
           isActive={activeMode === 'management'}
-          onClick={() => handleModeChange('management')}
+          onClick={(trigger) => handleModeChange('management', trigger)}
           isMobile={isCompactLayout}
         />
       )}
@@ -197,7 +197,7 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
         icon={<Shield size={24} />}
         label="Safety & Emergency"
         isActive={activeMode === 'safety'}
-        onClick={() => handleModeChange('safety')}
+        onClick={(trigger) => handleModeChange('safety', trigger)}
         isMobile={isCompactLayout}
       />
       <DockItem
@@ -205,7 +205,7 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
         icon={<Settings size={24} />}
         label="Settings"
         isActive={activeMode === 'settings'}
-        onClick={() => handleModeChange('settings')}
+        onClick={(trigger) => handleModeChange('settings', trigger)}
         isMobile={isCompactLayout}
       />
 
@@ -328,13 +328,13 @@ const DockItem: React.FC<{
   icon: React.ReactNode;
   label: string;
   isActive: boolean;
-  onClick: () => void;
+  onClick: (trigger: HTMLButtonElement) => void;
   badge?: boolean;
   isMobile?: boolean;
 }> = ({ mode, icon, label, isActive, onClick, badge, isMobile }) => {
   return (
     <button
-      onClick={onClick}
+      onClick={(event) => onClick(event.currentTarget)}
       data-dock-mode={mode}
       aria-label={label}
       aria-pressed={isActive}

@@ -10,6 +10,7 @@ import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useTruckScheduleStore } from '../stores/truckScheduleStore';
 import { useProductionStore } from '../stores/productionStore';
+import { useOperationsCampaignStore } from '../stores/operationsCampaignStore';
 import { useShallow } from 'zustand/react/shallow';
 import { getForkliftWarningColor } from '../utils/statusColors';
 import { ForkliftModel } from './models';
@@ -18,6 +19,7 @@ import { ForkliftData } from '../types';
 import { POLYGON_OFFSET } from '../constants/renderLayers';
 import {
   createRoundedForkliftRoute,
+  canPerformForkliftLogisticsAction,
   dampAngle,
   isForkliftSimulationPaused,
   moveTowards,
@@ -674,6 +676,31 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       receiving: state.truckSchedule.receiving.truckDocked,
     }))
   );
+  const dispatchExecution = useOperationsCampaignStore(
+    useShallow((state) => ({
+      releasedFinishedKg: state.execution.releasedFinishedKg,
+      loadStatus: state.execution.dispatchLoad.status,
+    }))
+  );
+  const canPerformWaypointAction = useCallback(
+    (action: 'pickup' | 'dropoff'): boolean => {
+      return canPerformForkliftLogisticsAction({
+        forkliftId: data.id,
+        action,
+        shippingDocked: truckDocked.shipping,
+        receivingDocked: truckDocked.receiving,
+        releasedFinishedKg: dispatchExecution.releasedFinishedKg,
+        dispatchLoadStatus: dispatchExecution.loadStatus,
+      });
+    },
+    [
+      data.id,
+      dispatchExecution.loadStatus,
+      dispatchExecution.releasedFinishedKg,
+      truckDocked.receiving,
+      truckDocked.shipping,
+    ]
+  );
 
   // Physics system toggle
   const enablePhysics = useGraphicsStore((state) => state.graphics.enablePhysics);
@@ -1054,6 +1081,13 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       }
       const action = data.pathActions[pathIndexRef.current];
       const currentlyHasCargo = hasCargoRef.current; // Use ref for immediate value
+      if (
+        (action.type === 'pickup' && !currentlyHasCargo && !canPerformWaypointAction('pickup')) ||
+        (action.type === 'dropoff' && currentlyHasCargo && !canPerformWaypointAction('dropoff'))
+      ) {
+        publishMotionTelemetry();
+        return;
+      }
 
       if (action.type === 'pickup' && !currentlyHasCargo) {
         // Start loading operation
@@ -1229,6 +1263,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
             onPositionUpdate={handlePhysicsPositionUpdate}
             onCargoChange={handleCargoChange}
             onOperationChange={handleOperationChange}
+            canPerformAction={canPerformWaypointAction}
           >
             {forkliftContent}
           </PhysicsForklift>

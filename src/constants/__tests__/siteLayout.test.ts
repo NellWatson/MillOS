@@ -71,6 +71,12 @@ describe('canonical site layout', () => {
     const propaneClearance = getServiceAssetBounds(SITE_LAYOUT.serviceYard.propaneCompound, true);
     expect(boundsOverlapXZ(maintenanceClearance, propaneClearance)).toBe(false);
 
+    const tankFarm = getServiceAssetBounds(SITE_LAYOUT.serviceYard.utilityTankFarm);
+    expect(boundsOverlapXZ(tankFarm, propaneClearance)).toBe(false);
+    expect(propaneClearance.maxX).toBeLessThanOrEqual(SITE_LAYOUT.perimeter.maxX);
+    expect(tankFarm.maxX).toBeLessThan(SITE_LAYOUT.perimeter.maxX);
+    expect(tankFarm.minZ).toBeGreaterThan(SITE_LAYOUT.perimeter.minZ);
+
     const lounge = getServiceAssetBounds(SITE_LAYOUT.serviceYard.driverLounge);
     expect(lounge.minX).toBeGreaterThan(SITE_LAYOUT.docks.shipping.apron.maxX);
   });

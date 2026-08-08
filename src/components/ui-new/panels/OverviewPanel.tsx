@@ -40,6 +40,11 @@ const PredictiveMaintenancePanel = recoverableLazy(() =>
     default: m.PredictiveMaintenancePanel,
   }))
 );
+const OperationsCampaignPanel = recoverableLazy(() =>
+  import('../../ui/OperationsCampaignPanel').then((module) => ({
+    default: module.OperationsCampaignPanel,
+  }))
+);
 
 // Isolated Clock component to prevent full panel re-renders
 const GameClock: React.FC = React.memo(() => {
@@ -671,6 +676,18 @@ export const OverviewPanel: React.FC = React.memo(() => {
 
       <MaterialTraceabilitySection />
       <BatchGenealogySection />
+
+      <RecoverableFeatureBoundary featureName="Operations campaign">
+        <Suspense
+          fallback={
+            <div className="h-24 rounded-xl bg-slate-800/30 animate-pulse" role="status">
+              <span className="sr-only">Loading operations campaign...</span>
+            </div>
+          }
+        >
+          <OperationsCampaignPanel />
+        </Suspense>
+      </RecoverableFeatureBoundary>
 
       {/* Maintenance (breakdowns, predictive alerts, parts, schedule) */}
       <section>
