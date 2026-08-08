@@ -54,6 +54,17 @@ export interface MaterialAmount {
   productBatches?: ProductBatchContribution[];
 }
 
+/**
+ * The active customer recipe expressed as a physical routing instruction.
+ * When present, only its source grain and finished product enter new process
+ * steps. Material already on a conveyor is still delivered so mass is never
+ * stranded or discarded when the campaign changes over.
+ */
+export interface MaterialFlowProductionPlan {
+  sourceMaterial: Extract<MaterialType, 'wheat_grain' | 'corn_grain'>;
+  finishedMaterial: Extract<MaterialType, 'flour' | 'semolina'>;
+}
+
 export type MaterialDisposition = 'released' | 'hold' | 'recalled' | 'shipped';
 
 export interface SourceLot {
@@ -235,7 +246,11 @@ export interface MaterialFlowState {
   simulationTime: number; // seconds elapsed
 
   // Actions
-  tickMaterialFlow: (deltaSeconds: number, productionSpeed: number) => void;
+  tickMaterialFlow: (
+    deltaSeconds: number,
+    productionSpeed: number,
+    productionPlan?: MaterialFlowProductionPlan
+  ) => void;
   /**
    * Couple machine status to flow: stopped/idle/critical machines stop
    * processing material. Joined on the live machine ids from the scene.
@@ -256,7 +271,10 @@ export interface MaterialFlowState {
    * A shipping truck removes completed flour or semolina from packer output.
    * Returns the amount actually loaded, which may be lower than requested.
    */
-  shipFinishedGoods: (amountKg: number) => number;
+  shipFinishedGoods: (
+    amountKg: number,
+    preferredMaterial?: Extract<MaterialType, 'flour' | 'semolina'>
+  ) => number;
   setBatchDisposition: (
     batchIds: readonly string[],
     disposition: Exclude<MaterialDisposition, 'shipped'>,
@@ -569,9 +587,10 @@ function createInitialNetwork(): NetworkTopology {
     fromId: string,
     toId: string,
     materialType: MaterialType,
-    flowRate: number = 30
+    flowRate: number = 30,
+    idSuffix = ''
   ) => {
-    const segmentId = `conv-${fromId}-${toId}`;
+    const segmentId = `conv-${fromId}-${toId}${idSuffix}`;
     segments.push({
       id: segmentId,
       fromMachineId: fromId,
@@ -612,12 +631,19 @@ function createInitialNetwork(): NetworkTopology {
   addSegment('rm-102', 'sifter-b', 'flour', 50);
   addSegment('rm-103', 'sifter-c', 'flour', 50);
   addSegment('rm-104', 'sifter-a', 'flour', 50);
+  addSegment('rm-101', 'sifter-a', 'semolina', 50, '-semolina');
+  addSegment('rm-102', 'sifter-b', 'semolina', 50, '-semolina');
+  addSegment('rm-103', 'sifter-c', 'semolina', 50, '-semolina');
+  addSegment('rm-104', 'sifter-a', 'semolina', 50, '-semolina');
 
   // Sifters -> Packers
   // Each sifter feeds one packer primarily
   addSegment('sifter-a', 'packer-0', 'flour', 80);
   addSegment('sifter-b', 'packer-1', 'flour', 80);
   addSegment('sifter-c', 'packer-2', 'flour', 80);
+  addSegment('sifter-a', 'packer-0', 'semolina', 80, '-semolina');
+  addSegment('sifter-b', 'packer-1', 'semolina', 80, '-semolina');
+  addSegment('sifter-c', 'packer-2', 'semolina', 80, '-semolina');
 
   return { segments, downstreamMap, upstreamMap };
 }
@@ -652,7 +678,7 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
       processSequence: 0,
       simulationTime: 0,
 
-      tickMaterialFlow: (deltaSeconds: number, productionSpeed: number) => {
+      tickMaterialFlow: (deltaSeconds, productionSpeed, productionPlan) => {
         if (
           !Number.isFinite(deltaSeconds) ||
           !Number.isFinite(productionSpeed) ||
@@ -798,6 +824,15 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
           // Process each input material type
           buffer.inputBuffer.forEach((inputMaterial) => {
             if (inputMaterial.amount <= 0 || remainingProcessCapacity <= 0) return;
+            if (
+              productionPlan &&
+              ((buffer.machineType === 'roller_mill' &&
+                inputMaterial.type !== productionPlan.sourceMaterial) ||
+                ((buffer.machineType === 'plansifter' || buffer.machineType === 'packer') &&
+                  inputMaterial.type !== productionPlan.finishedMaterial))
+            ) {
+              return;
+            }
 
             const conversion = buffer.conversionRatios.find(
               (c) => c.inputType === inputMaterial.type
@@ -987,6 +1022,12 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
             }
           });
 
+          const routedMaterial =
+            fromBuffer.machineType === 'silo'
+              ? productionPlan?.sourceMaterial
+              : productionPlan?.finishedMaterial;
+          if (routedMaterial && segment.fromOutputType !== routedMaterial) return;
+
           // Move material from source output to conveyor
           const outputMaterial = fromBuffer.outputBuffer.find(
             (m) => m.type === segment.fromOutputType
@@ -1165,7 +1206,7 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
         return toAdd;
       },
 
-      shipFinishedGoods: (amountKg: number) => {
+      shipFinishedGoods: (amountKg, preferredMaterial) => {
         if (!Number.isFinite(amountKg) || amountKg <= 0) return 0;
         const state = get();
         const newBuffers = new Map(state.machineBuffers);
@@ -1191,7 +1232,9 @@ export const useMaterialFlowStore = create<MaterialFlowState>()(
             sourceContributions: cloneSourceContributions(material.sourceContributions),
             productBatches: material.productBatches?.map((batch) => ({ ...batch })),
           }));
-          for (const materialType of ['flour', 'semolina'] as const) {
+          const materialOrder: ReadonlyArray<Extract<MaterialType, 'flour' | 'semolina'>> =
+            preferredMaterial === 'semolina' ? ['semolina', 'flour'] : ['flour', 'semolina'];
+          for (const materialType of materialOrder) {
             if (remaining <= 0) break;
             const material = outputBuffer.find((entry) => entry.type === materialType);
             if (!material || material.amount <= 0) continue;

@@ -5,6 +5,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { selectSafetyHoldActive, useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useProductionStore } from '../../stores/productionStore';
 import { useMaterialFlowStore } from '../../stores/materialFlowStore';
+import { useOperationsCampaignStore } from '../../stores/operationsCampaignStore';
 import {
   DECAL_OFFSET,
   FLOOR_LAYERS,
@@ -24,6 +25,7 @@ import {
   getTruckBenchmarkControllerStart,
   getTruckScheduleStatus,
   isTruckDockedPhase,
+  resolveTrailerLoadSettle,
   type TruckAnimState,
 } from './useTruckPhysics';
 
@@ -255,6 +257,8 @@ interface TruckVisualProps {
    * differ, which by itself stops them reading as clones.
    */
   readonly grime?: number;
+  /** Conserved outbound load progress, used for a subtle trailer suspension settle. */
+  readonly loadRatio?: number;
 }
 
 function TruckIdentityDecals({
@@ -480,6 +484,7 @@ export function OptimizedTruckVisual({
   plateNumber = 'MILL 001',
   operatorName = 'Driver',
   grime = 0.7,
+  loadRatio = 0,
 }: TruckVisualProps) {
   const cabRef = useRef<THREE.Group>(null);
   const trailerRef = useRef<THREE.Group>(null);
@@ -871,7 +876,11 @@ export function OptimizedTruckVisual({
         pitchSin * CAB_PITCH_CENTRE_Z + (1 - Math.cos(state.cabRoll)) * CAB_ROLL_CENTRE_Y;
       cabRef.current.position.z = (1 - Math.cos(state.cabPitch)) * CAB_PITCH_CENTRE_Z;
     }
-    if (trailerRef.current) trailerRef.current.rotation.y = state.trailerAngle;
+    if (trailerRef.current) {
+      trailerRef.current.rotation.y = state.trailerAngle;
+      trailerRef.current.position.y = -resolveTrailerLoadSettle(loadRatio);
+      trailerRef.current.userData.loadRatio = THREE.MathUtils.clamp(loadRatio, 0, 1);
+    }
 
     // Running lights are switched at the day/night boundary, never lerped. A
     // per-frame intensity ramp on an emissive is the closest thing this scene
@@ -1558,6 +1567,12 @@ export function OptimizedTruckBay({ showShipping, showReceiving }: OptimizedTruc
   const priorSchedule = useRef({ shipping: '', receiving: '' });
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const safetyHoldActive = useGameSimulationStore(selectSafetyHoldActive);
+  const outboundLoadRatio = useOperationsCampaignStore((state) =>
+    Math.min(
+      1,
+      state.execution.dispatchLoad.loadedKg / Math.max(1, state.execution.dispatchLoad.capacityKg)
+    )
+  );
   const setTruckDocked = useProductionStore((state) => state.setTruckDocked);
   const recordTruckDeparture = useProductionStore((state) => state.recordTruckDeparture);
   const updateDockStatus = useProductionStore((state) => state.updateDockStatus);
@@ -1651,6 +1666,7 @@ export function OptimizedTruckBay({ showShipping, showReceiving }: OptimizedTruc
               company="FLOUR EXPRESS"
               plateNumber="FLR 2847"
               operatorName="Mara"
+              loadRatio={outboundLoadRatio}
             />
           </group>
         </>

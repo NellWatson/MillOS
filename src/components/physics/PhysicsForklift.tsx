@@ -47,6 +47,7 @@ interface PhysicsForkliftProps {
   onPositionUpdate?: (x: number, z: number, rotation: number) => void;
   onCargoChange?: (hasCargo: boolean) => void;
   onOperationChange?: (operation: ForkliftOperation) => void;
+  canPerformAction?: (action: 'pickup' | 'dropoff') => boolean;
 }
 
 // Helper to clamp velocity magnitude
@@ -73,6 +74,7 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
   onPositionUpdate,
   onCargoChange,
   onOperationChange,
+  canPerformAction,
 }) => {
   const rigidBodyRef = useRef<RapierRigidBody>(null);
 
@@ -234,6 +236,15 @@ export const PhysicsForklift: React.FC<PhysicsForkliftProps> = ({
       // Check for action at this waypoint
       const action = data.pathActions[pathIndexRef.current];
       const currentlyHasCargo = hasCargoRef.current;
+      if (
+        canPerformAction &&
+        ((action.type === 'pickup' && !currentlyHasCargo && !canPerformAction('pickup')) ||
+          (action.type === 'dropoff' && currentlyHasCargo && !canPerformAction('dropoff')))
+      ) {
+        rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        updatePosition(0);
+        return;
+      }
 
       if (action.type === 'pickup' && !currentlyHasCargo) {
         // Start loading operation

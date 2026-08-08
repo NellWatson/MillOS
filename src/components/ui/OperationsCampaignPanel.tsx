@@ -8,9 +8,13 @@ import {
   CheckCircle2,
   ClipboardList,
   Coffee,
+  Factory,
   Gauge,
+  PackageCheck,
   PlayCircle,
+  Route,
   ShieldAlert,
+  Truck,
   Users,
   Zap,
 } from 'lucide-react';
@@ -62,6 +66,8 @@ export const OperationsCampaignPanel: React.FC = React.memo(() => {
     constraints,
     reports,
     logbook,
+    execution,
+    utilityAssets,
     activateOrder,
     assignWorker,
     sendWorkerOnBreak,
@@ -82,6 +88,8 @@ export const OperationsCampaignPanel: React.FC = React.memo(() => {
       constraints: state.constraints,
       reports: state.reports,
       logbook: state.logbook,
+      execution: state.execution,
+      utilityAssets: state.utilityAssets,
       activateOrder: state.activateOrder,
       assignWorker: state.assignWorker,
       sendWorkerOnBreak: state.sendWorkerOnBreak,
@@ -121,6 +129,10 @@ export const OperationsCampaignPanel: React.FC = React.memo(() => {
     economics.demurrageCost +
     economics.latePenalties;
   const margin = economics.revenue - totalCosts;
+  const loadingProgress = Math.min(
+    100,
+    (execution.dispatchLoad.loadedKg / Math.max(1, execution.dispatchLoad.capacityKg)) * 100
+  );
 
   const submitAssignment = () => {
     const worker = workers.find((candidate) => candidate.id === selectedWorkerId);
@@ -206,6 +218,79 @@ export const OperationsCampaignPanel: React.FC = React.memo(() => {
           ))}
         </div>
       )}
+
+      <div className="mt-4 rounded-lg border border-cyan-500/25 bg-cyan-950/15 p-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-cyan-200">
+            <Route size={13} aria-hidden="true" /> Live production execution
+          </h4>
+          <span
+            className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
+              execution.stage === 'quality_hold'
+                ? 'bg-amber-500/15 text-amber-200'
+                : execution.stage === 'fulfilled'
+                  ? 'bg-emerald-500/15 text-emerald-200'
+                  : 'bg-cyan-500/15 text-cyan-200'
+            }`}
+          >
+            {execution.stage.replaceAll('_', ' ')}
+          </span>
+        </div>
+        <div className="mt-2 grid grid-cols-3 gap-2 text-[9px]">
+          <div className="rounded bg-slate-900/55 p-2">
+            <div className="flex items-center gap-1 uppercase text-slate-500">
+              <Factory size={11} aria-hidden="true" /> Route
+            </div>
+            <div className="mt-1 font-semibold text-slate-100">
+              {execution.sourceMaterial?.replaceAll('_', ' ') ?? 'No source'}
+            </div>
+            <div className="text-cyan-300">
+              {execution.finishedMaterial?.replaceAll('_', ' ') ?? 'No product'}
+            </div>
+          </div>
+          <div className="rounded bg-slate-900/55 p-2">
+            <div className="flex items-center gap-1 uppercase text-slate-500">
+              <Gauge size={11} aria-hidden="true" /> Line setpoint
+            </div>
+            <div className="mt-1 font-mono text-sm font-bold text-white">
+              {execution.lineSetpointPercent.toFixed(0)}%
+            </div>
+            <div className={execution.qualityReleased ? 'text-emerald-300' : 'text-amber-300'}>
+              QC {execution.qualityReleased ? 'released' : 'held'}
+            </div>
+          </div>
+          <div className="rounded bg-slate-900/55 p-2">
+            <div className="flex items-center gap-1 uppercase text-slate-500">
+              <PackageCheck size={11} aria-hidden="true" /> Released
+            </div>
+            <div className="mt-1 font-mono text-sm font-bold text-white">
+              {execution.releasedFinishedKg.toFixed(0)} kg
+            </div>
+            <div className="text-slate-400">{execution.remainingKg.toFixed(0)} kg remaining</div>
+          </div>
+        </div>
+        <div className="mt-2 rounded bg-slate-900/55 p-2">
+          <div className="flex items-center justify-between text-[9px]">
+            <span className="flex items-center gap-1 uppercase text-slate-500">
+              <Truck size={11} aria-hidden="true" /> Outbound load
+            </span>
+            <span className="font-mono text-slate-300">
+              {execution.dispatchLoad.loadedKg.toFixed(0)} /{' '}
+              {execution.dispatchLoad.capacityKg.toFixed(0)} kg
+            </span>
+          </div>
+          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-700">
+            <div
+              className="h-full rounded-full bg-cyan-400 transition-[width] duration-300"
+              style={{ width: `${loadingProgress}%` }}
+            />
+          </div>
+          <div className="mt-1 text-[9px] text-slate-400">
+            {execution.dispatchLoad.blockReason ??
+              execution.dispatchLoad.status.replaceAll('_', ' ')}
+          </div>
+        </div>
+      </div>
 
       <div className="mt-4">
         <h4 className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -457,6 +542,38 @@ export const OperationsCampaignPanel: React.FC = React.memo(() => {
           <div className="mt-1 font-mono text-xs text-slate-200">
             {formatCurrency(economics.demurrageCost)}
           </div>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <h4 className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <Gauge size={13} aria-hidden="true" /> Utility vessels
+        </h4>
+        <div className="mt-2 grid grid-cols-2 gap-1.5">
+          {utilityAssets.map((asset) => (
+            <div key={asset.id} className="rounded-lg bg-slate-800/45 p-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-[9px] font-semibold text-slate-200">
+                  {asset.label}
+                </span>
+                <span
+                  role="img"
+                  className={`h-2 w-2 shrink-0 rounded-full ${
+                    asset.status === 'critical'
+                      ? 'bg-rose-400'
+                      : asset.status === 'low'
+                        ? 'bg-amber-400'
+                        : 'bg-emerald-400'
+                  }`}
+                  aria-label={`${asset.status} level`}
+                />
+              </div>
+              <div className="mt-1 font-mono text-[10px] text-cyan-200">
+                {asset.levelPercent.toFixed(1)}% · {asset.temperatureC.toFixed(1)} °C
+              </div>
+              <div className="truncate text-[8px] text-slate-500">{asset.contents}</div>
+            </div>
+          ))}
         </div>
       </div>
 

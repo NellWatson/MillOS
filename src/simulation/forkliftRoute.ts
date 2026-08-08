@@ -173,3 +173,29 @@ export function isForkliftSimulationPaused(productionSpeed: number, gameSpeed: n
     gameSpeed <= 0
   );
 }
+
+export interface ForkliftLogisticsGate {
+  forkliftId: string;
+  action: 'pickup' | 'dropoff';
+  shippingDocked: boolean;
+  receivingDocked: boolean;
+  releasedFinishedKg: number;
+  dispatchLoadStatus: 'away' | 'loading' | 'held' | 'ready' | 'departed';
+}
+
+/**
+ * Prevents visual cargo from appearing without a physical source or vanishing
+ * into an empty bay. Other forklifts remain unconstrained by dock logistics.
+ */
+export function canPerformForkliftLogisticsAction(gate: ForkliftLogisticsGate): boolean {
+  if (gate.forkliftId === 'forklift-1') {
+    if (gate.action === 'pickup') {
+      return gate.releasedFinishedKg > 0 && gate.dispatchLoadStatus !== 'ready';
+    }
+    return gate.shippingDocked && gate.dispatchLoadStatus === 'loading';
+  }
+  if (gate.forkliftId === 'forklift-2' && gate.action === 'pickup') {
+    return gate.receivingDocked;
+  }
+  return true;
+}

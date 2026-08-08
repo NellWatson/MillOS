@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createRoundedForkliftRoute,
+  canPerformForkliftLogisticsAction,
   dampAngle,
   isForkliftSimulationPaused,
   moveTowards,
@@ -83,5 +84,34 @@ describe('forklift route motion', () => {
     expect(isForkliftSimulationPaused(0.8, 0)).toBe(true);
     expect(isForkliftSimulationPaused(Number.NaN, 180)).toBe(true);
     expect(isForkliftSimulationPaused(0.8, Number.NaN)).toBe(true);
+  });
+
+  it('gates dock actions against released stock and truck presence', () => {
+    const base = {
+      forkliftId: 'forklift-1',
+      action: 'pickup' as const,
+      shippingDocked: false,
+      receivingDocked: false,
+      releasedFinishedKg: 500,
+      dispatchLoadStatus: 'away' as const,
+    };
+    expect(canPerformForkliftLogisticsAction(base)).toBe(true);
+    expect(canPerformForkliftLogisticsAction({ ...base, releasedFinishedKg: 0 })).toBe(false);
+    expect(
+      canPerformForkliftLogisticsAction({
+        ...base,
+        action: 'dropoff',
+        shippingDocked: true,
+        dispatchLoadStatus: 'loading',
+      })
+    ).toBe(true);
+    expect(canPerformForkliftLogisticsAction({ ...base, action: 'dropoff' })).toBe(false);
+    expect(
+      canPerformForkliftLogisticsAction({
+        ...base,
+        forkliftId: 'forklift-2',
+        receivingDocked: false,
+      })
+    ).toBe(false);
   });
 });

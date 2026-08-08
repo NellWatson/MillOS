@@ -43,6 +43,26 @@ describe('MaterialFlowStore', () => {
       const segmentIds = useMaterialFlowStore.getState().network.segments.map(({ id }) => id);
       expect(new Set(segmentIds).size).toBe(segmentIds.length);
     });
+
+    it('should route both flour and semolina through every finished-goods lane', () => {
+      const segments = useMaterialFlowStore.getState().network.segments;
+      expect(
+        segments.some(
+          (segment) =>
+            segment.fromMachineId === 'rm-101' &&
+            segment.toMachineId === 'sifter-a' &&
+            segment.fromOutputType === 'semolina'
+        )
+      ).toBe(true);
+      expect(
+        segments.some(
+          (segment) =>
+            segment.fromMachineId === 'sifter-a' &&
+            segment.toMachineId === 'packer-0' &&
+            segment.fromOutputType === 'semolina'
+        )
+      ).toBe(true);
+    });
   });
 
   describe('tickMaterialFlow', () => {
@@ -125,6 +145,26 @@ describe('MaterialFlowStore', () => {
       expect(useMaterialFlowStore.getState().totalFlourProduced).toBeCloseTo(228, 5);
       // The remaining 5% is explicitly accounted for as dust extraction waste.
       expect(useMaterialFlowStore.getState().wasteKg).toBeCloseTo(12, 5);
+    });
+
+    it('should make the active recipe a physical routing instruction', () => {
+      const plan = { sourceMaterial: 'corn_grain', finishedMaterial: 'semolina' } as const;
+      for (let index = 0; index < 18; index += 1) {
+        useMaterialFlowStore.getState().tickMaterialFlow(1, 1, plan);
+      }
+
+      const state = useMaterialFlowStore.getState();
+      expect(
+        state.productionBatches.some(
+          (batch) => batch.materialType === 'semolina' && batch.producedKg > 0
+        )
+      ).toBe(true);
+      expect(
+        state.productionBatches.some(
+          (batch) => batch.materialType === 'flour' && batch.producedKg > 0
+        )
+      ).toBe(false);
+      expect(Math.abs(state.getMaterialBalance().errorKg)).toBeLessThan(0.001);
     });
 
     it('should move material onto conveyors and deliver it after transit time', () => {
@@ -391,6 +431,21 @@ describe('MaterialFlowStore', () => {
       expect(balance.wasteKg).toBeGreaterThan(0);
       expect(balance.shippedKg).toBeCloseTo(shipped, 5);
       expect(Math.abs(balance.errorKg)).toBeLessThan(0.001);
+    });
+
+    it('should load the active order material before other released product', () => {
+      const plan = { sourceMaterial: 'corn_grain', finishedMaterial: 'semolina' } as const;
+      for (let index = 0; index < 24; index += 1) {
+        useMaterialFlowStore.getState().tickMaterialFlow(1, 1, plan);
+      }
+
+      const shipped = useMaterialFlowStore.getState().shipFinishedGoods(250, 'semolina');
+      const manifest = useMaterialFlowStore.getState().manifests.at(-1);
+      expect(shipped).toBeGreaterThan(0);
+      expect(manifest?.materials[0]?.type).toBe('semolina');
+      expect(Math.abs(useMaterialFlowStore.getState().getMaterialBalance().errorKg)).toBeLessThan(
+        0.001
+      );
     });
   });
 

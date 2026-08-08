@@ -45,6 +45,7 @@ import {
   ListChecks,
   BookOpenText,
   BriefcaseBusiness,
+  Gauge,
 } from 'lucide-react';
 import {
   LineChart,
@@ -173,6 +174,8 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
       activeOrderId: state.activeOrderId,
       incidents: state.incidents,
       constraints: state.constraints,
+      execution: state.execution,
+      utilityAssets: state.utilityAssets,
       logbook: state.logbook,
       addLogEntry: state.addLogEntry,
     }))
@@ -1274,14 +1277,14 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                           </div>
                         </div>
                         <div className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5">
-                          <div className="text-[10px] uppercase text-slate-400">Due state</div>
+                          <div className="text-[10px] uppercase text-slate-400">
+                            Execution state
+                          </div>
                           <div className="mt-1 font-mono text-xs text-slate-200">
-                            {activeOrder
-                              ? `${Math.round(activeOrder.dueAtMinute - campaign.elapsedMinutes)} min`
-                              : 'clear'}
+                            {campaign.execution.lineSetpointPercent.toFixed(0)}% setpoint
                           </div>
                           <div className="mt-1 text-[10px] capitalize text-slate-400">
-                            {activeOrder?.status ?? 'fulfilled'}
+                            {campaign.execution.stage.replaceAll('_', ' ')}
                           </div>
                         </div>
                         <div className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5">
@@ -1309,6 +1312,84 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                       </>
                     );
                   })()}
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  <div className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5">
+                    <div className="text-[10px] uppercase text-slate-400">Recipe route</div>
+                    <div className="mt-1 text-xs font-semibold text-cyan-200">
+                      {campaign.execution.sourceMaterial?.replaceAll('_', ' ') ?? 'no source'}
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      to {campaign.execution.finishedMaterial?.replaceAll('_', ' ') ?? 'no product'}
+                    </div>
+                  </div>
+                  <div className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5">
+                    <div className="text-[10px] uppercase text-slate-400">Quality gate</div>
+                    <div
+                      className={`mt-1 text-xs font-semibold ${campaign.execution.qualityReleased ? 'text-emerald-200' : 'text-amber-200'}`}
+                    >
+                      {campaign.execution.qualityReleased ? 'Released' : 'Held'}
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      {campaign.execution.releasedFinishedKg.toFixed(0)} kg dispatchable
+                    </div>
+                  </div>
+                  <div className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5">
+                    <div className="text-[10px] uppercase text-slate-400">Truck load</div>
+                    <div className="mt-1 font-mono text-xs font-semibold text-cyan-200">
+                      {campaign.execution.dispatchLoad.loadedKg.toFixed(0)} /{' '}
+                      {campaign.execution.dispatchLoad.capacityKg.toFixed(0)} kg
+                    </div>
+                    <div className="mt-1 truncate text-[10px] capitalize text-slate-400">
+                      {campaign.execution.dispatchLoad.blockReason ??
+                        campaign.execution.dispatchLoad.status}
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-950/10 p-3">
+                <div>
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
+                    <Gauge className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+                    Utility vessel telemetry
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Simulated local instrumentation for the visible tank farm and LPG compound.
+                  </p>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                  {campaign.utilityAssets.map((asset) => (
+                    <article
+                      key={asset.id}
+                      className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="truncate text-[10px] font-semibold text-slate-200">
+                          {asset.label}
+                        </div>
+                        <span
+                          className={`h-2 w-2 shrink-0 rounded-full ${
+                            asset.status === 'critical'
+                              ? 'bg-rose-400'
+                              : asset.status === 'low'
+                                ? 'bg-amber-400'
+                                : 'bg-emerald-400'
+                          }`}
+                          aria-label={`${asset.status} level`}
+                        />
+                      </div>
+                      <div className="mt-1 font-mono text-sm font-semibold text-white">
+                        {asset.levelPercent.toFixed(1)}%
+                      </div>
+                      <div className="mt-1 font-mono text-[10px] text-slate-400">
+                        {asset.temperatureC.toFixed(1)} °C · {asset.pressureBar.toFixed(2)} bar
+                      </div>
+                      <div className="mt-1 truncate text-[9px] text-slate-500">
+                        {asset.contents}
+                      </div>
+                    </article>
+                  ))}
                 </div>
               </section>
 

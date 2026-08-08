@@ -63,6 +63,14 @@ export const SITE_LAYOUT = {
     radius: 255,
     horizonRadius: 260,
   },
+  perimeter: {
+    minX: -95,
+    maxX: 95,
+    minY: 0,
+    maxY: 4,
+    minZ: -85,
+    maxZ: 85,
+  } satisfies SiteBounds,
   factory: {
     bounds: {
       minX: -60,
@@ -155,10 +163,17 @@ export const SITE_LAYOUT = {
     },
     propaneCompound: {
       id: 'propane-compound',
-      position: [92.5, 0, 8],
+      position: [85.5, 0, 10.5],
       rotation: 0,
       footprint: [9, 5],
       clearance: 5,
+    },
+    utilityTankFarm: {
+      id: 'utility-tank-farm',
+      position: [75, 0, -15],
+      rotation: 0,
+      footprint: [16, 36],
+      clearance: 2,
     },
     trailerDropYard: {
       id: 'trailer-drop-yard',

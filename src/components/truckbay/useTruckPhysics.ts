@@ -44,6 +44,12 @@ export function isTruckGuidingPhase(phase: TruckPhase): boolean {
   return phase === 'backing' || phase === 'final_adjustment';
 }
 
+/** Subtle loaded-trailer suspension compression, bounded against bad telemetry. */
+export function resolveTrailerLoadSettle(loadRatio: number): number {
+  if (!Number.isFinite(loadRatio)) return 0;
+  return Math.max(0, Math.min(1, loadRatio)) * 0.08;
+}
+
 export function applyTruckSafetyHold(state: TruckAnimState): TruckAnimState {
   return {
     ...state,

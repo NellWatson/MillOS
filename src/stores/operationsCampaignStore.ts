@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { MaterialManifest, MaterialType, ProductionBatch } from './materialFlowStore';
 import type { WorkerData, WorkerSkills } from '../types';
 import { safeJSONStorage } from './storage';
+import { UTILITY_ASSET_DEFINITIONS } from '../constants/utilityAssets';
 
 export type OrderStatus = 'planned' | 'active' | 'late' | 'fulfilled' | 'cancelled';
 export type AssignmentKind =
@@ -132,6 +133,54 @@ export interface CampaignConstraint {
   relatedId: string | null;
 }
 
+export type FulfillmentStage =
+  | 'planning'
+  | 'milling'
+  | 'quality_hold'
+  | 'ready_to_load'
+  | 'loading'
+  | 'ready_to_dispatch'
+  | 'dispatched'
+  | 'fulfilled';
+
+export type DispatchLoadStatus = 'away' | 'loading' | 'held' | 'ready' | 'departed';
+
+export interface DispatchLoadSnapshot {
+  cycleId: string;
+  status: DispatchLoadStatus;
+  loadedKg: number;
+  capacityKg: number;
+  materialType: Extract<MaterialType, 'flour' | 'semolina'>;
+  blockReason: string | null;
+  lastDispatchKg: number;
+}
+
+export interface OrderExecutionState {
+  orderId: string | null;
+  recipeId: string | null;
+  sourceMaterial: Extract<MaterialType, 'wheat_grain' | 'corn_grain'> | null;
+  finishedMaterial: Extract<MaterialType, 'flour' | 'semolina'> | null;
+  stage: FulfillmentStage;
+  lineSetpointPercent: number;
+  remainingKg: number;
+  sourceInventoryKg: number;
+  finishedAvailableKg: number;
+  releasedFinishedKg: number;
+  qualityReleased: boolean;
+  dispatchLoad: DispatchLoadSnapshot;
+}
+
+export interface UtilityAssetTelemetry {
+  id: string;
+  label: string;
+  contents: string;
+  capacityLitres: number;
+  levelPercent: number;
+  temperatureC: number;
+  pressureBar: number;
+  status: 'normal' | 'low' | 'critical';
+}
+
 export interface CampaignTickContext {
   shiftKey: string;
   shiftLabel: string;
@@ -145,6 +194,10 @@ export interface CampaignTickContext {
   shippingDocked: boolean;
   receivingDocked: boolean;
   dispatchReleased: boolean;
+  sourceInventoryKg: number;
+  finishedAvailableKg: number;
+  releasedFinishedKg: number;
+  dispatchLoad: DispatchLoadSnapshot;
   openWorkOrders: number;
 }
 
@@ -168,6 +221,8 @@ interface OperationsCampaignState {
   reports: ShiftCampaignReport[];
   logbook: CampaignLogEntry[];
   constraints: CampaignConstraint[];
+  execution: OrderExecutionState;
+  utilityAssets: UtilityAssetTelemetry[];
   processedManifestIds: string[];
   lastWasteKg: number;
   currentShiftKey: string | null;
@@ -194,6 +249,12 @@ interface OperationsCampaignState {
     relatedId?: string | null
   ) => void;
   tickCampaign: (deltaSimulationSeconds: number, context: CampaignTickContext) => void;
+  getActiveProductionPlan: () => {
+    orderId: string;
+    sourceMaterial: Extract<MaterialType, 'wheat_grain' | 'corn_grain'>;
+    finishedMaterial: Extract<MaterialType, 'flour' | 'semolina'>;
+    lineSetpointPercent: number;
+  } | null;
   getProductionMultiplier: () => number;
   getIncidentEffect: () => IncidentEffect;
   getWorkerEffectiveness: (workerId: string, kind?: AssignmentKind) => number;
@@ -222,6 +283,46 @@ const ZERO_SHIFT_METRICS: ShiftCampaignMetrics = {
   incidentsResolved: 0,
   tasksCompleted: 0,
 };
+
+const EMPTY_DISPATCH_LOAD: DispatchLoadSnapshot = {
+  cycleId: 'shipping-0',
+  status: 'away',
+  loadedKg: 0,
+  capacityKg: 5000,
+  materialType: 'flour',
+  blockReason: null,
+  lastDispatchKg: 0,
+};
+
+function createInitialExecution(): OrderExecutionState {
+  return {
+    orderId: 'order-001',
+    recipeId: 'strong_white',
+    sourceMaterial: 'wheat_grain',
+    finishedMaterial: 'flour',
+    stage: 'planning',
+    lineSetpointPercent: 100,
+    remainingKg: 6000,
+    sourceInventoryKg: 0,
+    finishedAvailableKg: 0,
+    releasedFinishedKg: 0,
+    qualityReleased: true,
+    dispatchLoad: { ...EMPTY_DISPATCH_LOAD },
+  };
+}
+
+function createInitialUtilityTelemetry(): UtilityAssetTelemetry[] {
+  return UTILITY_ASSET_DEFINITIONS.map((asset) => ({
+    id: asset.id,
+    label: asset.label,
+    contents: asset.contents,
+    capacityLitres: asset.capacityLitres,
+    levelPercent: asset.nominalLevelPercent,
+    temperatureC: asset.nominalTemperatureC,
+    pressureBar: asset.nominalPressureBar,
+    status: 'normal',
+  }));
+}
 
 export const MILL_RECIPES: Record<string, MillRecipe> = {
   strong_white: {
@@ -547,6 +648,8 @@ function emptyState() {
     reports: [] as ShiftCampaignReport[],
     logbook: [] as CampaignLogEntry[],
     constraints: [] as CampaignConstraint[],
+    execution: createInitialExecution(),
+    utilityAssets: createInitialUtilityTelemetry(),
     processedManifestIds: [] as string[],
     lastWasteKg: 0,
     currentShiftKey: null as string | null,
@@ -554,6 +657,87 @@ function emptyState() {
     shiftStartedAtMinute: 0,
     sequence: 0,
   };
+}
+
+function deriveLineSetpoint(
+  order: CustomerOrder,
+  elapsedMinutes: number,
+  sourceKg: number
+): number {
+  if (sourceKg <= EPSILON_KG) return 0;
+  const remainingMinutes = order.dueAtMinute - elapsedMinutes;
+  const priorityBase = order.priority === 'critical' ? 100 : order.priority === 'high' ? 92 : 84;
+  const urgency =
+    remainingMinutes <= 0 ? 8 : remainingMinutes <= 90 ? 5 : remainingMinutes <= 180 ? 2 : 0;
+  return clamp(priorityBase + urgency, 0, 108);
+}
+
+function deriveExecution(
+  activeOrder: CustomerOrder | undefined,
+  elapsedMinutes: number,
+  context: CampaignTickContext
+): OrderExecutionState {
+  if (!activeOrder) {
+    return {
+      ...createInitialExecution(),
+      orderId: null,
+      recipeId: null,
+      sourceMaterial: null,
+      finishedMaterial: null,
+      stage: 'fulfilled',
+      lineSetpointPercent: 0,
+      remainingKg: 0,
+      qualityReleased: context.dispatchReleased,
+      dispatchLoad: { ...context.dispatchLoad },
+    };
+  }
+
+  const remainingKg = Math.max(0, activeOrder.requiredKg - activeOrder.shippedKg);
+  let stage: FulfillmentStage = 'milling';
+  if (activeOrder.status === 'fulfilled' || remainingKg <= EPSILON_KG) stage = 'fulfilled';
+  else if (context.dispatchLoad.status === 'departed' && context.dispatchLoad.lastDispatchKg > 0)
+    stage = 'dispatched';
+  else if (context.dispatchLoad.status === 'ready') stage = 'ready_to_dispatch';
+  else if (context.dispatchLoad.status === 'loading') stage = 'loading';
+  else if (context.dispatchLoad.status === 'held' || !context.dispatchReleased)
+    stage = 'quality_hold';
+  else if (context.releasedFinishedKg > EPSILON_KG) stage = 'ready_to_load';
+
+  return {
+    orderId: activeOrder.id,
+    recipeId: activeOrder.recipe.id,
+    sourceMaterial: activeOrder.recipe.sourceMaterial,
+    finishedMaterial: activeOrder.recipe.finishedMaterial,
+    stage,
+    lineSetpointPercent: deriveLineSetpoint(activeOrder, elapsedMinutes, context.sourceInventoryKg),
+    remainingKg,
+    sourceInventoryKg: context.sourceInventoryKg,
+    finishedAvailableKg: context.finishedAvailableKg,
+    releasedFinishedKg: context.releasedFinishedKg,
+    qualityReleased: context.dispatchReleased,
+    dispatchLoad: { ...context.dispatchLoad },
+  };
+}
+
+function getExecutionStageMessage(execution: OrderExecutionState): string {
+  switch (execution.stage) {
+    case 'planning':
+      return 'Production route planned.';
+    case 'milling':
+      return `Milling ${execution.sourceMaterial ?? 'scheduled grain'} for the active recipe.`;
+    case 'quality_hold':
+      return execution.dispatchLoad.blockReason ?? 'Finished goods are held at the quality gate.';
+    case 'ready_to_load':
+      return 'Released finished goods are ready at the shipping bay.';
+    case 'loading':
+      return `Shipping load is ${execution.dispatchLoad.loadedKg.toFixed(0)} of ${execution.dispatchLoad.capacityKg.toFixed(0)} kg.`;
+    case 'ready_to_dispatch':
+      return 'The outbound load is ready for truck departure.';
+    case 'dispatched':
+      return `${execution.dispatchLoad.lastDispatchKg.toFixed(0)} kg left the shipping bay.`;
+    case 'fulfilled':
+      return 'All customer commitments are fulfilled.';
+  }
 }
 
 function combinedIncidentEffect(incidents: ReadonlyArray<OperationalIncident>): IncidentEffect {
@@ -598,7 +782,10 @@ function gradeShift(
 }
 
 function makeConstraints(
-  state: Pick<OperationsCampaignState, 'orders' | 'incidents' | 'elapsedMinutes' | 'personnel'>,
+  state: Pick<
+    OperationsCampaignState,
+    'orders' | 'activeOrderId' | 'incidents' | 'elapsedMinutes' | 'personnel'
+  >,
   context: CampaignTickContext,
   incidentEffect: IncidentEffect
 ): CampaignConstraint[] {
@@ -615,6 +802,16 @@ function makeConstraints(
   const nextOrder = state.orders
     .filter((order) => order.status !== 'fulfilled' && order.status !== 'cancelled')
     .sort((a, b) => a.dueAtMinute - b.dueAtMinute)[0];
+  const activeOrder = state.orders.find((order) => order.id === state.activeOrderId);
+  if (activeOrder && context.sourceInventoryKg <= EPSILON_KG) {
+    constraints.push({
+      id: `recipe-feed-${activeOrder.id}`,
+      severity: 'critical',
+      label: 'Recipe feed unavailable',
+      detail: `${activeOrder.recipe.sourceMaterial.replaceAll('_', ' ')} inventory is empty for ${activeOrder.customer}.`,
+      relatedId: activeOrder.id,
+    });
+  }
   if (nextOrder) {
     const remainingMinutes = nextOrder.dueAtMinute - state.elapsedMinutes;
     if (remainingMinutes <= 90) {
@@ -723,16 +920,32 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
       },
 
       activateOrder: (orderId) =>
-        set((state) => ({
-          activeOrderId: state.orders.some((order) => order.id === orderId)
-            ? orderId
-            : state.activeOrderId,
-          orders: state.orders.map((order) =>
-            order.id === orderId && order.status === 'planned'
-              ? { ...order, status: 'active' }
-              : order
-          ),
-        })),
+        set((state) => {
+          const order = state.orders.find((candidate) => candidate.id === orderId);
+          if (!order || order.status === 'fulfilled' || order.status === 'cancelled') return state;
+          const sequence = state.sequence + 1;
+          return {
+            activeOrderId: orderId,
+            orders: state.orders.map((candidate) =>
+              candidate.id === orderId && candidate.status === 'planned'
+                ? { ...candidate, status: 'active' }
+                : candidate
+            ),
+            logbook: appendBounded(
+              state.logbook,
+              {
+                id: `log-${String(sequence).padStart(4, '0')}`,
+                simulationMinute: state.elapsedMinutes,
+                author: 'Production planner',
+                category: 'operation',
+                message: `${order.recipe.label} selected for ${order.customer}; routing ${order.recipe.sourceMaterial} to ${order.recipe.finishedMaterial}.`,
+                relatedId: order.id,
+              },
+              MAX_LOG_ENTRIES
+            ),
+            sequence,
+          };
+        }),
 
       assignWorker: (worker, kind, targetId = null) => {
         const state = get();
@@ -1035,10 +1248,77 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
             return order;
           });
 
+          let activeOrderId = state.activeOrderId;
+          const currentActive = orders.find((order) => order.id === activeOrderId);
+          if (
+            !currentActive ||
+            currentActive.status === 'fulfilled' ||
+            currentActive.status === 'cancelled'
+          ) {
+            activeOrderId =
+              orders
+                .filter((order) => order.status !== 'fulfilled' && order.status !== 'cancelled')
+                .sort(
+                  (a, b) =>
+                    priorityRank(a.priority) - priorityRank(b.priority) ||
+                    a.dueAtMinute - b.dueAtMinute ||
+                    a.id.localeCompare(b.id)
+                )[0]?.id ?? null;
+            if (activeOrderId) {
+              orders = orders.map((order) =>
+                order.id === activeOrderId && order.status === 'planned'
+                  ? { ...order, status: 'active' }
+                  : order
+              );
+            }
+          }
+
           const effectiveEnergyKw = Math.max(
             0,
             context.totalEnergyKw * incidentEffect.energyMultiplier
           );
+          const currentUtilityAssets =
+            state.utilityAssets?.length === UTILITY_ASSET_DEFINITIONS.length
+              ? state.utilityAssets
+              : createInitialUtilityTelemetry();
+          const utilityAssets = currentUtilityAssets.map((asset, index) => {
+            const definition = UTILITY_ASSET_DEFINITIONS.find(
+              (candidate) => candidate.id === asset.id
+            );
+            if (!definition) return asset;
+            const consumptionLitres =
+              asset.id === 'utility-fuel-oil-01'
+                ? effectiveEnergyKw * deltaHours * 0.018
+                : asset.id === 'utility-process-oil-02'
+                  ? (state.execution?.lineSetpointPercent ?? 100) * deltaHours * 0.012
+                  : asset.id.startsWith('utility-lpg')
+                    ? deltaHours * 0.8
+                    : deltaHours * 0.15;
+            const currentLitres = (asset.levelPercent / 100) * asset.capacityLitres;
+            const levelPercent = clamp(
+              ((currentLitres - consumptionLitres) / asset.capacityLitres) * 100,
+              0,
+              100
+            );
+            const status: UtilityAssetTelemetry['status'] =
+              levelPercent <= 10 ? 'critical' : levelPercent <= 20 ? 'low' : 'normal';
+            const temperatureC =
+              definition.nominalTemperatureC + Math.sin(elapsedMinutes / 90 + index * 0.7) * 1.4;
+            const pressureBar = Math.max(
+              0,
+              definition.nominalPressureBar +
+                (definition.kind === 'lpg_vessel'
+                  ? Math.sin(elapsedMinutes / 55 + index) * 0.12
+                  : Math.sin(elapsedMinutes / 120 + index) * 0.01)
+            );
+            return {
+              ...asset,
+              levelPercent: Math.round(levelPercent * 100) / 100,
+              temperatureC: Math.round(temperatureC * 10) / 10,
+              pressureBar: Math.round(pressureBar * 100) / 100,
+              status,
+            };
+          });
           const tariff =
             elapsedMinutes % (24 * 60) >= 9 * 60 && elapsedMinutes % (24 * 60) <= 21 * 60
               ? 0.15
@@ -1080,7 +1360,13 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
             : state.elapsedMinutes;
           if (currentShiftKey !== context.shiftKey) {
             const openRisks = makeConstraints(
-              { orders, incidents: state.incidents, elapsedMinutes, personnel },
+              {
+                orders,
+                activeOrderId,
+                incidents: state.incidents,
+                elapsedMinutes,
+                personnel,
+              },
               context,
               incidentEffect
             )
@@ -1131,14 +1417,35 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
           }
 
           const constraints = makeConstraints(
-            { orders, incidents: state.incidents, elapsedMinutes, personnel },
+            { orders, activeOrderId, incidents: state.incidents, elapsedMinutes, personnel },
             context,
             incidentEffect
           );
+          const activeOrder = orders.find((order) => order.id === activeOrderId);
+          const execution = deriveExecution(activeOrder, elapsedMinutes, context);
+          if (
+            execution.orderId !== state.execution?.orderId ||
+            execution.stage !== state.execution?.stage
+          ) {
+            sequence += 1;
+            logbook = appendBounded(
+              logbook,
+              {
+                id: `log-${String(sequence).padStart(4, '0')}`,
+                simulationMinute: elapsedMinutes,
+                author: 'Production execution',
+                category: execution.stage === 'quality_hold' ? 'quality' : 'operation',
+                message: getExecutionStageMessage(execution),
+                relatedId: execution.orderId,
+              },
+              MAX_LOG_ENTRIES
+            );
+          }
 
           return {
             elapsedMinutes,
             orders,
+            activeOrderId,
             personnel,
             assignments: assignments.slice(-80),
             economics,
@@ -1146,6 +1453,8 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
             reports,
             logbook,
             constraints,
+            execution,
+            utilityAssets,
             processedManifestIds,
             lastWasteKg: context.wasteKg,
             currentShiftKey,
@@ -1157,6 +1466,19 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
       },
 
       getIncidentEffect: () => combinedIncidentEffect(get().incidents),
+
+      getActiveProductionPlan: () => {
+        const state = get();
+        const order = state.orders.find((candidate) => candidate.id === state.activeOrderId);
+        if (!order || order.status === 'fulfilled' || order.status === 'cancelled') return null;
+        return {
+          orderId: order.id,
+          sourceMaterial: order.recipe.sourceMaterial,
+          finishedMaterial: order.recipe.finishedMaterial,
+          lineSetpointPercent:
+            state.execution?.orderId === order.id ? state.execution.lineSetpointPercent : 100,
+        };
+      },
 
       getProductionMultiplier: () => {
         const state = get();
@@ -1177,7 +1499,12 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
               1.08
             )
           : 1;
-        return clamp(incidentMultiplier * personnelMultiplier, 0.2, 1.08);
+        const setpointMultiplier = clamp(
+          (state.execution?.lineSetpointPercent ?? 100) / 100,
+          0,
+          1.08
+        );
+        return clamp(incidentMultiplier * personnelMultiplier * setpointMultiplier, 0, 1.08);
       },
 
       getWorkerEffectiveness: (workerId, kind) => {
@@ -1212,6 +1539,8 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
         reports: state.reports,
         logbook: state.logbook,
         constraints: state.constraints,
+        execution: state.execution,
+        utilityAssets: state.utilityAssets,
         processedManifestIds: state.processedManifestIds,
         lastWasteKg: state.lastWasteKg,
         currentShiftKey: state.currentShiftKey,

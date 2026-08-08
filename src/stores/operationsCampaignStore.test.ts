@@ -52,6 +52,18 @@ function context(overrides: Partial<CampaignTickContext> = {}): CampaignTickCont
     shippingDocked: false,
     receivingDocked: false,
     dispatchReleased: true,
+    sourceInventoryKg: 50000,
+    finishedAvailableKg: 0,
+    releasedFinishedKg: 0,
+    dispatchLoad: {
+      cycleId: 'shipping-0',
+      status: 'away',
+      loadedKg: 0,
+      capacityKg: 5000,
+      materialType: 'flour',
+      blockReason: null,
+      lastDispatchKg: 0,
+    },
     openWorkOrders: 0,
     ...overrides,
   };
@@ -87,6 +99,77 @@ describe('operationsCampaignStore', () => {
     expect(state.assignments.find((assignment) => assignment.workerId === 'w4')?.kind).toBe(
       'quality'
     );
+  });
+
+  it('turns the selected customer recipe into the active physical production plan', () => {
+    useOperationsCampaignStore.getState().activateOrder('order-002');
+
+    expect(useOperationsCampaignStore.getState().getActiveProductionPlan()).toMatchObject({
+      orderId: 'order-002',
+      sourceMaterial: 'corn_grain',
+      finishedMaterial: 'semolina',
+    });
+    expect(useOperationsCampaignStore.getState().logbook.at(-1)?.message).toContain(
+      'corn_grain to semolina'
+    );
+  });
+
+  it('publishes production, quality, and truck loading as one execution state', () => {
+    useOperationsCampaignStore.getState().tickCampaign(
+      60,
+      context({
+        sourceInventoryKg: 42000,
+        finishedAvailableKg: 1600,
+        releasedFinishedKg: 1200,
+        dispatchLoad: {
+          cycleId: 'shipping-1',
+          status: 'loading',
+          loadedKg: 800,
+          capacityKg: 5000,
+          materialType: 'flour',
+          blockReason: null,
+          lastDispatchKg: 0,
+        },
+      })
+    );
+
+    expect(useOperationsCampaignStore.getState().execution).toMatchObject({
+      orderId: 'order-001',
+      sourceMaterial: 'wheat_grain',
+      finishedMaterial: 'flour',
+      stage: 'loading',
+      sourceInventoryKg: 42000,
+      releasedFinishedKg: 1200,
+      dispatchLoad: { loadedKg: 800 },
+    });
+  });
+
+  it('raises a critical recipe constraint when the active feedstock is exhausted', () => {
+    useOperationsCampaignStore.getState().activateOrder('order-002');
+    useOperationsCampaignStore.getState().tickCampaign(60, context({ sourceInventoryKg: 0 }));
+
+    expect(useOperationsCampaignStore.getState().constraints).toContainEqual(
+      expect.objectContaining({
+        id: 'recipe-feed-order-002',
+        severity: 'critical',
+        detail: expect.stringContaining('corn grain'),
+        relatedId: 'order-002',
+      })
+    );
+  });
+
+  it('keeps all visible utility vessel telemetry finite and bounded', () => {
+    useOperationsCampaignStore.getState().tickCampaign(300, context());
+
+    const assets = useOperationsCampaignStore.getState().utilityAssets;
+    expect(assets).toHaveLength(5);
+    for (const asset of assets) {
+      expect(Number.isFinite(asset.levelPercent)).toBe(true);
+      expect(Number.isFinite(asset.temperatureC)).toBe(true);
+      expect(Number.isFinite(asset.pressureBar)).toBe(true);
+      expect(asset.levelPercent).toBeGreaterThanOrEqual(0);
+      expect(asset.levelPercent).toBeLessThanOrEqual(100);
+    }
   });
 
   it('allocates each shipping manifest once to the earliest matching commitment', () => {

@@ -5,6 +5,7 @@ import { useMaterialFlowStore } from '../../stores/materialFlowStore';
 import { useQCLabStore } from '../../stores/qcLabStore';
 import { useTruckScheduleStore } from '../../stores/truckScheduleStore';
 import { useUIStore } from '../../stores/uiStore';
+import { useOperationsCampaignStore } from '../../stores/operationsCampaignStore';
 
 const tickContext: TickContext = {
   deltaSeconds: 0.1,
@@ -17,6 +18,7 @@ const tickContext: TickContext = {
 describe('UnifiedGameTick shipping quality interlock', () => {
   beforeEach(() => {
     useMaterialFlowStore.getState().resetMaterialFlow();
+    useOperationsCampaignStore.getState().resetCampaign();
     useTruckScheduleStore.getState().resetTruckSchedule();
     useQCLabStore.setState((state) => ({
       qcLab: {
@@ -53,10 +55,20 @@ describe('UnifiedGameTick shipping quality interlock', () => {
     });
   });
 
-  it('loads released goods after the quality condition clears', () => {
+  it('loads released goods while docked and dispatches them on departure', () => {
     useTruckScheduleStore.getState().setTruckDocked('shipping', true);
 
-    unifiedGameTick(tickContext);
+    for (let index = 0; index < 20; index += 1) {
+      unifiedGameTick({ ...tickContext, deltaSeconds: 0.5, tickCount: index + 1 });
+    }
+
+    expect(useMaterialFlowStore.getState().shippedKg).toBe(0);
+    expect(useOperationsCampaignStore.getState().execution.dispatchLoad.loadedKg).toBeGreaterThan(
+      0
+    );
+
+    useTruckScheduleStore.getState().setTruckDocked('shipping', false);
+    unifiedGameTick({ ...tickContext, tickCount: 30 });
 
     expect(useMaterialFlowStore.getState().shippedKg).toBeGreaterThan(0);
     expect(useMaterialFlowStore.getState().manifests.at(-1)).toMatchObject({

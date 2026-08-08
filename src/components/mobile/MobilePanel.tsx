@@ -25,6 +25,7 @@ import {
   FastForward,
   Siren,
   Heart,
+  Truck,
 } from 'lucide-react';
 import type { DockMode } from '../ui-new/dock/Dock';
 import { useProductionStore } from '../../stores/productionStore';
@@ -129,6 +130,7 @@ const OverviewContent: React.FC = () => {
   const campaignIncidents = useOperationsCampaignStore((s) => s.incidents);
   const campaignConstraints = useOperationsCampaignStore((s) => s.constraints);
   const campaignEconomics = useOperationsCampaignStore((s) => s.economics);
+  const campaignExecution = useOperationsCampaignStore((s) => s.execution);
 
   // Machine status counts
   const machineStats = {
@@ -336,6 +338,25 @@ const OverviewContent: React.FC = () => {
             Revenue:{' '}
             <span className="font-semibold text-emerald-300">
               £{campaignEconomics.revenue.toFixed(0)}
+            </span>
+          </div>
+        </div>
+        <div className="mt-1.5 rounded bg-slate-950/35 p-1.5 text-[9px]">
+          <div className="flex items-center justify-between gap-2">
+            <span className="capitalize text-cyan-200">
+              {campaignExecution.stage.replaceAll('_', ' ')}
+            </span>
+            <span className="font-mono text-slate-300">
+              {campaignExecution.lineSetpointPercent.toFixed(0)}% setpoint
+            </span>
+          </div>
+          <div className="mt-1 flex items-center justify-between gap-2 text-slate-400">
+            <span className="flex items-center gap-1">
+              <Truck className="h-3 w-3" aria-hidden="true" /> Outbound
+            </span>
+            <span className="font-mono">
+              {campaignExecution.dispatchLoad.loadedKg.toFixed(0)} /{' '}
+              {campaignExecution.dispatchLoad.capacityKg.toFixed(0)} kg
             </span>
           </div>
         </div>
@@ -566,6 +587,8 @@ const AIContent: React.FC = () => {
 const SCADAContent: React.FC = () => {
   const metrics = useProductionStore((s) => s.metrics);
   const scadaLive = useProductionStore((s) => s.scadaLive);
+  const campaignExecution = useOperationsCampaignStore((s) => s.execution);
+  const utilityAssets = useOperationsCampaignStore((s) => s.utilityAssets);
 
   const MetricCard: React.FC<{
     label: string;
@@ -624,6 +647,40 @@ const SCADAContent: React.FC = () => {
           unit="%"
           icon={<CheckCircle className="w-3 h-3" />}
         />
+      </div>
+      <div className="rounded-lg border border-cyan-500/20 bg-cyan-950/15 p-2">
+        <div className="flex items-center justify-between text-[10px]">
+          <span className="uppercase text-slate-400">Execution route</span>
+          <span className="capitalize text-cyan-200">
+            {campaignExecution.stage.replaceAll('_', ' ')}
+          </span>
+        </div>
+        <div className="mt-1 text-xs font-semibold text-white">
+          {campaignExecution.sourceMaterial?.replaceAll('_', ' ') ?? 'No source'} to{' '}
+          {campaignExecution.finishedMaterial?.replaceAll('_', ' ') ?? 'no product'}
+        </div>
+        <div className="mt-1 text-[10px] text-slate-400">
+          QC {campaignExecution.qualityReleased ? 'released' : 'held'},{' '}
+          {campaignExecution.releasedFinishedKg.toFixed(0)} kg available
+        </div>
+      </div>
+      <div>
+        <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+          Utility vessels
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          {utilityAssets.map((asset) => (
+            <div key={asset.id} className="rounded bg-slate-800/50 p-2">
+              <div className="truncate text-[9px] font-semibold text-slate-200">{asset.label}</div>
+              <div className="mt-0.5 font-mono text-xs text-cyan-300">
+                {asset.levelPercent.toFixed(1)}%
+              </div>
+              <div className="font-mono text-[9px] text-slate-500">
+                {asset.temperatureC.toFixed(1)} °C · {asset.pressureBar.toFixed(2)} bar
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

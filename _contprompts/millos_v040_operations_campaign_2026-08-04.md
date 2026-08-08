@@ -5,14 +5,14 @@ status: complete
 stepsCompleted: 7
 scope: truthful capability contracts, full-shift operations, personnel consequences, incidents, SCADA, continuous-world polish, and acceptance
 verification_criteria:
-  - "Package, interface, replay, documentation, and release metadata remain locked to 0.40.0 while feature development continues."
-  - "Every public capability claim maps to a live implementation or is visibly described as simulated, experimental, or unavailable."
-  - "A deterministic accelerated shift carries customer orders, recipes, due times, capacity, quality, energy, labour, maintenance, trucks, cost, and end-of-shift reporting."
-  - "Personnel skills, certifications, fatigue, breaks, and assignments produce bounded, explainable operational effects and visible task behaviour."
-  - "At least six incident types produce coherent consequences across the 3D world, machinery, personnel, alarms, SCADA, commitments, and debrief."
-  - "SCADA provides process navigation, annotated trends, operator logbook entries, alarm lifecycle, batch and maintenance provenance, and deterministic replay links."
-  - "Weather, water, lighting, vehicles, town, farm, garage, personnel, mountains, sky, sun, and moon remain continuously present and receive bounded sensory polish."
-  - "The complete world meets deterministic, browser, accessibility, visual, motion, bundle, and runtime-performance gates."
+  - 'Package, interface, replay, documentation, and release metadata remain locked to 0.40.0 while feature development continues.'
+  - 'Every public capability claim maps to a live implementation or is visibly described as simulated, experimental, or unavailable.'
+  - 'A deterministic accelerated shift carries customer orders, recipes, due times, capacity, quality, energy, labour, maintenance, trucks, cost, and end-of-shift reporting.'
+  - 'Personnel skills, certifications, fatigue, breaks, and assignments produce bounded, explainable operational effects and visible task behaviour.'
+  - 'At least six incident types produce coherent consequences across the 3D world, machinery, personnel, alarms, SCADA, commitments, and debrief.'
+  - 'SCADA provides process navigation, annotated trends, operator logbook entries, alarm lifecycle, batch and maintenance provenance, and deterministic replay links.'
+  - 'Weather, water, lighting, vehicles, town, farm, garage, personnel, mountains, sky, sun, and moon remain continuously present and receive bounded sensory polish.'
+  - 'The complete world meets deterministic, browser, accessibility, visual, motion, bundle, and runtime-performance gates.'
 ---
 
 # MillOS v0.40 Operations Campaign
@@ -97,11 +97,14 @@ At merged commit `54a7d2a`, package identity is `0.40.0`. TypeScript, ESLint, Pr
 
 ## Deviations
 
-| Date | Discovery | Conservative decision | Evidence required |
-|---|---|---|---|
-| 2026-08-04 | The plan described a new shift layer, but the repository already contains shift handover, energy, truck scheduling, fatigue, maintenance, historian, replay, and scenario systems. | Compose the existing systems through a bounded operations-campaign contract instead of creating replacement subsystems. | Dependency tests and browser proof that the new campaign reads and drives the existing authorities. |
-| 2026-08-04 | Incident feedback needed to remain visible without adding another heavy scene or duplicating authored props. | Add one quality-aware marker layer anchored to the canonical site layout, with shared geometry, materials, and one animation loop. | Placement tests, depth and shader policy gates, browser inspection, and the continuous-world benchmark. |
-| 2026-08-04 | The existing historian replay store already owns recent replay state. | Link the SCADA operations logbook to that authority instead of creating a campaign-specific playback engine. | Browser proof that the logbook records an operator entry and toggles from recent replay back to live. |
+| Date       | Discovery                                                                                                                                                                          | Conservative decision                                                                                                                                                                                | Evidence required                                                                                       |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 2026-08-04 | The plan described a new shift layer, but the repository already contains shift handover, energy, truck scheduling, fatigue, maintenance, historian, replay, and scenario systems. | Compose the existing systems through a bounded operations-campaign contract instead of creating replacement subsystems.                                                                              | Dependency tests and browser proof that the new campaign reads and drives the existing authorities.     |
+| 2026-08-04 | Incident feedback needed to remain visible without adding another heavy scene or duplicating authored props.                                                                       | Add one quality-aware marker layer anchored to the canonical site layout, with shared geometry, materials, and one animation loop.                                                                   | Placement tests, depth and shader policy gates, browser inspection, and the continuous-world benchmark. |
+| 2026-08-04 | The existing historian replay store already owns recent replay state.                                                                                                              | Link the SCADA operations logbook to that authority instead of creating a campaign-specific playback engine.                                                                                         | Browser proof that the logbook records an operator entry and toggles from recent replay back to live.   |
+| 2026-08-08 | Shipping previously removed released goods as soon as a truck reached the bay, so loading had no physical duration and its manifest preceded departure.                            | Keep product in the material authority while the docked truck loads, gate forklift actions on release and dock state, and consume conserved goods into the authoritative manifest only on departure. | Conservation tests, quality-interlock tests, truck and forklift state tests, and browser motion proof.  |
+| 2026-08-08 | Five visible utility vessels had duplicate naming, dark metallic surfaces, intersecting shell geometry, and positions that conflicted with the perimeter.                          | Centralize their identity and geometry, use watertight pale dielectric shells, and place the tank farm and LPG compound inside the canonical fence-safe yard.                                        | Site-layout tests, bounded telemetry tests, depth and shader gates, and exterior browser inspection.    |
+| 2026-08-08 | The browser journey exposed a latent dock focus race because the sidebar remembered the document's current focus instead of the workspace trigger that opened it.                  | Pass the exact dock trigger through the interaction contract and return focus to that element on close.                                                                                             | Dock unit tests, browser focus assertions, and full accessibility journeys.                            |
 
 ## Machine acceptance, 2026-08-04
 
@@ -112,6 +115,19 @@ At merged commit `54a7d2a`, package identity is `0.40.0`. TypeScript, ESLint, Pr
 - The headed moving-world benchmark passed at all five representative cameras. Average frame rate ranged from 67.5 to 92.9 FPS, p95 frame time ranged from 12.1 to 17.6 ms, effective DPR was 1.20, and every view reported a continuous world.
 - Browser inspection confirmed live order, personnel, incident, cost, handover, and logbook state; a bearing incident changed throughput, machine status, maintenance work orders, alarms, PA output, and SCADA context; the SCADA logbook recorded an operator entry and entered recent replay.
 
-## Remaining human gate
+## Refinement scope, 2026-08-08
 
-Machine acceptance establishes correctness, continuity, accessibility, and measured performance. Final visual taste across the factory, personnel, town, farm, garage, mountains, sky, sun, moon, water, weather, trucks, forklifts, and incident staging remains a human review decision.
+The campaign now exposes one execution state from active recipe and source inventory through milling, quality hold, released inventory, physical truck loading, departure manifest, order allocation, and shift economics. Forklift logistics and trailer settling respond to the same state. Desktop SCADA, the operations panel, and mobile views expose the route, setpoint, quality gate, load, and simulated telemetry for every visible utility vessel.
+
+## Refinement machine acceptance, 2026-08-08
+
+- Product identity remained locked to `0.40.0`; the version-lock contract passed in the complete unit suite.
+- TypeScript, ESLint, Prettier, Impeccable, all 106 Vitest files with 1,679 tests, and the Vite production build passed. The build transformed 3,725 modules.
+- Asset, depth, shader, and bundle gates passed. Initial JavaScript remained 0.61 MiB gzip and the complete build was 99.63 MiB.
+- Both Playwright journeys passed after exercising desktop and mobile layouts, accessibility scans, dock focus restoration, SCADA, alarms, trends, events, simulated faults, safety, settings, downloads, and responsive surfaces.
+- The headed moving-world benchmark passed at overview, personnel, shipping, and yard cameras. Average frame rate ranged from 72.3 to 84.3 FPS, p95 frame time ranged from 14.1 to 16.3 ms, effective DPR remained 1.20, every view reported a continuous world, and no browser console or page errors were recorded.
+- Runtime motion telemetry confirmed truck entry, steering, wheel and trailer animation, dock preparation, forklift travel, fork lift, mast tilt, stopping, and cargo state. Visual inspection confirmed the unified world, factory walls and windows, town, stream, castle, mountains, yard, maintenance building, tank farm, and LPG compound remained present without visible overlap or fence intersection.
+
+## Acceptance posture
+
+The explicit release instruction removes a human-review hold from this branch. Machine acceptance must still establish correctness, continuity, accessibility, performance, and version identity before the pull request is marked ready. Visual taste remains subjective and will be reported as inspected rather than independently certified.
