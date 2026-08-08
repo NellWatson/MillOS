@@ -273,6 +273,173 @@ const SM = {
   }),
 };
 
+// ===== SKYLINE ROOFS =====
+// The church spire, the town hall cupola and the school bell cap are the three
+// things in the village that break the treeline, so they are the three that get
+// a designed profile rather than a primitive. Each is authored at world scale
+// (radius and y are already metres) and each holds the exact envelope of the
+// cone it replaces, because every one of them is positioned against a
+// hand-tuned neighbour: the spire base is flush with the 4 m tower, the cupola
+// eave overhangs the clock tower by 1.6 m, the bell cap overhangs the belfry
+// beam by 0.4 m. Max radius and the y range are load-bearing numbers.
+//
+// All three buildings are singletons, so these vertices are a one-off scene
+// cost (1078 across the three - 207 + 700 + 171, the counts three.js reports
+// for these LatheGeometries) rather than a per-instance one, and none of the
+// three meshes - nor any group above them, up to `authored-village-site` -
+// carries a pointer handler, so none needs the picking proxy the corrugated
+// silo shell does.
+
+/**
+ * Church spire - 4 m across, 6 m tall, carried to 19 m on the tower.
+ *
+ * A broach spire, not a cone. Bottom to top: a near-vertical 180 mm stone
+ * capping course at the rim (a hard shadow line where the slate meets the
+ * masonry), a sharp 250 mm break into the splayed skirt, then the long taper
+ * carrying about 3.5% entasis - a convex swell peaking around a third of the
+ * way up, which is what stops a tall spire reading as sagging inward. It closes
+ * with a necking, an astragal ring, a ball finial and a spike that runs up
+ * inside the gold cross above it.
+ *
+ * Eight sides is the design, not a budget: a broach spire IS octagonal, and at
+ * this size the hips read as slate arrises running base to finial rather than
+ * as facets on a circle. Verified in Blender at 19 m and at 9 m.
+ *
+ * Envelope preserved from ConeGeometry(2, 6, 16): max radius 2.0 on both x and
+ * z (the 0 deg and 90 deg vertices), y from -3 to +3. Drift 0.00 mm.
+ */
+function createChurchSpireGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -3.0), // underside cap centre
+    new THREE.Vector2(2.0, -3.0), // rim - envelope max radius, flush with the tower
+    new THREE.Vector2(1.99, -2.82), // capping course, near vertical
+    new THREE.Vector2(1.74, -2.66), // hard break: the skirt springs
+    new THREE.Vector2(1.585, -2.3), // splayed skirt
+    new THREE.Vector2(1.404, -1.6), // taper with entasis from here up
+    new THREE.Vector2(1.119, -0.6),
+    new THREE.Vector2(0.788, 0.45),
+    new THREE.Vector2(0.507, 1.3),
+    new THREE.Vector2(0.355, 1.75),
+    new THREE.Vector2(0.25, 2.06), // necking
+    new THREE.Vector2(0.215, 2.2), // neck waist
+    new THREE.Vector2(0.33, 2.28), // astragal ring, under-flare
+    new THREE.Vector2(0.335, 2.37), // astragal top
+    new THREE.Vector2(0.19, 2.43), // tuck in below the finial
+    new THREE.Vector2(0.27, 2.5),
+    new THREE.Vector2(0.3, 2.58), // ball equator
+    new THREE.Vector2(0.26, 2.67),
+    new THREE.Vector2(0.145, 2.75), // ball top
+    new THREE.Vector2(0.08, 2.82), // spike
+    new THREE.Vector2(0.055, 2.92), // enters the cross shaft here
+    new THREE.Vector2(0.045, 3.0), // envelope max y
+    new THREE.Vector2(0.0, 3.0),
+  ];
+  return new THREE.LatheGeometry(profile, 8);
+}
+
+const CHURCH_SPIRE = createChurchSpireGeometry();
+
+/**
+ * Town hall clock tower cupola - 7.2 m across, 4 m tall, top at 18 m.
+ *
+ * An ogee cupola (a welsche Haube), which is the civic answer to the church's
+ * spire and deliberately not another one. It overhangs the 4 m box tower by
+ * 1.6 m, so its eave underside is what you see from the square below: that gets
+ * a 100 mm fascia band and a hard kick where the roof turns off the rim. Above
+ * the kick a short convex dome shoulder rolls over at y = -0.46 into a long
+ * concave sweep - the ogee inflection is the whole silhouette - and the crown
+ * is a real one: necking, projecting cornice, a straight lantern drum, a second
+ * cornice, then a fat ball and spike sized to still read at 40 m.
+ *
+ * Round where the spire is faceted, because a lead-covered dome is round. 24
+ * segments: at 20 m the between-vertex inset is 31 mm, about a pixel, and 32
+ * segments were indistinguishable in the Blender A/B for 224 more vertices.
+ *
+ * Envelope preserved from ConeGeometry(3.6, 4, 16): max radius 3.6, y from -2
+ * to +2, so the 1.6 m overhang and the eave line are unmoved. Drift 0.00 mm.
+ */
+function createTownHallCupolaGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -2.0), // eave underside centre
+    new THREE.Vector2(3.6, -2.0), // eave rim - envelope max radius
+    new THREE.Vector2(3.56, -1.9), // fascia band, near vertical
+    new THREE.Vector2(3.3, -1.78), // eave kick
+    new THREE.Vector2(3.16, -1.6), // convex dome shoulder
+    new THREE.Vector2(2.92, -1.36),
+    new THREE.Vector2(2.58, -1.08),
+    new THREE.Vector2(2.16, -0.78),
+    new THREE.Vector2(1.68, -0.46), // ogee inflection - steepest point
+    new THREE.Vector2(1.24, -0.14), // concave sweep from here up
+    new THREE.Vector2(0.9, 0.16),
+    new THREE.Vector2(0.64, 0.42),
+    new THREE.Vector2(0.46, 0.64),
+    new THREE.Vector2(0.36, 0.8),
+    new THREE.Vector2(0.32, 0.9), // necking
+    new THREE.Vector2(0.3, 0.99), // neck waist
+    new THREE.Vector2(0.52, 1.07), // lantern cornice, projecting
+    new THREE.Vector2(0.5, 1.15), // lantern drum base
+    new THREE.Vector2(0.5, 1.42), // lantern drum top
+    new THREE.Vector2(0.55, 1.48), // upper cornice
+    new THREE.Vector2(0.4, 1.55), // lantern cap rolls in
+    new THREE.Vector2(0.26, 1.6),
+    new THREE.Vector2(0.42, 1.7), // ball equator
+    new THREE.Vector2(0.36, 1.81),
+    new THREE.Vector2(0.2, 1.89), // ball top
+    new THREE.Vector2(0.1, 1.95), // spike
+    new THREE.Vector2(0.06, 2.0), // envelope max y
+    new THREE.Vector2(0.0, 2.0),
+  ];
+  return new THREE.LatheGeometry(profile, 24);
+}
+
+const TOWNHALL_CUPOLA = createTownHallCupolaGeometry();
+
+/**
+ * School bell-tower cap - 2.8 m across, 2 m tall, skylined at 12.5 m.
+ *
+ * A cupola cap over the open belfry frame, and octagonal on purpose: the frame
+ * below it is a square of four posts, and an octagon springing from a square is
+ * the canonical belfry transition - the hips land on the posts and on the beam
+ * midpoints. It overhangs the 2 m beam by 0.4 m, so it gets a 120 mm boarded
+ * fascia and an eave kick like the town hall, then a bell-cast concave sweep
+ * (steep off the eave, easing as it rises), a necking, a cornice ring and a
+ * ball finial sized to still be a ball rather than a bump at 18 m.
+ *
+ * The eight sides cost nothing visually: in the Blender A/B against the same
+ * profile lathed at 16 segments the two were indistinguishable at 18 m, and the
+ * octagon is a little over half the vertices (171 against 323).
+ *
+ * Envelope preserved from ConeGeometry(1.4, 2, 16): max radius 1.4 on both x
+ * and z, y from -1 to +1, so the cap still sits exactly on the beam at 10.5 m
+ * with its 0.4 m overhang. Drift 0.00 mm.
+ */
+function createSchoolBellCapGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -1.0), // eave underside centre
+    new THREE.Vector2(1.4, -1.0), // eave rim - envelope max radius
+    new THREE.Vector2(1.39, -0.88), // boarded fascia, near vertical
+    new THREE.Vector2(1.16, -0.76), // eave kick
+    new THREE.Vector2(0.94, -0.5), // bell-cast sweep, steep off the eave
+    new THREE.Vector2(0.72, -0.2),
+    new THREE.Vector2(0.5, 0.14),
+    new THREE.Vector2(0.33, 0.42),
+    new THREE.Vector2(0.26, 0.52),
+    new THREE.Vector2(0.2, 0.6), // necking
+    new THREE.Vector2(0.32, 0.66), // cornice ring, under-flare
+    new THREE.Vector2(0.325, 0.73), // cornice top
+    new THREE.Vector2(0.185, 0.78), // tuck in below the finial
+    new THREE.Vector2(0.255, 0.845),
+    new THREE.Vector2(0.275, 0.9), // ball equator
+    new THREE.Vector2(0.22, 0.955),
+    new THREE.Vector2(0.105, 0.985), // ball top
+    new THREE.Vector2(0.045, 1.0), // envelope max y
+    new THREE.Vector2(0.0, 1.0),
+  ];
+  return new THREE.LatheGeometry(profile, 8);
+}
+
+const SCHOOL_BELL_CAP = createSchoolBellCapGeometry();
+
 // ===== CHIMNEY SMOKE =====
 // Shared geometry; the materials are per-chimney because opacity is animated
 // per puff and a module-level singleton would make every chimney in the
@@ -513,9 +680,10 @@ const ChurchBuilding = React.memo<{
       <boxGeometry args={[4, 10, 4]} />
       <primitive object={SM.stone} attach="material" />
     </mesh>
-    {/* Spire - proper cone */}
+    {/* Broach spire - see createChurchSpireGeometry. Capping course, skirt
+        break, entasis, astragal and ball finial, on eight slate hips. */}
     <mesh position={[0, 16, -5]} castShadow>
-      <coneGeometry args={[2, 6, 8]} />
+      <primitive object={CHURCH_SPIRE} attach="geometry" />
       <primitive object={SM.roofSlate} attach="material" />
     </mesh>
     {/* Cross on spire */}
@@ -752,9 +920,11 @@ export const TownHall = React.memo<{ position: [number, number, number]; rotatio
           <boxGeometry args={[4, 6, 4]} />
           <primitive object={SM.cream} attach="material" />
         </mesh>
-        {/* Tower roof - proper cone */}
+        {/* Ogee cupola - see createTownHallCupolaGeometry. Fascia and eave kick
+            on the 1.6 m overhang, dome shoulder rolling into a concave sweep,
+            lantern drum and ball finial. */}
         <mesh position={[0, 16, 0]} castShadow>
-          <coneGeometry args={[3.6, 4, 8]} />
+          <primitive object={TOWNHALL_CUPOLA} attach="geometry" />
           <primitive object={SM.roofSlate} attach="material" />
         </mesh>
 
@@ -982,8 +1152,10 @@ const School = React.memo<{
         </mesh>
       </group>
     </group>
+    {/* Belfry cap - see createSchoolBellCapGeometry. An octagon springing from
+        the square post frame: fascia, eave kick, bell-cast sweep, ball finial. */}
     <mesh position={[0, 11.5, 0]} castShadow>
-      <coneGeometry args={[1.4, 2, 8]} />
+      <primitive object={SCHOOL_BELL_CAP} attach="geometry" />
       <primitive object={SM.roofSlate} attach="material" />
     </mesh>
     {/* Windows - row */}
@@ -1013,12 +1185,120 @@ const School = React.memo<{
 ));
 School.displayName = 'School';
 
+/**
+ * (radius, y) pairs into the Vector2[] THREE.LatheGeometry wants.
+ *
+ * Every profile below is transcribed verbatim from a spec that was drawn,
+ * rendered and judged in Blender (`scripts/blender/specs/village-water.json`),
+ * and that harness prints its points as (r, y). Keeping the same form here
+ * means the numbers in the source are the numbers that were approved rather
+ * than a retyped-from-memory approximation of them.
+ */
+const latheProfile = (points: readonly (readonly [number, number])[]): THREE.Vector2[] =>
+  points.map(([r, y]) => new THREE.Vector2(r, y));
+
 // ===== WISHING WELL =====
+
+/**
+ * Drystone kerb for the wishing well.
+ *
+ * 2.4 m across and 0.8 m tall, standing on the village cobbles at y=0.12 - so
+ * the bottom 120 mm is buried and the widest ring is placed just clear of the
+ * paving rather than at the very foot, where nobody would ever see it. The
+ * previous `CylinderGeometry(1, 1.2, 0.8, 12)` was a plain tapered drum: the
+ * 12-gon read as coursing, but there were no courses in it to read.
+ *
+ * Deliberately still a 12-gon (`LatheGeometry` at 12 segments is the same
+ * inscribed polygon the cylinder was), because at 2.4 m across the 41 mm inset
+ * between vertices reads as dressed masonry and sanding it smooth would lose
+ * that. What is new is the profile: four battered courses, each stepping in at
+ * a joint, under a capstone that projects 190 mm and throws a shadow onto them.
+ * The projection is the feature that carries - a well is recognisable by its
+ * coping long before its stonework is.
+ *
+ * The flat top is held at exactly y=+0.40 out to radius 1.07. The Cat prop is
+ * seated at world y=0.80 on this face and the dark mouth disc sits at 0.81 with
+ * radius 0.75, so any weathering that pulled the top ring below +0.40 would
+ * unseat the cat and lift the disc off the stone. Envelope: max radius 1.20,
+ * y in [-0.40, 0.40] - identical to the cylinder.
+ */
+const WELL_KERB = new THREE.LatheGeometry(
+  latheProfile([
+    [1.06, -0.4], // footing, below the paving
+    [1.14, -0.32],
+    [1.2, -0.255], // plinth course - envelope max radius, 45 mm above the cobbles
+    [1.11, -0.23], // first coursing joint
+    [1.1, -0.09],
+    [1.02, -0.062], // second coursing joint
+    [1.01, 0.1],
+    [0.94, 0.128], // third coursing joint
+    [0.93, 0.212], // the drum's narrowest course
+    [1.1, 0.246], // capstone springs out over the courses
+    [1.12, 0.262],
+    [1.12, 0.366], // capstone face
+    [1.07, 0.4], // weathered arris
+    [0.0, 0.4], // flat coping top - the cat sits here
+  ]),
+  12
+);
+
+/**
+ * Thatched roof for the wishing well.
+ *
+ * 2.4 m across at 2.8 m - just above head height on a walk-up prop with a
+ * pettable cat on its rim, so it is read from two or three metres and mostly
+ * from below. `ConeGeometry(1.2, 1, 16)` gave it a straight-sided pitch and a
+ * knife-edged rim, which is the one thing thatch never has.
+ *
+ * Three features, all of them silhouette rather than surface: a fat rolled eave
+ * (a 190 mm quarter-round where the straw is cut and combed), a bell-cast
+ * slope whose pitch steepens monotonically from ~30 deg at the skirt to ~72 deg
+ * at the peak, and the tied bundle at the apex with its binding ring. The
+ * bell-cast is what stops it reading as a lampshade: real thatch is flared at
+ * the eave because the straw is laid over a tilting fillet.
+ *
+ * The underside cap is kept. The timber posts run up inside it and the eave is
+ * at 2.30, so opening the underside would show their tops floating in a hollow.
+ *
+ * The bell-cast is also why the posts are 2.0 m and not the 2.2 m they were
+ * under the cone. A straight cone is at radius 0.84 at world 2.60; this
+ * profile is at 0.689 there, and the posts' corners stand 0.7786 from the
+ * axis, so a post that used to be swallowed now pokes a timber block out
+ * through the straw. Any future change to this slope has to re-check that
+ * clearance against the 20-gon INSCRIBED radius (r * cos(pi/20)), not r.
+ *
+ * Envelope: max radius 1.20 at the eave, y in [-0.50, 0.50] - identical to the
+ * cone. 20 segments leaves a 15 mm crease at the eave radius.
+ */
+const WELL_ROOF = new THREE.LatheGeometry(
+  latheProfile([
+    [0.0, -0.5], // underside cap centre
+    [1.2, -0.5], // eave outer edge - envelope max radius
+    [1.198, -0.47],
+    [1.18, -0.443],
+    [1.14, -0.421], // rolled thatch edge
+    [1.085, -0.407],
+    [1.01, -0.398], // the roll flattens into the skirt
+    [0.809, -0.281],
+    [0.636, -0.164],
+    [0.48, -0.047], // slope steepens through the middle
+    [0.341, 0.07],
+    [0.235, 0.187],
+    [0.171, 0.288],
+    [0.14, 0.382], // straw gathers under the binding
+    [0.185, 0.42], // binding ring
+    [0.165, 0.458],
+    [0.08, 0.486],
+    [0.0, 0.5], // apex - envelope max y
+  ]),
+  20
+);
+
 const WishingWell = React.memo<{ position: [number, number, number] }>(({ position }) => (
   <group position={position}>
-    {/* Stone base */}
+    {/* Stone kerb - see WELL_KERB for the coursing and the cat's seat. */}
     <mesh position={[0, 0.4, 0]} castShadow>
-      <cylinderGeometry args={[1, 1.2, 0.8, 12]} />
+      <primitive object={WELL_KERB} attach="geometry" />
       <primitive object={SM.stone} attach="material" />
     </mesh>
     {/* Dark hole at top of well */}
@@ -1031,16 +1311,18 @@ const WishingWell = React.memo<{ position: [number, number, number] }>(({ positi
       <cylinderGeometry args={[0.7, 0.7, 0.3, 12]} />
       <primitive object={SM.water} attach="material" />
     </mesh>
-    {/* Wooden posts */}
+    {/* Wooden posts. Top at world 2.40, not the 2.60 the straight cone used to
+        swallow - see WELL_ROOF. The bottom stays at 0.40, buried in the kerb,
+        so the visible run from the coping to the eave is unchanged. */}
     {[-0.7, 0.7].map((x, i) => (
-      <mesh key={i} position={[x, 1.5, 0]} castShadow>
-        <boxGeometry args={[0.15, 2.2, 0.15]} />
+      <mesh key={i} position={[x, 1.4, 0]} castShadow>
+        <boxGeometry args={[0.15, 2.0, 0.15]} />
         <primitive object={SM.timber} attach="material" />
       </mesh>
     ))}
-    {/* Roof */}
+    {/* Thatched roof - see WELL_ROOF for the eave roll and the bell-cast. */}
     <mesh position={[0, 2.8, 0]} castShadow>
-      <coneGeometry args={[1.2, 1, 8]} />
+      <primitive object={WELL_ROOF} attach="geometry" />
       <primitive object={SM.thatch} attach="material" />
     </mesh>
     {/* Bucket */}
@@ -1056,25 +1338,6 @@ const WishingWell = React.memo<{ position: [number, number, number] }>(({ positi
   </group>
 ));
 WishingWell.displayName = 'WishingWell';
-
-// ===== STREET LAMP =====
-const VillageLamp = React.memo<{ position: [number, number, number] }>(({ position }) => (
-  <group position={position}>
-    <mesh position={[0, 2, 0]} castShadow>
-      <cylinderGeometry args={[0.08, 0.12, 4, 8]} />
-      <primitive object={SM.black} attach="material" />
-    </mesh>
-    <mesh position={[0, 4.3, 0]}>
-      <boxGeometry args={[0.5, 0.6, 0.5]} />
-      <primitive object={SM.black} attach="material" />
-    </mesh>
-    <mesh position={[0, 4.3, 0]} userData={{ dynamic: true }}>
-      <boxGeometry args={[0.35, 0.45, 0.35]} />
-      <primitive object={SM.windowGlass} attach="material" />
-    </mesh>
-  </group>
-));
-VillageLamp.displayName = 'VillageLamp';
 
 // ===== DUCK COMPONENT =====
 const Duck = React.memo<{
@@ -1140,6 +1403,66 @@ const Duck = React.memo<{
 Duck.displayName = 'Duck';
 
 // ===== DUCK POND =====
+
+/**
+ * Kerbed bank around the duck pond.
+ *
+ * 14 m across, walked around and leaned on. It was `RingGeometry(5.5, 7, 32)`
+ * laid flat: a zero-thickness annulus painted on the cobbles, needing a
+ * polygonOffset to stay out of a depth fight with them, and leaving the water
+ * disc's 80 mm cut edge standing exposed above it as a bright blue band with a
+ * visibly polygonal outline.
+ *
+ * This is the one object in this file whose envelope deliberately changes:
+ * there is no zero-drift version of "flat annulus becomes a shaped bank". It
+ * gains 150 mm of y half-extent. Nothing in the scene is positioned against
+ * the ring's extent - DuckPond is a singleton at [20, 0, 25], the ducks float
+ * at y=0.35 inside radius 2.5, and the lily pads at y=0.33 inside radius 2.6 -
+ * so the only relationships that matter are the two this profile is designed
+ * around, and both are held:
+ *
+ *   - The inner lip is at radius 5.44, at y=+0.07 (world 0.220), overhanging
+ *     the r=5.5 water top at world 0.19. At 48 segments the lip's own facet
+ *     midpoints fall to 5.4283, and the 32-segment water disc's fall to
+ *     5.5*cos(pi/32) = 5.4736. Lip max 5.44 < water min 5.4736, so the stone
+ *     covers the water's cut edge at every angle around the pond rather than
+ *     beating in and out of it. Under the lip the profile turns back out and
+ *     down to 5.51, which undercuts it and lays a shadow line on the water.
+ *   - The outer edge reaches world 0.118 and then drops a skirt to 0.090,
+ *     which passes through the cobble sheet at 0.12. That is an intersection,
+ *     not a coplanar surface, so the polygonOffset hack the flat ring needed
+ *     is gone with it.
+ *
+ * Between the two, a 340 mm flat coping at world 0.30 - 180 mm of readable
+ * kerb above the paving - rolling over into a gravel apron. Max radius stays
+ * exactly 7.0. One shared geometry, one instance, 637 vertices; no pointer
+ * handler is on this mesh (they are on the Ducks), so nothing raycasts it.
+ *
+ * Traversed OUTER to INNER on purpose: LatheGeometry derives its winding and
+ * normals from the order of the profile, and an open sheet walked the other
+ * way faces downwards and is culled by the default FrontSide material. The
+ * Blender preview cannot catch that - workbench does not backface cull - so
+ * the direction is checked against three's own normals instead.
+ */
+const POND_SHORE = new THREE.LatheGeometry(
+  latheProfile([
+    [7.0, -0.06], // skirt, buried under the paving
+    [7.0, -0.032], // outer edge - envelope max radius, unchanged
+    [6.85, -0.024], // gravel apron levels out at the cobbles
+    [6.68, 0.008],
+    [6.56, 0.048],
+    [6.45, 0.096], // coping rolls over
+    [6.3, 0.136],
+    [6.12, 0.15], // the flat you can sit on
+    [5.78, 0.15], // coping top - world 0.30
+    [5.66, 0.116],
+    [5.57, 0.062], // inner face of the kerb drops to the water
+    [5.51, 0.038], // undercut: shadow line where stone meets water
+    [5.44, 0.07], // lip crest, overhangs the waterline
+  ]),
+  48
+);
+
 const DuckPond = React.memo<{ position: [number, number, number] }>(({ position }) => {
   // Local heart particles state
   const [hearts, setHearts] = React.useState<{ id: number; pos: [number, number, number] }[]>([]);
@@ -1156,18 +1479,29 @@ const DuckPond = React.memo<{ position: [number, number, number] }>(({ position 
 
   return (
     <group position={position}>
-      {/* Shore ring - raised above village cobbles (y=0.12) */}
-      <mesh position={[0, 0.15, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <ringGeometry args={[5.5, 7, 24]} />
-        <meshStandardMaterial
-          color="#a89f91"
-          roughness={0.9}
-          polygonOffset
-          polygonOffsetFactor={-2}
-          polygonOffsetUnits={-2}
-        />
+      {/* Shore kerb - see POND_SHORE. The lathe is built about its own Y axis,
+          so unlike the flat ring it replaces it takes no -PI/2 rotation, and
+          its skirt intersects the cobble sheet instead of lying on it, so it
+          needs no polygonOffset either. Shadow contract is unchanged from the
+          flat ring - receive only. A single-sided open sheet renders its BACK
+          side into the shadow map by three's default shadowSide, so asking a
+          kerb like this to cast buys a peeled shadow, not a better one.
+
+          DoubleSide because the profile reverses radial direction at the
+          undercut: the inner face's normals point INWARD, the lip's point
+          OUTWARD, so no single winding orients both and one of the two is
+          backfacing from any given eye. Most viewpoints are fine - the inner
+          face is front-facing from above ~31 deg and hidden behind the coping
+          edge below that - but the band in between opens a see-through slot at
+          the waterline onto the water disc's cut edge, which is the artefact
+          this profile exists to hide. This removes the class rather than one
+          observed hole. No geometry cost, back faces light correctly (three
+          flips the normal), shadows unaffected - the mesh only receives. */}
+      <mesh position={[0, 0.15, 0]} receiveShadow>
+        <primitive object={POND_SHORE} attach="geometry" />
+        <meshStandardMaterial color="#a89f91" roughness={0.9} side={THREE.DoubleSide} />
       </mesh>
-      {/* Water pond - thin disc that fits nicely */}
+      {/* Water pond - thin disc, its rim tucked under the kerb's lip. */}
       <mesh position={[0, 0.15, 0]}>
         <cylinderGeometry args={[5.5, 5.5, 0.08, 32]} />
         <meshStandardMaterial
@@ -1176,9 +1510,15 @@ const DuckPond = React.memo<{ position: [number, number, number] }>(({ position 
           // Water is a dielectric. At metalness 0.6 the pond was reflecting
           // its own blue albedo as specular and reading as chalky enamel.
           metalness={0}
-          polygonOffset
-          polygonOffsetFactor={-4}
-          polygonOffsetUnits={-4}
+          // No polygonOffset. It carried -4/-4 to win against the flat annulus
+          // that used to be the shore, which itself carried -2/-2 against the
+          // cobbles. POND_SHORE is a solid bank now and its lip crosses over
+          // this disc with only 2.6 mm of clearance at r=5.5; a negative offset
+          // is applied along the view ray, so at the grazing angles you read a
+          // 14 m pond from it is worth centimetres of depth and would push the
+          // blue back out through the stone. Nothing here is coplanar with
+          // anything - the disc's wall intersects the cobble sheet at 0.12
+          // rather than lying on it - so no bias is needed in either direction.
         />
       </mesh>
       {/* Ducks - floating on water surface */}
@@ -1405,6 +1745,183 @@ const fountainFallMaterial = new THREE.MeshBasicMaterial({
   side: THREE.DoubleSide,
 });
 
+/**
+ * Moulded basin for the market fountain.
+ *
+ * 7 m across and 0.6 m tall, the centrepiece of the market square with four
+ * stalls set around it - walk-up-and-lean-on geometry, not a distant
+ * silhouette. `CylinderGeometry(3, 3.5, 0.6, 32)` was a bare tapered drum: no
+ * plinth, no coping, nothing for a shadow to catch on.
+ *
+ * The profile is a stone basin read from the bottom up: a splayed plinth whose
+ * widest ring sits at y=-0.186 (world 0.114, just under the cobble sheet at
+ * 0.12, so the flare washes into the paving rather than hovering above it); a
+ * bowl wall with a slight entasis, slimmest at 3.11; a quirk - a recessed
+ * groove at 3.13 - and then the coping springing out over it to a rolled crest
+ * at 3.35 before turning in to the flat rim band. The quirk is the feature
+ * that does the work at distance: it is what puts a hard shadow line under the
+ * coping, and a moulding without one reads as a smooth bulge.
+ *
+ * The last three points dish the top face 38 mm below the rim between radius
+ * 2.6 and the centre. The water sheet lies in that dish with its underside
+ * open, and at 0.85 opacity the stone shows through it as apparent depth.
+ *
+ * Envelope: max radius 3.50, y in [-0.30, 0.30] - identical to the cylinder.
+ * 627 vertices, one shared geometry on a single instance, no pointer handler.
+ */
+const FOUNTAIN_POOL = new THREE.LatheGeometry(
+  latheProfile([
+    [3.34, -0.3], // foot, below the paving
+    [3.43, -0.238],
+    [3.5, -0.186], // plinth top - envelope max radius
+    [3.45, -0.16], // plinth wash
+    [3.26, -0.112],
+    [3.16, -0.036],
+    [3.11, 0.042], // entasis - the wall's slimmest point
+    [3.12, 0.104],
+    [3.135, 0.15],
+    [3.13, 0.182], // quirk: the groove that throws the coping's shadow
+    [3.26, 0.212], // coping springs out over the groove
+    [3.34, 0.248],
+    [3.35, 0.268], // coping roll crest
+    [3.3, 0.29],
+    [3.18, 0.3], // coping outer top edge
+    [2.85, 0.3], // coping band inner edge
+    [2.6, 0.292],
+    [1.5, 0.272],
+    [0.0, 0.262], // dished floor centre, 38 mm below the rim
+  ]),
+  32
+);
+
+/**
+ * Water surface in the base pool.
+ *
+ * `CylinderGeometry(2.8, 2.8, 0.1, 32)` gave the pool a 100 mm vertical blue
+ * wall standing proud of the stone - a coaster, not a body of water. This is
+ * the same envelope drawn as a sheet: nearly flat across the middle, then
+ * sweeping down over the last 400 mm of radius to die into the coping at
+ * (2.80, -0.05). The waterline stops being an edge and becomes a curve.
+ *
+ * Open at both ends on purpose. The inner ring at radius 0.30 is swallowed by
+ * the pedestal, whose radius over this height is 0.38 - the hole can never
+ * show. There is no bottom cap because the sheet lies directly on the pool's
+ * dished top face, which is what should be visible through it.
+ *
+ * Envelope: max radius 2.80, y in [-0.05, 0.05] - identical to the cylinder,
+ * so the mesh stays at y=0.65 and the ripple ring above it does not move.
+ * Held at the pool's 32 segments: same count, same vertex angles, so the stone
+ * margin outboard of the waterline is constant all the way round.
+ *
+ * Traversed OUTER to INNER, and that direction is load-bearing rather than
+ * stylistic: LatheGeometry takes its winding and its normals from the order of
+ * the profile, so an open sheet walked inner-to-outer comes out facing
+ * downwards and is culled by the default FrontSide material. It renders
+ * identically in the Blender preview either way - workbench does not backface
+ * cull - so this is a mistake the previews cannot catch.
+ */
+const FOUNTAIN_WATER = new THREE.LatheGeometry(
+  latheProfile([
+    [2.8, -0.05], // waterline - dies into the coping band; envelope max r and -y
+    [2.74, -0.038],
+    [2.62, -0.014],
+    [2.4, 0.01],
+    [1.95, 0.03],
+    [1.3, 0.042],
+    [0.62, 0.048],
+    [0.3, 0.05], // inner ring - inside the pedestal; envelope max +y
+  ]),
+  32
+);
+
+/**
+ * Baluster pedestal carrying the upper bowl.
+ *
+ * 2.4 m tall, and only the top 1.9 m of it is ever seen: everything below
+ * world 0.70 is inside the pool's stone or its water. `CylinderGeometry(0.3,
+ * 0.4, 2.4, 12)` put its widest ring at the very bottom, where it is buried.
+ * Here the max-radius ring is a base torus at y=-0.80 - world 0.70, right at
+ * the waterline - so the envelope's widest point is also the moulding a viewer
+ * actually reads, and the shaft appears to rise out of the water on a foot.
+ *
+ * Above it: a shaft with an entasis bellying to 0.29 at mid-height, a neck
+ * with an astragal bead, and a capital that coves out to a 0.315 abacus at
+ * y=+1.02. The abacus is deliberately below y=+1.10 (world 2.52 against the
+ * bowl's underside at 2.60): put any higher and the capital is swallowed by
+ * the bowl and the pedestal reads as a pipe pushed through a saucer.
+ *
+ * Radius over world 0.60-0.70 stays 0.38, comfortably outside the water
+ * sheet's 0.30 inner hole. Envelope: max radius 0.40, y in [-1.20, 1.20] -
+ * identical to the cylinder. 20 segments: the mouldings are turned stone and
+ * want roundness, and 0.4 m across that leaves a 5 mm inset.
+ */
+const FOUNTAIN_PEDESTAL = new THREE.LatheGeometry(
+  latheProfile([
+    [0.38, -1.2], // buried in the pool floor
+    [0.38, -0.86],
+    [0.4, -0.8], // base torus at the waterline - envelope max radius
+    [0.37, -0.74],
+    [0.3, -0.69], // fillet in to the shaft
+    [0.285, -0.56],
+    [0.29, -0.3], // entasis - the shaft's belly
+    [0.28, 0.0],
+    [0.255, 0.32],
+    [0.225, 0.64],
+    [0.205, 0.76], // neck
+    [0.22, 0.815], // astragal bead
+    [0.203, 0.865],
+    [0.245, 0.925], // capital coves out
+    [0.295, 0.985],
+    [0.315, 1.02], // abacus - world 2.52, clear of the bowl underside at 2.60
+    [0.31, 1.07],
+    [0.285, 1.095],
+    [0.285, 1.2], // stub swallowed by the bowl
+    [0.0, 1.2],
+  ]),
+  20
+);
+
+/**
+ * Upper tier - the tazza the fountain falls from.
+ *
+ * 2 m across at 2.8 m, so it is read from below by anyone standing in the
+ * square: the underside is more visible than the inside. `CylinderGeometry(1,
+ * 0.8, 0.4, 12)` gave that underside a flat disc and the rim a square edge.
+ *
+ * This sweeps the underside as a cove springing off the pedestal's capital at
+ * radius 0.26 - inside the pedestal's 0.281 inscribed radius at that height,
+ * so the joint can never gap - and out to a rim that rolls over at 1.00. A
+ * quirk at 0.905 undercuts the rim so it reads as a lip rather than a
+ * thickening, the same trick as the pool coping.
+ *
+ * Left solid. The bowl's own water disc (radius 0.8, opaque, 25 mm proud of
+ * the rim) covers everything a hollow would have revealed, so hollowing it
+ * would be vertices spent on a surface no camera can reach.
+ *
+ * Envelope: max radius 1.00 at the rim, y in [-0.20, 0.20] - identical to the
+ * cylinder.
+ */
+const FOUNTAIN_BOWL = new THREE.LatheGeometry(
+  latheProfile([
+    [0.26, -0.2], // springs off the pedestal capital - envelope min y
+    [0.36, -0.198],
+    [0.48, -0.186],
+    [0.6, -0.162],
+    [0.71, -0.126], // cove underside
+    [0.805, -0.078],
+    [0.875, -0.022],
+    [0.915, 0.034],
+    [0.93, 0.08],
+    [0.905, 0.11], // quirk: shadow line beneath the rim
+    [0.948, 0.142],
+    [1.0, 0.176], // rim crest - envelope max radius
+    [0.985, 0.2], // rolled inward - envelope max +y
+    [0.86, 0.2],
+    [0.0, 0.2], // flat top, under the bowl water
+  ]),
+  24
+);
+
 const Fountain = React.memo<{ position: [number, number, number] }>(({ position }) => {
   const rippleRef = useRef<THREE.Mesh>(null);
   const rippleMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
@@ -1431,14 +1948,15 @@ const Fountain = React.memo<{ position: [number, number, number] }>(({ position 
 
   return (
     <group position={position}>
-      {/* Base pool */}
+      {/* Base pool - see FOUNTAIN_POOL for the plinth, quirk and coping. */}
       <mesh position={[0, 0.3, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[3, 3.5, 0.6, 16]} />
+        <primitive object={FOUNTAIN_POOL} attach="geometry" />
         <primitive object={SM.stone} attach="material" />
       </mesh>
-      {/* Lower water - animated scrolling surface */}
+      {/* Lower water - animated scrolling surface, drawn as a feathered sheet
+          that dies into the coping rather than a slab standing on it. */}
       <mesh position={[0, 0.65, 0]}>
-        <cylinderGeometry args={[2.8, 2.8, 0.1, 16]} />
+        <primitive object={FOUNTAIN_WATER} attach="geometry" />
         <primitive object={fountainWaterMaterial} attach="material" />
       </mesh>
       {/* Ripple ring - faint, expands outward from the column */}
@@ -1452,14 +1970,14 @@ const Fountain = React.memo<{ position: [number, number, number] }>(({ position 
           depthWrite={false}
         />
       </mesh>
-      {/* Center column */}
+      {/* Pedestal - see FOUNTAIN_PEDESTAL for the base torus and the capital. */}
       <mesh position={[0, 1.5, 0]} castShadow>
-        <cylinderGeometry args={[0.3, 0.4, 2.4, 12]} />
+        <primitive object={FOUNTAIN_PEDESTAL} attach="geometry" />
         <primitive object={SM.stone} attach="material" />
       </mesh>
-      {/* Top bowl */}
+      {/* Upper tier - see FOUNTAIN_BOWL for the cove underside and rolled rim. */}
       <mesh position={[0, 2.8, 0]} castShadow>
-        <cylinderGeometry args={[1, 0.8, 0.4, 12]} />
+        <primitive object={FOUNTAIN_BOWL} attach="geometry" />
         <primitive object={SM.stone} attach="material" />
       </mesh>
       <mesh position={[0, 2.95, 0]}>

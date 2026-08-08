@@ -134,17 +134,151 @@ interface CanopyOptions {
   height: number;
   /** Canopy centre height in tree-local space. */
   centerY: number;
-  /** 0 = rectangular cards (broadleaf), 1 = fully tapered (conifer). */
+  /**
+   * Crown form. Below 0.5 selects the broadleaf DOME layout and narrows its
+   * upper edges slightly; 0.5 and above selects the tiered conifer SPIRE.
+   */
   taper: number;
 }
 
 /**
- * Eight-card cage: four vertical quads through the axis at 45 degree yaw
- * steps, two tilted quads for oblique parallax, and two horizontal caps that
- * stop the canopy looking hollow from above or below.
+ * One card of a crown layout, in units of the canopy's own radius and height.
  *
- * ~32 triangles (16 after back-face culling) against ~288 for the three
- * spheres this replaces.
+ * A card's VISIBLE shape is not its quad: `generateLeafAtlas` puts every
+ * leaflet centre within 0.44 of the cell centre, so the corners of a cell are
+ * always transparent and what actually gets drawn is the ellipse inscribed in
+ * the quad. Every number below was designed against that inscribed ellipse
+ * (scripts/blender/specs/trees-canopy.json carries the resulting silhouettes),
+ * which is why the quad edges look generous next to the crown they produce.
+ */
+interface CrownCard {
+  yaw: number;
+  /** Tilt about the card's OWN mid-height, so it never moves the band. */
+  tilt: number;
+  /**
+   * Lateral offset along the card's local x, in radii. This is what makes a
+   * broadleaf crown lumpy: without it every card is centred on the trunk axis
+   * and the canopy is perfectly radially symmetric from every direction.
+   */
+  offR: number;
+  yBot: number;
+  yTop: number;
+  rBot: number;
+  rTop: number;
+  cell: number;
+  mirror: boolean;
+}
+
+/** Horizontal card. `halfR` is a half-side, so the quad's CORNERS sit at
+ *  halfR * sqrt(2) - see the envelope note on DOME_CROWN. */
+interface CrownCap {
+  yaw: number;
+  y: number;
+  halfR: number;
+  cell: number;
+  mirror: boolean;
+}
+
+interface CrownLayout {
+  cards: readonly CrownCard[];
+  caps: readonly CrownCap[];
+}
+
+/**
+ * The x/z half-extent the OLD cage measured: its bottom cap was a square of
+ * half-side 0.9 radii yawed 1.15 rad, whose corners reached
+ * 0.9 * (cos 1.15 + sin 1.15) = 1.1891 radii. Both layouts below hand that
+ * number to a card at yaw 0 and one at yaw PI/2, so the footprint of every
+ * canopy in the scene is preserved to the last bit rather than to a rounded
+ * literal. (Those corners are transparent - the leaf atlas cuts a disc out of
+ * each cell - so nothing about the visible crown followed from it, which is
+ * exactly why it has to be carried deliberately instead of by accident.)
+ */
+const CROWN_RIM = 0.9 * (Math.cos(1.15) + Math.sin(1.15));
+
+/**
+ * Broadleaf crown: three overlapping full-height masses plus three off-axis
+ * lobes, closed top and bottom.
+ *
+ * The layout this replaces was four rectangular cards on the axis at 45 degree
+ * steps plus two tilted ones - a perfectly radially symmetric ball, the same
+ * width at every azimuth, which is the one thing a hardwood crown never is.
+ * The three masses here are staggered in height and width so the outline is
+ * weighted below the midline; the three lobes are pushed 0.50-0.58 radii off
+ * the axis so the crown reads as a main mass with sub-crowns hung off it, and
+ * the yaw jitter every instance already carries points them somewhere
+ * different on each tree. Previewed at 0, 35 and 63 degrees of azimuth before
+ * the numbers were fixed.
+ *
+ * ENVELOPE. The two cards at yaw 0 and PI/2 carry rBot = CROWN_RIM, so the
+ * cage's x and z half-extents are bit-identical to the old cage's. y measures
+ * exactly -1.03 to +1.00 for every radius:height ratio, which is what the old
+ * AXIS cards spanned; the old cage reached -1.26 to +1.08 only because tilt is
+ * applied about world X AFTER yaw, so its two tilted cards swung their
+ * (transparent) corners out - and by an amount that varied with R:H. The three
+ * masses here are therefore untilted and the lobes are tilted only as far as
+ * keeps their swing inside the axis cards (worst case -0.935). See the call
+ * sites: nothing is positioned against a canopy, and shortening the (empty)
+ * bottom CLOSES the gap between crown and trunk top rather than opening one.
+ */
+// prettier-ignore
+const DOME_CROWN: CrownLayout = {
+  cards: [
+    { yaw: 0, tilt: 0, offR: 0, yBot: -1.03, yTop: 0.8, rBot: CROWN_RIM, rTop: 0.72, cell: 0, mirror: false },
+    { yaw: Math.PI / 2, tilt: 0, offR: 0, yBot: -0.9, yTop: 1.0, rBot: CROWN_RIM, rTop: 0.7, cell: 2, mirror: false },
+    { yaw: Math.PI / 4, tilt: 0, offR: 0, yBot: -0.99, yTop: 0.86, rBot: 1.14, rTop: 0.88, cell: 1, mirror: true },
+    { yaw: 2.3562, tilt: 0.06, offR: 0.58, yBot: -0.44, yTop: 0.54, rBot: 0.54, rTop: 0.46, cell: 3, mirror: true },
+    { yaw: 0.9, tilt: 0, offR: 0.5, yBot: 0.08, yTop: 0.92, rBot: 0.44, rTop: 0.32, cell: 1, mirror: false },
+    { yaw: 1.9, tilt: -0.12, offR: 0.52, yBot: -0.8, yTop: 0.02, rBot: 0.5, rTop: 0.48, cell: 3, mirror: false },
+  ],
+  caps: [
+    // Sized to sit INSIDE the mass at their own height - the old top cap stood
+    // 0.06 radii proud of the crown and read as a plate.
+    { yaw: 0.35, y: 0.42, halfR: 0.62, cell: 2, mirror: true },
+    { yaw: 1.15, y: -0.34, halfR: 0.8, cell: 0, mirror: false },
+  ],
+};
+
+/**
+ * Conifer crown: three branch whorls and a leader.
+ *
+ * The old cage drove the same rectangular cards through a `taper` that pulled
+ * their top edge in to 15% - a cone in card form, which the inscribed leaf
+ * blob then rounds into a smooth teardrop. A spruce is not a cone: it is a
+ * stack of whorls, each flaring out past the one above it, with a notch
+ * between. The bands below step the silhouette 0.87 -> 0.42 -> 0.63 -> 0.33 ->
+ * 0.48 -> 0.25 -> 0.31 -> 0 in radii, bottom to top; the notches run 0.23 to
+ * 0.45 radii deep, which is what it takes to still read at 17 m once the leaf
+ * cut-out has softened them. Tiers 1 and 3 share yaw 0 / PI/2 on purpose:
+ * staggering every tier hides the stack from any single viewpoint.
+ *
+ * Same envelope contract as DOME_CROWN, and its single cap sits at y = -0.80,
+ * where the skirt measures 0.87 radii, so it never shows as a rim the way the
+ * old cage's two caps did.
+ */
+// prettier-ignore
+const SPIRE_CROWN: CrownLayout = {
+  cards: [
+    { yaw: 0, tilt: 0, offR: 0, yBot: -1.03, yTop: -0.28, rBot: CROWN_RIM, rTop: 0.58, cell: 0, mirror: false },
+    { yaw: Math.PI / 2, tilt: 0, offR: 0, yBot: -1.0, yTop: -0.24, rBot: CROWN_RIM, rTop: 0.55, cell: 2, mirror: false },
+    { yaw: Math.PI / 4, tilt: 0.1, offR: 0, yBot: -0.4, yTop: 0.24, rBot: 0.86, rTop: 0.42, cell: 1, mirror: true },
+    { yaw: (Math.PI * 3) / 4, tilt: -0.1, offR: 0, yBot: -0.36, yTop: 0.2, rBot: 0.82, rTop: 0.4, cell: 3, mirror: true },
+    { yaw: 0, tilt: 0, offR: 0, yBot: 0.12, yTop: 0.68, rBot: 0.68, rTop: 0.26, cell: 1, mirror: false },
+    { yaw: Math.PI / 2, tilt: 0, offR: 0, yBot: 0.08, yTop: 0.62, rBot: 0.64, rTop: 0.24, cell: 3, mirror: false },
+    { yaw: Math.PI / 4, tilt: 0, offR: 0, yBot: 0.52, yTop: 1.0, rBot: 0.46, rTop: 0.05, cell: 2, mirror: true },
+  ],
+  caps: [{ yaw: 1.15, y: -0.8, halfR: 0.6, cell: 0, mirror: false }],
+};
+
+/**
+ * Eight-card cage for one crown: six or seven designed bands plus one or two
+ * horizontal caps that stop the canopy looking hollow from above.
+ *
+ * EIGHT CARDS IS THE BUDGET, not a starting point. Every card is 12
+ * non-indexed vertices (two triangles in both windings), so the geometry is
+ * 96 vertices / 32 triangles whichever layout is chosen - the same cost as the
+ * ball it replaces, and against ~288 for the three spheres before that. The
+ * redesign buys its silhouette by moving cards, not by adding them.
  */
 export const createCanopyCage = ({
   radius,
@@ -156,56 +290,65 @@ export const createCanopyCage = ({
   const origin = new THREE.Vector3(0, centerY, 0);
   const quat = new THREE.Quaternion();
   const euler = new THREE.Euler();
+  const layout = taper >= 0.5 ? SPIRE_CROWN : DOME_CROWN;
+  // `taper` narrows only the TOP edge of a band. The widest edge of every card
+  // is a BOTTOM edge, so no value of taper can move the unit envelope - which
+  // is what lets birch (0.15) and the exterior variants (0.12) share one
+  // footprint with the untapered oak.
+  const crown = 1 - taper * 0.35;
 
-  const addQuad = (
-    yaw: number,
+  const place = (
+    local: THREE.Vector3[],
     tilt: number,
-    scale: number,
-    offsetY: number,
-    cell: number,
-    mirror: boolean,
-    horizontal: boolean
+    yaw: number,
+    y: number,
+    flatDir: number[]
   ) => {
-    const r = radius * scale;
-    const h = height * scale;
-    // Bottom corners keep full width; top corners taper for conifers.
-    const topR = horizontal ? r : r * (1 - taper * 0.85);
-    const local: THREE.Vector3[] = horizontal
-      ? [
-          new THREE.Vector3(-r, 0, -r),
-          new THREE.Vector3(r, 0, -r),
-          new THREE.Vector3(r, 0, r),
-          new THREE.Vector3(-r, 0, r),
-        ]
-      : [
-          new THREE.Vector3(-r, -h, 0),
-          new THREE.Vector3(r, -h, 0),
-          new THREE.Vector3(topR, h, 0),
-          new THREE.Vector3(-topR, h, 0),
-        ];
-
     euler.set(tilt, yaw, 0);
     quat.setFromEuler(euler);
     const corners = local.map((v) =>
-      v.applyQuaternion(quat).add(new THREE.Vector3(0, centerY + offsetY * height, 0))
+      v.applyQuaternion(quat).add(new THREE.Vector3(0, centerY + y * height, 0))
     ) as [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3];
-
-    const flat = new THREE.Vector3(0, horizontal ? 1 : 0, horizontal ? 0 : 1).applyQuaternion(quat);
-    pushCard(b, corners, cellUv(cell, mirror), origin, 0.8, flat);
+    const flat = new THREE.Vector3(flatDir[0], flatDir[1], flatDir[2]).applyQuaternion(quat);
+    return { corners, flat };
   };
 
-  // Four vertical cards through the axis.
-  addQuad(0, 0, 1.0, 0, 0, false, false);
-  addQuad(Math.PI / 4, 0, 0.96, 0.04, 1, true, false);
-  addQuad(Math.PI / 2, 0, 1.0, -0.03, 2, false, false);
-  addQuad((Math.PI * 3) / 4, 0, 0.94, 0.06, 3, true, false);
-  // Two tilted cards: these are what give the silhouette depth when the
-  // camera is above or below the canopy midline.
-  addQuad(Math.PI / 8, 0.44, 0.82, 0.18, 1, false, false);
-  addQuad((Math.PI * 5) / 8, -0.44, 0.8, -0.16, 3, true, false);
-  // Caps, so the canopy is not see-through from directly above.
-  addQuad(0.35, 0, 0.78, 0.5, 2, true, true);
-  addQuad(1.15, 0, 0.9, -0.34, 0, false, true);
+  for (const c of layout.cards) {
+    const yHalf = (c.yTop - c.yBot) * 0.5 * height;
+    const d = c.offR * radius;
+    const rb = c.rBot * radius;
+    const rt = c.rTop * crown * radius;
+    const { corners, flat } = place(
+      [
+        new THREE.Vector3(d - rb, -yHalf, 0),
+        new THREE.Vector3(d + rb, -yHalf, 0),
+        new THREE.Vector3(d + rt, yHalf, 0),
+        new THREE.Vector3(d - rt, yHalf, 0),
+      ],
+      c.tilt,
+      c.yaw,
+      (c.yBot + c.yTop) * 0.5,
+      [0, 0, 1]
+    );
+    pushCard(b, corners, cellUv(c.cell, c.mirror), origin, 0.8, flat);
+  }
+
+  for (const c of layout.caps) {
+    const r = c.halfR * radius;
+    const { corners, flat } = place(
+      [
+        new THREE.Vector3(-r, 0, -r),
+        new THREE.Vector3(r, 0, -r),
+        new THREE.Vector3(r, 0, r),
+        new THREE.Vector3(-r, 0, r),
+      ],
+      0,
+      c.yaw,
+      c.y,
+      [0, 1, 0]
+    );
+    pushCard(b, corners, cellUv(c.cell, c.mirror), origin, 0.8, flat);
+  }
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(b.position, 3));
@@ -383,31 +526,126 @@ interface SpeciesDef {
   kind: FoliageKind;
 }
 
-const makeTrunk = (
-  topRadius: number,
-  bottomRadius: number,
-  height: number
+/**
+ * A trunk from a designed (radius, y) profile, base sitting on y = 0.
+ *
+ * These were `CylinderGeometry(topRadius, bottomRadius, height, 12)` - a
+ * straight cone, which is a table leg, not a trunk. What makes a trunk read as
+ * grown rather than driven into the ground is the ROOT FLARE: a short concave
+ * swell at the foot, a knee where it meets the bole, and then a bole that
+ * tapers on a slight inward curve rather than a straight line. All three are
+ * in the profiles below, and all three carry at the 8-10 m the camera actually
+ * walks past a village or farm tree at.
+ *
+ * Twelve sides is kept exactly as it was and is NOT the redesign here: the
+ * chord argument for 12 (0.207 m at the oak's 0.64 m base, against 0.400 m at
+ * 6) is unchanged, and the flare is a profile change, not a facet change.
+ *
+ * ENVELOPE. Every profile below opens at (bottomRadius, -height/2) and closes
+ * at (topRadius, +height/2), and only ever dips INSIDE the straight line
+ * between them, so max radius and the y range are bit-identical to the
+ * cylinder each replaces (verified 0.00 mm by
+ * scripts/blender/machine_part_preview.py --spec specs/trees-canopy.json).
+ *
+ * COST. One shared module-level geometry per species drawn through an
+ * InstancedMesh, so the extra vertices are a one-off scene cost at any tree
+ * count: oak 76 -> 156, birch 76 -> 143, pine 76 -> 195 - +333 vertices for
+ * every tree on the site.
+ */
+const createTrunkGeometry = (
+  profile: readonly (readonly [number, number])[],
+  segments = 12
 ): THREE.BufferGeometry => {
-  const geo = new THREE.CylinderGeometry(topRadius, bottomRadius, height, 8);
-  geo.translate(0, height * 0.5, 0);
+  const geo = new THREE.LatheGeometry(
+    profile.map(([r, y]) => new THREE.Vector2(r, y)),
+    segments
+  );
+  // LatheGeometry lays v out by PROFILE INDEX (`uv.y = j / (points.length-1)`),
+  // so the samples clustered in the root flare would squeeze the bark map's
+  // bottom fifth over the flare and stretch the rest up the bole.
+  // CylinderGeometry - what these replace - lays v out linearly in height, and
+  // the bark maps are ClampToEdge at repeat 1, so re-deriving v from y is what
+  // keeps bark density exactly where it was.
+  const pos = geo.getAttribute('position');
+  const uv = geo.getAttribute('uv');
+  const yMin = profile[0][1];
+  const span = profile[profile.length - 1][1] - yMin || 1;
+  for (let i = 0; i < uv.count; i += 1) uv.setY(i, (pos.getY(i) - yMin) / span);
+  uv.needsUpdate = true;
+  geo.translate(0, span * 0.5, 0);
   return geo;
 };
 
+/** Oak: heavy buttress flare over the bottom 0.36 m, then a columnar bole on a
+ *  concave taper. Envelope: r 0.32 -> 0.18, y +-1.3 (2.6 m). */
+const OAK_TRUNK_PROFILE: readonly (readonly [number, number])[] = [
+  [0.0, -1.3],
+  [0.32, -1.3], // flare foot - envelope max radius
+  [0.29, -1.245],
+  [0.256, -1.16],
+  [0.232, -1.055],
+  [0.223, -0.94], // knee
+  [0.211, -0.74],
+  [0.203, -0.3],
+  [0.196, 0.22],
+  [0.189, 0.76],
+  [0.18, 1.3], // envelope top radius / max y
+  [0.0, 1.3],
+];
+
+/** Birch: a tight basal swell over a long clean bole, deliberately NOT the
+ *  oak's buttress - the species read is the point. Envelope: 0.16 -> 0.10,
+ *  y +-1.55 (3.1 m). */
+const BIRCH_TRUNK_PROFILE: readonly (readonly [number, number])[] = [
+  [0.0, -1.55],
+  [0.16, -1.55],
+  [0.142, -1.5],
+  [0.126, -1.428],
+  [0.12, -1.33], // swell shoulder, only 0.22 m up
+  [0.117, -1.0],
+  [0.114, -0.4],
+  [0.11, 0.3],
+  [0.105, 0.95],
+  [0.1, 1.55],
+  [0.0, 1.55],
+];
+
+/** Conifer: modest flare, a strong straight taper, and two branch-whorl
+ *  collars - a slow swell into the whorl and a step in above it, which is how
+ *  a whorl scar actually sits. Envelope: 0.24 -> 0.12, y +-1.5 (3 m). */
+const PINE_TRUNK_PROFILE: readonly (readonly [number, number])[] = [
+  [0.0, -1.5],
+  [0.24, -1.5],
+  [0.211, -1.432],
+  [0.187, -1.33],
+  [0.174, -1.19], // knee
+  [0.163, -0.85],
+  [0.157, -0.58],
+  [0.164, -0.47], // whorl collar 1
+  [0.148, -0.43],
+  [0.141, 0.0],
+  [0.136, 0.34],
+  [0.142, 0.43], // whorl collar 2
+  [0.128, 0.47],
+  [0.12, 1.5],
+  [0.0, 1.5],
+];
+
 const SPECIES: Record<TreeSpecies, SpeciesDef> = {
   oak: {
-    trunk: makeTrunk(0.18, 0.32, 2.6),
+    trunk: createTrunkGeometry(OAK_TRUNK_PROFILE),
     canopy: createCanopyCage({ radius: 1.85, height: 1.55, centerY: 3.3, taper: 0 }),
     trunkMaterial: TREE_MATERIALS.trunk,
     kind: 'broadleaf',
   },
   birch: {
-    trunk: makeTrunk(0.1, 0.16, 3.1),
+    trunk: createTrunkGeometry(BIRCH_TRUNK_PROFILE),
     canopy: createCanopyCage({ radius: 1.25, height: 1.5, centerY: 3.6, taper: 0.15 }),
     trunkMaterial: TREE_MATERIALS.birchTrunk,
     kind: 'broadleaf',
   },
   pine: {
-    trunk: makeTrunk(0.12, 0.24, 3.0),
+    trunk: createTrunkGeometry(PINE_TRUNK_PROFILE),
     canopy: createCanopyCage({ radius: 1.45, height: 1.9, centerY: 3.1, taper: 1 }),
     // Pine reuses the oak bark map; there is no dedicated pine trunk material
     // in sharedMaterials and adding one is not this domain's file.
@@ -738,6 +976,12 @@ InstancedGrassClutter.displayName = 'InstancedGrassClutter';
 // MULCH DECALS
 // ============================================================
 
+// 14 segments looks coarse for a ring instanced out to 3-4.6 m across, and it
+// is deliberately left alone: `generateMulchDecal` writes alpha = edge^2 * 0.82
+// with edge = 1 - (d + wobble), so alpha is exactly 0 at d = 1, and the chord
+// midpoints of a 14-gon sit at d = 0.9749 - alpha 0.0005, well under one 8-bit
+// level. The polygon silhouette is not merely soft, it is unrenderable; more
+// segments would buy nothing but vertices.
 const MULCH_GEOMETRY = new THREE.CircleGeometry(1, 14);
 MULCH_GEOMETRY.rotateX(-Math.PI / 2);
 
