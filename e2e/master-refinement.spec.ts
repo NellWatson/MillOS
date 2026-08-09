@@ -259,9 +259,11 @@ test.describe('MillOS master refinement runtime', () => {
     await expect(
       overviewSidebar.getByRole('heading', { name: 'Batch genealogy and quality' })
     ).toBeVisible();
-    await expect(
-      overviewSidebar.getByRole('combobox', { name: 'Select MillOS version' })
-    ).toHaveValue('v0.40');
+    const versionSelector = overviewSidebar.getByRole('combobox', {
+      name: 'Select MillOS version',
+    });
+    await expect(versionSelector).toHaveValue('v0.40');
+    await expect(versionSelector.locator('option')).toHaveText(['0.40', '0.30', '0.20', '0.10']);
     await expect(
       overviewSidebar.getByRole('alert', { name: 'Mill Overview unavailable' })
     ).toHaveCount(0);

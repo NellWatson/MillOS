@@ -15,12 +15,12 @@ import {
 import { DockMode } from '../dock/Dock';
 import { MachineData } from '../../../types';
 import { AboutModal } from '../../AboutModal';
-import pkg from '../../../../package.json';
 import { RecoverableFeatureBoundary } from '../../ErrorBoundary';
 import { recoverableLazy } from '../../../utils/recoverableLazy';
-
-// "0.40.0" -> "v0.40" (matches the versioned deployment base paths)
-const CURRENT_VERSION = `v${pkg.version.split('.').slice(0, 2).join('.')}`;
+import {
+  CURRENT_RELEASE_VERSION,
+  SELECTABLE_RELEASE_VERSIONS,
+} from '../../../config/releaseVersions';
 
 // Lazy load the heavy panels
 const AICommandCenter = recoverableLazy(() =>
@@ -201,16 +201,18 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
                     </span>
                     <select
                       className="text-[9px] ml-1 bg-transparent border-none cursor-pointer text-slate-400 hover:text-orange-400 transition-colors"
-                      value={pendingVersion ?? CURRENT_VERSION}
+                      value={pendingVersion ?? CURRENT_RELEASE_VERSION}
                       onChange={(e) => {
                         const value = e.target.value;
-                        setPendingVersion(value === CURRENT_VERSION ? null : value);
+                        setPendingVersion(value === CURRENT_RELEASE_VERSION ? null : value);
                       }}
                       aria-label="Select MillOS version"
                     >
-                      <option value={CURRENT_VERSION}>{CURRENT_VERSION.slice(1)}</option>
-                      <option value="v0.20">0.20</option>
-                      <option value="v0.10">0.10</option>
+                      {SELECTABLE_RELEASE_VERSIONS.map((version) => (
+                        <option key={version} value={version}>
+                          {version.slice(1)}
+                        </option>
+                      ))}
                     </select>
                     {pendingVersion && (
                       <button
