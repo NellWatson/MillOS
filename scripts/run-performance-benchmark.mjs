@@ -305,11 +305,17 @@ async function waitForRuntimeStage(page, label, predicate, timeoutMs, diagnostic
 function summarizeMotion(samples) {
   const numericTelemetryKeys = [
     'speed',
+    'acceleration',
     'steeringAngle',
+    'innerSteeringAngle',
+    'outerSteeringAngle',
     'wheelRotation',
+    'wheelTravel',
+    'routeDistance',
     'forkHeight',
     'mastTilt',
     'trailerAngle',
+    'articulation',
     'doorOpenAmount',
     'landingGearAmount',
   ];
@@ -370,6 +376,43 @@ function summarizeMotion(samples) {
       ])
     ),
   }));
+}
+
+function evaluateMotionAcceptance(samples, summary) {
+  if (!options.motionEnabled) return { passed: true, checks: [] };
+  const expectedIds = ['forklift-1', 'forklift-2', 'receiving-truck', 'shipping-truck'];
+  const observedIds = new Set(summary.map((entity) => entity.id));
+  const completeFleet = expectedIds.every((id) => observedIds.has(id));
+  const finiteTelemetry = samples.every((sample) =>
+    sample.entities.every(
+      (entity) =>
+        Number.isFinite(entity.speed) &&
+        Number.isFinite(entity.steeringAngle) &&
+        Number.isFinite(entity.wheelTravel) &&
+        Number.isFinite(entity.routeDistance)
+    )
+  );
+  const boundedSteering = samples.every((sample) =>
+    sample.entities.every((entity) => Math.abs(entity.steeringAngle ?? 0) <= 0.61)
+  );
+  const boundedArticulation = samples.every((sample) =>
+    sample.entities
+      .filter((entity) => entity.type === 'truck')
+      .every((entity) => Math.abs(entity.articulation ?? 0) <= 0.701)
+  );
+  const movingEntities = summary.filter((entity) => entity.distance > 0.25);
+  const wheelTravelFollowsMotion = movingEntities.every(
+    (entity) => Math.abs(entity.telemetry.wheelTravel?.delta ?? 0) > 0.1
+  );
+  const checks = [
+    { id: 'complete-fleet', passed: completeFleet, observed: [...observedIds].sort() },
+    { id: 'finite-telemetry', passed: finiteTelemetry },
+    { id: 'bounded-steering', passed: boundedSteering },
+    { id: 'bounded-articulation', passed: boundedArticulation },
+    { id: 'vehicle-motion-observed', passed: movingEntities.length > 0 },
+    { id: 'wheel-travel-follows-motion', passed: wheelTravelFollowsMotion },
+  ];
+  return { passed: checks.every((check) => check.passed), checks };
 }
 
 async function waitForRuntimeSettled(
@@ -620,6 +663,8 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
       screenshotError = error instanceof Error ? error.message : String(error);
     });
   const budget = evaluateBudgets(snapshot);
+  const motionSummary = summarizeMotion(motionSamples);
+  const motionAcceptance = evaluateMotionAcceptance(motionSamples, motionSummary);
   const result = {
     scene,
     variant,
@@ -629,6 +674,7 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
     snapshot,
     domStacks,
     budget,
+    motionAcceptance,
     diagnostics: {
       consoleErrors,
       pageErrors,
@@ -640,7 +686,7 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
     startup,
     motionStart,
     motionSamples,
-    motionSummary: summarizeMotion(motionSamples),
+    motionSummary,
     motionDelta:
       motionStart === null
         ? null
@@ -743,7 +789,7 @@ async function main() {
     systemComparisons: {
       scada: scadaComparisons,
     },
-    passed: results.every((result) => result.budget.passed),
+    passed: results.every((result) => result.budget.passed && result.motionAcceptance.passed),
     results,
   };
   const reportPath = path.join(options.output, 'benchmark.json');
@@ -756,8 +802,9 @@ async function main() {
         `${result.scene} startup: ${metric.firstFrameAt.toFixed(1)} ms first useful frame, DPR ${metric.canvas.effectiveDpr.toFixed(2)}, ${result.budget.passed ? 'PASS' : 'FAIL'}`
       );
     } else {
+      const passed = result.budget.passed && result.motionAcceptance.passed;
       console.log(
-        `${result.scene}${options.compareScada ? ` (${result.variant})` : ''}: ${metric.averageFps.toFixed(1)} FPS, p95 ${metric.p95FrameMs.toFixed(1)} ms, ${metric.renderer.calls} calls, DPR ${metric.canvas.effectiveDpr.toFixed(2)}, world ${metric.worldIntegrity?.passed ? 'continuous' : options.disabledSystems.length > 0 ? 'isolated' : 'BROKEN'}, ${result.budget.passed ? 'PASS' : 'FAIL'}`
+        `${result.scene}${options.compareScada ? ` (${result.variant})` : ''}: ${metric.averageFps.toFixed(1)} FPS, p95 ${metric.p95FrameMs.toFixed(1)} ms, ${metric.renderer.calls} calls, DPR ${metric.canvas.effectiveDpr.toFixed(2)}, world ${metric.worldIntegrity?.passed ? 'continuous' : options.disabledSystems.length > 0 ? 'isolated' : 'BROKEN'}, ${options.motionEnabled ? `motion ${result.motionAcceptance.passed ? 'valid' : 'INVALID'}, ` : ''}${passed ? 'PASS' : 'FAIL'}`
       );
     }
   }

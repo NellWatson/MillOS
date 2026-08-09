@@ -34,8 +34,8 @@ import { getFacilityBaseLoad, getMachineEnergy } from '../utils/energyCalculatio
 
 // Tracks the receiving dock's docked state across ticks so a false->true
 // transition (a grain truck arriving) triggers exactly one silo delivery.
-let _lastReceivingDocked = false;
-let _lastShippingDocked = false;
+let _lastReceivingTransferReady = false;
+let _lastShippingTransferReady = false;
 let _shippingLoad: DispatchLoadSnapshot = {
   cycleId: 'shipping-0',
   status: 'away',
@@ -631,21 +631,22 @@ function unifiedGameTick(ctx: TickContext): void {
   // 4c. Grain deliveries: when a receiving truck docks, it refills the
   // emptiest silo — without this the silos drain dry in under an hour of
   // simulation and the flow network starves permanently.
-  const receivingDocked = useTruckScheduleStore.getState().truckSchedule.receiving.truckDocked;
-  if (receivingDocked && !_lastReceivingDocked) {
+  const receivingTransferReady =
+    useTruckScheduleStore.getState().truckSchedule.receiving.transferReady;
+  if (receivingTransferReady && !_lastReceivingTransferReady) {
     flowStore.receiveGrainDelivery(GRAIN_DELIVERY_KG);
     // The same truck also carries a spare-parts resupply, closing the
     // maintenance loop: consume parts to repair, trucks bring them back.
     useBreakdownStore.getState().restockDelivery();
   }
-  _lastReceivingDocked = receivingDocked;
+  _lastReceivingTransferReady = receivingTransferReady;
 
   // 4d. Loading is a docked operation. Product remains conserved in finished
   // goods until the vehicle actually departs, when the material store creates
   // the authoritative dispatch manifest. The load snapshot is operational
   // intent only, never a second inventory ledger.
   const shippingSchedule = useTruckScheduleStore.getState().truckSchedule.shipping;
-  const shippingDocked = shippingSchedule.truckDocked;
+  const shippingTransferReady = shippingSchedule.transferReady;
   const dockFlow = useMaterialFlowStore.getState();
   const reasonByCode = {
     certification_expired: 'Quality certification is expired.',
@@ -654,7 +655,7 @@ function unifiedGameTick(ctx: TickContext): void {
     batch_quality_hold: 'Available production batches remain on quality hold.',
     batch_recalled: 'Recalled production remains isolated from dispatch.',
   } as const;
-  if (shippingDocked && !_lastShippingDocked) {
+  if (shippingTransferReady && !_lastShippingTransferReady) {
     _shippingLoad = {
       cycleId: `shipping-${shippingSchedule.departureCount + 1}`,
       status: 'loading',
@@ -666,7 +667,7 @@ function unifiedGameTick(ctx: TickContext): void {
     };
   }
 
-  if (shippingDocked) {
+  if (shippingTransferReady) {
     const qualityStatus = getDispatchQualityStatus(
       useQCLabStore.getState().qcLab,
       dockFlow.productionBatches
@@ -735,7 +736,7 @@ function unifiedGameTick(ctx: TickContext): void {
         acknowledged: false,
       });
     }
-  } else if (_lastShippingDocked) {
+  } else if (_lastShippingTransferReady) {
     const actualKg = dockFlow.shipFinishedGoods(_shippingLoad.loadedKg, _shippingLoad.materialType);
     _shippingLoad = {
       ..._shippingLoad,
@@ -757,7 +758,7 @@ function unifiedGameTick(ctx: TickContext): void {
       blockReason: null,
     };
   }
-  _lastShippingDocked = shippingDocked;
+  _lastShippingTransferReady = shippingTransferReady;
 
   const latestProduction = useProductionStore.getState();
   const latestFlow = useMaterialFlowStore.getState();

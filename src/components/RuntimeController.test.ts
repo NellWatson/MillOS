@@ -67,19 +67,37 @@ describe('readRuntimeMotionTelemetry', () => {
     expect(
       readRuntimeMotionTelemetry({
         speed: 2.75,
+        acceleration: -0.625,
         steeringAngle: -0.125,
+        innerSteeringAngle: -0.15,
+        outerSteeringAngle: -0.1,
         wheelRotation: 12.34567,
+        wheelTravel: 9.75,
+        routeDistance: 4.25,
         forkHeight: Number.NaN,
         trailerAngle: 'invalid',
         cargo: 'pallet',
+        loadPhase: 'carrying',
+        stopReason: 'none',
+        active: true,
+        dockLocked: false,
         stopped: false,
         unrelated: 99,
       })
     ).toEqual({
       speed: 2.75,
+      acceleration: -0.625,
       steeringAngle: -0.125,
+      innerSteeringAngle: -0.15,
+      outerSteeringAngle: -0.1,
       wheelRotation: 12.3457,
+      wheelTravel: 9.75,
+      routeDistance: 4.25,
       cargo: 'pallet',
+      loadPhase: 'carrying',
+      stopReason: 'none',
+      active: true,
+      dockLocked: false,
       stopped: false,
     });
   });

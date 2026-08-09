@@ -191,6 +191,8 @@ interface ForkliftModelProps {
   forkHeightRef?: React.MutableRefObject<number>; // Ref for fork animation - avoids re-renders
   mastTiltRef?: React.MutableRefObject<number>;
   steeringAngleRef?: React.MutableRefObject<number>;
+  innerSteeringAngleRef?: React.MutableRefObject<number>;
+  outerSteeringAngleRef?: React.MutableRefObject<number>;
   /** Road/mill-floor film strength, 0..1. Per fleet vehicle, not shared. */
   grime?: number;
 }
@@ -478,6 +480,8 @@ const CompactForklift: React.FC<ForkliftModelProps> = ({
   forkHeightRef,
   mastTiltRef,
   steeringAngleRef,
+  innerSteeringAngleRef,
+  outerSteeringAngleRef,
 }) => {
   const modelRef = useRef<THREE.Group>(null);
   const wheelRef = useRef<THREE.InstancedMesh>(null);
@@ -585,10 +589,18 @@ const CompactForklift: React.FC<ForkliftModelProps> = ({
     compactWheelSpin.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, wheelAngleRef.current);
 
     compactWheelPositions.forEach(([x, y, z], index) => {
-      compactWheelSteering.setFromAxisAngle(
-        THREE.Object3D.DEFAULT_UP,
-        index >= 2 ? (steeringAngleRef?.current ?? 0) : 0
-      );
+      const centreSteering = steeringAngleRef?.current ?? 0;
+      const rearSteering =
+        index === 2
+          ? centreSteering > 0
+            ? (outerSteeringAngleRef?.current ?? centreSteering)
+            : (innerSteeringAngleRef?.current ?? centreSteering)
+          : index === 3
+            ? centreSteering > 0
+              ? (innerSteeringAngleRef?.current ?? centreSteering)
+              : (outerSteeringAngleRef?.current ?? centreSteering)
+            : 0;
+      compactWheelSteering.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, rearSteering);
       compactWheelQuaternion
         .copy(compactWheelSteering)
         .multiply(compactWheelOrientation)
@@ -1085,9 +1097,13 @@ const ProceduralForklift: React.FC<ForkliftModelProps> = ({
   isMoving,
   forkHeightRef,
   mastTiltRef,
+  steeringAngleRef,
+  innerSteeringAngleRef,
+  outerSteeringAngleRef,
 }) => {
   const modelRef = useRef<THREE.Group>(null);
   const wheelRefs = useRef<THREE.Mesh[]>([]);
+  const wheelGroupRefs = useRef<THREE.Group[]>([]);
   const mastAssemblyRef = useRef<THREE.Group>(null);
   const forkTiltRef = useRef<THREE.Group>(null);
   const cargoTiltRef = useRef<THREE.Group>(null);
@@ -1150,6 +1166,18 @@ const ProceduralForklift: React.FC<ForkliftModelProps> = ({
     }
 
     if (!modelRef.current) return;
+    const centreSteering = steeringAngleRef?.current ?? 0;
+    wheelGroupRefs.current.forEach((wheelGroup, index) => {
+      if (index < 2 || !wheelGroup) return;
+      wheelGroup.rotation.y =
+        index === 2
+          ? centreSteering > 0
+            ? (outerSteeringAngleRef?.current ?? centreSteering)
+            : (innerSteeringAngleRef?.current ?? centreSteering)
+          : centreSteering > 0
+            ? (innerSteeringAngleRef?.current ?? centreSteering)
+            : (outerSteeringAngleRef?.current ?? centreSteering);
+    });
     modelRef.current.getWorldPosition(worldPositionRef.current);
     if (!hasPreviousWorldPositionRef.current) {
       previousWorldPositionRef.current.copy(worldPositionRef.current);
@@ -1169,6 +1197,9 @@ const ProceduralForklift: React.FC<ForkliftModelProps> = ({
 
   const setWheelRef = (index: number) => (el: THREE.Mesh | null) => {
     if (el) wheelRefs.current[index] = el;
+  };
+  const setWheelGroupRef = (index: number) => (el: THREE.Group | null) => {
+    if (el) wheelGroupRefs.current[index] = el;
   };
 
   return (
@@ -1342,7 +1373,7 @@ const ProceduralForklift: React.FC<ForkliftModelProps> = ({
         [-0.7, 0.25, -0.9],
         [0.7, 0.25, -0.9],
       ].map((pos, i) => (
-        <group key={i} position={pos as [number, number, number]}>
+        <group ref={setWheelGroupRef(i)} key={i} position={pos as [number, number, number]}>
           {/* Tire */}
           <mesh ref={setWheelRef(i)} castShadow rotation={[0, 0, Math.PI / 2]}>
             <cylinderGeometry

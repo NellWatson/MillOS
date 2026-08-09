@@ -241,7 +241,7 @@ export const SafetyPanel: React.FC = () => {
                       aria-label={`Set weather to ${opt.label}`}
                       className={`px-2 py-1.5 rounded text-xs font-medium transition-colors ${
                         weather === opt.value
-                          ? 'bg-blue-600 text-white'
+                          ? 'bg-blue-700 text-white'
                           : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700'
                       }`}
                     >

@@ -647,6 +647,14 @@ export const useProductionStore = create<ProductionStore>()(
     },
     setTruckDocked: (...args: Parameters<TruckScheduleStore['setTruckDocked']>) =>
       useTruckScheduleStore.getState().setTruckDocked(...args),
+    setTruckTransferReady: (...args: Parameters<TruckScheduleStore['setTruckTransferReady']>) =>
+      useTruckScheduleStore.getState().setTruckTransferReady(...args),
+    setTruckActive: (...args: Parameters<TruckScheduleStore['setTruckActive']>) =>
+      useTruckScheduleStore.getState().setTruckActive(...args),
+    consumeTruckArrival: (...args: Parameters<TruckScheduleStore['consumeTruckArrival']>) =>
+      useTruckScheduleStore.getState().consumeTruckArrival(...args),
+    setTruckLifecycle: (...args: Parameters<TruckScheduleStore['setTruckLifecycle']>) =>
+      useTruckScheduleStore.getState().setTruckLifecycle(...args),
     updateNextArrival: (...args: Parameters<TruckScheduleStore['updateNextArrival']>) =>
       useTruckScheduleStore.getState().updateNextArrival(...args),
     recordTruckDeparture: (...args: Parameters<TruckScheduleStore['recordTruckDeparture']>) =>

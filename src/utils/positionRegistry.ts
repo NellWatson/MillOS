@@ -8,6 +8,7 @@ export interface EntityPosition {
   dirX?: number;
   dirZ?: number;
   isStopped?: boolean;
+  kind?: 'forklift' | 'truck';
 }
 
 export interface Obstacle {
@@ -32,9 +33,10 @@ class PositionRegistry {
     dirX?: number,
     dirZ?: number,
     isStopped?: boolean,
-    y = 0
+    y = 0,
+    kind: EntityPosition['kind'] = 'forklift'
   ): void {
-    this.positions.set(id, { id, x, y, z, dirX, dirZ, isStopped });
+    this.positions.set(id, { id, x, y, z, dirX, dirZ, isStopped, kind });
   }
 
   unregister(id: string): void {
@@ -117,7 +119,7 @@ class PositionRegistry {
   }
 
   getAllForklifts(): EntityPosition[] {
-    return [...this.positions.values()];
+    return [...this.positions.values()].filter((position) => position.kind !== 'truck');
   }
 }
 

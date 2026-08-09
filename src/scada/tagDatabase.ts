@@ -784,6 +784,115 @@ const utilityAssetTags: TagDefinition[] = UTILITY_ASSET_DEFINITIONS.flatMap((ass
   ];
 });
 
+export interface VehicleTagIds {
+  speed: string;
+  steeringOrArticulation: string;
+  phase: string;
+  interlock: string;
+}
+
+/** Stable read-only telemetry identities for the autonomous vehicle fleet. */
+export const VEHICLE_TAG_IDS = {
+  'forklift-1': {
+    speed: 'FLT01.ST001.PV',
+    steeringOrArticulation: 'FLT01.PT001.PV',
+    phase: 'FLT01.ZS001.PV',
+    interlock: 'FLT01.ZS002.PV',
+  },
+  'forklift-2': {
+    speed: 'FLT02.ST001.PV',
+    steeringOrArticulation: 'FLT02.PT001.PV',
+    phase: 'FLT02.ZS001.PV',
+    interlock: 'FLT02.ZS002.PV',
+  },
+  'shipping-truck': {
+    speed: 'TRUCK_SHIPPING.ST001.PV',
+    steeringOrArticulation: 'TRUCK_SHIPPING.PT001.PV',
+    phase: 'TRUCK_SHIPPING.ZS001.PV',
+    interlock: 'TRUCK_SHIPPING.ZS002.PV',
+  },
+  'receiving-truck': {
+    speed: 'TRUCK_RECEIVING.ST001.PV',
+    steeringOrArticulation: 'TRUCK_RECEIVING.PT001.PV',
+    phase: 'TRUCK_RECEIVING.ZS001.PV',
+    interlock: 'TRUCK_RECEIVING.ZS002.PV',
+  },
+} as const satisfies Readonly<Record<string, VehicleTagIds>>;
+
+const vehicleTags: TagDefinition[] = Object.entries(VEHICLE_TAG_IDS).flatMap(([vehicleId, ids]) => {
+  const isTruck = vehicleId.endsWith('-truck');
+  const label = vehicleId
+    .split('-')
+    .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+  return [
+    {
+      id: ids.speed,
+      name: `${label} Ground Speed`,
+      description: `Distance-derived ground speed for autonomous ${label}`,
+      dataType: 'FLOAT32' as const,
+      accessMode: 'READ' as const,
+      engUnit: isTruck ? 'km/h' : 'm/s',
+      engLow: 0,
+      engHigh: isTruck ? 80 : 4,
+      deadband: 0.05,
+      machineId: vehicleId,
+      group: 'SPEED' as const,
+      simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+    },
+    {
+      id: ids.steeringOrArticulation,
+      name: `${label} ${isTruck ? 'Articulation' : 'Steering'}`,
+      description: isTruck
+        ? `Tractor to trailer articulation angle for autonomous ${label}`
+        : `Rear axle steering angle for autonomous ${label}`,
+      dataType: 'FLOAT32' as const,
+      accessMode: 'READ' as const,
+      engUnit: 'deg',
+      engLow: isTruck ? -40 : -35,
+      engHigh: isTruck ? 40 : 35,
+      alarmLo: isTruck ? -32 : undefined,
+      alarmHi: isTruck ? 32 : undefined,
+      alarmLoLo: isTruck ? -38 : undefined,
+      alarmHiHi: isTruck ? 38 : undefined,
+      deadband: 0.25,
+      machineId: vehicleId,
+      group: 'POSITION' as const,
+      simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+    },
+    {
+      id: ids.phase,
+      name: `${label} Motion Phase`,
+      description: `Encoded deterministic route or service phase for autonomous ${label}`,
+      dataType: 'INT16' as const,
+      accessMode: 'READ' as const,
+      engUnit: 'state',
+      engLow: 0,
+      engHigh: 32,
+      deadband: 0,
+      machineId: vehicleId,
+      group: 'STATUS' as const,
+      simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+    },
+    {
+      id: ids.interlock,
+      name: `${label} ${isTruck ? 'Transfer Interlock' : 'Stop Reason'}`,
+      description: isTruck
+        ? `Dock transfer-ready permissive for autonomous ${label}`
+        : `Encoded safety or logistics stop reason for autonomous ${label}`,
+      dataType: isTruck ? ('BOOL' as const) : ('INT16' as const),
+      accessMode: 'READ' as const,
+      engUnit: isTruck ? 'ready' : 'state',
+      engLow: 0,
+      engHigh: isTruck ? 1 : 16,
+      deadband: 0,
+      machineId: vehicleId,
+      group: 'STATUS' as const,
+      simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+    },
+  ];
+});
+
 /** Stable IDs used by the material-flow bridge and control workspace. */
 export const OPERATION_TAG_IDS = {
   rawInventory: 'OPERATIONS.WT001.PV',
@@ -1007,6 +1116,7 @@ export const MILL_TAGS: TagDefinition[] = [
   ...packerTags, // 12 tags
   ...utilityTags, // 10 tags
   ...utilityAssetTags, // 15 tags (5 visible vessels x 3 instruments)
+  ...vehicleTags, // 16 tags (4 autonomous vehicles x 4)
   ...operationalTags, // 13 tags
 ];
 
@@ -1041,7 +1151,7 @@ export function getTagsWithAlarms(): TagDefinition[] {
   );
 }
 
-// Tag database loaded: 106 tags total
+// Tag database loaded: 122 tags total
 // Zone 1 (Silos): 20 tags, Zone 2 (Mills): 24 tags, Zone 3 (Sifters): 12 tags
 // Zone 4 (Packers): 12 tags, Utility: 10 tags, Visible utility assets: 15 tags,
-// Operations: 13 tags
+// Autonomous vehicles: 16 tags, Operations: 13 tags

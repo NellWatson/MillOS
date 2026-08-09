@@ -11,7 +11,7 @@ import { MILL_TAGS } from '../tagDatabase';
 
 describe('SCADA Integration', () => {
   it('keeps the complete tag registry unique and its authored baselines deterministic', () => {
-    expect(MILL_TAGS).toHaveLength(106);
+    expect(MILL_TAGS).toHaveLength(122);
     expect(new Set(MILL_TAGS.map((tag) => tag.id)).size).toBe(MILL_TAGS.length);
 
     const siloMoistureBaselines = MILL_TAGS.filter((tag) => tag.id.endsWith('.MT001.PV')).map(

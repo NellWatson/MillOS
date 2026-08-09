@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { MILL_TAGS, OPERATION_TAG_IDS, UTILITY_ASSET_TAG_IDS } from './scada/tagDatabase';
+import {
+  MILL_TAGS,
+  OPERATION_TAG_IDS,
+  UTILITY_ASSET_TAG_IDS,
+  VEHICLE_TAG_IDS,
+} from './scada/tagDatabase';
 import { buildOperationalTelemetry } from './store';
 import { useBreakdownStore } from './stores/breakdownStore';
 import { useMaterialFlowStore } from './stores/materialFlowStore';
@@ -89,5 +94,45 @@ describe('buildOperationalTelemetry', () => {
       expect(telemetry[tagIds.temperature]).toBe(asset.temperatureC);
       expect(telemetry[tagIds.pressure]).toBe(asset.pressureBar);
     });
+  });
+
+  it('publishes distance-derived autonomous vehicle state without synthetic noise', () => {
+    const telemetry = buildOperationalTelemetry(
+      useMaterialFlowStore.getState(),
+      useBreakdownStore.getState().partsInventory,
+      useQCLabStore.getState().qcLab,
+      [],
+      [],
+      [
+        {
+          id: 'forklift-1',
+          type: 'forklift',
+          speedMps: 1.25,
+          steeringRadians: Math.PI / 12,
+          phase: 'carrying',
+          stopReason: 'none',
+          articulationRadians: 0,
+          transferReady: false,
+        },
+        {
+          id: 'shipping-truck',
+          type: 'truck',
+          speedMps: -1.5,
+          steeringRadians: 0.1,
+          phase: 'transfer',
+          stopReason: 'docked',
+          articulationRadians: -Math.PI / 6,
+          transferReady: true,
+        },
+      ]
+    );
+
+    expect(telemetry[VEHICLE_TAG_IDS['forklift-1'].speed]).toBe(1.25);
+    expect(telemetry[VEHICLE_TAG_IDS['forklift-1'].steeringOrArticulation]).toBeCloseTo(15);
+    expect(telemetry[VEHICLE_TAG_IDS['forklift-1'].phase]).toBe(1);
+    expect(telemetry[VEHICLE_TAG_IDS['shipping-truck'].speed]).toBeCloseTo(5.4);
+    expect(telemetry[VEHICLE_TAG_IDS['shipping-truck'].steeringOrArticulation]).toBeCloseTo(-30);
+    expect(telemetry[VEHICLE_TAG_IDS['shipping-truck'].phase]).toBe(29);
+    expect(telemetry[VEHICLE_TAG_IDS['shipping-truck'].interlock]).toBe(1);
   });
 });

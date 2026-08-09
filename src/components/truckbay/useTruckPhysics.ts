@@ -16,6 +16,20 @@ export type TruckPhase =
   | 'accelerating'
   | 'leaving';
 
+export type TruckServicePhase =
+  | 'approach'
+  | 'parking-brake'
+  | 'chocking'
+  | 'dock-locking'
+  | 'leveler-deploying'
+  | 'door-opening'
+  | 'transfer'
+  | 'door-closing'
+  | 'leveler-stowing'
+  | 'dock-unlocking'
+  | 'unchocking'
+  | 'departure-ready';
+
 export interface TruckAnimState {
   phase: TruckPhase;
   x: number;
@@ -34,6 +48,13 @@ export interface TruckAnimState {
   doorsOpen: boolean;
   doorOpenAmount: number;
   landingGearAmount: number;
+  servicePhase: TruckServicePhase;
+  active: boolean;
+  parkingBrake: boolean;
+  chocksDeployed: boolean;
+  dockLocked: boolean;
+  levelerDeployed: boolean;
+  articulation: number;
 }
 
 export function isTruckDockedPhase(phase: TruckPhase): boolean {
@@ -217,6 +238,13 @@ const baseState = (
   doorsOpen: false,
   doorOpenAmount: 0,
   landingGearAmount: 0,
+  servicePhase: 'approach',
+  active: true,
+  parkingBrake: false,
+  chocksDeployed: false,
+  dockLocked: false,
+  levelerDeployed: false,
+  articulation: 0,
   ...overrides,
 });
 

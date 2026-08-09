@@ -12,7 +12,11 @@
 
 import { logger } from './utils/logger';
 import { scadaToStoreMetrics } from './scada/SCADABridge';
-import { OPERATION_TAG_IDS, UTILITY_ASSET_TAG_IDS } from './scada/tagDatabase';
+import { OPERATION_TAG_IDS, UTILITY_ASSET_TAG_IDS, VEHICLE_TAG_IDS } from './scada/tagDatabase';
+import {
+  vehicleTelemetryRegistry,
+  type VehicleTelemetrySnapshot,
+} from './simulation/vehicles/vehicleTelemetryRegistry';
 import type { MachineData } from './types';
 
 // Re-export everything from the new stores
@@ -57,7 +61,8 @@ export function buildOperationalTelemetry(
   parts: PartsInventory,
   qcLab: QCLabState,
   workOrders: MaintenanceWorkOrder[] = [],
-  utilityAssets: readonly UtilityAssetTelemetry[] = []
+  utilityAssets: readonly UtilityAssetTelemetry[] = [],
+  vehicleTelemetry: readonly VehicleTelemetrySnapshot[] = []
 ): Record<string, number> {
   let totalInventoryKg = 0;
   let rawInventoryKg = 0;
@@ -136,6 +141,68 @@ export function buildOperationalTelemetry(
     values[tagIds.pressure] = asset.pressureBar;
   });
 
+  const phaseCodes: Readonly<Record<string, number>> = {
+    idle: 0,
+    carrying: 1,
+    aligning: 2,
+    lowering: 3,
+    engaging: 4,
+    lifting: 5,
+    releasing: 6,
+    retracting: 7,
+    complete: 8,
+    entering: 10,
+    slowing: 11,
+    turning_in: 12,
+    straightening: 13,
+    positioning: 14,
+    stopping_to_back: 15,
+    backing: 16,
+    final_adjustment: 17,
+    docked: 18,
+    preparing_to_leave: 19,
+    pulling_out: 20,
+    turning_out: 21,
+    accelerating: 22,
+    leaving: 23,
+    'parking-brake': 24,
+    chocking: 25,
+    'dock-locking': 26,
+    'leveler-deploying': 27,
+    'door-opening': 28,
+    transfer: 29,
+    'door-closing': 30,
+    'leveler-stowing': 31,
+    'dock-unlocking': 32,
+    unchocking: 33,
+    'departure-ready': 34,
+  };
+  const stopCodes: Readonly<Record<string, number>> = {
+    none: 0,
+    'simulation-paused': 1,
+    'emergency-stop': 2,
+    'route-blocked': 3,
+    'vehicle-yield': 4,
+    'crossing-reservation': 5,
+    'logistics-interlock': 6,
+    'load-operation': 7,
+    'safety-hold': 8,
+    scheduled: 9,
+  };
+  vehicleTelemetry.forEach((vehicle) => {
+    const tagIds = VEHICLE_TAG_IDS[vehicle.id as keyof typeof VEHICLE_TAG_IDS];
+    if (!tagIds) return;
+    values[tagIds.speed] = Math.abs(vehicle.speedMps) * (vehicle.type === 'truck' ? 3.6 : 1);
+    values[tagIds.steeringOrArticulation] =
+      (vehicle.type === 'truck' ? vehicle.articulationRadians : vehicle.steeringRadians) *
+      (180 / Math.PI);
+    values[tagIds.phase] = phaseCodes[vehicle.phase] ?? 0;
+    values[tagIds.interlock] =
+      vehicle.type === 'truck'
+        ? Number(vehicle.transferReady)
+        : (stopCodes[vehicle.stopReason] ?? 0);
+  });
+
   return values;
 }
 
@@ -206,7 +273,8 @@ export function initializeSCADASync(): () => void {
           useBreakdownStore.getState().partsInventory,
           useQCLabStore.getState().qcLab,
           useBreakdownStore.getState().workOrders,
-          useOperationsCampaignStore.getState().utilityAssets
+          useOperationsCampaignStore.getState().utilityAssets,
+          vehicleTelemetryRegistry.getAll()
         );
         const nextSignature = Object.values(values)
           .map((value) => value.toFixed(3))

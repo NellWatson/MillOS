@@ -10,6 +10,7 @@ import { selectSafetyHoldActive, useGameSimulationStore } from '../stores/gameSi
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useMaterialFlowStore } from '../stores/materialFlowStore';
 import { useOperationsCampaignStore } from '../stores/operationsCampaignStore';
+import { useTruckScheduleStore, type TruckLifecyclePhase } from '../stores/truckScheduleStore';
 import { FLOOR_LAYERS, POLYGON_OFFSET, RENDER_ORDER } from '../constants/renderLayers';
 import { SITE_LAYOUT } from '../constants/siteLayout';
 import {
@@ -19,18 +20,19 @@ import {
   OptimizedStripeInstances,
 } from './TruckBayInstances';
 import {
-  calculateShippingTruckState,
-  calculateReceivingTruckState,
-  applyTruckSafetyHold,
-  getTruckBenchmarkControllerStart,
-  getTruckScheduleStatus,
-  isTruckDockedPhase,
   isTruckGateOpenPhase,
   isTruckGuidingPhase,
-  TRUCK_CYCLE_SECONDS,
   type TruckAnimState,
   type TruckPhase,
 } from './truckbay/useTruckPhysics';
+import {
+  createTruckController,
+  getTruckControllerPose,
+  stepTruckController,
+  type TruckControllerState,
+} from './truckbay/truckController';
+import { vehicleTelemetryRegistry } from '../simulation/vehicles/vehicleTelemetryRegistry';
+import { positionRegistry } from '../utils/positionRegistry';
 import { OptimizedTruckVisual, TRUCK_WHEEL_RADIUS } from './truckbay/OptimizedTruckBay';
 import { getRuntimeMode } from '../runtime/runtimeMode';
 import { PROCEDURAL_TEXTURES } from '../utils/sharedMaterials';
@@ -2688,42 +2690,108 @@ const DockLeveler: React.FC<{
   );
 };
 
+const TRUCK_CONTROLLER_STEP_SECONDS = 1 / 60;
+const MAXIMUM_TRUCK_CONTROLLER_DELTA_SECONDS = 0.5;
+
+interface DockVisualState {
+  readonly docked: boolean;
+  readonly doorsOpen: boolean;
+  readonly guiding: boolean;
+  readonly gateOpen: boolean;
+  readonly chocksDeployed: boolean;
+  readonly dockLocked: boolean;
+  readonly levelerDeployed: boolean;
+}
+
+const getBenchmarkTruckPhase = (scene: string, dock: 'shipping' | 'receiving'): TruckPhase => {
+  if (scene === 'shipping' && dock === 'shipping') return 'turning_in';
+  if (scene === 'receiving' && dock === 'receiving') return 'backing';
+  return 'entering';
+};
+
+const isTruckPhysicallyDocked = (state: TruckAnimState): boolean =>
+  state.active && (state.phase === 'docked' || state.phase === 'preparing_to_leave');
+
+const isTruckTransferReady = (state: TruckAnimState): boolean =>
+  state.phase === 'docked' &&
+  state.servicePhase === 'transfer' &&
+  state.parkingBrake &&
+  state.chocksDeployed &&
+  state.dockLocked &&
+  state.levelerDeployed &&
+  state.doorsOpen;
+
+const getTruckLifecycle = (state: TruckAnimState): TruckLifecyclePhase => {
+  if (!state.active) return 'scheduled';
+  if (isTruckTransferReady(state)) return 'servicing';
+  if (isTruckPhysicallyDocked(state)) return 'docked';
+  if (
+    state.phase === 'pulling_out' ||
+    state.phase === 'turning_out' ||
+    state.phase === 'accelerating' ||
+    state.phase === 'leaving'
+  ) {
+    return 'departing';
+  }
+  return 'approaching';
+};
+
+const getDockVisualState = (state: TruckAnimState): DockVisualState => ({
+  docked: isTruckPhysicallyDocked(state),
+  doorsOpen: state.doorsOpen,
+  guiding: isTruckGuidingPhase(state.phase),
+  gateOpen: isTruckGateOpenPhase(state.phase),
+  chocksDeployed: state.chocksDeployed,
+  dockLocked: state.dockLocked,
+  levelerDeployed: state.levelerDeployed,
+});
+
+const dockVisualChanged = (prior: DockVisualState, next: DockVisualState): boolean =>
+  prior.docked !== next.docked ||
+  prior.doorsOpen !== next.doorsOpen ||
+  prior.guiding !== next.guiding ||
+  prior.gateOpen !== next.gateOpen ||
+  prior.chocksDeployed !== next.chocksDeployed ||
+  prior.dockLocked !== next.dockLocked ||
+  prior.levelerDeployed !== next.levelerDeployed;
+
 export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
   const runtimeMode = getRuntimeMode();
-  const benchmarkControllerStart = runtimeMode.benchmark
-    ? getTruckBenchmarkControllerStart(runtimeMode.benchmarkScene)
-    : null;
-  const initialControllerTime = benchmarkControllerStart ?? 0;
-  const initialShippingCycle = initialControllerTime % TRUCK_CYCLE_SECONDS;
-  const initialReceivingCycle =
-    (initialControllerTime + TRUCK_CYCLE_SECONDS / 2) % TRUCK_CYCLE_SECONDS;
-  const initialShippingState = calculateShippingTruckState(
-    initialShippingCycle,
-    initialControllerTime
+  const initialShippingController = createTruckController(
+    'shipping',
+    true,
+    runtimeMode.benchmark
+      ? getBenchmarkTruckPhase(runtimeMode.benchmarkScene, 'shipping')
+      : 'entering'
   );
-  const initialReceivingState = calculateReceivingTruckState(
-    initialReceivingCycle,
-    initialControllerTime
+  const initialReceivingController = createTruckController(
+    'receiving',
+    true,
+    runtimeMode.benchmark
+      ? getBenchmarkTruckPhase(runtimeMode.benchmarkScene, 'receiving')
+      : 'entering'
   );
+  const initialShippingState = getTruckControllerPose(initialShippingController);
+  const initialReceivingState = getTruckControllerPose(initialReceivingController);
   const shippingTruckRef = useRef<THREE.Group>(null);
   const receivingTruckRef = useRef<THREE.Group>(null);
   const shippingStateRef = useRef<TruckPhase>(initialShippingState.phase);
   const receivingStateRef = useRef<TruckPhase>(initialReceivingState.phase);
-  const [shippingDockVisual, setShippingDockVisual] = useState(() => ({
-    docked: isTruckDockedPhase(initialShippingState.phase),
-    doorsOpen: initialShippingState.doorsOpen,
-    guiding: isTruckGuidingPhase(initialShippingState.phase),
-    gateOpen: isTruckGateOpenPhase(initialShippingState.phase),
-  }));
-  const [receivingDockVisual, setReceivingDockVisual] = useState(() => ({
-    docked: isTruckDockedPhase(initialReceivingState.phase),
-    doorsOpen: initialReceivingState.doorsOpen,
-    guiding: isTruckGuidingPhase(initialReceivingState.phase),
-    gateOpen: isTruckGateOpenPhase(initialReceivingState.phase),
-  }));
+  const shippingServicePhaseRef = useRef(initialShippingState.servicePhase);
+  const receivingServicePhaseRef = useRef(initialReceivingState.servicePhase);
+  const [shippingDockVisual, setShippingDockVisual] = useState(() =>
+    getDockVisualState(initialShippingState)
+  );
+  const [receivingDockVisual, setReceivingDockVisual] = useState(() =>
+    getDockVisualState(initialReceivingState)
+  );
   const shippingDockVisualRef = useRef(shippingDockVisual);
   const receivingDockVisualRef = useRef(receivingDockVisual);
   const backupBeeperRef = useRef<{ shipping: boolean; receiving: boolean }>({
+    shipping: false,
+    receiving: false,
+  });
+  const engineMovingRef = useRef<{ shipping: boolean; receiving: boolean }>({
     shipping: false,
     receiving: false,
   });
@@ -2734,19 +2802,24 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
   // Dock status updates
   const updateDockStatus = useProductionStore((state) => state.updateDockStatus);
-  const setTruckDocked = useProductionStore((state) => state.setTruckDocked);
   const lastDockUpdateRef = useRef({ receiving: '', shipping: '' });
   const lastDockedStateRef = useRef({ shipping: false, receiving: false });
+  const lastTransferReadyRef = useRef({ shipping: false, receiving: false });
+  const lastLifecycleRef = useRef<{
+    shipping: TruckLifecyclePhase;
+    receiving: TruckLifecyclePhase;
+  }>({ shipping: 'approaching', receiving: 'approaching' });
 
-  // Single-clock truck state: the conserved material-flow clock drives pose,
-  // phase, wheels, doors, lights, and dock events. RealisticTruck reads the
-  // same state refs, so pause and time scaling cannot put subsystems out of
-  // phase.
+  // One deterministic kinematic authority drives path progress, speed,
+  // steering, trailer articulation, wheel travel, dock interlocks and events.
   const shippingTruckStateRef = useRef<TruckAnimState>(initialShippingState);
   const receivingTruckStateRef = useRef<TruckAnimState>(initialReceivingState);
+  const shippingControllerRef = useRef<TruckControllerState>(initialShippingController);
+  const receivingControllerRef = useRef<TruckControllerState>(initialReceivingController);
+  const shippingAccumulatorRef = useRef(0);
+  const receivingAccumulatorRef = useRef(0);
   const priorSimulationTimeRef = useRef(0);
   const simulationTimeInitializedRef = useRef(false);
-  const controllerTimeRef = useRef(initialControllerTime);
 
   // PERFORMANCE: Consolidate store subscriptions with useShallow
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
@@ -2761,8 +2834,11 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
   useEffect(() => {
     if (!audioReady) return undefined;
-    audioManager.startTruckEngine('shipping-truck', shippingTruckStateRef.current.speed !== 0);
-    audioManager.startTruckEngine('receiving-truck', receivingTruckStateRef.current.speed !== 0);
+    const shippingMoving = Math.abs(shippingTruckStateRef.current.speed) > 0.05;
+    const receivingMoving = Math.abs(receivingTruckStateRef.current.speed) > 0.05;
+    engineMovingRef.current = { shipping: shippingMoving, receiving: receivingMoving };
+    audioManager.startTruckEngine('shipping-truck', shippingMoving);
+    audioManager.startTruckEngine('receiving-truck', receivingMoving);
 
     return () => {
       audioManager.stopTruckEngine('shipping-truck');
@@ -2770,17 +2846,26 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
     };
   }, [audioReady]);
 
+  useEffect(
+    () => () => {
+      vehicleTelemetryRegistry.unregister('shipping-truck');
+      vehicleTelemetryRegistry.unregister('receiving-truck');
+      positionRegistry.unregister('shipping-truck-cab');
+      positionRegistry.unregister('shipping-truck-trailer');
+      positionRegistry.unregister('receiving-truck-cab');
+      positionRegistry.unregister('receiving-truck-trailer');
+    },
+    []
+  );
+
   useEffect(() => {
     if (!audioReady) return;
     const running = productionSpeed > 0 && !safetyHoldActive;
-    audioManager.updateTruckEngine(
-      'shipping-truck',
-      running && shippingTruckStateRef.current.speed !== 0
-    );
-    audioManager.updateTruckEngine(
-      'receiving-truck',
-      running && receivingTruckStateRef.current.speed !== 0
-    );
+    const shippingMoving = running && Math.abs(shippingTruckStateRef.current.speed) > 0.05;
+    const receivingMoving = running && Math.abs(receivingTruckStateRef.current.speed) > 0.05;
+    audioManager.updateTruckEngine('shipping-truck', shippingMoving);
+    audioManager.updateTruckEngine('receiving-truck', receivingMoving);
+    engineMovingRef.current = { shipping: shippingMoving, receiving: receivingMoving };
     if (!running) {
       audioManager.stopBackupBeeper?.('shipping-truck');
       audioManager.stopBackupBeeper?.('receiving-truck');
@@ -2800,8 +2885,6 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         const dz = camera.position.z - anchorZ;
         nearestSquared = Math.min(nearestSquared, dx * dx + dy * dy + dz * dz);
       }
-      // Hysteresis band: a camera parked on the threshold must not flicker the
-      // whole sign set on and off every fifteenth frame.
       const threshold = labelsVisible ? LABEL_HIDDEN_DISTANCE : LABEL_VISIBLE_DISTANCE;
       setLabelsVisible(nearestSquared <= threshold * threshold);
     }
@@ -2811,222 +2894,244 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
     const simulationDelta = simulationTimeInitializedRef.current
       ? Math.max(0, simulationTime - priorSimulationTimeRef.current)
       : 0;
-    if (!simulationTimeInitializedRef.current) {
-      controllerTimeRef.current = benchmarkControllerStart ?? simulationTime * 0.45;
-    }
     simulationTimeInitializedRef.current = true;
     priorSimulationTimeRef.current = simulationTime;
-    const controllerDelta = safetyHoldActive ? 0 : simulationDelta * 0.45 * vehicleSpeedMultiplier;
-    controllerTimeRef.current += controllerDelta;
-    const adjustedTime = controllerTimeRef.current;
+    const controllerDelta = Math.min(MAXIMUM_TRUCK_CONTROLLER_DELTA_SECONDS, simulationDelta);
+    const shippingServiceComplete =
+      useOperationsCampaignStore.getState().execution.dispatchLoad.status === 'ready';
 
-    // Shipping truck animation
-    if (shippingTruckRef.current) {
-      const cycle = adjustedTime % TRUCK_CYCLE_SECONDS;
-      const baseTruckState = calculateShippingTruckState(cycle, adjustedTime);
-      const truckState = safetyHoldActive ? applyTruckSafetyHold(baseTruckState) : baseTruckState;
-      shippingTruckStateRef.current = truckState;
+    const advanceTruck = (
+      dock: 'shipping' | 'receiving',
+      controllerRef: React.MutableRefObject<TruckControllerState>,
+      accumulatorRef: React.MutableRefObject<number>,
+      truckStateRef: React.MutableRefObject<TruckAnimState>,
+      truckRef: React.MutableRefObject<THREE.Group | null>,
+      wheelRotationRef: React.MutableRefObject<number>,
+      phaseRef: React.MutableRefObject<TruckPhase>,
+      servicePhaseRef: React.MutableRefObject<TruckAnimState['servicePhase']>,
+      visualRef: React.MutableRefObject<DockVisualState>,
+      setVisual: React.Dispatch<React.SetStateAction<DockVisualState>>
+    ): void => {
+      const scheduleBefore = useTruckScheduleStore.getState().truckSchedule[dock];
+      let controller = controllerRef.current;
+      let accumulator = accumulatorRef.current + controllerDelta;
+      let departedThisFrame = false;
 
-      shippingTruckRef.current.position.x = truckState.x;
-      shippingTruckRef.current.position.z = truckState.z;
-      shippingTruckRef.current.rotation.y = truckState.rotation;
-      shippingWheelRotation.current += (truckState.speed * controllerDelta) / TRUCK_WHEEL_RADIUS;
-      Object.assign(shippingTruckRef.current.userData, {
-        phase: truckState.phase,
-        speed: truckState.speed,
-        steeringAngle: truckState.steeringAngle,
-        wheelRotation: shippingWheelRotation.current,
-        trailerAngle: truckState.trailerAngle,
-        doorOpenAmount: truckState.doorOpenAmount,
-        landingGearAmount: truckState.landingGearAmount,
-        stopped: Math.abs(truckState.speed) <= 0.01,
+      while (accumulator >= TRUCK_CONTROLLER_STEP_SECONDS) {
+        const result = stepTruckController(controller, {
+          deltaSeconds: TRUCK_CONTROLLER_STEP_SECONDS,
+          arrivalReady: scheduleBefore.arrivalReady,
+          safetyHold: safetyHoldActive,
+          serviceComplete: dock === 'receiving' || shippingServiceComplete,
+          speedMultiplier: vehicleSpeedMultiplier,
+        });
+        controller = result.state;
+        departedThisFrame ||= result.departedThisStep;
+        accumulator -= TRUCK_CONTROLLER_STEP_SECONDS;
+      }
+      controllerRef.current = controller;
+      accumulatorRef.current = accumulator;
+
+      if (scheduleBefore.arrivalReady && controller.active) {
+        useTruckScheduleStore.getState().consumeTruckArrival(dock);
+      }
+      if (departedThisFrame) {
+        useTruckScheduleStore.getState().recordTruckDeparture(dock, simulationTime / 60);
+      }
+
+      const truckState = getTruckControllerPose(controller, safetyHoldActive);
+      truckStateRef.current = truckState;
+      wheelRotationRef.current = controller.wheelTravel / TRUCK_WHEEL_RADIUS;
+
+      if (truckRef.current) {
+        truckRef.current.visible = truckState.active;
+        truckRef.current.position.x = truckState.x;
+        truckRef.current.position.z = truckState.z;
+        truckRef.current.rotation.y = truckState.rotation;
+        Object.assign(truckRef.current.userData, {
+          vehicleType: 'autonomous-articulated-truck',
+          dock,
+          active: truckState.active,
+          phase: truckState.phase,
+          servicePhase: truckState.servicePhase,
+          speed: truckState.speed,
+          acceleration: controller.motion.acceleration,
+          steeringAngle: truckState.steeringAngle,
+          wheelRotation: wheelRotationRef.current,
+          wheelTravel: controller.wheelTravel,
+          routeDistance: controller.phaseDistance,
+          trailerAngle: truckState.trailerAngle,
+          articulation: truckState.articulation,
+          parkingBrake: truckState.parkingBrake,
+          chocksDeployed: truckState.chocksDeployed,
+          dockLocked: truckState.dockLocked,
+          levelerDeployed: truckState.levelerDeployed,
+          doorOpenAmount: truckState.doorOpenAmount,
+          landingGearAmount: truckState.landingGearAmount,
+          safetyHold: safetyHoldActive,
+          stopped: Math.abs(truckState.speed) <= 0.01,
+        });
+      }
+
+      const physicallyDocked = isTruckPhysicallyDocked(truckState);
+      const transferReady = isTruckTransferReady(truckState);
+      const cabRegistryId = `${dock}-truck-cab`;
+      const trailerRegistryId = `${dock}-truck-trailer`;
+      if (truckState.active) {
+        const trailerYaw = truckState.rotation + truckState.articulation;
+        const trailerOffset = -5.75;
+        positionRegistry.register(
+          cabRegistryId,
+          truckState.x,
+          truckState.z,
+          Math.sin(truckState.rotation),
+          Math.cos(truckState.rotation),
+          Math.abs(truckState.speed) <= 0.01,
+          0,
+          'truck'
+        );
+        positionRegistry.register(
+          trailerRegistryId,
+          truckState.x + Math.sin(trailerYaw) * trailerOffset,
+          truckState.z + Math.cos(trailerYaw) * trailerOffset,
+          Math.sin(trailerYaw),
+          Math.cos(trailerYaw),
+          Math.abs(truckState.speed) <= 0.01,
+          0,
+          'truck'
+        );
+      } else {
+        positionRegistry.unregister(cabRegistryId);
+        positionRegistry.unregister(trailerRegistryId);
+      }
+      vehicleTelemetryRegistry.publish({
+        id: `${dock}-truck`,
+        type: 'truck',
+        speedMps: truckState.speed,
+        steeringRadians: truckState.steeringAngle,
+        phase: truckState.servicePhase === 'approach' ? truckState.phase : truckState.servicePhase,
+        stopReason: safetyHoldActive
+          ? 'safety-hold'
+          : truckState.active
+            ? Math.abs(truckState.speed) <= 0.01
+              ? truckState.phase
+              : 'none'
+            : 'scheduled',
+        articulationRadians: truckState.articulation,
+        transferReady,
       });
-
-      const shippingDocked = isTruckDockedPhase(truckState.phase);
-
-      // Update store when docked state changes (for forklift speed boost)
-      if (shippingDocked !== lastDockedStateRef.current.shipping) {
-        lastDockedStateRef.current.shipping = shippingDocked;
-        setTruckDocked('shipping', shippingDocked);
+      const lifecycle = getTruckLifecycle(truckState);
+      if (physicallyDocked !== lastDockedStateRef.current[dock]) {
+        lastDockedStateRef.current[dock] = physicallyDocked;
+        useTruckScheduleStore.getState().setTruckDocked(dock, physicallyDocked);
+      }
+      if (transferReady !== lastTransferReadyRef.current[dock]) {
+        lastTransferReadyRef.current[dock] = transferReady;
+        useTruckScheduleStore.getState().setTruckTransferReady(dock, transferReady);
+      }
+      if (lifecycle !== lastLifecycleRef.current[dock]) {
+        lastLifecycleRef.current[dock] = lifecycle;
+        useTruckScheduleStore.getState().setTruckLifecycle(dock, lifecycle);
       }
 
-      const priorVisual = shippingDockVisualRef.current;
-      const shippingGuiding = isTruckGuidingPhase(truckState.phase);
-      const shippingGateOpen = isTruckGateOpenPhase(truckState.phase);
-      if (
-        priorVisual.docked !== shippingDocked ||
-        priorVisual.doorsOpen !== truckState.doorsOpen ||
-        priorVisual.guiding !== shippingGuiding ||
-        priorVisual.gateOpen !== shippingGateOpen
-      ) {
-        const nextVisual = {
-          docked: shippingDocked,
-          doorsOpen: truckState.doorsOpen,
-          guiding: shippingGuiding,
-          gateOpen: shippingGateOpen,
-        };
-        shippingDockVisualRef.current = nextVisual;
-        setShippingDockVisual(nextVisual);
+      const nextVisual = getDockVisualState(truckState);
+      if (dockVisualChanged(visualRef.current, nextVisual)) {
+        visualRef.current = nextVisual;
+        setVisual(nextVisual);
       }
 
-      const shouldBeep = productionSpeed > 0 && !safetyHoldActive && truckState.reverseLights;
-      if (shouldBeep !== backupBeeperRef.current.shipping) {
-        backupBeeperRef.current.shipping = shouldBeep;
-        if (shouldBeep) {
-          audioManager.startBackupBeeper?.('shipping-truck');
-        } else {
-          audioManager.stopBackupBeeper?.('shipping-truck');
+      const vehicleId = `${dock}-truck`;
+      const shouldBeep =
+        productionSpeed > 0 && truckState.active && !safetyHoldActive && truckState.reverseLights;
+      if (shouldBeep !== backupBeeperRef.current[dock]) {
+        backupBeeperRef.current[dock] = shouldBeep;
+        if (shouldBeep) audioManager.startBackupBeeper?.(vehicleId);
+        else audioManager.stopBackupBeeper?.(vehicleId);
+      }
+
+      const engineMoving =
+        productionSpeed > 0 &&
+        truckState.active &&
+        !safetyHoldActive &&
+        Math.abs(truckState.speed) > 0.05;
+      if (audioReady && engineMoving !== engineMovingRef.current[dock]) {
+        engineMovingRef.current[dock] = engineMoving;
+        audioManager.updateTruckEngine(vehicleId, engineMoving);
+      }
+
+      if (truckState.phase !== phaseRef.current) {
+        if (audioReady) {
+          if (truckState.phase === 'docked') {
+            audioManager.playTruckArrival();
+            audioManager.playAirBrake?.();
+            audioManager.updateTruckEngine(vehicleId, false);
+          } else if (truckState.phase === 'preparing_to_leave') {
+            audioManager.playTruckHorn?.(vehicleId, false);
+          } else if (truckState.phase === 'pulling_out') {
+            audioManager.playTruckDeparture();
+            audioManager.updateTruckEngine(vehicleId, true);
+          } else if (truckState.phase === 'stopping_to_back') {
+            audioManager.playAirBrake?.();
+          } else if (truckState.phase === 'slowing' && phaseRef.current === 'entering') {
+            audioManager.playJakeBrake?.(vehicleId, 1.5);
+          }
         }
+        phaseRef.current = truckState.phase;
       }
 
-      if (truckState.phase !== shippingStateRef.current) {
-        if (truckState.phase === 'final_adjustment' && shippingStateRef.current === 'backing') {
-          audioManager.playDockLevelerSound();
+      if (truckState.servicePhase !== servicePhaseRef.current) {
+        if (audioReady) {
+          if (truckState.servicePhase === 'leveler-deploying') {
+            audioManager.playDockLevelerSound();
+          } else if (truckState.servicePhase === 'door-opening') {
+            audioManager.playDoorOpen();
+          } else if (truckState.servicePhase === 'door-closing') {
+            audioManager.playDoorClose();
+          }
         }
-        if (truckState.phase === 'docked' && shippingStateRef.current === 'final_adjustment') {
-          audioManager.playDoorOpen();
-          audioManager.playTruckArrival();
-          audioManager.updateTruckEngine('shipping-truck', false);
-          audioManager.playAirBrake?.();
-        } else if (
-          truckState.phase === 'preparing_to_leave' &&
-          shippingStateRef.current === 'docked'
-        ) {
-          // Truck horn to signal departure
-          audioManager.playTruckHorn?.('shipping-truck', false);
-        } else if (
-          truckState.phase === 'pulling_out' &&
-          shippingStateRef.current === 'preparing_to_leave'
-        ) {
-          audioManager.playDoorClose();
-          audioManager.playTruckDeparture();
-          audioManager.updateTruckEngine('shipping-truck', true);
-        } else if (truckState.phase === 'stopping_to_back') {
-          audioManager.playAirBrake?.();
-        } else if (truckState.phase === 'slowing' && shippingStateRef.current === 'entering') {
-          // Jake brake when slowing down from highway speed
-          audioManager.playJakeBrake?.('shipping-truck', 1.5);
-        } else if (truckState.phase === 'turning_in' && shippingStateRef.current === 'slowing') {
-          // Tire squeal during tight turn
-          audioManager.playTireSqueal?.('shipping-truck', 0.3);
-        }
-        shippingStateRef.current = truckState.phase;
-      }
-    }
-
-    // Receiving truck animation
-    if (receivingTruckRef.current) {
-      const cycle = (adjustedTime + TRUCK_CYCLE_SECONDS / 2) % TRUCK_CYCLE_SECONDS;
-      const baseTruckState = calculateReceivingTruckState(cycle, adjustedTime);
-      const truckState = safetyHoldActive ? applyTruckSafetyHold(baseTruckState) : baseTruckState;
-      receivingTruckStateRef.current = truckState;
-
-      receivingTruckRef.current.position.x = truckState.x;
-      receivingTruckRef.current.position.z = truckState.z;
-      receivingTruckRef.current.rotation.y = truckState.rotation;
-      receivingWheelRotation.current += (truckState.speed * controllerDelta) / TRUCK_WHEEL_RADIUS;
-      Object.assign(receivingTruckRef.current.userData, {
-        phase: truckState.phase,
-        speed: truckState.speed,
-        steeringAngle: truckState.steeringAngle,
-        wheelRotation: receivingWheelRotation.current,
-        trailerAngle: truckState.trailerAngle,
-        doorOpenAmount: truckState.doorOpenAmount,
-        landingGearAmount: truckState.landingGearAmount,
-        stopped: Math.abs(truckState.speed) <= 0.01,
-      });
-
-      const receivingDocked = isTruckDockedPhase(truckState.phase);
-
-      // Update store when docked state changes (for forklift speed boost)
-      if (receivingDocked !== lastDockedStateRef.current.receiving) {
-        lastDockedStateRef.current.receiving = receivingDocked;
-        setTruckDocked('receiving', receivingDocked);
+        servicePhaseRef.current = truckState.servicePhase;
       }
 
-      const priorVisual = receivingDockVisualRef.current;
-      const receivingGuiding = isTruckGuidingPhase(truckState.phase);
-      const receivingGateOpen = isTruckGateOpenPhase(truckState.phase);
-      if (
-        priorVisual.docked !== receivingDocked ||
-        priorVisual.doorsOpen !== truckState.doorsOpen ||
-        priorVisual.guiding !== receivingGuiding ||
-        priorVisual.gateOpen !== receivingGateOpen
-      ) {
-        const nextVisual = {
-          docked: receivingDocked,
-          doorsOpen: truckState.doorsOpen,
-          guiding: receivingGuiding,
-          gateOpen: receivingGateOpen,
-        };
-        receivingDockVisualRef.current = nextVisual;
-        setReceivingDockVisual(nextVisual);
+      const latestSchedule = useTruckScheduleStore.getState().truckSchedule[dock];
+      const status: 'arriving' | 'loading' | 'departing' | 'clear' = !truckState.active
+        ? 'clear'
+        : physicallyDocked
+          ? 'loading'
+          : lifecycle === 'departing'
+            ? 'departing'
+            : 'arriving';
+      const etaMinutes = truckState.active ? 0 : Math.ceil(latestSchedule.nextArrivalMinutes);
+      const statusKey = `${status}-${etaMinutes}-${truckState.servicePhase}`;
+      if (statusKey !== lastDockUpdateRef.current[dock]) {
+        lastDockUpdateRef.current[dock] = statusKey;
+        updateDockStatus(dock, { status, etaMinutes });
       }
+    };
 
-      const shouldBeep = productionSpeed > 0 && !safetyHoldActive && truckState.reverseLights;
-      if (shouldBeep !== backupBeeperRef.current.receiving) {
-        backupBeeperRef.current.receiving = shouldBeep;
-        if (shouldBeep) {
-          audioManager.startBackupBeeper?.('receiving-truck');
-        } else {
-          audioManager.stopBackupBeeper?.('receiving-truck');
-        }
-      }
-
-      if (truckState.phase !== receivingStateRef.current) {
-        if (truckState.phase === 'final_adjustment' && receivingStateRef.current === 'backing') {
-          audioManager.playDockLevelerSound();
-        }
-        if (truckState.phase === 'docked' && receivingStateRef.current === 'final_adjustment') {
-          audioManager.playDoorOpen();
-          audioManager.playTruckArrival();
-          audioManager.updateTruckEngine('receiving-truck', false);
-          audioManager.playAirBrake?.();
-        } else if (
-          truckState.phase === 'preparing_to_leave' &&
-          receivingStateRef.current === 'docked'
-        ) {
-          // Truck horn to signal departure
-          audioManager.playTruckHorn?.('receiving-truck', false);
-        } else if (
-          truckState.phase === 'pulling_out' &&
-          receivingStateRef.current === 'preparing_to_leave'
-        ) {
-          audioManager.playDoorClose();
-          audioManager.playTruckDeparture();
-          audioManager.updateTruckEngine('receiving-truck', true);
-        } else if (truckState.phase === 'stopping_to_back') {
-          audioManager.playAirBrake?.();
-        } else if (truckState.phase === 'slowing' && receivingStateRef.current === 'entering') {
-          // Jake brake when slowing down from highway speed
-          audioManager.playJakeBrake?.('receiving-truck', 1.5);
-        } else if (truckState.phase === 'turning_in' && receivingStateRef.current === 'slowing') {
-          // Tire squeal during tight turn
-          audioManager.playTireSqueal?.('receiving-truck', 0.3);
-        }
-        receivingStateRef.current = truckState.phase;
-      }
-
-      const receivingSchedule = getTruckScheduleStatus(cycle);
-      const { status: receivingStatus, etaMinutes: receivingEta } = receivingSchedule;
-
-      // Only update store when status changes to avoid unnecessary re-renders
-      const receivingKey = `${receivingStatus}-${receivingEta}`;
-      if (receivingKey !== lastDockUpdateRef.current.receiving) {
-        lastDockUpdateRef.current.receiving = receivingKey;
-        updateDockStatus('receiving', { status: receivingStatus, etaMinutes: receivingEta });
-      }
-    }
-
-    const shippingCycle = adjustedTime % TRUCK_CYCLE_SECONDS;
-    const { status: shippingStatus, etaMinutes: shippingEta } =
-      getTruckScheduleStatus(shippingCycle);
-
-    const shippingKey = `${shippingStatus}-${shippingEta}`;
-    if (shippingKey !== lastDockUpdateRef.current.shipping) {
-      lastDockUpdateRef.current.shipping = shippingKey;
-      updateDockStatus('shipping', { status: shippingStatus, etaMinutes: shippingEta });
-    }
+    advanceTruck(
+      'shipping',
+      shippingControllerRef,
+      shippingAccumulatorRef,
+      shippingTruckStateRef,
+      shippingTruckRef,
+      shippingWheelRotation,
+      shippingStateRef,
+      shippingServicePhaseRef,
+      shippingDockVisualRef,
+      setShippingDockVisual
+    );
+    advanceTruck(
+      'receiving',
+      receivingControllerRef,
+      receivingAccumulatorRef,
+      receivingTruckStateRef,
+      receivingTruckRef,
+      receivingWheelRotation,
+      receivingStateRef,
+      receivingServicePhaseRef,
+      receivingDockVisualRef,
+      setReceivingDockVisual
+    );
   });
 
   return (
@@ -3097,17 +3202,17 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         </group>
 
         {/* Single dock leveler - centered (at wall opening) */}
-        <DockLeveler position={[0, 2, -1.5]} isDeployed={shippingDockVisual.docked} />
+        <DockLeveler position={[0, 2, -1.5]} isDeployed={shippingDockVisual.levelerDeployed} />
 
         {/* Roll-up dock door - at wall opening */}
-        <RollUpDoor position={[0, 0, -1.8]} isOpen={shippingDockVisual.docked} />
+        <RollUpDoor position={[0, 0, -1.8]} isOpen={shippingDockVisual.doorsOpen} />
 
         {/* Dock shelter - centered (in front of wall) */}
-        <DockShelter position={[0, 0, 1]} isCompressed={shippingDockVisual.docked} />
+        <DockShelter position={[0, 0, 1]} isCompressed={shippingDockVisual.dockLocked} />
 
         {/* Status lights for single bay */}
-        <DockStatusLight position={[-5, 4, -1.8]} isOccupied={shippingDockVisual.docked} />
-        <DockStatusLight position={[5, 4, -1.8]} isOccupied={shippingDockVisual.docked} />
+        <DockStatusLight position={[-5, 4, -1.8]} isOccupied={shippingDockVisual.dockLocked} />
+        <DockStatusLight position={[5, 4, -1.8]} isOccupied={shippingDockVisual.dockLocked} />
 
         {/* Concrete bollards around dock - single bay */}
         <OptimizedBollardInstances
@@ -3145,17 +3250,25 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         <PalletStaging position={[12, 0, 5]} />
 
         {/* Wheel chocks - deployed when truck is docked (centered bay) */}
-        <WheelChock position={[-1.5, 0, 10]} rotation={0} isDeployed={shippingDockVisual.docked} />
-        <WheelChock position={[1.5, 0, 10]} rotation={0} isDeployed={shippingDockVisual.docked} />
+        <WheelChock
+          position={[-1.5, 0, 10]}
+          rotation={0}
+          isDeployed={shippingDockVisual.chocksDeployed}
+        />
+        <WheelChock
+          position={[1.5, 0, 10]}
+          rotation={0}
+          isDeployed={shippingDockVisual.chocksDeployed}
+        />
         <WheelChock
           position={[-1.5, 0, 11]}
           rotation={Math.PI}
-          isDeployed={shippingDockVisual.docked}
+          isDeployed={shippingDockVisual.chocksDeployed}
         />
         <WheelChock
           position={[1.5, 0, 11]}
           rotation={Math.PI}
-          isDeployed={shippingDockVisual.docked}
+          isDeployed={shippingDockVisual.chocksDeployed}
         />
       </group>
 
@@ -3381,7 +3494,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         <ManifestHolder position={[5.5, 3, -1]} rotation={0} />
 
         {/* Dock plate - centered */}
-        <DockPlate position={[0, 2, 1]} isDeployed={shippingDockVisual.docked} />
+        <DockPlate position={[0, 2, 1]} isDeployed={shippingDockVisual.levelerDeployed} />
 
         {/* Dock bumpers with wear indicators - moved forward to avoid wall */}
         <DockBumperWithWear position={[-2, 1.2, 0]} wearLevel={0.3} />
@@ -3496,16 +3609,16 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           </mesh>
         </group>
 
-        <DockLeveler position={[0, 2, -1.5]} isDeployed={receivingDockVisual.docked} />
+        <DockLeveler position={[0, 2, -1.5]} isDeployed={receivingDockVisual.levelerDeployed} />
 
         {/* Roll-up dock door - at wall opening */}
-        <RollUpDoor position={[0, 0, -1.8]} isOpen={receivingDockVisual.docked} />
+        <RollUpDoor position={[0, 0, -1.8]} isOpen={receivingDockVisual.doorsOpen} />
 
         {/* Dock shelter */}
-        <DockShelter position={[0, 0, 1]} isCompressed={receivingDockVisual.docked} />
+        <DockShelter position={[0, 0, 1]} isCompressed={receivingDockVisual.dockLocked} />
 
-        <DockStatusLight position={[-5, 4, -1.8]} isOccupied={receivingDockVisual.docked} />
-        <DockStatusLight position={[5, 4, -1.8]} isOccupied={receivingDockVisual.docked} />
+        <DockStatusLight position={[-5, 4, -1.8]} isOccupied={receivingDockVisual.dockLocked} />
+        <DockStatusLight position={[5, 4, -1.8]} isOccupied={receivingDockVisual.dockLocked} />
 
         {/* Concrete bollards around dock */}
         <OptimizedBollardInstances
@@ -3543,17 +3656,25 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         <PalletStaging position={[12, 0, 5]} />
 
         {/* Wheel chocks - deployed when truck is docked */}
-        <WheelChock position={[-1.5, 0, 10]} rotation={0} isDeployed={receivingDockVisual.docked} />
-        <WheelChock position={[1.5, 0, 10]} rotation={0} isDeployed={receivingDockVisual.docked} />
+        <WheelChock
+          position={[-1.5, 0, 10]}
+          rotation={0}
+          isDeployed={receivingDockVisual.chocksDeployed}
+        />
+        <WheelChock
+          position={[1.5, 0, 10]}
+          rotation={0}
+          isDeployed={receivingDockVisual.chocksDeployed}
+        />
         <WheelChock
           position={[-1.5, 0, 11]}
           rotation={Math.PI}
-          isDeployed={receivingDockVisual.docked}
+          isDeployed={receivingDockVisual.chocksDeployed}
         />
         <WheelChock
           position={[1.5, 0, 11]}
           rotation={Math.PI}
-          isDeployed={receivingDockVisual.docked}
+          isDeployed={receivingDockVisual.chocksDeployed}
         />
       </group>
 
@@ -3759,7 +3880,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         <ManifestHolder position={[5.5, 3, 1]} rotation={0} />
 
         {/* Dock plate - centered */}
-        <DockPlate position={[0, 2, -1]} isDeployed={receivingDockVisual.docked} />
+        <DockPlate position={[0, 2, -1]} isDeployed={receivingDockVisual.levelerDeployed} />
 
         {/* Dock bumpers with wear indicators - moved forward to avoid wall */}
         <DockBumperWithWear position={[-2, 1.2, 0]} wearLevel={0.5} />

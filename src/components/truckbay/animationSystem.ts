@@ -70,6 +70,20 @@ export interface AnimationState {
 
 const animationRegistry = new Map<string, AnimationState>();
 
+/**
+ * Converts an authored 60 Hz smoothing fraction into a delta-time-correct
+ * damping fraction. This preserves the original feel at 60 fps without making
+ * doors, steering or suspension animate faster on high-refresh displays.
+ */
+export const getAnimationDampingAlpha = (perFrameAlpha: number, deltaSeconds: number): number => {
+  if (!Number.isFinite(perFrameAlpha) || !Number.isFinite(deltaSeconds) || deltaSeconds <= 0) {
+    return 0;
+  }
+  const safeAlpha = THREE.MathUtils.clamp(perFrameAlpha, 0, 1);
+  if (safeAlpha >= 1) return 1;
+  return 1 - Math.pow(1 - safeAlpha, deltaSeconds * 60);
+};
+
 export const registerAnimation = (
   id: string,
   type: AnimationType,
@@ -224,7 +238,11 @@ export const TruckAnimationManager: React.FC = () => {
           if (mesh) {
             const currVal = mesh[property][axis];
             if (Math.abs(currVal - target) > 0.001) {
-              const newVal = THREE.MathUtils.lerp(currVal, target, speed * (60 * adjustDelta));
+              const newVal = THREE.MathUtils.lerp(
+                currVal,
+                target,
+                getAnimationDampingAlpha(speed, adjustDelta)
+              );
               mesh[property][axis] = newVal;
 
               // Optional visibility toggle for "slide out" effects
@@ -265,6 +283,7 @@ export const TruckAnimationManager: React.FC = () => {
 
     // --- 2. Process Particle Systems (throttled to 30fps) ---
     if (shouldRunThisFrame(2)) {
+      const particleDelta = delta * 2;
       particleRegistry.forEach((system) => {
         if (!system.ref.current || !system.isRunning) return;
 
@@ -272,7 +291,7 @@ export const TruckAnimationManager: React.FC = () => {
         const posArray = posAttr.array as Float32Array;
 
         for (let i = 0; i < system.particleCount; i++) {
-          system.lifetimes[i] += delta * (0.5 + system.throttle * 0.5);
+          system.lifetimes[i] += particleDelta * (0.5 + system.throttle * 0.5);
 
           if (system.lifetimes[i] > system.maxLifetimes[i]) {
             // Reset particle
@@ -285,12 +304,13 @@ export const TruckAnimationManager: React.FC = () => {
             system.velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.03;
           } else {
             // Update position
-            posArray[i * 3] += system.velocities[i * 3] * delta * 60;
-            posArray[i * 3 + 1] += system.velocities[i * 3 + 1] * delta * 60;
-            posArray[i * 3 + 2] += system.velocities[i * 3 + 2] * delta * 60;
+            posArray[i * 3] += system.velocities[i * 3] * particleDelta * 60;
+            posArray[i * 3 + 1] += system.velocities[i * 3 + 1] * particleDelta * 60;
+            posArray[i * 3 + 2] += system.velocities[i * 3 + 2] * particleDelta * 60;
             // Spread out as it rises
-            system.velocities[i * 3] *= 1.01;
-            system.velocities[i * 3 + 2] *= 1.01;
+            const spread = Math.pow(1.01, particleDelta * 60);
+            system.velocities[i * 3] *= spread;
+            system.velocities[i * 3 + 2] *= spread;
           }
         }
 
@@ -326,7 +346,7 @@ export const TruckAnimationManager: React.FC = () => {
         truck.trailerRef.current.rotation.y = THREE.MathUtils.lerp(
           truck.trailerRef.current.rotation.y,
           truck.trailerAngle.current,
-          0.1
+          getAnimationDampingAlpha(0.1, delta)
         );
       }
 
@@ -336,12 +356,12 @@ export const TruckAnimationManager: React.FC = () => {
         truck.leftDoorRef.current.rotation.y = THREE.MathUtils.lerp(
           truck.leftDoorRef.current.rotation.y,
           -targetAngle,
-          0.08
+          getAnimationDampingAlpha(0.08, delta)
         );
         truck.rightDoorRef.current.rotation.y = THREE.MathUtils.lerp(
           truck.rightDoorRef.current.rotation.y,
           targetAngle,
-          0.08
+          getAnimationDampingAlpha(0.08, delta)
         );
       }
 
@@ -377,12 +397,12 @@ export const TruckAnimationManager: React.FC = () => {
         truck.cabBodyRef.current.rotation.z = THREE.MathUtils.lerp(
           truck.cabBodyRef.current.rotation.z,
           truckState.cabRoll,
-          0.1
+          getAnimationDampingAlpha(0.1, delta)
         );
         truck.cabBodyRef.current.rotation.x = THREE.MathUtils.lerp(
           truck.cabBodyRef.current.rotation.x,
           truckState.cabPitch,
-          0.1
+          getAnimationDampingAlpha(0.1, delta)
         );
       }
 
@@ -391,14 +411,14 @@ export const TruckAnimationManager: React.FC = () => {
         truck.steerLeftRef.current.rotation.y = THREE.MathUtils.lerp(
           truck.steerLeftRef.current.rotation.y,
           truckState.steeringAngle,
-          0.2
+          getAnimationDampingAlpha(0.2, delta)
         );
       }
       if (truck.steerRightRef?.current) {
         truck.steerRightRef.current.rotation.y = THREE.MathUtils.lerp(
           truck.steerRightRef.current.rotation.y,
           truckState.steeringAngle,
-          0.2
+          getAnimationDampingAlpha(0.2, delta)
         );
       }
     });

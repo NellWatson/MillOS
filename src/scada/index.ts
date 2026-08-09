@@ -4,7 +4,7 @@
  * Bidirectional SCADA integration layer supporting:
  * - Simulation mode (physics-based value generation)
  * - Live mode (real SCADA data via REST, MQTT, OPC-UA)
- * - 87 industrial tags with ISA naming convention
+ * - 122 process, utility, logistics and operational tags with ISA naming
  * - ISA-18.2-informed alarm behavior
  * - 24-hour rolling history with IndexedDB persistence
  */

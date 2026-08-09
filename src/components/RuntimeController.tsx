@@ -77,14 +77,29 @@ interface RuntimeTextureIssue {
 
 export interface RuntimeMotionTelemetry {
   speed?: number;
+  acceleration?: number;
   steeringAngle?: number;
+  innerSteeringAngle?: number;
+  outerSteeringAngle?: number;
   wheelRotation?: number;
+  wheelTravel?: number;
+  routeDistance?: number;
   forkHeight?: number;
   mastTilt?: number;
   trailerAngle?: number;
+  articulation?: number;
   doorOpenAmount?: number;
   landingGearAmount?: number;
   cargo?: 'pallet' | 'empty';
+  loadPhase?: string;
+  servicePhase?: string;
+  stopReason?: string;
+  active?: boolean;
+  parkingBrake?: boolean;
+  chocksDeployed?: boolean;
+  dockLocked?: boolean;
+  levelerDeployed?: boolean;
+  safetyHold?: boolean;
   stopped?: boolean;
 }
 
@@ -238,11 +253,17 @@ function rounded(value: number, precision: number = 2): number {
 
 const MOTION_NUMBER_KEYS = [
   'speed',
+  'acceleration',
   'steeringAngle',
+  'innerSteeringAngle',
+  'outerSteeringAngle',
   'wheelRotation',
+  'wheelTravel',
+  'routeDistance',
   'forkHeight',
   'mastTilt',
   'trailerAngle',
+  'articulation',
   'doorOpenAmount',
   'landingGearAmount',
 ] as const satisfies ReadonlyArray<keyof RuntimeMotionTelemetry>;
@@ -257,7 +278,22 @@ export function readRuntimeMotionTelemetry(
     if (typeof value === 'number' && Number.isFinite(value)) telemetry[key] = rounded(value, 4);
   });
   if (userData.cargo === 'pallet' || userData.cargo === 'empty') telemetry.cargo = userData.cargo;
-  if (typeof userData.stopped === 'boolean') telemetry.stopped = userData.stopped;
+  const stringKeys = ['loadPhase', 'servicePhase', 'stopReason'] as const;
+  stringKeys.forEach((key) => {
+    if (typeof userData[key] === 'string') telemetry[key] = userData[key];
+  });
+  const booleanKeys = [
+    'active',
+    'parkingBrake',
+    'chocksDeployed',
+    'dockLocked',
+    'levelerDeployed',
+    'safetyHold',
+    'stopped',
+  ] as const;
+  booleanKeys.forEach((key) => {
+    if (typeof userData[key] === 'boolean') telemetry[key] = userData[key];
+  });
   return telemetry;
 }
 

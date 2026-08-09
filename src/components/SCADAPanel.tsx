@@ -349,6 +349,14 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
           description: 'Finished product dispatch',
           machineIds: Array.from(tagsByMachine.keys()).filter((id) => id.startsWith('packer-')),
         },
+        {
+          id: 'logistics',
+          label: 'Autonomous logistics',
+          description: 'Forklift and truck motion interlocks',
+          machineIds: Array.from(tagsByMachine.keys()).filter(
+            (id) => id.startsWith('forklift-') || id.endsWith('-truck')
+          ),
+        },
       ] as const,
     [tagsByMachine]
   );
@@ -1426,7 +1434,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                 </div>
               </div>
 
-              <div className="grid gap-3 lg:grid-cols-4">
+              <div className="grid gap-3 lg:grid-cols-5">
                 {processStages.map((stage, stageIndex) => {
                   const stageAlarms = alarms.filter(
                     (alarm) => alarm.machineId && stage.machineIds.includes(alarm.machineId)
