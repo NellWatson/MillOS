@@ -4,8 +4,8 @@ import { useIncidentReplayStore } from '../incidentReplayStore';
 const frame = (timestamp: number) => ({
   timestamp,
   machineStates: [{ id: 'RM-101', status: 'running', metrics: { rpm: 1200 } }],
-  workerPositions: [
-    { id: 'worker-1', position: [0, 0, 0] as [number, number, number], task: 'Inspect' },
+  mobileEquipmentPositions: [
+    { id: 'service-rover-1', position: [0, 0, 0] as [number, number, number], task: 'Inspect' },
   ],
   alerts: [],
 });

@@ -3,7 +3,6 @@ import {
   Factory,
   Brain,
   Activity,
-  Users,
   Shield,
   Settings,
   Eye,
@@ -15,18 +14,10 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useUIStore } from '../../../stores/uiStore';
-import { useIsMultiplayerActive } from '../../../stores/multiplayerStore';
 import { useMobileDetection } from '../../../hooks/useMobileDetection';
 import { useMobileControlStore } from '../../../stores/mobileControlStore';
 
-export type DockMode =
-  | 'overview'
-  | 'ai'
-  | 'scada'
-  | 'management'
-  | 'safety'
-  | 'settings'
-  | 'multiplayer';
+export type DockMode = 'overview' | 'ai' | 'scada' | 'management' | 'safety' | 'settings';
 
 interface DockProps {
   activeMode: DockMode;
@@ -37,7 +28,6 @@ interface DockProps {
 export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalinksOpen }) => {
   const fpsMode = useUIStore((state) => state.fpsMode);
   const toggleFpsMode = useUIStore((state) => state.toggleFpsMode);
-  const isMultiplayerActive = useIsMultiplayerActive();
   const { isMobile, isCompactLayout } = useMobileDetection();
   const openMobilePanel = useMobileControlStore((state) => state.openMobilePanel);
 
@@ -206,16 +196,10 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
           aria-haspopup="menu"
           aria-expanded={moreOpen}
           className={`relative min-h-[44px] min-w-[44px] rounded-xl p-2 text-slate-300 transition-colors hover:bg-white/5 hover:text-white ${
-            activeMode === 'multiplayer' || fpsMode ? 'bg-white/10 text-cyan-300' : ''
+            fpsMode ? 'bg-white/10 text-cyan-300' : ''
           }`}
         >
           <MoreHorizontal size={24} aria-hidden="true" />
-          {isMultiplayerActive && (
-            <span
-              className="absolute right-1 top-1 h-2 w-2 rounded-full bg-green-500"
-              aria-hidden="true"
-            />
-          )}
         </button>
         {moreOpen && (
           <div
@@ -236,18 +220,6 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
                 </button>
               </>
             )}
-            <button
-              role="menuitem"
-              type="button"
-              onClick={() => handleMoreModeChange('multiplayer')}
-              className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/10"
-            >
-              <Users size={18} aria-hidden="true" />
-              Multiplayer
-              {isMultiplayerActive && (
-                <span className="ml-auto text-[10px] font-semibold text-green-300">ACTIVE</span>
-              )}
-            </button>
             {onDatalinksOpen && (
               <button
                 role="menuitem"

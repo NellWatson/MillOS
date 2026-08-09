@@ -54,8 +54,8 @@ export const OPERATIONAL_INCIDENT_PLACEMENTS: Readonly<Record<IncidentKind, Sign
     position: [118, SITE_LAYOUT.datum.water + 0.04, 116],
     shortLabel: 'HIGH WATER',
   },
-  understaffing: {
-    position: [SITE_LAYOUT.portals.eastPersonnel.centre[0] - 7, 0.08, -20],
+  control_network_degraded: {
+    position: [SITE_LAYOUT.portals.eastService.centre[0] - 7, 0.08, -20],
     shortLabel: 'ROLE GAP',
   },
 };
@@ -249,7 +249,7 @@ const SignalSymbol: React.FC<{
           ))}
         </group>
       );
-    case 'understaffing':
+    case 'control_network_degraded':
       return (
         <group>
           {[-0.34, 0.34].map((x) => (

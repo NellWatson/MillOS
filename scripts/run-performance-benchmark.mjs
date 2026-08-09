@@ -9,7 +9,6 @@ const DEFAULT_OUTPUT = path.join(ROOT, 'test-results', 'runtime-benchmarks');
 const DEFAULT_SCENES = ['overview', 'interior', 'shipping', 'receiving', 'water'];
 const PERF_SYSTEMS = {
   trucks: 'disableTruckBay',
-  workers: 'disableWorkerSystem',
   forklifts: 'disableForkliftSystem',
   conveyors: 'disableConveyorSystem',
   machines: 'disableMachines',

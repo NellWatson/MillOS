@@ -59,7 +59,6 @@ describe('UnifiedGameTick maintenance causality', () => {
     expect(useUIStore.getState().alerts.at(-1)?.message).toContain('wo-00001');
 
     const breakdownId = maintenance.activeBreakdowns[0].id;
-    maintenance.assignRepairWorker(breakdownId, 'maintenance-1', 'Maria Santos');
     expect(useBreakdownStore.getState().startRepair(breakdownId).started).toBe(true);
     useBreakdownStore.getState().updateRepairProgress(breakdownId, 100);
     expect(useBreakdownStore.getState().verifyRepair(breakdownId)).toBe(true);

@@ -5,10 +5,9 @@ import {
   Thermometer,
   Activity,
   Brain,
-  Users,
   Settings,
   Shield,
-  Heart,
+  Cpu,
   Factory,
   Info,
   ArrowRight,
@@ -35,35 +34,7 @@ import { MachineInspector } from './MachineInspector';
 import { SettingsPanel } from '../panels/SettingsPanel';
 import { SafetyPanel } from '../panels/SafetyPanel';
 import { OverviewPanel } from '../panels/OverviewPanel';
-
-// MultiplayerPanel lazy-loaded to keep peerjs/WebRTC out of the boot chunk
-const MultiplayerPanel = recoverableLazy(() =>
-  import('../panels/MultiplayerPanel').then((m) => ({ default: m.MultiplayerPanel }))
-);
-
-// Core BAS controls (kept static - frequently used, small)
-import { FiveAxesPanel } from '../widgets/FiveAxesPanel';
-import { ValueDashboard } from '../widgets/ValueDashboard';
-
-// Lazy load heavy BAS panels for bundle optimization
-const StabilityMonitor = recoverableLazy(() =>
-  import('../widgets/StabilityMonitor').then((m) => ({ default: m.StabilityMonitor }))
-);
-const BASTimeline = recoverableLazy(() =>
-  import('../widgets/BASTimeline').then((m) => ({ default: m.BASTimeline }))
-);
-const FederationPanel = recoverableLazy(() =>
-  import('../widgets/FederationPanel').then((m) => ({ default: m.FederationPanel }))
-);
-const SocialMissionPanel = recoverableLazy(() =>
-  import('../widgets/SocialMissionPanel').then((m) => ({ default: m.SocialMissionPanel }))
-);
-const BASEducation = recoverableLazy(() =>
-  import('../widgets/BASEducation').then((m) => ({ default: m.BASEducation }))
-);
-const VCPStatusPanel = recoverableLazy(() =>
-  import('../widgets/VCPStatusPanel').then((m) => ({ default: m.VCPStatusPanel }))
-);
+import { AutonomyPanel } from '../widgets/AutonomyPanel';
 
 interface ContextSidebarProps {
   mode: DockMode;
@@ -163,52 +134,10 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
     headerTitle = 'Safety & Emergency';
     HeaderIcon = Shield;
     content = <SafetyPanel />;
-  } else if (mode === 'multiplayer') {
-    headerTitle = 'Multiplayer';
-    HeaderIcon = Users;
-    content = (
-      <Suspense fallback={<LoadingPlaceholder />}>
-        <MultiplayerPanel />
-      </Suspense>
-    );
   } else if (mode === 'management') {
-    headerTitle = 'Bilateral Autonomy';
-    HeaderIcon = Heart;
-    content = (
-      <div className="p-3 h-full overflow-y-auto space-y-4">
-        {/* Core BAS Controls (static - always loaded) */}
-        <FiveAxesPanel />
-        <ValueDashboard />
-
-        {/* Lazy-loaded panels with compact fallbacks */}
-        <RecoverablePanel featureName="Stability monitor">
-          <StabilityMonitor />
-        </RecoverablePanel>
-
-        {/* VCP 2.0 - Value Coordination Protocol */}
-        <RecoverablePanel featureName="VCP status">
-          <VCPStatusPanel />
-        </RecoverablePanel>
-
-        {/* Timeline & History */}
-        <RecoverablePanel featureName="BAS timeline">
-          <BASTimeline />
-        </RecoverablePanel>
-
-        {/* Autonomous inter-mill coordination */}
-        <RecoverablePanel featureName="Federation">
-          <FederationPanel />
-        </RecoverablePanel>
-        <RecoverablePanel featureName="Social mission">
-          <SocialMissionPanel />
-        </RecoverablePanel>
-
-        {/* Educational Content */}
-        <RecoverablePanel featureName="BAS education">
-          <BASEducation />
-        </RecoverablePanel>
-      </div>
-    );
+    headerTitle = 'Autonomy & Optimization';
+    HeaderIcon = Cpu;
+    content = <AutonomyPanel />;
   } else {
     // Overview mode - show production overview
     headerTitle = 'Mill Overview';
@@ -347,27 +276,4 @@ const LoadingPlaceholder = () => (
     <Activity size={24} aria-hidden="true" />
     <span className="sr-only">Loading panel content...</span>
   </div>
-);
-
-// Compact loader for lazy-loaded BAS panels
-const PanelLoader = () => (
-  <div
-    className="h-20 bg-slate-800/30 rounded-lg animate-pulse flex items-center justify-center border border-slate-700/30"
-    role="status"
-  >
-    <Activity className="w-4 h-4 text-cyan-500/50" aria-hidden="true" />
-    <span className="sr-only">Loading...</span>
-  </div>
-);
-
-const RecoverablePanel = ({
-  featureName,
-  children,
-}: {
-  featureName: string;
-  children: React.ReactNode;
-}) => (
-  <RecoverableFeatureBoundary featureName={featureName}>
-    <Suspense fallback={<PanelLoader />}>{children}</Suspense>
-  </RecoverableFeatureBoundary>
 );

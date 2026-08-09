@@ -576,8 +576,8 @@ const FLOOR_PROGRAM_CACHE_KEY = 'millos-floor-detail-v2';
  * `roughnessMap`/`aoMap` (macro, 1:1) and `normalMap` (tiled) already coexist
  * without any shader work. The one thing per-map transforms cannot do is a
  * SECOND albedo at a different scale, and that is the whole gap between a slab
- * that holds up from the overview camera and one that holds up when a worker
- * walks past it. One extra texture fetch on one mesh.
+ * that holds up from the overview camera and one that holds up during close
+ * inspection. One extra texture fetch on one mesh.
  */
 function applyFloorDetailBlend(material: THREE.MeshStandardMaterial): void {
   material.onBeforeCompile = (shader) => {
@@ -1002,7 +1002,7 @@ function FactoryShell() {
       { position: [37.5, 4, 50], scale: [45, 8, 0.55] },
       { position: [-34.5, 4, -50], scale: [51, 8, 0.55] },
       { position: [34.5, 4, -50], scale: [51, 8, 0.55] },
-      // West wall, with an actual personnel opening at z = -20.
+      // West wall, with an actual service opening at z = -20.
       { position: [-60, 4, -36], scale: [0.55, 8, 28] },
       { position: [-60, 4, 16], scale: [0.55, 8, 68] },
       { position: [-60, 5.5, -20], scale: [0.55, 5, 4] },

@@ -30,8 +30,6 @@ export interface BreakdownEvent {
   startTime: number;
   estimatedRepairTime: number;
   severity: 'minor' | 'moderate';
-  assignedWorkerId?: string;
-  assignedWorkerName?: string;
   repairProgress: number;
   resolved: boolean;
   description: string;
@@ -47,8 +45,6 @@ export interface MaintenanceWorkOrder {
   requiredParts: (keyof PartsInventory)[];
   consumedParts: (keyof PartsInventory)[];
   phase: WorkOrderPhase;
-  assignedWorkerId?: string;
-  assignedWorkerName?: string;
   openedAt: number;
   repairStartedAt?: number;
   verificationCompletedAt?: number;
@@ -153,7 +149,7 @@ const missingParts = (
 
 export interface StartRepairResult {
   started: boolean;
-  reason?: 'unknown_breakdown' | 'technician_required' | 'invalid_phase' | 'missing_parts';
+  reason?: 'unknown_breakdown' | 'invalid_phase' | 'missing_parts';
   missingParts: (keyof PartsInventory)[];
 }
 
@@ -175,7 +171,6 @@ export interface BreakdownStore {
   triggerRandomBreakdown: (
     machines: Array<{ id: string; name: string; status: string }>
   ) => BreakdownEvent | null;
-  assignRepairWorker: (breakdownId: string, workerId: string, workerName: string) => void;
   startRepair: (breakdownId: string) => StartRepairResult;
   updateRepairProgress: (breakdownId: string, progressDelta: number) => void;
   verifyRepair: (breakdownId: string, note?: string) => boolean;
@@ -310,32 +305,6 @@ export const useBreakdownStore = create<BreakdownStore>()(
       return get().triggerBreakdown(machine.id, machine.name);
     },
 
-    assignRepairWorker: (breakdownId, workerId, workerName) =>
-      set((state) => ({
-        activeBreakdowns: state.activeBreakdowns.map((breakdown) =>
-          breakdown.id === breakdownId
-            ? { ...breakdown, assignedWorkerId: workerId, assignedWorkerName: workerName }
-            : breakdown
-        ),
-        workOrders: state.workOrders.map((workOrder) =>
-          workOrder.breakdownId === breakdownId && workOrder.phase !== 'returned_to_service'
-            ? {
-                ...workOrder,
-                assignedWorkerId: workerId,
-                assignedWorkerName: workerName,
-                audit: [
-                  ...workOrder.audit,
-                  {
-                    phase: workOrder.phase,
-                    timestamp: Date.now(),
-                    note: `Assigned to ${workerName}.`,
-                  },
-                ],
-              }
-            : workOrder
-        ),
-      })),
-
     startRepair: (breakdownId) => {
       let result: StartRepairResult = {
         started: false,
@@ -348,10 +317,6 @@ export const useBreakdownStore = create<BreakdownStore>()(
           (candidate) => candidate.breakdownId === breakdownId
         );
         if (!breakdown || !workOrder) return {};
-        if (!workOrder.assignedWorkerId) {
-          result = { started: false, reason: 'technician_required', missingParts: [] };
-          return {};
-        }
         if (workOrder.phase !== 'diagnosed' && workOrder.phase !== 'awaiting_parts') {
           result = { started: false, reason: 'invalid_phase', missingParts: [] };
           return {};

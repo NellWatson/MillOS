@@ -387,7 +387,7 @@ const packerTags: TagDefinition[] = PACKER_NUMBERS.flatMap((num, idx) => [
   {
     id: `PACKER_${num}.CT001.PV`,
     name: `Packer ${num} Bag Count`,
-    description: `Packing Line ${num} bags produced this shift`,
+    description: `Packing Line ${num} bags produced in the active run window`,
     dataType: 'INT32' as const,
     accessMode: 'READ' as const,
     engUnit: 'bags',
@@ -784,7 +784,7 @@ const utilityAssetTags: TagDefinition[] = UTILITY_ASSET_DEFINITIONS.flatMap((ass
   ];
 });
 
-/** Stable IDs used by the material-flow bridge and operator workspace. */
+/** Stable IDs used by the material-flow bridge and control workspace. */
 export const OPERATION_TAG_IDS = {
   rawInventory: 'OPERATIONS.WT001.PV',
   inProcess: 'OPERATIONS.WT002.PV',

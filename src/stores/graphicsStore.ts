@@ -12,9 +12,7 @@ export type GraphicsQuality = 'low' | 'medium' | 'high' | 'ultra';
 
 // Performance debug toggles - disable systems for A/B testing
 export interface PerfDebugSettings {
-  disableWorkerMoods: boolean; // Disable useMoodSimulation hook
   disableTruckBay: boolean; // Disable TruckBay (28+ useFrame hooks)
-  disableWorkerSystem: boolean; // Disable WorkerSystem (3+ useFrame hooks per worker)
   disableForkliftSystem: boolean; // Disable ForkliftSystem
   disableConveyorSystem: boolean; // Disable ConveyorSystem
   disableMachines: boolean; // Disable Machines (9 useFrame hooks)
@@ -87,7 +85,7 @@ export interface GraphicsSettings {
   enableSignage: boolean;
   enableVentilationDucts: boolean;
   enableAnisotropicReflections: boolean;
-  // Physics system toggle - experimental Rapier physics for workers/forklifts/player
+  // Physics system toggle, experimental Rapier physics for vehicles and camera
   enablePhysics: boolean;
   // Performance sliders
   /**
@@ -101,8 +99,6 @@ export interface GraphicsSettings {
   shadowMapSize: 1024 | 2048 | 4096;
   /** Index into `AO_QUALITY_LEVELS`. Numeric so it survives persistence. */
   aoQuality: number;
-  // LOD (Level of Detail) settings
-  workerLodDistance: number; // Distance at which workers switch to low-poly (0 = always high detail)
   // Machine visual enhancement settings
   /**
    * External KTX2/JPG PBR maps, via `getModelTextures` in
@@ -159,9 +155,7 @@ export interface GraphicsSettings {
 
 // Default perf debug settings (all systems enabled)
 const DEFAULT_PERF_DEBUG: PerfDebugSettings = {
-  disableWorkerMoods: false,
   disableTruckBay: false,
-  disableWorkerSystem: false,
   disableForkliftSystem: false,
   disableConveyorSystem: false,
   disableMachines: false,
@@ -253,7 +247,6 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     dustParticleCount: 0,
     shadowMapSize: 1024,
     aoQuality: 0,
-    workerLodDistance: 15, // Low quality: aggressive LOD
     // Machine visual enhancements
     //
     // THE `enableMachineTextures` HOLD, stated once here for all four tiers.
@@ -285,7 +278,7 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     //
     // Live consumers, for whoever does the audit: ConveyorSystem.tsx:751,
     // FactoryExterior.tsx:5252, FactoryFloor.tsx:38+254, ReflectiveFloor.tsx:16,
-    // ambient/FactoryProps.tsx:88, workers/SharedWorkerMaterials.ts:37. The
+    // ambient/FactoryProps.tsx:88. The
     // `Instanced*.tsx` callers are in the dead tree and do not count.
     enableMachineTextures: false,
     enableMachineColorVariation: false,
@@ -368,7 +361,6 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     dustParticleCount: 30,
     shadowMapSize: 1024,
     aoQuality: 0,
-    workerLodDistance: 35,
     // Machine visual enhancements
     enableMachineTextures: false, // See the hold documented on the low preset.
     enableMachineColorVariation: true, // Enable color variation on medium+
@@ -430,7 +422,6 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     shadowMapSize: 2048,
     // N8AO 'low'. Never 'high'/'ultra' - both jump to aoSamples 64.
     aoQuality: 1,
-    workerLodDistance: 55,
     // Machine visual enhancements
     enableMachineTextures: false, // See the hold documented on the low preset.
     enableMachineColorVariation: true,
@@ -485,7 +476,6 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     shadowMapSize: 2048,
     // N8AO 'medium'. Still short of 'high'/'ultra' to hold p95 <= 25 ms.
     aoQuality: 2,
-    workerLodDistance: 100, // Ultra: very long LOD distance, full detail at most distances
     // Machine visual enhancements
     enableMachineTextures: false, // See the hold documented on the low preset.
     enableMachineColorVariation: true,
@@ -544,7 +534,6 @@ export function sanitizeGraphicsSettings(value: unknown): GraphicsSettings {
   output.aoQuality = Math.round(
     Math.min(AO_QUALITY_LEVELS.length - 1, Math.max(0, output.aoQuality))
   );
-  output.workerLodDistance = Math.min(1000, Math.max(0, output.workerLodDistance));
   output.machineLodDistance = Math.min(1000, Math.max(0, output.machineLodDistance));
   if (![1024, 2048, 4096].includes(output.shadowMapSize)) {
     output.shadowMapSize = defaults.shadowMapSize;

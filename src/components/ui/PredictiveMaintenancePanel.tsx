@@ -16,7 +16,6 @@ import {
   CheckCircle,
   Clock,
   TrendingUp,
-  Bot,
   Play,
   ClipboardCheck,
   RotateCcw,
@@ -170,7 +169,6 @@ const ActiveBreakdownsSection: React.FC = () => {
   const activeBreakdowns = useBreakdownStore((state) => state.activeBreakdowns);
   const workOrders = useBreakdownStore((state) => state.workOrders);
   const partsInventory = useBreakdownStore((state) => state.partsInventory);
-  const assignRepairWorker = useBreakdownStore((state) => state.assignRepairWorker);
   const startRepair = useBreakdownStore((state) => state.startRepair);
   const updateRepairProgress = useBreakdownStore((state) => state.updateRepairProgress);
   const verifyRepair = useBreakdownStore((state) => state.verifyRepair);
@@ -211,12 +209,7 @@ const ActiveBreakdownsSection: React.FC = () => {
               <div className="text-xs text-slate-400 mt-2">{breakdown.description}</div>
               <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                 <div className="text-slate-400">
-                  Service:{' '}
-                  <span
-                    className={workOrder.assignedWorkerName ? 'text-amber-300' : 'text-red-300'}
-                  >
-                    {workOrder.assignedWorkerId ? 'Autonomous service unit' : 'unassigned'}
-                  </span>
+                  Service: <span className="text-amber-300">Autonomous service unit</span>
                 </div>
                 <div className="text-right text-slate-400">
                   Downtime:{' '}
@@ -246,34 +239,17 @@ const ActiveBreakdownsSection: React.FC = () => {
                 </div>
               )}
               <div className="mt-3 flex flex-wrap gap-2">
-                {!workOrder.assignedWorkerId && (
+                {(workOrder.phase === 'diagnosed' || workOrder.phase === 'awaiting_parts') && (
                   <button
                     type="button"
-                    onClick={() => {
-                      assignRepairWorker(
-                        breakdown.id,
-                        'autonomous-service-unit',
-                        'Autonomous service unit'
-                      );
-                    }}
-                    className="inline-flex min-h-11 items-center gap-2 rounded bg-blue-800 px-3 text-xs font-semibold text-white hover:bg-blue-700 disabled:bg-slate-600 disabled:text-white/90"
+                    disabled={unavailableParts.length > 0}
+                    onClick={() => startRepair(breakdown.id)}
+                    className="inline-flex min-h-11 items-center gap-2 rounded bg-amber-800 px-3 text-xs font-semibold text-white hover:bg-amber-700 disabled:bg-slate-600 disabled:text-white/90"
                   >
-                    <Bot className="h-4 w-4" aria-hidden="true" />
+                    <Play className="h-4 w-4" aria-hidden="true" />
                     Dispatch service unit
                   </button>
                 )}
-                {(workOrder.phase === 'diagnosed' || workOrder.phase === 'awaiting_parts') &&
-                  workOrder.assignedWorkerId && (
-                    <button
-                      type="button"
-                      disabled={unavailableParts.length > 0}
-                      onClick={() => startRepair(breakdown.id)}
-                      className="inline-flex min-h-11 items-center gap-2 rounded bg-amber-800 px-3 text-xs font-semibold text-white hover:bg-amber-700 disabled:bg-slate-600 disabled:text-white/90"
-                    >
-                      <Play className="h-4 w-4" aria-hidden="true" />
-                      Start repair
-                    </button>
-                  )}
                 {workOrder.phase === 'repairing' && (
                   <button
                     type="button"

@@ -5,7 +5,6 @@ import {
   Home,
   Brain,
   Activity,
-  Users,
   Shield,
   Settings,
   Play,
@@ -17,9 +16,6 @@ import {
   Clock,
   Wifi,
   WifiOff,
-  UserPlus,
-  Copy,
-  Check,
   Gauge,
   Package,
   FastForward,
@@ -29,10 +25,8 @@ import {
 import type { DockMode } from '../ui-new/dock/Dock';
 import { useProductionStore } from '../../stores/productionStore';
 import { useUIStore } from '../../stores/uiStore';
-import { useMultiplayerStore } from '../../stores/multiplayerStore';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useSafetyStore } from '../../stores/safetyStore';
-import { useAIConfigStore } from '../../stores/aiConfigStore';
 import { useOperationsCampaignStore } from '../../stores/operationsCampaignStore';
 import { EmergencyStopButton } from '../ui/EmergencyStopButton';
 
@@ -78,8 +72,6 @@ const getPanelIcon = (mode: DockMode) => {
       return <Settings className={iconClass} />;
     case 'management':
       return <Heart className={iconClass} />;
-    case 'multiplayer':
-      return <Users className={iconClass} />;
     default:
       return <Home className={iconClass} />;
   }
@@ -100,8 +92,6 @@ const getPanelTitle = (mode: DockMode) => {
       return 'Settings';
     case 'management':
       return 'Bilateral Autonomy';
-    case 'multiplayer':
-      return 'Multiplayer';
     default:
       return 'Panel';
   }
@@ -609,258 +599,48 @@ const SCADAContent: React.FC = () => {
   );
 };
 
-// Multiplayer panel content
-const MultiplayerTrustNotice: React.FC = () => (
-  <p className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-2 text-[11px] leading-relaxed text-amber-100">
-    Trusted friends, experimental. The host owns the simulation state. Guest sessions end if the
-    host leaves.
-  </p>
-);
-
-const MultiplayerContent: React.FC = () => {
-  const connectionState = useMultiplayerStore((s) => s.connectionState);
-  const roomCode = useMultiplayerStore((s) => s.roomCode);
-  const isHost = useMultiplayerStore((s) => s.isHost);
-  const remotePlayers = useMultiplayerStore((s) => s._remoteRosterArray);
-  const createRoom = useMultiplayerStore((s) => s.createRoom);
-  const leaveRoom = useMultiplayerStore((s) => s.leaveRoom);
-
-  const [copied, setCopied] = React.useState(false);
-  const copyTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [confirmLeave, setConfirmLeave] = React.useState(false);
-  const leaveTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  React.useEffect(() => {
-    return () => {
-      if (copyTimeoutRef.current) {
-        clearTimeout(copyTimeoutRef.current);
-      }
-      if (leaveTimeoutRef.current) {
-        clearTimeout(leaveTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // Two-tap confirm so an accidental touch can't end the shared session.
-  const handleLeaveClick = () => {
-    if (confirmLeave) {
-      if (leaveTimeoutRef.current) {
-        clearTimeout(leaveTimeoutRef.current);
-        leaveTimeoutRef.current = null;
-      }
-      setConfirmLeave(false);
-      leaveRoom();
-      return;
-    }
-    setConfirmLeave(true);
-    if (leaveTimeoutRef.current) {
-      clearTimeout(leaveTimeoutRef.current);
-    }
-    leaveTimeoutRef.current = setTimeout(() => setConfirmLeave(false), 3000);
-  };
-
-  const copyRoomCode = () => {
-    if (roomCode) {
-      navigator.clipboard
-        ?.writeText(roomCode)
-        .then(() => {
-          setCopied(true);
-          if (copyTimeoutRef.current) {
-            clearTimeout(copyTimeoutRef.current);
-          }
-          copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
-        })
-        .catch(() => {
-          /* clipboard write failed; leave UI unchanged */
-        });
-    }
-  };
-
-  if (connectionState === 'disconnected') {
-    return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <Users className="w-4 h-4" />
-          <span>Multiplayer</span>
-        </div>
-        <MultiplayerTrustNotice />
-        <button
-          onClick={createRoom}
-          className="w-full p-3 bg-cyan-600 hover:bg-cyan-500 rounded-lg flex items-center justify-center gap-2 text-white font-medium transition-colors"
-        >
-          <UserPlus className="w-5 h-5" />
-          Create Room
-        </button>
-        <div className="text-[10px] text-slate-500 text-center">
-          Share the room code with friends to play together
-        </div>
-      </div>
-    );
-  }
-
-  // While the session is still establishing, show a loading indicator instead
-  // of the connected room view (mirrors the desktop MultiplayerLobby).
-  if (connectionState === 'connecting' || connectionState === 'reconnecting') {
-    return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <Users className="w-4 h-4" />
-          <span>Multiplayer</span>
-        </div>
-        <MultiplayerTrustNotice />
-        <div className="bg-slate-800/50 rounded-lg p-3 text-center">
-          <div className="flex items-center justify-center gap-2 text-yellow-400 text-xs">
-            <Wifi className="w-4 h-4 animate-pulse" />
-            {connectionState === 'reconnecting' ? 'Reconnecting...' : 'Connecting...'}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <Users className="w-4 h-4" />
-          <span>Room: {roomCode}</span>
-        </div>
-        <button
-          onClick={copyRoomCode}
-          className="p-1.5 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
-          aria-label={copied ? 'Room code copied' : 'Copy room code'}
-        >
-          {copied ? (
-            <Check className="w-4 h-4 text-green-400" />
-          ) : (
-            <Copy className="w-4 h-4 text-slate-300" />
-          )}
-        </button>
-      </div>
-      <MultiplayerTrustNotice />
-
-      <div className="bg-slate-800/50 rounded-lg p-2">
-        <div className="text-xs text-slate-400 mb-2">
-          {isHost ? 'You are the host' : 'Connected as guest'}
-        </div>
-        <div className="text-sm text-white">
-          {remotePlayers.length + 1} player{remotePlayers.length !== 0 ? 's' : ''} in room
-        </div>
-        {remotePlayers.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {remotePlayers.slice(0, 3).map((player) => (
-              <div key={player.id} className="flex items-center gap-2 text-xs">
-                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: player.color }} />
-                <span className="text-slate-300">{player.name}</span>
-              </div>
-            ))}
-            {remotePlayers.length > 3 && (
-              <div className="text-[10px] text-slate-500">+{remotePlayers.length - 3} more</div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <button
-        onClick={handleLeaveClick}
-        className="w-full p-2 bg-red-600/80 hover:bg-red-500/80 rounded-lg text-white text-sm font-medium transition-colors"
-      >
-        {confirmLeave ? 'Tap again to confirm' : 'Leave Room'}
-      </button>
-    </div>
-  );
-};
-
-// Management Style panel content (simplified for mobile)
+// Autonomous plant status for compact layouts
 const ManagementContent: React.FC = () => {
-  const managementGenerosity = useAIConfigStore((s) => s.managementGenerosity);
-  const setManagementGenerosity = useAIConfigStore((s) => s.setManagementGenerosity);
-  const getGrantRate = useAIConfigStore((s) => s.getGrantRate);
-
-  const grantRate = getGrantRate();
-  const styleLabel =
-    managementGenerosity >= 80
-      ? 'Generous'
-      : managementGenerosity >= 60
-        ? 'Kind'
-        : managementGenerosity >= 40
-          ? 'Balanced'
-          : managementGenerosity >= 20
-            ? 'Firm'
-            : 'Strict';
-
-  const PRESETS = [
-    { name: 'Strict', value: 10 },
-    { name: 'Balanced', value: 50 },
-    { name: 'Kind', value: 75 },
-    { name: 'Generous', value: 95 },
-  ];
+  const machines = useProductionStore((state) => state.machines);
+  const metrics = useProductionStore((state) => state.metrics);
+  const incidents = useOperationsCampaignStore((state) => state.incidents);
+  const activeAssets = machines.filter((machine) => machine.status === 'running').length;
+  const openIncidents = incidents.filter((incident) => incident.phase !== 'resolved').length;
+  const readiness = Math.max(0, Math.round(metrics.uptime - openIncidents * 8));
 
   return (
     <div className="space-y-3">
-      {/* Current Style */}
-      <div className="flex items-center justify-between bg-slate-800/50 rounded-lg p-3">
+      <div className="flex items-center justify-between rounded-lg bg-slate-800/50 p-3">
         <div className="flex items-center gap-2">
-          <Heart
-            className={`w-5 h-5 ${managementGenerosity >= 60 ? 'text-green-400' : managementGenerosity >= 40 ? 'text-blue-400' : 'text-amber-400'}`}
-          />
-          <span className="text-sm font-medium text-white">{styleLabel}</span>
+          <Heart className="h-5 w-5 text-cyan-400" />
+          <span className="text-sm font-medium text-white">Autonomous readiness</span>
         </div>
-        <span className="text-lg font-bold font-mono text-cyan-400">{managementGenerosity}%</span>
+        <span className="font-mono text-lg font-bold text-cyan-400">{readiness}%</span>
       </div>
-
-      {/* Preset Buttons */}
-      <div className="grid grid-cols-4 gap-2">
-        {PRESETS.map((preset) => (
-          <button
-            key={preset.name}
-            onClick={() => setManagementGenerosity(preset.value)}
-            className={`py-2 rounded text-xs font-medium transition-colors ${
-              Math.abs(managementGenerosity - preset.value) < 10
-                ? 'bg-cyan-600 text-white'
-                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-            }`}
-          >
-            {preset.name}
-          </button>
-        ))}
-      </div>
-
-      {/* Slider */}
-      <input
-        id="mobile-management-generosity"
-        type="range"
-        min="0"
-        max="100"
-        value={managementGenerosity}
-        onChange={(e) => setManagementGenerosity(parseInt(e.target.value))}
-        className="w-full h-2 rounded-lg appearance-none cursor-pointer accent-cyan-500 bg-gradient-to-r from-red-600 via-blue-500 to-green-500"
-        aria-label="Management generosity"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={managementGenerosity}
-        aria-valuetext={`${managementGenerosity} percent, ${styleLabel} style`}
-      />
-
-      {/* Key Metrics */}
       <div className="grid grid-cols-3 gap-2">
-        <div className="bg-slate-800/50 rounded p-2 text-center">
-          <div className="text-sm font-bold text-cyan-400">{(grantRate * 100).toFixed(0)}%</div>
-          <div className="text-[9px] text-slate-500">Grant</div>
+        <div className="rounded bg-slate-800/50 p-2 text-center">
+          <div className="text-sm font-bold text-emerald-400">{activeAssets}</div>
+          <div className="text-[9px] text-slate-500">Active assets</div>
         </div>
-        <div className="bg-slate-800/50 rounded p-2 text-center">
-          <div className="text-sm font-bold text-green-400">AUTO</div>
-          <div className="text-[9px] text-slate-500">Site</div>
+        <div className="rounded bg-slate-800/50 p-2 text-center">
+          <div className="text-sm font-bold text-cyan-400">{metrics.throughput}</div>
+          <div className="text-[9px] text-slate-500">Bags per hour</div>
         </div>
-        <div className="bg-slate-800/50 rounded p-2 text-center">
-          <div className="text-sm font-bold text-green-400">0</div>
-          <div className="text-[9px] text-slate-500">Presence</div>
+        <div className="rounded bg-slate-800/50 p-2 text-center">
+          <div
+            className={
+              openIncidents
+                ? 'text-sm font-bold text-amber-400'
+                : 'text-sm font-bold text-emerald-400'
+            }
+          >
+            {openIncidents}
+          </div>
+          <div className="text-[9px] text-slate-500">Open incidents</div>
         </div>
       </div>
-
-      {/* Info */}
-      <div className="text-[10px] text-slate-500 text-center">
-        Preference grants tune the autonomous partner policy
+      <div className="text-center text-[10px] text-slate-500">
+        Process, logistics, safety, and dispatch remain under closed-loop control.
       </div>
     </div>
   );
@@ -876,8 +656,6 @@ const getPanelContent = (mode: DockMode | null) => {
       return <AIContent />;
     case 'scada':
       return <SCADAContent />;
-    case 'multiplayer':
-      return <MultiplayerContent />;
     case 'safety':
       return <SafetyContent />;
     case 'settings':

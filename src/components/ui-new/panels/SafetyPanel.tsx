@@ -43,9 +43,6 @@ export const SafetyPanel: React.FC = () => {
     emergencyActive,
     emergencyDrillMode,
     crisisActive,
-    shiftChangeActive,
-    currentShift,
-    startShiftHandover,
     weather,
     setWeather,
     safetyEvents,
@@ -56,11 +53,6 @@ export const SafetyPanel: React.FC = () => {
       emergencyActive: state.emergencyActive,
       emergencyDrillMode: state.emergencyDrillMode,
       crisisActive: state.crisisState.active,
-      shiftChangeActive: state.shiftChangeActive,
-      currentShift: state.currentShift,
-      // startShiftHandover (not the plain triggerShiftChange): same walk-out
-      // flags, plus the supervisor handoff bookkeeping the richer flow tracks
-      startShiftHandover: state.startShiftHandover,
       weather: state.weather,
       setWeather: state.setWeather,
       safetyEvents: state.safetyEvents,
@@ -257,23 +249,6 @@ export const SafetyPanel: React.FC = () => {
                     </button>
                   ))}
                 </div>
-              </div>
-
-              {/* Shift Change */}
-              <div className="pt-3 border-t border-white/5">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs text-slate-400">Current Shift</span>
-                  <span className="text-xs font-mono text-cyan-400 capitalize">{currentShift}</span>
-                </div>
-                <button
-                  onClick={() => startShiftHandover()}
-                  disabled={shiftChangeActive}
-                  aria-disabled={shiftChangeActive}
-                  title={shiftChangeActive ? 'Shift handover already in progress' : undefined}
-                  className="w-full bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 py-2 rounded-lg text-xs font-medium"
-                >
-                  {shiftChangeActive ? 'Handover in Progress...' : 'Trigger Shift Handover'}
-                </button>
               </div>
             </div>
           </section>

@@ -8,15 +8,15 @@ const completePassingRetest = (batchId: string, sourceLotIds: string[]) => {
     batchId,
     sourceLotIds,
     testType: 'retest',
-    operator: 'Amina Patel',
+    controlSource: 'Amina Patel',
   });
   return qc.completeQCTest({
     machineId: 'packer-0',
     batchId,
     sourceLotIds,
     testType: 'retest',
-    operator: 'Amina Patel',
-    operatorNote: 'Retained sample conforms after investigation',
+    controlSource: 'Amina Patel',
+    controlNote: 'Retained sample conforms after investigation',
     grade: 'A',
     moistureContent: 13,
     proteinLevel: 12,
@@ -42,8 +42,8 @@ describe('QC batch genealogy lifecycle', () => {
 
     const alertId = useQCLabStore.getState().triggerContaminationAlert({
       sourceLotIds: [lotId],
-      operator: 'Amina Patel',
-      operatorNote: 'Foreign material confirmed in source sample',
+      controlSource: 'Amina Patel',
+      controlNote: 'Foreign material confirmed in source sample',
     });
     const current = useMaterialFlowStore.getState();
 

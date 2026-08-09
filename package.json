@@ -34,7 +34,8 @@
     "validate:assets": "node scripts/validate-assets.mjs",
     "validate:depth": "node scripts/validate-depth-policy.mjs",
     "validate:shaders": "node scripts/validate-shaders.mjs",
-    "validate:bundle": "node scripts/validate-bundle.mjs"
+    "validate:bundle": "node scripts/validate-bundle.mjs",
+    "validate:uncrewed": "node scripts/validate-uncrewed-build.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -47,7 +48,6 @@
     "framer-motion": "^12.23.26",
     "lucide-react": "^0.562.0",
     "maath": "^0.10.8",
-    "peerjs": "^1.5.5",
     "postprocessing": "^6.38.2",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",

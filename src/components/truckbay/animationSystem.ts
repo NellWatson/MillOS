@@ -7,7 +7,6 @@ import React from 'react';
 import { useFrame } from '@react-three/fiber';
 import { shouldRunThisFrame } from '../../utils/frameThrottle';
 import * as THREE from 'three';
-import { audioManager } from '../../utils/audioManager';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useGraphicsStore } from '../../stores/graphicsStore';
 import type { TruckAnimState } from './useTruckPhysics';
@@ -115,25 +114,6 @@ export const updateParticleSystem = (
   if (system) {
     Object.assign(system, updates);
   }
-};
-
-// --- Worker Movement Registry ---
-export interface WorkerMovement {
-  ref: React.RefObject<THREE.Group | null>;
-  targetPos: React.MutableRefObject<{ x: number; z: number }>;
-  lastBeepTime: React.MutableRefObject<number>;
-  isActive: boolean;
-  workAreaBounds: { minX: number; maxX: number; minZ: number; maxZ: number };
-}
-
-const workerRegistry = new Map<string, WorkerMovement>();
-
-export const registerWorker = (id: string, worker: WorkerMovement) => {
-  workerRegistry.set(id, worker);
-};
-
-export const unregisterWorker = (id: string) => {
-  workerRegistry.delete(id);
 };
 
 // --- Truck Components Registry ---
@@ -318,50 +298,7 @@ export const TruckAnimationManager: React.FC = () => {
       });
     }
 
-    // --- 3. Process Worker Movement (throttled to 20fps) ---
-    if (shouldRunThisFrame(3)) {
-      workerRegistry.forEach((worker) => {
-        if (!worker.ref.current || !worker.isActive) return;
-
-        // Move around work area
-        if (Math.random() < 0.005) {
-          worker.targetPos.current = {
-            x:
-              worker.workAreaBounds.minX +
-              Math.random() * (worker.workAreaBounds.maxX - worker.workAreaBounds.minX),
-            z:
-              worker.workAreaBounds.minZ +
-              Math.random() * (worker.workAreaBounds.maxZ - worker.workAreaBounds.minZ),
-          };
-        }
-
-        worker.ref.current.position.x = THREE.MathUtils.lerp(
-          worker.ref.current.position.x,
-          worker.targetPos.current.x,
-          0.01
-        );
-        worker.ref.current.position.z = THREE.MathUtils.lerp(
-          worker.ref.current.position.z,
-          worker.targetPos.current.z,
-          0.01
-        );
-
-        // Face direction of travel
-        const dx = worker.targetPos.current.x - worker.ref.current.position.x;
-        const dz = worker.targetPos.current.z - worker.ref.current.position.z;
-        if (Math.abs(dx) > 0.1 || Math.abs(dz) > 0.1) {
-          worker.ref.current.rotation.y = Math.atan2(dx, dz);
-        }
-
-        // Play beep periodically while moving
-        if (time - worker.lastBeepTime.current > 3 && (Math.abs(dx) > 0.1 || Math.abs(dz) > 0.1)) {
-          worker.lastBeepTime.current = time;
-          audioManager.playPalletJackBeep?.();
-        }
-      });
-    }
-
-    // --- 4. Process Truck Component Animations (no throttle, needs smooth updates) ---
+    // --- 3. Process Truck Component Animations (no throttle, needs smooth updates) ---
     truckComponentsRegistry.forEach((truck) => {
       const truckState = truck.getTruckState();
 

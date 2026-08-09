@@ -15,12 +15,12 @@ interface SafetyStore {
   safetyMetrics: {
     nearMisses: number;
     safetyStops: number;
-    workerEvasions: number;
+    routeConflicts: number;
     lastIncidentTime: number | null;
     daysSinceIncident: number;
   };
   recordSafetyStop: () => void;
-  recordWorkerEvasion: () => void;
+  recordRouteConflict: () => void;
   incrementDaysSafe: () => void;
   recordNearMiss: () => void;
 
@@ -32,7 +32,7 @@ interface SafetyStore {
     description: string;
     location?: { x: number; z: number };
     forkliftId?: string;
-    workerId?: string;
+    conflictingVehicleId?: string;
   }>;
   addSafetyIncident: (
     incident: Omit<SafetyStore['safetyIncidents'][0], 'id' | 'timestamp'>
@@ -58,7 +58,7 @@ interface SafetyStore {
   resetForkliftMetrics: () => void;
   cleanupForkliftUpdateTimes: () => void; // Cleanup stale entries
 
-  // Incident heat map data (separate from worker heat map)
+  // Incident heat map data
   _incidentIndices: IncidentHeatMapIndex;
   incidentHeatMap: Array<{ x: number; z: number; intensity: number; type: string }>;
   recordIncidentLocation: (x: number, z: number, type: string) => void;
@@ -68,7 +68,7 @@ interface SafetyStore {
 
   // Safety configuration
   safetyConfig: {
-    workerDetectionRadius: number;
+    vehicleDetectionRadius: number;
     forkliftSafetyRadius: number;
     pathCheckDistance: number;
     speedZoneSlowdown: number; // 0-1, how much to slow down in speed zones
@@ -91,7 +91,7 @@ export const useSafetyStore = create<SafetyStore>()(
       safetyMetrics: {
         nearMisses: 0,
         safetyStops: 0,
-        workerEvasions: 0,
+        routeConflicts: 0,
         lastIncidentTime: null,
         daysSinceIncident: 0,
       },
@@ -105,11 +105,11 @@ export const useSafetyStore = create<SafetyStore>()(
             daysSinceIncident: 0,
           },
         })),
-      recordWorkerEvasion: () =>
+      recordRouteConflict: () =>
         set((state) => ({
           safetyMetrics: {
             ...state.safetyMetrics,
-            workerEvasions: state.safetyMetrics.workerEvasions + 1,
+            routeConflicts: state.safetyMetrics.routeConflicts + 1,
           },
         })),
       incrementDaysSafe: () =>
@@ -263,7 +263,7 @@ export const useSafetyStore = create<SafetyStore>()(
       setShowIncidentHeatMap: (show) => set({ showIncidentHeatMap: show }),
 
       safetyConfig: {
-        workerDetectionRadius: 1.8, // Reduced from 2.5 - less aggressive stopping
+        vehicleDetectionRadius: 1.8, // Reduced from 2.5 - less aggressive stopping
         forkliftSafetyRadius: 3, // Reduced from 4 - forklifts can pass closer
         pathCheckDistance: 4, // Reduced from 5 - shorter lookahead
         speedZoneSlowdown: 0.5, // Increased from 0.4 - less slowdown (50% speed)

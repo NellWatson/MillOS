@@ -1,7 +1,7 @@
 /**
  * Physics configuration for Rapier physics engine integration
  *
- * Uses @react-three/rapier for physics simulation of workers, forklifts, and player
+ * Uses @react-three/rapier for autonomous vehicles and first-person site inspection.
  */
 import { SITE_LAYOUT } from '../constants/siteLayout';
 
@@ -9,21 +9,6 @@ import { SITE_LAYOUT } from '../constants/siteLayout';
 export const PHYSICS_CONFIG = {
   gravity: [0, -9.81, 0] as const,
   timestep: 1 / 60,
-
-  // Worker physics properties
-  worker: {
-    mass: 70,
-    linearDamping: 8, // High damping for responsive stop
-    angularDamping: 5,
-    maxLinearVelocity: 3, // Normal walk speed
-    maxEvacuationVelocity: 6, // Fire drill run speed
-    moveForce: 800, // Force applied for movement
-    evacuationForce: 1200, // Force for emergency evacuation
-    // Soft collision avoidance (worker-to-worker)
-    avoidanceRadius: 2.0, // Distance at which workers start avoiding each other
-    avoidanceForce: 400, // Force applied to separate overlapping workers
-    personalSpace: 1.2, // Minimum comfortable distance between workers
-  },
 
   // Forklift physics properties
   forklift: {
@@ -51,14 +36,11 @@ export const PHYSICS_CONFIG = {
 } as const;
 
 // Collision groups using bit masks for efficient filtering
-// Workers and forklifts don't collide with each other for performance
 export const COLLISION_GROUPS = {
   NONE: 0x0000,
   STATIC: 0x0001, // Machines, obstacles (not walls)
-  WORKER: 0x0002, // Worker NPCs
   FORKLIFT: 0x0004, // Forklifts
   PLAYER: 0x0008, // First-person player
-  SENSOR: 0x0010, // Trigger zones (exits, crossings)
   BOUNDARY: 0x0020, // World boundary walls (no collision)
   ALL: 0xffff,
 } as const;
@@ -67,23 +49,10 @@ export const COLLISION_GROUPS = {
 // membership = what group this body belongs to
 // filter = what groups this body collides with
 export const COLLISION_FILTERS = {
-  // Static objects collide with everything except sensors
+  // Static objects collide with autonomous vehicles and the inspection camera.
   static: {
     memberships: COLLISION_GROUPS.STATIC,
-    filter: COLLISION_GROUPS.WORKER | COLLISION_GROUPS.FORKLIFT | COLLISION_GROUPS.PLAYER,
-  },
-
-  // Workers collide with static and player, not other workers or forklifts
-  // This prevents crowding issues and improves performance.
-  // SENSOR is included because Rapier requires BOTH colliders' filters to
-  // accept each other before intersection events fire: without it the
-  // fire-drill exit sensors (memberships=SENSOR, filter=WORKER) could never
-  // detect a worker, so physics-mode evacuations were never registered by
-  // the sensors. Sensors are non-physical (intersection events only), so
-  // this adds no collision response.
-  worker: {
-    memberships: COLLISION_GROUPS.WORKER,
-    filter: COLLISION_GROUPS.STATIC | COLLISION_GROUPS.PLAYER | COLLISION_GROUPS.SENSOR,
+    filter: COLLISION_GROUPS.FORKLIFT | COLLISION_GROUPS.PLAYER,
   },
 
   // Forklifts collide with static and player only
@@ -92,16 +61,10 @@ export const COLLISION_FILTERS = {
     filter: COLLISION_GROUPS.STATIC | COLLISION_GROUPS.PLAYER,
   },
 
-  // Player collides with everything physical
+  // The inspection camera collides with every physical scene body.
   player: {
     memberships: COLLISION_GROUPS.PLAYER,
-    filter: COLLISION_GROUPS.STATIC | COLLISION_GROUPS.WORKER | COLLISION_GROUPS.FORKLIFT,
-  },
-
-  // Sensors detect workers for fire drill exits
-  sensor: {
-    memberships: COLLISION_GROUPS.SENSOR,
-    filter: COLLISION_GROUPS.WORKER,
+    filter: COLLISION_GROUPS.STATIC | COLLISION_GROUPS.FORKLIFT,
   },
 
   // Boundary walls - no collision with anything (player can walk through)

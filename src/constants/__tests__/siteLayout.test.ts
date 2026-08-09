@@ -42,8 +42,8 @@ describe('canonical site layout', () => {
   it('aligns portals to the corresponding factory boundary', () => {
     expect(SITE_LAYOUT.portals.shipping.centre[2]).toBe(FACTORY_BOUNDS.maxZ);
     expect(SITE_LAYOUT.portals.receiving.centre[2]).toBe(FACTORY_BOUNDS.minZ);
-    expect(SITE_LAYOUT.portals.eastPersonnel.centre[0]).toBe(FACTORY_BOUNDS.maxX);
-    expect(SITE_LAYOUT.portals.westPersonnel.centre[0]).toBe(FACTORY_BOUNDS.minX);
+    expect(SITE_LAYOUT.portals.eastService.centre[0]).toBe(FACTORY_BOUNDS.maxX);
+    expect(SITE_LAYOUT.portals.westService.centre[0]).toBe(FACTORY_BOUNDS.minX);
 
     expect(SITE_LAYOUT.docks.shipping.bayCentre[2]).toBeGreaterThan(FACTORY_BOUNDS.maxZ);
     expect(SITE_LAYOUT.docks.receiving.bayCentre[2]).toBeLessThan(FACTORY_BOUNDS.minZ);
@@ -78,8 +78,8 @@ describe('canonical site layout', () => {
     expect(tankFarm.maxX).toBeLessThan(SITE_LAYOUT.perimeter.maxX);
     expect(tankFarm.minZ).toBeGreaterThan(SITE_LAYOUT.perimeter.minZ);
 
-    const lounge = getServiceAssetBounds(SITE_LAYOUT.serviceYard.driverLounge);
-    expect(lounge.minX).toBeGreaterThan(SITE_LAYOUT.docks.shipping.apron.maxX);
+    const telemetryHub = getServiceAssetBounds(SITE_LAYOUT.serviceYard.fleetTelemetryHub);
+    expect(telemetryHub.minX).toBeGreaterThan(SITE_LAYOUT.docks.shipping.apron.maxX);
   });
 
   it('keeps canonical forklift swept corridors clear of machines and service assets', () => {
@@ -162,9 +162,9 @@ describe('canonical site layout', () => {
     expect(isPointInPortalTransition(SITE_LAYOUT.portals.shipping, 0, 61)).toBe(true);
     expect(isPointInPortalTransition(SITE_LAYOUT.portals.shipping, 30, 50)).toBe(false);
 
-    expect(isPointInPortalTransition(SITE_LAYOUT.portals.eastPersonnel, 58, -20)).toBe(true);
-    expect(isPointInPortalTransition(SITE_LAYOUT.portals.eastPersonnel, 62, -20)).toBe(true);
-    expect(isPointInPortalTransition(SITE_LAYOUT.portals.eastPersonnel, 60, 0)).toBe(false);
+    expect(isPointInPortalTransition(SITE_LAYOUT.portals.eastService, 58, -20)).toBe(true);
+    expect(isPointInPortalTransition(SITE_LAYOUT.portals.eastService, 62, -20)).toBe(true);
+    expect(isPointInPortalTransition(SITE_LAYOUT.portals.eastService, 60, 0)).toBe(false);
   });
 
   it('preloads only nearby render cells and overlaps at portals', () => {

@@ -102,7 +102,7 @@ describe('historicalPlaybackStore', () => {
     const createMockDecision = (id: string, timestamp: number): AIDecision => ({
       id,
       timestamp: new Date(timestamp),
-      type: 'assignment',
+      type: 'coordination',
       action: `Test action ${id}`,
       reasoning: 'Test reasoning',
       confidence: 0.85,
@@ -126,7 +126,6 @@ describe('historicalPlaybackStore', () => {
       const store = useHistoricalPlaybackStore.getState();
       const timestamp = Date.now();
       const decision = createMockDecision('d2', timestamp);
-      decision.workerId = 'worker-1';
       decision.machineId = 'machine-1';
 
       store.logDecision(decision);
@@ -135,10 +134,9 @@ describe('historicalPlaybackStore', () => {
       const entry = decisionHistory[0];
       expect(entry.id).toBe('d2');
       expect(entry.timestamp).toBe(timestamp);
-      expect(entry.type).toBe('assignment');
+      expect(entry.type).toBe('coordination');
       expect(entry.action).toBe('Test action d2');
       expect(entry.priority).toBe('medium');
-      expect(entry.workerId).toBe('worker-1');
       expect(entry.machineId).toBe('machine-1');
     });
 
@@ -169,7 +167,7 @@ describe('historicalPlaybackStore', () => {
         store.logDecision({
           id: `d${i}`,
           timestamp: new Date(baseTime + i * 60000), // 1 min apart
-          type: 'assignment',
+          type: 'coordination',
           action: `Action ${i}`,
           reasoning: 'Test',
           confidence: 0.8,

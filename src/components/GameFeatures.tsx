@@ -18,7 +18,6 @@ export {
   // Components
   PAAnnouncementSystem,
   AchievementsPanel,
-  WorkerLeaderboard,
   MiniMap,
   ScreenshotButton,
   IncidentReplayControls,

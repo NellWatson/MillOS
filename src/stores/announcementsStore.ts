@@ -1,7 +1,7 @@
 /**
  * PA announcement queue, preference, and transcript store.
  *
- * The default Focused Operations mode keeps routine speech literal and sparse.
+ * The default Focused Operations mode keeps routine notices literal and sparse.
  * Characterful Simulation unlocks the full comic corpus. Safety-critical
  * announcements remain available in every mode.
  */
@@ -11,7 +11,7 @@ import { persist, subscribeWithSelector } from 'zustand/middleware';
 import { safeJSONStorage } from './storage';
 
 export type PAMode = 'focused' | 'characterful' | 'off';
-export type PAChannel = 'operational' | 'safety' | 'logistics' | 'worker' | 'flavor';
+export type PAChannel = 'operational' | 'safety' | 'logistics' | 'flavor';
 export type PATone = 'literal' | 'reassuring' | 'characterful';
 
 export interface PAContext {
@@ -31,7 +31,7 @@ export interface Announcement {
   priority: number;
   channel: PAChannel;
   tone: PATone;
-  audience: 'all' | 'operators' | 'drivers' | 'maintenance';
+  audience: 'all' | 'control' | 'logistics' | 'maintenance';
   cooldownMs: number;
 }
 
@@ -101,7 +101,6 @@ function sanitizePersistedAnnouncements(value: unknown): Announcement[] {
       const channel =
         entry.channel === 'safety' ||
         entry.channel === 'logistics' ||
-        entry.channel === 'worker' ||
         entry.channel === 'flavor' ||
         entry.channel === 'operational'
           ? entry.channel
@@ -127,8 +126,8 @@ function sanitizePersistedAnnouncements(value: unknown): Announcement[] {
         channel,
         tone,
         audience:
-          entry.audience === 'operators' ||
-          entry.audience === 'drivers' ||
+          entry.audience === 'control' ||
+          entry.audience === 'logistics' ||
           entry.audience === 'maintenance' ||
           entry.audience === 'all'
             ? entry.audience

@@ -33,7 +33,7 @@ import { logger } from './logger';
 /** Default model — matches CABAL's DEFAULT_MODEL_ID (Qwen3-4B q4f16). */
 export const DEFAULT_WEBGPU_MODEL_ID = 'Qwen3-4B-q4f16_1-MLC';
 
-/** Human-readable model label for the settings UI. */
+/** Display label for the settings UI. */
 export const DEFAULT_WEBGPU_MODEL_LABEL = 'Qwen3-4B Instruct';
 
 // Context limit protection — mirror geminiClient's budget so prompts that fit
@@ -62,7 +62,7 @@ const ADVISORY_MIN_MAX_BUFFER_SIZE = 1_000_000_000; // ~1GB
 // ============================================================================
 
 export interface WebGPULoadProgress {
-  /** Human-readable status text from the MLC engine. */
+  /** Display status text from the MLC engine. */
   text: string;
   /** 0..1 fraction of weights downloaded / shaders compiled. */
   progress: number;

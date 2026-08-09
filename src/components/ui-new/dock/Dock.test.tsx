@@ -8,7 +8,6 @@ vi.mock('lucide-react', () => ({
   Home: () => <span data-testid="icon-home" />,
   Brain: () => <span data-testid="icon-brain" />,
   Activity: () => <span data-testid="icon-activity" />,
-  Users: () => <span data-testid="icon-users" />,
   Shield: () => <span data-testid="icon-shield" />,
   Settings: () => <span data-testid="icon-settings" />,
   Eye: () => <span data-testid="icon-eye" />,
@@ -56,14 +55,19 @@ describe('Dock Component', () => {
 
   it('groups secondary workspaces and view controls behind one menu', () => {
     const handleModeChange = vi.fn();
-    render(<Dock activeMode="overview" onModeChange={handleModeChange} />);
+    const handleDatalinksOpen = vi.fn();
+    render(
+      <Dock
+        activeMode="overview"
+        onModeChange={handleModeChange}
+        onDatalinksOpen={handleDatalinksOpen}
+      />
+    );
 
     fireEvent.click(screen.getByLabelText('More workspaces and view controls'));
-    fireEvent.click(screen.getByRole('menuitem', { name: /Multiplayer/ }));
-    expect(handleModeChange).toHaveBeenCalledWith(
-      'multiplayer',
-      screen.getByLabelText('More workspaces and view controls')
-    );
+    fireEvent.click(screen.getByRole('menuitem', { name: /Datalinks/ }));
+    expect(handleDatalinksOpen).toHaveBeenCalledOnce();
+    expect(handleModeChange).not.toHaveBeenCalled();
   });
 
   it('has accessible labels for screen readers', () => {

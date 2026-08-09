@@ -229,7 +229,7 @@ const CAB_PITCH_CENTRE_Z = 0.4;
  *
  * At 1280 px across a 79-degree horizontal field, one world metre is 1280 /
  * (2 d tan 39.7deg) px, so at 115 m a metre is 6.7 px. The parts gated here are
- * 0.05-0.24 m across (window pillars, mirror glass, the dash, the driver behind
+ * 0.05-0.24 m across (window pillars, mirror glass, and the dash behind
  * 0.55-opacity glazing) - between a third of a pixel and one and a half. The
  * silhouette parts are NOT gated: the cab shell, roof fairing, greenhouse
  * glazing, grille, bumper, exhaust stacks, every lamp, the wheels and the whole

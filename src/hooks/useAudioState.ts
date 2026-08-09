@@ -33,13 +33,11 @@ export interface AudioTrack {
 
 export interface AudioStateWithControls extends AudioState {
   currentTrack: AudioTrack;
-  ttsEnabled: boolean;
   setMuted: (v: boolean) => void;
   setVolume: (v: number) => void;
   setMusicEnabled: (v: boolean) => void;
   setMusicVolume: (v: number) => void;
   setMachineVolume: (v: number) => void;
-  setTtsEnabled: (v: boolean) => void;
   startMusic: () => void;
   nextTrack: () => void;
   prevTrack: () => void;
@@ -89,16 +87,12 @@ function getSnapshot(): AudioState {
 }
 
 // Extended snapshot for full controls
-let cachedExtendedSnapshot:
-  | (AudioState & { currentTrack: AudioTrack; ttsEnabled: boolean })
-  | null = null;
+let cachedExtendedSnapshot: (AudioState & { currentTrack: AudioTrack }) | null = null;
 let lastCurrentTrackId: string | null = null;
-let lastTtsEnabled: boolean | null = null;
 
-function getExtendedSnapshot(): AudioState & { currentTrack: AudioTrack; ttsEnabled: boolean } {
+function getExtendedSnapshot(): AudioState & { currentTrack: AudioTrack } {
   const base = getSnapshot();
   const currentTrack = audioManager.currentTrack;
-  const ttsEnabled = audioManager.ttsEnabled;
 
   if (
     cachedExtendedSnapshot === null ||
@@ -107,15 +101,12 @@ function getExtendedSnapshot(): AudioState & { currentTrack: AudioTrack; ttsEnab
     cachedExtendedSnapshot.musicEnabled !== base.musicEnabled ||
     cachedExtendedSnapshot.musicVolume !== base.musicVolume ||
     cachedExtendedSnapshot.machineVolume !== base.machineVolume ||
-    lastCurrentTrackId !== currentTrack.id ||
-    lastTtsEnabled !== ttsEnabled
+    lastCurrentTrackId !== currentTrack.id
   ) {
     lastCurrentTrackId = currentTrack.id;
-    lastTtsEnabled = ttsEnabled;
     cachedExtendedSnapshot = {
       ...base,
       currentTrack,
-      ttsEnabled,
     };
   }
 
@@ -158,9 +149,6 @@ export function useAudioStateWithControls(): AudioStateWithControls {
       },
       setMachineVolume: (v: number) => {
         audioManager.machineVolume = v;
-      },
-      setTtsEnabled: (v: boolean) => {
-        audioManager.ttsEnabled = v;
       },
       startMusic: () => audioManager.startMusic(),
       nextTrack: () => audioManager.nextTrack(),

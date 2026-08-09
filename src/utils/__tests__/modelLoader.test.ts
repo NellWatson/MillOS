@@ -4,7 +4,6 @@ import { checkModelExists, isBundledModel } from '../modelLoader';
 describe('modelLoader', () => {
   it('recognises delivery-validated bundled models without a network probe', () => {
     expect(isBundledModel('forklift')).toBe(true);
-    expect(isBundledModel('worker')).toBe(true);
     expect(isBundledModel('silo')).toBe(false);
   });
 

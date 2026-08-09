@@ -5,7 +5,6 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { MillScene } from './MillScene';
 import { PhysicsFirstPersonController } from './physics/PhysicsFirstPersonController';
 import { FactoryColliders } from './physics/FactoryColliders';
-import { ExitZoneSensors } from './physics/ExitZoneSensors';
 import { PhysicsDebug } from './physics/PhysicsDebug';
 import { MobileFirstPersonController } from './mobile/MobileFirstPersonController';
 import type { MachineData } from '../types';
@@ -34,7 +33,6 @@ export const PhysicsScene: React.FC<PhysicsSceneProps> = ({
 }) => (
   <Physics gravity={[0, -9.81, 0]} timeStep={1 / 60}>
     <FactoryColliders />
-    <ExitZoneSensors />
     <PhysicsDebug />
 
     {fpsMode ? (

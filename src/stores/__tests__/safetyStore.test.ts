@@ -16,7 +16,7 @@ describe('SafetyStore', () => {
       safetyMetrics: {
         nearMisses: 0,
         safetyStops: 0,
-        workerEvasions: 0,
+        routeConflicts: 0,
         lastIncidentTime: null,
         daysSinceIncident: 127,
       },
@@ -28,7 +28,7 @@ describe('SafetyStore', () => {
       incidentHeatMap: [],
       showIncidentHeatMap: false,
       safetyConfig: {
-        workerDetectionRadius: 1.8,
+        vehicleDetectionRadius: 1.8,
         forkliftSafetyRadius: 3,
         pathCheckDistance: 4,
         speedZoneSlowdown: 0.5,
@@ -70,27 +70,27 @@ describe('SafetyStore', () => {
       expect(safetyMetrics.lastIncidentTime).toBeDefined();
     });
 
-    it('should record worker evasion', () => {
-      const { recordWorkerEvasion } = useSafetyStore.getState();
-      recordWorkerEvasion();
+    it('should record a mobile-equipment route conflict', () => {
+      const { recordRouteConflict } = useSafetyStore.getState();
+      recordRouteConflict();
 
       const { safetyMetrics } = useSafetyStore.getState();
-      expect(safetyMetrics.workerEvasions).toBe(1);
+      expect(safetyMetrics.routeConflicts).toBe(1);
     });
 
     it('should accumulate multiple incidents', () => {
-      const { recordSafetyStop, recordWorkerEvasion } = useSafetyStore.getState();
+      const { recordSafetyStop, recordRouteConflict } = useSafetyStore.getState();
 
       recordSafetyStop();
       recordSafetyStop();
-      recordWorkerEvasion();
-      recordWorkerEvasion();
-      recordWorkerEvasion();
+      recordRouteConflict();
+      recordRouteConflict();
+      recordRouteConflict();
 
       const { safetyMetrics } = useSafetyStore.getState();
       expect(safetyMetrics.safetyStops).toBe(2);
       expect(safetyMetrics.nearMisses).toBe(2);
-      expect(safetyMetrics.workerEvasions).toBe(3);
+      expect(safetyMetrics.routeConflicts).toBe(3);
     });
   });
 
@@ -323,7 +323,7 @@ describe('SafetyStore', () => {
   describe('Safety Configuration', () => {
     it('should have default safety config', () => {
       const { safetyConfig } = useSafetyStore.getState();
-      expect(safetyConfig.workerDetectionRadius).toBe(1.8);
+      expect(safetyConfig.vehicleDetectionRadius).toBe(1.8);
       expect(safetyConfig.forkliftSafetyRadius).toBe(3);
       expect(safetyConfig.pathCheckDistance).toBe(4);
       expect(safetyConfig.speedZoneSlowdown).toBe(0.5);
@@ -331,22 +331,22 @@ describe('SafetyStore', () => {
 
     it('should update safety config partially', () => {
       const { setSafetyConfig } = useSafetyStore.getState();
-      setSafetyConfig({ workerDetectionRadius: 2.5 });
+      setSafetyConfig({ vehicleDetectionRadius: 2.5 });
 
       const { safetyConfig } = useSafetyStore.getState();
-      expect(safetyConfig.workerDetectionRadius).toBe(2.5);
+      expect(safetyConfig.vehicleDetectionRadius).toBe(2.5);
       expect(safetyConfig.forkliftSafetyRadius).toBe(3); // Unchanged
     });
 
     it('should update multiple config values', () => {
       const { setSafetyConfig } = useSafetyStore.getState();
       setSafetyConfig({
-        workerDetectionRadius: 2.0,
+        vehicleDetectionRadius: 2.0,
         speedZoneSlowdown: 0.3,
       });
 
       const { safetyConfig } = useSafetyStore.getState();
-      expect(safetyConfig.workerDetectionRadius).toBe(2.0);
+      expect(safetyConfig.vehicleDetectionRadius).toBe(2.0);
       expect(safetyConfig.speedZoneSlowdown).toBe(0.3);
     });
   });

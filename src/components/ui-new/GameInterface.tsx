@@ -36,13 +36,13 @@ const INTRO_STEPS: OnboardingStep[] = [
     title: 'Protect today’s target',
     icon: 'goal',
     content:
-      'The status bar compares output with the shift target. Alarms, stoppages, quality loss, and unsafe choices reduce throughput.',
+      'The status bar compares output with the active run target. Alarms, stoppages, quality loss, and route conflicts reduce throughput.',
   },
   {
     title: 'Inspect before acting',
     icon: 'controls',
     content:
-      'Select a machine to inspect it. The bottom dock opens production, safety, BAS, and simulated SCADA. Press ? for keyboard controls.',
+      'Select a machine to inspect it. The bottom dock opens production, safety, autonomy, and simulated SCADA. Press ? for keyboard controls.',
   },
 ];
 
@@ -236,11 +236,7 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
 
     if (
       activeMode === mode &&
-      (mode === 'ai' ||
-        mode === 'settings' ||
-        mode === 'scada' ||
-        mode === 'safety' ||
-        mode === 'multiplayer')
+      (mode === 'ai' || mode === 'settings' || mode === 'scada' || mode === 'safety')
     ) {
       // Toggle off if clicking the same active mode for panels
       setActiveMode('overview');
@@ -276,8 +272,7 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
       activeMode === 'ai' ||
       activeMode === 'scada' ||
       activeMode === 'settings' ||
-      activeMode === 'safety' ||
-      activeMode === 'multiplayer'
+      activeMode === 'safety'
     ) {
       // Notify parent of panel state changes for keyboard shortcut sync
       if (activeMode === 'ai') onAIPanelChange?.(false);

@@ -59,7 +59,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
         { key: 'Ctrl+B', description: 'Blueprint mode (see-through walls)' },
         { key: '+/-', description: 'Adjust production speed' },
         { key: 'ESC', description: 'Close panels' },
-        { key: 'Click', description: 'Select machine/worker' },
+        { key: 'Click', description: 'Select machine or vehicle' },
       ],
     },
     {

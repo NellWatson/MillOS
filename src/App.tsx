@@ -39,7 +39,6 @@ if (import.meta.env.DEV) {
   devWindow.useFPSStore = useFPSStore;
 }
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { useMultiplayerSync } from './multiplayer';
 import { useMobileDetection } from './hooks/useMobileDetection';
 import { TouchLookHandler } from './components/mobile/TouchLookHandler';
 import { MobileFirstPersonController } from './components/mobile/MobileFirstPersonController';
@@ -340,9 +339,6 @@ const App: React.FC = () => {
     setQualityNotification,
   });
 
-  // Initialize multiplayer state synchronization
-  useMultiplayerSync();
-
   // Initialize audio on first user interaction (required by Web Audio API)
   const initializeAudio = useCallback(() => {
     if (runtimeMode.benchmark) return;
@@ -500,31 +496,6 @@ const App: React.FC = () => {
     return () => {
       active = false;
       cleanup?.();
-    };
-  }, [runtimeMode.benchmark]);
-
-  // Initialize VCP update loop
-  useEffect(() => {
-    // VCP remains available to normal sessions, but its periodic store writes
-    // do not belong in a deterministic fixed-camera render benchmark.
-    if (runtimeMode.benchmark) return;
-
-    let active = true;
-    let stopLoop: (() => void) | undefined;
-
-    import('./protocols/vcp')
-      .then(({ startVCPUpdateLoop, stopVCPUpdateLoop }) => {
-        if (!active) return;
-        startVCPUpdateLoop();
-        stopLoop = stopVCPUpdateLoop;
-      })
-      .catch(() => {
-        stopLoop = undefined;
-      });
-
-    return () => {
-      active = false;
-      stopLoop?.();
     };
   }, [runtimeMode.benchmark]);
 

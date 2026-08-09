@@ -1,13 +1,10 @@
 import React from 'react';
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { GameInterface } from './ui-new/GameInterface';
-import { MultiplayerChat } from './multiplayer/MultiplayerChat';
-import { AIDecisionVotingPanel } from './multiplayer/AIDecisionVoting';
 import { ProductionTargetWidget } from './ProductionTargetWidget';
 import {
   EnergyDashboard,
   MultiObjectiveDashboard,
-  ShiftHandoverSummary,
   CostEstimationOverlay,
   WeatherEffectsOverlay,
 } from './ui';
@@ -45,7 +42,7 @@ interface DeferredOperationalUIProps {
 
 /**
  * The complete DOM operations layer is intentionally loaded after the first
- * useful WebGL frame. This keeps SCADA, knowledge, multiplayer, and animation
+ * useful WebGL frame. This keeps SCADA, knowledge, and animation
  * code from delaying the visible factory while preserving the complete UI once
  * the core scene is on screen.
  */
@@ -167,13 +164,10 @@ export const DeferredOperationalUI: React.FC<DeferredOperationalUIProps> = ({
       )}
     </AnimatePresence>
 
-    <MultiplayerChat />
-    <AIDecisionVotingPanel />
     <ProductionTargetWidget />
     <EnergyDashboard />
     <MultiObjectiveDashboard />
     <CostEstimationOverlay />
-    <ShiftHandoverSummary />
     <WeatherEffectsOverlay />
     <RotateDeviceOverlay visible={isMobile && !isLandscape} />
   </MotionConfig>

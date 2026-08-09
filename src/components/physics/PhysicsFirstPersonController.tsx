@@ -12,7 +12,6 @@ import { RigidBody, CapsuleCollider } from '@react-three/rapier';
 import type { RapierRigidBody } from '@react-three/rapier';
 import * as THREE from 'three';
 import { useUIStore } from '../../stores/uiStore';
-import { useMultiplayerStore } from '../../stores/multiplayerStore';
 import {
   PHYSICS_CONFIG,
   COLLISION_FILTERS,
@@ -131,7 +130,6 @@ export const PhysicsFirstPersonController: React.FC<PhysicsFirstPersonController
   }, []);
 
   // Track frame count for throttled multiplayer updates
-  const frameCount = useRef(0);
 
   // Movement update
   useFrame((_state, delta) => {
@@ -193,18 +191,6 @@ export const PhysicsFirstPersonController: React.FC<PhysicsFirstPersonController
     // Sync camera to physics body position
     const pos = rb.translation();
     camera.position.set(pos.x, pos.y + PHYSICS_CONFIG.player.height, pos.z);
-
-    // Broadcast position to multiplayer store (throttled to every 3 frames ~20Hz at 60fps)
-    frameCount.current++;
-    if (frameCount.current % 3 === 0) {
-      const vel = rb.linvel();
-      const mpStore = useMultiplayerStore.getState();
-      if (mpStore.connectionState === 'connected') {
-        mpStore.setLocalPosition([pos.x, pos.y + PHYSICS_CONFIG.player.height, pos.z]);
-        mpStore.setLocalRotation(camera.rotation.y);
-        mpStore.setLocalVelocity([vel.x, vel.y, vel.z]);
-      }
-    }
   });
 
   // Handle lock state changes

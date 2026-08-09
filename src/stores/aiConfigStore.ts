@@ -4,10 +4,6 @@
  * Manages AI mode settings, Gemini API key, connection state,
  * and live cost tracking for Gemini API usage.
  *
- * BAS Integration (Dec 2024):
- * - Subscribes to basStore for five axes values
- * - AI behavior adapts based on autonomy, transparency, and tone axes
- * - Proactivity scales with autonomy level (lower = more proactive AI)
  */
 
 import { create } from 'zustand';
@@ -22,8 +18,6 @@ import {
 } from '../utils/webgpuClient';
 import { logger } from '../utils/logger';
 import type { StrategicPriority } from '../types';
-import type { FiveAxes, SuggestionMode } from '../types/bas';
-import { useBASStore } from './basStore';
 
 export type AIMode = 'heuristic' | 'gemini' | 'hybrid';
 
@@ -73,27 +67,7 @@ interface StrategicState {
   insight?: string; // Key observation from Gemini
   tradeoff?: string; // Trade-off explanation
   focusMachine?: string; // Machine ID to prioritize
-  recommendWorker?: string; // Recommended worker for critical tasks
   confidenceScores?: { overall: number; reasoning: string };
-}
-
-/**
- * BAS-derived AI behavior settings
- * These are computed from BAS axis values
- */
-interface BASAIBehavior {
-  /** Proactivity level (0-100): Higher = AI is more proactive */
-  proactivity: number;
-  /** Transparency level (0-100): Higher = AI explains more */
-  transparency: number;
-  /** Tone warmth (0-100): Higher = warmer, more supportive tone */
-  toneWarmth: number;
-  /** Suggestion mode derived from autonomy axis */
-  suggestionMode: SuggestionMode;
-  /** Maximum suggestions per hour (scales with autonomy) */
-  maxSuggestionsPerHour: number;
-  /** Whether AI should defer to democratic decisions */
-  deferToDemocracy: boolean;
 }
 
 interface AIConfigState {
@@ -113,14 +87,14 @@ interface AIConfigState {
   // Local WebGPU neural core state
   webgpuStatus: WebGPUStatus;
   webgpuProgress: number; // 0..1 download/compile progress
-  webgpuMessage: string; // human-readable status line
+  webgpuMessage: string; // display status line
   webgpuError: string | null;
   webgpuModelReady: boolean; // engine loaded & serving inference
   webgpuModelId: string;
   webgpuAdapterWarning: string | null; // advisory OOM/perf warning from adapter probe
   /** Load the local model. `promote` (default true) mirrors the Gemini
    *  connect-time switch to Hybrid; the silent startup prewarm passes false so
-   *  it never overrides a returning operator's persisted aiMode. */
+   *  it never overrides a persisted aiMode. */
   loadWebGPUModel: (promote?: boolean) => Promise<boolean>;
   cancelWebGPUModelLoad: () => void;
   unloadWebGPUModel: () => Promise<void>;
@@ -171,7 +145,6 @@ interface AIConfigState {
   showEnergyDashboard: boolean;
   showMultiObjective: boolean;
   showCostOverlay: boolean;
-  showShiftHandover: boolean;
   setShowCascadeVisualization: (show: boolean) => void;
   setShowProductionTarget: (show: boolean) => void;
   setShowStrategicOverlay: (show: boolean) => void;
@@ -179,75 +152,6 @@ interface AIConfigState {
   setShowEnergyDashboard: (show: boolean) => void;
   setShowMultiObjective: (show: boolean) => void;
   setShowCostOverlay: (show: boolean) => void;
-  setShowShiftHandover: (show: boolean) => void;
-
-  // Bilateral Alignment: Management Style
-  // 0 = Strict (50% grant rate), 50 = Balanced (75%), 100 = Generous (95%)
-  managementGenerosity: number;
-  setManagementGenerosity: (value: number) => void;
-  getGrantRate: () => number; // Calculated grant rate based on generosity
-
-  // =============================================================================
-  // BAS INTEGRATION: AI behavior derived from Five Axes
-  // =============================================================================
-
-  /** Current BAS axes (synced from basStore) */
-  basAxes: FiveAxes;
-
-  /** Update BAS axes (called by subscription) */
-  syncBASAxes: (axes: FiveAxes) => void;
-
-  /** Get computed AI behavior based on BAS axes */
-  getBASAIBehavior: () => BASAIBehavior;
-
-  /** Check if AI should be more passive based on autonomy level */
-  shouldDeferToWorkers: () => boolean;
-
-  /** Get proactive suggestion interval in ms (longer = less frequent) */
-  getSuggestionIntervalMs: () => number;
-}
-
-/**
- * Calculate AI behavior from BAS axes
- */
-function computeBASBehavior(axes: FiveAxes): BASAIBehavior {
-  // Proactivity is INVERSE of autonomy - low autonomy means AI is more proactive
-  const proactivity = 100 - axes.autonomyLevel;
-
-  // Transparency directly maps from information access
-  const transparency = axes.informationAccess;
-
-  // Tone warmth derived from evaluation direction (worker-friendly = warmer)
-  // and collective orientation (team focus = warmer)
-  const toneWarmth = (axes.evaluationDirection + axes.collectiveOrientation) / 2;
-
-  // Suggestion mode based on autonomy level
-  let suggestionMode: SuggestionMode;
-  if (axes.autonomyLevel < 25) {
-    suggestionMode = 'directive';
-  } else if (axes.autonomyLevel < 50) {
-    suggestionMode = 'suggestive';
-  } else if (axes.autonomyLevel < 75) {
-    suggestionMode = 'available';
-  } else {
-    suggestionMode = 'silent';
-  }
-
-  // Max suggestions scale inversely with autonomy
-  // Low autonomy (0) = 20/hour, High autonomy (100) = 2/hour
-  const maxSuggestionsPerHour = Math.max(2, Math.round(20 - (axes.autonomyLevel / 100) * 18));
-
-  // Defer to democracy when decision mode is > 66%
-  const deferToDemocracy = axes.decisionMode > 66;
-
-  return {
-    proactivity,
-    transparency,
-    toneWarmth,
-    suggestionMode,
-    maxSuggestionsPerHour,
-    deferToDemocracy,
-  };
 }
 
 // Transient (non-reactive, non-persisted) flag coordinating an in-flight model
@@ -275,7 +179,7 @@ export const useAIConfigStore = create<AIConfigState>()(
       setLLMBackend: (backend: LLMBackend) => {
         set({ llmBackend: backend });
         logger.info(`[AIConfigStore] LLM backend set to: ${backend}`);
-        // Auto-download/load the local model the moment the operator picks it
+        // Auto-download/load the local model the moment the controller selects it
         // (idempotent — loadWebGPUModel() no-ops if already loading or ready).
         if (backend === 'webgpu') {
           void get().loadWebGPUModel();
@@ -567,7 +471,6 @@ export const useAIConfigStore = create<AIConfigState>()(
       showEnergyDashboard: false,
       showMultiObjective: false,
       showCostOverlay: false,
-      showShiftHandover: true,
 
       setShowCascadeVisualization: (show: boolean) => set({ showCascadeVisualization: show }),
       setShowProductionTarget: (show: boolean) => set({ showProductionTarget: show }),
@@ -576,64 +479,6 @@ export const useAIConfigStore = create<AIConfigState>()(
       setShowEnergyDashboard: (show: boolean) => set({ showEnergyDashboard: show }),
       setShowMultiObjective: (show: boolean) => set({ showMultiObjective: show }),
       setShowCostOverlay: (show: boolean) => set({ showCostOverlay: show }),
-      setShowShiftHandover: (show: boolean) => set({ showShiftHandover: show }),
-
-      // Bilateral Alignment: Management Generosity (default: 75 = Kind/Balanced)
-      managementGenerosity: 75,
-      setManagementGenerosity: (value: number) => {
-        const clamped = Math.max(0, Math.min(100, value));
-        set({ managementGenerosity: clamped });
-        logger.info(`[AIConfigStore] Management generosity set to: ${clamped}%`);
-      },
-      getGrantRate: () => {
-        const generosity = get().managementGenerosity;
-        // 0% generosity = 50% grant rate (strict but not cruel)
-        // 50% generosity = 75% grant rate (balanced)
-        // 100% generosity = 95% grant rate (very kind)
-        return 0.5 + (generosity / 100) * 0.45;
-      },
-
-      // =============================================================================
-      // BAS INTEGRATION
-      // =============================================================================
-
-      // Default BAS axes (will be synced from basStore)
-      basAxes: {
-        autonomyLevel: 60,
-        decisionMode: 50,
-        informationAccess: 80,
-        evaluationDirection: 50,
-        collectiveOrientation: 40,
-      },
-
-      syncBASAxes: (axes: FiveAxes) => {
-        set({ basAxes: axes });
-        logger.info(
-          `[AIConfigStore] BAS axes synced - Autonomy: ${axes.autonomyLevel}%, Decision: ${axes.decisionMode}%`
-        );
-      },
-
-      getBASAIBehavior: () => {
-        return computeBASBehavior(get().basAxes);
-      },
-
-      shouldDeferToWorkers: () => {
-        const axes = get().basAxes;
-        // Defer when autonomy > 60% or decision mode > 50%
-        return axes.autonomyLevel > 60 || axes.decisionMode > 50;
-      },
-
-      getSuggestionIntervalMs: () => {
-        const behavior = get().getBASAIBehavior();
-        // Base interval: 30 seconds
-        // Low proactivity (high autonomy) = 5 minute intervals
-        // High proactivity (low autonomy) = 15 second intervals
-        const minInterval = 15000; // 15 seconds
-        const maxInterval = 300000; // 5 minutes
-        const proactivityFactor = behavior.proactivity / 100;
-        // Higher proactivity = shorter interval
-        return Math.round(maxInterval - proactivityFactor * (maxInterval - minInterval));
-      },
 
       // Cost tracking - session state
       costTracking: {
@@ -794,7 +639,6 @@ export const useAIConfigStore = create<AIConfigState>()(
         // Only persist these fields
         aiMode: state.aiMode,
         geminiApiKey: state.geminiApiKey,
-        managementGenerosity: state.managementGenerosity,
         // Persist the chosen backend; webgpuModelReady is intentionally NOT
         // persisted (the engine is memory-only and must be reloaded each session).
         llmBackend: state.llmBackend,
@@ -803,55 +647,14 @@ export const useAIConfigStore = create<AIConfigState>()(
   )
 );
 
-// =============================================================================
-// BAS SUBSCRIPTION SETUP
-// Subscribe to basStore changes and sync axes to aiConfigStore
-// =============================================================================
-
-// Lazy import to avoid circular dependency
-let basStoreSubscribed = false;
-let basStoreUnsubscribe: (() => void) | null = null;
-
-export function initBASSubscription(): void {
-  if (basStoreSubscribed) return;
-
-  // Initial sync
-  const axes = useBASStore.getState().axes;
-  useAIConfigStore.getState().syncBASAxes(axes);
-
-  // Subscribe to future changes. basStore replaces the axes object on every
-  // mutation (setAxis/applyPreset/resetToDefaults all spread into a fresh
-  // object, never mutate in place), so an O(1) reference check is sufficient
-  // and avoids a per-callback JSON.stringify on unrelated BAS mutations.
-  basStoreUnsubscribe = useBASStore.subscribe((state, prevState) => {
-    if (state.axes !== prevState.axes) {
-      useAIConfigStore.getState().syncBASAxes(state.axes);
-    }
-  });
-
-  basStoreSubscribed = true;
-  logger.info('[AIConfigStore] BAS subscription initialized');
-}
-
-/** Cleanup function for testing and HMR - unsubscribes from BAS store */
-export function cleanupAIConfigBASSubscription(): void {
-  if (basStoreUnsubscribe) {
-    basStoreUnsubscribe();
-    basStoreUnsubscribe = null;
-  }
-  basStoreSubscribed = false;
-}
-
 // Initialize on module load (will run after rehydration)
 if (typeof window !== 'undefined') {
   // Small delay to ensure rehydration completes
   setTimeout(() => {
     useAIConfigStore.getState().initializeFromStorage();
-    // Initialize BAS subscription after stores are ready
-    initBASSubscription();
   }, 100);
 
-  // Prewarm the local model if the operator left the backend on WebGPU.
+  // Prewarm the local model if WebGPU was the persisted backend.
   // Deferred so the heavy 3D scene boots first; idempotent + fire-and-forget.
   // After the one-time download the weights are browser-cached, so this is a
   // fast cache load on subsequent sessions (the "download automatically" path).

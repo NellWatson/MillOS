@@ -793,11 +793,11 @@ const FenceSection: React.FC<{
 
 // Water colors
 const WATER_COLORS = {
-  deep: '#1a3a6e', // Deep blue water
-  shallow: '#2d5a8a', // Shallow blue water
-  surface: '#3d6ab0', // Blue surface reflection
-  edge: '#1e3a5a', // Water edge/shore
-  pond: '#2563eb', // Bright blue for decorative ponds
+  deep: '#173f4a', // Deep blue-green water
+  shallow: '#2d6670', // Mineral-rich shallows
+  surface: '#6d989e', // Muted sky reflection
+  edge: '#1d3c42', // Wet bank transition
+  pond: '#2b6871', // Decorative pond water
 };
 
 // The former `WATER_DEPTH_MATERIALS` pair is gone. Every consumer painted a
@@ -993,14 +993,17 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
         void main() {
           vec2 centred = vUv * 2.0 - 1.0;
 
-          // Three travelling wave trains. The axes arrive pre-normalised as
-          // uniforms; keeping the raw phases lets the analytic derivatives
-          // below reuse them instead of evaluating a second set of sines.
-          float phaseA = dot(vUv, uRippleA) * 38.0 + uTime * uFlowSpeed * 1.62;
-          float phaseC = dot(vUv, uRippleC) * 23.0 + uTime * uFlowSpeed * 0.63;
+          // Three travelling wave trains in world space. UV-scaled phases
+          // forced every surface to carry the same number of waves, stretching
+          // broad white bands across long canals and compressing them on small
+          // ponds. World-space wavelengths stay physically consistent and
+          // continue seamlessly between neighbouring water meshes.
+          vec2 waterCoord = vWorldPosition.xz;
+          float phaseA = dot(waterCoord, uRippleA) * 2.05 + uTime * uFlowSpeed * 1.62;
+          float phaseC = dot(waterCoord, uRippleC) * 1.35 + uTime * uFlowSpeed * 0.63;
           float rippleA = sin(phaseA);
           float phaseB =
-            dot(vUv, uRippleB) * 59.0 - uTime * uFlowSpeed * 1.09 + rippleA * 0.72;
+            dot(waterCoord, uRippleB) * 3.10 - uTime * uFlowSpeed * 1.09 + rippleA * 0.48;
           float rippleB = sin(phaseB);
           float rippleC = cos(phaseC);
           vec2 rainTile = fract(vWorldPosition.xz * 0.19) - 0.5;
@@ -1036,9 +1039,9 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
           // centimetre chop that makes the reflection break up. No texture
           // fetch, no second pass - purely ALU, which is the budget we have.
           vec2 slope =
-            cos(phaseA) * 38.0 * 0.0040 * uRippleA
-            + cos(phaseB) * 59.0 * 0.0016 * uRippleB
-            - sin(phaseC) * 23.0 * 0.0030 * uRippleC;
+            cos(phaseA) * 2.05 * 0.0180 * uRippleA
+            + cos(phaseB) * 3.10 * 0.0085 * uRippleB
+            - sin(phaseC) * 1.35 * 0.0140 * uRippleC;
           vec3 normal = normalize(
             vWorldNormal + vec3(slope.x + rainRipple * 0.018, 0.0, slope.y - rainRipple * 0.018)
           );
@@ -1065,8 +1068,8 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
           colour += uSunColour * glitter * uDaylight;
 
           float crestSignal = rippleA * 0.7 + rippleB * 0.22 + rippleC * 0.08;
-          float crest = smoothstep(0.70, 0.98, crestSignal);
-          colour = mix(colour, uReflection, crest * (0.05 + 0.06 * uDaylight));
+          float crest = smoothstep(0.78, 1.0, crestSignal);
+          colour = mix(colour, uReflection, crest * (0.025 + 0.035 * uDaylight));
 
           // Shore foam that breathes with the swell rather than a static rim,
           // with a finer lace line right on the waterline.
@@ -1103,7 +1106,7 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
     // MANUALLY VERSIONED, never derived from time or randomness - see the
     // documented `Date.now()` cache-key bug. Bump this whenever the shader
     // source above changes or a stale cached program will be reused.
-    value.customProgramCacheKey = () => 'millos-unified-water-v7';
+    value.customProgramCacheKey = () => 'millos-unified-water-v8';
     return value;
   }, [crossOnly, deep, flowSpeed, flowX, flowY, opacity, radial, reflection, shallow]);
 
@@ -1147,7 +1150,7 @@ const StillCanalWater: React.FC<{
         <UnifiedWaterSurfaceMaterial
           deep={WATER_COLORS.deep}
           shallow={WATER_COLORS.shallow}
-          reflection="#b9dce3"
+          reflection="#86aeb5"
           flowSpeed={0.12}
           opacity={0.9}
           crossOnly
@@ -5920,7 +5923,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
 
   // Exterior wall positions - these are OUTSIDE the existing factory elements
   // Factory floor extends to about x=±60, z=±80 (for truck yards)
-  // Main building is roughly x=±55, z=±45 where personnel doors are
+  // Main building is roughly x=±55, z=±45 where service egress doors are
   const buildingHalfWidth = 58; // X extent (slightly outside the x=±55 doors)
   const buildingFrontZ = 48; // Front wall Z (behind the z=42 front doors)
   const buildingBackZ = -48; // Back wall Z (behind the z=-45 back doors)
@@ -6062,8 +6065,8 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
             />
           </mesh>
 
-          {/* ========== FRONT PERSONNEL ENTRANCES - Realistic Industrial Style ========== */}
-          {/* Left main entrance at x=-45 - doors positioned 1.5 units in front of wall */}
+          {/* ========== FRONT SERVICE ENTRANCES ========== */}
+          {/* Left service entrance at x=-45, positioned 1.5 units in front of wall */}
           <group position={[-45, 0, buildingFrontZ + 1.5]}>
             {/* Concrete entrance platform/steps */}
             <mesh position={[0, 0.2, 1.5]} castShadow receiveShadow>
@@ -6174,7 +6177,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
             </mesh>
           </group>
 
-          {/* Right staff entrance at x=45 - doors positioned 1.5 units in front of wall */}
+          {/* Right service entrance at x=45, positioned 1.5 units in front of wall */}
           <group position={[45, 0, buildingFrontZ + 1.5]}>
             {/* Concrete entrance platform/steps */}
             <mesh position={[0, 0.2, 1.5]} castShadow receiveShadow>
@@ -6623,9 +6626,9 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
             </Text>
           </group>
 
-          {/* ========== LEFT SIDE WALL (X-) with personnel door ========== */}
+          {/* ========== LEFT SIDE WALL (X-) with service egress ========== */}
           {/* Side walls end INSIDE front/back walls - front/back walls wrap around corners */}
-          {/* Personnel door opening in the wall - West Exit */}
+          {/* Service egress opening in the wall, West Exit */}
           {(() => {
             const sideWallLength = Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2;
             const doorWidth = 3;
@@ -6680,7 +6683,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                     side={THREE.DoubleSide}
                   />
                 </mesh>
-                {/* West Personnel Door - exterior side */}
+                {/* West service egress, exterior side */}
                 <group
                   position={[-buildingHalfWidth - 0.3, 0, doorZ]}
                   rotation={[0, Math.PI / 2, 0]}
@@ -6734,7 +6737,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                     />
                   </mesh>
                 </group>
-                {/* West Personnel Door - interior side */}
+                {/* West service egress, interior side */}
                 <group
                   position={[-buildingHalfWidth + 0.3, 0, doorZ]}
                   rotation={[0, -Math.PI / 2, 0]}
@@ -6791,8 +6794,8 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
             />
           </mesh>
 
-          {/* ========== RIGHT SIDE WALL (X+) with personnel door ========== */}
-          {/* Personnel door opening in the wall - East Exit */}
+          {/* ========== RIGHT SIDE WALL (X+) with service egress ========== */}
+          {/* Service egress opening in the wall, East Exit */}
           {(() => {
             const sideWallLength = Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2;
             const doorWidth = 3;
@@ -6847,7 +6850,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                     side={THREE.DoubleSide}
                   />
                 </mesh>
-                {/* East Personnel Door - exterior side */}
+                {/* East service egress, exterior side */}
                 <group
                   position={[buildingHalfWidth + 0.3, 0, doorZ]}
                   rotation={[0, -Math.PI / 2, 0]}
@@ -6901,7 +6904,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                     />
                   </mesh>
                 </group>
-                {/* East Personnel Door - interior side */}
+                {/* East service egress, interior side */}
                 <group
                   position={[buildingHalfWidth - 0.3, 0, doorZ]}
                   rotation={[0, Math.PI / 2, 0]}
@@ -7321,7 +7324,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
       {/* European-style bus shelter on shipping road, past checkpoint, near farm */}
       <BusStop position={[29, 0, 140]} rotation={-Math.PI / 2} />
 
-      {/* ========== EMPLOYEE PARKING LOT WITH CUTE CARS ========== */}
+      {/* ========== VISITOR PARKING LOT WITH CUTE CARS ========== */}
       {/* Parking lot positioned outside east fence (fence is at x=95) */}
       <ParkingLot position={[120, 0, 50]} rows={2} spotsPerRow={6} rotation={0} />
 

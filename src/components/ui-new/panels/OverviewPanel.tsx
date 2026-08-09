@@ -246,15 +246,15 @@ const BatchGenealogySection: React.FC = React.memo(() => {
       batchId,
       sourceLotIds,
       testType,
-      operator: 'Overview operator',
+      controlSource: 'Autonomous QC controller',
     });
     completeQCTest({
       machineId: batch.packerId,
       batchId,
       sourceLotIds,
       testType,
-      operator: 'Overview operator',
-      operatorNote:
+      controlSource: 'Autonomous QC controller',
+      controlNote:
         testType === 'retest'
           ? 'Conforming retest completed after corrective investigation'
           : 'Routine batch release test completed',
@@ -275,7 +275,7 @@ const BatchGenealogySection: React.FC = React.memo(() => {
           resolveContaminationAlert(
             alert.id,
             'released',
-            'Overview operator',
+            'Autonomous QC controller',
             'Conforming retest released the investigated scope'
           )
         );
@@ -293,13 +293,13 @@ const BatchGenealogySection: React.FC = React.memo(() => {
       triggerContaminationAlert({
         batchIds: [batchId],
         severity: 'high',
-        operator: 'Overview operator',
-        operatorNote: 'Targeted batch recall investigation',
+        controlSource: 'Autonomous QC controller',
+        controlNote: 'Targeted batch recall investigation',
       });
     resolveContaminationAlert(
       alertId,
       'recalled',
-      'Overview operator',
+      'Autonomous QC controller',
       'Affected batch recalled and isolated from dispatch'
     );
   };
@@ -395,8 +395,8 @@ const BatchGenealogySection: React.FC = React.memo(() => {
                           triggerContaminationAlert({
                             batchIds: [batch.id],
                             severity: 'medium',
-                            operator: 'Overview operator',
-                            operatorNote: 'Operator initiated targeted quality hold',
+                            controlSource: 'Autonomous QC controller',
+                            controlNote: 'Automated targeted quality hold initiated',
                           })
                         }
                         className="min-h-11 rounded bg-amber-800 px-3 text-xs font-semibold text-white hover:bg-amber-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-300"

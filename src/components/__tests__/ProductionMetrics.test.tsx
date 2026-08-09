@@ -90,7 +90,7 @@ describe('ProductionMetrics', () => {
       safetyMetrics: {
         nearMisses: 0,
         safetyStops: 2,
-        workerEvasions: 1,
+        routeConflicts: 1,
         lastIncidentTime: null,
         daysSinceIncident: 127,
       },
@@ -173,10 +173,10 @@ describe('ProductionMetrics', () => {
       expect(screen.getByText('2')).toBeInTheDocument();
     });
 
-    it('should display worker evasions from store', () => {
+    it('should display route conflicts from store', () => {
       render(<ProductionMetrics />);
 
-      // Worker evasions value
+      // Route-conflict value
       expect(screen.getByText('1')).toBeInTheDocument();
     });
   });
@@ -241,7 +241,7 @@ describe('ProductionMetrics', () => {
           safetyMetrics: {
             nearMisses: 1,
             safetyStops: 5,
-            workerEvasions: 3,
+            routeConflicts: 3,
             lastIncidentTime: Date.now(),
             daysSinceIncident: 0,
           },
@@ -277,7 +277,7 @@ describe('ProductionMetrics', () => {
         safetyMetrics: {
           nearMisses: 0,
           safetyStops: 0,
-          workerEvasions: 0,
+          routeConflicts: 0,
           lastIncidentTime: null,
           daysSinceIncident: 127,
         },
@@ -294,7 +294,7 @@ describe('ProductionMetrics', () => {
         safetyMetrics: {
           nearMisses: 1,
           safetyStops: 1,
-          workerEvasions: 0,
+          routeConflicts: 0,
           lastIncidentTime: fiveMinutesAgo,
           daysSinceIncident: 0,
         },
@@ -313,7 +313,7 @@ describe('ProductionMetrics', () => {
         safetyMetrics: {
           nearMisses: 0,
           safetyStops: 0,
-          workerEvasions: 0,
+          routeConflicts: 0,
           lastIncidentTime: null,
           daysSinceIncident: 127,
         },
@@ -329,7 +329,7 @@ describe('ProductionMetrics', () => {
         safetyMetrics: {
           nearMisses: 0,
           safetyStops: 3,
-          workerEvasions: 0,
+          routeConflicts: 0,
           lastIncidentTime: null,
           daysSinceIncident: 127,
         },

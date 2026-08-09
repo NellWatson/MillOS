@@ -7,10 +7,9 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Target, X, Lightbulb, AlertTriangle, Gauge, Award, User } from 'lucide-react';
+import { Target, X, Lightbulb, AlertTriangle, Gauge } from 'lucide-react';
 import { useAIConfigStore } from '../../stores/aiConfigStore';
 import { ConfidenceBar } from './ConfidenceBar';
-import { WORKER_ROSTER } from '../../types';
 
 interface StrategicPriorityCardsProps {
   className?: string;
@@ -26,7 +25,7 @@ export const StrategicPriorityCards: React.FC<StrategicPriorityCardsProps> = ({
     setDismissedPriorities((prev) => new Set([...prev, index]));
   };
 
-  // Use legacy string priorities for display (human-readable)
+  // Use legacy string priorities for compact display.
   const displayPriorities = strategic.legacyPriorities || [];
   const visiblePriorities = displayPriorities.filter((_, i) => !dismissedPriorities.has(i));
 
@@ -202,47 +201,6 @@ export const StrategicPriorityCards: React.FC<StrategicPriorityCardsProps> = ({
                 {strategic.confidenceScores.reasoning}
               </p>
             )}
-          </motion.div>
-        )}
-
-        {/* Recommended Worker with Skills (if available) */}
-        {strategic.recommendWorker && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-emerald-900/30 rounded-lg p-3 border border-emerald-500/30"
-          >
-            <div className="flex items-start gap-2">
-              <User className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <span className="text-[10px] font-medium text-emerald-400 uppercase tracking-wider">
-                  Recommended Worker
-                </span>
-                <p className="text-sm text-emerald-200 mt-0.5 font-medium">
-                  {strategic.recommendWorker}
-                </p>
-                {/* Worker Skills */}
-                {(() => {
-                  const worker = WORKER_ROSTER.find((w) =>
-                    strategic.recommendWorker?.toLowerCase().includes(w.name.toLowerCase())
-                  );
-                  if (worker) {
-                    return (
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/20 text-[9px] text-emerald-300">
-                          <Award className="w-2.5 h-2.5" />
-                          {worker.role}
-                        </div>
-                        <div className="px-1.5 py-0.5 rounded bg-slate-700/50 text-[9px] text-slate-300">
-                          {worker.experience} yrs experience
-                        </div>
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
-              </div>
-            </div>
           </motion.div>
         )}
       </AnimatePresence>

@@ -636,7 +636,6 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
   const frameCountRef = useRef(0); // Frame counter for throttling
   const lastCollisionCheckRef = useRef({
     pathClear: true,
-    workersNearby: [] as EntityPosition[],
     forkliftsNearby: [] as EntityPosition[],
   });
   const crossingTimerRef = useRef(0); // Time spent waiting at crossing
@@ -648,7 +647,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
   const mastTiltRef = useRef(resolveForkliftMastTilt('traveling', data.cargo === 'pallet'));
   const safetyStopTimerRef = useRef(0); // Time since safety stop started (for resume delay)
   const HYSTERESIS_TIME = 0.15; // 150ms before state can change
-  const SAFETY_RESUME_DELAY = 1.0; // Wait 1.0s after safety stop before resuming (prevents worker thrash)
+  const SAFETY_RESUME_DELAY = 1.0; // Hold one second after a route conflict clears
   const CROSSING_WAIT_TIME = 1.0; // Wait 1.0s before entering crossing zone
   const CROSSING_APPROACH_DISTANCE = 3; // Distance to start slowing for crossing
   const FORK_LIFT_HEIGHT = 1.2; // Max height forks raise during load/unload
@@ -835,16 +834,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       previousSpeedRef.current = 0;
       steeringAngleRef.current = 0;
       const direction = dirNormalizedRef.current;
-      positionRegistry.register(
-        data.id,
-        pos.x,
-        pos.z,
-        'forklift',
-        direction.x,
-        direction.z,
-        true,
-        pos.y
-      );
+      positionRegistry.register(data.id, pos.x, pos.z, direction.x, direction.z, true, pos.y);
       publishMotionTelemetry();
       return;
     }
@@ -856,7 +846,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
     const direction = directionRef.current.subVectors(target, pos);
     const distance = direction.length();
 
-    // Collision avoidance: check for workers and other forklifts ahead
+    // Collision avoidance: check other autonomous vehicles and static obstacles ahead
     const SAFETY_RADIUS = 2.5; // Distance to keep from entities
     const FORKLIFT_SAFETY_RADIUS = 4; // Larger radius for forklift-to-forklift
     const CHECK_DISTANCE = 5; // How far ahead to check
@@ -882,11 +872,10 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
     const shouldCheckCollisions = frameCountRef.current % 3 === 0;
 
     let pathClear: boolean;
-    let workersNearby: EntityPosition[];
     let forkliftsNearby: EntityPosition[];
 
     if (shouldCheckCollisions) {
-      // Check path is clear of workers, other forklifts, and static obstacles
+      // Check the predicted route against autonomous vehicles and static obstacles
       pathClear = positionRegistry.isPathClear(
         pos.x,
         pos.z,
@@ -899,9 +888,6 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
         pos.y // Pass Y position for height checks
       );
 
-      // Check immediate vicinity for workers
-      workersNearby = positionRegistry.getWorkersNearby(pos.x, pos.z, SAFETY_RADIUS, pos.y);
-
       // Check immediate vicinity for other forklifts
       forkliftsNearby = positionRegistry.getForkliftsNearby(
         pos.x,
@@ -912,10 +898,10 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
       );
 
       // Cache the results
-      lastCollisionCheckRef.current = { pathClear, workersNearby, forkliftsNearby };
+      lastCollisionCheckRef.current = { pathClear, forkliftsNearby };
     } else {
       // Use cached results
-      ({ pathClear, workersNearby, forkliftsNearby } = lastCollisionCheckRef.current);
+      ({ pathClear, forkliftsNearby } = lastCollisionCheckRef.current);
     }
 
     // Check if currently in or approaching a crossing zone
@@ -967,11 +953,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
 
     // Basic safety conditions (path clear, no nearby entities)
     const basicSafetyMet =
-      !emergencyStopActive &&
-      pathClear &&
-      workersNearby.length === 0 &&
-      forkliftsNearby.length === 0 &&
-      crossingClear;
+      !emergencyStopActive && pathClear && forkliftsNearby.length === 0 && crossingClear;
 
     // Track safety stop timer - prevents thrash by requiring delay before resume
     // Timer represents time spent in "safe" state since last safety stop
@@ -997,12 +979,11 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
     const newIsStopped = !isSafeToMove;
 
     // Register position with CURRENT frame's stopped state (not delayed React state)
-    // This ensures workers see the forklift's intent immediately
+    // Publish the current intent immediately for peer-vehicle avoidance
     positionRegistry.register(
       data.id,
       pos.x,
       pos.z,
-      'forklift',
       dirNormalized.x,
       dirNormalized.z,
       newIsStopped,
@@ -1201,7 +1182,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
         />
       )}
 
-      {/* Operator name and status - only render when close */}
+      {/* Fleet identity and operation status, rendered only when close */}
       {distanceTier === 'close' && (
         <Billboard position={[0, authoredVehicleVisual ? 2.18 : 2.48, 0]} follow>
           <Text

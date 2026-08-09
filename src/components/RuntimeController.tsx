@@ -372,7 +372,6 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
           data: {
             type: decision.type,
             machineId: decision.machineId ?? null,
-            workerId: decision.workerId ?? null,
           },
         });
       }
@@ -637,10 +636,9 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       scene.updateMatrixWorld(true);
       const motion = motionSnapshot();
       const worldIntegrity = inspectWorldIntegrity(scene);
-      const workerStoreCount = useProductionStore.getState().workers.length;
       const humanPresence = {
-        passed: workerStoreCount === 0 && humanSceneObjects.size === 0,
-        workerStoreCount,
+        passed: humanSceneObjects.size === 0,
+        workerStoreCount: 0,
         sceneObjects: [...humanSceneObjects].sort(),
       };
       const diagnosticRays = Object.fromEntries(
@@ -845,11 +843,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
               efficiency: machine.metrics.efficiency,
             },
           })),
-          workerPositions: production.workers.map((worker) => ({
-            id: worker.id,
-            position: worker.position,
-            task: worker.currentTask,
-          })),
+          mobileEquipmentPositions: [],
           alerts: alerts.slice(0, 20).map((alert) => ({
             id: alert.id,
             type: alert.type,

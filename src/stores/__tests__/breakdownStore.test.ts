@@ -36,13 +36,10 @@ describe('BreakdownStore', () => {
   });
 
   describe('Failure/Repair State Machine', () => {
-    const createAssignedRepair = (
+    const createRepair = (
       type: 'mechanical' | 'electrical' | 'overheating' | 'vibration_failure' = 'mechanical'
     ) => {
-      const state = useBreakdownStore.getState();
-      const breakdown = state.triggerBreakdown('rm-101', 'Roller Mill 101', type)!;
-      state.assignRepairWorker(breakdown.id, 'worker-7', 'Maria Santos');
-      return breakdown;
+      return useBreakdownStore.getState().triggerBreakdown('rm-101', 'Roller Mill 101', type)!;
     };
 
     it('creates deterministic breakdown and work-order identities', () => {
@@ -81,23 +78,23 @@ describe('BreakdownStore', () => {
       expect(useBreakdownStore.getState().workOrders).toHaveLength(1);
     });
 
-    it('requires an assigned technician before parts can be consumed', () => {
+    it('starts an autonomous repair when all required parts are available', () => {
       const breakdown = useBreakdownStore
         .getState()
         .triggerBreakdown('rm-101', 'Roller Mill 101', 'mechanical')!;
 
       const result = useBreakdownStore.getState().startRepair(breakdown.id);
 
-      expect(result).toEqual({
-        started: false,
-        reason: 'technician_required',
-        missingParts: [],
+      expect(result).toEqual({ started: true, missingParts: [] });
+      expect(useBreakdownStore.getState().partsInventory).toEqual({
+        ...DEFAULT_INVENTORY,
+        bearings: 9,
+        belts: 7,
       });
-      expect(useBreakdownStore.getState().partsInventory).toEqual(DEFAULT_INVENTORY);
     });
 
     it('atomically consumes all required parts when repair starts', () => {
-      const breakdown = createAssignedRepair('mechanical');
+      const breakdown = createRepair('mechanical');
       const result = useBreakdownStore.getState().startRepair(breakdown.id);
       const state = useBreakdownStore.getState();
 
@@ -106,7 +103,6 @@ describe('BreakdownStore', () => {
       expect(state.partsInventory.belts).toBe(7);
       expect(state.workOrders[0]).toMatchObject({
         phase: 'repairing',
-        assignedWorkerId: 'worker-7',
         consumedParts: ['bearings', 'belts'],
       });
     });
@@ -115,7 +111,7 @@ describe('BreakdownStore', () => {
       useBreakdownStore.setState((state) => ({
         partsInventory: { ...state.partsInventory, motors: 0 },
       }));
-      const breakdown = createAssignedRepair('electrical');
+      const breakdown = createRepair('electrical');
 
       const result = useBreakdownStore.getState().startRepair(breakdown.id);
 
@@ -129,7 +125,7 @@ describe('BreakdownStore', () => {
     });
 
     it('requires repair completion, verification, and explicit restart in order', () => {
-      const breakdown = createAssignedRepair();
+      const breakdown = createRepair();
       const state = useBreakdownStore.getState();
       expect(state.startRepair(breakdown.id).started).toBe(true);
 
@@ -155,7 +151,6 @@ describe('BreakdownStore', () => {
       expect(current.workOrders[0].phase).toBe('returned_to_service');
       expect(current.workOrders[0].audit.map((entry) => entry.phase)).toEqual([
         'diagnosed',
-        'diagnosed',
         'repairing',
         'verification',
         'ready_to_restart',
@@ -165,7 +160,7 @@ describe('BreakdownStore', () => {
     });
 
     it('tracks downtime on active faults and freezes it after restart', () => {
-      const breakdown = createAssignedRepair();
+      const breakdown = createRepair();
       const state = useBreakdownStore.getState();
       state.tickDowntime(12.5);
       state.startRepair(breakdown.id);
@@ -181,7 +176,7 @@ describe('BreakdownStore', () => {
     });
 
     it('does not let the compatibility resolve action bypass causality', () => {
-      const breakdown = createAssignedRepair();
+      const breakdown = createRepair();
       useBreakdownStore.getState().resolveBreakdown(breakdown.id);
 
       expect(useBreakdownStore.getState().activeBreakdowns).toHaveLength(1);

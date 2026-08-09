@@ -28,16 +28,20 @@ import {
   getAIMemoryState,
   getCongestionHotspots,
 } from '../aiEngine';
-import { useMillStore, useProductionStore } from '../../stores';
+import { useProductionStore } from '../../stores/productionStore';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { MachineType, AIDecision } from '../../types';
 
 // Mock the store
-vi.mock('../../stores', () => ({
-  useMillStore: {
+vi.mock('../../stores/productionStore', () => ({
+  useProductionStore: {
     getState: vi.fn(),
     subscribe: vi.fn(() => vi.fn()),
   },
-  useProductionStore: {
+}));
+
+vi.mock('../../stores/gameSimulationStore', () => ({
+  useGameSimulationStore: {
     getState: vi.fn(),
     subscribe: vi.fn(() => vi.fn()),
   },
@@ -103,23 +107,6 @@ describe('aiEngine - Core Functions', () => {
           fillLevel: 85,
         },
       ],
-      workers: [
-        {
-          id: 'W-001',
-          name: 'John Smith',
-          role: 'Operator' as const,
-          icon: 'operator' as const,
-          position: [0, 0, 0] as [number, number, number],
-          speed: 1,
-          direction: 1 as const,
-          currentTask: 'Monitoring',
-          status: 'working' as const,
-          shiftStart: '06:00',
-          experience: 5,
-          certifications: ['Safety', 'Operations'],
-          color: '#4a90e2',
-        },
-      ],
       alerts: [],
       aiDecisions: [],
       metrics: {
@@ -132,7 +119,7 @@ describe('aiEngine - Core Functions', () => {
         safetyStops: 0,
         nearMisses: 2,
         daysSinceIncident: 45,
-        workerEvasions: 5,
+        routeConflicts: 5,
       },
       emergencyActive: false,
       emergencyMachineId: null,
@@ -141,15 +128,10 @@ describe('aiEngine - Core Functions', () => {
       currentShift: 'morning' as const,
       weather: 'clear' as const,
       heatMapData: [],
-      workerSatisfaction: {
-        overallScore: 85,
-        averageEnergy: 80,
-        productivityBonus: 1.1,
-      },
       addAIDecision: vi.fn(),
     };
 
-    vi.mocked(useMillStore.getState).mockReturnValue(mockStoreState as any);
+    vi.mocked(useProductionStore.getState).mockReturnValue(mockStoreState as any);
     vi.mocked(useProductionStore.getState).mockReturnValue({
       ...mockStoreState,
       addAIDecision: vi.fn(),
@@ -158,9 +140,6 @@ describe('aiEngine - Core Functions', () => {
       },
       productionSpeed: 1.0,
       setProductionSpeed: vi.fn(),
-      selectedWorker: null,
-      setSelectedWorker: vi.fn(),
-      updateWorkerTask: vi.fn(),
       selectedMachine: null,
       setSelectedMachine: vi.fn(),
       updateMachineStatus: vi.fn(),
@@ -171,10 +150,9 @@ describe('aiEngine - Core Functions', () => {
       updateSafetyMetrics: vi.fn(),
       recordNearMiss: vi.fn(),
       recordSafetyStop: vi.fn(),
-      recordWorkerEvasion: vi.fn(),
+      recordRouteConflict: vi.fn(),
       resetDaysSinceIncident: vi.fn(),
       setEmergencyDrillMode: vi.fn(),
-      setWorkers: vi.fn(),
       achievements: [],
       addAchievement: vi.fn(),
       announcements: [],
@@ -190,6 +168,11 @@ describe('aiEngine - Core Functions', () => {
       incidentReplay: null,
       setIncidentReplay: vi.fn(),
       clearIncidentReplay: vi.fn(),
+    } as any);
+    vi.mocked(useGameSimulationStore.getState).mockReturnValue({
+      currentShift: 'morning',
+      weather: 'clear',
+      emergencyDrillMode: false,
     } as any);
   });
 
@@ -211,8 +194,8 @@ describe('aiEngine - Core Functions', () => {
     });
 
     it('should return null when no machines exist', () => {
-      vi.mocked(useMillStore.getState).mockReturnValue({
-        ...vi.mocked(useMillStore.getState)(),
+      vi.mocked(useProductionStore.getState).mockReturnValue({
+        ...vi.mocked(useProductionStore.getState)(),
         machines: [],
       });
 
@@ -222,8 +205,8 @@ describe('aiEngine - Core Functions', () => {
 
     it('should force a specific decision type when requested', () => {
       // Set up a scenario that would trigger maintenance
-      vi.mocked(useMillStore.getState).mockReturnValue({
-        ...vi.mocked(useMillStore.getState)(),
+      vi.mocked(useProductionStore.getState).mockReturnValue({
+        ...vi.mocked(useProductionStore.getState)(),
         machines: [
           {
             id: 'RM-101',
@@ -255,16 +238,16 @@ describe('aiEngine - Core Functions', () => {
     });
 
     it('should generate safety decisions during emergency drill mode', () => {
-      vi.mocked(useMillStore.getState).mockReturnValue({
-        ...vi.mocked(useMillStore.getState)(),
+      vi.mocked(useGameSimulationStore.getState).mockReturnValue({
+        ...vi.mocked(useGameSimulationStore.getState)(),
         emergencyDrillMode: true,
-      });
+      } as any);
 
       const decision = generateContextAwareDecision();
 
       // During drill mode, should generate drill-related decisions
       if (decision) {
-        expect(['safety', 'assignment']).toContain(decision.type);
+        expect(['safety', 'coordination']).toContain(decision.type);
       }
     });
 
@@ -276,8 +259,8 @@ describe('aiEngine - Core Functions', () => {
       });
 
       // Create conditions that will generate a decision
-      vi.mocked(useMillStore.getState).mockReturnValue({
-        ...vi.mocked(useMillStore.getState)(),
+      vi.mocked(useProductionStore.getState).mockReturnValue({
+        ...vi.mocked(useProductionStore.getState)(),
         machines: [
           {
             id: 'RM-101',
@@ -378,13 +361,13 @@ describe('aiEngine - Core Functions', () => {
       const decision: AIDecision = {
         id: 'ai-test-004',
         timestamp: new Date(),
-        type: 'assignment',
-        action: 'Assign worker',
-        reasoning: 'Worker needed',
+        type: 'coordination',
+        action: 'Assign autonomous service route',
+        reasoning: 'Equipment service route needed',
         confidence: 80,
         impact: 'Faster response',
         status: 'completed',
-        outcome: 'Failed to complete task - worker unavailable',
+        outcome: 'Failed to complete task because the route was unavailable',
         priority: 'medium',
       };
 
@@ -436,7 +419,7 @@ describe('aiEngine - Core Functions', () => {
     it('should return confidence adjustments for all decision types', () => {
       const adjustments = getConfidenceAdjustments();
 
-      expect(adjustments).toHaveProperty('assignment');
+      expect(adjustments).toHaveProperty('coordination');
       expect(adjustments).toHaveProperty('optimization');
       expect(adjustments).toHaveProperty('prediction');
       expect(adjustments).toHaveProperty('maintenance');
@@ -557,7 +540,7 @@ describe('aiEngine - Core Functions', () => {
     it('should track stats by decision type', () => {
       const stats = getImpactStats();
 
-      expect(stats.byType).toHaveProperty('assignment');
+      expect(stats.byType).toHaveProperty('coordination');
       expect(stats.byType).toHaveProperty('optimization');
       expect(stats.byType).toHaveProperty('prediction');
       expect(stats.byType).toHaveProperty('maintenance');
@@ -641,7 +624,7 @@ describe('aiEngine - Core Functions', () => {
         timestamp: new Date(),
         type: 'safety',
         action: 'Safety stop',
-        reasoning: 'Worker in danger zone',
+        reasoning: 'Vehicle entered an interlocked exclusion zone',
         confidence: 95,
         impact: 'Prevents injury',
         status: 'pending',
@@ -689,7 +672,7 @@ describe('aiEngine - Core Functions', () => {
       const memoryState = getAIMemoryState();
 
       expect(memoryState).toHaveProperty('machineDecisionCounts');
-      expect(memoryState).toHaveProperty('workerDecisionCounts');
+      expect(memoryState).toHaveProperty('assetDecisionCounts');
       expect(memoryState).toHaveProperty('activeCooldowns');
       expect(memoryState).toHaveProperty('pendingChains');
       expect(memoryState).toHaveProperty('predictedEvents');
@@ -733,9 +716,8 @@ describe('aiEngine - Core Functions', () => {
 
   describe('Edge Cases and Error Handling', () => {
     it('should handle empty store state gracefully', () => {
-      vi.mocked(useMillStore.getState).mockReturnValue({
+      vi.mocked(useProductionStore.getState).mockReturnValue({
         machines: [],
-        workers: [],
         alerts: [],
         aiDecisions: [],
         metrics: { throughput: 0, efficiency: 0, uptime: 0, quality: 0 },
@@ -743,7 +725,7 @@ describe('aiEngine - Core Functions', () => {
           safetyStops: 0,
           nearMisses: 0,
           daysSinceIncident: 0,
-          workerEvasions: 0,
+          routeConflicts: 0,
           lastIncidentTime: null,
         },
         emergencyActive: false,
@@ -753,13 +735,6 @@ describe('aiEngine - Core Functions', () => {
         currentShift: 'morning' as const,
         weather: 'clear' as const,
         heatMapData: [],
-        workerSatisfaction: {
-          overallScore: 0,
-          averageEnergy: 0,
-          productivityBonus: 1,
-          breakCount: 0,
-          conversationCount: 0,
-        },
         addAIDecision: vi.fn(),
         graphics: {
           quality: 'medium' as const,
@@ -782,7 +757,7 @@ describe('aiEngine - Core Functions', () => {
       const minimalDecision: AIDecision = {
         id: 'ai-minimal',
         timestamp: new Date(),
-        type: 'assignment',
+        type: 'coordination',
         action: 'Minimal action',
         reasoning: 'Minimal reasoning',
         confidence: 50,
@@ -790,7 +765,7 @@ describe('aiEngine - Core Functions', () => {
         status: 'completed',
         outcome: 'Completed',
         priority: 'low',
-        // No machineId, workerId, etc.
+        // No optional equipment linkage.
       };
 
       expect(() => trackDecisionOutcome(minimalDecision)).not.toThrow();

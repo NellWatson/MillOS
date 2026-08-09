@@ -181,7 +181,7 @@ describe('fill budget', () => {
 
 describe('shouldAdoptEnvironmentMap', () => {
   it('takes metals and leaves dielectrics on the scene dampener', () => {
-    // Real values from the repo: chrome, steel, painted metal, then the worker
+    // Real values from the repo: chrome, steel, painted metal, then the control
     // and vehicle materials that authored an envMapIntensity at metalness 0.
     expect(shouldAdoptEnvironmentMap(new THREE.MeshStandardMaterial({ metalness: 0.95 }))).toBe(
       true

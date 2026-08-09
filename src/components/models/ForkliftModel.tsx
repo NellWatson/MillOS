@@ -117,7 +117,7 @@ const createAuthoredForkliftMaterials = (grime: number): AuthoredForkliftMateria
     { grime, grimeCeiling: 1.05 }
   );
   const seat = new THREE.MeshPhysicalMaterial({
-    name: 'operator-seat',
+    name: 'control-seat',
     color: linearColor(0.0295568, 0.0395462, 0.043735),
     roughness: 0.85,
     metalness: 0,
@@ -152,7 +152,7 @@ const createAuthoredForkliftMaterials = (grime: number): AuthoredForkliftMateria
     'structural-graphite': graphite,
     'industrial-rubber': rubber,
     'galvanized-steel': steel,
-    'operator-seat': seat,
+    'control-seat': seat,
     'lamp-glass': lampGlass,
   };
   return { byName, ram, lampGlass, all: [paint, graphite, rubber, steel, seat, lampGlass, ram] };
@@ -1495,8 +1495,8 @@ const DetailedForkliftModel: React.FC<ForkliftModelProps> = (props) => {
 };
 
 // Main export. Low keeps the compact fallback. Medium and above use the
-// normalized authored vehicle so the default experience has a credible cab,
-// mast, tyres, and operator silhouette.
+// normalized authored vehicle so the default experience has a credible
+// uncrewed control station, mast, tyres, and hydraulic hardware.
 export const ForkliftModel: React.FC<ForkliftModelProps> = (props) => {
   const quality = useGraphicsStore((state) => state.graphics.quality);
 

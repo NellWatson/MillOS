@@ -233,7 +233,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
   const [trendTagSearch, setTrendTagSearch] = useState('');
   const [eventHistory, setEventHistory] = useState<Alarm[]>([]);
   const [eventHistoryLoading, setEventHistoryLoading] = useState(false);
-  const [alarmOperator, setAlarmOperator] = useState('Simulation operator');
+  const [controlIdentity, setControlIdentity] = useState('Autonomous control layer');
   const [alarmNote, setAlarmNote] = useState('');
   const [operationsLogMessage, setOperationsLogMessage] = useState('');
 
@@ -1234,8 +1234,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                     </div>
                     {latestOpenWorkOrder && (
                       <div className="mt-0.5 capitalize">
-                        {latestOpenWorkOrder.phase.replaceAll('_', ' ')},{' '}
-                        {latestOpenWorkOrder.assignedWorkerName ?? 'unassigned'}
+                        {latestOpenWorkOrder.phase.replaceAll('_', ' ')}, autonomous service
                       </div>
                     )}
                   </div>
@@ -1744,21 +1743,21 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                 <div className="mt-3 grid gap-2 md:grid-cols-2">
                   <div>
                     <label
-                      htmlFor="scada-alarm-operator"
+                      htmlFor="scada-alarm-source"
                       className="mb-1 block text-xs text-slate-300"
                     >
-                      Simulated operator
+                      Control identity
                     </label>
                     <input
-                      id="scada-alarm-operator"
-                      value={alarmOperator}
-                      onChange={(event) => setAlarmOperator(event.target.value)}
+                      id="scada-alarm-source"
+                      value={controlIdentity}
+                      onChange={(event) => setControlIdentity(event.target.value)}
                       className="min-h-11 w-full rounded border border-slate-700 bg-slate-900/70 px-3 text-sm text-white focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/30"
                     />
                   </div>
                   <div>
                     <label htmlFor="scada-alarm-note" className="mb-1 block text-xs text-slate-300">
-                      Operator note or disposition reason
+                      Control note or disposition reason
                     </label>
                     <input
                       id="scada-alarm-note"
@@ -1811,7 +1810,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                               onClick={() =>
                                 acknowledge(
                                   alarm.id,
-                                  alarmOperator.trim() || 'Simulation operator',
+                                  controlIdentity.trim() || 'Autonomous control layer',
                                   alarmNote
                                 )
                               }
@@ -1827,7 +1826,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                             onClick={() =>
                               shelve(
                                 alarm.tagId,
-                                alarmOperator.trim() || 'Simulation operator',
+                                controlIdentity.trim() || 'Autonomous control layer',
                                 alarmNote.trim(),
                                 15 * 60 * 1000
                               )
@@ -1842,7 +1841,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                             onClick={() =>
                               suppress(
                                 alarm.tagId,
-                                alarmOperator.trim() || 'Simulation operator',
+                                controlIdentity.trim() || 'Autonomous control layer',
                                 alarmNote.trim(),
                                 15 * 60 * 1000
                               )
@@ -1857,7 +1856,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                             onClick={() =>
                               takeOutOfService(
                                 alarm.tagId,
-                                alarmOperator.trim() || 'Simulation operator',
+                                controlIdentity.trim() || 'Autonomous control layer',
                                 alarmNote.trim()
                               )
                             }
@@ -1940,7 +1939,10 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                 <div className="p-3 border-t border-slate-700/50">
                   <button
                     onClick={() =>
-                      acknowledgeAll(alarmOperator.trim() || 'Simulation operator', alarmNote)
+                      acknowledgeAll(
+                        controlIdentity.trim() || 'Autonomous control layer',
+                        alarmNote
+                      )
                     }
                     className="min-h-11 w-full rounded bg-cyan-500/20 px-4 text-sm text-cyan-400 hover:bg-cyan-500/30"
                   >
@@ -2363,8 +2365,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                         Operations logbook
                       </h3>
                       <p className="text-xs text-slate-400">
-                        Operator decisions, campaign incidents, manifests, and shift handover
-                        entries.
+                        Control decisions, campaign incidents, manifests, and dispatch records.
                       </p>
                     </div>
                     <button
@@ -2390,7 +2391,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                     onSubmit={(event) => {
                       event.preventDefault();
                       campaign.addLogEntry(
-                        alarmOperator.trim() || 'Simulation operator',
+                        controlIdentity.trim() || 'Autonomous control layer',
                         'operation',
                         operationsLogMessage
                       );
@@ -2405,7 +2406,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                       value={operationsLogMessage}
                       onChange={(event) => setOperationsLogMessage(event.target.value)}
                       maxLength={500}
-                      placeholder="Record an operator decision or observation"
+                      placeholder="Record an autonomous decision or system observation"
                       className="min-h-11 min-w-0 flex-1 rounded border border-slate-600 bg-slate-900/60 px-3 text-xs text-white placeholder:text-slate-500"
                     />
                     <button
@@ -2428,7 +2429,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                           <span className="font-mono text-[10px] text-slate-500">
                             T+{Math.round(entry.simulationMinute)}m
                           </span>{' '}
-                          <span className="font-semibold text-slate-100">{entry.author}:</span>{' '}
+                          <span className="font-semibold text-slate-100">{entry.source}:</span>{' '}
                           {entry.message}
                         </li>
                       ))}

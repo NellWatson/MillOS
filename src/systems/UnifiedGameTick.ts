@@ -24,9 +24,8 @@ import {
 import { useTruckScheduleStore } from '../stores/truckScheduleStore';
 import { useBreakdownStore, type BreakdownType } from '../stores/breakdownStore';
 import { useUIStore } from '../stores/uiStore';
-import type { MachineData, WorkerData } from '../types';
+import type { MachineData } from '../types';
 import {
-  getAssignmentLabel,
   useOperationsCampaignStore,
   type DispatchLoadSnapshot,
   type OperationalIncident,
@@ -127,8 +126,8 @@ function applyCampaignIncidentConsequence(incident: OperationalIncident): void {
         batchIds: flow.productionBatches
           .filter((batch) => batch.availableKg > 0 && batch.disposition !== 'shipped')
           .map((batch) => batch.id),
-        operator: 'Operations campaign',
-        operatorNote: 'Supplier notification requires traceability review before dispatch release.',
+        controlSource: 'Operations campaign controller',
+        controlNote: 'Supplier notification requires traceability review before dispatch release.',
       });
       break;
     case 'severe_rain':
@@ -136,7 +135,7 @@ function applyCampaignIncidentConsequence(incident: OperationalIncident): void {
       break;
     case 'power_sag':
     case 'packaging_shortage':
-    case 'understaffing':
+    case 'control_network_degraded':
       // Their continuing effects are represented by the campaign multiplier.
       break;
   }
@@ -163,56 +162,6 @@ function getStorageUtilization(): number {
   });
   return capacityKg > 0 ? occupiedKg / capacityKg : 0;
 }
-
-function synchronizePersonnelAssignments(): void {
-  const campaign = useOperationsCampaignStore.getState();
-  const production = useProductionStore.getState();
-  const activeByWorker = new Map(
-    campaign.assignments
-      .filter((assignment) => assignment.status === 'active')
-      .map((assignment) => [assignment.workerId, assignment])
-  );
-  const personnelByWorker = new Map(campaign.personnel.map((person) => [person.workerId, person]));
-  const responding = campaign.incidents.some((incident) => incident.phase !== 'resolved');
-  let changed = false;
-  const workers = production.workers.map((worker) => {
-    const assignment = activeByWorker.get(worker.id);
-    const person = personnelByWorker.get(worker.id);
-    if (!assignment && !person) return worker;
-    const status: WorkerData['status'] = assignment
-      ? assignment.kind === 'break'
-        ? 'break'
-        : responding && ['maintenance', 'quality', 'safety'].includes(assignment.kind)
-          ? 'responding'
-          : 'working'
-      : 'idle';
-    const currentTask = assignment ? getAssignmentLabel(assignment) : 'Awaiting assignment';
-    const targetMachine = assignment?.targetId ?? undefined;
-    const energy = person?.energy ?? worker.energy;
-    const tasksCompleted = person?.tasksCompleted ?? worker.tasksCompleted;
-    if (
-      status === worker.status &&
-      currentTask === worker.currentTask &&
-      targetMachine === worker.targetMachine &&
-      energy === worker.energy &&
-      tasksCompleted === worker.tasksCompleted
-    ) {
-      return worker;
-    }
-    changed = true;
-    return { ...worker, status, currentTask, targetMachine, energy, tasksCompleted };
-  });
-  if (changed) useProductionStore.setState({ workers });
-}
-
-// Shift-change phase timer. startShiftHandover() sets phase 'leaving' (workers
-// walk to the exit at z=-50, ~3 u/s, worst case ~27 s) but nothing ever
-// completed the change — shiftChangeActive stayed true forever and the
-// handover button disabled itself permanently. This timer advances
-// leaving -> entering -> completeShiftHandover().
-let _shiftPhaseElapsed = 0;
-const SHIFT_LEAVING_DURATION_S = 30;
-const SHIFT_ENTERING_DURATION_S = 10;
 
 // Machine status type (matches MachineData.status)
 type MachineStatus = 'running' | 'idle' | 'warning' | 'critical';
@@ -439,7 +388,7 @@ function unifiedGameTick(ctx: TickContext): void {
   // 2. Update machine TRUTH (not cosmetics)
   let prodStore = useProductionStore.getState();
   const campaign = useOperationsCampaignStore.getState();
-  campaign.initializeCampaign(prodStore.workers);
+  campaign.initializeCampaign();
   useOperationsCampaignStore
     .getState()
     .incidents.filter((incident) => incident.phase !== 'resolved' && !incident.effectApplied)
@@ -827,7 +776,6 @@ function unifiedGameTick(ctx: TickContext): void {
   useOperationsCampaignStore.getState().tickCampaign(deltaSeconds * safeGameSpeed, {
     shiftKey: `day-${latestGame.gameDay}-${latestGame.currentShift}`,
     shiftLabel: `${latestGame.currentShift[0].toUpperCase()}${latestGame.currentShift.slice(1)}`,
-    workers: latestProduction.workers,
     manifests: latestFlow.manifests,
     productionBatches: latestFlow.productionBatches,
     totalEnergyKw,
@@ -847,29 +795,6 @@ function unifiedGameTick(ctx: TickContext): void {
       .getState()
       .workOrders.filter((workOrder) => workOrder.phase !== 'returned_to_service').length,
   });
-  synchronizePersonnelAssignments();
-
-  // 4e. Shift-change completion (see _shiftPhaseElapsed above)
-  const simStore = useGameSimulationStore.getState();
-  if (simStore.shiftChangeActive) {
-    _shiftPhaseElapsed += deltaSeconds;
-    if (simStore.shiftChangePhase === 'leaving' && _shiftPhaseElapsed >= SHIFT_LEAVING_DURATION_S) {
-      // Old crew is out — new crew walks back in (normal worker behavior resumes)
-      useGameSimulationStore.setState({ shiftChangePhase: 'entering' });
-      _shiftPhaseElapsed = 0;
-    } else if (
-      simStore.shiftChangePhase === 'entering' &&
-      _shiftPhaseElapsed >= SHIFT_ENTERING_DURATION_S
-    ) {
-      // completeShiftHandover (not the plain completeShiftChange): also
-      // archives shift notes/production, resets incidents and clock-ins,
-      // and rolls the supervisor handoff for the incoming shift.
-      simStore.completeShiftHandover();
-      _shiftPhaseElapsed = 0;
-    }
-  } else {
-    _shiftPhaseElapsed = 0;
-  }
 
   // 5. Handle breakdowns (async, outside main path)
   if (_breakdowns.length > 0) {

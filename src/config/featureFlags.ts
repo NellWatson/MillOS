@@ -13,7 +13,6 @@
  *   ?knowledge=off     - Disable all knowledge features
  *   ?narration=off     - Disable AI narration only
  *   ?tooltips=off      - Disable tooltips only
- *   ?dialogue=off      - Disable worker dialogue only
  */
 
 // =============================================================================
@@ -43,9 +42,6 @@ export const FEATURE_FLAGS = {
   /** AI self-narration moments (AI explaining its philosophy) */
   AI_NARRATION_ENABLED: true,
 
-  /** NPC worker philosophical comments */
-  WORKER_DIALOGUE_ENABLED: false,
-
   /** Welcome message on first play */
   FIRST_PLAY_WELCOME_ENABLED: true,
 
@@ -64,25 +60,6 @@ export const FEATURE_FLAGS = {
 
   /** Chaos-weighted announcements during high chaos */
   PA_CHAOS_SCALING_ENABLED: true,
-
-  // =========================================================================
-  // OTHER FEATURES
-  // =========================================================================
-
-  /** Federation inter-cooperation features */
-  FEDERATION_ENABLED: true,
-
-  /** AI welfare tracking display */
-  AI_WELFARE_DISPLAY_ENABLED: true,
-
-  /** Wallace stability metrics display */
-  STABILITY_METRICS_ENABLED: true,
-
-  /** Flourishing/eudaimonia tracking */
-  FLOURISHING_TRACKING_ENABLED: true,
-
-  /** Economic democracy features (voting, ownership) */
-  ECONOMIC_DEMOCRACY_ENABLED: true,
 };
 
 /**
@@ -114,13 +91,6 @@ export function isKnowledgeEnabled(): boolean {
  */
 export function isNarrationEnabled(): boolean {
   return FEATURE_FLAGS.KNOWLEDGE_SYSTEM_ENABLED && FEATURE_FLAGS.AI_NARRATION_ENABLED;
-}
-
-/**
- * Check if worker dialogue is available
- */
-export function isWorkerDialogueEnabled(): boolean {
-  return FEATURE_FLAGS.KNOWLEDGE_SYSTEM_ENABLED && FEATURE_FLAGS.WORKER_DIALOGUE_ENABLED;
 }
 
 /**
@@ -166,11 +136,6 @@ export function applyURLOverrides(): void {
     console.log('[FeatureFlags] Tooltips disabled via URL');
   }
 
-  if (urlParams.get('dialogue') === 'off') {
-    FEATURE_FLAGS.WORKER_DIALOGUE_ENABLED = false;
-    console.log('[FeatureFlags] Worker dialogue disabled via URL');
-  }
-
   if (urlParams.get('quotes') === 'off') {
     FEATURE_FLAGS.KNOWLEDGE_LOADING_QUOTES_ENABLED = false;
     console.log('[FeatureFlags] Loading quotes disabled via URL');
@@ -191,7 +156,6 @@ export function applyURLOverrides(): void {
   if (urlParams.get('minimal') === 'true') {
     FEATURE_FLAGS.KNOWLEDGE_SYSTEM_ENABLED = false;
     FEATURE_FLAGS.PA_HUMOR_ENABLED = false;
-    FEATURE_FLAGS.AI_WELFARE_DISPLAY_ENABLED = false;
     console.log('[FeatureFlags] Minimal mode enabled via URL');
   }
 }

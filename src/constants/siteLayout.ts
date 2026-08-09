@@ -10,7 +10,7 @@ export interface SiteBounds {
 }
 
 export interface SitePortal {
-  readonly id: 'shipping-dock' | 'receiving-dock' | 'east-personnel' | 'west-personnel';
+  readonly id: 'shipping-dock' | 'receiving-dock' | 'east-service' | 'west-service';
   readonly label: string;
   readonly centre: Vec3Tuple;
   readonly normal: Vec3Tuple;
@@ -126,18 +126,18 @@ export const SITE_LAYOUT = {
       height: 14,
       transitionDepth: 18,
     },
-    eastPersonnel: {
-      id: 'east-personnel',
-      label: 'East personnel exit',
+    eastService: {
+      id: 'east-service',
+      label: 'East service exit',
       centre: [60, 0, -20],
       normal: [1, 0, 0],
       halfWidth: 2,
       height: 3,
       transitionDepth: 8,
     },
-    westPersonnel: {
-      id: 'west-personnel',
-      label: 'West personnel exit',
+    westService: {
+      id: 'west-service',
+      label: 'West service exit',
       centre: [-60, 0, -20],
       normal: [-1, 0, 0],
       halfWidth: 2,
@@ -202,8 +202,8 @@ export const SITE_LAYOUT = {
       height: 5,
       clearance: 4,
     },
-    driverLounge: {
-      id: 'driver-lounge',
+    fleetTelemetryHub: {
+      id: 'fleet-telemetry-hub',
       position: [42, 0, 75],
       rotation: -Math.PI / 2,
       footprint: [12, 10],

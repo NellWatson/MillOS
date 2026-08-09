@@ -6,30 +6,13 @@ import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useSafetyStore } from '../../stores/safetyStore';
 import { PAAnnouncementSystem, selectAnnouncementForDisplay } from './PAAnnouncementSystem';
 
-const audioState = vi.hoisted(() => ({
-  muted: false,
-  canSpeak: false,
-  pendingSpeech: false,
-}));
-
-const speakAnnouncement = vi.hoisted(() =>
-  vi.fn(() => {
-    audioState.pendingSpeech = true;
-  })
-);
+const audioState = vi.hoisted(() => ({ muted: false }));
 
 vi.mock('../../utils/audioManager', () => ({
   audioManager: {
     get muted() {
       return audioState.muted;
     },
-    get canSpeakAnnouncements() {
-      return audioState.canSpeak;
-    },
-    get hasPendingAnnouncementSpeech() {
-      return audioState.pendingSpeech;
-    },
-    speakAnnouncement,
   },
 }));
 
@@ -50,13 +33,10 @@ vi.mock('../../hooks/useAudioState', () => ({
   useAudioMuted: () => audioState.muted,
 }));
 
-describe('PAAnnouncementSystem speech lifecycle', () => {
+describe('PAAnnouncementSystem caption lifecycle', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     audioState.muted = false;
-    audioState.canSpeak = false;
-    audioState.pendingSpeech = false;
-    speakAnnouncement.mockClear();
     useAnnouncementsStore.setState({
       announcements: [],
       lastAnnouncementTime: {},
@@ -134,7 +114,7 @@ describe('PAAnnouncementSystem speech lifecycle', () => {
     expect(selected?.id).toBe('earlier');
   });
 
-  it('keeps a readable caption without initializing host speech synthesis', async () => {
+  it('keeps a readable caption for the full display interval', async () => {
     enqueueAnnouncement();
     render(<PAAnnouncementSystem />);
 
@@ -142,7 +122,6 @@ describe('PAAnnouncementSystem speech lifecycle', () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
 
-    expect(speakAnnouncement).not.toHaveBeenCalled();
     expect(
       screen.getAllByText('Receiving bay is ready for the next scheduled delivery.')
     ).toHaveLength(2);
@@ -160,8 +139,7 @@ describe('PAAnnouncementSystem speech lifecycle', () => {
     expect(useAnnouncementsStore.getState().getActiveAnnouncements()).toHaveLength(0);
   });
 
-  it('keeps captions silent even when host speech synthesis is available', async () => {
-    audioState.canSpeak = true;
+  it('advances the caption queue without an audio-service dependency', async () => {
     enqueueAnnouncement();
     render(<PAAnnouncementSystem />);
 
@@ -169,7 +147,6 @@ describe('PAAnnouncementSystem speech lifecycle', () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
 
-    expect(speakAnnouncement).not.toHaveBeenCalled();
     expect(useAnnouncementsStore.getState().getActiveAnnouncements()).toHaveLength(1);
 
     await act(async () => {

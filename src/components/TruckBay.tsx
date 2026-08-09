@@ -111,7 +111,7 @@ const TRAILER_DROP_YARD_POSITION = [...SITE_LAYOUT.serviceYard.trailerDropYard.p
   number,
   number,
 ];
-const DRIVER_LOUNGE_POSITION = [...SITE_LAYOUT.serviceYard.driverLounge.position] as [
+const FLEET_TELEMETRY_HUB_POSITION = [...SITE_LAYOUT.serviceYard.fleetTelemetryHub.position] as [
   number,
   number,
   number,
@@ -1135,282 +1135,63 @@ const TruckWashStation: React.FC<{ position: [number, number, number]; rotation?
   );
 };
 
-// Driver break room/lounge building
-export const DriverBreakRoom: React.FC<{
+// Autonomous fleet telemetry hub
+export const FleetTelemetryHub: React.FC<{
   position: [number, number, number];
   rotation?: number;
 }> = ({ position, rotation = 0 }) => (
-  <group name="driver-break-room" position={position} rotation={[0, rotation, 0]}>
-    {/* Main building */}
-    <mesh position={[0, 2, 0]} castShadow>
+  <group name="fleet-telemetry-hub" position={position} rotation={[0, rotation, 0]}>
+    <mesh position={[0, 2, 0]} castShadow receiveShadow>
       <boxGeometry args={[8, 4, 6]} />
-      <meshStandardMaterial color="#78716c" roughness={0.8} />
+      <meshStandardMaterial color="#4b5563" roughness={0.78} metalness={0.12} />
     </mesh>
-    {/* Roof */}
-    <mesh position={[0, 4.15, 0]}>
-      <boxGeometry args={[8.5, 0.3, 6.5]} />
-      <meshStandardMaterial color="#57534e" roughness={0.7} />
+    <mesh position={[0, 4.15, 0]} castShadow>
+      <boxGeometry args={[8.6, 0.3, 6.6]} />
+      <meshStandardMaterial color="#1f2937" roughness={0.62} metalness={0.35} />
     </mesh>
-    {/* Front door - positioned so bottom sits at floor level */}
-    <mesh position={[0, 1.2, 3.01]}>
-      <boxGeometry args={[1.2, 2.4, 0.1]} />
-      <meshStandardMaterial color="#44403c" roughness={0.6} />
+    <mesh position={[0, 1.5, 3.04]}>
+      <boxGeometry args={[2.8, 2.7, 0.12]} />
+      <meshStandardMaterial color="#111827" roughness={0.5} metalness={0.65} />
     </mesh>
-    {/* Door handle */}
-    <mesh position={[0.4, 1.2, 3.08]}>
-      <boxGeometry args={[0.08, 0.2, 0.05]} />
-      <meshStandardMaterial color="#a8a29e" metalness={0.7} roughness={0.3} />
-    </mesh>
-    {/* Door window */}
-    <mesh position={[0, 1.9, 3.06]}>
-      <planeGeometry args={[0.5, 0.6]} />
-      <meshStandardMaterial
-        color="#1e3a5f"
-        metalness={0.9}
-        roughness={0.1}
-        transparent
-        opacity={0.8}
-      />
-    </mesh>
-    {/* Windows - properly scaled */}
-    {[
-      [-2.5, 2.2],
-      [2.5, 2.2],
-    ].map(([x, y], i) => (
-      <mesh key={i} position={[x, y, 3.01]}>
-        <planeGeometry args={[1.2, 1.0]} />
-        <meshStandardMaterial
-          color="#1e3a5f"
-          metalness={0.9}
-          roughness={0.1}
-          transparent
-          opacity={0.8}
-        />
-      </mesh>
-    ))}
-    {/* AC unit on roof */}
-    <mesh position={[2, 4.5, 0]}>
-      <boxGeometry args={[1.5, 0.8, 1.5]} />
-      <meshStandardMaterial color="#94a3b8" roughness={0.6} />
-    </mesh>
-    {/* Vending machine alcove */}
-    <group position={[-3.5, 1.2, 3.3]}>
-      <mesh>
-        <boxGeometry args={[1.2, 2.2, 0.8]} />
-        <meshStandardMaterial color="#dc2626" roughness={0.5} />
-      </mesh>
-      <mesh position={[0, 0.3, 0.41]}>
-        <planeGeometry args={[0.9, 1.2]} />
-        <meshStandardMaterial color="#1f2937" metalness={0.8} roughness={0.2} />
-      </mesh>
-      <Text position={[0, 0.85, 0.42]} fontSize={0.12} color="#ffffff" anchorX="center">
-        SNACKS
-      </Text>
-    </group>
-    {/* Bench outside */}
-    <mesh position={[2.5, 0.4, 4]}>
-      <boxGeometry args={[2, 0.1, 0.5]} />
-      <meshStandardMaterial color="#713f12" roughness={0.8} />
-    </mesh>
-    {[-0.6, 0.6].map((x, i) => (
-      <mesh key={i} position={[2.5 + x, 0.2, 4]}>
-        <boxGeometry args={[0.1, 0.4, 0.4]} />
-        <meshStandardMaterial color="#374151" roughness={0.6} />
-      </mesh>
-    ))}
-    {/* Sign */}
-    <group position={[0, 3.5, 3.2]}>
-      <mesh>
-        <boxGeometry args={[3, 0.6, 0.1]} />
-        <meshStandardMaterial color="#1e40af" roughness={0.5} />
-      </mesh>
-      <Text position={[0, 0, 0.06]} fontSize={0.25} color="#ffffff" anchorX="center">
-        DRIVER LOUNGE
-      </Text>
-    </group>
-    {/* Smoking area sign */}
-    <group position={[5, 1.5, 0]}>
-      <mesh position={[0, 1, 0]}>
-        <cylinderGeometry args={[0.05, 0.05, 2, 8]} />
-        <meshStandardMaterial color="#64748b" roughness={0.5} />
-      </mesh>
-      <mesh position={[0, 2.2, 0]}>
-        <boxGeometry args={[0.8, 0.5, 0.05]} />
-        <meshStandardMaterial color="#fbbf24" roughness={0.5} />
-      </mesh>
-      <Text position={[0, 2.2, 0.03]} fontSize={0.1} color="#1f2937" anchorX="center">
-        SMOKING
-      </Text>
-    </group>
-  </group>
-);
-
-// Employee parking lot with striped spaces
-export const EmployeeParking: React.FC<{
-  position: [number, number, number];
-  rotation?: number;
-}> = ({ position, rotation = 0 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
-    {/* Parking lot surface - raised above TerrainGround (y=0.05) */}
-    <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-      <planeGeometry args={[25, 18]} />
-      <meshStandardMaterial
-        color="#2d2d2d"
-        roughness={0.9}
-        depthWrite={false}
-        polygonOffset
-        polygonOffsetFactor={-2}
-        polygonOffsetUnits={-2}
-      />
-    </mesh>
-    {/* Parking stripes - 8 spaces */}
-    {[0, 1, 2, 3, 4, 5, 6, 7].map((_: unknown, i: number) => (
-      <group key={i} position={[-10 + i * 3, 0, 0]}>
-        {/* Vertical stripe */}
-        <mesh
-          position={[0, 0.09, 0]}
-          rotation={[-Math.PI / 2, 0, 0]}
-          renderOrder={RENDER_ORDER.floorMarkings}
-        >
-          <planeGeometry args={[0.1, 5]} />
-          <meshBasicMaterial
-            color="#fef3c7"
-            depthWrite={false}
-            polygonOffset
-            polygonOffsetFactor={-3}
-            polygonOffsetUnits={-3}
-          />
+    {[-0.82, 0, 0.82].map((x, index) => (
+      <group key={x} position={[x, 1.62, 3.12]}>
+        <mesh>
+          <boxGeometry args={[0.58, 1.85, 0.08]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.42} metalness={0.55} />
         </mesh>
-        {/* Horizontal stripe at back */}
-        <mesh
-          position={[1.5, 0.09, -2.4]}
-          rotation={[-Math.PI / 2, 0, 0]}
-          renderOrder={RENDER_ORDER.floorMarkings}
-        >
-          <planeGeometry args={[3, 0.1]} />
-          <meshBasicMaterial
-            color="#fef3c7"
-            depthWrite={false}
-            polygonOffset
-            polygonOffsetFactor={-3}
-            polygonOffsetUnits={-3}
-          />
-        </mesh>
-      </group>
-    ))}
-    {/* Handicap spaces - 2 at end */}
-    {[0, 1].map((_: unknown, i: number) => (
-      <group key={i} position={[10 + i * 3.5, 0, 0]}>
-        <mesh
-          position={[0, 0.09, 0]}
-          rotation={[-Math.PI / 2, 0, 0]}
-          renderOrder={RENDER_ORDER.floorMarkings}
-        >
-          <planeGeometry args={[0.15, 5]} />
-          <meshBasicMaterial
-            color="#3b82f6"
-            depthWrite={false}
-            polygonOffset
-            polygonOffsetFactor={-3}
-            polygonOffsetUnits={-3}
-          />
-        </mesh>
-        {/* Handicap symbol (simplified) */}
-        <mesh
-          position={[1.5, 0.1, -1]}
-          rotation={[-Math.PI / 2, 0, 0]}
-          renderOrder={RENDER_ORDER.floorMarkings}
-        >
-          <circleGeometry args={[0.5, 16]} />
-          <meshBasicMaterial
-            color="#3b82f6"
-            depthWrite={false}
-            polygonOffset
-            polygonOffsetFactor={-4}
-            polygonOffsetUnits={-4}
-          />
-        </mesh>
-        <Text
-          position={[1.5, 0.11, -1]}
-          rotation={[-Math.PI / 2, 0, 0]}
-          fontSize={0.6}
-          color="#ffffff"
-          anchorX="center"
-        >
-          P
-        </Text>
-      </group>
-    ))}
-    {/* Parked vehicles (simple representations) */}
-    {[
-      [0, 0],
-      [3, 0],
-      [6, 0],
-      [-6, 0],
-    ].map(([x, z], i) => (
-      <group key={i} position={[x + 1.5, 0, z - 1]}>
-        {/* Car body */}
-        <mesh position={[0, 0.7, 0]}>
-          <boxGeometry args={[1.8, 0.8, 3.5]} />
-          <meshStandardMaterial
-            color={['#374151', '#dc2626', '#2563eb', '#64748b'][i]}
-            roughness={0.5}
-          />
-        </mesh>
-        {/* Cabin */}
-        <mesh position={[0, 1.2, 0.2]}>
-          <boxGeometry args={[1.6, 0.5, 2]} />
-          <meshStandardMaterial
-            color={['#374151', '#dc2626', '#2563eb', '#64748b'][i]}
-            roughness={0.5}
-          />
-        </mesh>
-        {/* Windows */}
-        <mesh position={[0, 1.2, 1.21]}>
-          <planeGeometry args={[1.4, 0.4]} />
-          <meshStandardMaterial color="#1e3a5f" metalness={0.9} roughness={0.1} />
-        </mesh>
-        {/* Wheels */}
-        {[
-          [-0.7, -1.2],
-          [0.7, -1.2],
-          [-0.7, 1.2],
-          [0.7, 1.2],
-        ].map(([wx, wz], j) => (
-          <mesh key={j} position={[wx, 0.35, wz]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.35, 0.35, 0.2, 12]} />
-            <meshStandardMaterial color="#1f2937" roughness={0.7} />
+        {[0.48, 0.12, -0.24, -0.6].map((y, lightIndex) => (
+          <mesh key={y} position={[0, y, 0.05]}>
+            <boxGeometry args={[0.34, 0.08, 0.025]} />
+            <meshStandardMaterial
+              color={lightIndex === index ? '#67e8f9' : '#22c55e'}
+              emissive={lightIndex === index ? '#0891b2' : '#15803d'}
+              emissiveIntensity={1.2}
+              toneMapped={false}
+            />
           </mesh>
         ))}
       </group>
     ))}
-    {/* Light pole */}
-    <group position={[-12, 0, -8]}>
-      <mesh position={[0, 4, 0]}>
-        <cylinderGeometry args={[0.1, 0.15, 8, 8]} />
-        <meshStandardMaterial color="#64748b" metalness={0.6} roughness={0.4} />
+    <group position={[0, 5.4, 0]}>
+      <mesh position={[0, 1.1, 0]}>
+        <cylinderGeometry args={[0.08, 0.12, 2.2, 12]} />
+        <meshStandardMaterial color="#94a3b8" roughness={0.28} metalness={0.82} />
       </mesh>
-      <mesh position={[0, 8.2, 0]}>
-        <boxGeometry args={[1, 0.3, 0.5]} />
-        <meshStandardMaterial color="#374151" />
-      </mesh>
-      <pointLight position={[0, 8, 0]} intensity={15} distance={20} color="#fef3c7" />
+      {[0, Math.PI / 2].map((rotationY) => (
+        <mesh key={rotationY} position={[0, 2.15, 0]} rotation={[0, rotationY, 0]}>
+          <boxGeometry args={[2.4, 0.08, 0.08]} />
+          <meshStandardMaterial color="#cbd5e1" roughness={0.3} metalness={0.8} />
+        </mesh>
+      ))}
+      <pointLight position={[0, 2.2, 0]} intensity={2} distance={8} color="#22d3ee" />
     </group>
-    {/* Sign */}
-    <group position={[-13, 0, 5]}>
-      <mesh position={[0, 1.5, 0]}>
-        <cylinderGeometry args={[0.05, 0.05, 3, 8]} />
-        <meshStandardMaterial color="#64748b" roughness={0.5} />
+    <group position={[0, 3.5, 3.2]}>
+      <mesh>
+        <boxGeometry args={[4.8, 0.65, 0.12]} />
+        <meshStandardMaterial color="#0c4a6e" roughness={0.45} metalness={0.3} />
       </mesh>
-      <mesh position={[0, 3.2, 0]}>
-        <boxGeometry args={[2, 0.8, 0.1]} />
-        <meshStandardMaterial color="#1e40af" roughness={0.5} />
-      </mesh>
-      <Text position={[0, 3.4, 0.06]} fontSize={0.2} color="#ffffff" anchorX="center">
-        EMPLOYEE
-      </Text>
-      <Text position={[0, 3.1, 0.06]} fontSize={0.2} color="#ffffff" anchorX="center">
-        PARKING
+      <Text position={[0, 0, 0.07]} fontSize={0.24} color="#ecfeff" anchorX="center">
+        FLEET TELEMETRY
       </Text>
     </group>
   </group>
@@ -1626,8 +1407,8 @@ const ManifestHolder: React.FC<{ position: [number, number, number]; rotation?: 
   </group>
 );
 
-// Time clock station
-const TimeClockStation: React.FC<{ position: [number, number, number]; rotation?: number }> = ({
+// Yard access and telemetry node.
+const YardAccessNode: React.FC<{ position: [number, number, number]; rotation?: number }> = ({
   position,
   rotation = 0,
 }) => {
@@ -1647,7 +1428,7 @@ const TimeClockStation: React.FC<{ position: [number, number, number]; rotation?
         <boxGeometry args={[0.8, 1, 0.08]} />
         <meshStandardMaterial color="#e2e8f0" roughness={0.6} />
       </mesh>
-      {/* Time clock unit */}
+      {/* Hardened telemetry unit */}
       <mesh position={[0, 1.5, 0.08]}>
         <boxGeometry args={[0.5, 0.6, 0.15]} />
         <meshStandardMaterial color="#374151" roughness={0.5} />
@@ -1662,16 +1443,16 @@ const TimeClockStation: React.FC<{ position: [number, number, number]; rotation?
           emissiveIntensity={0.6}
         />
       </mesh>
-      {/* Time display text */}
+      {/* Run-window display */}
       <Text position={[0, 1.6, 0.17]} fontSize={0.08} color="#000000" anchorX="center">
-        07:45
+        AUTO 07:45
       </Text>
-      {/* Card slot */}
+      {/* Link status bar */}
       <mesh position={[0, 1.35, 0.16]}>
         <boxGeometry args={[0.25, 0.05, 0.02]} />
         <meshStandardMaterial color="#1f2937" />
       </mesh>
-      {/* Keypad */}
+      {/* Diagnostic keypad */}
       {[0, 1, 2].map((row) =>
         [0, 1, 2].map((col) => (
           <mesh key={`${row}-${col}`} position={[-0.1 + col * 0.1, 1.2 - row * 0.08, 0.16]}>
@@ -1680,21 +1461,26 @@ const TimeClockStation: React.FC<{ position: [number, number, number]; rotation?
           </mesh>
         ))
       )}
-      {/* Card rack beside */}
+      {/* Edge compute cabinet */}
       <mesh position={[0.5, 1.2, 0]}>
         <boxGeometry args={[0.25, 0.8, 0.1]} />
         <meshStandardMaterial color="#78716c" roughness={0.7} />
       </mesh>
-      {/* Time cards in rack */}
+      {/* Cabinet status lamps */}
       {[0, 1, 2, 3, 4].map((_: unknown, i: number) => (
         <mesh key={i} position={[0.5, 1.5 - i * 0.12, 0.06]}>
-          <boxGeometry args={[0.2, 0.08, 0.02]} />
-          <meshStandardMaterial color="#fefce8" roughness={0.8} />
+          <boxGeometry args={[0.2, 0.05, 0.02]} />
+          <meshStandardMaterial
+            color={i === 0 ? '#67e8f9' : '#22c55e'}
+            emissive={i === 0 ? '#0891b2' : '#15803d'}
+            emissiveIntensity={0.8}
+            toneMapped={false}
+          />
         </mesh>
       ))}
       {/* Label */}
       <Text position={[0, 1.95, 0.05]} fontSize={0.06} color="#1f2937" anchorX="center">
-        TIME CLOCK
+        YARD LINK
       </Text>
     </group>
   );
@@ -3438,7 +3224,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           />
         </mesh>
 
-        {/* Speed bumps - relocated to employee walkways on yard edges */}
+        {/* Speed bumps relocated to service lanes on yard edges */}
         <OptimizedSpeedBumpInstances
           bumps={[{ position: [-28, 0, 45] }, { position: [28, 0, 45] }]}
         />
@@ -3543,7 +3329,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             <CardboardCompactor position={[-65, 0, 25]} rotation={Math.PI / 2} />
 
             {/* Time clock station */}
-            <TimeClockStation position={[18, 0, 50]} rotation={Math.PI / 2} />
+            <YardAccessNode position={[18, 0, 50]} rotation={Math.PI / 2} />
 
             {/* Air hose station */}
             <AirHoseStation position={[30, 0, 20]} rotation={-Math.PI / 2} />
@@ -3583,10 +3369,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Tire inspection area - TESTING */}
         {/* <TireInspectionArea position={[25, 0, 35]} rotation={Math.PI / 2} /> */}
 
-        {/* Driver break room - MOVED to AMENITY BUILDINGS section below (outside dock offset) */}
-
-        {/* Employee parking lot - TESTING */}
-        {/* <EmployeeParking position={[45, 0, 55]} rotation={0} /> */}
+        {/* Visitor parking lot */}
 
         {/* Propane tank cage - TESTING */}
         {/* <PropaneTankCage position={[38, 0, 10]} rotation={0} /> */}
@@ -3599,9 +3382,6 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
         {/* Dock plate - centered */}
         <DockPlate position={[0, 2, 1]} isDeployed={shippingDockVisual.docked} />
-
-        {/* Driver restroom - DISABLED pending relocation */}
-        {/* <DriverRestroom position={[70, 0, 65]} rotation={-Math.PI / 2} /> */}
 
         {/* Dock bumpers with wear indicators - moved forward to avoid wall */}
         <DockBumperWithWear position={[-2, 1.2, 0]} wearLevel={0.3} />
@@ -3621,7 +3401,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* PERFORMANCE: TruckAlignmentGuides and PalletJackChargingStation moved to showDecorativeAnimations block */}
       </group>
 
-      {/* ========== AMENITY BUILDINGS (Outside FRONT TRUCK YARD to avoid z=50 offset) ========== */}
+      {/* ========== SERVICE ASSETS (outside the front truck yard) ========== */}
       {/* Maintenance bay - positioned at actual world coordinates */}
       <MaintenanceBay
         position={MAINTENANCE_GARAGE_POSITION}
@@ -3634,10 +3414,10 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         rotation={SITE_LAYOUT.serviceYard.trailerDropYard.rotation}
       />
 
-      {/* Driver break room - positioned east of shipping dock at world coordinates */}
-      <DriverBreakRoom
-        position={DRIVER_LOUNGE_POSITION}
-        rotation={SITE_LAYOUT.serviceYard.driverLounge.rotation}
+      {/* Fleet telemetry hub - positioned east of shipping dock at world coordinates */}
+      <FleetTelemetryHub
+        position={FLEET_TELEMETRY_HUB_POSITION}
+        rotation={SITE_LAYOUT.serviceYard.fleetTelemetryHub.rotation}
       />
 
       {/* Shipping truck */}
@@ -3842,7 +3622,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           />
         </mesh>
 
-        {/* Speed bumps - relocated to employee walkways on yard edges */}
+        {/* Speed bumps relocated to service lanes on yard edges */}
         <OptimizedSpeedBumpInstances
           bumps={[{ position: [-28, 0, -45] }, { position: [28, 0, -45] }]}
         />
@@ -3952,7 +3732,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             <CardboardCompactor position={[65, 0, -15]} rotation={-Math.PI / 2} />
 
             {/* Time clock station for receiving area - moved to yard */}
-            <TimeClockStation position={[-18, 0, -52]} rotation={-Math.PI / 2} />
+            <YardAccessNode position={[-18, 0, -52]} rotation={-Math.PI / 2} />
 
             {/* Air hose station */}
             <AirHoseStation position={[-30, 0, -20]} rotation={Math.PI / 2} />
@@ -4982,61 +4762,6 @@ const ScaleTicketKiosk: React.FC<{ position: [number, number, number]; rotation?
     </group>
   );
 };
-
-// Driver shower/restroom building
-export const DriverRestroom: React.FC<{
-  position: [number, number, number];
-  rotation?: number;
-}> = ({ position, rotation = 0 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
-    <mesh position={[0, 1.5, 0]} castShadow>
-      <boxGeometry args={[6, 3, 4]} />
-      <meshStandardMaterial color="#78716c" roughness={0.8} />
-    </mesh>
-    <mesh position={[0, 3.1, 0]}>
-      <boxGeometry args={[6.4, 0.2, 4.4]} />
-      <meshStandardMaterial color="#44403c" roughness={0.7} />
-    </mesh>
-    {/* Doors - positioned so bottom sits at floor level */}
-    {[-1.5, 0, 1.5].map((x, i) => (
-      <group key={i} position={[x, 1.1, 2.01]}>
-        <mesh>
-          <boxGeometry args={[1, 2.2, 0.1]} />
-          <meshStandardMaterial color="#374151" roughness={0.6} />
-        </mesh>
-        <mesh position={[0.35, 0.3, 0.06]}>
-          <sphereGeometry args={[0.06, 8, 8]} />
-          <meshStandardMaterial color="#fbbf24" metalness={0.8} roughness={0.2} />
-        </mesh>
-      </group>
-    ))}
-    <Text position={[-1.5, 2.6, 2.01]} fontSize={0.15} color="#1f2937" anchorX="center">
-      MEN
-    </Text>
-    <Text position={[0, 2.6, 2.01]} fontSize={0.15} color="#1f2937" anchorX="center">
-      WOMEN
-    </Text>
-    <Text position={[1.5, 2.6, 2.01]} fontSize={0.12} color="#1f2937" anchorX="center">
-      SHOWERS
-    </Text>
-    {/* Vending machine - positioned so bottom sits at floor level */}
-    <mesh position={[-2.5, 1.0, 2.01]}>
-      <boxGeometry args={[0.8, 2, 0.6]} />
-      <meshStandardMaterial color="#dc2626" roughness={0.5} />
-    </mesh>
-    <mesh position={[0, 3.3, 2.2]}>
-      <boxGeometry args={[0.3, 0.15, 0.2]} />
-      <meshStandardMaterial color="#fef3c7" emissive="#fef3c7" emissiveIntensity={0.3} />
-    </mesh>
-    <mesh position={[0, 3.5, 2.01]}>
-      <boxGeometry args={[3, 0.5, 0.1]} />
-      <meshStandardMaterial color="#1e40af" />
-    </mesh>
-    <Text position={[0, 3.5, 2.12]} fontSize={0.18} color="#ffffff" anchorX="center">
-      DRIVER FACILITIES
-    </Text>
-  </group>
-);
 
 // Trailer drop yard with empty trailers
 const TrailerDropYard: React.FC<{ position: [number, number, number]; rotation?: number }> = ({

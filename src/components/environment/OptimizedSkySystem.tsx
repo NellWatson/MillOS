@@ -68,8 +68,8 @@ void main() {
 
   float mu = max(dot(direction, sunDir), 0.0);
   float horizonWeight = mix(1.0, 2.4, 1.0 - abs(sunDir.y));
-  float mieBroad = pow(mu, 4.0) * 0.55 * horizonWeight;
-  float mieTight = pow(mu, 220.0) * 2.20;
+  float mieBroad = pow(mu, 4.0) * 0.38 * horizonWeight;
+  float mieTight = pow(mu, 220.0) * 1.35;
   float rayleigh = (1.0 + mu * mu) * 0.045;
   float haze = exp(-max(height, 0.0) * 5.5) * (0.06 + daylight * 0.11);
   sky += uSunTint * (mieBroad + mieTight) * uSunOpacity;
@@ -250,17 +250,14 @@ function createRadialGlowTexture(size: number): THREE.DataTexture {
 /**
  * Sun disc size.
  *
- * At `CELESTIAL_RADIUS` 345 the old 5.2 radius subtended 2*atan(5.2/345) =
- * 1.73 degrees, 3.3x the real sun's 0.53. A disc that large reads as a cartoon
- * blob and can never produce a convincing glare silhouette. 2.2 is 0.73
- * degrees: still a shade generous, deliberately, because bloom is currently
- * inert (`BLOOM.luminanceThreshold` is 1.0 and no material in the scene authors
- * emissive above it) so nothing else is left to give the disc presence. If the
- * post domain ever raises the sun core above 1.0 linear, this can go to 1.6 and
- * be physically exact.
+ * At `CELESTIAL_RADIUS` 345 the original 5.2 radius subtended 1.73 degrees and
+ * read as a cartoon blob. The later 2.2 radius was physically restrained but
+ * disappeared inside the analytic Mie glare at normal display resolution.
+ * 3.4 subtends 1.13 degrees: deliberately stylised, legible beside the authored
+ * moon, and still compact enough to retain a crisp glare silhouette.
  */
-const sunGeometry = new THREE.SphereGeometry(2.2, 20, 14);
-const sunGlowGeometry = new THREE.SphereGeometry(3.8, 18, 12);
+const sunGeometry = new THREE.SphereGeometry(3.4, 24, 16);
+const sunGlowGeometry = new THREE.SphereGeometry(5.6, 20, 14);
 const moonGeometry = new THREE.SphereGeometry(7.4, 32, 24);
 const SKY_RADIUS = 180;
 const CELESTIAL_RADIUS = 345;
@@ -694,7 +691,7 @@ export function OptimizedSkySystem() {
         sunDirection: { value: new THREE.Vector3(0.5, 0.75, -0.4).normalize() },
       },
     });
-    material.customProgramCacheKey = () => 'millos-optimized-sky-v5';
+    material.customProgramCacheKey = () => 'millos-optimized-sky-v6';
     return material;
   }, []);
 
@@ -769,7 +766,7 @@ export function OptimizedSkySystem() {
     // The mountain rings are an optical horizon rather than site geometry.
     // Keeping their horizontal origin at the camera preserves continuous
     // parallax-free distance and prevents the far slopes clipping as the
-    // operator traverses the authored site. Their vertical datum stays tied
+    // inspection camera traverses the authored site. Their vertical datum stays tied
     // to the terrain so the ranges never float with camera height.
     if (horizonGroupRef.current) {
       horizonGroupRef.current.position.x = state.camera.position.x;
@@ -841,12 +838,11 @@ export function OptimizedSkySystem() {
       response,
       delta
     );
-    // The halo now carries the sun's apparent size on its own: the core sphere
-    // shrank from 1.73 to 0.73 degrees, and with bloom inert there is nothing
-    // else to make a physically-sized disc read.
+    // The halo supports the readable core without becoming the sun's apparent
+    // size on its own. Golden hour earns a wider, warmer aureole.
     sunHaloMaterial.opacity = THREE.MathUtils.damp(
       sunHaloMaterial.opacity,
-      celestial.sunOpacity * (0.3 + celestial.goldenHour * 0.22),
+      celestial.sunOpacity * (0.22 + celestial.goldenHour * 0.2),
       response,
       delta
     );
@@ -1028,7 +1024,7 @@ export function OptimizedSkySystem() {
           <sprite
             name="sun-halo"
             material={sunHaloMaterial}
-            scale={[38, 38, 1]}
+            scale={[30, 30, 1]}
             renderOrder={RENDER_ORDER.sunMoon - 1}
           />
           <mesh

@@ -327,9 +327,9 @@ test.describe('MillOS master refinement runtime', () => {
     await expect(workspace.getByText('Active Faults')).toBeVisible();
 
     await workspace.getByRole('tab', { name: /Alarms/ }).click();
-    await workspace.getByLabel('Simulated operator').fill('Runtime verifier');
+    await workspace.getByLabel('Control identity').fill('Runtime verification controller');
     await workspace
-      .getByLabel('Operator note or disposition reason')
+      .getByLabel('Control note or disposition reason')
       .fill('Deterministic browser verification');
     const acknowledgeAll = workspace.getByRole('button', { name: /Acknowledge All/ });
     await expect(acknowledgeAll).toBeVisible({ timeout: 15_000 });

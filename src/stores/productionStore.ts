@@ -3,12 +3,10 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import {
   MachineData,
   MachineType,
-  WorkerData,
   AIDecision,
   ProductionTarget,
   type AIDecisionDisposition,
 } from '../types';
-import type { WorkerStatus } from '../utils/statusColors';
 import { useHistoricalPlaybackStore } from './historicalPlaybackStore';
 import { useMaterialFlowStore } from './materialFlowStore';
 import { useQCLabStore, type QCLabStore } from './qcLabStore';
@@ -36,7 +34,7 @@ export type { TruckScheduleState, TruckScheduleStore } from './truckScheduleStor
 
 // =========================================================================
 // CORE PRODUCTION STORE
-// Core production state: workers, machines, metrics, AI decisions
+// Core production state: machines, material flow, metrics, and AI decisions
 // Specialized concerns have been extracted to focused stores:
 // - qcLabStore.ts - Quality Control Lab
 // - achievementsStore.ts - Achievements system
@@ -341,14 +339,6 @@ export interface ProductionStore
   productionSpeed: number;
   setProductionSpeed: (speed: number) => void;
 
-  // Workers
-  workers: WorkerData[];
-  selectedWorker: WorkerData | null;
-  setSelectedWorker: (worker: WorkerData | null) => void;
-  setWorkers: (workers: WorkerData[]) => void;
-  updateWorkerTask: (workerId: string, task: string, targetMachine?: string) => void;
-  updateWorkerStatus: (workerId: string, status: WorkerStatus) => void;
-
   // Machines
   machines: MachineData[];
   selectedMachine: MachineData | null;
@@ -403,24 +393,12 @@ export interface ProductionStore
   tickMetrics: (deltaSeconds: number) => void; // Called by game loop to update tracking
   tickMachineMetrics: (deltaSeconds: number) => void; // Vary machine metrics over time
 
-  // Heat map data (worker position history)
+  // Heat map data for route and process activity history.
   heatMapData: Array<{ x: number; z: number; intensity: number }>;
   recordHeatMapPoint: (x: number, z: number) => void;
   clearHeatMap: () => void;
   showHeatMap: boolean;
   setShowHeatMap: (show: boolean) => void;
-
-  // Worker satisfaction metrics
-  workerSatisfaction: {
-    overallScore: number; // 0-100
-    breakCount: number; // Total breaks taken
-    conversationCount: number; // Social interactions
-    averageEnergy: number; // Average energy (0=exhausted, 100=fully rested)
-    productivityBonus: number; // % bonus from satisfied workers
-  };
-  updateWorkerSatisfaction: (updates: Partial<ProductionStore['workerSatisfaction']>) => void;
-  recordConversation: () => void;
-  recordBreakTaken: () => void;
 
   // Production targets
   productionTarget: ProductionTarget | null;
@@ -434,20 +412,6 @@ export interface ProductionStore
   incrementBagsProduced: (count?: number) => void;
   /** @internal Direct increment - use throttledIncrementBags() for high-frequency updates */
   _directIncrementBags: (count: number) => void;
-
-  // Worker leaderboard
-  workerLeaderboard: Array<{
-    workerId: string;
-    name: string;
-    score: number;
-    tasksCompleted: number;
-  }>;
-  updateWorkerScore: (
-    workerId: string,
-    name: string,
-    score: number,
-    tasksCompleted: number
-  ) => void;
 
   // Dock status for receiving and shipping bays
   dockStatus: {
@@ -466,10 +430,7 @@ export interface ProductionStore
 
 function enrichDecisionProvenance(
   decision: AIDecision,
-  state: Pick<
-    ProductionStore,
-    'metrics' | 'machines' | 'workers' | 'productionSpeed' | 'totalBagsProduced'
-  >
+  state: Pick<ProductionStore, 'metrics' | 'machines' | 'productionSpeed' | 'totalBagsProduced'>
 ): AIDecision {
   if (decision.provenance) return decision;
 
@@ -477,16 +438,13 @@ function enrichDecisionProvenance(
   const machine = decision.machineId
     ? state.machines.find((candidate) => candidate.id === decision.machineId)
     : undefined;
-  const worker = decision.workerId
-    ? state.workers.find((candidate) => candidate.id === decision.workerId)
-    : undefined;
   const source =
     decision.triggeredBy === 'schedule'
       ? 'schedule'
       : decision.triggeredBy === 'prediction'
         ? 'prediction'
         : decision.triggeredBy === 'user'
-          ? 'operator'
+          ? 'simulation'
           : 'simulation';
   const observations: NonNullable<AIDecision['provenance']>['observations'] = [
     {
@@ -551,7 +509,7 @@ function enrichDecisionProvenance(
       assumptions: decision.uncertainty
         ? [decision.uncertainty]
         : ['Simulator telemetry is current at the captured time.'],
-      affectedPeople: worker ? [`${worker.name} (${worker.id})`] : ['Mill operators'],
+      affectedSystems: ['Autonomous production control'],
       affectedEquipment: machine ? [`${machine.name} (${machine.id})`] : ['Production system'],
       expectedEffect: decision.impact,
       alternatives:
@@ -572,7 +530,6 @@ function enrichDecisionProvenance(
         totalBagsProduced: state.totalBagsProduced,
         machineId: decision.machineId ?? null,
         machineStatus: machine?.status ?? null,
-        workerId: decision.workerId ?? null,
         trigger: decision.triggeredBy ?? null,
       },
     },
@@ -704,21 +661,6 @@ export const useProductionStore = create<ProductionStore>()(
     productionSpeed: 1,
     setProductionSpeed: (speed) => set({ productionSpeed: speed }),
 
-    workers: [],
-    selectedWorker: null,
-    setSelectedWorker: (worker) => set({ selectedWorker: worker }),
-    setWorkers: (workers) => set({ workers }),
-    updateWorkerTask: (workerId, task, targetMachine) =>
-      set((state) => ({
-        workers: state.workers.map((w) =>
-          w.id === workerId ? { ...w, currentTask: task, targetMachine } : w
-        ),
-      })),
-    updateWorkerStatus: (workerId: string, status: WorkerStatus) =>
-      set((state) => ({
-        workers: state.workers.map((w) => (w.id === workerId ? { ...w, status } : w)),
-      })),
-
     machines: [],
     selectedMachine: null,
     setSelectedMachine: (machine) => set({ selectedMachine: machine }),
@@ -818,7 +760,7 @@ export const useProductionStore = create<ProductionStore>()(
               disposition === 'rejected'
                 ? options?.note
                   ? `Rejected: ${options.note}`
-                  : 'Rejected by the operator'
+                  : 'Rejected by the control layer'
                 : decision.outcome,
           };
         }),
@@ -1225,66 +1167,6 @@ export const useProductionStore = create<ProductionStore>()(
     showHeatMap: false,
     setShowHeatMap: (show: boolean) => set({ showHeatMap: show }),
 
-    // Worker satisfaction
-    workerSatisfaction: {
-      overallScore: 85,
-      breakCount: 0,
-      conversationCount: 0,
-      averageEnergy: 100,
-      productivityBonus: 5,
-    },
-    updateWorkerSatisfaction: (updates: Partial<ProductionStore['workerSatisfaction']>) =>
-      set((state) => {
-        const newSatisfaction = { ...state.workerSatisfaction, ...updates };
-        // Calculate overall score based on components
-        const energyScore = newSatisfaction.averageEnergy * 0.4;
-        const socialScore = Math.min(100, newSatisfaction.conversationCount * 2) * 0.3;
-        const breakScore = Math.min(100, newSatisfaction.breakCount * 5) * 0.3;
-        newSatisfaction.overallScore = Math.min(
-          100,
-          Math.round(energyScore + socialScore + breakScore)
-        );
-        // Productivity bonus scales with satisfaction
-        newSatisfaction.productivityBonus = Math.round((newSatisfaction.overallScore - 50) / 5);
-        return { workerSatisfaction: newSatisfaction };
-      }),
-    recordConversation: () =>
-      set((state) => {
-        // Atomically update conversation count and recalculate derived values
-        const newSatisfaction = {
-          ...state.workerSatisfaction,
-          conversationCount: state.workerSatisfaction.conversationCount + 1,
-        };
-        // Recalculate derived values
-        const energyScore = newSatisfaction.averageEnergy * 0.4;
-        const socialScore = Math.min(100, newSatisfaction.conversationCount * 2) * 0.3;
-        const breakScore = Math.min(100, newSatisfaction.breakCount * 5) * 0.3;
-        newSatisfaction.overallScore = Math.min(
-          100,
-          Math.round(energyScore + socialScore + breakScore)
-        );
-        newSatisfaction.productivityBonus = Math.round((newSatisfaction.overallScore - 50) / 5);
-        return { workerSatisfaction: newSatisfaction };
-      }),
-    recordBreakTaken: () =>
-      set((state) => {
-        // Atomically update break count and recalculate derived values
-        const newSatisfaction = {
-          ...state.workerSatisfaction,
-          breakCount: state.workerSatisfaction.breakCount + 1,
-        };
-        // Recalculate derived values
-        const energyScore = newSatisfaction.averageEnergy * 0.4;
-        const socialScore = Math.min(100, newSatisfaction.conversationCount * 2) * 0.3;
-        const breakScore = Math.min(100, newSatisfaction.breakCount * 5) * 0.3;
-        newSatisfaction.overallScore = Math.min(
-          100,
-          Math.round(energyScore + socialScore + breakScore)
-        );
-        newSatisfaction.productivityBonus = Math.round((newSatisfaction.overallScore - 50) / 5);
-        return { workerSatisfaction: newSatisfaction };
-      }),
-
     // Production targets
     productionTarget: {
       id: 'daily-target-1',
@@ -1388,22 +1270,6 @@ export const useProductionStore = create<ProductionStore>()(
               }
             : null,
         };
-      }),
-
-    // Worker leaderboard
-    workerLeaderboard: [],
-    updateWorkerScore: (workerId: string, name: string, score: number, tasksCompleted: number) =>
-      set((state) => {
-        const existing = state.workerLeaderboard.findIndex((w) => w.workerId === workerId);
-        const newBoard = [...state.workerLeaderboard];
-        if (existing >= 0) {
-          newBoard[existing] = { workerId, name, score, tasksCompleted };
-        } else {
-          newBoard.push({ workerId, name, score, tasksCompleted });
-        }
-        // Sort by score descending
-        newBoard.sort((a, b) => b.score - a.score);
-        return { workerLeaderboard: newBoard.slice(0, 10) };
       }),
 
     // Dock status
