@@ -11,7 +11,7 @@ import { CameraController, useCameraStore } from './components/CameraController'
 import { FirstPersonController } from './components/FirstPersonController';
 import ErrorBoundary from './components/ErrorBoundary';
 import { LoadingScreen } from './components/LoadingScreen';
-import { MachineData, MachineType, WorkerData, createInitialWorkers } from './types';
+import { MachineData, MachineType } from './types';
 import type { ForkliftData } from './components/ForkliftSystem';
 import { audioManager } from './utils/audioManager';
 import { gpuResourceManager } from './utils/GPUResourceManager';
@@ -39,7 +39,6 @@ if (import.meta.env.DEV) {
   devWindow.useFPSStore = useFPSStore;
 }
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { useSafetySimulation } from './hooks/useSafetySimulation';
 import { useMultiplayerSync } from './multiplayer';
 import { useMobileDetection } from './hooks/useMobileDetection';
 import { TouchLookHandler } from './components/mobile/TouchLookHandler';
@@ -194,7 +193,6 @@ const App: React.FC = () => {
 
   // New UI handles panels via Dock/Sidebar, but we still need some state for selection
   const [selectedMachine, setSelectedMachine] = useState<MachineData | null>(null);
-  const [selectedWorker, setSelectedWorker] = useState<WorkerData | null>(null);
   const [selectedForklift, setSelectedForklift] = useState<ForkliftData | null>(null);
 
   // AI/SCADA panel state - synced bidirectionally with GameInterface via props
@@ -237,12 +235,10 @@ const App: React.FC = () => {
   // Memoized callbacks
   const handleCloseSelection = useCallback(() => {
     setSelectedMachine(null);
-    setSelectedWorker(null);
   }, []);
 
   const handleSelectMachine = useCallback((machine: MachineData) => {
     setSelectedMachine(machine);
-    setSelectedWorker(null); // Mutual exclusion
   }, []);
   const handleFocusMachine = useCallback(
     (machineId: string) => {
@@ -263,11 +259,6 @@ const App: React.FC = () => {
     },
     [handleSelectMachine]
   );
-  const handleSelectWorker = useCallback((worker: WorkerData) => {
-    setSelectedWorker(worker);
-    setSelectedMachine(null); // Mutual exclusion
-  }, []);
-
   const handleSelectForklift = useCallback(
     (forklift: ForkliftData) => setSelectedForklift(forklift),
     []
@@ -340,8 +331,6 @@ const App: React.FC = () => {
     setShowSCADAPanel,
     selectedMachine,
     setSelectedMachine,
-    selectedWorker,
-    setSelectedWorker,
     productionSpeed,
     setProductionSpeed,
     showZones,
@@ -354,9 +343,6 @@ const App: React.FC = () => {
   // Initialize multiplayer state synchronization
   useMultiplayerSync();
 
-  // Safety simulation - syncs game days to safety metrics & generates random events
-  useSafetySimulation();
-
   // Initialize audio on first user interaction (required by Web Audio API)
   const initializeAudio = useCallback(() => {
     if (runtimeMode.benchmark) return;
@@ -366,8 +352,6 @@ const App: React.FC = () => {
         .then(() => {
           audioManager.startAmbientSounds();
           audioManager.startOutdoorAmbient(); // Birds, wind, distant traffic
-          audioManager.startRadioChatter(); // Radio static/beeps from workers
-          audioManager.startWorkerVoices(); // Distant shouts/whistles from workers
           audioManager.startPASystem(); // PA announcements and shift bells
           audioManager.startCompressorCycling(); // Industrial air compressor cycling
           audioManager.startMetalClanks(); // Random metal clanks from factory floor
@@ -543,15 +527,6 @@ const App: React.FC = () => {
       stopLoop?.();
     };
   }, [runtimeMode.benchmark]);
-
-  // Initialize workers at app startup (not tied to 3D scene rendering)
-  // This ensures workers are available in the store for UI even when camera is outside factory
-  useEffect(() => {
-    const store = useProductionStore.getState();
-    if (store.workers.length === 0) {
-      store.setWorkers(createInitialWorkers());
-    }
-  }, []);
 
   // Headless production simulation - runs regardless of camera position
   // This ensures bags are counted even when ConveyorSystem isn't rendering
@@ -730,7 +705,6 @@ const App: React.FC = () => {
               showZones={showZones}
               setShowZones={setShowZones}
               selectedMachine={selectedMachine}
-              selectedWorker={selectedWorker}
               selectedForklift={selectedForklift}
               onCloseSelection={handleCloseSelection}
               onClearForklift={() => setSelectedForklift(null)}
@@ -779,7 +753,7 @@ const App: React.FC = () => {
             // stays the one tier that is purely forward-rendered.
             shadows={canvasQuality === 'low' ? false : { type: THREE.PCFSoftShadowMap }}
             camera={{
-              position: [35, 25, 20], // Start inside factory so workers/production initialize
+              position: [35, 25, 20], // Start inside factory so production is immediately readable
               fov: 65,
               near: CAMERA_DEPTH.near,
               far: CAMERA_DEPTH.far,
@@ -874,7 +848,6 @@ const App: React.FC = () => {
                         productionSpeed={productionSpeed}
                         showZones={showZones}
                         onSelectMachine={handleSelectMachine}
-                        onSelectWorker={handleSelectWorker}
                         onSelectForklift={handleSelectForklift}
                       />
                     }
@@ -887,7 +860,6 @@ const App: React.FC = () => {
                       showZones={showZones}
                       onLockChange={handleLockChange}
                       onSelectMachine={handleSelectMachine}
-                      onSelectWorker={handleSelectWorker}
                       onSelectForklift={handleSelectForklift}
                     />
                   </ErrorBoundary>
@@ -917,13 +889,7 @@ const App: React.FC = () => {
                             ? 0.001
                             : 0.2
                         }
-                        minDistance={
-                          runtimeMode.benchmark &&
-                          (runtimeMode.benchmarkScene === 'personnel-close' ||
-                            runtimeMode.benchmarkScene === 'personnel-feminine')
-                            ? 3
-                            : 15
-                        }
+                        minDistance={15}
                         maxDistance={220}
                         autoRotate
                         autoRotateSpeed={0}
@@ -940,7 +906,6 @@ const App: React.FC = () => {
                       productionSpeed={productionSpeed}
                       showZones={showZones}
                       onSelectMachine={handleSelectMachine}
-                      onSelectWorker={handleSelectWorker}
                       onSelectForklift={handleSelectForklift}
                     />
                   </>
@@ -955,7 +920,7 @@ const App: React.FC = () => {
             {!fpsMode && !runtimeMode.benchmark && (
               <CameraController
                 orbitControlsRef={orbitControlsRef}
-                autoRotateEnabled={autoRotate && !selectedMachine && !selectedWorker}
+                autoRotateEnabled={autoRotate && !selectedMachine}
                 targetSpeed={0.15}
               />
             )}

@@ -12,10 +12,7 @@ export const MiniMap: React.FC = () => {
       setShowMiniMap: state.setShowMiniMap,
     }))
   );
-  const [positions, setPositions] = useState<{
-    workers: EntityPosition[];
-    forklifts: EntityPosition[];
-  }>({ workers: [], forklifts: [] });
+  const [positions, setPositions] = useState<{ forklifts: EntityPosition[] }>({ forklifts: [] });
 
   useEffect(() => {
     if (!showMiniMap) return;
@@ -24,7 +21,6 @@ export const MiniMap: React.FC = () => {
     // 10Hz was excessive for a mini map - 2Hz is sufficient
     const interval = setInterval(() => {
       setPositions({
-        workers: positionRegistry.getAllWorkers(),
         forklifts: positionRegistry.getAllForklifts(),
       });
     }, 500);
@@ -89,20 +85,6 @@ export const MiniMap: React.FC = () => {
           <div className="absolute left-2 bottom-1/4 text-[8px] text-slate-400">Sifters</div>
           <div className="absolute left-2 bottom-2 text-[8px] text-slate-400">Packers</div>
 
-          {/* Workers */}
-          {positions.workers.map((worker) => (
-            <div
-              key={worker.id}
-              className="absolute w-2 h-2 rounded-full bg-green-500 border border-green-300"
-              style={{
-                left: offsetX + (worker.x * mapScale) / 2,
-                top: offsetZ - (worker.z * mapScale) / 2,
-                transform: 'translate(-50%, -50%)',
-              }}
-              title={worker.id}
-            />
-          ))}
-
           {/* Forklifts */}
           {positions.forklifts.map((forklift) => (
             <div
@@ -133,10 +115,6 @@ export const MiniMap: React.FC = () => {
 
         {/* Legend */}
         <div className="flex items-center justify-center gap-4 px-3 py-1.5 border-t border-slate-800 bg-slate-800/30">
-          <div className="flex items-center gap-1">
-            <div className="w-2 h-2 rounded-full bg-green-500" />
-            <span className="text-[9px] text-slate-400">Workers</span>
-          </div>
           <div className="flex items-center gap-1">
             <div className="w-2 h-2 bg-amber-500 rounded-sm" />
             <span className="text-[9px] text-slate-400">Forklifts</span>

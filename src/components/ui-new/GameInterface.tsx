@@ -4,7 +4,7 @@ import { ContextSidebar } from './sidebar/ContextSidebar';
 import { StatusHUD } from './hud/StatusHUD';
 import { EmergencyOverlay } from '../EmergencyOverlay';
 import { AlertSystem } from '../AlertSystem';
-import { MachineData, WorkerData } from '../../types';
+import { MachineData } from '../../types';
 import {
   PAAnnouncementSystem,
   GamificationBar,
@@ -23,7 +23,6 @@ import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useAnnouncementsStore } from '../../stores/announcementsStore';
 import { useMobileControlStore } from '../../stores/mobileControlStore';
 import { KeyboardShortcutsModal } from '../ui/KeyboardShortcutsModal';
-import { startVoteGenerator } from '../../stores/votingStore';
 import { OnboardingGuide, type OnboardingStep } from './onboarding/OnboardingGuide';
 
 const INTRO_STEPS: OnboardingStep[] = [
@@ -53,7 +52,6 @@ interface GameInterfaceProps {
   showZones: boolean;
   setShowZones: (v: boolean) => void;
   selectedMachine: MachineData | null;
-  selectedWorker: WorkerData | null;
   onCloseSelection: () => void;
   // Keyboard shortcut state bridge
   showAIPanel?: boolean;
@@ -69,7 +67,6 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   showZones,
   setShowZones,
   selectedMachine,
-  selectedWorker,
   onCloseSelection,
   showAIPanel,
   showSCADAPanel,
@@ -156,10 +153,6 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
     setIntroStep(null);
   };
 
-  // Low-frequency worker-vote producer so Democratic Voting sees activity
-  // during normal play (contextual worker-initiated votes every ~5 minutes).
-  useEffect(() => startVoteGenerator(), []);
-
   // AI Narration - get current narration to display
   const { getNarration, markShown } = useAINarrationStore();
   const { unlockEntry } = useKnowledgeStore();
@@ -190,11 +183,11 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
 
   // Sync external selection with Dock/Sidebar state
   useEffect(() => {
-    if (selectedMachine || selectedWorker) {
+    if (selectedMachine) {
       // Show sidebar when something is selected
       setSidebarVisible(true);
     }
-  }, [selectedMachine, selectedWorker]);
+  }, [selectedMachine]);
 
   // Sync keyboard-driven panel flags (I = AI, O = SCADA) into activeMode.
   //
@@ -347,7 +340,6 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
           isVisible={isSidebarVisible}
           onClose={handleSidebarClose}
           selectedMachine={selectedMachine}
-          selectedWorker={selectedWorker}
           productionSpeed={productionSpeed}
           setProductionSpeed={setProductionSpeed}
           showZones={showZones}

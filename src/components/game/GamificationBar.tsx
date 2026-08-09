@@ -1,13 +1,12 @@
 import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Trophy, TrendingUp, History, Map } from 'lucide-react';
+import { X, Trophy, History, Map } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 import { useProductionStore } from '../../stores/productionStore';
 import { useHistoricalPlaybackStore } from '../../stores/historicalPlaybackStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useAchievementTracker } from '../../hooks/useAchievementTracker';
 import { AchievementsPanel } from './AchievementsPanel';
-import { WorkerLeaderboard } from './WorkerLeaderboard';
 import { ScreenshotButton } from './ScreenshotButton';
 
 export const GamificationBar: React.FC = () => {
@@ -17,7 +16,6 @@ export const GamificationBar: React.FC = () => {
   useAchievementTracker();
 
   const [showAchievements, setShowAchievements] = useState(false);
-  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const { showMiniMap, setShowMiniMap, showGamificationBar, setShowGamificationBar } = useUIStore(
     useShallow((state) => ({
       showMiniMap: state.showMiniMap,
@@ -34,7 +32,6 @@ export const GamificationBar: React.FC = () => {
   // Memoized handlers to prevent re-renders
   const handleHideBar = useCallback(() => setShowGamificationBar(false), [setShowGamificationBar]);
   const handleToggleAchievements = useCallback(() => setShowAchievements((prev) => !prev), []);
-  const handleToggleLeaderboard = useCallback(() => setShowLeaderboard((prev) => !prev), []);
   const handleToggleMiniMap = useCallback(
     () => setShowMiniMap(!showMiniMap),
     [setShowMiniMap, showMiniMap]
@@ -85,20 +82,6 @@ export const GamificationBar: React.FC = () => {
             )}
           </button>
 
-          {/* Leaderboard */}
-          <button
-            onClick={handleToggleLeaderboard}
-            aria-expanded={showLeaderboard}
-            className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${
-              showLeaderboard
-                ? 'bg-cyan-600 text-white'
-                : 'bg-slate-800 text-cyan-400 hover:bg-slate-700'
-            }`}
-            title="Leaderboard"
-          >
-            <TrendingUp className="w-5 h-5" />
-          </button>
-
           {/* Replay/History - Moved here from 'R' key */}
           <button
             onClick={() => {
@@ -141,7 +124,6 @@ export const GamificationBar: React.FC = () => {
       {/* Panels */}
       <AnimatePresence>
         {showAchievements && <AchievementsPanel onClose={() => setShowAchievements(false)} />}
-        {showLeaderboard && <WorkerLeaderboard onClose={() => setShowLeaderboard(false)} />}
       </AnimatePresence>
     </>
   );

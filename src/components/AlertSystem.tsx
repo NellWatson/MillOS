@@ -25,10 +25,10 @@ const getSampleAlerts = (): Omit<AlertData, 'id' | 'timestamp' | 'acknowledged'>
 ];
 
 const NEAR_MISS_MESSAGES = [
-  'Forklift stopped for pedestrian - safety protocol activated',
-  'Worker detected in forklift path - collision averted',
+  'Forklift stopped for a blocked aisle - safety protocol activated',
+  'Unexpected load detected in forklift path - collision averted',
   'Emergency stop triggered - all clear',
-  'Proximity alert - forklift yielded to personnel',
+  'Proximity alert - forklift yielded to crossing equipment',
   'Safety system engaged - near-miss avoided',
 ];
 

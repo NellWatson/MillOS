@@ -16,7 +16,6 @@ import { toSimulationMinutes } from '../../simulation/simulationClock';
 import { getRuntimeMode } from '../../runtime/runtimeMode';
 import { createLinearDataTexture } from '../../utils/textureGenerator';
 import { applyVehicleSurface } from '../../utils/vehicleSurface';
-import { SeatedVehicleOperator } from '../models/VehicleOperator';
 import {
   TRUCK_CYCLE_SECONDS,
   applyTruckSafetyHold,
@@ -249,7 +248,6 @@ interface TruckVisualProps {
   readonly wheelRotationRef: React.MutableRefObject<number>;
   readonly company?: string;
   readonly plateNumber?: string;
-  readonly operatorName?: string;
   /**
    * Road-film strength, 0..1. Deliberately a prop: the two trucks share a
    * module-level material table, and identical wear on both reads as a tiling
@@ -482,7 +480,6 @@ export function OptimizedTruckVisual({
   wheelRotationRef,
   company = 'MILL LOGISTICS',
   plateNumber = 'MILL 001',
-  operatorName = 'Driver',
   grime = 0.7,
   loadRatio = 0,
 }: TruckVisualProps) {
@@ -1019,12 +1016,6 @@ export function OptimizedTruckVisual({
             scale={[0.78, 0.24, 0.76]}
             receiveShadow
           />
-          <group position={[-0.48, 1.33, 3.46]} scale={1.28}>
-            <SeatedVehicleOperator
-              name={operatorName}
-              vestColor={colour === '#9a4e35' ? '#e9a23b' : '#e6b83f'}
-            />
-          </group>
         </group>
         <mesh
           geometry={UNIT_BOX}
@@ -1665,7 +1656,6 @@ export function OptimizedTruckBay({ showShipping, showReceiving }: OptimizedTruc
               wheelRotationRef={shippingWheelRotation}
               company="FLOUR EXPRESS"
               plateNumber="FLR 2847"
-              operatorName="Mara"
               loadRatio={outboundLoadRatio}
             />
           </group>
@@ -1686,7 +1676,6 @@ export function OptimizedTruckBay({ showShipping, showReceiving }: OptimizedTruc
               wheelRotationRef={receivingWheelRotation}
               company="GRAIN CO"
               plateNumber="GRN 5921"
-              operatorName="Owen"
             />
           </group>
         </>

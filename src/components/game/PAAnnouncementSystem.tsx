@@ -15,6 +15,7 @@ import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { useAudioMuted } from '../../hooks/useAudioState';
 import { audioManager } from '../../utils/audioManager';
 import { logger } from '../../utils/logger';
+import { HUMAN_PRESENCE_POLICY } from '../../config/featureFlags';
 
 // Fallback timeout - dismiss after this even if TTS hasn't finished
 const FALLBACK_TIMEOUT_MS = 10000;
@@ -179,17 +180,17 @@ export const PAAnnouncementSystem: React.FC = () => {
       );
       setCurrentAnnouncementId(currentAnnouncement.id);
 
-      if (audioManager.canSpeakAnnouncements) {
+      if (HUMAN_PRESENCE_POLICY.humanVoiceAudio && audioManager.canSpeakAnnouncements) {
         logger.debug('[PA] Calling speakAnnouncement...');
         audioManager.speakAnnouncement(currentAnnouncement.message, currentAnnouncement.priority);
       } else {
-        logger.debug('[PA] Caption only: audio has not been initialized by user interaction');
+        logger.debug('[PA] Caption only: v0.40 uncrewed-site policy');
       }
     }
 
     const announcementId = currentAnnouncement.id;
 
-    if (audioManager.hasPendingAnnouncementSpeech) {
+    if (HUMAN_PRESENCE_POLICY.humanVoiceAudio && audioManager.hasPendingAnnouncementSpeech) {
       // Poll accepted TTS work until both active speech and its startup queue
       // are empty. The former is briefly false while a voice is being loaded.
       ttsCheckIntervalRef.current = setInterval(() => {
@@ -362,10 +363,8 @@ export const PAAnnouncementSystem: React.FC = () => {
     }
   };
 
-  // AI Voice styling is warm/cyan with heart, PA is sardonic/blue-slate with speaker
-  // Note: Announcement type doesn't have voice field, so all are PA voice for now
+  // PA channel styling is priority-based blue/slate with a signal icon.
   const getVoiceStyles = (priority: number) => {
-    // PA Voice: priority-based coloring
     return getPriorityStyles(priority);
   };
 

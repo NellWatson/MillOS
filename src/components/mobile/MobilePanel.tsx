@@ -23,7 +23,6 @@ import {
   Gauge,
   Package,
   FastForward,
-  Siren,
   Heart,
   Truck,
 } from 'lucide-react';
@@ -34,7 +33,6 @@ import { useMultiplayerStore } from '../../stores/multiplayerStore';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useSafetyStore } from '../../stores/safetyStore';
 import { useAIConfigStore } from '../../stores/aiConfigStore';
-import { useWorkerMoodStore } from '../../stores/workerMoodStore';
 import { useOperationsCampaignStore } from '../../stores/operationsCampaignStore';
 import { EmergencyStopButton } from '../ui/EmergencyStopButton';
 
@@ -74,8 +72,6 @@ const getPanelIcon = (mode: DockMode) => {
       return <Brain className={iconClass} />;
     case 'scada':
       return <Activity className={iconClass} />;
-    case 'workforce':
-      return <Users className={iconClass} />;
     case 'safety':
       return <Shield className={iconClass} />;
     case 'settings':
@@ -98,8 +94,6 @@ const getPanelTitle = (mode: DockMode) => {
       return 'AI Partner';
     case 'scada':
       return 'Simulated SCADA';
-    case 'workforce':
-      return 'Workforce';
     case 'safety':
       return 'Safety & Emergency';
     case 'settings':
@@ -145,10 +139,7 @@ const OverviewContent: React.FC = () => {
     0,
     Math.min(
       100,
-      100 -
-        (safetyMetrics?.nearMisses ?? 0) * 5 -
-        (safetyMetrics?.safetyStops ?? 0) * 2 -
-        (safetyMetrics?.workerEvasions ?? 0)
+      100 - (safetyMetrics?.nearMisses ?? 0) * 5 - (safetyMetrics?.safetyStops ?? 0) * 2
     )
   );
 
@@ -421,83 +412,15 @@ const MachineStatusBadge: React.FC<{ label: string; count: number; color: string
   );
 };
 
-// Safety panel content with fire drill
+// Safety panel content for the uncrewed site
 const SafetyContent: React.FC = () => {
-  const drillMetrics = useGameSimulationStore((s) => s.drillMetrics);
-  const startEmergencyDrill = useGameSimulationStore((s) => s.startEmergencyDrill);
-  const endEmergencyDrill = useGameSimulationStore((s) => s.endEmergencyDrill);
-  const workers = useProductionStore((s) => s.workers);
-
-  const evacuatedCount = drillMetrics.evacuatedWorkerIds.length;
-  const totalWorkers = drillMetrics.totalWorkers || workers.length;
-  const evacuationProgress = totalWorkers > 0 ? (evacuatedCount / totalWorkers) * 100 : 0;
-
-  // Calculate elapsed time
-  const elapsedSeconds = drillMetrics.active
-    ? Math.floor((Date.now() - drillMetrics.startTime) / 1000)
-    : (drillMetrics.finalTimeSeconds ?? 0);
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   return (
     <div className="space-y-3">
       {/* Emergency Stop */}
       <EmergencyStopButton />
 
-      {/* Fire Drill Section */}
-      <div className="bg-slate-800/50 rounded-lg p-3">
-        <div className="flex items-center gap-2 mb-2">
-          <Siren className="w-4 h-4 text-orange-400" />
-          <span className="text-sm font-medium text-white">Fire Drill</span>
-        </div>
-
-        {drillMetrics.active ? (
-          <>
-            {/* Active drill UI */}
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-400">Evacuated</span>
-                <span className="text-orange-400 font-mono">
-                  {evacuatedCount}/{totalWorkers}
-                </span>
-              </div>
-              <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-orange-500 transition-all duration-300"
-                  style={{ width: `${evacuationProgress}%` }}
-                />
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-slate-500">Time: {formatTime(elapsedSeconds)}</span>
-                <button
-                  onClick={endEmergencyDrill}
-                  className="px-3 py-1 bg-slate-600 hover:bg-slate-500 rounded text-xs font-medium text-white transition-colors"
-                >
-                  END DRILL
-                </button>
-              </div>
-              {drillMetrics.evacuationComplete && (
-                <div className="text-center py-1 bg-green-600/20 border border-green-500/30 rounded text-green-400 text-xs font-bold">
-                  ALL CLEAR - {formatTime(drillMetrics.finalTimeSeconds ?? elapsedSeconds)}
-                </div>
-              )}
-            </div>
-          </>
-        ) : (
-          <button
-            onClick={() => startEmergencyDrill(workers.length)}
-            className="w-full py-2 bg-orange-600 hover:bg-orange-500 rounded text-sm font-medium text-white transition-colors"
-          >
-            START DRILL
-          </button>
-        )}
-      </div>
-
       <div className="text-[10px] text-slate-500 text-center">
-        Emergency stop halts production. Fire drill tests evacuation.
+        Emergency stop halts production and autonomous logistics.
       </div>
     </div>
   );
@@ -686,50 +609,6 @@ const SCADAContent: React.FC = () => {
   );
 };
 
-// Workforce panel content
-const WorkforceContent: React.FC = () => {
-  const workers = useProductionStore((s) => s.workers);
-  const satisfaction = useProductionStore((s) => s.workerSatisfaction);
-
-  const activeWorkers = workers.filter((w) => w.currentTask !== 'idle').length;
-  const totalWorkers = workers.length;
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2 text-xs text-slate-400">
-        <Users className="w-4 h-4" />
-        <span>Workforce Status</span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div className="bg-slate-800/50 rounded-lg p-3 text-center">
-          <div className="text-2xl font-bold text-white">
-            {activeWorkers}/{totalWorkers}
-          </div>
-          <div className="text-[10px] text-slate-400">Active Workers</div>
-        </div>
-        <div className="bg-slate-800/50 rounded-lg p-3 text-center">
-          <div className="text-2xl font-bold text-cyan-400">{satisfaction.overallScore}%</div>
-          <div className="text-[10px] text-slate-400">Satisfaction</div>
-        </div>
-      </div>
-
-      <div className="bg-slate-800/50 rounded-lg p-2">
-        <div className="flex justify-between text-xs mb-1">
-          <span className="text-slate-400">Productivity Bonus</span>
-          <span className="text-green-400">+{satisfaction.productivityBonus}%</span>
-        </div>
-        <div className="w-full h-1.5 bg-slate-700 rounded-full">
-          <div
-            className="h-full bg-green-500 rounded-full transition-all"
-            style={{ width: `${Math.min(100, satisfaction.overallScore)}%` }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-};
-
 // Multiplayer panel content
 const MultiplayerTrustNotice: React.FC = () => (
   <p className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-2 text-[11px] leading-relaxed text-amber-100">
@@ -897,9 +776,6 @@ const ManagementContent: React.FC = () => {
   const managementGenerosity = useAIConfigStore((s) => s.managementGenerosity);
   const setManagementGenerosity = useAIConfigStore((s) => s.setManagementGenerosity);
   const getGrantRate = useAIConfigStore((s) => s.getGrantRate);
-  const averageTrust = useWorkerMoodStore((s) => s.getAverageManagementTrust());
-  const averageInitiative = useWorkerMoodStore((s) => s.getAverageInitiative());
-  const productivityMultiplier = useWorkerMoodStore((s) => s.getWorkforceProductivityMultiplier());
 
   const grantRate = getGrantRate();
   const styleLabel =
@@ -967,32 +843,24 @@ const ManagementContent: React.FC = () => {
       />
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <div className="bg-slate-800/50 rounded p-2 text-center">
           <div className="text-sm font-bold text-cyan-400">{(grantRate * 100).toFixed(0)}%</div>
           <div className="text-[9px] text-slate-500">Grant</div>
         </div>
         <div className="bg-slate-800/50 rounded p-2 text-center">
-          <div className="text-sm font-bold text-white">{averageTrust.toFixed(0)}%</div>
-          <div className="text-[9px] text-slate-500">Trust</div>
+          <div className="text-sm font-bold text-green-400">AUTO</div>
+          <div className="text-[9px] text-slate-500">Site</div>
         </div>
         <div className="bg-slate-800/50 rounded p-2 text-center">
-          <div className="text-sm font-bold text-white">{averageInitiative.toFixed(0)}%</div>
-          <div className="text-[9px] text-slate-500">Initiative</div>
-        </div>
-        <div className="bg-slate-800/50 rounded p-2 text-center">
-          <div
-            className={`text-sm font-bold ${productivityMultiplier >= 1.0 ? 'text-green-400' : 'text-amber-400'}`}
-          >
-            {(productivityMultiplier * 100).toFixed(0)}%
-          </div>
-          <div className="text-[9px] text-slate-500">Output</div>
+          <div className="text-sm font-bold text-green-400">0</div>
+          <div className="text-[9px] text-slate-500">Presence</div>
         </div>
       </div>
 
       {/* Info */}
       <div className="text-[10px] text-slate-500 text-center">
-        Higher generosity builds trust → improves productivity
+        Preference grants tune the autonomous partner policy
       </div>
     </div>
   );
@@ -1008,8 +876,6 @@ const getPanelContent = (mode: DockMode | null) => {
       return <AIContent />;
     case 'scada':
       return <SCADAContent />;
-    case 'workforce':
-      return <WorkforceContent />;
     case 'multiplayer':
       return <MultiplayerContent />;
     case 'safety':

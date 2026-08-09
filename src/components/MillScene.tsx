@@ -16,7 +16,6 @@ import { ENVIRONMENT_INTENSITY } from './environment/SceneEnvironmentIBL';
 import { CentralTickProvider, useUnifiedGameTick } from '../systems';
 import { ProductionFlowVisualization } from './ProductionFlowVisualization';
 import { useAIConfigStore } from '../stores/aiConfigStore';
-import { WorkerPersonalityLayer } from './workers/WorkerPersonalityLayer';
 import { recoverableLazy } from '../utils/recoverableLazy';
 import ErrorBoundary from './ErrorBoundary';
 import { StaticMeshBatch } from './performance/StaticMeshBatch';
@@ -50,16 +49,8 @@ const AuthoredDockOpening = recoverableLazy(() =>
 const OperationalConveyors = recoverableLazy(() =>
   import('./ConveyorSystem').then((module) => ({ default: module.ConveyorSystem }))
 );
-const OperationalPersonnel = recoverableLazy(() =>
-  import('./WorkerSystemNew').then((module) => ({ default: module.WorkerSystemNew }))
-);
 const OperationalForklifts = recoverableLazy(() =>
   import('./ForkliftSystem').then((module) => ({ default: module.ForkliftSystem }))
-);
-const OperationalRemotePlayers = recoverableLazy(() =>
-  import('./multiplayer/RemotePlayersGroup').then((module) => ({
-    default: module.RemotePlayersGroup,
-  }))
 );
 const EnhancedHolographicDisplays = recoverableLazy(() =>
   import('./HolographicDisplays').then((module) => ({
@@ -91,8 +82,7 @@ const OperationalWorldSignals = recoverableLazy(() =>
     default: module.OperationalWorldSignals,
   }))
 );
-import { useMoodSimulation, useBilateralAlignmentSimulation } from './WorkerMoodOverlay';
-import { MachineData, MachineType, WorkerData } from '../types';
+import { MachineData, MachineType } from '../types';
 import { useGraphicsStore, isPostProcessingActive } from '../stores/graphicsStore';
 import { useProductionStore } from '../stores/productionStore';
 import { useSafetyStore } from '../stores/safetyStore';
@@ -402,7 +392,6 @@ interface MillSceneProps {
   productionSpeed: number;
   showZones: boolean;
   onSelectMachine: (data: MachineData) => void;
-  onSelectWorker: (data: WorkerData) => void;
   onSelectForklift?: (data: ForkliftData) => void;
 }
 
@@ -411,7 +400,6 @@ export const MillScene: React.FC<MillSceneProps> = ({
   showZones,
   onSelectForklift,
   onSelectMachine,
-  onSelectWorker,
 }) => {
   const [authoredSiteReady, setAuthoredSiteReady] = useState(
     () => typeof document !== 'undefined' && document.documentElement.dataset.sceneReady === 'true'
@@ -440,12 +428,6 @@ export const MillScene: React.FC<MillSceneProps> = ({
       // Removed subscriptions that cause re-renders
     }))
   );
-
-  // Worker mood simulation - Theme Hospital inspired mood system
-  useMoodSimulation();
-
-  // Bilateral Alignment simulation - preference requests, safety reports, emergent cooperation
-  useBilateralAlignmentSimulation();
 
   // CENTRALIZED TICK SYSTEM - Single source of truth for all game ticks
   // Replaces scattered tickGameTime, tickMetrics, and various intervals
@@ -756,7 +738,6 @@ export const MillScene: React.FC<MillSceneProps> = ({
         postProcessingEnabled: isPostProcessingActive(state.graphics),
       }))
     );
-  const useEnhancedQualityLayers = graphicsQuality === 'high' || graphicsQuality === 'ultra';
   const useUltraQualityLayers = graphicsQuality === 'ultra';
   const isLowGraphics = graphicsQuality === 'low';
   // Static batching must not rebuild at the live day/night boundary. Every
@@ -871,16 +852,6 @@ export const MillScene: React.FC<MillSceneProps> = ({
           <OperationalConveyors productionSpeed={productionSpeed} />
         )}
       </group>
-      <group name="world-personnel">
-        {authoredSiteReady && !perfDebug?.disableWorkerSystem && (
-          <OperationalPersonnel onSelectWorker={onSelectWorker} />
-        )}
-      </group>
-      {/* Worker Personality Visualization - mood auras, thoughts, relationships */}
-      {useEnhancedQualityLayers && (
-        <WorkerPersonalityLayer showAuras={true} showThoughts={true} showRelationships={false} />
-      )}
-      {/* Remote multiplayer players */}
       <group name="world-forklifts">
         {authoredSiteReady && !perfDebug?.disableForkliftSystem && (
           <OperationalForklifts showSpeedZones={showZones} onSelectForklift={onSelectForklift} />
@@ -888,7 +859,6 @@ export const MillScene: React.FC<MillSceneProps> = ({
       </group>
       {/* The authored truck bay includes the garage, service yard, docks, and trucks. */}
       <group name="world-logistics">
-        {authoredSiteReady && <OperationalRemotePlayers />}
         {authoredSiteReady && !perfDebug?.disableTruckBay && (
           <StaticMeshBatch name="authored-truck-yard" revision={staticBatchRevision}>
             <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>

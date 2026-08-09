@@ -24,6 +24,10 @@ function createCompleteWorld(): THREE.Group {
 }
 
 describe('continuous authored world contract', () => {
+  it('defines an uncrewed world with no personnel layer', () => {
+    expect(CONTINUOUS_WORLD_LAYER_IDS).not.toContain('world-personnel');
+  });
+
   it('passes when every required layer is present and continuous layers are visible', () => {
     const report = inspectWorldIntegrity(createCompleteWorld());
 

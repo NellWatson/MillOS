@@ -2,7 +2,7 @@
  * Feature Flags - Circuit Breakers for MillOS Features
  *
  * Toggle entire features on/off without removing code.
- * All default to true; set to false to disable.
+ * Most default to true; set to false to disable.
  *
  * Usage:
  *   import { FEATURE_FLAGS, isKnowledgeEnabled } from '@/config/featureFlags';
@@ -44,7 +44,7 @@ export const FEATURE_FLAGS = {
   AI_NARRATION_ENABLED: true,
 
   /** NPC worker philosophical comments */
-  WORKER_DIALOGUE_ENABLED: true,
+  WORKER_DIALOGUE_ENABLED: false,
 
   /** Welcome message on first play */
   FIRST_PLAY_WELCOME_ENABLED: true,
@@ -84,6 +84,19 @@ export const FEATURE_FLAGS = {
   /** Economic democracy features (voting, ownership) */
   ECONOMIC_DEMOCRACY_ENABLED: true,
 };
+
+/**
+ * v0.40 is an uncrewed digital-twin site. These switches are deliberately
+ * immutable and are not URL-overridable: no human presence is rendered,
+ * voiced, or exposed through the operational interface.
+ */
+export const HUMAN_PRESENCE_POLICY = Object.freeze({
+  personnelModels: false,
+  vehicleOperators: false,
+  remoteAvatars: false,
+  humanVoiceAudio: false,
+  workforceUI: false,
+} as const);
 
 // =============================================================================
 // HELPER FUNCTIONS

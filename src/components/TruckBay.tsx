@@ -42,8 +42,6 @@ import {
   registerParticleSystem,
   unregisterParticleSystem,
   updateParticleSystem,
-  registerWorker,
-  unregisterWorker,
   registerTruckComponents,
   unregisterTruckComponents,
 } from './truckbay/animationSystem';
@@ -98,12 +96,6 @@ const APRON_CONCRETE_SURFACE = {
   metalness: 0,
 } as const;
 
-// Stable module-level work-area bounds for warehouse workers. Hoisted out of
-// the JSX so their object identity is constant across renders; passing inline
-// object literals would churn WarehouseWorkerWithPalletJack's registration
-// effect (deps include workAreaBounds) on every parent re-render.
-const SHIPPING_WORKER_BOUNDS = { minX: -8, maxX: 8, minZ: -5, maxZ: 8 } as const;
-const RECEIVING_WORKER_BOUNDS = { minX: -8, maxX: 8, minZ: -8, maxZ: 5 } as const;
 // TRUCK_WHEEL_RADIUS is imported from OptimizedTruckBay, which owns the wheel
 // geometry. A second local copy here is how the divisor and the mesh drift
 // apart, and wheel slip is the classic tell that a vehicle is animated rather
@@ -417,6 +409,197 @@ const Text: React.FC<React.ComponentProps<typeof SceneText>> = (props) => {
     <group ref={groupRef}>
       <SceneText {...props} />
     </group>
+  );
+};
+
+const COMPACT_TRUCK_FULL_DETAIL_DISTANCE = 120;
+const COMPACT_TRUCK_COMPACT_DISTANCE = 135;
+const COMPACT_TRUCK_LOD_CHECK_INTERVAL = 15;
+const COMPACT_TRUCK_BOX = new THREE.BoxGeometry(1, 1, 1);
+const COMPACT_TRUCK_WHEEL = new THREE.CylinderGeometry(0.52, 0.52, 0.38, 12);
+const COMPACT_TRUCK_TRAILER_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#d8dde0',
+  roughness: 0.72,
+  metalness: 0,
+});
+const COMPACT_TRUCK_FRAME_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#23282b',
+  roughness: 0.72,
+  metalness: 0.35,
+});
+const COMPACT_TRUCK_GLASS_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#17282e',
+  roughness: 0.22,
+  metalness: 0,
+});
+const COMPACT_TRUCK_TYRE_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#101214',
+  roughness: 0.96,
+  metalness: 0,
+});
+const COMPACT_TRUCK_REAR_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#6f1718',
+  emissive: '#b91c1c',
+  emissiveIntensity: 0.3,
+  roughness: 0.5,
+  metalness: 0,
+});
+const COMPACT_TRUCK_WHEELS = [
+  [-1.38, 0.58, 3.55],
+  [1.38, 0.58, 3.55],
+  [-1.38, 0.58, 0.25],
+  [1.38, 0.58, 0.25],
+  [-1.38, 0.58, -8.75],
+  [1.38, 0.58, -8.75],
+] as const;
+
+interface CompactTruckVisualProps {
+  colour: string;
+  stateRef: React.MutableRefObject<TruckAnimState>;
+}
+
+/**
+ * Seven-draw silhouette for landscape cameras where the complete articulated
+ * truck is only a few dozen pixels long. The moving parent still follows the
+ * authoritative truck clock, so the vehicle never freezes or teleports when
+ * the camera crosses the LOD band.
+ */
+const CompactTruckVisual: React.FC<CompactTruckVisualProps> = ({ colour, stateRef }) => {
+  const trailerRef = useRef<THREE.Group>(null);
+  const wheelsRef = useRef<THREE.InstancedMesh>(null);
+  const paintMaterial = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: colour,
+        roughness: 0.42,
+        metalness: 0,
+      }),
+    [colour]
+  );
+
+  useLayoutEffect(() => {
+    const wheels = wheelsRef.current;
+    if (!wheels) return;
+    const transform = new THREE.Object3D();
+    COMPACT_TRUCK_WHEELS.forEach(([x, y, z], index) => {
+      transform.position.set(x, y, z);
+      transform.rotation.set(0, 0, Math.PI / 2);
+      transform.updateMatrix();
+      wheels.setMatrixAt(index, transform.matrix);
+    });
+    wheels.instanceMatrix.needsUpdate = true;
+    wheels.computeBoundingSphere();
+  }, []);
+
+  useEffect(() => () => paintMaterial.dispose(), [paintMaterial]);
+
+  useFrame(() => {
+    if (!trailerRef.current) return;
+    trailerRef.current.rotation.y = stateRef.current.trailerAngle;
+    trailerRef.current.position.y = -stateRef.current.landingGearAmount * 0.04;
+  });
+
+  return (
+    <group dispose={null}>
+      <mesh
+        geometry={COMPACT_TRUCK_BOX}
+        material={COMPACT_TRUCK_FRAME_MATERIAL}
+        position={[0, 0.78, -3.7]}
+        scale={[2.35, 0.25, 15.2]}
+      />
+      <mesh
+        geometry={COMPACT_TRUCK_BOX}
+        material={paintMaterial}
+        position={[0, 1.9, 2.85]}
+        scale={[2.55, 2.65, 3.7]}
+        castShadow
+        receiveShadow
+      />
+      <mesh
+        geometry={COMPACT_TRUCK_BOX}
+        material={paintMaterial}
+        position={[0, 3.38, 2.68]}
+        scale={[2.7, 0.34, 3.25]}
+        castShadow
+      />
+      <mesh
+        geometry={COMPACT_TRUCK_BOX}
+        material={COMPACT_TRUCK_GLASS_MATERIAL}
+        position={[0, 2.55, 4.72]}
+        scale={[2.05, 0.88, 0.08]}
+      />
+      <group ref={trailerRef}>
+        <mesh
+          geometry={COMPACT_TRUCK_BOX}
+          material={COMPACT_TRUCK_TRAILER_MATERIAL}
+          position={[0, 2.68, -6.05]}
+          scale={[2.6, 3.85, 11.3]}
+          castShadow
+          receiveShadow
+        />
+        <mesh
+          geometry={COMPACT_TRUCK_BOX}
+          material={COMPACT_TRUCK_REAR_MATERIAL}
+          position={[0, 1.35, -11.72]}
+          scale={[1.9, 0.22, 0.08]}
+        />
+      </group>
+      <instancedMesh
+        ref={wheelsRef}
+        args={[COMPACT_TRUCK_WHEEL, COMPACT_TRUCK_TYRE_MATERIAL, COMPACT_TRUCK_WHEELS.length]}
+        castShadow
+        receiveShadow
+      />
+    </group>
+  );
+};
+
+interface TruckVisualLODProps extends CompactTruckVisualProps {
+  company: string;
+  plateNumber: string;
+  wheelRotationRef: React.MutableRefObject<number>;
+  grime: number;
+}
+
+const TruckVisualLOD: React.FC<TruckVisualLODProps> = ({
+  colour,
+  company,
+  plateNumber,
+  wheelRotationRef,
+  stateRef,
+  grime,
+}) => {
+  const [fullDetail, setFullDetail] = useState(true);
+  const fullDetailRef = useRef(true);
+  const frameRef = useRef(0);
+
+  useFrame(({ camera }) => {
+    frameRef.current += 1;
+    if (frameRef.current % COMPACT_TRUCK_LOD_CHECK_INTERVAL !== 0) return;
+    const truck = stateRef.current;
+    const dx = camera.position.x - truck.x;
+    const dz = camera.position.z - truck.z;
+    const threshold = fullDetailRef.current
+      ? COMPACT_TRUCK_COMPACT_DISTANCE
+      : COMPACT_TRUCK_FULL_DETAIL_DISTANCE;
+    const nextFullDetail =
+      dx * dx + camera.position.y * camera.position.y + dz * dz <= threshold * threshold;
+    if (nextFullDetail === fullDetailRef.current) return;
+    fullDetailRef.current = nextFullDetail;
+    setFullDetail(nextFullDetail);
+  });
+
+  return fullDetail ? (
+    <OptimizedTruckVisual
+      colour={colour}
+      company={company}
+      plateNumber={plateNumber}
+      wheelRotationRef={wheelRotationRef}
+      stateRef={stateRef}
+      grime={grime}
+    />
+  ) : (
+    <CompactTruckVisual colour={colour} stateRef={stateRef} />
   );
 };
 
@@ -1396,129 +1579,6 @@ const DumpsterArea: React.FC<{ position: [number, number, number]; rotation?: nu
   </group>
 );
 
-// Warehouse worker with pallet jack
-const WarehouseWorkerWithPalletJack: React.FC<{
-  position: [number, number, number];
-  isActive: boolean;
-  workAreaBounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
-}> = ({ position, isActive, workAreaBounds = { minX: -5, maxX: 5, minZ: -3, maxZ: 3 } }) => {
-  const groupRef = useRef<THREE.Group>(null);
-  const targetPos = useRef({ x: 0, z: 0 });
-  const lastBeepTime = useRef(0);
-  const workerId = useMemo(() => `worker-${Math.random()}`, []);
-
-  useEffect(() => {
-    registerWorker(workerId, {
-      ref: groupRef,
-      targetPos,
-      lastBeepTime,
-      isActive,
-      workAreaBounds,
-    });
-
-    return () => {
-      unregisterWorker(workerId);
-    };
-  }, [workerId, isActive, workAreaBounds]);
-
-  return (
-    <group position={position}>
-      <group ref={groupRef}>
-        {/* Pallet jack */}
-        <group>
-          {/* Handle */}
-          <mesh position={[0, 0.9, -0.5]} rotation={[-0.3, 0, 0]}>
-            <cylinderGeometry args={[0.03, 0.03, 1.2, 8]} />
-            <meshStandardMaterial color="#f59e0b" roughness={0.5} />
-          </mesh>
-          {/* Handle grip */}
-          <mesh position={[0, 1.4, -0.8]}>
-            <boxGeometry args={[0.3, 0.08, 0.08]} />
-            <meshStandardMaterial color="#1f2937" roughness={0.7} />
-          </mesh>
-          {/* Main body */}
-          <mesh position={[0, 0.35, 0]}>
-            <boxGeometry args={[0.5, 0.25, 1.5]} />
-            <meshStandardMaterial color="#f59e0b" roughness={0.5} />
-          </mesh>
-          {/* Forks */}
-          {[-0.25, 0.25].map((x, i) => (
-            <mesh key={i} position={[x, 0.1, 0.5]}>
-              <boxGeometry args={[0.12, 0.08, 1.2]} />
-              <meshStandardMaterial color="#64748b" metalness={0.6} roughness={0.4} />
-            </mesh>
-          ))}
-          {/* Wheels */}
-          {[
-            [-0.2, -0.6],
-            [0.2, -0.6],
-            [-0.3, 1],
-            [0.3, 1],
-          ].map(([x, z], i) => (
-            <mesh key={i} position={[x, 0.1, z]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[0.1, 0.1, 0.1, 12]} />
-              <meshStandardMaterial color="#1f2937" roughness={0.7} />
-            </mesh>
-          ))}
-          {/* Pallet on forks */}
-          <mesh position={[0, 0.2, 0.6]}>
-            <boxGeometry args={[0.8, 0.12, 1]} />
-            <meshStandardMaterial color="#92400e" roughness={0.8} />
-          </mesh>
-          {/* Boxes on pallet */}
-          <mesh position={[0, 0.5, 0.6]}>
-            <boxGeometry args={[0.6, 0.5, 0.8]} />
-            <meshStandardMaterial color="#d4a574" roughness={0.7} />
-          </mesh>
-        </group>
-        {/* Worker */}
-        <group position={[0, 0, -0.9]}>
-          {/* Hard hat */}
-          <mesh position={[0, 1.8, 0]}>
-            <sphereGeometry args={[0.14, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
-            <meshStandardMaterial color="#fbbf24" roughness={0.6} />
-          </mesh>
-          {/* Head */}
-          <mesh position={[0, 1.6, 0]}>
-            <sphereGeometry args={[0.12, 12, 12]} />
-            <meshStandardMaterial color="#d4a574" roughness={0.8} />
-          </mesh>
-          {/* Safety vest */}
-          <mesh position={[0, 1.3, 0]}>
-            <boxGeometry args={[0.35, 0.5, 0.2]} />
-            <meshStandardMaterial color="#f97316" roughness={0.7} />
-          </mesh>
-          {/* Reflective stripes */}
-          <mesh position={[0, 1.35, 0.11]}>
-            <boxGeometry args={[0.34, 0.04, 0.01]} />
-            <meshStandardMaterial color="#fef3c7" metalness={0.3} roughness={0.4} />
-          </mesh>
-          {/* Pants */}
-          <mesh position={[0, 0.9, 0]}>
-            <boxGeometry args={[0.3, 0.5, 0.2]} />
-            <meshStandardMaterial color="#1e3a8a" roughness={0.7} />
-          </mesh>
-          {/* Legs */}
-          {[-0.08, 0.08].map((x, i) => (
-            <mesh key={i} position={[x, 0.5, 0]}>
-              <boxGeometry args={[0.1, 0.4, 0.12]} />
-              <meshStandardMaterial color="#1e3a8a" roughness={0.7} />
-            </mesh>
-          ))}
-          {/* Boots */}
-          {[-0.08, 0.08].map((x, i) => (
-            <mesh key={i} position={[x, 0.25, 0.03]}>
-              <boxGeometry args={[0.12, 0.15, 0.18]} />
-              <meshStandardMaterial color="#1f2937" roughness={0.8} />
-            </mesh>
-          ))}
-        </group>
-      </group>
-    </group>
-  );
-};
-
-// Clipboard/manifest holder at dock
 const ManifestHolder: React.FC<{ position: [number, number, number]; rotation?: number }> = ({
   position,
   rotation = 0,
@@ -1822,133 +1882,6 @@ const MudflapWithLogo: React.FC<{
   </group>
 );
 
-// Dock attendant/spotter figure that guides trucks
-const DockSpotter: React.FC<{
-  position: [number, number, number];
-  isGuiding: boolean;
-  rotation?: number;
-}> = ({ position, isGuiding, rotation = 0 }) => {
-  const spotterRef = useRef<THREE.Group>(null);
-  const leftArmRef = useRef<THREE.Mesh>(null);
-  const rightArmRef = useRef<THREE.Mesh>(null);
-  const wandRef = useRef<THREE.Group>(null);
-  const animId = useRef(`spotter-${Math.random().toString(36).substr(2, 9)}`);
-  const isGuidingRef = useRef(isGuiding);
-  isGuidingRef.current = isGuiding;
-
-  useEffect(() => {
-    const id = animId.current;
-    registerAnimation(id, 'custom', null, {}, (time) => {
-      if (isGuidingRef.current) {
-        // Wave arms to guide truck back
-        if (leftArmRef.current) {
-          leftArmRef.current.rotation.x = -0.5 + Math.sin(time * 4) * 0.4;
-        }
-        if (rightArmRef.current) {
-          rightArmRef.current.rotation.x = -0.5 + Math.sin(time * 4 + Math.PI) * 0.4;
-        }
-        // Bob wands
-        if (wandRef.current) {
-          wandRef.current.rotation.z = Math.sin(time * 4) * 0.3;
-        }
-      } else {
-        // Idle pose
-        if (leftArmRef.current) {
-          leftArmRef.current.rotation.x = 0;
-        }
-        if (rightArmRef.current) {
-          rightArmRef.current.rotation.x = 0;
-        }
-      }
-    });
-    return () => unregisterAnimation(id);
-  }, []);
-
-  return (
-    <group ref={spotterRef} position={position} rotation={[0, rotation, 0]}>
-      {/* Hard hat */}
-      <mesh position={[0, 1.8, 0]}>
-        <sphereGeometry args={[0.15, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
-        <meshStandardMaterial color="#f97316" roughness={0.6} />
-      </mesh>
-      <mesh position={[0, 1.72, 0]}>
-        <cylinderGeometry args={[0.18, 0.18, 0.05, 16]} />
-        <meshStandardMaterial color="#f97316" roughness={0.6} />
-      </mesh>
-
-      {/* Head */}
-      <mesh position={[0, 1.65, 0]}>
-        <sphereGeometry args={[0.12, 12, 12]} />
-        <meshStandardMaterial color="#d4a574" roughness={0.8} />
-      </mesh>
-
-      {/* Safety vest body */}
-      <mesh position={[0, 1.35, 0]}>
-        <boxGeometry args={[0.35, 0.45, 0.2]} />
-        <meshStandardMaterial color="#f97316" roughness={0.7} />
-      </mesh>
-      {/* Reflective stripes on vest */}
-      {[-0.1, 0.1].map((y, i) => (
-        <mesh key={i} position={[0, 1.35 + y, 0.11]}>
-          <boxGeometry args={[0.34, 0.04, 0.01]} />
-          <meshStandardMaterial color="#fef3c7" metalness={0.3} roughness={0.4} />
-        </mesh>
-      ))}
-
-      {/* Legs */}
-      {[-0.08, 0.08].map((x, i) => (
-        <mesh key={i} position={[x, 0.9, 0]}>
-          <boxGeometry args={[0.12, 0.5, 0.12]} />
-          <meshStandardMaterial color="#1f2937" roughness={0.8} />
-        </mesh>
-      ))}
-
-      {/* Feet */}
-      {[-0.08, 0.08].map((x, i) => (
-        <mesh key={i} position={[x, 0.62, 0.04]}>
-          <boxGeometry args={[0.12, 0.08, 0.18]} />
-          <meshStandardMaterial color="#1f2937" roughness={0.8} />
-        </mesh>
-      ))}
-
-      {/* Arms with wands */}
-      <mesh ref={leftArmRef} position={[-0.22, 1.4, 0]} userData={{ noStaticBatch: true }}>
-        <boxGeometry args={[0.08, 0.35, 0.08]} />
-        <meshStandardMaterial color="#f97316" roughness={0.7} />
-      </mesh>
-      <mesh ref={rightArmRef} position={[0.22, 1.4, 0]} userData={{ noStaticBatch: true }}>
-        <boxGeometry args={[0.08, 0.35, 0.08]} />
-        <meshStandardMaterial color="#f97316" roughness={0.7} />
-      </mesh>
-
-      {/* Signal wands (orange cones) */}
-      <group ref={wandRef} userData={{ noStaticBatch: true }}>
-        <group position={[-0.22, 1.15, 0]}>
-          <mesh rotation={[0, 0, 0.3]}>
-            <coneGeometry args={[0.04, 0.35, 8]} />
-            <meshStandardMaterial
-              color="#f97316"
-              emissive="#f97316"
-              emissiveIntensity={isGuiding ? 0.5 : 0.1}
-            />
-          </mesh>
-        </group>
-        <group position={[0.22, 1.15, 0]}>
-          <mesh rotation={[0, 0, -0.3]}>
-            <coneGeometry args={[0.04, 0.35, 8]} />
-            <meshStandardMaterial
-              color="#f97316"
-              emissive="#f97316"
-              emissiveIntensity={isGuiding ? 0.5 : 0.1}
-            />
-          </mesh>
-        </group>
-      </group>
-    </group>
-  );
-};
-
-// Weight scale at yard entrance
 const WeightScale: React.FC<{ position: [number, number, number]; rotation?: number }> = ({
   position,
   rotation = 0,
@@ -3438,13 +3371,6 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           rotation={Math.PI}
           isDeployed={shippingDockVisual.docked}
         />
-
-        {/* Dock spotter - guides truck while backing */}
-        <DockSpotter
-          position={[-5, 0, 8]}
-          isGuiding={shippingDockVisual.guiding}
-          rotation={Math.PI}
-        />
       </group>
 
       {/* ========== FRONT TRUCK YARD ========== */}
@@ -3616,13 +3542,6 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             {/* Cardboard compactor/baler for recycling - relocated to west periphery */}
             <CardboardCompactor position={[-65, 0, 25]} rotation={Math.PI / 2} />
 
-            {/* Warehouse worker with pallet jack - centered dock */}
-            <WarehouseWorkerWithPalletJack
-              position={[10, 0, 5]}
-              isActive={shippingDockVisual.doorsOpen}
-              workAreaBounds={SHIPPING_WORKER_BOUNDS}
-            />
-
             {/* Time clock station */}
             <TimeClockStation position={[18, 0, 50]} rotation={Math.PI / 2} />
 
@@ -3723,11 +3642,10 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
       {/* Shipping truck */}
       <group ref={shippingTruckRef} name="shipping-truck" position={[20, 0, 160]}>
-        <OptimizedTruckVisual
+        <TruckVisualLOD
           colour="#275d76"
           company="FLOUR EXPRESS"
           plateNumber="FLR 2847"
-          operatorName="Mara"
           wheelRotationRef={shippingWheelRotation}
           stateRef={shippingTruckStateRef}
           grime={0.82}
@@ -3856,13 +3774,6 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           position={[1.5, 0, 11]}
           rotation={Math.PI}
           isDeployed={receivingDockVisual.docked}
-        />
-
-        {/* Dock spotter - guides truck while backing */}
-        <DockSpotter
-          position={[-5, 0, 8]}
-          isGuiding={receivingDockVisual.guiding}
-          rotation={Math.PI}
         />
       </group>
 
@@ -4040,13 +3951,6 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             {/* Cardboard compactor/baler for receiving area - relocated to east periphery */}
             <CardboardCompactor position={[65, 0, -15]} rotation={-Math.PI / 2} />
 
-            {/* Warehouse worker with pallet jack - centered dock */}
-            <WarehouseWorkerWithPalletJack
-              position={[10, 0, -5]}
-              isActive={receivingDockVisual.doorsOpen}
-              workAreaBounds={RECEIVING_WORKER_BOUNDS}
-            />
-
             {/* Time clock station for receiving area - moved to yard */}
             <TimeClockStation position={[-18, 0, -52]} rotation={-Math.PI / 2} />
 
@@ -4097,11 +4001,10 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
       {/* Receiving truck */}
       <group ref={receivingTruckRef} name="receiving-truck" position={[-20, 0, -160]}>
-        <OptimizedTruckVisual
+        <TruckVisualLOD
           colour="#9a4e35"
           company="GRAIN CO"
           plateNumber="GRN 5921"
-          operatorName="Owen"
           wheelRotationRef={receivingWheelRotation}
           stateRef={receivingTruckStateRef}
           grime={0.52}
@@ -4221,32 +4124,6 @@ export const RealisticTruck: React.FC<{
             />
           </mesh>
         ))}
-
-        {/* === DRIVER === */}
-        {showMinorDetails && (
-          <group position={[0.4, 2.2, 0]}>
-            {/* Head */}
-            <mesh position={[0, 0.5, 0]}>
-              <sphereGeometry args={[0.18, 8, 8]} />
-              <meshStandardMaterial color="#d4a574" roughness={0.8} />
-            </mesh>
-            {/* Body */}
-            <mesh position={[0, 0.1, 0]}>
-              <boxGeometry args={[0.35, 0.5, 0.25]} />
-              <meshStandardMaterial color="#1e40af" roughness={0.7} />
-            </mesh>
-            {/* Arms on wheel */}
-            <mesh position={[0, 0, 0.3]} rotation={[0.3, 0, 0]}>
-              <boxGeometry args={[0.5, 0.12, 0.12]} />
-              <meshStandardMaterial color="#1e40af" roughness={0.7} />
-            </mesh>
-            {/* Cap */}
-            <mesh position={[0, 0.65, 0.05]}>
-              <cylinderGeometry args={[0.12, 0.15, 0.08, 8]} />
-              <meshStandardMaterial color="#1f2937" roughness={0.7} />
-            </mesh>
-          </group>
-        )}
 
         {/* Roof fairing */}
         <mesh position={[0, 3.5, -0.3]}>

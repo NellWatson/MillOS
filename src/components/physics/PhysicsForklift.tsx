@@ -36,7 +36,6 @@ interface PhysicsForkliftInternalData {
   pathActions: WaypointAction[];
   pathIndex: number;
   cargo: 'empty' | 'pallet';
-  operatorName: string;
 }
 
 type ForkliftOperation = 'traveling' | 'loading' | 'unloading';

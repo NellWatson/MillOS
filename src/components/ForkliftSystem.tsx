@@ -365,7 +365,6 @@ interface Forklift {
   pathActions: WaypointAction[]; // Action at each waypoint
   pathIndex: number;
   cargo: 'empty' | 'pallet';
-  operatorName: string;
 }
 
 const withRoundedRoute = (forklift: Forklift): Forklift => {
@@ -560,7 +559,6 @@ export const ForkliftSystem: React.FC<ForkliftSystemProps> = ({
             ],
             pathIndex: 0,
             cargo: 'empty',
-            operatorName: 'Jake',
           },
           {
             id: 'forklift-2',
@@ -581,7 +579,6 @@ export const ForkliftSystem: React.FC<ForkliftSystemProps> = ({
             ],
             pathIndex: 0,
             cargo: 'empty',
-            operatorName: 'Tom',
           },
         ] as Forklift[]
       ).map(withRoundedRoute),
@@ -1162,7 +1159,6 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
               : 'moving';
       onSelect({
         id: data.id,
-        operatorName: data.operatorName,
         cargo: hasCargo ? 'pallet' : 'empty',
         position: [ref.current.position.x, ref.current.position.y, ref.current.position.z],
         rotation: ref.current.rotation.y,
@@ -1186,7 +1182,6 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
         <ForkliftModel
           hasCargo={hasCargo}
           isMoving={!motionStopped && !isOperating}
-          operatorName={data.operatorName}
           forkHeightRef={forkHeightRef}
           mastTiltRef={mastTiltRef}
           steeringAngleRef={steeringAngleRef}
@@ -1217,7 +1212,7 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
             outlineWidth={0.02}
             outlineColor="#000"
           >
-            {data.operatorName}
+            {data.id}
           </Text>
           {/* Show operation status when loading/unloading */}
           {isOperating && (
@@ -1253,7 +1248,6 @@ const Forklift: React.FC<{ data: Forklift; onSelect?: (forklift: ForkliftData) =
               pathActions: data.pathActions,
               pathIndex: data.pathIndex,
               cargo: data.cargo,
-              operatorName: data.operatorName,
             }}
             onPositionUpdate={handlePhysicsPositionUpdate}
             onCargoChange={handleCargoChange}

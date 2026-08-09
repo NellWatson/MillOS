@@ -237,26 +237,20 @@ describe('canonical site layout', () => {
     expect(Math.hypot(position[0] - target[0], position[2] - target[2])).toBeGreaterThan(24);
   });
 
-  it('frames both authored body types from their facing side at conversational distance', () => {
-    const close = SITE_LAYOUT.cameras.personnelClose;
-    const feminine = SITE_LAYOUT.cameras.personnelFeminine;
-    const closeDistance = Math.hypot(
-      close.position[0] - close.target[0],
-      close.position[1] - close.target[1],
-      close.position[2] - close.target[2]
-    );
-    const feminineDistance = Math.hypot(
-      feminine.position[0] - feminine.target[0],
-      feminine.position[1] - feminine.target[1],
-      feminine.position[2] - feminine.target[2]
-    );
+  it('keeps uncrewed review cameras on the process floor, tank farm, and logistics yard', () => {
+    const process = SITE_LAYOUT.cameras.processFloor;
+    const tank = SITE_LAYOUT.cameras.tankFarm;
+    const logistics = SITE_LAYOUT.cameras.logisticsClose;
+    const tankFarm = SITE_LAYOUT.serviceYard.utilityTankFarm.position;
 
-    expect(close.position[2]).toBeGreaterThan(-18);
-    expect(feminine.position[2]).toBeLessThan(-14);
-    expect(closeDistance).toBeGreaterThan(1.5);
-    expect(closeDistance).toBeLessThan(2.5);
-    expect(feminineDistance).toBeGreaterThan(1.5);
-    expect(feminineDistance).toBeLessThan(2.5);
+    expect(containsPoint(SITE_LAYOUT.renderCells.interior, ...process.target)).toBe(true);
+    expect(tank.target[0]).toBe(tankFarm[0]);
+    expect(tank.target[2]).toBe(tankFarm[2]);
+    expect(containsPoint(SITE_LAYOUT.renderCells.eastYard, ...tank.target)).toBe(true);
+    expect(containsPoint(SITE_LAYOUT.renderCells.shipping, ...logistics.target)).toBe(true);
+    expect(process.fov).toBeGreaterThanOrEqual(45);
+    expect(tank.fov).toBeGreaterThanOrEqual(45);
+    expect(logistics.fov).toBeGreaterThanOrEqual(45);
   });
 
   it('uses one declared water surface datum', () => {

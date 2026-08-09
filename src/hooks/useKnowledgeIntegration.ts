@@ -5,10 +5,8 @@
  * This centralizes event detection rather than modifying each component.
  *
  * Events tracked:
- * - First vote cast
  * - Axis adjustments (any, all five)
  * - AI suggestion acceptance/rejection
- * - Flourishing thresholds
  * - Stability milestones
  * - Federation trades
  * - Play time milestones
@@ -17,31 +15,24 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useKnowledgeStore } from '../stores/knowledgeStore';
 import { useAINarrationStore, NarrationTrigger, NarrationEntry } from '../stores/aiNarrationStore';
-import { useVotingStore } from '../stores/votingStore';
 import { useBASStore } from '../stores/basStore';
 import { useStabilityStore } from '../stores/stabilityStore';
-import { useFlourishingStore } from '../stores/flourishingStore';
 import { FEATURE_FLAGS } from '../config/featureFlags';
 
 interface KnowledgeIntegrationState {
   // Track which events have been triggered this session
   hasTriggeredFirstPlay: boolean;
   axesAdjusted: Set<string>;
-  hasVotedThisSession: boolean;
   hasRejectedSuggestion: boolean;
   hasAcceptedWellbeingSuggestion: boolean;
   sessionStartTime: number;
 }
 
 const WELLBEING_CHECK_INTERVAL_MS = 30_000;
-const HIGH_FLOURISHING_SCORE = 80;
-const LOW_FLOURISHING_SCORE = 40;
-
 export function useKnowledgeIntegration(onNarration?: (narration: NarrationEntry) => void) {
   const stateRef = useRef<KnowledgeIntegrationState>({
     hasTriggeredFirstPlay: false,
     axesAdjusted: new Set(),
-    hasVotedThisSession: false,
     hasRejectedSuggestion: false,
     hasAcceptedWellbeingSuggestion: false,
     sessionStartTime: Date.now(),
@@ -60,7 +51,6 @@ export function useKnowledgeIntegration(onNarration?: (narration: NarrationEntry
   } = useAINarrationStore();
 
   // Game state hooks - use selectors for performance
-  const votes = useVotingStore((s) => s.votes);
   const axes = useBASStore((s) => s.axes);
 
   // Helper to trigger narration
@@ -114,26 +104,6 @@ export function useKnowledgeIntegration(onNarration?: (narration: NarrationEntry
   }, [triggerNarration, hasBeenShown, narrationEnabled]);
 
   // =========================================================================
-  // VOTING DETECTION
-  // =========================================================================
-  useEffect(() => {
-    if (stateRef.current.hasVotedThisSession) return;
-
-    // Check if any votes exist (votes object is not empty)
-    const hasVotes = Object.keys(votes).length > 0;
-
-    if (hasVotes) {
-      stateRef.current.hasVotedThisSession = true;
-
-      // Trigger unlock check
-      checkUnlockConditions({ hasVoted: true });
-
-      // Trigger narration
-      triggerNarration('democratic-vote');
-    }
-  }, [votes, checkUnlockConditions, triggerNarration]);
-
-  // =========================================================================
   // AXIS ADJUSTMENT DETECTION
   // =========================================================================
   useEffect(() => {
@@ -170,7 +140,7 @@ export function useKnowledgeIntegration(onNarration?: (narration: NarrationEntry
   }, [axes, checkUnlockConditions, triggerNarration]);
 
   // =========================================================================
-  // STABILITY AND FLOURISHING DETECTION
+  // STABILITY DETECTION
   // =========================================================================
   useEffect(() => {
     const checkWellbeing = () => {
@@ -180,15 +150,6 @@ export function useKnowledgeIntegration(onNarration?: (narration: NarrationEntry
         triggerNarration('stability-high');
       } else if (stability < 30) {
         triggerNarration('stability-critical');
-      }
-
-      // Factory flourishing is expressed as a percentage on a 0-100 scale.
-      const avgFlourishing = useFlourishingStore.getState().getFactoryFlourishing().overallScore;
-      if (avgFlourishing >= HIGH_FLOURISHING_SCORE) {
-        checkUnlockConditions({ hasAchievedHighFlourishing: true });
-        triggerNarration('all-workers-thriving');
-      } else if (avgFlourishing < LOW_FLOURISHING_SCORE) {
-        triggerNarration('flourishing-dropped');
       }
     };
 

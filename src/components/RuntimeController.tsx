@@ -135,6 +135,11 @@ export interface RuntimeTelemetrySnapshot {
   shaderStates: RuntimeShaderState[];
   textureIssues: RuntimeTextureIssue[];
   worldIntegrity: WorldIntegrityReport;
+  humanPresence: {
+    passed: boolean;
+    workerStoreCount: number;
+    sceneObjects: string[];
+  };
   motion: RuntimeMotionState;
   audio: ReturnType<typeof audioManager.getDiagnostics>;
   sceneChildren: number;
@@ -181,9 +186,9 @@ const BENCHMARK_CAMERAS: Record<BenchmarkScene, BenchmarkCameraPose> = {
   milling: SITE_LAYOUT.cameras.milling,
   sifting: SITE_LAYOUT.cameras.sifting,
   packing: SITE_LAYOUT.cameras.packing,
-  personnel: SITE_LAYOUT.cameras.personnel,
-  'personnel-close': SITE_LAYOUT.cameras.personnelClose,
-  'personnel-feminine': SITE_LAYOUT.cameras.personnelFeminine,
+  'process-floor': SITE_LAYOUT.cameras.processFloor,
+  'tank-farm': SITE_LAYOUT.cameras.tankFarm,
+  'logistics-close': SITE_LAYOUT.cameras.logisticsClose,
   forklift: SITE_LAYOUT.cameras.forklift,
   shipping: SITE_LAYOUT.cameras.shipping,
   receiving: SITE_LAYOUT.cameras.receiving,
@@ -464,7 +469,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       currentGame.setGameSpeed(previousGameInputs.gameSpeed);
       currentGame.setWeather(previousGameInputs.weather);
     };
-  }, [camera, controls, mode]);
+  }, [camera, controls, mode, scene]);
 
   useEffect(() => {
     let observer: PerformanceObserver | null = null;
@@ -564,6 +569,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       );
       const geometryIds = new Set<string>();
       const materialIds = new Set<string>();
+      const humanSceneObjects = new Set<string>();
       const sceneGraph: RuntimeSceneGraphStats = {
         objects: 0,
         meshes: 0,
@@ -575,6 +581,18 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       };
       scene.traverse((object) => {
         sceneGraph.objects += 1;
+        const objectName = object.name.toLowerCase();
+        if (
+          objectName.startsWith('worker-') ||
+          objectName.startsWith('remote-player') ||
+          objectName === 'seated-vehicle-operator' ||
+          objectName.startsWith('dock-spotter') ||
+          objectName.startsWith('warehouse-worker') ||
+          typeof object.userData.workerId === 'string' ||
+          typeof object.userData.operatorName === 'string'
+        ) {
+          humanSceneObjects.add(object.name || object.type);
+        }
         if (!(object instanceof THREE.Mesh)) return;
         sceneGraph.meshes += 1;
         if (object.visible) sceneGraph.visibleMeshes += 1;
@@ -619,6 +637,12 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       scene.updateMatrixWorld(true);
       const motion = motionSnapshot();
       const worldIntegrity = inspectWorldIntegrity(scene);
+      const workerStoreCount = useProductionStore.getState().workers.length;
+      const humanPresence = {
+        passed: workerStoreCount === 0 && humanSceneObjects.size === 0,
+        workerStoreCount,
+        sceneObjects: [...humanSceneObjects].sort(),
+      };
       const diagnosticRays = Object.fromEntries(
         [
           ['centre', 0, 0],
@@ -754,6 +778,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
         shaderStates,
         textureIssues,
         worldIntegrity,
+        humanPresence,
         motion,
         audio: audioManager.getDiagnostics(),
         sceneChildren: scene.children.length,

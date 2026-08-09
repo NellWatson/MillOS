@@ -9,7 +9,6 @@ vi.mock('lucide-react', () => ({
   Brain: () => <span data-testid="icon-brain" />,
   Activity: () => <span data-testid="icon-activity" />,
   Users: () => <span data-testid="icon-users" />,
-  HardHat: () => <span data-testid="icon-hardhat" />,
   Shield: () => <span data-testid="icon-shield" />,
   Settings: () => <span data-testid="icon-settings" />,
   Eye: () => <span data-testid="icon-eye" />,
@@ -28,7 +27,7 @@ describe('Dock Component', () => {
     expect(screen.getByLabelText('Mill Overview')).toBeInTheDocument();
     expect(screen.getByLabelText('AI Partner')).toBeInTheDocument();
     expect(screen.getByLabelText('Simulated SCADA')).toBeInTheDocument();
-    expect(screen.getByLabelText('Workforce')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Workforce')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Bilateral Autonomy System (BAS)')).toBeInTheDocument();
     expect(screen.getByLabelText('Safety & Emergency')).toBeInTheDocument();
     expect(screen.getByLabelText('Settings')).toBeInTheDocument();

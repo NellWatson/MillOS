@@ -72,7 +72,7 @@ describe('Store Integration Tests', () => {
       unmount();
     });
 
-    it('rechecks wellbeing and narrates when flourishing later exceeds 80 percent', () => {
+    it('keeps operational narration independent of inactive workforce flourishing', () => {
       const onNarration = vi.fn();
       const { unmount } = renderHook(() => useKnowledgeIntegration(onNarration));
       onNarration.mockClear();
@@ -84,7 +84,7 @@ describe('Store Integration Tests', () => {
 
       expect(
         onNarration.mock.calls.some(([narration]) => narration.trigger === 'all-workers-thriving')
-      ).toBe(true);
+      ).toBe(false);
       unmount();
     });
   });

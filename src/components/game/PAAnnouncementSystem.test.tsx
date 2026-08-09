@@ -160,7 +160,7 @@ describe('PAAnnouncementSystem speech lifecycle', () => {
     expect(useAnnouncementsStore.getState().getActiveAnnouncements()).toHaveLength(0);
   });
 
-  it('dismisses only after queued speech has actually completed', async () => {
+  it('keeps captions silent even when host speech synthesis is available', async () => {
     audioState.canSpeak = true;
     enqueueAnnouncement();
     render(<PAAnnouncementSystem />);
@@ -169,17 +169,16 @@ describe('PAAnnouncementSystem speech lifecycle', () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
 
-    expect(speakAnnouncement).toHaveBeenCalledOnce();
+    expect(speakAnnouncement).not.toHaveBeenCalled();
     expect(useAnnouncementsStore.getState().getActiveAnnouncements()).toHaveLength(1);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(600);
+      await vi.advanceTimersByTimeAsync(9_999);
     });
     expect(useAnnouncementsStore.getState().getActiveAnnouncements()).toHaveLength(1);
 
-    audioState.pendingSpeech = false;
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(300);
+      await vi.advanceTimersByTimeAsync(1);
     });
 
     expect(useAnnouncementsStore.getState().getActiveAnnouncements()).toHaveLength(0);

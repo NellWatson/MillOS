@@ -275,24 +275,13 @@ export const SettingsPanel: React.FC<{
               ))}
             </div>
             <p className="text-[10px] leading-4 text-slate-400">
-              Focused uses sparse operational messages. Characterful enables the full simulation
-              voice. Critical safety announcements remain available.
+              Focused uses sparse operational captions. Characterful enables the full text feed.
+              Critical safety messages remain available.
             </p>
           </fieldset>
 
-          {/* Speech and caption controls */}
-          <div className="flex justify-between items-center pt-2 border-t border-white/5">
-            <span className="text-xs text-slate-200">Spoken PA</span>
-            <button
-              onClick={() => audio.setTtsEnabled(!audio.ttsEnabled)}
-              aria-label={audio.ttsEnabled ? 'Disable spoken PA' : 'Enable spoken PA'}
-              aria-pressed={audio.ttsEnabled}
-              className={`text-[10px] px-2 py-0.5 rounded ${audio.ttsEnabled ? 'bg-teal-700 text-white' : 'bg-slate-700 text-white/70'}`}
-            >
-              {audio.ttsEnabled ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div className="flex items-center justify-between">
+          {/* The uncrewed v0.40 site exposes text captions and non-vocal signal tones only. */}
+          <div className="flex items-center justify-between border-t border-white/5 pt-2">
             <span className="flex items-center gap-2 text-xs text-slate-200">
               <Captions size={12} aria-hidden="true" />
               PA captions

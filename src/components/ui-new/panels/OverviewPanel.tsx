@@ -28,7 +28,7 @@ import { useHistoricalPlaybackStore } from '../../../stores/historicalPlaybackSt
 import { useMaterialFlowStore } from '../../../stores/materialFlowStore';
 import { useQCLabStore, type QCTestType } from '../../../stores/qcLabStore';
 import { useShallow } from 'zustand/react/shallow';
-import { AchievementsPanel, WorkerLeaderboard } from '../../GameFeatures';
+import { AchievementsPanel } from '../../GameFeatures';
 import { TimelinePlayback } from '../../ui/TimelinePlayback';
 import { recoverableLazy } from '../../../utils/recoverableLazy';
 import { RecoverableFeatureBoundary } from '../../ErrorBoundary';
@@ -38,11 +38,6 @@ import { RecoverableFeatureBoundary } from '../../ErrorBoundary';
 const PredictiveMaintenancePanel = recoverableLazy(() =>
   import('../../ui/PredictiveMaintenancePanel').then((m) => ({
     default: m.PredictiveMaintenancePanel,
-  }))
-);
-const OperationsCampaignPanel = recoverableLazy(() =>
-  import('../../ui/OperationsCampaignPanel').then((module) => ({
-    default: module.OperationsCampaignPanel,
   }))
 );
 
@@ -478,7 +473,6 @@ export const OverviewPanel: React.FC = React.memo(() => {
   const totalBagsProduced = useProductionStore((state) => state.totalBagsProduced);
   const productionTarget = useProductionStore((state) => state.productionTarget);
   const machines = useProductionStore((state) => state.machines);
-  const workers = useProductionStore((state) => state.workers);
   const dockStatus = useProductionStore((state) => state.dockStatus);
 
   const weather = useGameSimulationStore((state) => state.weather);
@@ -499,10 +493,7 @@ export const OverviewPanel: React.FC = React.memo(() => {
     0,
     Math.min(
       100,
-      100 -
-        (safetyMetrics?.nearMisses ?? 0) * 5 -
-        (safetyMetrics?.safetyStops ?? 0) * 2 -
-        (safetyMetrics?.workerEvasions ?? 0)
+      100 - (safetyMetrics?.nearMisses ?? 0) * 5 - (safetyMetrics?.safetyStops ?? 0) * 2
     )
   );
 
@@ -598,15 +589,15 @@ export const OverviewPanel: React.FC = React.memo(() => {
         <GameSpeedControls />
       </section>
 
-      {/* Weather & Workers */}
+      {/* Weather & Site Mode */}
       <section className="grid grid-cols-2 gap-2">
         <div className="bg-slate-800/50 border border-white/5 rounded-xl p-3">
           <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Weather</div>
           <div className="text-sm font-bold text-white capitalize">{weather}</div>
         </div>
         <div className="bg-slate-800/50 border border-white/5 rounded-xl p-3">
-          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Workers</div>
-          <div className="text-sm font-bold text-white">{workers.length} on shift</div>
+          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Site Mode</div>
+          <div className="text-sm font-bold text-white">Uncrewed</div>
         </div>
       </section>
 
@@ -676,18 +667,6 @@ export const OverviewPanel: React.FC = React.memo(() => {
 
       <MaterialTraceabilitySection />
       <BatchGenealogySection />
-
-      <RecoverableFeatureBoundary featureName="Operations campaign">
-        <Suspense
-          fallback={
-            <div className="h-24 rounded-xl bg-slate-800/30 animate-pulse" role="status">
-              <span className="sr-only">Loading operations campaign...</span>
-            </div>
-          }
-        >
-          <OperationsCampaignPanel />
-        </Suspense>
-      </RecoverableFeatureBoundary>
 
       {/* Maintenance (breakdowns, predictive alerts, parts, schedule) */}
       <section>
@@ -800,7 +779,6 @@ const DockCard: React.FC<{ label: string; status: string; eta: number }> = ({
 // Quick Actions Section with Gamification Controls
 const QuickActionsSection: React.FC = () => {
   const [showAchievements, setShowAchievements] = useState(false);
-  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const achievements = useProductionStore((state) => state.achievements);
   const { showMiniMap, setShowMiniMap } = useUIStore(
     useShallow((state) => ({
@@ -874,20 +852,6 @@ const QuickActionsSection: React.FC = () => {
             )}
           </button>
 
-          {/* Leaderboard */}
-          <button
-            onClick={() => setShowLeaderboard(!showLeaderboard)}
-            className={`py-2.5 px-3 rounded-lg flex items-center gap-2 transition-colors ${
-              showLeaderboard
-                ? 'bg-cyan-600 text-white'
-                : 'bg-slate-700/80 text-slate-300 hover:bg-slate-600'
-            }`}
-            title="Leaderboard"
-          >
-            <TrendingUp size={16} className={showLeaderboard ? 'text-white' : 'text-cyan-400'} />
-            <span className="text-xs font-medium">Leaderboard</span>
-          </button>
-
           {/* Replay History */}
           <button
             onClick={handleToggleReplay}
@@ -948,7 +912,6 @@ const QuickActionsSection: React.FC = () => {
       {/* Panels */}
       <AnimatePresence>
         {showAchievements && <AchievementsPanel onClose={() => setShowAchievements(false)} />}
-        {showLeaderboard && <WorkerLeaderboard onClose={() => setShowLeaderboard(false)} />}
       </AnimatePresence>
     </>
   );

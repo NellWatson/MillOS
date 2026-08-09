@@ -63,20 +63,6 @@ const GRASS_COLORS = {
 const PROPANE_COMPOUND_CENTRE = SITE_LAYOUT.serviceYard.propaneCompound.position;
 const UTILITY_TANK_FARM_CENTRE = SITE_LAYOUT.serviceYard.utilityTankFarm.position;
 
-const tankPaintMaterials = new Map<string, THREE.MeshStandardMaterial>();
-const getTankPaintMaterial = (color: string): THREE.MeshStandardMaterial => {
-  const cached = tankPaintMaterials.get(color);
-  if (cached) return cached;
-  const material = new THREE.MeshStandardMaterial({
-    color,
-    roughness: 0.64,
-    metalness: 0.03,
-    envMapIntensity: 0.72,
-  });
-  tankPaintMaterials.set(color, material);
-  return material;
-};
-
 const TANK_SUPPORT_MATERIAL = new THREE.MeshStandardMaterial({
   color: '#64707a',
   roughness: 0.68,
@@ -4428,8 +4414,6 @@ export const StorageTank: React.FC<{
   accentColor = '#2f6f8f',
   label = 'UTILITY',
 }) => {
-  const bodyMaterial = getTankPaintMaterial(color);
-  const accentMaterial = getTankPaintMaterial(accentColor);
   const centreY = radius + 1.5;
 
   return (
@@ -4450,7 +4434,14 @@ export const StorageTank: React.FC<{
         castShadow
         receiveShadow
       >
-        <primitive object={bodyMaterial} attach="material" />
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={0.18}
+          roughness={0.64}
+          metalness={0.03}
+          envMapIntensity={0.72}
+        />
       </mesh>
       {/* Identification bands make the vessel orientation readable even in
           overcast and night lighting without adding a light or emissive hack. */}
@@ -4462,45 +4453,53 @@ export const StorageTank: React.FC<{
           castShadow
         >
           <torusGeometry args={[radius + 0.035, 0.085, 8, 24]} />
-          <primitive object={accentMaterial} attach="material" />
+          <meshStandardMaterial
+            color={accentColor}
+            roughness={0.64}
+            metalness={0.03}
+            envMapIntensity={0.72}
+          />
         </mesh>
       ))}
       {/* Support legs - 4 saddle supports */}
       {[-length / 3, length / 3].map((x, i) => (
         <group key={`legs-${i}`} position={[x, 0, 0]}>
           {/* Left leg */}
-          <mesh position={[0, 0.75, -radius * 0.7]} castShadow>
+          <mesh material={TANK_SUPPORT_MATERIAL} position={[0, 0.75, -radius * 0.7]} castShadow>
             <boxGeometry args={[0.4, 1.5, 0.4]} />
-            <primitive object={TANK_SUPPORT_MATERIAL} attach="material" />
           </mesh>
           {/* Right leg */}
-          <mesh position={[0, 0.75, radius * 0.7]} castShadow>
+          <mesh material={TANK_SUPPORT_MATERIAL} position={[0, 0.75, radius * 0.7]} castShadow>
             <boxGeometry args={[0.4, 1.5, 0.4]} />
-            <primitive object={TANK_SUPPORT_MATERIAL} attach="material" />
           </mesh>
           {/* Cross brace */}
-          <mesh position={[0, 0.4, 0]} castShadow>
+          <mesh material={TANK_SUPPORT_MATERIAL} position={[0, 0.4, 0]} castShadow>
             <boxGeometry args={[0.3, 0.3, radius * 1.4]} />
-            <primitive object={TANK_SUPPORT_MATERIAL} attach="material" />
           </mesh>
           {/* Saddle */}
-          <mesh position={[0, 1.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+          <mesh
+            material={TANK_SUPPORT_MATERIAL}
+            position={[0, 1.5, 0]}
+            rotation={[0, 0, Math.PI / 2]}
+            castShadow
+          >
             <cylinderGeometry
               args={[radius + 0.1, radius + 0.1, 0.6, 12, 1, false, Math.PI, Math.PI]}
             />
-            <primitive object={TANK_SUPPORT_MATERIAL} attach="material" />
           </mesh>
         </group>
       ))}
       <GroundBlob position={[0, 0]} scale={length + 3} scaleZ={radius * 3.4} />
       {/* Pipe fittings on top */}
-      <mesh position={[0, radius * 2 + 1.62, 0]} castShadow>
+      <mesh material={TANK_FITTING_MATERIAL} position={[0, radius * 2 + 1.62, 0]} castShadow>
         <cylinderGeometry args={[0.3, 0.3, 0.8, 8]} />
-        <primitive object={TANK_FITTING_MATERIAL} attach="material" />
       </mesh>
-      <mesh position={[length / 4, radius * 2 + 1.58, 0]} castShadow>
+      <mesh
+        material={TANK_FITTING_MATERIAL}
+        position={[length / 4, radius * 2 + 1.58, 0]}
+        castShadow
+      >
         <cylinderGeometry args={[0.2, 0.2, 0.6, 8]} />
-        <primitive object={TANK_FITTING_MATERIAL} attach="material" />
       </mesh>
       {/* Ladder access */}
       <group position={[0, 0, -radius - 0.2]}>
@@ -4560,7 +4559,14 @@ export const PropaneTank: React.FC<{
       castShadow
       receiveShadow
     >
-      <primitive object={getTankPaintMaterial(color)} attach="material" />
+      <meshStandardMaterial
+        color={color}
+        emissive={color}
+        emissiveIntensity={0.18}
+        roughness={0.64}
+        metalness={0.03}
+        envMapIntensity={0.72}
+      />
     </mesh>
     {/* Support legs - 3 legs */}
     {[0, (Math.PI * 2) / 3, (Math.PI * 4) / 3].map((angle, i) => (
@@ -4593,7 +4599,12 @@ export const PropaneTank: React.FC<{
       position={[0, height * 0.3 + 0.5, 0]}
       castShadow
     >
-      <primitive object={getTankPaintMaterial(accentColor)} attach="material" />
+      <meshStandardMaterial
+        color={accentColor}
+        roughness={0.64}
+        metalness={0.03}
+        envMapIntensity={0.72}
+      />
     </mesh>
   </group>
 );

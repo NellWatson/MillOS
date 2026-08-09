@@ -61,7 +61,7 @@ export interface MaintenanceRecord {
   id: string;
   date: string;
   type: 'preventive' | 'corrective' | 'emergency';
-  technician: string;
+  serviceUnit: string;
   notes: string;
   duration: number; // minutes
 }
@@ -307,7 +307,6 @@ export interface ForkliftData {
   status: 'moving' | 'loading' | 'unloading' | 'idle';
   cargo: 'empty' | 'pallet' | 'grain' | 'flour';
   targetPosition?: [number, number, number];
-  operatorName?: string;
 }
 
 // =========================================================================

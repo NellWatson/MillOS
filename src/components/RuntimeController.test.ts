@@ -39,9 +39,14 @@ describe('resolveBenchmarkCamera', () => {
     expect(resolveBenchmarkCamera('overview', 12, 'clear')).toEqual(SITE_LAYOUT.cameras.overview);
   });
 
-  it('uses a portrait field of view for close personnel evidence', () => {
-    expect(resolveBenchmarkCamera('personnel-close', 12, 'clear').fov).toBe(42);
-    expect(resolveBenchmarkCamera('personnel-feminine', 12, 'clear').fov).toBe(42);
+  it('preserves authored uncrewed process, tank, and logistics cameras', () => {
+    expect(resolveBenchmarkCamera('process-floor', 12, 'clear')).toEqual(
+      SITE_LAYOUT.cameras.processFloor
+    );
+    expect(resolveBenchmarkCamera('tank-farm', 12, 'clear')).toEqual(SITE_LAYOUT.cameras.tankFarm);
+    expect(resolveBenchmarkCamera('logistics-close', 12, 'clear')).toEqual(
+      SITE_LAYOUT.cameras.logisticsClose
+    );
   });
 
   it('aims sun and moon evidence cameras along the matching celestial direction', () => {

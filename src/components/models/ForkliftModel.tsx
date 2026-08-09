@@ -40,7 +40,6 @@ import { useGraphicsStore } from '../../stores/graphicsStore';
 import { useProductionStore } from '../../stores/productionStore';
 import { applyVehicleSurface } from '../../utils/vehicleSurface';
 import { RENDER_ORDER } from '../../constants/renderLayers';
-import { SeatedVehicleOperator } from './VehicleOperator';
 
 /**
  * Authored-GLB material overrides.
@@ -188,7 +187,6 @@ const CARGO_FADE_DURATION = 0.25;
 interface ForkliftModelProps {
   hasCargo: boolean;
   isMoving: boolean;
-  operatorName: string;
   speedMultiplier?: number;
   forkHeightRef?: React.MutableRefObject<number>; // Ref for fork animation - avoids re-renders
   mastTiltRef?: React.MutableRefObject<number>;
@@ -477,7 +475,6 @@ const setCompactInstances = (
 const CompactForklift: React.FC<ForkliftModelProps> = ({
   hasCargo,
   isMoving,
-  operatorName,
   forkHeightRef,
   mastTiltRef,
   steeringAngleRef,
@@ -651,9 +648,6 @@ const CompactForklift: React.FC<ForkliftModelProps> = ({
         castShadow
         receiveShadow
       />
-      <group position={[0, 1.03, -0.52]} scale={0.68}>
-        <SeatedVehicleOperator name={operatorName} />
-      </group>
       <mesh
         geometry={compactForkliftGeometry.steeringWheel}
         material={compactForkliftMaterial.dark}
@@ -819,7 +813,6 @@ const measureWheelRadius = (node: THREE.Object3D): number => {
 const GLTFForklift: React.FC<ForkliftModelProps> = ({
   hasCargo,
   isMoving,
-  operatorName,
   forkHeightRef,
   mastTiltRef,
   steeringAngleRef,
@@ -1048,9 +1041,6 @@ const GLTFForklift: React.FC<ForkliftModelProps> = ({
   return (
     <group ref={modelRef}>
       <primitive object={clonedScene} scale={FORKLIFT_MODEL_SCALE} />
-      <group position={[0, 0.93, -0.22]} scale={0.68}>
-        <SeatedVehicleOperator name={operatorName} />
-      </group>
       {/* Add cargo on top if needed - always mounted, opacity animated */}
       <group ref={cargoMastRef} name="authored-forklift-cargo-mast">
         <group

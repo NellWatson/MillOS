@@ -4,7 +4,6 @@ import {
   Brain,
   Activity,
   Users,
-  HardHat,
   Shield,
   Settings,
   Eye,
@@ -24,7 +23,6 @@ export type DockMode =
   | 'overview'
   | 'ai'
   | 'scada'
-  | 'workforce'
   | 'management'
   | 'safety'
   | 'settings'
@@ -174,16 +172,6 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
       />
       {!isCompactLayout && (
         <DockItem
-          mode="workforce"
-          icon={<HardHat size={24} />}
-          label="Workforce"
-          isActive={activeMode === 'workforce'}
-          onClick={(trigger) => handleModeChange('workforce', trigger)}
-          isMobile={isCompactLayout}
-        />
-      )}
-      {!isCompactLayout && (
-        <DockItem
           mode="management"
           icon={<Heart size={24} />}
           label="Bilateral Autonomy System (BAS)"
@@ -237,15 +225,6 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
           >
             {isCompactLayout && (
               <>
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => handleMoreModeChange('workforce')}
-                  className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/10"
-                >
-                  <HardHat size={18} aria-hidden="true" />
-                  Workforce
-                </button>
                 <button
                   role="menuitem"
                   type="button"

@@ -583,9 +583,10 @@ export class HistoryStore {
     if (this.historyDisabled) return '';
 
     const rows = ['timestamp,tagId,value,quality'];
+    const histories = await this.getMultipleTagHistory(tagIds, startTime, endTime);
 
     for (const tagId of tagIds) {
-      const history = await this.getHistory(tagId, startTime, endTime);
+      const history = histories[tagId] ?? [];
       history.forEach((h) => {
         rows.push(`${h.timestamp},${tagId},${h.value},${h.quality}`);
       });
