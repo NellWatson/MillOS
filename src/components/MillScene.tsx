@@ -19,6 +19,10 @@ import { useAIConfigStore } from '../stores/aiConfigStore';
 import { recoverableLazy } from '../utils/recoverableLazy';
 import ErrorBoundary from './ErrorBoundary';
 import { StaticMeshBatch } from './performance/StaticMeshBatch';
+import {
+  DISTANT_FACTORY_INTERIOR_LOD,
+  resolveFactoryInteriorDetailVisibility,
+} from './performance/distantFactoryInteriorLod';
 
 // Lazy load heavy optional layers while preserving the complete authored world.
 // Quality changes may reduce effects and geometry density, but never swap the
@@ -79,6 +83,37 @@ const OperationalWorldSignals = recoverableLazy(() =>
     default: module.OperationalWorldSignals,
   }))
 );
+
+/**
+ * Keep the unified factory mounted while omitting sub-pixel service detail
+ * behind the distant shell and glazing. Machine bodies remain visible through
+ * the windows. The hysteresis avoids visibility chatter near the boundary, and
+ * the named contract groups remain visible so this is a conventional detail
+ * LOD rather than an alternate world.
+ */
+const DistantFactoryInteriorDetail: React.FC<React.PropsWithChildren> = ({ children }) => {
+  const groupRef = useRef<THREE.Group>(null);
+  const visibleRef = useRef(true);
+  const sampleFrameRef = useRef(0);
+
+  useFrame(({ camera }) => {
+    sampleFrameRef.current =
+      (sampleFrameRef.current + 1) % DISTANT_FACTORY_INTERIOR_LOD.sampleEveryFrames;
+    if (sampleFrameRef.current !== 0) return;
+
+    const nextVisible = resolveFactoryInteriorDetailVisibility(
+      visibleRef.current,
+      camera.position.x,
+      camera.position.z
+    );
+    if (nextVisible === visibleRef.current) return;
+
+    visibleRef.current = nextVisible;
+    if (groupRef.current) groupRef.current.visible = nextVisible;
+  });
+
+  return <group ref={groupRef}>{children}</group>;
+};
 import { MachineData, MachineType } from '../types';
 import { useGraphicsStore, isPostProcessingActive } from '../stores/graphicsStore';
 import { useProductionStore } from '../stores/productionStore';
@@ -829,14 +864,16 @@ export const MillScene: React.FC<MillSceneProps> = ({
         {!perfDebug?.disableMachines && (
           <MachinesContainer initialMachines={displayMachines} onSelect={onSelectMachine} />
         )}
-        {!isLowGraphics && !perfDebug?.disableMachines && (
-          <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
-            <Suspense fallback={null}>
-              <HighDetailSpoutingSystem machines={displayMachines} />
-            </Suspense>
-          </ErrorBoundary>
-        )}
-        {!isLowGraphics && <ProductionFlowVisualization />}
+        <DistantFactoryInteriorDetail>
+          {!isLowGraphics && !perfDebug?.disableMachines && (
+            <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
+              <Suspense fallback={null}>
+                <HighDetailSpoutingSystem machines={displayMachines} />
+              </Suspense>
+            </ErrorBoundary>
+          )}
+          {!isLowGraphics && <ProductionFlowVisualization />}
+        </DistantFactoryInteriorDetail>
       </group>
       <group name="world-factory-infrastructure">
         <OptimizedFactoryInfrastructure showZones={showZones} />
@@ -844,9 +881,11 @@ export const MillScene: React.FC<MillSceneProps> = ({
 
       {/* Dynamic Elements - Respect perfDebug toggles */}
       <group name="world-conveyors">
-        {authoredSiteReady && !perfDebug?.disableConveyorSystem && (
-          <OperationalConveyors productionSpeed={productionSpeed} />
-        )}
+        <DistantFactoryInteriorDetail>
+          {authoredSiteReady && !perfDebug?.disableConveyorSystem && (
+            <OperationalConveyors productionSpeed={productionSpeed} />
+          )}
+        </DistantFactoryInteriorDetail>
       </group>
       <group name="world-forklifts">
         {authoredSiteReady && !perfDebug?.disableForkliftSystem && (
