@@ -10,4 +10,8 @@ if (releaseMatrix.currentVersion !== packageReleaseVersion) {
 }
 
 export const CURRENT_RELEASE_VERSION = releaseMatrix.currentVersion;
+export const SELECTABLE_RELEASES = releaseMatrix.releases.map((release) => ({
+  ...release,
+  displayLabel: `${release.label} (${release.type === 'current' ? 'current' : 'historical'})`,
+}));
 export const SELECTABLE_RELEASE_VERSIONS = releaseMatrix.releases.map((release) => release.version);

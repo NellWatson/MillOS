@@ -18,7 +18,7 @@
     for (const release of matrix.releases) {
       const option = document.createElement('option');
       option.value = release.version;
-      option.textContent = release.label;
+      option.textContent = `${release.label} (${release.type === 'current' ? 'current' : 'historical'})`;
       selector.append(option);
     }
     selector.value = matrix.releases.some((release) => release.version === activeVersion)

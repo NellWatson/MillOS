@@ -263,7 +263,12 @@ test.describe('MillOS master refinement runtime', () => {
       name: 'Select MillOS version',
     });
     await expect(versionSelector).toHaveValue('v0.40');
-    await expect(versionSelector.locator('option')).toHaveText(['0.40', '0.30', '0.20', '0.10']);
+    await expect(versionSelector.locator('option')).toHaveText([
+      '0.40 (current)',
+      '0.30 (historical)',
+      '0.20 (historical)',
+      '0.10 (historical)',
+    ]);
     await expect(
       overviewSidebar.getByRole('alert', { name: 'Mill Overview unavailable' })
     ).toHaveCount(0);

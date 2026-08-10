@@ -612,15 +612,15 @@ export const createStaticMeshBatches = (
 
   const existingDiagnostics = root.userData.staticBatchStats as StaticBatchDiagnostics | undefined;
   if (existingDiagnostics) {
-    existingDiagnostics.optimizedOriginals = batches.reduce(
+    existingDiagnostics.optimizedOriginals += batches.reduce(
       (total, batch) => total + batch.originals.length,
       0
     );
-    existingDiagnostics.batches = batches.length;
-    existingDiagnostics.instancedOriginals = instancedOriginalCount;
-    existingDiagnostics.instancedBatches = instancedBatchCount;
-    existingDiagnostics.mergedOriginals = mergedOriginalCount;
-    existingDiagnostics.mergedMeshes = mergedMeshCount;
+    existingDiagnostics.batches += batches.length;
+    existingDiagnostics.instancedOriginals += instancedOriginalCount;
+    existingDiagnostics.instancedBatches += instancedBatchCount;
+    existingDiagnostics.mergedOriginals += mergedOriginalCount;
+    existingDiagnostics.mergedMeshes += mergedMeshCount;
   }
 
   return batches;

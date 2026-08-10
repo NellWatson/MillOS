@@ -328,6 +328,7 @@ function summarizeMotion(samples) {
         distance: 0,
         phases: [],
         cargoStates: [],
+        stopReasons: [],
         telemetry: {},
         lastPosition: null,
       };
@@ -343,6 +344,9 @@ function summarizeMotion(samples) {
       }
       if (entity.cargo && current.cargoStates.at(-1) !== entity.cargo) {
         current.cargoStates.push(entity.cargo);
+      }
+      if (entity.stopReason && current.stopReasons.at(-1) !== entity.stopReason) {
+        current.stopReasons.push(entity.stopReason);
       }
       for (const key of numericTelemetryKeys) {
         const value = entity[key];
@@ -401,6 +405,10 @@ function evaluateMotionAcceptance(samples, summary) {
       .every((entity) => Math.abs(entity.articulation ?? 0) <= 0.701)
   );
   const movingEntities = summary.filter((entity) => entity.distance > 0.25);
+  const stationaryEntities = summary.filter((entity) => entity.distance <= 0.25);
+  const stationaryStatesExplained = stationaryEntities.every((entity) =>
+    entity.stopReasons.some((reason) => reason !== 'none')
+  );
   const wheelTravelFollowsMotion = movingEntities.every(
     (entity) => Math.abs(entity.telemetry.wheelTravel?.delta ?? 0) > 0.1
   );
@@ -410,6 +418,14 @@ function evaluateMotionAcceptance(samples, summary) {
     { id: 'bounded-steering', passed: boundedSteering },
     { id: 'bounded-articulation', passed: boundedArticulation },
     { id: 'vehicle-motion-observed', passed: movingEntities.length > 0 },
+    {
+      id: 'stationary-vehicles-have-interlock-reason',
+      passed: stationaryStatesExplained,
+      observed: stationaryEntities.map((entity) => ({
+        id: entity.id,
+        stopReasons: entity.stopReasons,
+      })),
+    },
     { id: 'wheel-travel-follows-motion', passed: wheelTravelFollowsMotion },
   ];
   return { passed: checks.every((check) => check.passed), checks };
@@ -789,7 +805,10 @@ async function main() {
     systemComparisons: {
       scada: scadaComparisons,
     },
-    passed: results.every((result) => result.budget.passed && result.motionAcceptance.passed),
+    passed: results.every(
+      (result) =>
+        result.budget.passed && (options.startupOnly || result.motionAcceptance?.passed === true)
+    ),
     results,
   };
   const reportPath = path.join(options.output, 'benchmark.json');

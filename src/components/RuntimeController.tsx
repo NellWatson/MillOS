@@ -638,7 +638,13 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       });
       sceneGraph.uniqueGeometries = geometryIds.size;
       sceneGraph.uniqueMaterials = materialIds.size;
-      const branchRoot = scene.children.length === 1 ? scene.children[0] : scene;
+      // The Canvas owns a small unnamed helper sibling beside `world-root`, so
+      // choosing the Scene whenever there is more than one child collapsed all
+      // diagnostics into a single 1,400-mesh branch. Prefer the authored root
+      // explicitly and retain the old fallback for isolated test scenes.
+      const branchRoot =
+        scene.getObjectByName('world-root') ??
+        (scene.children.length === 1 ? scene.children[0] : scene);
       sceneGraph.topBranches = branchRoot.children
         .map((branch, index) => {
           let objects = 0;

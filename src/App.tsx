@@ -1,7 +1,6 @@
 import React, { useState, Suspense, useEffect, useCallback, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
-import { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
 import { trackRender } from './utils/renderProfiler';
 import './utils/perfMonitor';
@@ -58,6 +57,7 @@ import { installAtmosphericFogChunks } from './shaders/atmosphericFog';
 installAtmosphericFogChunks();
 
 const PhysicsScene = recoverableLazy(() => import('./components/PhysicsScene'));
+const DeferredOrbitControls = recoverableLazy(() => import('./components/SceneOrbitControls'));
 const AuthoredMillScene = recoverableLazy(() =>
   import('./components/MillScene').then((module) => ({ default: module.MillScene }))
 );
@@ -844,7 +844,7 @@ const App: React.FC = () => {
                         <FirstPersonController onLockChange={handleLockChange} />
                       )
                     ) : (
-                      <OrbitControls
+                      <DeferredOrbitControls
                         ref={orbitControlsRef}
                         maxPolarAngle={
                           runtimeMode.benchmark &&
