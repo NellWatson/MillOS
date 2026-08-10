@@ -89,4 +89,27 @@ describe('v0.40 uncrewed-site contract', () => {
       /speechSynthesis|SpeechSynthesis|ttsEnabled|speakAnnouncement|startWorkerVoices|startRadioChatter|playRadioDispatch|WorkerModel|WORKER_ASSET_PATHS|WORKER_VARIANTS/
     );
   });
+
+  it('keeps current design guidance and source-only modules uncrewed', () => {
+    const prohibitedSourcePaths = [
+      'src/components/ui-new/widgets/PortraitCard.tsx',
+      'src/config/portraits.ts',
+      'scripts/blender/specs/worker-body.json',
+    ];
+    expect(
+      prohibitedSourcePaths.filter((path) => existsSync(resolve(process.cwd(), path)))
+    ).toEqual([]);
+
+    const blenderPrompt = source('scripts/blender/PROMPTS.md');
+    expect(blenderPrompt).not.toMatch(/only the forklift and three workers/i);
+
+    const vehicleStudies = JSON.parse(
+      source('scripts/blender/specs/forklift-vehicles.json')
+    ) as Array<{ name: string }>;
+    expect(vehicleStudies.map(({ name }) => name)).not.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^(?:operator|worker|driver|personnel|avatar|human)/i),
+      ])
+    );
+  });
 });

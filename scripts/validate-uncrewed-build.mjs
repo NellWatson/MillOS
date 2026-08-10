@@ -4,6 +4,12 @@ import process from 'node:process';
 
 const ROOT = process.cwd();
 const DIST = path.join(ROOT, 'dist');
+const ACTIVE_SOURCE = path.join(ROOT, 'src');
+const CURRENT_PUBLIC = path.join(ROOT, 'public');
+const DESIGN_FILES = [
+  path.join(ROOT, 'scripts', 'blender', 'PROMPTS.md'),
+  path.join(ROOT, 'scripts', 'blender', 'specs', 'forklift-vehicles.json'),
+];
 
 const forbiddenPathPatterns = [
   { label: 'portrait directory', pattern: /(^|\/)assets\/workers(\/|$)/i },
@@ -27,6 +33,21 @@ const forbiddenRuntimePatterns = [
     pattern: /marcus_chen|sarah_mitchell|james_rodriguez|emily_ronson|jennifer_lee/i,
   },
 ];
+
+const forbiddenDesignPatterns = [
+  { label: 'obsolete worker asset guidance', pattern: /only the forklift and three workers/i },
+  {
+    label: 'personnel geometry study',
+    pattern: /"name"\s*:\s*"(?:operator|worker|driver|personnel|avatar|human)/i,
+  },
+  { label: 'worker geometry manifest', pattern: /worker-body\.json/i },
+];
+
+const isArchivedPath = (relative) =>
+  relative.startsWith('0.10 Archive/') || /^v\d+\.\d+\//.test(relative);
+
+const isTestSource = (relative) =>
+  relative.includes('/__tests__/') || /(?:^|\.)test\.[cm]?[jt]sx?$/.test(relative);
 
 async function collectFiles(directory, base = directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -62,12 +83,42 @@ async function main() {
     }
   }
 
+  const sourceFiles = await collectFiles(ACTIVE_SOURCE);
+  for (const file of sourceFiles) {
+    if (isArchivedPath(file.relative) || isTestSource(file.relative)) continue;
+    for (const rule of forbiddenPathPatterns) {
+      if (rule.pattern.test(file.relative)) failures.push(`active source ${rule.label}: ${file.relative}`);
+    }
+    if (!/\.[cm]?[jt]sx?$/i.test(file.relative)) continue;
+    const content = await readFile(file.absolute, 'utf8');
+    for (const rule of forbiddenRuntimePatterns) {
+      if (rule.pattern.test(content)) failures.push(`active source ${rule.label}: ${file.relative}`);
+    }
+  }
+
+  const publicFiles = await collectFiles(CURRENT_PUBLIC);
+  for (const file of publicFiles) {
+    if (isArchivedPath(file.relative)) continue;
+    for (const rule of forbiddenPathPatterns) {
+      if (rule.pattern.test(file.relative)) failures.push(`current public ${rule.label}: ${file.relative}`);
+    }
+  }
+
+  for (const absolute of DESIGN_FILES) {
+    const content = await readFile(absolute, 'utf8');
+    for (const rule of forbiddenDesignPatterns) {
+      if (rule.pattern.test(content)) {
+        failures.push(`design ${rule.label}: ${path.relative(ROOT, absolute)}`);
+      }
+    }
+  }
+
   if (failures.length > 0) {
     throw new Error(`Uncrewed delivery contract failed:\n${[...new Set(failures)].join('\n')}`);
   }
 
   console.log(
-    `Uncrewed delivery contract passed: ${files.length} files, no human assets, host voices, or personnel modules.`
+    `Uncrewed delivery contract passed: ${files.length} delivery files and ${sourceFiles.length} source files; no human assets, host voices, personnel modules, or personnel design studies.`
   );
 }
 

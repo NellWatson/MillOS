@@ -28,7 +28,11 @@ const sparkMaterial = new THREE.MeshBasicMaterial({
   opacity: 0.9,
 });
 
-const smokeGeometry = new THREE.SphereGeometry(0.15, 6, 6);
+// Puffs expand as they rise - scale reaches ~1.9 by end of life - so this 0.15 m
+// sphere draws up to 0.57 m across, at the range you stand to repair the machine.
+// Six segments read as a faceted lump at that size. One shared geometry through
+// one InstancedMesh: +68 vertices once, not per particle.
+const smokeGeometry = new THREE.SphereGeometry(0.15, 12, 8);
 const smokeMaterial = new THREE.MeshBasicMaterial({
   color: '#6b7280',
   transparent: true,
