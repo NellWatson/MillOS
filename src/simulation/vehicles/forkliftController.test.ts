@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  FORKLIFT_MAXIMUM_STEERING_RADIANS,
   createForkliftRoutePlan,
   createInitialForkliftMotion,
   distanceAheadOnClosedPath,
@@ -100,5 +101,92 @@ describe('forklift controller', () => {
     expect(placing.cargoEngaged).toBe(true);
     expect(disengaged.phase).toBe('disengaging');
     expect(disengaged.cargoEngaged).toBe(false);
+  });
+
+  it('preserves route progress across common rendering frequencies', () => {
+    const plan = createForkliftRoutePlan(points, actions);
+    const simulate = (framesPerSecond: number) => {
+      let state = createInitialForkliftMotion(plan, [0, 0, 0]);
+      for (let frame = 0; frame < framesPerSecond * 20; frame += 1) {
+        state = stepForkliftMotion(state, plan, {
+          targetSpeed: 2,
+          stopReason: 'none',
+          loaded: false,
+          deltaSeconds: 1 / framesPerSecond,
+        });
+      }
+      return state;
+    };
+
+    const results = [30, 60, 120].map(simulate);
+    const wheelTravel = results.map((state) => state.wheelTravel);
+    expect(Math.max(...wheelTravel) - Math.min(...wheelTravel)).toBeLessThan(0.15);
+    for (const state of results) {
+      expect(Number.isFinite(state.x)).toBe(true);
+      expect(Number.isFinite(state.z)).toBe(true);
+      expect(Math.abs(state.steeringAngle)).toBeLessThanOrEqual(FORKLIFT_MAXIMUM_STEERING_RADIANS);
+    }
+  });
+
+  it('stops for an emergency, holds position, and resumes without a jump', () => {
+    const plan = createForkliftRoutePlan(points, actions);
+    let state = createInitialForkliftMotion(plan, [0, 0, 0]);
+    for (let frame = 0; frame < 180; frame += 1) {
+      state = stepForkliftMotion(state, plan, {
+        targetSpeed: 2,
+        stopReason: 'none',
+        loaded: false,
+        deltaSeconds: 1 / 60,
+      });
+    }
+
+    const emergencyStart = state.wheelTravel;
+    for (let frame = 0; frame < 180; frame += 1) {
+      state = stepForkliftMotion(state, plan, {
+        targetSpeed: 2,
+        stopReason: 'emergency-stop',
+        loaded: false,
+        deltaSeconds: 1 / 60,
+      });
+    }
+    const stoppedAt = state.wheelTravel;
+    expect(stoppedAt - emergencyStart).toBeLessThan(3);
+    expect(state.speed).toBe(0);
+    expect(state.stopReason).toBe('emergency-stop');
+
+    for (let frame = 0; frame < 120; frame += 1) {
+      state = stepForkliftMotion(state, plan, {
+        targetSpeed: 2,
+        stopReason: 'none',
+        loaded: false,
+        deltaSeconds: 1 / 60,
+      });
+    }
+    expect(state.wheelTravel).toBeGreaterThan(stoppedAt);
+    expect(state.stopReason).toBe('none');
+  });
+
+  it('honours a finite movement authority without overshoot', () => {
+    const plan = createForkliftRoutePlan(points, actions);
+    let state = createInitialForkliftMotion(plan, [0, 0, 0]);
+    for (let frame = 0; frame < 180; frame += 1) {
+      state = stepForkliftMotion(state, plan, {
+        targetSpeed: 2,
+        stopReason: 'none',
+        loaded: false,
+        deltaSeconds: 1 / 60,
+      });
+    }
+
+    const wheelTravel = state.wheelTravel;
+    state = stepForkliftMotion(state, plan, {
+      targetSpeed: 2,
+      stopReason: 'none',
+      loaded: false,
+      deltaSeconds: 1 / 60,
+      maximumTravelDistance: 0.01,
+    });
+    expect(state.wheelTravel - wheelTravel).toBeCloseTo(0.01);
+    expect(state.speed).toBe(0);
   });
 });

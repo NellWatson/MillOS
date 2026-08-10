@@ -17,8 +17,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      V030_SOURCE_SHA: 20bcbe044fc6d7ca7275999fec63ddce83fd49d0
     steps:
       - uses: actions/checkout@v6
         with:
@@ -39,9 +37,11 @@ jobs:
           npm run lint
           npm run format:check
           npm test
+          npm run validate:releases
 
       - name: Rebuild the deployed v0.30 release for preservation
         run: |
+          V030_SOURCE_SHA=$(node -e "const m=require('./release-matrix.json'); process.stdout.write(m.releases.find((r) => r.version === 'v0.30').sourceCommit)")
           git worktree add --detach "$RUNNER_TEMP/millos-v030" "$V030_SOURCE_SHA"
           npm ci --force --ignore-scripts --prefix "$RUNNER_TEMP/millos-v030"
           VERSION=v0.30 npm run build --prefix "$RUNNER_TEMP/millos-v030"
@@ -52,8 +52,8 @@ jobs:
       - name: Stage current and archived releases
         run: |
           npm run build:pages-staging -- \
-            --archive-build "v0.30=$RUNNER_TEMP/millos-v030/dist" \
-            --archive-source "v0.30=$V030_SOURCE_SHA"
+            --archive-build "v0.30=$RUNNER_TEMP/millos-v030/dist"
+          npm run validate:releases -- --staging staging
 
       - name: Setup Pages
         uses: actions/configure-pages@v6

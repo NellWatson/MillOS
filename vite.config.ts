@@ -6,6 +6,14 @@ import react from '@vitejs/plugin-react-swc'; // SWC is 20x faster than Babel
 const packageMetadata = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')
 ) as { version?: string };
+const releaseMatrix = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, 'release-matrix.json'), 'utf8')
+) as { releases: Array<{ version: string; type: string }> };
+const STATIC_RELEASE_VERSIONS = new Set(
+  releaseMatrix.releases
+    .filter((release) => release.type === 'static')
+    .map((release) => release.version)
+);
 
 const CURRENT_AUDIO_FILES = new Set([
   'The Builder.mp3',
@@ -78,15 +86,14 @@ function finalizeCurrentBuild({
   };
 }
 
-// Plugin to serve static v0.10 and v0.20 builds during development
+// Serve the immutable static archives declared by the release matrix in development.
 function serveStaticVersions(): Plugin {
   return {
     name: 'serve-static-versions',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        // Handle both v0.10 and v0.20 static builds
-        const versionMatch = req.url?.match(/^\/(v0\.10|v0\.20)(\/|$)/);
-        if (versionMatch && req.url) {
+        const versionMatch = req.url?.match(/^\/(v\d+\.\d+)(\/|$)/);
+        if (versionMatch && req.url && STATIC_RELEASE_VERSIONS.has(versionMatch[1])) {
           const version = versionMatch[1];
           const urlPath = req.url.replace(/\?.*$/, ''); // Remove query string
           let filePath = path.join(__dirname, 'public', urlPath);

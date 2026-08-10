@@ -35,7 +35,8 @@
     "validate:depth": "node scripts/validate-depth-policy.mjs",
     "validate:shaders": "node scripts/validate-shaders.mjs",
     "validate:bundle": "node scripts/validate-bundle.mjs",
-    "validate:uncrewed": "node scripts/validate-uncrewed-build.mjs"
+    "validate:uncrewed": "node scripts/validate-uncrewed-build.mjs",
+    "validate:releases": "node scripts/validate-release-matrix.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

@@ -18,6 +18,33 @@ const step = (
     ...overrides,
   });
 
+const runCompleteCycle = (framesPerSecond: number, speedMultiplier: number = 1) => {
+  let state = createTruckController('shipping');
+  let maximumArticulation = 0;
+  let maximumSteering = 0;
+  let departureSeconds = Number.POSITIVE_INFINITY;
+  const maximumFrames = framesPerSecond * 200;
+
+  for (let frame = 0; frame < maximumFrames; frame += 1) {
+    const result = stepTruckController(state, {
+      deltaSeconds: 1 / framesPerSecond,
+      arrivalReady: false,
+      safetyHold: false,
+      serviceComplete: true,
+      speedMultiplier,
+    });
+    state = result.state;
+    maximumArticulation = Math.max(maximumArticulation, Math.abs(result.pose.articulation));
+    maximumSteering = Math.max(maximumSteering, Math.abs(result.pose.steeringAngle));
+    if (result.departedThisStep) {
+      departureSeconds = (frame + 1) / framesPerSecond;
+      break;
+    }
+  }
+
+  return { state, maximumArticulation, maximumSteering, departureSeconds };
+};
+
 describe('schedule-owned articulated truck controller', () => {
   it('runs a complete service cycle without teleporting at phase boundaries', () => {
     let state = createTruckController('shipping');
@@ -153,5 +180,31 @@ describe('schedule-owned articulated truck controller', () => {
     const inactive = createTruckController('shipping', false);
     expect(step(inactive).state.active).toBe(false);
     expect(step(inactive, { arrivalReady: true }).state.active).toBe(true);
+  });
+
+  it('completes the same bounded articulated cycle at 30, 60, and 120 Hz', () => {
+    const results = [30, 60, 120].map((framesPerSecond) => runCompleteCycle(framesPerSecond));
+    const departureTimes = results.map((result) => result.departureSeconds);
+    const wheelTravel = results.map((result) => result.state.wheelTravel);
+
+    expect(departureTimes.every(Number.isFinite)).toBe(true);
+    expect(Math.max(...departureTimes) - Math.min(...departureTimes)).toBeLessThan(0.5);
+    expect(Math.max(...wheelTravel) - Math.min(...wheelTravel)).toBeLessThan(0.15);
+    for (const result of results) {
+      expect(result.state.active).toBe(false);
+      expect(result.maximumArticulation).toBeLessThanOrEqual(0.7 + 1e-8);
+      expect(result.maximumSteering).toBeLessThanOrEqual(0.55 + 1e-8);
+    }
+  });
+
+  it('applies incident traction limits while preserving the route contract', () => {
+    const clear = runCompleteCycle(60, 1);
+    const restricted = runCompleteCycle(60, 0.55);
+
+    expect(restricted.departureSeconds).toBeGreaterThan(clear.departureSeconds);
+    expect(restricted.state.active).toBe(false);
+    expect(restricted.state.wheelTravel).toBeCloseTo(clear.state.wheelTravel, 1);
+    expect(restricted.maximumArticulation).toBeLessThanOrEqual(0.7 + 1e-8);
+    expect(restricted.maximumSteering).toBeLessThanOrEqual(0.55 + 1e-8);
   });
 });
