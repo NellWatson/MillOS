@@ -22,9 +22,183 @@ import { PROCEDURAL_TEXTURES } from '../../utils/sharedMaterials';
 // ============================================================
 
 // Lamp geometries
-const lampPostGeometry = new THREE.CylinderGeometry(0.08, 0.12, 4, 8);
-const lampHousingGeometry = new THREE.BoxGeometry(0.5, 0.6, 0.5);
-const lampGlassGeometry = new THREE.BoxGeometry(0.35, 0.45, 0.35);
+//
+// The lamp is a STACK - post, lantern frame, glazed drum - assembled from three
+// instance matrices that are 0.3 m apart, so each profile below is designed
+// against its neighbours and not just against itself. All three keep the exact
+// envelope of the primitive they replace, because those matrices are hand-tuned
+// world offsets (post at y 2, head at y 4.3) and any drift would move the
+// lantern off the post.
+
+/**
+ * Cast-iron street standard.
+ *
+ * Rendered 4 m tall and 0.24 m across the foot, eight of them along the village
+ * street, and walkable up to in first person. `CylinderGeometry(0.08, 0.12, 4, 8)`
+ * was a bare tapered tube: nothing about it said street lamp rather than pipe.
+ *
+ * A turned standard is a sequence of events up its length, and the profile has
+ * the five that carry: a 105 mm plinth skirt at the ground, a swelled base vase,
+ * an astragal ring where the vase meets the shaft, entasis on the taper (a
+ * convex swell, radius following t^1.6 rather than a straight line, so the
+ * silhouette reads as a curve), and a projecting capital collar under a flared
+ * seat that receives the lantern. The plinth and the capital are what read at
+ * street distance; the astragal and the entasis are what hold up close.
+ *
+ * Envelope is unchanged: max radius 0.12 at y -2, top face at y +2. Sixteen
+ * segments on a 0.24 m tube is round to the eye at arm's length, and this is one
+ * shared geometry behind an InstancedMesh, so its ~480 vertices are a one-off
+ * for the whole street rather than a per-lamp cost.
+ */
+function createLampPostGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0, -2), // base cap centre
+    new THREE.Vector2(0.12, -2), // plinth foot - envelope max radius
+    new THREE.Vector2(0.12, -1.895), // plinth face, vertical
+    new THREE.Vector2(0.104, -1.868), // plinth chamfer
+    new THREE.Vector2(0.098, -1.842),
+    new THREE.Vector2(0.112, -1.792), // base vase swells back out
+    new THREE.Vector2(0.113, -1.73),
+    new THREE.Vector2(0.1, -1.652),
+    new THREE.Vector2(0.082, -1.576),
+    new THREE.Vector2(0.074, -1.516), // vase tucks into the shaft
+    new THREE.Vector2(0.086, -1.48), // astragal ring
+    new THREE.Vector2(0.089, -1.452),
+    new THREE.Vector2(0.089, -1.42),
+    new THREE.Vector2(0.08, -1.394),
+    new THREE.Vector2(0.07, -1.36), // shaft begins
+    new THREE.Vector2(0.0691, -1), // entasis: the taper is convex, not straight
+    new THREE.Vector2(0.0658, -0.4),
+    new THREE.Vector2(0.0609, 0.2),
+    new THREE.Vector2(0.0546, 0.8),
+    new THREE.Vector2(0.0486, 1.3),
+    new THREE.Vector2(0.047, 1.56),
+    new THREE.Vector2(0.044, 1.64), // necking under the capital
+    new THREE.Vector2(0.062, 1.69), // capital collar, projecting
+    new THREE.Vector2(0.063, 1.74),
+    new THREE.Vector2(0.055, 1.775),
+    new THREE.Vector2(0.048, 1.81),
+    new THREE.Vector2(0.053, 1.88), // flared seat for the lantern base
+    new THREE.Vector2(0.075, 1.96),
+    new THREE.Vector2(0.075, 2), // top face - envelope max y
+    new THREE.Vector2(0, 2),
+  ];
+  return new THREE.LatheGeometry(profile, 16);
+}
+
+/**
+ * Lantern frame - the ironwork the glazing sits in.
+ *
+ * Rendered 0.5 m across and 0.6 m tall on top of the post. This was
+ * `BoxGeometry(0.5, 0.6, 0.5)`, a solid cube, and being solid it also sealed the
+ * emissive glazing inside it: `lampGlassGeometry` is strictly smaller on all
+ * three axes, both are drawn at the same y 4.3 with no scale, and this material
+ * is an opaque front-side standard material. The night cue the glazing exists to
+ * provide could not reach the camera.
+ *
+ * Designing the frame as a frame fixes that as a consequence rather than as a
+ * hack: a real lantern is a cast base plate, a thin burner stem, and a cap
+ * carried above the glass, so the profile pinches to a 0.052 m stem through the
+ * middle - narrower than the glazing that surrounds it - and the glazing is
+ * simply visible between the plate and the cap. The gap left under the eave is
+ * the ventilation gap a burning lantern needs.
+ *
+ * Features: base plate with a 26 mm vertical drip rim; the stem; a bell-cast cap
+ * overhanging at the eave with a 22 mm fascia band; a vent cowl instead of a ball
+ * finial, because this is a gas lamp and a cowl is what a gas lamp crowns with.
+ * The doubled points either side of the two horizontal bands are crease points -
+ * LatheGeometry averages the normals at a corner, and confining that blend to
+ * 1.5 mm is what keeps the rim and the eave reading as machined edges instead of
+ * rolled ones.
+ *
+ * Envelope is unchanged: an eight-sided lathe at circumradius 0.25 has the same
+ * axis-aligned half-extents as the 0.5 m box (0.25, 0.3, 0.25). It is narrower
+ * across the flats - 0.462 m against 0.5 - and nothing abuts the lantern head, so
+ * that reduction is free. Eight sides because a fabricated glazed lantern IS
+ * octagonal; the smooth round post below is the deliberate contrast.
+ */
+function createLampFrameGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0, -0.3), // underside centre
+    new THREE.Vector2(0.09, -0.3), // mounting collar over the post seat
+    new THREE.Vector2(0.096, -0.286),
+    new THREE.Vector2(0.14, -0.278), // base plate underside flares
+    new THREE.Vector2(0.212, -0.266),
+    new THREE.Vector2(0.2335, -0.2566), // crease
+    new THREE.Vector2(0.235, -0.256), // plate rim
+    new THREE.Vector2(0.235, -0.2545),
+    new THREE.Vector2(0.235, -0.2315),
+    new THREE.Vector2(0.235, -0.23), // rim fascia, vertical
+    new THREE.Vector2(0.2335, -0.2294), // crease
+    new THREE.Vector2(0.21, -0.22), // plate top chamfer
+    new THREE.Vector2(0.14, -0.211),
+    new THREE.Vector2(0.062, -0.203), // glazing seat
+    new THREE.Vector2(0.03, -0.18), // burner stem - thinner than the glazing
+    new THREE.Vector2(0.026, 0.07),
+    new THREE.Vector2(0.034, 0.104),
+    new THREE.Vector2(0.08, 0.118), // cap underside begins
+    new THREE.Vector2(0.172, 0.13),
+    new THREE.Vector2(0.236, 0.142),
+    new THREE.Vector2(0.2487, 0.1512), // crease
+    new THREE.Vector2(0.25, 0.152), // eave - envelope max radius
+    new THREE.Vector2(0.25, 0.1535),
+    new THREE.Vector2(0.25, 0.1725),
+    new THREE.Vector2(0.25, 0.174), // fascia band, vertical
+    new THREE.Vector2(0.2487, 0.1748), // crease
+    new THREE.Vector2(0.234, 0.186), // bell-cast kick
+    new THREE.Vector2(0.192, 0.206),
+    new THREE.Vector2(0.144, 0.228),
+    new THREE.Vector2(0.096, 0.248),
+    new THREE.Vector2(0.064, 0.262), // roof meets the vent cowl
+    new THREE.Vector2(0.05, 0.27), // cowl shoulder
+    new THREE.Vector2(0.048, 0.286), // cowl drum
+    new THREE.Vector2(0.062, 0.29), // cowl cap flares
+    new THREE.Vector2(0.052, 0.296),
+    new THREE.Vector2(0.022, 0.3), // crown - envelope max y
+    new THREE.Vector2(0, 0.3),
+  ];
+  return new THREE.LatheGeometry(profile, 8);
+}
+
+/**
+ * Lantern glazing - the part that lights.
+ *
+ * Rendered 0.35 m across and 0.45 m tall, and at night this is the only lit
+ * silhouette in the village, so its outline is what the night read is made of. A
+ * cube glows like a cube; an octagonal drum with panes leaning inward, a base
+ * rim and a top rail glows like a lantern.
+ *
+ * The upper shoulder above y 0.108 is deliberately tucked in: the frame's cap
+ * skirt comes down over it, so that part of the profile only exists to close the
+ * mesh and to hold the y envelope. What the eye gets is the drum below it.
+ *
+ * Envelope is unchanged: max radius 0.175 at the base, y in [-0.225, 0.225] -
+ * the same half-extents as the 0.35 x 0.45 x 0.35 box, at the same eight sides
+ * as the frame so the two share their corner angles.
+ */
+function createLampGlazingGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0, -0.225),
+    new THREE.Vector2(0.175, -0.225), // glazing base - envelope max radius
+    new THREE.Vector2(0.175, -0.202), // base rim, vertical
+    new THREE.Vector2(0.163, -0.186), // chamfer up to the pane line
+    new THREE.Vector2(0.16, -0.15),
+    new THREE.Vector2(0.15, 0.02), // panes lean inward
+    new THREE.Vector2(0.145, 0.058),
+    new THREE.Vector2(0.157, 0.072), // top rail flares back out
+    new THREE.Vector2(0.157, 0.094), // rail fascia, vertical
+    new THREE.Vector2(0.133, 0.108),
+    new THREE.Vector2(0.082, 0.135), // shoulder, tucks up under the cap
+    new THREE.Vector2(0.046, 0.18),
+    new THREE.Vector2(0.034, 0.225), // envelope max y, hidden inside the cap
+    new THREE.Vector2(0, 0.225),
+  ];
+  return new THREE.LatheGeometry(profile, 8);
+}
+
+const lampPostGeometry = createLampPostGeometry();
+const lampHousingGeometry = createLampFrameGeometry();
+const lampGlassGeometry = createLampGlazingGeometry();
 
 // Bench geometries
 const benchSeatGeometry = new THREE.BoxGeometry(1.5, 0.08, 0.5);
@@ -147,7 +321,11 @@ export const InstancedLamps: React.FC<{ isNight: boolean }> = React.memo(({ isNi
       </instancedMesh>
       {/* The emissive glass supplies the night cue without adding point lights.
           Changing the global light count at dusk recompiles every affected
-          scene material, which caused a visible whole-site hitch. */}
+          scene material, which caused a visible whole-site hitch.
+          For that cue to reach the camera the glazing has to be OUTSIDE the
+          frame's surface: see createLampFrameGeometry, whose profile pinches to
+          a stem narrower than this drum for exactly that reason. The previous
+          solid housing box enclosed this mesh completely. */}
     </group>
   );
 });

@@ -39,6 +39,7 @@ import {
   TREE_FOLIAGE_VARIANTS,
   TREE_FOLIAGE_MATERIALS,
   treeJitterFromPosition,
+  SHARED_TREE_TRUNK,
 } from './exterior/ExteriorVegetation';
 import {
   createOrganicLakeBankGeometry,
@@ -61,20 +62,6 @@ const GRASS_COLORS = {
 
 const PROPANE_COMPOUND_CENTRE = SITE_LAYOUT.serviceYard.propaneCompound.position;
 const UTILITY_TANK_FARM_CENTRE = SITE_LAYOUT.serviceYard.utilityTankFarm.position;
-
-const tankPaintMaterials = new Map<string, THREE.MeshStandardMaterial>();
-const getTankPaintMaterial = (color: string): THREE.MeshStandardMaterial => {
-  const cached = tankPaintMaterials.get(color);
-  if (cached) return cached;
-  const material = new THREE.MeshStandardMaterial({
-    color,
-    roughness: 0.64,
-    metalness: 0.03,
-    envMapIntensity: 0.72,
-  });
-  tankPaintMaterials.set(color, material);
-  return material;
-};
 
 const TANK_SUPPORT_MATERIAL = new THREE.MeshStandardMaterial({
   color: '#64707a',
@@ -364,9 +351,15 @@ const SimpleTree: React.FC<{ position: [number, number, number]; scale?: number 
 
     return (
       <group position={position} scale={scale * jitter} rotation={[0, rotY, 0]}>
-        {/* Trunk - shared bark-textured material */}
-        <mesh position={[0, 1.5, 0]} castShadow>
-          <cylinderGeometry args={[0.3, 0.4, 3, 6]} />
+        {/* Trunk - the same designed bole the instanced parkland trees use.
+            This was an inline `cylinderGeometry args={[0.3, 0.4, 3, 6]}`, so
+            these six individually-placed trees kept a straight 6-sided cone
+            while the 24 instanced ones got a root flare and a knee. Sharing the
+            geometry rather than copying its numbers keeps the two paths from
+            drifting apart again; it arrives pre-translated with its base at
+            y = 0, so the mesh no longer carries the +1.5 offset. */}
+        <mesh castShadow>
+          <primitive object={SHARED_TREE_TRUNK} attach="geometry" />
           <primitive object={TREE_MATERIALS.trunk} attach="material" />
         </mesh>
         {/* Canopy - merged icosahedron cluster, single draw call */}
@@ -800,11 +793,11 @@ const FenceSection: React.FC<{
 
 // Water colors
 const WATER_COLORS = {
-  deep: '#1a3a6e', // Deep blue water
-  shallow: '#2d5a8a', // Shallow blue water
-  surface: '#3d6ab0', // Blue surface reflection
-  edge: '#1e3a5a', // Water edge/shore
-  pond: '#2563eb', // Bright blue for decorative ponds
+  deep: '#173f4a', // Deep blue-green water
+  shallow: '#2d6670', // Mineral-rich shallows
+  surface: '#6d989e', // Muted sky reflection
+  edge: '#1d3c42', // Wet bank transition
+  pond: '#2b6871', // Decorative pond water
 };
 
 // The former `WATER_DEPTH_MATERIALS` pair is gone. Every consumer painted a
@@ -861,6 +854,8 @@ const WaterAnimationManager: React.FC = () => {
       const uniforms = material.uniforms;
       uniforms.uTime.value = time;
       uniforms.uWetness.value = atmosphere.wetness;
+      uniforms.uPrecipitation.value = atmosphere.precipitation;
+      uniforms.uWind.value = atmosphere.wind;
       uniforms.uDaylight.value = daylight;
       uniforms.uSkyZenith.value.copy(_waterZenith);
       uniforms.uSkyHorizon.value.copy(_waterHorizon);
@@ -933,6 +928,8 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
         uRadial: { value: radial ? 1 : 0 },
         uCrossOnly: { value: crossOnly ? 1 : 0 },
         uWetness: { value: 0 },
+        uPrecipitation: { value: 0 },
+        uWind: { value: 0.2 },
         uDaylight: { value: 1 },
         uSkyZenith: { value: WATER_ZENITH_DAY.clone() },
         uSkyHorizon: { value: WATER_HORIZON_DAY.clone() },
@@ -944,6 +941,7 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
         uniform vec2 uFlowDirection;
         uniform vec2 uCrossFlow;
         uniform float uFlowSpeed;
+        uniform float uWind;
         varying vec2 vUv;
         varying float vWave;
         varying vec3 vWorldPosition;
@@ -959,9 +957,10 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
           vec2 waveDerivative =
             cos(along * 0.32 + uTime * uFlowSpeed) * 0.32 * uFlowDirection
             - sin(across * 0.44 - uTime * uFlowSpeed * 0.71) * 0.44 * crossFlow;
-          vec2 heightDerivative = waveDerivative * 0.0175;
+          float windAmplitude = mix(0.75, 1.45, clamp(uWind, 0.0, 1.0));
+          vec2 heightDerivative = waveDerivative * 0.0175 * windAmplitude;
           vec3 displaced = position;
-          displaced.z += vWave * 0.035;
+          displaced.z += vWave * 0.035 * windAmplitude;
           vec3 localNormal = normalize(vec3(-heightDerivative.x, -heightDerivative.y, 1.0));
           vWorldNormal = normalize(mat3(modelMatrix) * localNormal);
           vWorldPosition = (modelMatrix * vec4(displaced, 1.0)).xyz;
@@ -981,6 +980,7 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
         uniform float uRadial;
         uniform float uCrossOnly;
         uniform float uWetness;
+        uniform float uPrecipitation;
         uniform float uDaylight;
         uniform vec3 uSkyZenith;
         uniform vec3 uSkyHorizon;
@@ -993,17 +993,31 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
         void main() {
           vec2 centred = vUv * 2.0 - 1.0;
 
-          // Three travelling wave trains. The axes arrive pre-normalised as
-          // uniforms; keeping the raw phases lets the analytic derivatives
-          // below reuse them instead of evaluating a second set of sines.
-          float phaseA = dot(vUv, uRippleA) * 38.0 + uTime * uFlowSpeed * 1.62;
-          float phaseC = dot(vUv, uRippleC) * 23.0 + uTime * uFlowSpeed * 0.63;
+          // Three travelling wave trains in world space. UV-scaled phases
+          // forced every surface to carry the same number of waves, stretching
+          // broad white bands across long canals and compressing them on small
+          // ponds. World-space wavelengths stay physically consistent and
+          // continue seamlessly between neighbouring water meshes.
+          vec2 waterCoord = vWorldPosition.xz;
+          float phaseA = dot(waterCoord, uRippleA) * 2.05 + uTime * uFlowSpeed * 1.62;
+          float phaseC = dot(waterCoord, uRippleC) * 1.35 + uTime * uFlowSpeed * 0.63;
           float rippleA = sin(phaseA);
           float phaseB =
-            dot(vUv, uRippleB) * 59.0 - uTime * uFlowSpeed * 1.09 + rippleA * 0.72;
+            dot(waterCoord, uRippleB) * 3.10 - uTime * uFlowSpeed * 1.09 + rippleA * 0.48;
           float rippleB = sin(phaseB);
           float rippleC = cos(phaseC);
-          float ripples = rippleA * 0.56 + rippleB * 0.27 + rippleC * 0.11 + vWave * 0.06;
+          vec2 rainTile = fract(vWorldPosition.xz * 0.19) - 0.5;
+          float rainDistance = length(rainTile);
+          float rainRipple =
+            sin(rainDistance * 46.0 - uTime * 2.1) *
+            (1.0 - smoothstep(0.08, 0.5, rainDistance)) *
+            uPrecipitation;
+          float ripples =
+            rippleA * 0.54 +
+            rippleB * 0.26 +
+            rippleC * 0.10 +
+            vWave * 0.06 +
+            rainRipple * 0.08;
 
           // DEPTH IS DISTANCE FROM THE BANK, not a UV ramp. The old
           // 0.48 + vUv.y * 0.16 gradient ran across the mesh regardless of
@@ -1025,10 +1039,12 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
           // centimetre chop that makes the reflection break up. No texture
           // fetch, no second pass - purely ALU, which is the budget we have.
           vec2 slope =
-            cos(phaseA) * 38.0 * 0.0040 * uRippleA
-            + cos(phaseB) * 59.0 * 0.0016 * uRippleB
-            - sin(phaseC) * 23.0 * 0.0030 * uRippleC;
-          vec3 normal = normalize(vWorldNormal + vec3(slope.x, 0.0, slope.y));
+            cos(phaseA) * 2.05 * 0.0180 * uRippleA
+            + cos(phaseB) * 3.10 * 0.0085 * uRippleB
+            - sin(phaseC) * 1.35 * 0.0140 * uRippleC;
+          vec3 normal = normalize(
+            vWorldNormal + vec3(slope.x + rainRipple * 0.018, 0.0, slope.y - rainRipple * 0.018)
+          );
 
           vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
           float fresnel = pow(1.0 - max(dot(normal, viewDirection), 0.0), 4.0);
@@ -1052,8 +1068,8 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
           colour += uSunColour * glitter * uDaylight;
 
           float crestSignal = rippleA * 0.7 + rippleB * 0.22 + rippleC * 0.08;
-          float crest = smoothstep(0.70, 0.98, crestSignal);
-          colour = mix(colour, uReflection, crest * (0.05 + 0.06 * uDaylight));
+          float crest = smoothstep(0.78, 1.0, crestSignal);
+          colour = mix(colour, uReflection, crest * (0.025 + 0.035 * uDaylight));
 
           // Shore foam that breathes with the swell rather than a static rim,
           // with a finer lace line right on the waterline.
@@ -1090,7 +1106,7 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
     // MANUALLY VERSIONED, never derived from time or randomness - see the
     // documented `Date.now()` cache-key bug. Bump this whenever the shader
     // source above changes or a stale cached program will be reused.
-    value.customProgramCacheKey = () => 'millos-unified-water-v6';
+    value.customProgramCacheKey = () => 'millos-unified-water-v8';
     return value;
   }, [crossOnly, deep, flowSpeed, flowX, flowY, opacity, radial, reflection, shallow]);
 
@@ -1134,7 +1150,7 @@ const StillCanalWater: React.FC<{
         <UnifiedWaterSurfaceMaterial
           deep={WATER_COLORS.deep}
           shallow={WATER_COLORS.shallow}
-          reflection="#b9dce3"
+          reflection="#86aeb5"
           flowSpeed={0.12}
           opacity={0.9}
           crossOnly
@@ -2156,8 +2172,14 @@ const Pond: React.FC<{
     <group position={position}>
       {/* Surrounding grass - REMOVED: now handled by TerrainGround system */}
       {/* Stone edge - raised above TerrainGround (y=0.05) */}
+      {/* The two ponds are 21 m and 13 m across and both are read flat-on from
+          the bank, where a 24-gon is 2.7 m of dead-straight stone kerb per
+          facet - the one silhouette here that has nothing else to hide behind.
+          48 halves it. The water disc below carries the same count so the
+          kerb and the waterline stay concentric; both are flat fans, so this
+          is a few dozen vertices for the whole feature. */}
       <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <ringGeometry args={[radius - 0.3, radius + 0.5, 24]} />
+        <ringGeometry args={[radius - 0.3, radius + 0.5, 48]} />
         <meshStandardMaterial
           color="#7d8590"
           roughness={0.85}
@@ -2178,7 +2200,10 @@ const Pond: React.FC<{
         receiveShadow
         renderOrder={RENDER_ORDER.waterSurface}
       >
-        <circleGeometry args={[radius - 0.5, 24]} />
+        {/* 48 to match the stone kerb. The wave displacement in
+            UnifiedWaterSurfaceMaterial only moves rim vertices on a disc fan,
+            so the extra segments buy a smoother waterline as well. */}
+        <circleGeometry args={[radius - 0.5, 48]} />
         <UnifiedWaterSurfaceMaterial
           deep="#183f4b"
           shallow="#4c8990"
@@ -3661,6 +3686,279 @@ const BusStop: React.FC<{
   );
 };
 
+/**
+ * Bolted grain-bin geometry for the two exterior silo landmarks.
+ *
+ * These are the biggest objects on the site - 12 m x 35 m and 10 m x 30 m - and
+ * the only ones visible from every corner of it, and they were a smooth
+ * `CylinderGeometry` drum, a smooth `ConeGeometry` roof and a plain tapered
+ * cylinder for a cap: three primitives that together read as a plastic bottle.
+ * The machine-bank silos in `src/components/machines/CompactMachines.tsx`
+ * already carry a corrugated shell and a rolled-eave bin roof. These are the
+ * same family at five times the size.
+ *
+ * Every profile below was designed and previewed in Blender before it was
+ * ported: the numbers are transcribed from
+ * `scripts/blender/specs/grain-silos-exterior.json`, rendered with
+ * `scripts/blender/machine_part_preview.py` at both the across-the-site
+ * distance (62 m) and first-person walk-up distance (14 m), and from the orbit
+ * camera's 34-degree elevation, which is the only view that shows the roof.
+ *
+ * Each profile keeps the EXACT envelope of the primitive it replaces - the
+ * harness reports 0.00 mm drift on all of them - because these parts are
+ * stacked by hand-tuned offsets: the roof eave overhangs the drum by 0.3 m, the
+ * fill-cap flange lands on the roof peak, the plinth leaves a 0.5 m ledge. Any
+ * drift here turns a fix into a new bug.
+ */
+const SILO_SHEET_INSET = 0.14; // sheet face, inset so the hoops stand proud
+const SILO_SEAM_INSET = 0.17; // lap groove at each course boundary
+const SILO_BASE_SKIRT = 0.55; // anchor flange at the foot of the wall
+const SILO_EAVE_RING = 0.78; // heavier ring the roof lands on
+const SILO_COURSE_TARGET = 1.1; // nominal rolled-sheet course height, metres
+const SILO_RADIAL_SEGMENTS = 48; // 0.79 m facets on the 12 m drum (was 24 at HEAD)
+
+/**
+ * Bin wall: sheet courses, lap seams and stiffener hoops.
+ *
+ * The wall is built from SHEET COURSES, not from fine corrugation. Real bin
+ * corrugation has a ~100 mm pitch; at the 60-100 m these silos are actually
+ * viewed from that is under a pixel and averages straight back to a smooth
+ * cylinder. A 1.08 m sheet course is ~13 px at the same distance, and it is the
+ * feature the eye uses to read a bin's scale, because it already knows how tall
+ * a steel sheet is. That works out at 31 courses on the 35 m silo and 26 on the
+ * 30 m one.
+ *
+ * Three radii, and the envelope is the largest of them:
+ *   `radius`                  stiffener hoops, base skirt, eave ring
+ *   `radius` - 0.14           the sheet face - hoops stand 140 mm proud of it
+ *   `radius` - 0.17           the lap groove at each course boundary
+ * Insetting the wall instead of standing the hoops proud of it is what keeps
+ * max radius exactly `radius`. It also lifts the `CurvedText` brand mark, which
+ * is placed at exactly `radius`, off a wall it used to be coplanar with.
+ *
+ * Every fourth course is a stiffener hoop - except where one would land on the
+ * brand mark at 0.6 * height. That run is left as clear sheet on purpose, the
+ * way a real bin's painted mark is.
+ *
+ * This replaces twelve meshes per silo, not one. The eleven `TorusGeometry`
+ * "corrugation rings" went with it: three.js lays a torus in the XY plane and
+ * they carried no rotation, so they stood INSIDE the drum as vertical hoops and
+ * all that ever escaped the wall was a thin lens at +/-X. The preview harness
+ * counts its own lathe rebuild of the drum at 192 -> 6,000 verts; in three.js
+ * the real figures are 292 for `CylinderGeometry(radius, radius, height, 48)`
+ * and 6,125 for this lathe on the 35 m silo (5,194 on the 30 m one), against
+ * 11 x 225 = 2,475 verts of broken torus deleted alongside.
+ *
+ * Two silos exist and neither carries pointer handlers - the first-person
+ * controller collides against analytic boxes, not scene raycasts - so this
+ * needs no picking proxy the way `raycastSiloShell` does in CompactMachines.
+ * The geometry is cached per (radius, height) at module level so a re-render
+ * never rebuilds it.
+ *
+ * A leaner 1.6 m course variant was built and previewed too (spec entry
+ * `grain_silo_shell_lean`, 1,824 verts cheaper) and rejected: it reads as an
+ * oil drum, and no rolled steel sheet is 1.6 m tall.
+ */
+function createGrainSiloShellGeometry(radius: number, height: number): THREE.LatheGeometry {
+  const face = radius - SILO_SHEET_INSET;
+  const seam = radius - SILO_SEAM_INSET;
+  const wallFrom = SILO_BASE_SKIRT + 0.07;
+  const wallTo = height - SILO_EAVE_RING;
+  const courses = Math.max(6, Math.round((wallTo - wallFrom) / SILO_COURSE_TARGET));
+  const course = (wallTo - wallFrom) / courses;
+  const brandFrom = 0.52 * height;
+  const brandTo = 0.7 * height;
+
+  const profile: THREE.Vector2[] = [
+    new THREE.Vector2(0, 0),
+    new THREE.Vector2(radius, 0), // base skirt - envelope max radius
+    new THREE.Vector2(radius, SILO_BASE_SKIRT),
+    new THREE.Vector2(face, wallFrom),
+  ];
+  for (let i = 0; i < courses; i += 1) {
+    const y = wallFrom + i * course;
+    const hoop = i % 4 === 3 && (y + 0.74 * course < brandFrom || y + 0.3 * course > brandTo);
+    if (hoop) {
+      profile.push(
+        new THREE.Vector2(face, y + 0.05 * course),
+        new THREE.Vector2(face, y + 0.24 * course),
+        new THREE.Vector2(radius, y + 0.3 * course), // hoop, 140 mm proud
+        new THREE.Vector2(radius, y + 0.74 * course),
+        new THREE.Vector2(face, y + 0.8 * course),
+        new THREE.Vector2(face, y + 0.92 * course),
+        new THREE.Vector2(seam, y + course) // lap groove
+      );
+    } else {
+      profile.push(
+        new THREE.Vector2(face, y + 0.05 * course),
+        new THREE.Vector2(face, y + 0.92 * course),
+        new THREE.Vector2(seam, y + course) // lap groove
+      );
+    }
+  }
+  profile.push(
+    new THREE.Vector2(face, wallTo + 0.1),
+    new THREE.Vector2(radius, wallTo + 0.2), // eave ring
+    new THREE.Vector2(radius, height),
+    new THREE.Vector2(0, height)
+  );
+  // The drum mesh sits at [0, height / 2, 0], so the lathe has to be centred.
+  for (const point of profile) point.y -= height / 2;
+
+  return new THREE.LatheGeometry(profile, SILO_RADIAL_SEGMENTS);
+}
+
+/**
+ * Bin roof: rolled eave, drip lip, 24 radial panel seams, peak collar.
+ *
+ * Radial seams are what a bin roof actually shows, because it is built from
+ * overlapping wedge panels - and unlike the 4.7 m machine-bank roof, where
+ * ribs were previewed and rejected as indistinguishable at viewing distance,
+ * this roof is 12.6 m across and the orbit camera looks DOWN on it. The seams
+ * are its main contribution to the scene from the default view.
+ *
+ * `LatheGeometry` cannot modulate radius by angle, so this is a hand-built
+ * surface: `THREE.LatheGeometry`'s exact vertex layout, winding and UV
+ * convention with `rib` folded into the radius. The modulation is faded out
+ * with a sine at both ends of the slope so the eave rim and the peak collar
+ * stay perfectly circular - which is what holds the envelope at radius + 0.3
+ * and lets the fill cap's flange land flush on the peak.
+ *
+ * The seam column is wrapped rather than duplicated so `computeVertexNormals`
+ * does not split normals at phi = 0 and draw a bright line up one panel.
+ *
+ * The preview harness counts 192 -> 1,152 verts against the cone; in three.js
+ * the real figures are 195 for `ConeGeometry(radius + 0.3, radius * 0.8, 48)`
+ * and 1,152 here (2,112 triangles against the cone's 96), once per silo.
+ */
+function createGrainSiloRoofGeometry(radius: number): THREE.BufferGeometry {
+  const SEGMENTS = 96; // two per drum facet, so the eave never reads polygonal
+  const RIBS = 24; // 1.65 m panels on the 12.6 m roof
+  const RIB_DEPTH = 0.16;
+
+  const outer = radius + 0.3; // eave rim - envelope max radius
+  const half = radius * 0.4; // half the cone height - envelope max y
+  // (radius fraction of `outer`, y fraction of `half`)
+  const shape: Array<[number, number]> = [
+    [0.0, -1.0],
+    [1.0, -1.0], // eave rim
+    [0.99, -0.925], // rolled drip lip, curls up and in
+    [0.952, -0.875], // fascia returns onto the slope
+    [0.667, -0.333],
+    [0.317, 0.354],
+    [0.162, 0.658], // knuckle: the pitch breaks into the peak collar
+    [0.095, 0.742],
+    [0.089, 0.812], // collar shoulder
+    [0.089, 0.958],
+    [0.07, 1.0], // collar top chamfer
+    [0.0, 1.0],
+  ];
+  const points = shape.map(([r, y]) => new THREE.Vector2(outer * r, half * y));
+  const ribFrom = -0.925 * half; // drip lip: seams start above it
+  const ribTo = 0.658 * half; // knuckle: seams stop below the collar
+
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  const rows = points.length;
+  for (let i = 0; i < SEGMENTS; i += 1) {
+    const phi = (i / SEGMENTS) * Math.PI * 2;
+    const rib = (1 - Math.cos(RIBS * phi)) / 2;
+    const sin = Math.sin(phi);
+    const cos = Math.cos(phi);
+    for (let j = 0; j < rows; j += 1) {
+      const span = Math.min(Math.max((points[j].y - ribFrom) / (ribTo - ribFrom), 0), 1);
+      const fade = Math.sin(Math.PI * span);
+      const r = Math.max(points[j].x - RIB_DEPTH * rib * fade, 0);
+      positions.push(r * sin, points[j].y, r * cos);
+      uvs.push(i / SEGMENTS, j / (rows - 1));
+    }
+  }
+  for (let i = 0; i < SEGMENTS; i += 1) {
+    const base = i * rows;
+    const next = ((i + 1) % SEGMENTS) * rows;
+    for (let j = 0; j < rows - 1; j += 1) {
+      indices.push(base + j, next + j, base + j + 1);
+      indices.push(next + j + 1, base + j + 1, next + j);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * Roof fill cap: base flange, collar, overhanging rolled lid, lift-eye bead.
+ *
+ * `CylinderGeometry(0.8, 1, 1.5, 24)` was a plain tapered drum sitting on the
+ * roof apex - the one object on the silo with clear sky behind it on every
+ * side, and the least shaped. A real bin's fill cap is a collar with a lid
+ * that overhangs it, and the overhang is what reads: it puts a shadow line
+ * right where the silhouette narrows.
+ *
+ * Authored at world size rather than as a unit envelope, because the component
+ * gives both silos the same 2 m cap - so this is one shared geometry, and it
+ * keeps the replaced envelope exactly (max radius 1.0, y in [-0.75, 0.75]).
+ * 24 segments, unchanged: the part is 2 m across and 39 m up.
+ */
+function createGrainSiloFillCapGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -0.75),
+    new THREE.Vector2(1.0, -0.75), // base flange rim - envelope max radius
+    new THREE.Vector2(1.0, -0.66), // flange edge
+    new THREE.Vector2(0.8, -0.6), // step in to the collar
+    new THREE.Vector2(0.75, -0.52), // collar shoulder
+    new THREE.Vector2(0.75, 0.16), // collar
+    new THREE.Vector2(0.79, 0.2), // lid underside
+    new THREE.Vector2(0.95, 0.26), // lid skirt overhangs the collar
+    new THREE.Vector2(0.94, 0.36), // rolled rim
+    new THREE.Vector2(0.86, 0.44), // rim rolls back onto the lid
+    new THREE.Vector2(0.58, 0.6), // lid dome
+    new THREE.Vector2(0.28, 0.7),
+    new THREE.Vector2(0.12, 0.715), // neck under the lift-eye boss
+    // A lathe cannot make a discrete lug, so this is the ring bead the eye
+    // bolt would be welded into - a bright rim on the apex, not an ear.
+    new THREE.Vector2(0.17, 0.735),
+    new THREE.Vector2(0.09, 0.75), // envelope max y
+    new THREE.Vector2(0.0, 0.75),
+  ];
+  return new THREE.LatheGeometry(profile, 24);
+}
+
+const GRAIN_SILO_FILL_CAP = createGrainSiloFillCapGeometry();
+
+/**
+ * Both silos are authored from `radius`/`height` props rather than from a unit
+ * envelope, so the shell and roof cannot be one shared geometry the way the
+ * cap is - a non-uniform scale would stretch the sheet courses differently on
+ * each silo. Two entries land in each cache instead, built once.
+ */
+const grainSiloShells = new Map<string, THREE.LatheGeometry>();
+const grainSiloRoofs = new Map<number, THREE.BufferGeometry>();
+
+const getGrainSiloShell = (radius: number, height: number): THREE.LatheGeometry => {
+  const key = `${radius}x${height}`;
+  let geometry = grainSiloShells.get(key);
+  if (!geometry) {
+    geometry = createGrainSiloShellGeometry(radius, height);
+    grainSiloShells.set(key, geometry);
+  }
+  return geometry;
+};
+
+const getGrainSiloRoof = (radius: number): THREE.BufferGeometry => {
+  let geometry = grainSiloRoofs.get(radius);
+  if (!geometry) {
+    geometry = createGrainSiloRoofGeometry(radius);
+    grainSiloRoofs.set(radius, geometry);
+  }
+  return geometry;
+};
+
 export const GrainSilo: React.FC<{
   position: [number, number, number];
   radius?: number;
@@ -3668,9 +3966,18 @@ export const GrainSilo: React.FC<{
   color?: string;
 }> = ({ position, radius = 5, height = 30, color = '#94a3b8' }) => (
   <group position={position}>
-    {/* Main cylindrical body */}
-    <mesh position={[0, height / 2, 0]} castShadow receiveShadow>
-      <cylinderGeometry args={[radius, radius, height, 24]} />
+    {/* Bin wall - sheet courses, lap seams and stiffener hoops, cut into one
+        lathe by `createGrainSiloShellGeometry`. This mesh also carries the
+        eleven separate `TorusGeometry` "corrugation rings" that used to stand
+        vertically INSIDE the drum: the hoops are part of the profile now, so
+        they are actually around the wall, and eleven meshes per silo are gone
+        with them. */}
+    <mesh
+      geometry={getGrainSiloShell(radius, height)}
+      position={[0, height / 2, 0]}
+      castShadow
+      receiveShadow
+    >
       {/* PAINTED steel, so dielectric. These metalness values are tuned
           against the sky-derived PMREM on `scene.environment`
           (environmentIntensity 0.30); if that probe is removed or its
@@ -3679,21 +3986,14 @@ export const GrainSilo: React.FC<{
           fitting/volume contrast reads. */}
       <meshStandardMaterial color={color} roughness={0.66} metalness={0.15} />
     </mesh>
-    {/* Corrugated texture rings */}
-    {Array.from({ length: Math.floor(height / 3) }).map((_, i) => (
-      <mesh key={`ring-${i}`} position={[0, 1.5 + i * 3, 0]} castShadow>
-        <torusGeometry args={[radius + 0.05, 0.08, 8, 24]} />
-        <meshStandardMaterial color="#64748b" roughness={0.62} metalness={0.15} />
-      </mesh>
-    ))}
-    {/* Conical roof */}
-    <mesh position={[0, height + radius * 0.4, 0]} castShadow>
-      <coneGeometry args={[radius + 0.3, radius * 0.8, 24]} />
+    {/* Bin roof - rolled eave, drip lip and 24 radial panel seams. The 12.6 m
+        eave keeps exactly the cone's radius + 0.3 overhang. */}
+    <mesh geometry={getGrainSiloRoof(radius)} position={[0, height + radius * 0.4, 0]} castShadow>
       <meshStandardMaterial color="#475569" roughness={0.58} metalness={0.2} />
     </mesh>
-    {/* Roof cap/vent */}
-    <mesh position={[0, height + radius * 0.8, 0]} castShadow>
-      <cylinderGeometry args={[0.8, 1, 1.5, 12]} />
+    {/* Fill cap - collar with an overhanging rolled lid. One shared geometry:
+        the component gives both silos the same 2 m cap. */}
+    <mesh geometry={GRAIN_SILO_FILL_CAP} position={[0, height + radius * 0.8, 0]} castShadow>
       <meshStandardMaterial color="#374151" roughness={0.4} metalness={0.6} />
     </mesh>
     {/* Access ladder */}
@@ -3727,7 +4027,9 @@ export const GrainSilo: React.FC<{
         />
       </mesh>
     </group>
-    {/* Foundation ring */}
+    {/* Foundation ring. A shaped batter was rendered and rejected: this low,
+        grazing-angle part reads as one concrete mass, so the original 24-sided
+        frustum is the more disciplined geometry. */}
     <mesh position={[0, 0.3, 0]} castShadow receiveShadow>
       <cylinderGeometry args={[radius + 0.5, radius + 0.8, 0.6, 24]} />
       <meshStandardMaterial color="#6b7280" roughness={0.9} />
@@ -3943,6 +4245,158 @@ export const LoadingDockCanopy: React.FC<{
   </group>
 );
 
+/**
+ * Torispherical ("dished") pressure-vessel head, normalised to the shell radius.
+ *
+ * A cylinder capped with two hemispheres is a pill, and that is what both tanks
+ * on this site used to be. A real vessel head is not a hemisphere: it is a
+ * shallow spherical crown blended into the shell through a tight knuckle, and
+ * the knuckle is the feature - it puts a shoulder on the silhouette where the
+ * barrel stops being a barrel. These are ASME "2:1 ellipsoidal equivalent"
+ * proportions: crown radius 0.90 D (1.8 R), knuckle radius 0.17 D (0.34 R). The
+ * knuckle sweeps 63.124 degrees off the shell tangent onto the crown, which
+ * makes the head 0.497694 R deep.
+ *
+ * Points are (radius, depth back from the pole), both x the shell radius,
+ * running pole -> flange. Designed and previewed in Blender at the tanks' real
+ * viewing distances - scripts/blender/specs/tanks-exterior.json, rendered with
+ * scripts/blender/machine_part_preview.py. These are those numbers verbatim.
+ *
+ * The flatter ASME flanged-and-dished proportions (crown 1.0 D, knuckle 0.06 D,
+ * depth 0.339 R) were rendered alongside and lost: at 30 m the end just faded
+ * off and the tank read as a drum with lids.
+ */
+const VESSEL_HEAD: ReadonlyArray<readonly [number, number]> = [
+  [0.0, 0.0], // pole
+  [0.210597, 0.012362],
+  [0.418301, 0.049279],
+  [0.62026, 0.110243],
+  [0.813699, 0.194418], // crown/knuckle tangent
+  [0.890385, 0.247649],
+  [0.949705, 0.31973],
+  [0.987185, 0.405227],
+  [1.0, 0.497694], // knuckle meets the straight flange
+];
+
+/**
+ * 24 earned on its own terms, not inherited: the largest barrel is 6 m across
+ * and lies at eye height, so 24 is a 0.78 m chord, and the knuckle needs that
+ * much radial resolution or the shoulder shades as a hexagon rather than a
+ * curve. State the baseline plainly - the last committed barrel was 16 and its
+ * end caps 12, so this is not "unchanged"; 24 is kept because of the chord.
+ *
+ * 24 is also a 15 degree step, the same grid as the saddle cradles below
+ * (12 segments over a half turn), which is why those are 12 and should stay 12.
+ * The propane warning band takes 24 for the same reason and must not go below
+ * 20: it is only 0.02 m proud, so at 12 its flats fall 0.03 m inside a 24-gon
+ * shell's vertices and the stripe gets swallowed.
+ */
+const VESSEL_SEGMENTS = 24;
+/** Weld groove: floor inset, floor half-width, mouth half-width - all x radius. */
+const VESSEL_SEAM_DEPTH = 0.02;
+const VESSEL_SEAM_FLAT = 0.013;
+const VESSEL_SEAM_LIP = 0.02;
+
+/**
+ * A whole pressure vessel - both dished heads, the shell and the two
+ * head-to-shell weld seams - as one lathe.
+ *
+ * Envelope is preserved exactly: max radius `radius`, axis range
+ * +-(length / 2 + radius), the same box the cylinder-plus-two-hemispheres
+ * occupied. That is not free. A dished head tangent to the shell whose depth
+ * equals R is provably the hemisphere (solve Rc - (Rc - rk) sin b = R with
+ * cos b = (R - rk)/(Rc - rk) and Rc = R falls out for every knuckle radius), so
+ * a torispherical head cannot fill the old extent on its own. It does not have
+ * to: real heads have a STRAIGHT FLANGE before the knuckle, and here that
+ * flange is exactly R - depth = 0.502306 R long, which absorbs the difference
+ * and simply reads as more cylinder. The tank stops being a pill and becomes a
+ * bullet - long barrel, quick dish - which is the correct silhouette anyway.
+ *
+ * The flange length falls out so that the weld seams land exactly on
+ * +-length/2, where the old barrel ended.
+ *
+ * The seams are grooves, not proud beads. A bead is what a real weld looks like
+ * but it would push past `radius` and break the envelope; the groove reads as
+ * the same dark ring at distance and its widest point IS the shell radius. A
+ * third seam at mid-shell was tried and cut: at 30 m one central ring read as
+ * two drums bolted together, and halving its depth did not rescue it.
+ */
+function createVesselGeometry(radius: number, length: number): THREE.LatheGeometry {
+  const half = length / 2 + radius;
+  const points: THREE.Vector2[] = [];
+
+  // Bottom head, pole first, so the profile runs strictly bottom-to-top and
+  // LatheGeometry's normals face outward.
+  for (const [r, depth] of VESSEL_HEAD) {
+    points.push(new THREE.Vector2(r * radius, -(half - depth * radius)));
+  }
+  const floor = radius * (1 - VESSEL_SEAM_DEPTH);
+  const flat = VESSEL_SEAM_FLAT * radius;
+  const lip = VESSEL_SEAM_LIP * radius;
+  const seam = (y: number) => {
+    points.push(new THREE.Vector2(radius, y - lip));
+    points.push(new THREE.Vector2(floor, y - flat));
+    points.push(new THREE.Vector2(floor, y + flat));
+    points.push(new THREE.Vector2(radius, y + lip));
+  };
+  seam(-length / 2);
+  seam(length / 2);
+  for (let i = VESSEL_HEAD.length - 1; i >= 0; i -= 1) {
+    const [r, depth] = VESSEL_HEAD[i];
+    points.push(new THREE.Vector2(r * radius, half - depth * radius));
+  }
+
+  return new THREE.LatheGeometry(points, VESSEL_SEGMENTS);
+}
+
+/**
+ * Shared vessel geometry, keyed by size.
+ *
+ * Both tank components take their dimensions as props, so the geometry cannot
+ * be a single module constant - but there are only four distinct sizes on the
+ * whole site (the two 3 x 10 storage tanks share one). Caching collapses what
+ * was fifteen inline `<cylinderGeometry>`/`<sphereGeometry>` instances across
+ * five tanks into four geometries, and folds each tank's three meshes into one.
+ * Neither tank carries pointer handlers, so no picking proxy is needed.
+ */
+const VESSEL_GEOMETRY_CACHE = new Map<string, THREE.LatheGeometry>();
+const VESSEL_WARNING_BAND_CACHE = new Map<number, THREE.LatheGeometry>();
+
+function vesselGeometry(radius: number, length: number): THREE.LatheGeometry {
+  const key = `${radius}x${length}`;
+  let geometry = VESSEL_GEOMETRY_CACHE.get(key);
+  if (!geometry) {
+    geometry = createVesselGeometry(radius, length);
+    VESSEL_GEOMETRY_CACHE.set(key, geometry);
+  }
+  return geometry;
+}
+
+/**
+ * Rolled warning band for vertical vessels. Its lips tuck 4 mm into the shell,
+ * then chamfer out to the same radius + 0.02 envelope as the previous band.
+ * The 24-sided sweep therefore carries an actual pressed profile rather than
+ * being a generic segment-count increase on a cylinder.
+ */
+function vesselWarningBandGeometry(radius: number): THREE.LatheGeometry {
+  let geometry = VESSEL_WARNING_BAND_CACHE.get(radius);
+  if (!geometry) {
+    geometry = new THREE.LatheGeometry(
+      [
+        new THREE.Vector2(radius - 0.004, -0.15),
+        new THREE.Vector2(radius + 0.012, -0.146),
+        new THREE.Vector2(radius + 0.02, -0.132),
+        new THREE.Vector2(radius + 0.02, 0.132),
+        new THREE.Vector2(radius + 0.012, 0.146),
+        new THREE.Vector2(radius - 0.004, 0.15),
+      ],
+      VESSEL_SEGMENTS
+    );
+    VESSEL_WARNING_BAND_CACHE.set(radius, geometry);
+  }
+  return geometry;
+}
+
 // Industrial storage tank - horizontal cylindrical tank with legs
 export const StorageTank: React.FC<{
   assetId?: string;
@@ -3963,8 +4417,6 @@ export const StorageTank: React.FC<{
   accentColor = '#2f6f8f',
   label = 'UTILITY',
 }) => {
-  const bodyMaterial = getTankPaintMaterial(color);
-  const accentMaterial = getTankPaintMaterial(accentColor);
   const centreY = radius + 1.5;
 
   return (
@@ -3974,13 +4426,25 @@ export const StorageTank: React.FC<{
       name={assetId}
       userData={{ assetId, equipmentType: 'utility-tank' }}
     >
-      {/* A single watertight capsule replaces the former overlapping cylinder
-          and hemisphere trio. Those intersections were a strong AO and
-          self-shadowing risk at the exact surfaces that rendered black.
-          Painted steel is dielectric, so the shell uses a low-metalness finish. */}
-      <mesh position={[0, centreY, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-        <capsuleGeometry args={[radius, length, 8, 24]} />
-        <primitive object={bodyMaterial} attach="material" />
+      {/* Dished pressure-vessel heads, straight flanges, and recessed weld
+          seams form one cached watertight geometry. This preserves the
+          operational asset identity and calibrated paint from the campaign
+          pass while replacing the pill-like capsule silhouette. */}
+      <mesh
+        geometry={vesselGeometry(radius, length)}
+        position={[0, centreY, 0]}
+        rotation={[0, 0, Math.PI / 2]}
+        castShadow
+        receiveShadow
+      >
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={0.18}
+          roughness={0.64}
+          metalness={0.03}
+          envMapIntensity={0.72}
+        />
       </mesh>
       {/* Identification bands make the vessel orientation readable even in
           overcast and night lighting without adding a light or emissive hack. */}
@@ -3992,45 +4456,53 @@ export const StorageTank: React.FC<{
           castShadow
         >
           <torusGeometry args={[radius + 0.035, 0.085, 8, 24]} />
-          <primitive object={accentMaterial} attach="material" />
+          <meshStandardMaterial
+            color={accentColor}
+            roughness={0.64}
+            metalness={0.03}
+            envMapIntensity={0.72}
+          />
         </mesh>
       ))}
       {/* Support legs - 4 saddle supports */}
       {[-length / 3, length / 3].map((x, i) => (
         <group key={`legs-${i}`} position={[x, 0, 0]}>
           {/* Left leg */}
-          <mesh position={[0, 0.75, -radius * 0.7]} castShadow>
+          <mesh material={TANK_SUPPORT_MATERIAL} position={[0, 0.75, -radius * 0.7]} castShadow>
             <boxGeometry args={[0.4, 1.5, 0.4]} />
-            <primitive object={TANK_SUPPORT_MATERIAL} attach="material" />
           </mesh>
           {/* Right leg */}
-          <mesh position={[0, 0.75, radius * 0.7]} castShadow>
+          <mesh material={TANK_SUPPORT_MATERIAL} position={[0, 0.75, radius * 0.7]} castShadow>
             <boxGeometry args={[0.4, 1.5, 0.4]} />
-            <primitive object={TANK_SUPPORT_MATERIAL} attach="material" />
           </mesh>
           {/* Cross brace */}
-          <mesh position={[0, 0.4, 0]} castShadow>
+          <mesh material={TANK_SUPPORT_MATERIAL} position={[0, 0.4, 0]} castShadow>
             <boxGeometry args={[0.3, 0.3, radius * 1.4]} />
-            <primitive object={TANK_SUPPORT_MATERIAL} attach="material" />
           </mesh>
           {/* Saddle */}
-          <mesh position={[0, 1.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+          <mesh
+            material={TANK_SUPPORT_MATERIAL}
+            position={[0, 1.5, 0]}
+            rotation={[0, 0, Math.PI / 2]}
+            castShadow
+          >
             <cylinderGeometry
               args={[radius + 0.1, radius + 0.1, 0.6, 12, 1, false, Math.PI, Math.PI]}
             />
-            <primitive object={TANK_SUPPORT_MATERIAL} attach="material" />
           </mesh>
         </group>
       ))}
       <GroundBlob position={[0, 0]} scale={length + 3} scaleZ={radius * 3.4} />
       {/* Pipe fittings on top */}
-      <mesh position={[0, radius * 2 + 1.62, 0]} castShadow>
+      <mesh material={TANK_FITTING_MATERIAL} position={[0, radius * 2 + 1.62, 0]} castShadow>
         <cylinderGeometry args={[0.3, 0.3, 0.8, 8]} />
-        <primitive object={TANK_FITTING_MATERIAL} attach="material" />
       </mesh>
-      <mesh position={[length / 4, radius * 2 + 1.58, 0]} castShadow>
+      <mesh
+        material={TANK_FITTING_MATERIAL}
+        position={[length / 4, radius * 2 + 1.58, 0]}
+        castShadow
+      >
         <cylinderGeometry args={[0.2, 0.2, 0.6, 8]} />
-        <primitive object={TANK_FITTING_MATERIAL} attach="material" />
       </mesh>
       {/* Ladder access */}
       <group position={[0, 0, -radius - 0.2]}>
@@ -4081,11 +4553,23 @@ export const PropaneTank: React.FC<{
   accentColor = '#b83a32',
 }) => (
   <group position={position} name={assetId} userData={{ assetId, equipmentType: 'lpg-vessel' }}>
-    {/* One watertight pressure vessel avoids the self-shadowing seams created
-        by the former cylinder and two intersecting hemispheres. */}
-    <mesh position={[0, (height + radius) / 2 + 0.5, 0]} castShadow>
-      <capsuleGeometry args={[radius, Math.max(0.5, height - radius), 8, 20]} />
-      <primitive object={getTankPaintMaterial(color)} attach="material" />
+    {/* The same cached dished-head vessel family as the horizontal utility
+        tanks. The lower head is deliberately buried while the upper knuckle
+        and weld line remain readable above the containment pad. */}
+    <mesh
+      geometry={vesselGeometry(radius, height)}
+      position={[0, height / 2 + 0.5, 0]}
+      castShadow
+      receiveShadow
+    >
+      <meshStandardMaterial
+        color={color}
+        emissive={color}
+        emissiveIntensity={0.18}
+        roughness={0.64}
+        metalness={0.03}
+        envMapIntensity={0.72}
+      />
     </mesh>
     {/* Support legs - 3 legs */}
     {[0, (Math.PI * 2) / 3, (Math.PI * 4) / 3].map((angle, i) => (
@@ -4112,10 +4596,18 @@ export const PropaneTank: React.FC<{
       <cylinderGeometry args={[0.15, 0.15, 0.1, 12]} />
       <meshStandardMaterial color="#1f2937" roughness={0.5} metalness={0.4} />
     </mesh>
-    {/* Warning stripe band */}
-    <mesh position={[0, height * 0.3 + 0.5, 0]} castShadow>
-      <cylinderGeometry args={[radius + 0.02, radius + 0.02, 0.3, 12]} />
-      <primitive object={getTankPaintMaterial(accentColor)} attach="material" />
+    {/* Rolled warning band, with tucked lips and a chamfered face. */}
+    <mesh
+      geometry={vesselWarningBandGeometry(radius)}
+      position={[0, height * 0.3 + 0.5, 0]}
+      castShadow
+    >
+      <meshStandardMaterial
+        color={accentColor}
+        roughness={0.64}
+        metalness={0.03}
+        envMapIntensity={0.72}
+      />
     </mesh>
   </group>
 );
@@ -5431,7 +5923,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
 
   // Exterior wall positions - these are OUTSIDE the existing factory elements
   // Factory floor extends to about x=±60, z=±80 (for truck yards)
-  // Main building is roughly x=±55, z=±45 where personnel doors are
+  // Main building is roughly x=±55, z=±45 where service egress doors are
   const buildingHalfWidth = 58; // X extent (slightly outside the x=±55 doors)
   const buildingFrontZ = 48; // Front wall Z (behind the z=42 front doors)
   const buildingBackZ = -48; // Back wall Z (behind the z=-45 back doors)
@@ -5573,8 +6065,8 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
             />
           </mesh>
 
-          {/* ========== FRONT PERSONNEL ENTRANCES - Realistic Industrial Style ========== */}
-          {/* Left main entrance at x=-45 - doors positioned 1.5 units in front of wall */}
+          {/* ========== FRONT SERVICE ENTRANCES ========== */}
+          {/* Left service entrance at x=-45, positioned 1.5 units in front of wall */}
           <group position={[-45, 0, buildingFrontZ + 1.5]}>
             {/* Concrete entrance platform/steps */}
             <mesh position={[0, 0.2, 1.5]} castShadow receiveShadow>
@@ -5685,7 +6177,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
             </mesh>
           </group>
 
-          {/* Right staff entrance at x=45 - doors positioned 1.5 units in front of wall */}
+          {/* Right service entrance at x=45, positioned 1.5 units in front of wall */}
           <group position={[45, 0, buildingFrontZ + 1.5]}>
             {/* Concrete entrance platform/steps */}
             <mesh position={[0, 0.2, 1.5]} castShadow receiveShadow>
@@ -6134,9 +6626,9 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
             </Text>
           </group>
 
-          {/* ========== LEFT SIDE WALL (X-) with personnel door ========== */}
+          {/* ========== LEFT SIDE WALL (X-) with service egress ========== */}
           {/* Side walls end INSIDE front/back walls - front/back walls wrap around corners */}
-          {/* Personnel door opening in the wall - West Exit */}
+          {/* Service egress opening in the wall, West Exit */}
           {(() => {
             const sideWallLength = Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2;
             const doorWidth = 3;
@@ -6191,7 +6683,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                     side={THREE.DoubleSide}
                   />
                 </mesh>
-                {/* West Personnel Door - exterior side */}
+                {/* West service egress, exterior side */}
                 <group
                   position={[-buildingHalfWidth - 0.3, 0, doorZ]}
                   rotation={[0, Math.PI / 2, 0]}
@@ -6245,7 +6737,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                     />
                   </mesh>
                 </group>
-                {/* West Personnel Door - interior side */}
+                {/* West service egress, interior side */}
                 <group
                   position={[-buildingHalfWidth + 0.3, 0, doorZ]}
                   rotation={[0, -Math.PI / 2, 0]}
@@ -6302,8 +6794,8 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
             />
           </mesh>
 
-          {/* ========== RIGHT SIDE WALL (X+) with personnel door ========== */}
-          {/* Personnel door opening in the wall - East Exit */}
+          {/* ========== RIGHT SIDE WALL (X+) with service egress ========== */}
+          {/* Service egress opening in the wall, East Exit */}
           {(() => {
             const sideWallLength = Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2;
             const doorWidth = 3;
@@ -6358,7 +6850,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                     side={THREE.DoubleSide}
                   />
                 </mesh>
-                {/* East Personnel Door - exterior side */}
+                {/* East service egress, exterior side */}
                 <group
                   position={[buildingHalfWidth + 0.3, 0, doorZ]}
                   rotation={[0, -Math.PI / 2, 0]}
@@ -6412,7 +6904,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                     />
                   </mesh>
                 </group>
-                {/* East Personnel Door - interior side */}
+                {/* East service egress, interior side */}
                 <group
                   position={[buildingHalfWidth - 0.3, 0, doorZ]}
                   rotation={[0, Math.PI / 2, 0]}
@@ -6832,7 +7324,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
       {/* European-style bus shelter on shipping road, past checkpoint, near farm */}
       <BusStop position={[29, 0, 140]} rotation={-Math.PI / 2} />
 
-      {/* ========== EMPLOYEE PARKING LOT WITH CUTE CARS ========== */}
+      {/* ========== VISITOR PARKING LOT WITH CUTE CARS ========== */}
       {/* Parking lot positioned outside east fence (fence is at x=95) */}
       <ParkingLot position={[120, 0, 50]} rows={2} spotsPerRow={6} rotation={0} />
 

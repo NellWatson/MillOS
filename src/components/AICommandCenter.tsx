@@ -77,14 +77,12 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
     aiDecisions,
     machines: _machines,
     metrics,
-    workerSatisfaction: _workerSatisfaction,
     recordDecisionResponse,
   } = useProductionStore(
     useShallow((state) => ({
       aiDecisions: state.aiDecisions,
       machines: state.machines,
       metrics: state.metrics,
-      workerSatisfaction: state.workerSatisfaction,
       recordDecisionResponse: state.recordDecisionResponse,
     }))
   );
@@ -302,7 +300,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
             {/* Context: Weather & Shift */}
             <div className="mt-2 flex items-center justify-between text-[9px] text-slate-400">
               <span className="capitalize">
-                {weather} | {currentShift} shift
+                {weather} | {currentShift} run window
               </span>
               <span>Eff: {metrics.efficiency.toFixed(0)}%</span>
             </div>

@@ -12,7 +12,7 @@ export function useSafetySimulation() {
   const gameDay = useGameSimulationStore((state) => state.gameDay);
   const gameSpeed = useGameSimulationStore((state) => state.gameSpeed);
   const incrementDaysSafe = useSafetyStore((state) => state.incrementDaysSafe);
-  const recordWorkerEvasion = useSafetyStore((state) => state.recordWorkerEvasion);
+  const recordRouteConflict = useSafetyStore((state) => state.recordRouteConflict);
   const recordNearMiss = useSafetyStore((state) => state.recordNearMiss);
   const addSafetyIncident = useSafetyStore((state) => state.addSafetyIncident);
 
@@ -64,8 +64,8 @@ export function useSafetySimulation() {
           description: getRandomNearMissDescription(),
         });
       } else if (roll < eventChance) {
-        // More common: Worker evasion (~0.7% base chance)
-        recordWorkerEvasion();
+        // More common: mobile-equipment route conflict (~0.7% base chance)
+        recordRouteConflict();
         addSafetyIncident({
           type: 'evasion',
           description: getRandomEvasionDescription(),
@@ -74,32 +74,32 @@ export function useSafetySimulation() {
     }, 30000); // Check every 30 seconds
 
     return () => clearInterval(interval);
-  }, [gameSpeed, recordWorkerEvasion, recordNearMiss, addSafetyIncident]);
+  }, [gameSpeed, recordRouteConflict, recordNearMiss, addSafetyIncident]);
 }
 
 // Random descriptions for variety
 function getRandomNearMissDescription(): string {
   const descriptions = [
-    'Forklift narrowly avoided pedestrian in aisle',
-    'Loose material fell from conveyor - no injuries',
-    'Worker stepped back into moving equipment zone',
-    'Pallet shifted during transport - caught in time',
-    'Spill on floor created slip hazard - quickly cleaned',
-    'Machine guard briefly disengaged during operation',
-    'Worker reached into active conveyor path',
-    'Heavy load shifted during crane operation',
+    'Forklift controller stopped before a blocked aisle',
+    'Loose material triggered conveyor containment isolation',
+    'Service rover entered a protected machine envelope',
+    'Pallet shift was contained by load-stability control',
+    'Floor spill triggered an automatic route closure',
+    'Machine guard interlock opened during operation',
+    'Conveyor clearance sensor detected an unexpected obstruction',
+    'Crane load monitor detected excessive lateral movement',
   ];
   return descriptions[Math.floor(Math.random() * descriptions.length)];
 }
 
 function getRandomEvasionDescription(): string {
   const descriptions = [
-    'Worker moved aside for approaching forklift',
-    'Pedestrian yielded to material transport',
-    'Team member stepped back from loading zone',
-    'Worker paused to let conveyor clear',
-    'Staff moved away from active equipment',
-    'Employee cleared packer output area',
+    'Forklift yielded to an approaching service rover',
+    'Material tug yielded at a shared route merge',
+    'Service rover cleared the loading-zone envelope',
+    'Forklift paused until the conveyor crossing cleared',
+    'Mobile equipment rerouted around an active machine',
+    'Pallet mover cleared the packer output area',
   ];
   return descriptions[Math.floor(Math.random() * descriptions.length)];
 }

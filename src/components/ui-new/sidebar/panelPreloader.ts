@@ -10,23 +10,6 @@ const panelImports = {
   // High priority - commonly used panels, preload first
   ai: () => import('../../AICommandCenter'),
   scada: () => import('../../SCADAPanel'),
-  worker: () => import('../../WorkerDetailPanel'),
-
-  // Medium priority - BAS panels
-  stability: () => import('../widgets/StabilityMonitor'),
-  timeline: () => import('../widgets/BASTimeline'),
-  vcp: () => import('../widgets/VCPStatusPanel'),
-  flourishing: () => import('../widgets/FlourishingDashboard'),
-  engagement: () => import('../widgets/EngagementSignaturePanel'),
-
-  // Lower priority - less frequently accessed
-  scenario: () => import('../widgets/ScenarioPlayground'),
-  ownership: () => import('../widgets/OwnershipPanel'),
-  voting: () => import('../widgets/VotingPanel'),
-  federation: () => import('../widgets/FederationPanel'),
-  aiWelfare: () => import('../widgets/AIWelfarePanel'),
-  socialMission: () => import('../widgets/SocialMissionPanel'),
-  education: () => import('../widgets/BASEducation'),
 };
 
 type PanelKey = keyof typeof panelImports;
@@ -112,13 +95,6 @@ export const preloadPanelsForMode = (mode: string): void => {
       break;
     case 'scada':
       preloadPanel('scada');
-      break;
-    case 'management':
-      // BAS mode uses many panels - preload the most important ones
-      preloadPanel('stability');
-      preloadPanel('timeline');
-      preloadPanel('vcp');
-      preloadPanel('flourishing');
       break;
     default:
       break;

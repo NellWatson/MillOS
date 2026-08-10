@@ -231,14 +231,14 @@ export function resolveCameraCollision(
       axis: 0 as const,
       boundary: factoryBounds.maxX,
       span: [factoryBounds.minZ, factoryBounds.maxZ] as const,
-      portal: SITE_LAYOUT.portals.eastPersonnel,
+      portal: SITE_LAYOUT.portals.eastService,
     },
     {
       id: 'west-wall',
       axis: 0 as const,
       boundary: factoryBounds.minX,
       span: [factoryBounds.minZ, factoryBounds.maxZ] as const,
-      portal: SITE_LAYOUT.portals.westPersonnel,
+      portal: SITE_LAYOUT.portals.westService,
     },
   ];
 

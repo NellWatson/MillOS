@@ -42,25 +42,25 @@ export const SafetyConfigPanel: React.FC = () => {
             exit={{ opacity: 0, height: 0 }}
             className="space-y-3 pt-2 overflow-hidden"
           >
-            {/* Worker Detection Radius */}
+            {/* Mobile-equipment detection radius */}
             <div>
               <div className="flex justify-between text-xs mb-1">
                 <span className={theme === 'light' ? 'text-slate-500' : 'text-slate-400'}>
-                  Worker Detection
+                  Vehicle Detection
                 </span>
                 <span className="text-green-500 font-mono font-bold">
-                  {safetyConfig.workerDetectionRadius.toFixed(1)}m
+                  {safetyConfig.vehicleDetectionRadius.toFixed(1)}m
                 </span>
               </div>
               <input
                 type="range"
-                aria-label="Worker detection radius (meters)"
+                aria-label="Vehicle detection radius (meters)"
                 min="1"
                 max="5"
                 step="0.5"
-                value={safetyConfig.workerDetectionRadius}
+                value={safetyConfig.vehicleDetectionRadius}
                 onChange={(e) =>
-                  setSafetyConfig({ workerDetectionRadius: parseFloat(e.target.value) })
+                  setSafetyConfig({ vehicleDetectionRadius: parseFloat(e.target.value) })
                 }
                 className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-green-500 ${
                   theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'
@@ -151,7 +151,8 @@ export const SafetyConfigPanel: React.FC = () => {
               }`}
             >
               <p>
-                <span className="text-green-500">Worker Detection:</span> How close workers can be
+                <span className="text-green-500">Vehicle Detection:</span> Protected separation
+                between mobile units
               </p>
               <p>
                 <span className="text-blue-500">Forklift Spacing:</span> Min distance between

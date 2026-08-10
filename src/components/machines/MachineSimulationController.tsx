@@ -4,7 +4,6 @@ import { useShallow } from 'zustand/react/shallow';
 import * as THREE from 'three';
 import { MachineData } from '../../types';
 import { useProductionStore } from '../../stores/productionStore';
-import { useWorkerMoodStore } from '../../stores/workerMoodStore';
 
 /**
  * Isolated, deterministic metric simulation. Keeping this in a small module
@@ -23,9 +22,6 @@ export function MachineSimulationController() {
   const lastUpdateRef = useRef(0);
   const frameCountRef = useRef(0);
   const productionSpeed = useProductionStore((state) => state.productionSpeed);
-  const workforceProductivity = useWorkerMoodStore((state) =>
-    state.getWorkforceProductivityMultiplier()
-  );
 
   useFrame((state) => {
     if (scadaLive) return;
@@ -57,7 +53,7 @@ export function MachineSimulationController() {
 
       let targetLoad = machine.metrics.load;
       if (isRunning) {
-        targetLoad = (50 + productionSpeed * 30) * workforceProductivity;
+        targetLoad = 50 + productionSpeed * 30;
       } else if (isIdle) {
         targetLoad = 0;
       }

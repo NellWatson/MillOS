@@ -3,7 +3,6 @@ import { useBreakdownStore } from '../../stores/breakdownStore';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useMaterialFlowStore } from '../../stores/materialFlowStore';
 import { useOperationsCampaignStore } from '../../stores/operationsCampaignStore';
-import { useProductionStore } from '../../stores/productionStore';
 import { useQCLabStore } from '../../stores/qcLabStore';
 import { useTruckScheduleStore } from '../../stores/truckScheduleStore';
 import { useUIStore } from '../../stores/uiStore';
@@ -74,43 +73,12 @@ describe('UnifiedGameTick operations campaign consequences', () => {
     expect(useOperationsCampaignStore.getState().getIncidentEffect().dispatchBlocked).toBe(true);
   });
 
-  it('returns personnel to an explicit idle state after a finite assignment completes', () => {
-    const worker = {
-      id: 'worker-campaign-test',
-      name: 'Campaign Test Worker',
-      gender: 'female' as const,
-      role: 'Quality Control' as const,
-      icon: 'quality' as const,
-      position: [0, 0, 0] as [number, number, number],
-      speed: 1,
-      direction: 1 as const,
-      currentTask: 'Sampling finished flour',
-      targetMachine: 'sifter-b',
-      status: 'working' as const,
-      shiftStart: '06:00',
-      experience: 4,
-      certifications: ['HACCP'],
-      color: '#ffffff',
-      energy: 90,
-      tasksCompleted: 2,
-    };
-    useProductionStore.getState().setWorkers([worker]);
-    useOperationsCampaignStore.getState().resetCampaign();
-    useOperationsCampaignStore.getState().initializeCampaign([worker]);
-    useOperationsCampaignStore.setState((state) => ({
-      assignments: state.assignments.map((assignment) => ({
-        ...assignment,
-        status: 'completed' as const,
-        progress: 100,
-      })),
-    }));
+  it('applies control-link degradation through the same production multiplier path', () => {
+    useOperationsCampaignStore.getState().triggerIncident('control_network_degraded');
 
     unifiedGameTick({ ...context, tickCount: 2 });
 
-    expect(useProductionStore.getState().workers[0]).toMatchObject({
-      status: 'idle',
-      currentTask: 'Awaiting assignment',
-      targetMachine: undefined,
-    });
+    expect(useOperationsCampaignStore.getState().getProductionMultiplier()).toBeLessThan(1);
+    expect(useUIStore.getState().alerts.at(-1)?.title).toBe('Control network degraded');
   });
 });

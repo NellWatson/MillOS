@@ -6,7 +6,6 @@ export const CONTINUOUS_WORLD_LAYER_IDS = [
   'world-factory-process',
   'world-factory-infrastructure',
   'world-conveyors',
-  'world-personnel',
   'world-forklifts',
   'world-logistics',
   'world-terrain',

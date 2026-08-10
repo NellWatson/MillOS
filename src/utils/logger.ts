@@ -183,15 +183,6 @@ const aiLogger = new Logger({
 });
 
 /**
- * Worker subsystem logger
- */
-const workerLogger = new Logger({
-  prefix: 'Worker',
-  level: isDevelopment ? 'debug' : 'info',
-  enabled: true,
-});
-
-/**
  * Store subsystem logger
  */
 const storeLogger = new Logger({
@@ -206,15 +197,6 @@ const storeLogger = new Logger({
 const perfLogger = new Logger({
   prefix: 'Perf',
   level: isDevelopment ? 'debug' : 'warn',
-  enabled: true,
-});
-
-/**
- * Multiplayer subsystem logger for WebRTC/PeerJS
- */
-const multiplayerLogger = new Logger({
-  prefix: 'Multiplayer',
-  level: isDevelopment ? 'debug' : 'info',
   enabled: true,
 });
 
@@ -234,10 +216,8 @@ export const logger = {
   scada: scadaLogger,
   audio: audioLogger,
   ai: aiLogger,
-  worker: workerLogger,
   store: storeLogger,
   perf: perfLogger,
-  multiplayer: multiplayerLogger,
 };
 
 /**

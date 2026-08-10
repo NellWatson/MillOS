@@ -60,12 +60,12 @@ describe('parseRuntimeMode', () => {
     expect(parseRuntimeMode('?benchmark=true&scene=yard').benchmarkScene).toBe('yard');
     expect(parseRuntimeMode('?benchmark=true&scene=water').benchmarkScene).toBe('water');
     expect(parseRuntimeMode('?benchmark=true&scene=forklift').benchmarkScene).toBe('forklift');
-    expect(parseRuntimeMode('?benchmark=true&scene=personnel').benchmarkScene).toBe('personnel');
-    expect(parseRuntimeMode('?benchmark=true&scene=personnel-close').benchmarkScene).toBe(
-      'personnel-close'
+    expect(parseRuntimeMode('?benchmark=true&scene=process-floor').benchmarkScene).toBe(
+      'process-floor'
     );
-    expect(parseRuntimeMode('?benchmark=true&scene=personnel-feminine').benchmarkScene).toBe(
-      'personnel-feminine'
+    expect(parseRuntimeMode('?benchmark=true&scene=tank-farm').benchmarkScene).toBe('tank-farm');
+    expect(parseRuntimeMode('?benchmark=true&scene=logistics-close').benchmarkScene).toBe(
+      'logistics-close'
     );
     expect(parseRuntimeMode('?benchmark=true&scene=village').benchmarkScene).toBe('village');
     expect(parseRuntimeMode('?benchmark=true&scene=farm').benchmarkScene).toBe('farm');

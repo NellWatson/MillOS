@@ -39,9 +39,14 @@ describe('resolveBenchmarkCamera', () => {
     expect(resolveBenchmarkCamera('overview', 12, 'clear')).toEqual(SITE_LAYOUT.cameras.overview);
   });
 
-  it('uses a portrait field of view for close personnel evidence', () => {
-    expect(resolveBenchmarkCamera('personnel-close', 12, 'clear').fov).toBe(42);
-    expect(resolveBenchmarkCamera('personnel-feminine', 12, 'clear').fov).toBe(42);
+  it('preserves authored uncrewed process, tank, and logistics cameras', () => {
+    expect(resolveBenchmarkCamera('process-floor', 12, 'clear')).toEqual(
+      SITE_LAYOUT.cameras.processFloor
+    );
+    expect(resolveBenchmarkCamera('tank-farm', 12, 'clear')).toEqual(SITE_LAYOUT.cameras.tankFarm);
+    expect(resolveBenchmarkCamera('logistics-close', 12, 'clear')).toEqual(
+      SITE_LAYOUT.cameras.logisticsClose
+    );
   });
 
   it('aims sun and moon evidence cameras along the matching celestial direction', () => {
@@ -62,19 +67,37 @@ describe('readRuntimeMotionTelemetry', () => {
     expect(
       readRuntimeMotionTelemetry({
         speed: 2.75,
+        acceleration: -0.625,
         steeringAngle: -0.125,
+        innerSteeringAngle: -0.15,
+        outerSteeringAngle: -0.1,
         wheelRotation: 12.34567,
+        wheelTravel: 9.75,
+        routeDistance: 4.25,
         forkHeight: Number.NaN,
         trailerAngle: 'invalid',
         cargo: 'pallet',
+        loadPhase: 'carrying',
+        stopReason: 'none',
+        active: true,
+        dockLocked: false,
         stopped: false,
         unrelated: 99,
       })
     ).toEqual({
       speed: 2.75,
+      acceleration: -0.625,
       steeringAngle: -0.125,
+      innerSteeringAngle: -0.15,
+      outerSteeringAngle: -0.1,
       wheelRotation: 12.3457,
+      wheelTravel: 9.75,
+      routeDistance: 4.25,
       cargo: 'pallet',
+      loadPhase: 'carrying',
+      stopReason: 'none',
+      active: true,
+      dockLocked: false,
       stopped: false,
     });
   });

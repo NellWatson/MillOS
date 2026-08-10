@@ -6,7 +6,6 @@
  */
 
 import * as THREE from 'three';
-import type { SkillLevel } from '@/src/types';
 
 /**
  * Type guard to check if a material is MeshStandardMaterial
@@ -48,26 +47,6 @@ export function assertFloat32Array(arr: unknown): asserts arr is Float32Array {
   if (!(arr instanceof Float32Array)) {
     throw new Error('Expected Float32Array');
   }
-}
-
-/**
- * Safely converts a number to a valid SkillLevel (1-5)
- * Clamps the value to the valid range and ensures type safety
- * @param value - The numeric value to convert
- * @returns A valid SkillLevel (1, 2, 3, 4, or 5)
- */
-export function toSkillLevel(value: number): SkillLevel {
-  const clamped = Math.max(1, Math.min(5, Math.floor(value)));
-  return clamped as SkillLevel;
-}
-
-/**
- * Type guard to check if a value is a valid SkillLevel
- * @param value - The value to check
- * @returns True if the value is a valid SkillLevel
- */
-export function isSkillLevel(value: unknown): value is SkillLevel {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 5;
 }
 
 /**

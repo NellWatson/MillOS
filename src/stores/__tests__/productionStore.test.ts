@@ -32,8 +32,6 @@ describe('ProductionStore - AI Decision Management', () => {
         heatMapIndex: new Map(),
       },
       machines: [],
-      workers: [],
-      selectedWorker: null,
       selectedMachine: null,
     });
     // Reset announcements store (productionStore delegates to this)
@@ -239,7 +237,7 @@ describe('ProductionStore - AI Decision Management', () => {
       expect(decisionsAfter).toEqual(decisionsBefore);
     });
 
-    it('records operator disposition separately from lifecycle status', () => {
+    it('records control disposition separately from lifecycle status', () => {
       const { recordDecisionResponse } = useProductionStore.getState();
 
       recordDecisionResponse('decision-to-update', 'deferred', {

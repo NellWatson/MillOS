@@ -16,14 +16,12 @@ import {
   CheckCircle,
   Clock,
   TrendingUp,
-  UserCheck,
   Play,
   ClipboardCheck,
   RotateCcw,
 } from 'lucide-react';
 import { useBreakdownStore, type PredictiveAlert } from '../../stores/breakdownStore';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
-import { useProductionStore } from '../../stores/productionStore';
 
 // Parts display with low inventory warning
 const PartsInventorySection: React.FC = () => {
@@ -171,17 +169,10 @@ const ActiveBreakdownsSection: React.FC = () => {
   const activeBreakdowns = useBreakdownStore((state) => state.activeBreakdowns);
   const workOrders = useBreakdownStore((state) => state.workOrders);
   const partsInventory = useBreakdownStore((state) => state.partsInventory);
-  const assignRepairWorker = useBreakdownStore((state) => state.assignRepairWorker);
   const startRepair = useBreakdownStore((state) => state.startRepair);
   const updateRepairProgress = useBreakdownStore((state) => state.updateRepairProgress);
   const verifyRepair = useBreakdownStore((state) => state.verifyRepair);
   const requestMachineRestart = useBreakdownStore((state) => state.requestMachineRestart);
-  const workers = useProductionStore((state) => state.workers);
-
-  const getTechnician = () =>
-    workers.find((worker) => worker.role === 'Maintenance' && worker.status !== 'responding') ??
-    workers.find((worker) => worker.role === 'Engineer' && worker.status !== 'responding') ??
-    workers.find((worker) => worker.role === 'Maintenance' || worker.role === 'Engineer');
 
   if (activeBreakdowns.length === 0) {
     return null;
@@ -204,8 +195,6 @@ const ActiveBreakdownsSection: React.FC = () => {
             (part) => partsInventory[part] <= 0
           );
           const phaseLabel = workOrder.phase.replaceAll('_', ' ');
-          const technician = getTechnician();
-
           return (
             <div key={breakdown.id} className="bg-slate-800/50 rounded p-3">
               <div className="flex items-start justify-between gap-2">
@@ -220,12 +209,7 @@ const ActiveBreakdownsSection: React.FC = () => {
               <div className="text-xs text-slate-400 mt-2">{breakdown.description}</div>
               <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                 <div className="text-slate-400">
-                  Technician:{' '}
-                  <span
-                    className={workOrder.assignedWorkerName ? 'text-amber-300' : 'text-red-300'}
-                  >
-                    {workOrder.assignedWorkerName ?? 'unassigned'}
-                  </span>
+                  Service: <span className="text-amber-300">Autonomous service unit</span>
                 </div>
                 <div className="text-right text-slate-400">
                   Downtime:{' '}
@@ -255,33 +239,17 @@ const ActiveBreakdownsSection: React.FC = () => {
                 </div>
               )}
               <div className="mt-3 flex flex-wrap gap-2">
-                {!workOrder.assignedWorkerId && (
+                {(workOrder.phase === 'diagnosed' || workOrder.phase === 'awaiting_parts') && (
                   <button
                     type="button"
-                    disabled={!technician}
-                    onClick={() => {
-                      if (technician) {
-                        assignRepairWorker(breakdown.id, technician.id, technician.name);
-                      }
-                    }}
-                    className="inline-flex min-h-11 items-center gap-2 rounded bg-blue-800 px-3 text-xs font-semibold text-white hover:bg-blue-700 disabled:bg-slate-600 disabled:text-white/90"
+                    disabled={unavailableParts.length > 0}
+                    onClick={() => startRepair(breakdown.id)}
+                    className="inline-flex min-h-11 items-center gap-2 rounded bg-amber-800 px-3 text-xs font-semibold text-white hover:bg-amber-700 disabled:bg-slate-600 disabled:text-white/90"
                   >
-                    <UserCheck className="h-4 w-4" aria-hidden="true" />
-                    Assign technician
+                    <Play className="h-4 w-4" aria-hidden="true" />
+                    Dispatch service unit
                   </button>
                 )}
-                {(workOrder.phase === 'diagnosed' || workOrder.phase === 'awaiting_parts') &&
-                  workOrder.assignedWorkerId && (
-                    <button
-                      type="button"
-                      disabled={unavailableParts.length > 0}
-                      onClick={() => startRepair(breakdown.id)}
-                      className="inline-flex min-h-11 items-center gap-2 rounded bg-amber-800 px-3 text-xs font-semibold text-white hover:bg-amber-700 disabled:bg-slate-600 disabled:text-white/90"
-                    >
-                      <Play className="h-4 w-4" aria-hidden="true" />
-                      Start repair
-                    </button>
-                  )}
                 {workOrder.phase === 'repairing' && (
                   <button
                     type="button"

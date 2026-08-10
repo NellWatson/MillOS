@@ -24,8 +24,8 @@ export interface QualityTestResult {
   batchId: string | null;
   sourceLotIds: string[];
   testType: QCTestType;
-  operator: string;
-  operatorNote: string;
+  controlSource: string;
+  controlNote: string;
   grade: QCGrade;
   moistureContent: number;
   proteinLevel: number;
@@ -42,7 +42,7 @@ export interface ContaminationAlert {
   timestamp: Date;
   sourceLotIds: string[];
   batchIds: string[];
-  operatorNote: string;
+  controlNote: string;
   resolved: boolean;
   resolution: 'released' | 'recalled' | null;
   resolvedAt: Date | null;
@@ -55,7 +55,7 @@ export interface QualityDispositionRecord {
   batchIds: string[];
   sourceLotIds: string[];
   referenceId: string;
-  operator: string;
+  controlSource: string;
   note: string;
 }
 
@@ -66,7 +66,7 @@ export interface QCLabState {
     batchId: string | null;
     sourceLotIds: string[];
     testType: QCTestType;
-    operator: string;
+    controlSource: string;
     startTime: Date;
     progress: number;
   } | null;
@@ -86,7 +86,7 @@ export interface QCLabStore {
       batchId?: string;
       sourceLotIds?: string[];
       testType?: QCTestType;
-      operator?: string;
+      controlSource?: string;
     }
   ) => void;
   completeQCTest: (
@@ -98,14 +98,14 @@ export interface QCLabStore {
       | 'batchId'
       | 'sourceLotIds'
       | 'testType'
-      | 'operator'
-      | 'operatorNote'
+      | 'controlSource'
+      | 'controlNote'
     > & {
       batchId?: string | null;
       sourceLotIds?: string[];
       testType?: QCTestType;
-      operator?: string;
-      operatorNote?: string;
+      controlSource?: string;
+      controlNote?: string;
     }
   ) => QualityTestResult;
   triggerContaminationAlert: (scope?: {
@@ -113,13 +113,13 @@ export interface QCLabStore {
     severity?: ContaminationAlert['severity'];
     sourceLotIds?: string[];
     batchIds?: string[];
-    operator?: string;
-    operatorNote?: string;
+    controlSource?: string;
+    controlNote?: string;
   }) => string;
   resolveContaminationAlert: (
     alertId: string,
     resolution: 'released' | 'recalled',
-    operator?: string,
+    controlSource?: string,
     note?: string
   ) => boolean;
   updateCertificationStatus: (status: QCLabState['certificationStatus']) => void;
@@ -201,7 +201,7 @@ export const useQCLabStore = create<QCLabStore>()(
             batchId: scope?.batchId ?? null,
             sourceLotIds: [...(scope?.sourceLotIds ?? [])],
             testType: scope?.testType ?? 'initial',
-            operator: scope?.operator?.trim() || 'QC operator',
+            controlSource: scope?.controlSource?.trim() || 'Autonomous QC controller',
             startTime: new Date(),
             progress: 0,
           },
@@ -214,8 +214,9 @@ export const useQCLabStore = create<QCLabStore>()(
       const batchId = result.batchId ?? current?.batchId ?? null;
       const sourceLotIds = [...new Set(result.sourceLotIds ?? current?.sourceLotIds ?? [])];
       const testType = result.testType ?? current?.testType ?? 'initial';
-      const operator = result.operator?.trim() || current?.operator || 'QC operator';
-      const operatorNote = result.operatorNote?.trim() || '';
+      const controlSource =
+        result.controlSource?.trim() || current?.controlSource || 'Autonomous QC controller';
+      const controlNote = result.controlNote?.trim() || '';
       const disposition: QualityTestResult['disposition'] =
         result.passed && result.grade !== 'FAIL' ? 'released' : 'hold';
       const fullResult: QualityTestResult = {
@@ -225,8 +226,8 @@ export const useQCLabStore = create<QCLabStore>()(
         batchId,
         sourceLotIds,
         testType,
-        operator,
-        operatorNote,
+        controlSource,
+        controlNote,
         disposition,
       };
       const affectedBatchIds = batchId ? [batchId] : [];
@@ -246,9 +247,9 @@ export const useQCLabStore = create<QCLabStore>()(
               batchIds: affectedBatchIds,
               sourceLotIds,
               referenceId: fullResult.id,
-              operator,
+              controlSource,
               note:
-                operatorNote ||
+                controlNote ||
                 `${result.grade} result ${disposition === 'released' ? 'released' : 'held'} tested material`,
             },
           ],
@@ -287,8 +288,8 @@ export const useQCLabStore = create<QCLabStore>()(
               .filter((batch) => batch.availableKg > 0 && batch.disposition !== 'shipped')
               .map((batch) => batch.id);
       const alertId = `contamination-${String(sequence).padStart(5, '0')}`;
-      const operator = scope?.operator?.trim() || 'QC operator';
-      const note = scope?.operatorNote?.trim() || 'Foreign material investigation opened';
+      const controlSource = scope?.controlSource?.trim() || 'Autonomous QC controller';
+      const note = scope?.controlNote?.trim() || 'Foreign material investigation opened';
 
       const lotAffectedBatches = sourceLotIds.length
         ? flow.setLotDisposition(sourceLotIds, 'hold', `${alertId}: ${note}`)
@@ -308,7 +309,7 @@ export const useQCLabStore = create<QCLabStore>()(
               timestamp: new Date(),
               sourceLotIds,
               batchIds: allBatchIds,
-              operatorNote: note,
+              controlNote: note,
               resolved: false,
               resolution: null,
               resolvedAt: null,
@@ -323,7 +324,7 @@ export const useQCLabStore = create<QCLabStore>()(
               batchIds: allBatchIds,
               sourceLotIds,
               referenceId: alertId,
-              operator,
+              controlSource,
               note,
             },
           ],
@@ -333,7 +334,12 @@ export const useQCLabStore = create<QCLabStore>()(
       return alertId;
     },
 
-    resolveContaminationAlert: (alertId, resolution, operator = 'QC supervisor', note = '') => {
+    resolveContaminationAlert: (
+      alertId,
+      resolution,
+      controlSource = 'Autonomous QC controller',
+      note = ''
+    ) => {
       const alert = get().qcLab.contaminationAlerts.find((candidate) => candidate.id === alertId);
       if (!alert || alert.resolved) return false;
       const sequence = get().qcLab.auditSequence + 1;
@@ -367,7 +373,7 @@ export const useQCLabStore = create<QCLabStore>()(
               batchIds,
               sourceLotIds: alert.sourceLotIds,
               referenceId: alertId,
-              operator: operator.trim() || 'QC supervisor',
+              controlSource: controlSource.trim() || 'Autonomous QC controller',
               note: reason,
             },
           ],

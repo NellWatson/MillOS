@@ -19,8 +19,6 @@ import {
   isObject,
   isRecord,
   hasProperty,
-  isSkillLevel,
-  toSkillLevel,
   toNumber,
   toString,
   isVector3,
@@ -213,54 +211,6 @@ describe('Type Guards', () => {
     it('should return false for non-objects', () => {
       expect(hasProperty(null, 'key')).toBe(false);
       expect(hasProperty('string', 'length')).toBe(false); // strings are not objects
-    });
-  });
-});
-
-describe('Skill Level Guards', () => {
-  describe('isSkillLevel', () => {
-    it('should return true for valid skill levels 1-5', () => {
-      expect(isSkillLevel(1)).toBe(true);
-      expect(isSkillLevel(2)).toBe(true);
-      expect(isSkillLevel(3)).toBe(true);
-      expect(isSkillLevel(4)).toBe(true);
-      expect(isSkillLevel(5)).toBe(true);
-    });
-
-    it('should return false for invalid numbers', () => {
-      expect(isSkillLevel(0)).toBe(false);
-      expect(isSkillLevel(6)).toBe(false);
-      expect(isSkillLevel(-1)).toBe(false);
-      expect(isSkillLevel(3.5)).toBe(false); // Must be integer
-    });
-
-    it('should return false for non-numbers', () => {
-      expect(isSkillLevel('3')).toBe(false);
-      expect(isSkillLevel(null)).toBe(false);
-      expect(isSkillLevel(undefined)).toBe(false);
-    });
-  });
-
-  describe('toSkillLevel', () => {
-    it('should return valid skill levels unchanged', () => {
-      expect(toSkillLevel(1)).toBe(1);
-      expect(toSkillLevel(3)).toBe(3);
-      expect(toSkillLevel(5)).toBe(5);
-    });
-
-    it('should clamp values below 1 to 1', () => {
-      expect(toSkillLevel(0)).toBe(1);
-      expect(toSkillLevel(-5)).toBe(1);
-    });
-
-    it('should clamp values above 5 to 5', () => {
-      expect(toSkillLevel(6)).toBe(5);
-      expect(toSkillLevel(100)).toBe(5);
-    });
-
-    it('should floor decimal values', () => {
-      expect(toSkillLevel(3.7)).toBe(3);
-      expect(toSkillLevel(2.1)).toBe(2);
     });
   });
 });

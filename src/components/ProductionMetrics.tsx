@@ -379,7 +379,7 @@ export const ProductionMetrics: React.FC = () => {
           </div>
           <div className="bg-slate-900/50 rounded p-1">
             <div className="text-sm font-bold text-emerald-400 font-mono leading-tight">
-              {safetyMetrics.workerEvasions}
+              {safetyMetrics.routeConflicts}
             </div>
             <div className="text-[10px] text-slate-400">evasions</div>
           </div>

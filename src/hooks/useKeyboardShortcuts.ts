@@ -7,7 +7,7 @@ import { useUIStore } from '../stores/uiStore';
 import { useAIConfigStore } from '../stores/aiConfigStore';
 import { audioManager } from '../utils/audioManager';
 import { useCameraStore, CAMERA_PRESETS } from '../components/CameraController';
-import { MachineData, WorkerData } from '../types';
+import { MachineData } from '../types';
 import { EMERGENCY_STOP_ANNOUNCEMENTS } from '../components/GameFeatures';
 
 interface KeyboardShortcutsConfig {
@@ -17,8 +17,6 @@ interface KeyboardShortcutsConfig {
   setShowSCADAPanel: (show: boolean) => void;
   selectedMachine: MachineData | null;
   setSelectedMachine: (machine: MachineData | null) => void;
-  selectedWorker: WorkerData | null;
-  setSelectedWorker: (worker: WorkerData | null) => void;
   productionSpeed: number;
   setProductionSpeed: (speed: number) => void;
   showZones: boolean;
@@ -36,8 +34,6 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
     setShowSCADAPanel,
     selectedMachine,
     setSelectedMachine,
-    selectedWorker,
-    setSelectedWorker,
     productionSpeed,
     setProductionSpeed,
     showZones,
@@ -54,7 +50,6 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
   const showAIPanelRef = useRef(showAIPanel);
   const showSCAPanelRef = useRef(showSCADAPanel);
   const selectedMachineRef = useRef(selectedMachine);
-  const selectedWorkerRef = useRef(selectedWorker);
 
   // Update ALL refs when values change - this prevents event listener recreation
   useEffect(() => {
@@ -64,16 +59,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
     showAIPanelRef.current = showAIPanel;
     showSCAPanelRef.current = showSCADAPanel;
     selectedMachineRef.current = selectedMachine;
-    selectedWorkerRef.current = selectedWorker;
-  }, [
-    productionSpeed,
-    showZones,
-    autoRotate,
-    showAIPanel,
-    showSCADAPanel,
-    selectedMachine,
-    selectedWorker,
-  ]);
+  }, [productionSpeed, showZones, autoRotate, showAIPanel, showSCADAPanel, selectedMachine]);
 
   // Graphics quality shortcuts
   const setGraphicsQuality = useGraphicsStore((state) => state.setGraphicsQuality);
@@ -161,18 +147,12 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
 
       // Close panels on escape (use refs for values that change frequently)
       if (e.key === 'Escape') {
-        if (
-          showAIPanelRef.current ||
-          showSCAPanelRef.current ||
-          selectedMachineRef.current ||
-          selectedWorkerRef.current
-        ) {
+        if (showAIPanelRef.current || showSCAPanelRef.current || selectedMachineRef.current) {
           audioManager.playPanelClose();
         }
         setShowAIPanel(false);
         setShowSCADAPanel(false);
         setSelectedMachine(null);
-        setSelectedWorker(null);
         return;
       }
 
@@ -431,7 +411,6 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
     setShowAIPanel,
     setShowSCADAPanel,
     setSelectedMachine,
-    setSelectedWorker,
     setProductionSpeed,
     setShowZones,
     setAutoRotate,

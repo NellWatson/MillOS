@@ -16,7 +16,6 @@ import { toSimulationMinutes } from '../../simulation/simulationClock';
 import { getRuntimeMode } from '../../runtime/runtimeMode';
 import { createLinearDataTexture } from '../../utils/textureGenerator';
 import { applyVehicleSurface } from '../../utils/vehicleSurface';
-import { SeatedVehicleOperator } from '../models/VehicleOperator';
 import {
   TRUCK_CYCLE_SECONDS,
   applyTruckSafetyHold,
@@ -230,7 +229,7 @@ const CAB_PITCH_CENTRE_Z = 0.4;
  *
  * At 1280 px across a 79-degree horizontal field, one world metre is 1280 /
  * (2 d tan 39.7deg) px, so at 115 m a metre is 6.7 px. The parts gated here are
- * 0.05-0.24 m across (window pillars, mirror glass, the dash, the driver behind
+ * 0.05-0.24 m across (window pillars, mirror glass, and the dash behind
  * 0.55-opacity glazing) - between a third of a pixel and one and a half. The
  * silhouette parts are NOT gated: the cab shell, roof fairing, greenhouse
  * glazing, grille, bumper, exhaust stacks, every lamp, the wheels and the whole
@@ -249,7 +248,6 @@ interface TruckVisualProps {
   readonly wheelRotationRef: React.MutableRefObject<number>;
   readonly company?: string;
   readonly plateNumber?: string;
-  readonly operatorName?: string;
   /**
    * Road-film strength, 0..1. Deliberately a prop: the two trucks share a
    * module-level material table, and identical wear on both reads as a tiling
@@ -482,7 +480,6 @@ export function OptimizedTruckVisual({
   wheelRotationRef,
   company = 'MILL LOGISTICS',
   plateNumber = 'MILL 001',
-  operatorName = 'Driver',
   grime = 0.7,
   loadRatio = 0,
 }: TruckVisualProps) {
@@ -1019,12 +1016,6 @@ export function OptimizedTruckVisual({
             scale={[0.78, 0.24, 0.76]}
             receiveShadow
           />
-          <group position={[-0.48, 1.33, 3.46]} scale={1.28}>
-            <SeatedVehicleOperator
-              name={operatorName}
-              vestColor={colour === '#9a4e35' ? '#e9a23b' : '#e6b83f'}
-            />
-          </group>
         </group>
         <mesh
           geometry={UNIT_BOX}
@@ -1665,7 +1656,6 @@ export function OptimizedTruckBay({ showShipping, showReceiving }: OptimizedTruc
               wheelRotationRef={shippingWheelRotation}
               company="FLOUR EXPRESS"
               plateNumber="FLR 2847"
-              operatorName="Mara"
               loadRatio={outboundLoadRatio}
             />
           </group>
@@ -1686,7 +1676,6 @@ export function OptimizedTruckBay({ showShipping, showReceiving }: OptimizedTruc
               wheelRotationRef={receivingWheelRotation}
               company="GRAIN CO"
               plateNumber="GRN 5921"
-              operatorName="Owen"
             />
           </group>
         </>

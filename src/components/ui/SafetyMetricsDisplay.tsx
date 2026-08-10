@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Activity, AlertTriangle, Users, Shield } from 'lucide-react';
+import { Activity, AlertTriangle, Route, Shield } from 'lucide-react';
 import { useSafetyStore } from '../../stores/safetyStore';
 import { useUIStore } from '../../stores/uiStore';
 
@@ -19,7 +19,7 @@ export const SafetyMetricsDisplay: React.FC = () => {
       setFlashStop(true);
       stopTimeout = setTimeout(() => setFlashStop(false), 500);
     }
-    if (safetyMetrics.workerEvasions > prevMetrics.workerEvasions) {
+    if (safetyMetrics.routeConflicts > prevMetrics.routeConflicts) {
       setFlashEvasion(true);
       evasionTimeout = setTimeout(() => setFlashEvasion(false), 500);
     }
@@ -60,7 +60,7 @@ export const SafetyMetricsDisplay: React.FC = () => {
         </span>
       </div>
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        Safety stops: {safetyMetrics.safetyStops}, Worker evasions: {safetyMetrics.workerEvasions}
+        Safety stops: {safetyMetrics.safetyStops}, route conflicts: {safetyMetrics.routeConflicts}
       </div>
       <div className="grid grid-cols-3 gap-2">
         <div
@@ -82,15 +82,15 @@ export const SafetyMetricsDisplay: React.FC = () => {
           className={`text-center p-1.5 rounded transition-all ${flashEvasion ? 'bg-blue-500/30 scale-105' : cardBg}`}
         >
           <div className="flex items-center justify-center gap-1 mb-0.5">
-            <Users className="w-3 h-3 text-blue-500" />
+            <Route className="w-3 h-3 text-blue-500" />
           </div>
           <div className="text-lg font-bold text-blue-500 font-mono">
-            {safetyMetrics.workerEvasions}
+            {safetyMetrics.routeConflicts}
           </div>
           <div
             className={`text-[8px] uppercase ${theme === 'light' ? 'text-slate-400' : 'text-slate-500'}`}
           >
-            Evasions
+            Conflicts
           </div>
         </div>
         <div className={`text-center p-1.5 rounded ${cardBg}`}>

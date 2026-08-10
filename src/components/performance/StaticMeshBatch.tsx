@@ -48,7 +48,7 @@ export type StaticBatchDiagnostics = {
   materialTypes: Record<string, number>;
 };
 
-const DYNAMIC_NAME_PATTERN = /forklift|shipping-truck|receiving-truck|worker-system/i;
+const DYNAMIC_NAME_PATTERN = /forklift|shipping-truck|receiving-truck/i;
 const MATRIX_EPSILON = 1e-5;
 const MINIMUM_MERGE_MESHES = 4;
 const MERGE_CELL_SIZE_METRES = 80;

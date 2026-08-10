@@ -64,8 +64,8 @@ const defaultAchievements: Achievement[] = [
   // Safety achievements
   {
     id: 'safety-first',
-    name: 'Safety First',
-    description: 'Complete a fire drill with all workers evacuated',
+    name: 'Interlock Proven',
+    description: 'Complete an emergency safety verification',
     category: 'safety',
     icon: 'Shield',
     unlocked: false,
@@ -160,8 +160,8 @@ const defaultAchievements: Achievement[] = [
   // Social achievements
   {
     id: 'team-player',
-    name: 'Team Player',
-    description: 'Have workers help each other 10 times',
+    name: 'Cell Coordination',
+    description: 'Coordinate 10 autonomous unit assists',
     category: 'social',
     icon: 'Users',
     unlocked: false,
@@ -170,8 +170,8 @@ const defaultAchievements: Achievement[] = [
   },
   {
     id: 'happy-workforce',
-    name: 'Happy Workforce',
-    description: 'Achieve 90%+ worker satisfaction',
+    name: 'Stable Autonomy',
+    description: 'Sustain 90% autonomous-system confidence',
     category: 'social',
     icon: 'Smile',
     unlocked: false,
@@ -180,8 +180,8 @@ const defaultAchievements: Achievement[] = [
   },
   {
     id: 'break-time',
-    name: 'Break Time',
-    description: 'Send workers on 50 breaks',
+    name: 'Service Windows',
+    description: 'Complete 50 planned service windows',
     category: 'social',
     icon: 'Coffee',
     unlocked: false,
@@ -190,8 +190,8 @@ const defaultAchievements: Achievement[] = [
   },
   {
     id: 'emergent-cooperation',
-    name: 'Emergent Cooperation',
-    description: 'Witness spontaneous worker cooperation',
+    name: 'Emergent Coordination',
+    description: 'Witness spontaneous cooperation between autonomous subsystems',
     category: 'social',
     icon: 'Lightbulb',
     unlocked: false,
@@ -200,8 +200,8 @@ const defaultAchievements: Achievement[] = [
   },
   {
     id: 'vote-participant',
-    name: 'Vote Participant',
-    description: 'Participate in 5 factory votes',
+    name: 'Decision Review',
+    description: 'Participate in 5 factory decision reviews',
     category: 'social',
     icon: 'Vote',
     unlocked: false,

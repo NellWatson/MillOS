@@ -2,7 +2,7 @@
  * VCLDebugPanel Component
  *
  * Beautiful showcase of the VCP (Value Context Protocol) encoding system.
- * Shows side-by-side comparison of verbose text vs compact emoji encoding.
+ * Shows side-by-side comparison of expanded telemetry vs compact glyph encoding.
  * Demonstrates the 95%+ token savings when communicating factory state to Gemini.
  */
 
@@ -25,20 +25,15 @@ import { useGameSimulationStore, useUIStore } from '../../stores';
 import { encodeFactoryContextVCL } from '../../utils/vclEncoder';
 
 // Example verbose text that VCL replaces
-const VERBOSE_EXAMPLE = `Current Time: 2:30 PM, Afternoon Shift
-Weather: Clear skies, good conditions
-Production Line Status:
+const VERBOSE_EXAMPLE = `Current time: 14:30, autonomous run window B
+Weather: clear
+Production line status:
 - Silos: 5 of 5 running at 65% average load
-- Roller Mills: 6 of 6 operational, 78% avg load
-- Plansifters: 3 of 3 active, 71% load
-- Packers: 3 of 3 running at 82% load
-Workforce: 8 workers on shift
-- 2 Supervisors (both active)
-- 3 Operators (2 working, 1 idle)
-- 2 Technicians (both working)
-- 1 QC Inspector (active)
-Fatigue Level: Moderate (65% into shift)
-Active Alerts: None`;
+- Roller mills: 6 of 6 running at 78% average load
+- Plansifters: 3 of 3 running at 71% average load
+- Packers: 3 of 3 running at 82% average load
+- Control network: online
+Active critical alarms: none`;
 
 export const VCLDebugPanel: React.FC = () => {
   const showVCLDebug = useAIConfigStore((state) => state.showVCLDebug);
@@ -55,37 +50,26 @@ export const VCLDebugPanel: React.FC = () => {
     };
   }, []);
 
-  const workers = useProductionStore((state) => state.workers);
   const machines = useProductionStore((state) => state.machines);
   const alerts = useUIStore((state) => state.alerts);
   const gameTime = useGameSimulationStore((state) => state.gameTime);
   const weather = useGameSimulationStore((state) => state.weather);
   const currentShift = useGameSimulationStore((state) => state.currentShift);
 
-  // Calculate shift progress (0-1 based on 8-hour shift)
-  const shiftProgress = useMemo(() => {
-    const shiftStart: Record<string, number> = { morning: 6, afternoon: 14, night: 22 };
-    const start = shiftStart[currentShift] || 6;
-    const elapsed = (gameTime - start + 24) % 24;
-    return Math.min(1, Math.max(0, elapsed / 8));
-  }, [gameTime, currentShift]);
-
   // Generate VCL encoding
   const vclEncoding = useMemo(() => {
     try {
       return encodeFactoryContextVCL(
         machines,
-        workers,
         currentShift,
         weather,
         gameTime,
-        shiftProgress,
         alerts.map((a) => ({ type: a.type }))
       );
     } catch {
       return 'Error encoding VCL';
     }
-  }, [machines, workers, currentShift, weather, gameTime, shiftProgress, alerts]);
+  }, [machines, currentShift, weather, gameTime, alerts]);
 
   // Calculate savings
   const verboseLength = VERBOSE_EXAMPLE.length;
@@ -321,12 +305,12 @@ export const VCLDebugPanel: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Workers */}
+                  {/* Control and alarms */}
                   <div>
-                    <div className="text-amber-400 font-semibold mb-1">Workers & Fatigue</div>
+                    <div className="text-amber-400 font-semibold mb-1">Control & Alarms</div>
                     <div className="space-y-0.5 text-slate-300">
-                      <div>👑 Supervisor | 🔧 Engineer | 👷 Operator | 🛠️ Tech</div>
-                      <div>😊 Fresh | 😐 Moderate | 😴 Tired | 😵 Exhausted</div>
+                      <div>🧠 Control | ✅ Clear | 🚨 Critical alarm count</div>
+                      <div>WA Morning | WB Afternoon | WC Night</div>
                     </div>
                   </div>
                 </div>
@@ -336,7 +320,7 @@ export const VCLDebugPanel: React.FC = () => {
                   <div className="text-[10px] text-slate-400">
                     <span className="text-cyan-400 font-semibold">Format: </span>
                     <span className="font-mono bg-slate-900/50 px-1.5 py-0.5 rounded">
-                      TIME|SHIFT|WEATHER | ZONE1→ZONE2→ZONE3→ZONE4 | WORKERS FATIGUE
+                      TIME|WINDOW|WEATHER | SILO→MILL→SIFTER→PACKER→CONTROL | ALARMS
                     </span>
                   </div>
                 </div>

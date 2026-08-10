@@ -77,7 +77,6 @@ describe('GraphicsStore', () => {
       expect(graphics.enableDustParticles).toBe(false);
       expect(graphics.dustParticleCount).toBe(0);
       expect(graphics.shadowMapSize).toBe(1024);
-      expect(graphics.workerLodDistance).toBe(15);
       // Low is the only tier without a composer.
       expect(isPostProcessingActive(graphics)).toBe(false);
     });
@@ -141,7 +140,6 @@ describe('GraphicsStore', () => {
       // jump to aoSamples 64 and will not hold p95 <= 25 ms.
       expect(graphics.aoQuality).toBe(AO_QUALITY_LEVELS.length - 1);
       expect(aoQualityLevel(graphics.aoQuality)).toBe('medium');
-      expect(graphics.workerLodDistance).toBe(100);
     });
   });
 
@@ -218,13 +216,6 @@ describe('GraphicsStore', () => {
       expect(useGraphicsStore.getState().graphics.shadowMapSize).toBe(4096);
     });
 
-    it('should set worker LOD distance', () => {
-      const { setGraphicsSetting } = useGraphicsStore.getState();
-
-      setGraphicsSetting('workerLodDistance', 50);
-      expect(useGraphicsStore.getState().graphics.workerLodDistance).toBe(50);
-    });
-
     it('should preserve other settings when changing one', () => {
       const { setGraphicsSetting } = useGraphicsStore.getState();
       const originalQuality = useGraphicsStore.getState().graphics.quality;
@@ -287,9 +278,7 @@ describe('GraphicsStore', () => {
   describe('Performance Debug Settings', () => {
     it('should have all systems enabled by default', () => {
       const { graphics } = useGraphicsStore.getState();
-      expect(graphics.perfDebug.disableWorkerMoods).toBe(false);
       expect(graphics.perfDebug.disableTruckBay).toBe(false);
-      expect(graphics.perfDebug.disableWorkerSystem).toBe(false);
       expect(graphics.perfDebug.disableForkliftSystem).toBe(false);
       expect(graphics.perfDebug.disableConveyorSystem).toBe(false);
       expect(graphics.perfDebug.disableMachines).toBe(false);
@@ -301,11 +290,11 @@ describe('GraphicsStore', () => {
     it('should set individual perf debug setting', () => {
       const { setPerfDebug } = useGraphicsStore.getState();
 
-      setPerfDebug('disableWorkerMoods', true);
-      expect(useGraphicsStore.getState().graphics.perfDebug.disableWorkerMoods).toBe(true);
+      setPerfDebug('disableTruckBay', true);
+      expect(useGraphicsStore.getState().graphics.perfDebug.disableTruckBay).toBe(true);
 
-      setPerfDebug('disableWorkerMoods', false);
-      expect(useGraphicsStore.getState().graphics.perfDebug.disableWorkerMoods).toBe(false);
+      setPerfDebug('disableTruckBay', false);
+      expect(useGraphicsStore.getState().graphics.perfDebug.disableTruckBay).toBe(false);
     });
 
     it('should toggle perf overlay', () => {
@@ -326,7 +315,6 @@ describe('GraphicsStore', () => {
       const { setPerfDebug, resetPerfDebug } = useGraphicsStore.getState();
 
       // Modify some settings
-      setPerfDebug('disableWorkerMoods', true);
       setPerfDebug('disableTruckBay', true);
       setPerfDebug('showPerfOverlay', true);
 
@@ -414,7 +402,6 @@ describe('GraphicsStore', () => {
         'dustParticleCount',
         'shadowMapSize',
         'aoQuality',
-        'workerLodDistance',
         'enableGrainFlow',
         'enableMachineDetail',
       ];
@@ -601,7 +588,6 @@ describe('GraphicsStore', () => {
             enableVignette: false,
             enableDepthOfField: true,
             dustParticleCount: 42,
-            workerLodDistance: 999,
           },
         },
         2
@@ -622,7 +608,6 @@ describe('GraphicsStore', () => {
 
       // Non-pipeline choices the user may have tuned are left alone.
       expect(migrated.graphics.dustParticleCount).toBe(42);
-      expect(migrated.graphics.workerLodDistance).toBe(999);
     });
 
     it('survives sanitisation, which is what actually reaches the store', () => {

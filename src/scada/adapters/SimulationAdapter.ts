@@ -274,7 +274,7 @@ export class SimulationAdapter implements IProtocolAdapter {
       }
     });
     // The adapter's 1 Hz sampler publishes the latest snapshot. Running a
-    // complete 87-tag tick for every material-flow update would move simulation
+    // complete tag tick for every material-flow update would move simulation
     // work onto the render-critical path and oversample historian data.
   }
 

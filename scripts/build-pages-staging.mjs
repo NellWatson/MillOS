@@ -8,8 +8,21 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const publicDirectory = path.join(projectRoot, 'public');
 const distDirectory = path.join(projectRoot, 'dist');
 const packageMetadata = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+const releaseMatrixPath = path.join(projectRoot, 'release-matrix.json');
+const releaseMatrix = JSON.parse(fs.readFileSync(releaseMatrixPath, 'utf8'));
 const [major, minor] = String(packageMetadata.version).split('.');
 const currentVersion = `v${major}.${minor}`;
+if (releaseMatrix.currentVersion !== currentVersion) {
+  throw new Error(
+    `Release matrix current version ${releaseMatrix.currentVersion} does not match package ${currentVersion}.`
+  );
+}
+const releaseByVersion = new Map(
+  releaseMatrix.releases.map((release) => [release.version, release])
+);
+if (releaseByVersion.size !== releaseMatrix.releases.length) {
+  throw new Error('Release matrix contains duplicate versions.');
+}
 
 const readFlagValues = (flag) =>
   process.argv.flatMap((argument, index) =>
@@ -64,34 +77,51 @@ const publicVersionDirectories = fs
       entry.isDirectory() && /^v\d+\.\d+$/.test(entry.name) && entry.name !== currentVersion
   )
   .map((entry) => entry.name);
-const staticArchives = publicVersionDirectories.filter((version) =>
-  fs.existsSync(path.join(publicDirectory, version, 'index.html'))
+const archiveReleases = releaseMatrix.releases.filter(
+  (release) => release.version !== currentVersion
 );
+const staticReleases = archiveReleases.filter((release) => release.type === 'static');
+const sourceBuildReleases = archiveReleases.filter((release) => release.type === 'source-build');
+const staticArchives = staticReleases.map((release) => release.version);
 const archiveBuilds = new Map(
   readFlagValues('--archive-build').map((value) => parseVersionValue(value, '--archive-build'))
 );
-const archiveCommits = new Map(
-  readFlagValues('--archive-source').map((value) => parseVersionValue(value, '--archive-source'))
-);
 
 for (const version of publicVersionDirectories) {
-  if (!staticArchives.includes(version) && !archiveBuilds.has(version)) {
+  const release = releaseByVersion.get(version);
+  if (!release) {
+    throw new Error(`Public version directory is missing from release matrix: ${version}`);
+  }
+  if (
+    release.type === 'static' &&
+    !fs.existsSync(path.join(publicDirectory, version, 'index.html'))
+  ) {
+    throw new Error(`Static release has no runnable index: ${version}`);
+  }
+  if (release.type === 'source-build' && !archiveBuilds.has(version)) {
     throw new Error(
       `${version} contains supplemental assets but no runnable archive. Supply --archive-build ${version}=PATH.`
     );
   }
 }
-for (const version of archiveCommits.keys()) {
-  if (!archiveBuilds.has(version)) {
-    throw new Error(`Archive source supplied without a build: ${version}`);
+for (const release of staticReleases) {
+  if (!fs.existsSync(path.resolve(projectRoot, release.sourcePath, 'index.html'))) {
+    throw new Error(`Static release source is incomplete: ${release.version}`);
+  }
+}
+for (const release of sourceBuildReleases) {
+  if (!archiveBuilds.has(release.version)) {
+    throw new Error(`Source-built release is missing an archive build: ${release.version}`);
+  }
+}
+for (const version of archiveBuilds.keys()) {
+  if (!sourceBuildReleases.some((release) => release.version === version)) {
+    throw new Error(`Archive build is not declared as source-built: ${version}`);
   }
 }
 
 const archiveBuildDirectories = new Map();
 for (const [version, sourceValue] of archiveBuilds) {
-  if (version === currentVersion || staticArchives.includes(version)) {
-    throw new Error(`Duplicate or current release supplied as archive build: ${version}`);
-  }
   const sourceDirectory = path.resolve(projectRoot, sourceValue);
   const sourceIndexPath = path.join(sourceDirectory, 'index.html');
   if (!fs.existsSync(sourceIndexPath)) {
@@ -124,22 +154,28 @@ const copyReleaseBuild = (sourceDirectory, destinationDirectory) => {
 copyReleaseBuild(distDirectory, path.join(outputDirectory, currentVersion));
 
 const archiveSources = new Map();
-const archives = [...staticArchives];
+const archives = archiveReleases.map((release) => release.version);
 
-for (const archive of archives) {
-  fs.cpSync(path.join(publicDirectory, archive), path.join(outputDirectory, archive), {
-    recursive: true,
-    filter: (source) => path.basename(source) !== '.DS_Store',
-  });
-  archiveSources.set(archive, { type: 'static', path: `public/${archive}` });
+for (const release of staticReleases) {
+  fs.cpSync(
+    path.resolve(projectRoot, release.sourcePath),
+    path.join(outputDirectory, release.version),
+    {
+      recursive: true,
+      filter: (source) => path.basename(source) !== '.DS_Store',
+    }
+  );
+  archiveSources.set(release.version, { type: 'static', path: release.sourcePath });
 }
 
 for (const [version, sourceDirectory] of archiveBuildDirectories) {
+  const release = releaseByVersion.get(version);
   copyReleaseBuild(sourceDirectory, path.join(outputDirectory, version));
-  archives.push(version);
   archiveSources.set(version, {
     type: 'source-build',
-    commit: archiveCommits.get(version) ?? null,
+    commit: release.sourceCommit,
+    sourcePackageVersion: release.sourcePackageVersion,
+    identityNote: release.identityNote,
   });
 }
 
@@ -156,6 +192,21 @@ for (const archive of ['v0.10', 'v0.20']) {
   }
 }
 
+const releaseNavigationPath = path.join(outputDirectory, currentVersion, 'release-navigation.js');
+if (!fs.existsSync(releaseNavigationPath)) {
+  throw new Error(`Current build is missing release-navigation.js: ${releaseNavigationPath}`);
+}
+const releaseNavigationTag = `<script defer src="/${currentVersion}/release-navigation.js"></script>`;
+for (const archive of archives) {
+  const archiveIndexPath = path.join(outputDirectory, archive, 'index.html');
+  const archiveIndex = fs.readFileSync(archiveIndexPath, 'utf8');
+  if (archiveIndex.includes(releaseNavigationTag)) continue;
+  const injectedIndex = /<\/body>/i.test(archiveIndex)
+    ? archiveIndex.replace(/<\/body>/i, `  ${releaseNavigationTag}\n</body>`)
+    : `${archiveIndex}\n${releaseNavigationTag}\n`;
+  fs.writeFileSync(archiveIndexPath, injectedIndex);
+}
+
 const rootIndex = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -163,12 +214,12 @@ const rootIndex = `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="refresh" content="0;url=/${currentVersion}/">
   <title>MillOS | 3D Grain Mill Operations Simulator</title>
-  <meta name="description" content="Explore MillOS, a browser-based 3D grain mill operations simulator with simulated workers, deterministic logistics, production metrics, and a simulated SCADA workspace." />
+  <meta name="description" content="Explore MillOS, a browser-based autonomous 3D grain mill operations simulator with deterministic logistics, production metrics, and a simulated SCADA workspace." />
   <link rel="canonical" href="https://www.millos.net/" />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://www.millos.net/" />
   <meta property="og:title" content="MillOS | 3D Grain Mill Operations Simulator" />
-  <meta property="og:description" content="Explore a browser-based grain mill simulator with deterministic logistics, production metrics, and a simulated SCADA workspace." />
+  <meta property="og:description" content="Explore an autonomous browser-based grain mill simulator with deterministic logistics, production metrics, and a simulated SCADA workspace." />
   <meta property="og:image" content="https://www.millos.net/og-image.png" />
   <meta property="og:image:alt" content="MillOS grain mill digital twin interface" />
   <meta property="og:image:width" content="3456" />
@@ -178,7 +229,7 @@ const rootIndex = `<!DOCTYPE html>
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:url" content="https://www.millos.net/" />
   <meta name="twitter:title" content="MillOS | 3D Grain Mill Operations Simulator" />
-  <meta name="twitter:description" content="A browser-based 3D grain mill simulator with simulated workers, deterministic logistics, production metrics, and simulated SCADA." />
+  <meta name="twitter:description" content="An autonomous browser-based 3D grain mill simulator with deterministic logistics, production metrics, and simulated SCADA." />
   <meta name="twitter:image" content="https://www.millos.net/og-image.png" />
   <meta name="twitter:image:alt" content="MillOS grain mill digital twin interface" />
   <meta name="twitter:creator" content="@NellWatson" />
@@ -189,6 +240,7 @@ const rootIndex = `<!DOCTYPE html>
 </html>
 `;
 fs.writeFileSync(path.join(outputDirectory, 'index.html'), rootIndex);
+fs.copyFileSync(releaseMatrixPath, path.join(outputDirectory, 'release-matrix.json'));
 
 for (const file of ['robots.txt', 'sitemap.xml', 'og-image.png']) {
   fs.copyFileSync(path.join(publicDirectory, file), path.join(outputDirectory, file));
@@ -204,7 +256,7 @@ fs.writeFileSync(
   path.join(outputDirectory, 'deployment-manifest.json'),
   `${JSON.stringify(
     {
-      schemaVersion: 1,
+      schemaVersion: 2,
       packageVersion: packageMetadata.version,
       currentVersion,
       buildInfo,
@@ -212,6 +264,13 @@ fs.writeFileSync(
       archiveSources: Object.fromEntries(
         archives.map((version) => [version, archiveSources.get(version)])
       ),
+      releases: releaseMatrix.releases.map((release) => ({
+        ...release,
+        source:
+          release.version === currentVersion
+            ? { type: 'current', buildInfo }
+            : archiveSources.get(release.version),
+      })),
     },
     null,
     2

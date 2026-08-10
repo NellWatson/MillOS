@@ -156,7 +156,7 @@ describe('Strategic Prompt Helpers', () => {
     });
   });
 
-  describe('generateHandoverSummary', () => {
+  describe('generateRunWindowSummary', () => {
     it('should include critical machine info', () => {
       const criticalMachines = ['mill-1', 'silo-3'];
       const warningMachines = ['packer-2'];
@@ -170,15 +170,15 @@ describe('Strategic Prompt Helpers', () => {
       expect(summary).toContain('packer-2');
     });
 
-    it('should include idle worker count', () => {
-      const workers = [
-        { status: 'working' },
+    it('should include idle autonomous-unit count', () => {
+      const mobileUnits = [
+        { status: 'active' },
         { status: 'idle' },
         { status: 'idle' },
-        { status: 'on-break' },
+        { status: 'charging' },
       ];
 
-      const idleCount = workers.filter((w) => w.status === 'idle').length;
+      const idleCount = mobileUnits.filter((unit) => unit.status === 'idle').length;
 
       expect(idleCount).toBe(2);
     });

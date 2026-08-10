@@ -44,8 +44,8 @@ const vendingButtonMaterial = new THREE.MeshStandardMaterial({
   emissiveIntensity: 0.3,
 });
 
-// Personnel door with frame, signage, and push bar - 50% smaller, bottom at floor level
-const PersonnelDoor: React.FC<{
+// Service door with frame, signage, and push bar, bottom at floor level
+const ServiceDoor: React.FC<{
   position: [number, number, number];
   rotation?: number;
   label?: string;
@@ -1164,13 +1164,13 @@ export const FactoryWalls: React.FC<FactoryWallsProps> = () => {
       {/* Manager's Office */}
       {!isLowGraphics && <ManagerOffice position={[-20, 0, 30]} />}
 
-      {/* Personnel doors */}
+      {/* Service egress doors */}
       {!isLowGraphics && (
         <>
-          <PersonnelDoor position={[-45, 0, 42]} rotation={0} label="ENTRANCE" />
-          <PersonnelDoor position={[45, 0, 42]} rotation={0} label="ENTRANCE" />
-          <PersonnelDoor position={[-45, 0, -45]} rotation={Math.PI} label="EXIT" isEmergencyExit />
-          <PersonnelDoor position={[45, 0, -45]} rotation={Math.PI} label="EXIT" isEmergencyExit />
+          <ServiceDoor position={[-45, 0, 42]} rotation={0} label="SERVICE" />
+          <ServiceDoor position={[45, 0, 42]} rotation={0} label="SERVICE" />
+          <ServiceDoor position={[-45, 0, -45]} rotation={Math.PI} label="EGRESS" isEmergencyExit />
+          <ServiceDoor position={[45, 0, -45]} rotation={Math.PI} label="EGRESS" isEmergencyExit />
         </>
       )}
 

@@ -1,0 +1,472 @@
+[
+ {
+  "name": "mill_body",
+  "renderer": "scripts/blender/machine_body_preview.py",
+  "note": "ROUNDED_BOX at [4.8,4.7,3.8] - a 4.8 m roller mill housing. Splayed plinth, parallel roll chamber, a bolted split line at 62% height, a battered feeder deck and a chamfered top deck. three.js counts for the before: 1764 verts / 588 tris.",
+  "scale": [
+   4.8,
+   4.7,
+   3.8
+  ],
+  "distance": 20.0,
+  "before": {
+   "kind": "roundedBox",
+   "args": [
+    1,
+    1,
+    1,
+    3,
+    0.08
+   ]
+  },
+  "after": {
+   "kind": "housing",
+   "corner": 0.032,
+   "arc": 2,
+   "points": [
+    [
+     0.9,
+     0.9,
+     -0.5
+    ],
+    [
+     0.945,
+     0.945,
+     -0.44
+    ],
+    [
+     1.0,
+     1.0,
+     -0.398
+    ],
+    [
+     1.0,
+     1.0,
+     0.2
+    ],
+    [
+     0.962,
+     1.0,
+     0.228
+    ],
+    [
+     0.918,
+     1.0,
+     0.345
+    ],
+    [
+     0.88,
+     1.0,
+     0.462
+    ],
+    [
+     0.792,
+     0.944,
+     0.5
+    ]
+   ]
+  }
+ },
+ {
+  "name": "mill_body_softcorner",
+  "renderer": "scripts/blender/machine_body_preview.py",
+  "note": "Same profile as mill_body, corner 0.045 over 3 arc segments instead of 0.032 over 2. Rendered only to choose the corner treatment - a fillet that reads as a cast radius against one that reads as a folded chamfer.",
+  "scale": [
+   4.8,
+   4.7,
+   3.8
+  ],
+  "distance": 20.0,
+  "before": {
+   "kind": "roundedBox",
+   "args": [
+    1,
+    1,
+    1,
+    3,
+    0.08
+   ]
+  },
+  "after": {
+   "kind": "housing",
+   "corner": 0.045,
+   "arc": 3,
+   "points": [
+    [
+     0.9,
+     0.9,
+     -0.5
+    ],
+    [
+     0.945,
+     0.945,
+     -0.44
+    ],
+    [
+     1.0,
+     1.0,
+     -0.398
+    ],
+    [
+     1.0,
+     1.0,
+     0.2
+    ],
+    [
+     0.962,
+     1.0,
+     0.228
+    ],
+    [
+     0.918,
+     1.0,
+     0.345
+    ],
+    [
+     0.88,
+     1.0,
+     0.462
+    ],
+    [
+     0.792,
+     0.944,
+     0.5
+    ]
+   ]
+  }
+ },
+ {
+  "name": "sifter_body",
+  "renderer": "scripts/blender/machine_body_preview.py",
+  "note": "ROUNDED_BOX at [6.5,3.35,5.65] - a plansifter casing, 6.5 m across. Four sieve-frame courses stepping inward above each tray flange, a chamfered underframe (the casing is suspended and does not touch its platform), and a hood that lands exactly on the 5.6 x 4.8 m lid. sz is pinned at 1.0 up to y 0.400 so every front placard stays flush.",
+  "scale": [
+   6.5,
+   3.35,
+   5.65
+  ],
+  "distance": 24.0,
+  "before": {
+   "kind": "roundedBox",
+   "args": [
+    1,
+    1,
+    1,
+    3,
+    0.08
+   ]
+  },
+  "after": {
+   "kind": "housing",
+   "corner": 0.032,
+   "arc": 2,
+   "points": [
+    [
+     0.88,
+     0.88,
+     -0.5
+    ],
+    [
+     0.958,
+     0.958,
+     -0.44
+    ],
+    [
+     1.0,
+     1.0,
+     -0.405
+    ],
+    [
+     1.0,
+     1.0,
+     -0.33
+    ],
+    [
+     0.984,
+     1.0,
+     -0.31
+    ],
+    [
+     0.984,
+     1.0,
+     -0.095
+    ],
+    [
+     0.966,
+     1.0,
+     -0.075
+    ],
+    [
+     0.966,
+     1.0,
+     0.15
+    ],
+    [
+     0.946,
+     1.0,
+     0.17
+    ],
+    [
+     0.946,
+     1.0,
+     0.4
+    ],
+    [
+     0.8615,
+     0.8496,
+     0.5
+    ]
+   ]
+  }
+ },
+ {
+  "name": "packer_body",
+  "renderer": "scripts/blender/machine_body_preview.py",
+  "note": "ROUNDED_BOX at [3.7,4.75,3.45] - a bagging cabinet. Round 2 set the lower front back but kept it nearly full width, and it read as a second box stacked under the first. Round 3 narrows the lower section in BOTH axes so it reads as the support frame the cabinet oversails - which is also where the sack, the guides and the fill head already live. Plus a plinth splay, a split line and a chamfered hood. No placard in machineDecals.ts sits on this body, so this lower section is free to move.",
+  "scale": [
+   3.7,
+   4.75,
+   3.45
+  ],
+  "distance": 19.0,
+  "before": {
+   "kind": "roundedBox",
+   "args": [
+    1,
+    1,
+    1,
+    3,
+    0.08
+   ]
+  },
+  "after": {
+   "kind": "housing",
+   "corner": 0.032,
+   "arc": 2,
+   "points": [
+    [
+     0.88,
+     0.86,
+     -0.5
+    ],
+    [
+     0.925,
+     0.885,
+     -0.44
+    ],
+    [
+     0.9,
+     0.845,
+     -0.395
+    ],
+    [
+     0.9,
+     0.845,
+     -0.15
+    ],
+    [
+     1.0,
+     1.0,
+     -0.095
+    ],
+    [
+     1.0,
+     1.0,
+     0.3
+    ],
+    [
+     0.976,
+     1.0,
+     0.332
+    ],
+    [
+     0.93,
+     1.0,
+     0.47
+    ],
+    [
+     0.836,
+     0.95,
+     0.5
+    ]
+   ]
+  }
+ },
+ {
+  "renderer": "scripts/blender/machine_body_preview.py",
+  "scale": [
+   4.8,
+   4.7,
+   3.8
+  ],
+  "name": "mill_body_straight",
+  "distance": 20.0,
+  "note": "Critic re-run of the rejected entasis study, half one. The SHIPPED straight-walled profile: sx pinned at 1.0 from the plinth to the split line.",
+  "before": {
+   "kind": "roundedBox",
+   "args": [
+    1,
+    1,
+    1,
+    3,
+    0.08
+   ]
+  },
+  "after": {
+   "kind": "housing",
+   "corner": 0.032,
+   "arc": 2,
+   "points": [
+    [
+     0.9,
+     0.9,
+     -0.5
+    ],
+    [
+     0.945,
+     0.945,
+     -0.44
+    ],
+    [
+     1.0,
+     1.0,
+     -0.398
+    ],
+    [
+     1.0,
+     1.0,
+     0.2
+    ],
+    [
+     0.962,
+     1.0,
+     0.228
+    ],
+    [
+     0.918,
+     1.0,
+     0.345
+    ],
+    [
+     0.88,
+     1.0,
+     0.462
+    ],
+    [
+     0.792,
+     0.944,
+     0.5
+    ]
+   ]
+  }
+ },
+ {
+  "renderer": "scripts/blender/machine_body_preview.py",
+  "scale": [
+   4.8,
+   4.7,
+   3.8
+  ],
+  "name": "mill_body_belly",
+  "distance": 20.0,
+  "note": "Critic re-run, half two. before = the shipped straight wall, after = an entasis belly on the SAME envelope (plinth 0.972, crown 1.0 at y -0.05, 0.994 at the split line). One extra course. If the two frames are indistinguishable at 20 m the rejection stands.",
+  "before": {
+   "kind": "housing",
+   "corner": 0.032,
+   "arc": 2,
+   "points": [
+    [
+     0.9,
+     0.9,
+     -0.5
+    ],
+    [
+     0.945,
+     0.945,
+     -0.44
+    ],
+    [
+     1.0,
+     1.0,
+     -0.398
+    ],
+    [
+     1.0,
+     1.0,
+     0.2
+    ],
+    [
+     0.962,
+     1.0,
+     0.228
+    ],
+    [
+     0.918,
+     1.0,
+     0.345
+    ],
+    [
+     0.88,
+     1.0,
+     0.462
+    ],
+    [
+     0.792,
+     0.944,
+     0.5
+    ]
+   ]
+  },
+  "after": {
+   "kind": "housing",
+   "corner": 0.032,
+   "arc": 2,
+   "points": [
+    [
+     0.9,
+     0.9,
+     -0.5
+    ],
+    [
+     0.945,
+     0.945,
+     -0.44
+    ],
+    [
+     0.972,
+     1.0,
+     -0.398
+    ],
+    [
+     1.0,
+     1.0,
+     -0.05
+    ],
+    [
+     0.994,
+     1.0,
+     0.2
+    ],
+    [
+     0.956,
+     1.0,
+     0.228
+    ],
+    [
+     0.918,
+     1.0,
+     0.345
+    ],
+    [
+     0.88,
+     1.0,
+     0.462
+    ],
+    [
+     0.792,
+     0.944,
+     0.5
+    ]
+   ]
+  }
+ }
+]

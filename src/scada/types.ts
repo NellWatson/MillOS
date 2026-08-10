@@ -60,7 +60,7 @@ export interface TagDefinition {
   // === Identification ===
   /** Unique tag ID using ISA naming: AREA.TAG_TYPE.INSTANCE.ATTRIBUTE */
   id: string;
-  /** Human-readable name */
+  /** Display name */
   name: string;
   /** Full description of what this tag represents */
   description: string;
@@ -148,7 +148,7 @@ export interface TagHistoryPoint {
 export type AlarmState =
   | 'NORMAL' // Value within limits, alarm cleared
   | 'UNACK' // Alarm active, not acknowledged
-  | 'ACKED' // Alarm active, acknowledged by operator
+  | 'ACKED' // Alarm active, acknowledged by the control source
   | 'RTN_UNACK'; // Returned to normal, but not yet acknowledged
 
 /** Alarm priority levels */
@@ -157,7 +157,7 @@ export type AlarmPriority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 /** Alarm type based on threshold exceeded */
 export type AlarmType = 'HIHI' | 'HI' | 'LO' | 'LOLO' | 'BAD_QUALITY' | 'RATE_OF_CHANGE';
 
-/** Operator disposition, kept separate from the process alarm state machine. */
+/** Control disposition, kept separate from the process alarm state machine. */
 export type AlarmDisposition = 'IN_SERVICE' | 'SHELVED' | 'SUPPRESSED' | 'OUT_OF_SERVICE';
 
 /** Active or historical alarm record */
@@ -166,7 +166,7 @@ export interface Alarm {
   id: string;
   /** Tag that generated this alarm */
   tagId: string;
-  /** Human-readable tag name */
+  /** Display tag name */
   tagName: string;
   /** Type of alarm condition */
   type: AlarmType;
@@ -188,13 +188,13 @@ export interface Alarm {
   unit?: string;
   /** Source data quality at the latest occurrence */
   quality?: Quality;
-  /** Literal condition shown to operators */
+  /** Literal condition shown in the control workspace */
   condition?: string;
-  /** Current operator disposition */
+  /** Current control disposition */
   disposition?: AlarmDisposition;
-  /** Operator who acknowledged (if applicable) */
+  /** Control source that acknowledged, if applicable */
   acknowledgedBy?: string;
-  /** Optional operator context entered during acknowledgement */
+  /** Optional control context entered during acknowledgement */
   acknowledgementNote?: string;
   /** When the alarm was acknowledged */
   acknowledgedAt?: number;
@@ -407,7 +407,7 @@ export interface AlarmHistoryRecord {
   acknowledgedAt?: number;
   /** When alarm cleared */
   clearedAt?: number;
-  /** Operator who acknowledged */
+  /** Control source that acknowledged */
   acknowledgedBy?: string;
 }
 

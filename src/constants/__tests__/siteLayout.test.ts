@@ -11,6 +11,7 @@ import {
   getVisibleSiteCells,
   getVisibleSiteCellsForView,
   isPointInPortalTransition,
+  routeIntersectsBoundsXZ,
 } from '../siteLayout';
 
 describe('canonical site layout', () => {
@@ -41,8 +42,8 @@ describe('canonical site layout', () => {
   it('aligns portals to the corresponding factory boundary', () => {
     expect(SITE_LAYOUT.portals.shipping.centre[2]).toBe(FACTORY_BOUNDS.maxZ);
     expect(SITE_LAYOUT.portals.receiving.centre[2]).toBe(FACTORY_BOUNDS.minZ);
-    expect(SITE_LAYOUT.portals.eastPersonnel.centre[0]).toBe(FACTORY_BOUNDS.maxX);
-    expect(SITE_LAYOUT.portals.westPersonnel.centre[0]).toBe(FACTORY_BOUNDS.minX);
+    expect(SITE_LAYOUT.portals.eastService.centre[0]).toBe(FACTORY_BOUNDS.maxX);
+    expect(SITE_LAYOUT.portals.westService.centre[0]).toBe(FACTORY_BOUNDS.minX);
 
     expect(SITE_LAYOUT.docks.shipping.bayCentre[2]).toBeGreaterThan(FACTORY_BOUNDS.maxZ);
     expect(SITE_LAYOUT.docks.receiving.bayCentre[2]).toBeLessThan(FACTORY_BOUNDS.minZ);
@@ -77,8 +78,55 @@ describe('canonical site layout', () => {
     expect(tankFarm.maxX).toBeLessThan(SITE_LAYOUT.perimeter.maxX);
     expect(tankFarm.minZ).toBeGreaterThan(SITE_LAYOUT.perimeter.minZ);
 
-    const lounge = getServiceAssetBounds(SITE_LAYOUT.serviceYard.driverLounge);
-    expect(lounge.minX).toBeGreaterThan(SITE_LAYOUT.docks.shipping.apron.maxX);
+    const telemetryHub = getServiceAssetBounds(SITE_LAYOUT.serviceYard.fleetTelemetryHub);
+    expect(telemetryHub.minX).toBeGreaterThan(SITE_LAYOUT.docks.shipping.apron.maxX);
+  });
+
+  it('keeps canonical forklift swept corridors clear of machines and service assets', () => {
+    const routes = Object.values(SITE_LAYOUT.routes.forklifts);
+    const obstacles = createMachineObstacles(0.35);
+    const serviceAssets = Object.values(SITE_LAYOUT.serviceYard).map((asset) => ({
+      id: asset.id,
+      bounds: getServiceAssetBounds(asset),
+    }));
+
+    for (const route of routes) {
+      route.points.forEach((point) => expect(containsPoint(FACTORY_BOUNDS, ...point)).toBe(true));
+      for (const obstacle of obstacles) {
+        expect(routeIntersectsBoundsXZ(route, obstacle), `${route.id} hits ${obstacle.id}`).toBe(
+          false
+        );
+      }
+      for (const asset of serviceAssets) {
+        expect(routeIntersectsBoundsXZ(route, asset.bounds), `${route.id} hits ${asset.id}`).toBe(
+          false
+        );
+      }
+    }
+  });
+
+  it('keeps forklift swept corridors outside conveyor and central dock hazards', () => {
+    const shipping = SITE_LAYOUT.routes.forklifts.shipping;
+    const receiving = SITE_LAYOUT.routes.forklifts.receiving;
+
+    expect(routeIntersectsBoundsXZ(shipping, SITE_LAYOUT.routeHazards.mainConveyor.bounds)).toBe(
+      false
+    );
+    expect(routeIntersectsBoundsXZ(shipping, SITE_LAYOUT.routeHazards.rollerConveyor.bounds)).toBe(
+      false
+    );
+    expect(routeIntersectsBoundsXZ(receiving, SITE_LAYOUT.routeHazards.mainConveyor.bounds)).toBe(
+      false
+    );
+    expect(routeIntersectsBoundsXZ(receiving, SITE_LAYOUT.routeHazards.rollerConveyor.bounds)).toBe(
+      false
+    );
+    expect(routeIntersectsBoundsXZ(shipping, SITE_LAYOUT.routeHazards.shippingDock.bounds)).toBe(
+      false
+    );
+    expect(routeIntersectsBoundsXZ(receiving, SITE_LAYOUT.routeHazards.receivingDock.bounds)).toBe(
+      false
+    );
   });
 
   it('keeps authored landscape districts separated from the factory and service yard', () => {
@@ -114,9 +162,9 @@ describe('canonical site layout', () => {
     expect(isPointInPortalTransition(SITE_LAYOUT.portals.shipping, 0, 61)).toBe(true);
     expect(isPointInPortalTransition(SITE_LAYOUT.portals.shipping, 30, 50)).toBe(false);
 
-    expect(isPointInPortalTransition(SITE_LAYOUT.portals.eastPersonnel, 58, -20)).toBe(true);
-    expect(isPointInPortalTransition(SITE_LAYOUT.portals.eastPersonnel, 62, -20)).toBe(true);
-    expect(isPointInPortalTransition(SITE_LAYOUT.portals.eastPersonnel, 60, 0)).toBe(false);
+    expect(isPointInPortalTransition(SITE_LAYOUT.portals.eastService, 58, -20)).toBe(true);
+    expect(isPointInPortalTransition(SITE_LAYOUT.portals.eastService, 62, -20)).toBe(true);
+    expect(isPointInPortalTransition(SITE_LAYOUT.portals.eastService, 60, 0)).toBe(false);
   });
 
   it('preloads only nearby render cells and overlaps at portals', () => {
@@ -189,26 +237,20 @@ describe('canonical site layout', () => {
     expect(Math.hypot(position[0] - target[0], position[2] - target[2])).toBeGreaterThan(24);
   });
 
-  it('frames both authored body types from their facing side at conversational distance', () => {
-    const close = SITE_LAYOUT.cameras.personnelClose;
-    const feminine = SITE_LAYOUT.cameras.personnelFeminine;
-    const closeDistance = Math.hypot(
-      close.position[0] - close.target[0],
-      close.position[1] - close.target[1],
-      close.position[2] - close.target[2]
-    );
-    const feminineDistance = Math.hypot(
-      feminine.position[0] - feminine.target[0],
-      feminine.position[1] - feminine.target[1],
-      feminine.position[2] - feminine.target[2]
-    );
+  it('keeps uncrewed review cameras on the process floor, tank farm, and logistics yard', () => {
+    const process = SITE_LAYOUT.cameras.processFloor;
+    const tank = SITE_LAYOUT.cameras.tankFarm;
+    const logistics = SITE_LAYOUT.cameras.logisticsClose;
+    const tankFarm = SITE_LAYOUT.serviceYard.utilityTankFarm.position;
 
-    expect(close.position[2]).toBeGreaterThan(-18);
-    expect(feminine.position[2]).toBeLessThan(-14);
-    expect(closeDistance).toBeGreaterThan(1.5);
-    expect(closeDistance).toBeLessThan(2.5);
-    expect(feminineDistance).toBeGreaterThan(1.5);
-    expect(feminineDistance).toBeLessThan(2.5);
+    expect(containsPoint(SITE_LAYOUT.renderCells.interior, ...process.target)).toBe(true);
+    expect(tank.target[0]).toBe(tankFarm[0]);
+    expect(tank.target[2]).toBe(tankFarm[2]);
+    expect(containsPoint(SITE_LAYOUT.renderCells.eastYard, ...tank.target)).toBe(true);
+    expect(containsPoint(SITE_LAYOUT.renderCells.shipping, ...logistics.target)).toBe(true);
+    expect(process.fov).toBeGreaterThanOrEqual(45);
+    expect(tank.fov).toBeGreaterThanOrEqual(45);
+    expect(logistics.fov).toBeGreaterThanOrEqual(45);
   });
 
   it('uses one declared water surface datum', () => {

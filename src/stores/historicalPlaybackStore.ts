@@ -24,7 +24,6 @@ export interface DecisionHistoryEntry {
   type: AIDecision['type'];
   action: string;
   priority: AIDecision['priority'];
-  workerId?: string;
   machineId?: string;
 }
 
@@ -113,7 +112,6 @@ export const useHistoricalPlaybackStore = create<HistoricalPlaybackState>((set, 
       type: decision.type,
       action: decision.action,
       priority: decision.priority,
-      workerId: decision.workerId,
       machineId: decision.machineId,
     };
 

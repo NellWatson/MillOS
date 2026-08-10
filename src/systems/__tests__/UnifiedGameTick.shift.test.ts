@@ -16,13 +16,13 @@ const ctx = (over: Partial<TickContext> = {}): TickContext => ({
   ...over,
 });
 
-describe('UnifiedGameTick shift reconciliation (regression)', () => {
+describe('UnifiedGameTick run-window reconciliation', () => {
   beforeEach(() => {
     useGameSimulationStore.getState().resetGameState();
   });
 
-  it('advances currentShift with the clock across a shift boundary', () => {
-    // Regression: the unified tick advanced gameTime but left currentShift
+  it('advances the run window with the clock across a boundary', () => {
+    // Regression: the unified tick advanced gameTime but left the run window
     // frozen, so the HUD showed e.g. "afternoon" at 23:59.
     const store = useGameSimulationStore.getState();
     store.setGameTime(21.9); // late afternoon, just before the 22:00 -> night boundary
@@ -33,10 +33,9 @@ describe('UnifiedGameTick shift reconciliation (regression)', () => {
     const s = useGameSimulationStore.getState();
     expect(s.gameTime).toBeGreaterThanOrEqual(22);
     expect(s.currentShift).toBe('night');
-    expect(s.shiftData.currentShift).toBe('night');
   });
 
-  it('leaves the shift unchanged within a shift window', () => {
+  it('leaves the run window unchanged inside its clock range', () => {
     const store = useGameSimulationStore.getState();
     store.setGameTime(15); // mid-afternoon
     unifiedGameTick(ctx({ gameSpeed: 180 })); // tiny advance, stays inside afternoon
@@ -44,18 +43,17 @@ describe('UnifiedGameTick shift reconciliation (regression)', () => {
   });
 });
 
-describe('setGameTime shift reconciliation (regression)', () => {
+describe('setGameTime run-window reconciliation', () => {
   beforeEach(() => {
     useGameSimulationStore.getState().resetGameState();
   });
 
-  it('keeps currentShift in sync when the clock is set directly', () => {
-    // Direct clock sets (e.g. multiplayer sync) must not leave the shift stale.
+  it('keeps the run window in sync when the clock is set directly', () => {
+    // Direct clock sets must not leave the run window stale.
     const store = useGameSimulationStore.getState();
     store.setShift('morning');
     store.setGameTime(23); // night
     const s = useGameSimulationStore.getState();
     expect(s.currentShift).toBe('night');
-    expect(s.shiftData.currentShift).toBe('night');
   });
 });

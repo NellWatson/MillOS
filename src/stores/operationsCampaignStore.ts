@@ -1,20 +1,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { MaterialManifest, MaterialType, ProductionBatch } from './materialFlowStore';
-import type { WorkerData, WorkerSkills } from '../types';
 import { safeJSONStorage } from './storage';
 import { UTILITY_ASSET_DEFINITIONS } from '../constants/utilityAssets';
 
 export type OrderStatus = 'planned' | 'active' | 'late' | 'fulfilled' | 'cancelled';
-export type AssignmentKind =
-  | 'production'
-  | 'quality'
-  | 'maintenance'
-  | 'forklift'
-  | 'supervision'
-  | 'safety'
-  | 'break';
-export type AssignmentStatus = 'active' | 'completed' | 'blocked';
 export type IncidentKind =
   | 'bearing_overheat'
   | 'dust_filter_pressure'
@@ -23,9 +13,9 @@ export type IncidentKind =
   | 'supplier_contamination'
   | 'packaging_shortage'
   | 'severe_rain'
-  | 'understaffing';
+  | 'control_network_degraded';
 export type IncidentPhase = 'raised' | 'acknowledged' | 'mitigated' | 'resolved';
-export type LogCategory = 'operation' | 'quality' | 'maintenance' | 'safety' | 'shift';
+export type LogCategory = 'operation' | 'quality' | 'maintenance' | 'safety' | 'period';
 
 export interface MillRecipe {
   id: string;
@@ -52,26 +42,6 @@ export interface CustomerOrder {
   completedAtMinute: number | null;
 }
 
-export interface PersonnelCampaignState {
-  workerId: string;
-  energy: number;
-  fatigue: number;
-  tasksCompleted: number;
-  lastBreakAtMinute: number;
-}
-
-export interface PersonnelAssignment {
-  id: string;
-  workerId: string;
-  kind: AssignmentKind;
-  targetId: string | null;
-  startedAtMinute: number;
-  progress: number;
-  effectiveness: number;
-  certified: boolean;
-  status: AssignmentStatus;
-}
-
 export interface OperationalIncident {
   id: string;
   kind: IncidentKind;
@@ -83,14 +53,13 @@ export interface OperationalIncident {
   acknowledgedAtMinute: number | null;
   resolvedAtMinute: number | null;
   affectedMachineId: string | null;
-  /** Cross-system consequence has been applied exactly once. */
   effectApplied: boolean;
 }
 
 export interface CampaignEconomics {
   revenue: number;
   energyCost: number;
-  labourCost: number;
+  automationCost: number;
   wasteCost: number;
   maintenanceCost: number;
   demurrageCost: number;
@@ -100,7 +69,7 @@ export interface CampaignEconomics {
 export interface ShiftCampaignMetrics extends CampaignEconomics {
   dispatchedKg: number;
   incidentsResolved: number;
-  tasksCompleted: number;
+  automaticActions: number;
 }
 
 export interface ShiftCampaignReport {
@@ -119,7 +88,7 @@ export interface ShiftCampaignReport {
 export interface CampaignLogEntry {
   id: string;
   simulationMinute: number;
-  author: string;
+  source: string;
   category: LogCategory;
   message: string;
   relatedId: string | null;
@@ -184,7 +153,6 @@ export interface UtilityAssetTelemetry {
 export interface CampaignTickContext {
   shiftKey: string;
   shiftLabel: string;
-  workers: ReadonlyArray<WorkerData>;
   manifests: ReadonlyArray<MaterialManifest>;
   productionBatches: ReadonlyArray<ProductionBatch>;
   totalEnergyKw: number;
@@ -206,6 +174,7 @@ export interface IncidentEffect {
   energyMultiplier: number;
   qualityPenalty: number;
   dispatchBlocked: boolean;
+  vehicleSpeedMultiplier: number;
 }
 
 interface OperationsCampaignState {
@@ -213,8 +182,6 @@ interface OperationsCampaignState {
   elapsedMinutes: number;
   orders: CustomerOrder[];
   activeOrderId: string | null;
-  personnel: PersonnelCampaignState[];
-  assignments: PersonnelAssignment[];
   incidents: OperationalIncident[];
   economics: CampaignEconomics;
   shiftMetrics: ShiftCampaignMetrics;
@@ -229,21 +196,15 @@ interface OperationsCampaignState {
   currentShiftLabel: string;
   shiftStartedAtMinute: number;
   sequence: number;
-  initializeCampaign: (workers: ReadonlyArray<WorkerData>) => void;
+  initializeCampaign: () => void;
   activateOrder: (orderId: string) => void;
-  assignWorker: (
-    worker: WorkerData,
-    kind: AssignmentKind,
-    targetId?: string | null
-  ) => PersonnelAssignment;
-  sendWorkerOnBreak: (worker: WorkerData) => PersonnelAssignment;
   triggerIncident: (kind: IncidentKind) => OperationalIncident | null;
   acknowledgeIncident: (incidentId: string) => void;
   mitigateIncident: (incidentId: string) => void;
   resolveIncident: (incidentId: string) => void;
   markIncidentEffectApplied: (incidentId: string) => void;
   addLogEntry: (
-    author: string,
+    source: string,
     category: LogCategory,
     message: string,
     relatedId?: string | null
@@ -257,7 +218,6 @@ interface OperationsCampaignState {
   } | null;
   getProductionMultiplier: () => number;
   getIncidentEffect: () => IncidentEffect;
-  getWorkerEffectiveness: (workerId: string, kind?: AssignmentKind) => number;
   resetCampaign: () => void;
 }
 
@@ -270,7 +230,7 @@ const EPSILON_KG = 1e-6;
 const ZERO_ECONOMICS: CampaignEconomics = {
   revenue: 0,
   energyCost: 0,
-  labourCost: 0,
+  automationCost: 0,
   wasteCost: 0,
   maintenanceCost: 0,
   demurrageCost: 0,
@@ -281,7 +241,7 @@ const ZERO_SHIFT_METRICS: ShiftCampaignMetrics = {
   ...ZERO_ECONOMICS,
   dispatchedKg: 0,
   incidentsResolved: 0,
-  tasksCompleted: 0,
+  automaticActions: 0,
 };
 
 const EMPTY_DISPATCH_LOAD: DispatchLoadSnapshot = {
@@ -293,36 +253,6 @@ const EMPTY_DISPATCH_LOAD: DispatchLoadSnapshot = {
   blockReason: null,
   lastDispatchKg: 0,
 };
-
-function createInitialExecution(): OrderExecutionState {
-  return {
-    orderId: 'order-001',
-    recipeId: 'strong_white',
-    sourceMaterial: 'wheat_grain',
-    finishedMaterial: 'flour',
-    stage: 'planning',
-    lineSetpointPercent: 100,
-    remainingKg: 6000,
-    sourceInventoryKg: 0,
-    finishedAvailableKg: 0,
-    releasedFinishedKg: 0,
-    qualityReleased: true,
-    dispatchLoad: { ...EMPTY_DISPATCH_LOAD },
-  };
-}
-
-function createInitialUtilityTelemetry(): UtilityAssetTelemetry[] {
-  return UTILITY_ASSET_DEFINITIONS.map((asset) => ({
-    id: asset.id,
-    label: asset.label,
-    contents: asset.contents,
-    capacityLitres: asset.capacityLitres,
-    levelPercent: asset.nominalLevelPercent,
-    temperatureC: asset.nominalTemperatureC,
-    pressureBar: asset.nominalPressureBar,
-    status: 'normal',
-  }));
-}
 
 export const MILL_RECIPES: Record<string, MillRecipe> = {
   strong_white: {
@@ -347,6 +277,144 @@ export const MILL_RECIPES: Record<string, MillRecipe> = {
     minimumQuality: 92,
   },
 };
+
+export const INCIDENT_DEFINITIONS: Record<
+  IncidentKind,
+  Omit<
+    OperationalIncident,
+    | 'id'
+    | 'phase'
+    | 'startedAtMinute'
+    | 'acknowledgedAtMinute'
+    | 'resolvedAtMinute'
+    | 'effectApplied'
+  > & { effect: IncidentEffect }
+> = {
+  bearing_overheat: {
+    kind: 'bearing_overheat',
+    title: 'Roller mill bearing overheat',
+    description: 'R.M. 101 bearing temperature is rising toward the trip point.',
+    severity: 'high',
+    affectedMachineId: 'rm-101',
+    effect: {
+      productionMultiplier: 0.82,
+      energyMultiplier: 1.08,
+      qualityPenalty: 0,
+      dispatchBlocked: false,
+      vehicleSpeedMultiplier: 1,
+    },
+  },
+  dust_filter_pressure: {
+    kind: 'dust_filter_pressure',
+    title: 'Dust filter differential pressure',
+    description: 'Extraction resistance is increasing around the sifting floor.',
+    severity: 'high',
+    affectedMachineId: 'sifter-b',
+    effect: {
+      productionMultiplier: 0.88,
+      energyMultiplier: 1.12,
+      qualityPenalty: 3,
+      dispatchBlocked: false,
+      vehicleSpeedMultiplier: 1,
+    },
+  },
+  power_sag: {
+    kind: 'power_sag',
+    title: 'Site power sag',
+    description: 'Incoming voltage is unstable and motor protection is limiting load.',
+    severity: 'critical',
+    affectedMachineId: null,
+    effect: {
+      productionMultiplier: 0.45,
+      energyMultiplier: 0.7,
+      qualityPenalty: 1,
+      dispatchBlocked: false,
+      vehicleSpeedMultiplier: 1,
+    },
+  },
+  delayed_truck: {
+    kind: 'delayed_truck',
+    title: 'Delayed dispatch truck',
+    description: 'The scheduled collection is delayed, increasing finished goods pressure.',
+    severity: 'medium',
+    affectedMachineId: null,
+    effect: {
+      productionMultiplier: 0.92,
+      energyMultiplier: 1,
+      qualityPenalty: 0,
+      dispatchBlocked: false,
+      vehicleSpeedMultiplier: 1,
+    },
+  },
+  supplier_contamination: {
+    kind: 'supplier_contamination',
+    title: 'Supplier contamination alert',
+    description: 'A source lot notification requires an immediate hold and traceability review.',
+    severity: 'critical',
+    affectedMachineId: null,
+    effect: {
+      productionMultiplier: 0.7,
+      energyMultiplier: 1,
+      qualityPenalty: 10,
+      dispatchBlocked: true,
+      vehicleSpeedMultiplier: 1,
+    },
+  },
+  packaging_shortage: {
+    kind: 'packaging_shortage',
+    title: 'Packaging material shortage',
+    description: 'Packer consumables are below the active order requirement.',
+    severity: 'high',
+    affectedMachineId: 'packer-0',
+    effect: {
+      productionMultiplier: 0.6,
+      energyMultiplier: 0.88,
+      qualityPenalty: 0,
+      dispatchBlocked: false,
+      vehicleSpeedMultiplier: 1,
+    },
+  },
+  severe_rain: {
+    kind: 'severe_rain',
+    title: 'Severe rain and drainage loading',
+    description: 'Yard drainage and the stream are rising, slowing vehicle movements.',
+    severity: 'high',
+    affectedMachineId: null,
+    effect: {
+      productionMultiplier: 0.9,
+      energyMultiplier: 1.06,
+      qualityPenalty: 1,
+      dispatchBlocked: false,
+      vehicleSpeedMultiplier: 0.55,
+    },
+  },
+  control_network_degraded: {
+    kind: 'control_network_degraded',
+    title: 'Control network degraded',
+    description: 'Redundant control links have fallen below the required availability threshold.',
+    severity: 'high',
+    affectedMachineId: null,
+    effect: {
+      productionMultiplier: 0.75,
+      energyMultiplier: 1.03,
+      qualityPenalty: 4,
+      dispatchBlocked: false,
+      vehicleSpeedMultiplier: 0.8,
+    },
+  },
+};
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+}
+
+function appendBounded<T>(values: readonly T[], value: T, limit: number): T[] {
+  return [...values.slice(-(limit - 1)), value];
+}
+
+function priorityRank(priority: CustomerOrder['priority']): number {
+  return priority === 'critical' ? 0 : priority === 'high' ? 1 : 2;
+}
 
 function createInitialOrders(): CustomerOrder[] {
   return [
@@ -401,237 +469,34 @@ function createInitialOrders(): CustomerOrder[] {
   ];
 }
 
-export const INCIDENT_DEFINITIONS: Record<
-  IncidentKind,
-  Omit<
-    OperationalIncident,
-    | 'id'
-    | 'phase'
-    | 'startedAtMinute'
-    | 'acknowledgedAtMinute'
-    | 'resolvedAtMinute'
-    | 'effectApplied'
-  > & {
-    effect: IncidentEffect;
-  }
-> = {
-  bearing_overheat: {
-    kind: 'bearing_overheat',
-    title: 'Roller mill bearing overheat',
-    description: 'R.M. 101 bearing temperature is rising toward the trip point.',
-    severity: 'high',
-    affectedMachineId: 'rm-101',
-    effect: {
-      productionMultiplier: 0.82,
-      energyMultiplier: 1.08,
-      qualityPenalty: 0,
-      dispatchBlocked: false,
-    },
-  },
-  dust_filter_pressure: {
-    kind: 'dust_filter_pressure',
-    title: 'Dust-filter differential pressure',
-    description: 'Extraction resistance is increasing around the sifting floor.',
-    severity: 'high',
-    affectedMachineId: 'sifter-b',
-    effect: {
-      productionMultiplier: 0.88,
-      energyMultiplier: 1.12,
-      qualityPenalty: 3,
-      dispatchBlocked: false,
-    },
-  },
-  power_sag: {
-    kind: 'power_sag',
-    title: 'Site power sag',
-    description: 'Incoming voltage is unstable and motor protection is limiting load.',
-    severity: 'critical',
-    affectedMachineId: null,
-    effect: {
-      productionMultiplier: 0.45,
-      energyMultiplier: 0.7,
-      qualityPenalty: 1,
-      dispatchBlocked: false,
-    },
-  },
-  delayed_truck: {
-    kind: 'delayed_truck',
-    title: 'Delayed dispatch truck',
-    description: 'The scheduled collection is delayed, increasing finished-goods pressure.',
-    severity: 'medium',
-    affectedMachineId: null,
-    effect: {
-      productionMultiplier: 0.92,
-      energyMultiplier: 1,
-      qualityPenalty: 0,
-      dispatchBlocked: false,
-    },
-  },
-  supplier_contamination: {
-    kind: 'supplier_contamination',
-    title: 'Supplier contamination alert',
-    description: 'A source-lot notification requires immediate hold and traceability review.',
-    severity: 'critical',
-    affectedMachineId: null,
-    effect: {
-      productionMultiplier: 0.7,
-      energyMultiplier: 1,
-      qualityPenalty: 10,
-      dispatchBlocked: true,
-    },
-  },
-  packaging_shortage: {
-    kind: 'packaging_shortage',
-    title: 'Packaging material shortage',
-    description: 'Packer consumables are below the quantity required for the active commitments.',
-    severity: 'high',
-    affectedMachineId: 'packer-0',
-    effect: {
-      productionMultiplier: 0.6,
-      energyMultiplier: 0.88,
-      qualityPenalty: 0,
-      dispatchBlocked: false,
-    },
-  },
-  severe_rain: {
-    kind: 'severe_rain',
-    title: 'Severe rain and drainage loading',
-    description: 'Yard drainage and the stream are rising, slowing vehicle movements.',
-    severity: 'high',
-    affectedMachineId: null,
-    effect: {
-      productionMultiplier: 0.9,
-      energyMultiplier: 1.06,
-      qualityPenalty: 1,
-      dispatchBlocked: false,
-    },
-  },
-  understaffing: {
-    kind: 'understaffing',
-    title: 'Understaffed shift',
-    description: 'Critical roles are uncovered and response capacity is reduced.',
-    severity: 'high',
-    affectedMachineId: null,
-    effect: {
-      productionMultiplier: 0.75,
-      energyMultiplier: 1.03,
-      qualityPenalty: 4,
-      dispatchBlocked: false,
-    },
-  },
-};
-
-const ASSIGNMENT_DURATION_HOURS: Record<AssignmentKind, number | null> = {
-  production: null,
-  quality: 0.35,
-  maintenance: 0.75,
-  forklift: 0.5,
-  supervision: null,
-  safety: 0.5,
-  break: 0.35,
-};
-
-const ASSIGNMENT_SKILL: Record<AssignmentKind, keyof WorkerSkills> = {
-  production: 'machineOperation',
-  quality: 'qualityControl',
-  maintenance: 'troubleshooting',
-  forklift: 'machineOperation',
-  supervision: 'teamwork',
-  safety: 'safetyProtocols',
-  break: 'teamwork',
-};
-
-const ASSIGNMENT_CERTIFICATIONS: Partial<Record<AssignmentKind, readonly string[]>> = {
-  quality: ['HACCP', 'Lab Analysis', 'ISO 17025', 'Food Science'],
-  maintenance: ['Electrical Systems', 'Mechanical Systems', 'Pneumatics', 'PLC Programming'],
-  forklift: ['Forklift License'],
-  safety: ['OSHA', 'Fire Safety', 'First Aid'],
-};
-
-function cloneEconomics(source: CampaignEconomics): CampaignEconomics {
-  return { ...source };
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
-}
-
-function appendBounded<T>(values: readonly T[], value: T, limit: number): T[] {
-  return [...values.slice(-(limit - 1)), value];
-}
-
-function priorityRank(priority: CustomerOrder['priority']): number {
-  return priority === 'critical' ? 0 : priority === 'high' ? 1 : 2;
-}
-
-export function deriveWorkerSkills(worker: WorkerData): WorkerSkills {
-  const experience = clamp(Math.floor(worker.experience / 3) + 1, 1, 5) as 1 | 2 | 3 | 4 | 5;
-  const base: WorkerSkills = {
-    machineOperation: Math.max(1, Math.min(5, experience)) as WorkerSkills['machineOperation'],
-    safetyProtocols: Math.max(1, Math.min(5, experience)) as WorkerSkills['safetyProtocols'],
-    qualityControl: Math.max(1, Math.min(5, experience - 1)) as WorkerSkills['qualityControl'],
-    troubleshooting: Math.max(1, Math.min(5, experience - 1)) as WorkerSkills['troubleshooting'],
-    teamwork: Math.max(1, Math.min(5, experience)) as WorkerSkills['teamwork'],
+function createInitialExecution(): OrderExecutionState {
+  return {
+    orderId: 'order-001',
+    recipeId: 'strong_white',
+    sourceMaterial: 'wheat_grain',
+    finishedMaterial: 'flour',
+    stage: 'planning',
+    lineSetpointPercent: 100,
+    remainingKg: 6000,
+    sourceInventoryKg: 0,
+    finishedAvailableKg: 0,
+    releasedFinishedKg: 0,
+    qualityReleased: true,
+    dispatchLoad: { ...EMPTY_DISPATCH_LOAD },
   };
-
-  if (worker.role === 'Quality Control') base.qualityControl = 5;
-  if (worker.role === 'Maintenance' || worker.role === 'Engineer') base.troubleshooting = 5;
-  if (worker.role === 'Safety Officer') base.safetyProtocols = 5;
-  if (worker.role === 'Supervisor') base.teamwork = 5;
-  if (worker.role === 'Operator')
-    base.machineOperation = Math.max(3, base.machineOperation) as WorkerSkills['machineOperation'];
-  return worker.skills ?? base;
 }
 
-export function isWorkerCertified(worker: WorkerData, kind: AssignmentKind): boolean {
-  const required = ASSIGNMENT_CERTIFICATIONS[kind];
-  return (
-    !required || required.some((certification) => worker.certifications.includes(certification))
-  );
-}
-
-export function calculateWorkerEffectiveness(
-  worker: WorkerData,
-  personnel: PersonnelCampaignState | undefined,
-  kind: AssignmentKind
-): number {
-  if (kind === 'break') return 1;
-  const skills = deriveWorkerSkills(worker);
-  const skill = skills[ASSIGNMENT_SKILL[kind]] / 5;
-  const energy = clamp(personnel?.energy ?? worker.energy ?? 100, 0, 100) / 100;
-  const experience = clamp(worker.experience / 15, 0, 1);
-  const certified = isWorkerCertified(worker, kind);
-  return clamp((skill * 0.6 + energy * 0.3 + experience * 0.1) * (certified ? 1 : 0.55), 0.2, 1.15);
-}
-
-export function getAssignmentLabel(assignment: PersonnelAssignment): string {
-  const target = assignment.targetId ? ` at ${assignment.targetId}` : '';
-  switch (assignment.kind) {
-    case 'production':
-      return `Running production${target}`;
-    case 'quality':
-      return `Sampling and quality release${target}`;
-    case 'maintenance':
-      return `Repair and verification${target}`;
-    case 'forklift':
-      return `Moving materials${target}`;
-    case 'supervision':
-      return 'Coordinating the shift';
-    case 'safety':
-      return `Safety inspection${target}`;
-    case 'break':
-      return 'Taking a restorative break';
-  }
-}
-
-function defaultAssignmentFor(worker: WorkerData): AssignmentKind {
-  if (worker.role === 'Quality Control') return 'quality';
-  if (worker.role === 'Maintenance') return 'maintenance';
-  if (worker.role === 'Safety Officer') return 'safety';
-  if (worker.role === 'Supervisor') return 'supervision';
-  if (worker.role === 'Operator' && worker.certifications.includes('Forklift License'))
-    return 'forklift';
-  return 'production';
+function createInitialUtilityTelemetry(): UtilityAssetTelemetry[] {
+  return UTILITY_ASSET_DEFINITIONS.map((asset) => ({
+    id: asset.id,
+    label: asset.label,
+    contents: asset.contents,
+    capacityLitres: asset.capacityLitres,
+    levelPercent: asset.nominalLevelPercent,
+    temperatureC: asset.nominalTemperatureC,
+    pressureBar: asset.nominalPressureBar,
+    status: 'normal',
+  }));
 }
 
 function emptyState() {
@@ -639,11 +504,9 @@ function emptyState() {
     initialized: false,
     elapsedMinutes: 0,
     orders: createInitialOrders(),
-    activeOrderId: 'order-001',
-    personnel: [] as PersonnelCampaignState[],
-    assignments: [] as PersonnelAssignment[],
+    activeOrderId: 'order-001' as string | null,
     incidents: [] as OperationalIncident[],
-    economics: cloneEconomics(ZERO_ECONOMICS),
+    economics: { ...ZERO_ECONOMICS },
     shiftMetrics: { ...ZERO_SHIFT_METRICS },
     reports: [] as ShiftCampaignReport[],
     logbook: [] as CampaignLogEntry[],
@@ -666,18 +529,18 @@ function deriveLineSetpoint(
 ): number {
   if (sourceKg <= EPSILON_KG) return 0;
   const remainingMinutes = order.dueAtMinute - elapsedMinutes;
-  const priorityBase = order.priority === 'critical' ? 100 : order.priority === 'high' ? 92 : 84;
+  const base = order.priority === 'critical' ? 100 : order.priority === 'high' ? 92 : 84;
   const urgency =
     remainingMinutes <= 0 ? 8 : remainingMinutes <= 90 ? 5 : remainingMinutes <= 180 ? 2 : 0;
-  return clamp(priorityBase + urgency, 0, 108);
+  return clamp(base + urgency, 0, 108);
 }
 
 function deriveExecution(
-  activeOrder: CustomerOrder | undefined,
+  order: CustomerOrder | undefined,
   elapsedMinutes: number,
   context: CampaignTickContext
 ): OrderExecutionState {
-  if (!activeOrder) {
+  if (!order) {
     return {
       ...createInitialExecution(),
       orderId: null,
@@ -691,10 +554,9 @@ function deriveExecution(
       dispatchLoad: { ...context.dispatchLoad },
     };
   }
-
-  const remainingKg = Math.max(0, activeOrder.requiredKg - activeOrder.shippedKg);
+  const remainingKg = Math.max(0, order.requiredKg - order.shippedKg);
   let stage: FulfillmentStage = 'milling';
-  if (activeOrder.status === 'fulfilled' || remainingKg <= EPSILON_KG) stage = 'fulfilled';
+  if (order.status === 'fulfilled' || remainingKg <= EPSILON_KG) stage = 'fulfilled';
   else if (context.dispatchLoad.status === 'departed' && context.dispatchLoad.lastDispatchKg > 0)
     stage = 'dispatched';
   else if (context.dispatchLoad.status === 'ready') stage = 'ready_to_dispatch';
@@ -702,14 +564,13 @@ function deriveExecution(
   else if (context.dispatchLoad.status === 'held' || !context.dispatchReleased)
     stage = 'quality_hold';
   else if (context.releasedFinishedKg > EPSILON_KG) stage = 'ready_to_load';
-
   return {
-    orderId: activeOrder.id,
-    recipeId: activeOrder.recipe.id,
-    sourceMaterial: activeOrder.recipe.sourceMaterial,
-    finishedMaterial: activeOrder.recipe.finishedMaterial,
+    orderId: order.id,
+    recipeId: order.recipe.id,
+    sourceMaterial: order.recipe.sourceMaterial,
+    finishedMaterial: order.recipe.finishedMaterial,
     stage,
-    lineSetpointPercent: deriveLineSetpoint(activeOrder, elapsedMinutes, context.sourceInventoryKg),
+    lineSetpointPercent: deriveLineSetpoint(order, elapsedMinutes, context.sourceInventoryKg),
     remainingKg,
     sourceInventoryKg: context.sourceInventoryKg,
     finishedAvailableKg: context.finishedAvailableKg,
@@ -719,12 +580,12 @@ function deriveExecution(
   };
 }
 
-function getExecutionStageMessage(execution: OrderExecutionState): string {
+function executionMessage(execution: OrderExecutionState): string {
   switch (execution.stage) {
     case 'planning':
       return 'Production route planned.';
     case 'milling':
-      return `Milling ${execution.sourceMaterial ?? 'scheduled grain'} for the active recipe.`;
+      return `Processing ${execution.sourceMaterial ?? 'scheduled grain'} through the active recipe.`;
     case 'quality_hold':
       return execution.dispatchLoad.blockReason ?? 'Finished goods are held at the quality gate.';
     case 'ready_to_load':
@@ -732,11 +593,11 @@ function getExecutionStageMessage(execution: OrderExecutionState): string {
     case 'loading':
       return `Shipping load is ${execution.dispatchLoad.loadedKg.toFixed(0)} of ${execution.dispatchLoad.capacityKg.toFixed(0)} kg.`;
     case 'ready_to_dispatch':
-      return 'The outbound load is ready for truck departure.';
+      return 'The outbound load is ready for departure.';
     case 'dispatched':
       return `${execution.dispatchLoad.lastDispatchKg.toFixed(0)} kg left the shipping bay.`;
     case 'fulfilled':
-      return 'All customer commitments are fulfilled.';
+      return 'All current commitments are fulfilled.';
   }
 }
 
@@ -746,46 +607,29 @@ function combinedIncidentEffect(incidents: ReadonlyArray<OperationalIncident>): 
     energyMultiplier: 1,
     qualityPenalty: 0,
     dispatchBlocked: false,
+    vehicleSpeedMultiplier: 1,
   };
-  incidents.forEach((incident) => {
-    if (incident.phase === 'resolved') return;
+  for (const incident of incidents) {
+    if (incident.phase === 'resolved') continue;
     const definition = INCIDENT_DEFINITIONS[incident.kind].effect;
-    const mitigation = incident.phase === 'mitigated' ? 0.5 : 1;
-    effect.productionMultiplier *= 1 - (1 - definition.productionMultiplier) * mitigation;
-    effect.energyMultiplier *= 1 + (definition.energyMultiplier - 1) * mitigation;
-    effect.qualityPenalty += definition.qualityPenalty * mitigation;
+    const scale = incident.phase === 'mitigated' ? 0.5 : 1;
+    effect.productionMultiplier *= 1 - (1 - definition.productionMultiplier) * scale;
+    effect.energyMultiplier *= 1 + (definition.energyMultiplier - 1) * scale;
+    effect.qualityPenalty += definition.qualityPenalty * scale;
     effect.dispatchBlocked ||= definition.dispatchBlocked && incident.phase !== 'mitigated';
-  });
-  effect.productionMultiplier = clamp(effect.productionMultiplier, 0.2, 1);
-  effect.energyMultiplier = clamp(effect.energyMultiplier, 0.5, 1.5);
-  effect.qualityPenalty = clamp(effect.qualityPenalty, 0, 30);
-  return effect;
-}
-
-function gradeShift(
-  metrics: ShiftCampaignMetrics,
-  openRisks: string[]
-): ShiftCampaignReport['grade'] {
-  const margin =
-    metrics.revenue -
-    metrics.energyCost -
-    metrics.labourCost -
-    metrics.wasteCost -
-    metrics.maintenanceCost -
-    metrics.demurrageCost -
-    metrics.latePenalties;
-  if (openRisks.length === 0 && margin >= 0 && metrics.dispatchedKg >= 4000) return 'A';
-  if (openRisks.length <= 1 && margin >= 0 && metrics.dispatchedKg >= 2500) return 'B';
-  if (openRisks.length <= 2 && metrics.dispatchedKg > 0) return 'C';
-  if (metrics.dispatchedKg > 0) return 'D';
-  return 'F';
+    effect.vehicleSpeedMultiplier *= 1 - (1 - definition.vehicleSpeedMultiplier) * scale;
+  }
+  return {
+    productionMultiplier: clamp(effect.productionMultiplier, 0.2, 1),
+    energyMultiplier: clamp(effect.energyMultiplier, 0.5, 1.5),
+    qualityPenalty: clamp(effect.qualityPenalty, 0, 30),
+    dispatchBlocked: effect.dispatchBlocked,
+    vehicleSpeedMultiplier: clamp(effect.vehicleSpeedMultiplier, 0.25, 1),
+  };
 }
 
 function makeConstraints(
-  state: Pick<
-    OperationsCampaignState,
-    'orders' | 'activeOrderId' | 'incidents' | 'elapsedMinutes' | 'personnel'
-  >,
+  state: Pick<OperationsCampaignState, 'orders' | 'activeOrderId' | 'incidents' | 'elapsedMinutes'>,
   context: CampaignTickContext,
   incidentEffect: IncidentEffect
 ): CampaignConstraint[] {
@@ -799,72 +643,66 @@ function makeConstraints(
       relatedId: null,
     });
   }
-  const nextOrder = state.orders
-    .filter((order) => order.status !== 'fulfilled' && order.status !== 'cancelled')
-    .sort((a, b) => a.dueAtMinute - b.dueAtMinute)[0];
   const activeOrder = state.orders.find((order) => order.id === state.activeOrderId);
   if (activeOrder && context.sourceInventoryKg <= EPSILON_KG) {
     constraints.push({
       id: `recipe-feed-${activeOrder.id}`,
       severity: 'critical',
       label: 'Recipe feed unavailable',
-      detail: `${activeOrder.recipe.sourceMaterial.replaceAll('_', ' ')} inventory is empty for ${activeOrder.customer}.`,
+      detail: `${activeOrder.recipe.sourceMaterial.replaceAll('_', ' ')} inventory is empty.`,
       relatedId: activeOrder.id,
     });
   }
+  const nextOrder = state.orders
+    .filter((order) => order.status !== 'fulfilled' && order.status !== 'cancelled')
+    .sort((a, b) => a.dueAtMinute - b.dueAtMinute)[0];
   if (nextOrder) {
     const remainingMinutes = nextOrder.dueAtMinute - state.elapsedMinutes;
     if (remainingMinutes <= 90) {
       constraints.push({
         id: `order-due-${nextOrder.id}`,
         severity: remainingMinutes <= 0 ? 'critical' : 'warning',
-        label: `${nextOrder.customer} commitment`,
-        detail: `${Math.max(0, nextOrder.requiredKg - nextOrder.shippedKg).toFixed(0)} kg remains, ${Math.round(Math.abs(remainingMinutes))} min ${remainingMinutes < 0 ? 'late' : 'to due time'}.`,
+        label: remainingMinutes <= 0 ? 'Commitment overdue' : 'Commitment due soon',
+        detail: `${Math.max(0, Math.ceil(remainingMinutes))} simulated minutes remain for ${nextOrder.customer}.`,
         relatedId: nextOrder.id,
       });
     }
   }
-  if (context.shippingDocked && (!context.dispatchReleased || incidentEffect.dispatchBlocked)) {
+  if (incidentEffect.dispatchBlocked) {
     constraints.push({
-      id: 'dispatch-blocked',
+      id: 'dispatch-isolated',
       severity: 'critical',
-      label: 'Dispatch interlock',
-      detail: 'A truck is at the bay but quality or incident controls block loading.',
-      relatedId: null,
+      label: 'Dispatch isolated',
+      detail: 'An active incident requires the shipping quality gate to remain closed.',
+      relatedId: state.incidents.find((incident) => incident.phase !== 'resolved')?.id ?? null,
     });
   }
   if (context.openWorkOrders > 0) {
     constraints.push({
-      id: 'maintenance-open',
-      severity: 'warning',
-      label: 'Maintenance capacity',
-      detail: `${context.openWorkOrders} work order${context.openWorkOrders === 1 ? '' : 's'} remains open.`,
+      id: 'maintenance-queue',
+      severity: context.openWorkOrders > 3 ? 'warning' : 'info',
+      label: 'Maintenance queue',
+      detail: `${context.openWorkOrders} autonomous work order${context.openWorkOrders === 1 ? '' : 's'} open.`,
       relatedId: null,
     });
   }
-  const fatigued = state.personnel.filter((person) => person.energy < 35).length;
-  if (fatigued > 0) {
-    constraints.push({
-      id: 'fatigue',
-      severity: fatigued >= 3 ? 'critical' : 'warning',
-      label: 'Personnel fatigue',
-      detail: `${fatigued} person${fatigued === 1 ? '' : 'nel'} needs a restorative break.`,
-      relatedId: null,
-    });
-  }
-  state.incidents
-    .filter((incident) => incident.phase !== 'resolved')
-    .slice(-3)
-    .forEach((incident) => {
-      constraints.push({
-        id: `incident-${incident.id}`,
-        severity: incident.severity === 'critical' ? 'critical' : 'warning',
-        label: incident.title,
-        detail: `${incident.phase}: ${incident.description}`,
-        relatedId: incident.id,
-      });
-    });
-  return constraints.slice(0, 8);
+  return constraints;
+}
+
+function gradePeriod(metrics: ShiftCampaignMetrics, risks: string[]): ShiftCampaignReport['grade'] {
+  const margin =
+    metrics.revenue -
+    metrics.energyCost -
+    metrics.automationCost -
+    metrics.wasteCost -
+    metrics.maintenanceCost -
+    metrics.demurrageCost -
+    metrics.latePenalties;
+  if (risks.length === 0 && margin >= 0 && metrics.dispatchedKg >= 4000) return 'A';
+  if (risks.length <= 1 && margin >= 0 && metrics.dispatchedKg >= 2500) return 'B';
+  if (risks.length <= 2 && metrics.dispatchedKg > 0) return 'C';
+  if (metrics.dispatchedKg > 0) return 'D';
+  return 'F';
 }
 
 export const useOperationsCampaignStore = create<OperationsCampaignState>()(
@@ -872,111 +710,64 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
     (set, get) => ({
       ...emptyState(),
 
-      initializeCampaign: (workers) => {
+      initializeCampaign: () => {
         if (get().initialized) return;
-        const personnel = workers.map((worker) => ({
-          workerId: worker.id,
-          energy: clamp(worker.energy ?? 100, 0, 100),
-          fatigue: clamp(100 - (worker.energy ?? 100), 0, 100),
-          tasksCompleted: worker.tasksCompleted ?? 0,
-          lastBreakAtMinute: 0,
-        }));
-        let sequence = 0;
-        const assignments = workers.map((worker) => {
-          sequence += 1;
-          const kind = defaultAssignmentFor(worker);
-          return {
-            id: `assignment-${String(sequence).padStart(4, '0')}`,
-            workerId: worker.id,
-            kind,
-            targetId: worker.targetMachine ?? null,
-            startedAtMinute: 0,
-            progress: 0,
-            effectiveness: calculateWorkerEffectiveness(
-              worker,
-              personnel.find((person) => person.workerId === worker.id),
-              kind
-            ),
-            certified: isWorkerCertified(worker, kind),
-            status: 'active' as const,
-          };
-        });
-        set({
+        set((state) => ({
           initialized: true,
-          personnel,
-          assignments,
-          logbook: [
+          sequence: state.sequence + 1,
+          logbook: appendBounded(
+            state.logbook,
             {
-              id: `log-${String(sequence + 1).padStart(4, '0')}`,
-              simulationMinute: 0,
-              author: 'Shift system',
-              category: 'shift',
-              message: 'Operations campaign initialized with the current roster and commitments.',
-              relatedId: 'order-001',
+              id: `log-${String(state.sequence + 1).padStart(4, '0')}`,
+              simulationMinute: state.elapsedMinutes,
+              source: 'Autonomous execution',
+              category: 'operation',
+              message: 'Production programme initialized from equipment and inventory state.',
+              relatedId: state.activeOrderId,
             },
-          ],
-          sequence: sequence + 1,
-        });
+            MAX_LOG_ENTRIES
+          ),
+        }));
       },
 
       activateOrder: (orderId) =>
         set((state) => {
-          const order = state.orders.find((candidate) => candidate.id === orderId);
-          if (!order || order.status === 'fulfilled' || order.status === 'cancelled') return state;
+          const selected = state.orders.find((order) => order.id === orderId);
+          if (!selected || selected.status === 'fulfilled' || selected.status === 'cancelled')
+            return state;
           const sequence = state.sequence + 1;
           return {
             activeOrderId: orderId,
-            orders: state.orders.map((candidate) =>
-              candidate.id === orderId && candidate.status === 'planned'
-                ? { ...candidate, status: 'active' }
-                : candidate
+            orders: state.orders.map((order) =>
+              order.id === orderId
+                ? { ...order, status: 'active' }
+                : order.status === 'active'
+                  ? { ...order, status: 'planned' }
+                  : order
             ),
+            execution: {
+              ...state.execution,
+              orderId,
+              recipeId: selected.recipe.id,
+              sourceMaterial: selected.recipe.sourceMaterial,
+              finishedMaterial: selected.recipe.finishedMaterial,
+              stage: 'planning',
+            },
+            sequence,
             logbook: appendBounded(
               state.logbook,
               {
                 id: `log-${String(sequence).padStart(4, '0')}`,
                 simulationMinute: state.elapsedMinutes,
-                author: 'Production planner',
+                source: 'Order scheduler',
                 category: 'operation',
-                message: `${order.recipe.label} selected for ${order.customer}; routing ${order.recipe.sourceMaterial} to ${order.recipe.finishedMaterial}.`,
-                relatedId: order.id,
+                message: `${selected.id} activated: ${selected.recipe.sourceMaterial} to ${selected.recipe.finishedMaterial}.`,
+                relatedId: selected.id,
               },
               MAX_LOG_ENTRIES
             ),
-            sequence,
           };
         }),
-
-      assignWorker: (worker, kind, targetId = null) => {
-        const state = get();
-        const sequence = state.sequence + 1;
-        const personnel = state.personnel.find((person) => person.workerId === worker.id);
-        const assignment: PersonnelAssignment = {
-          id: `assignment-${String(sequence).padStart(4, '0')}`,
-          workerId: worker.id,
-          kind,
-          targetId,
-          startedAtMinute: state.elapsedMinutes,
-          progress: 0,
-          effectiveness: calculateWorkerEffectiveness(worker, personnel, kind),
-          certified: isWorkerCertified(worker, kind),
-          status: 'active',
-        };
-        set({
-          assignments: [
-            ...state.assignments.map((candidate) =>
-              candidate.workerId === worker.id && candidate.status === 'active'
-                ? { ...candidate, status: 'completed' as const }
-                : candidate
-            ),
-            assignment,
-          ].slice(-80),
-          sequence,
-        });
-        return assignment;
-      },
-
-      sendWorkerOnBreak: (worker) => get().assignWorker(worker, 'break', 'break-room'),
 
       triggerIncident: (kind) => {
         const state = get();
@@ -984,9 +775,8 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
           state.incidents.some(
             (incident) => incident.kind === kind && incident.phase !== 'resolved'
           )
-        ) {
+        )
           return null;
-        }
         const definition = INCIDENT_DEFINITIONS[kind];
         const sequence = state.sequence + 1;
         const incident: OperationalIncident = {
@@ -1002,18 +792,21 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
           affectedMachineId: definition.affectedMachineId,
           effectApplied: false,
         };
-        const log: CampaignLogEntry = {
-          id: `log-${String(sequence + 1).padStart(4, '0')}`,
-          simulationMinute: state.elapsedMinutes,
-          author: 'Incident monitor',
-          category: definition.severity === 'critical' ? 'safety' : 'operation',
-          message: `${definition.title}: ${definition.description}`,
-          relatedId: incident.id,
-        };
         set({
           incidents: appendBounded(state.incidents, incident, MAX_INCIDENTS),
-          logbook: appendBounded(state.logbook, log, MAX_LOG_ENTRIES),
-          sequence: sequence + 1,
+          sequence,
+          logbook: appendBounded(
+            state.logbook,
+            {
+              id: `log-${String(sequence).padStart(4, '0')}`,
+              simulationMinute: state.elapsedMinutes,
+              source: 'Incident controller',
+              category: definition.severity === 'critical' ? 'safety' : 'operation',
+              message: definition.title,
+              relatedId: incident.id,
+            },
+            MAX_LOG_ENTRIES
+          ),
         });
         return incident;
       },
@@ -1022,11 +815,7 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
         set((state) => ({
           incidents: state.incidents.map((incident) =>
             incident.id === incidentId && incident.phase === 'raised'
-              ? {
-                  ...incident,
-                  phase: 'acknowledged',
-                  acknowledgedAtMinute: state.elapsedMinutes,
-                }
+              ? { ...incident, phase: 'acknowledged', acknowledgedAtMinute: state.elapsedMinutes }
               : incident
           ),
         })),
@@ -1042,246 +831,185 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
                 }
               : incident
           ),
+          shiftMetrics: {
+            ...state.shiftMetrics,
+            automaticActions: state.shiftMetrics.automaticActions + 1,
+          },
         })),
 
       resolveIncident: (incidentId) =>
         set((state) => {
-          const incident = state.incidents.find((candidate) => candidate.id === incidentId);
-          if (!incident || incident.phase === 'resolved') return state;
+          const target = state.incidents.find(
+            (incident) => incident.id === incidentId && incident.phase !== 'resolved'
+          );
+          if (!target) return state;
           const sequence = state.sequence + 1;
           return {
-            incidents: state.incidents.map((candidate) =>
-              candidate.id === incidentId
-                ? { ...candidate, phase: 'resolved', resolvedAtMinute: state.elapsedMinutes }
-                : candidate
+            incidents: state.incidents.map((incident) =>
+              incident.id === incidentId
+                ? { ...incident, phase: 'resolved', resolvedAtMinute: state.elapsedMinutes }
+                : incident
             ),
             shiftMetrics: {
               ...state.shiftMetrics,
               incidentsResolved: state.shiftMetrics.incidentsResolved + 1,
+              automaticActions: state.shiftMetrics.automaticActions + 1,
             },
+            sequence,
             logbook: appendBounded(
               state.logbook,
               {
                 id: `log-${String(sequence).padStart(4, '0')}`,
                 simulationMinute: state.elapsedMinutes,
-                author: 'Shift operator',
-                category: 'operation',
-                message: `${incident.title} marked resolved. Residual machine, quality, and maintenance interlocks remain explicit.`,
-                relatedId: incident.id,
+                source: 'Incident controller',
+                category: 'maintenance',
+                message: `${target.title} resolved and controls returned to normal.`,
+                relatedId: incidentId,
               },
               MAX_LOG_ENTRIES
             ),
-            sequence,
           };
         }),
 
       markIncidentEffectApplied: (incidentId) =>
         set((state) => ({
           incidents: state.incidents.map((incident) =>
-            incident.id === incidentId && !incident.effectApplied
-              ? { ...incident, effectApplied: true }
-              : incident
+            incident.id === incidentId ? { ...incident, effectApplied: true } : incident
           ),
         })),
 
-      addLogEntry: (author, category, message, relatedId = null) => {
-        const cleanMessage = message.trim().slice(0, 500);
-        if (!cleanMessage) return;
+      addLogEntry: (source, category, message, relatedId = null) =>
         set((state) => {
+          const trimmed = message.trim();
+          if (!trimmed) return state;
           const sequence = state.sequence + 1;
           return {
+            sequence,
             logbook: appendBounded(
               state.logbook,
               {
                 id: `log-${String(sequence).padStart(4, '0')}`,
                 simulationMinute: state.elapsedMinutes,
-                author: author.trim().slice(0, 80) || 'Simulation operator',
+                source: source.trim() || 'Control layer',
                 category,
-                message: cleanMessage,
+                message: trimmed,
                 relatedId,
               },
               MAX_LOG_ENTRIES
             ),
-            sequence,
           };
-        });
-      },
+        }),
 
       tickCampaign: (deltaSimulationSeconds, context) => {
         if (!Number.isFinite(deltaSimulationSeconds) || deltaSimulationSeconds <= 0) return;
-        if (!get().initialized) get().initializeCampaign(context.workers);
         set((state) => {
-          const deltaHours = Math.min(deltaSimulationSeconds, 300) / 3600;
-          const elapsedMinutes = state.elapsedMinutes + deltaHours * 60;
-          const incidentEffect = combinedIncidentEffect(state.incidents);
+          const deltaMinutes = deltaSimulationSeconds / 60;
+          const deltaHours = deltaSimulationSeconds / 3600;
+          const elapsedMinutes = state.elapsedMinutes + deltaMinutes;
           let sequence = state.sequence;
-          const economics = { ...state.economics };
-          let shiftMetrics = { ...state.shiftMetrics };
-          let logbook = state.logbook;
-          let processedManifestIds = [...state.processedManifestIds];
           let orders = state.orders.map((order) => ({
             ...order,
             batchIds: [...order.batchIds],
             manifestIds: [...order.manifestIds],
           }));
-          let assignments = state.assignments.map((assignment) => ({ ...assignment }));
-          const personnel = state.personnel.map((person) => ({ ...person }));
-
-          const personnelById = new Map(personnel.map((person) => [person.workerId, person]));
-          const workersById = new Map(context.workers.map((worker) => [worker.id, worker]));
-          assignments = assignments.map((assignment) => {
-            if (assignment.status !== 'active') return assignment;
-            const worker = workersById.get(assignment.workerId);
-            const person = personnelById.get(assignment.workerId);
-            if (!worker || !person) return { ...assignment, status: 'blocked' };
-            const drainPerHour =
-              assignment.kind === 'break'
-                ? -45
-                : assignment.kind === 'supervision'
-                  ? 3
-                  : assignment.kind === 'safety' || assignment.kind === 'quality'
-                    ? 4
-                    : 5.5;
-            person.energy = clamp(person.energy - drainPerHour * deltaHours, 0, 100);
-            person.fatigue = 100 - person.energy;
-            if (assignment.kind === 'break') person.lastBreakAtMinute = elapsedMinutes;
-            const effectiveness = calculateWorkerEffectiveness(worker, person, assignment.kind);
-            const duration = ASSIGNMENT_DURATION_HOURS[assignment.kind];
-            const progress =
-              duration === null
-                ? assignment.progress
-                : clamp(
-                    assignment.progress + (deltaHours / duration) * 100 * effectiveness,
-                    0,
-                    100
-                  );
-            const completed = duration !== null && progress >= 100;
-            if (completed) {
-              person.tasksCompleted += 1;
-              shiftMetrics.tasksCompleted += 1;
-            }
-            return {
-              ...assignment,
-              effectiveness,
-              progress,
-              status: completed ? 'completed' : assignment.status,
-            };
-          });
-
+          let logbook = state.logbook;
+          let processedManifestIds = [...state.processedManifestIds];
+          const economics = { ...state.economics };
+          let shiftMetrics = { ...state.shiftMetrics };
+          const incidentEffect = combinedIncidentEffect(state.incidents);
           const batchesById = new Map(context.productionBatches.map((batch) => [batch.id, batch]));
-          const newShippingManifests = context.manifests.filter(
-            (manifest) =>
-              manifest.kind === 'shipping' && !processedManifestIds.includes(manifest.id)
-          );
-          newShippingManifests.forEach((manifest) => {
+
+          for (const manifest of context.manifests) {
+            if (manifest.kind !== 'shipping' || processedManifestIds.includes(manifest.id))
+              continue;
             processedManifestIds.push(manifest.id);
-            const contributions = manifest.productBatches.length
-              ? manifest.productBatches
-              : manifest.materials.map((material, index) => ({
-                  batchId: `unattributed-${manifest.id}-${index}`,
-                  amount: material.amount,
-                }));
-            contributions.forEach((contribution) => {
-              const batch = batchesById.get(contribution.batchId);
-              const materialType = batch?.materialType ?? 'flour';
-              let remaining = contribution.amount;
-              const candidates = orders
+            let remaining = manifest.actualKg;
+            for (const product of manifest.productBatches) {
+              const batch = batchesById.get(product.batchId);
+              const material = batch?.materialType ?? manifest.materials[0]?.type;
+              for (const order of orders
                 .filter(
-                  (order) =>
-                    order.status !== 'fulfilled' &&
-                    order.status !== 'cancelled' &&
-                    order.recipe.finishedMaterial === materialType
+                  (candidate) =>
+                    candidate.status !== 'fulfilled' &&
+                    candidate.status !== 'cancelled' &&
+                    candidate.recipe.finishedMaterial === material
                 )
                 .sort(
                   (a, b) =>
                     priorityRank(a.priority) - priorityRank(b.priority) ||
-                    a.dueAtMinute - b.dueAtMinute ||
-                    a.id.localeCompare(b.id)
-                );
-              for (const order of candidates) {
+                    a.dueAtMinute - b.dueAtMinute
+                )) {
                 if (remaining <= EPSILON_KG) break;
-                const orderRemaining = Math.max(0, order.requiredKg - order.shippedKg);
-                const allocated = Math.min(orderRemaining, remaining);
+                const needed = Math.max(0, order.requiredKg - order.shippedKg);
+                const allocated = Math.min(needed, remaining, product.amount);
                 if (allocated <= EPSILON_KG) continue;
                 order.shippedKg += allocated;
                 remaining -= allocated;
-                order.status =
-                  order.shippedKg >= order.requiredKg - EPSILON_KG ? 'fulfilled' : 'active';
-                if (order.status === 'fulfilled') order.completedAtMinute = elapsedMinutes;
+                if (!order.batchIds.includes(product.batchId)) order.batchIds.push(product.batchId);
+                if (!order.manifestIds.includes(manifest.id)) order.manifestIds.push(manifest.id);
                 if (context.averageQuality < order.recipe.minimumQuality) {
                   order.qualityFailureKg += allocated;
                   economics.latePenalties += allocated * 0.08;
                   shiftMetrics.latePenalties += allocated * 0.08;
                 }
-                if (batch && !order.batchIds.includes(batch.id)) order.batchIds.push(batch.id);
-                if (!order.manifestIds.includes(manifest.id)) order.manifestIds.push(manifest.id);
                 const revenue = allocated * order.revenuePerKg;
                 economics.revenue += revenue;
                 shiftMetrics.revenue += revenue;
                 shiftMetrics.dispatchedKg += allocated;
+                if (order.shippedKg + EPSILON_KG >= order.requiredKg) {
+                  order.status = 'fulfilled';
+                  order.completedAtMinute = elapsedMinutes;
+                } else {
+                  order.status = 'active';
+                }
               }
-            });
+            }
             sequence += 1;
             logbook = appendBounded(
               logbook,
               {
                 id: `log-${String(sequence).padStart(4, '0')}`,
                 simulationMinute: elapsedMinutes,
-                author: 'Dispatch system',
+                source: 'Dispatch controller',
                 category: 'operation',
-                message: `${manifest.id} allocated ${manifest.actualKg.toFixed(1)} kg across active customer commitments.`,
+                message: `${manifest.id} allocated ${manifest.actualKg.toFixed(1)} kg across active commitments.`,
                 relatedId: manifest.id,
               },
               MAX_LOG_ENTRIES
             );
-          });
+          }
           processedManifestIds = processedManifestIds.slice(-MAX_PROCESSED_MANIFESTS);
 
-          orders = orders.map((order) => {
-            if (
-              order.status !== 'fulfilled' &&
-              order.status !== 'cancelled' &&
-              elapsedMinutes > order.dueAtMinute
-            ) {
-              return { ...order, status: 'late' };
-            }
-            return order;
-          });
-
+          orders = orders.map((order) =>
+            order.status !== 'fulfilled' &&
+            order.status !== 'cancelled' &&
+            elapsedMinutes > order.dueAtMinute
+              ? { ...order, status: 'late' }
+              : order
+          );
           let activeOrderId = state.activeOrderId;
-          const currentActive = orders.find((order) => order.id === activeOrderId);
-          if (
-            !currentActive ||
-            currentActive.status === 'fulfilled' ||
-            currentActive.status === 'cancelled'
-          ) {
+          const active = orders.find((order) => order.id === activeOrderId);
+          if (!active || active.status === 'fulfilled' || active.status === 'cancelled') {
             activeOrderId =
               orders
                 .filter((order) => order.status !== 'fulfilled' && order.status !== 'cancelled')
                 .sort(
                   (a, b) =>
                     priorityRank(a.priority) - priorityRank(b.priority) ||
-                    a.dueAtMinute - b.dueAtMinute ||
-                    a.id.localeCompare(b.id)
+                    a.dueAtMinute - b.dueAtMinute
                 )[0]?.id ?? null;
-            if (activeOrderId) {
-              orders = orders.map((order) =>
-                order.id === activeOrderId && order.status === 'planned'
-                  ? { ...order, status: 'active' }
-                  : order
-              );
-            }
+            orders = orders.map((order) =>
+              order.id === activeOrderId && order.status === 'planned'
+                ? { ...order, status: 'active' }
+                : order
+            );
           }
 
           const effectiveEnergyKw = Math.max(
             0,
             context.totalEnergyKw * incidentEffect.energyMultiplier
           );
-          const currentUtilityAssets =
-            state.utilityAssets?.length === UTILITY_ASSET_DEFINITIONS.length
-              ? state.utilityAssets
-              : createInitialUtilityTelemetry();
-          const utilityAssets = currentUtilityAssets.map((asset, index) => {
+          const utilityAssets = state.utilityAssets.map((asset, index) => {
             const definition = UTILITY_ASSET_DEFINITIONS.find(
               (candidate) => candidate.id === asset.id
             );
@@ -1290,7 +1018,7 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
               asset.id === 'utility-fuel-oil-01'
                 ? effectiveEnergyKw * deltaHours * 0.018
                 : asset.id === 'utility-process-oil-02'
-                  ? (state.execution?.lineSetpointPercent ?? 100) * deltaHours * 0.012
+                  ? state.execution.lineSetpointPercent * deltaHours * 0.012
                   : asset.id.startsWith('utility-lpg')
                     ? deltaHours * 0.8
                     : deltaHours * 0.15;
@@ -1300,33 +1028,40 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
               0,
               100
             );
-            const status: UtilityAssetTelemetry['status'] =
-              levelPercent <= 10 ? 'critical' : levelPercent <= 20 ? 'low' : 'normal';
-            const temperatureC =
-              definition.nominalTemperatureC + Math.sin(elapsedMinutes / 90 + index * 0.7) * 1.4;
-            const pressureBar = Math.max(
-              0,
-              definition.nominalPressureBar +
-                (definition.kind === 'lpg_vessel'
-                  ? Math.sin(elapsedMinutes / 55 + index) * 0.12
-                  : Math.sin(elapsedMinutes / 120 + index) * 0.01)
-            );
             return {
               ...asset,
               levelPercent: Math.round(levelPercent * 100) / 100,
-              temperatureC: Math.round(temperatureC * 10) / 10,
-              pressureBar: Math.round(pressureBar * 100) / 100,
-              status,
+              temperatureC:
+                Math.round(
+                  (definition.nominalTemperatureC +
+                    Math.sin(elapsedMinutes / 90 + index * 0.7) * 1.4) *
+                    10
+                ) / 10,
+              pressureBar:
+                Math.round(
+                  Math.max(
+                    0,
+                    definition.nominalPressureBar +
+                      Math.sin(
+                        elapsedMinutes / (definition.kind === 'lpg_vessel' ? 55 : 120) + index
+                      ) *
+                        (definition.kind === 'lpg_vessel' ? 0.12 : 0.01)
+                  ) * 100
+                ) / 100,
+              status:
+                levelPercent <= 10
+                  ? ('critical' as const)
+                  : levelPercent <= 20
+                    ? ('low' as const)
+                    : ('normal' as const),
             };
           });
-          const tariff =
-            elapsedMinutes % (24 * 60) >= 9 * 60 && elapsedMinutes % (24 * 60) <= 21 * 60
-              ? 0.15
-              : 0.08;
-          const energyCost = effectiveEnergyKw * tariff * deltaHours;
-          const labourCost = context.workers.length * 32 * deltaHours;
-          const wasteDelta = Math.max(0, context.wasteKg - state.lastWasteKg);
-          const wasteCost = wasteDelta * 0.18;
+
+          const hour = elapsedMinutes % (24 * 60);
+          const energyCost =
+            effectiveEnergyKw * (hour >= 540 && hour <= 1260 ? 0.15 : 0.08) * deltaHours;
+          const automationCost = 28 * deltaHours;
+          const wasteCost = Math.max(0, context.wasteKg - state.lastWasteKg) * 0.18;
           const maintenanceCost = context.openWorkOrders * 90 * deltaHours;
           const demurrageCost =
             context.shippingDocked && (!context.dispatchReleased || incidentEffect.dispatchBlocked)
@@ -1334,21 +1069,24 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
               : 0;
           const latePenalties = orders.reduce((sum, order) => {
             if (order.status !== 'late') return sum;
-            const remainingKg = Math.max(0, order.requiredKg - order.shippedKg);
-            return sum + remainingKg * order.latePenaltyPerKgHour * deltaHours;
+            return (
+              sum +
+              Math.max(0, order.requiredKg - order.shippedKg) *
+                order.latePenaltyPerKgHour *
+                deltaHours
+            );
           }, 0);
-          economics.energyCost += energyCost;
-          economics.labourCost += labourCost;
-          economics.wasteCost += wasteCost;
-          economics.maintenanceCost += maintenanceCost;
-          economics.demurrageCost += demurrageCost;
-          economics.latePenalties += latePenalties;
-          shiftMetrics.energyCost += energyCost;
-          shiftMetrics.labourCost += labourCost;
-          shiftMetrics.wasteCost += wasteCost;
-          shiftMetrics.maintenanceCost += maintenanceCost;
-          shiftMetrics.demurrageCost += demurrageCost;
-          shiftMetrics.latePenalties += latePenalties;
+          for (const [key, value] of Object.entries({
+            energyCost,
+            automationCost,
+            wasteCost,
+            maintenanceCost,
+            demurrageCost,
+            latePenalties,
+          }) as Array<[keyof CampaignEconomics, number]>) {
+            economics[key] += value;
+            shiftMetrics[key] += value;
+          }
 
           let reports = state.reports;
           let currentShiftKey = state.currentShiftKey ?? context.shiftKey;
@@ -1358,24 +1096,20 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
           let shiftStartedAtMinute = state.currentShiftKey
             ? state.shiftStartedAtMinute
             : state.elapsedMinutes;
+          const constraintInput = {
+            orders,
+            activeOrderId,
+            incidents: state.incidents,
+            elapsedMinutes,
+          };
           if (currentShiftKey !== context.shiftKey) {
-            const openRisks = makeConstraints(
-              {
-                orders,
-                activeOrderId,
-                incidents: state.incidents,
-                elapsedMinutes,
-                personnel,
-              },
-              context,
-              incidentEffect
-            )
+            const risks = makeConstraints(constraintInput, context, incidentEffect)
               .filter((constraint) => constraint.severity !== 'info')
               .map((constraint) => constraint.label);
-            const grade = gradeShift(shiftMetrics, openRisks);
+            const grade = gradePeriod(shiftMetrics, risks);
             sequence += 1;
             const report: ShiftCampaignReport = {
-              id: `shift-report-${String(sequence).padStart(4, '0')}`,
+              id: `period-report-${String(sequence).padStart(4, '0')}`,
               shiftKey: currentShiftKey,
               shiftLabel: currentShiftLabel,
               startedAtMinute: shiftStartedAtMinute,
@@ -1389,43 +1123,26 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
                     order.completedAtMinute >= shiftStartedAtMinute
                 )
                 .map((order) => order.id),
-              openRisks,
+              openRisks: risks,
               grade,
               summary:
                 grade === 'A' || grade === 'B'
-                  ? 'Commitments, controls, and recovery actions remained coherent through the shift.'
-                  : 'The next shift inherits material constraints or unresolved operational risk.',
+                  ? 'Commitments, controls, and recovery actions remained coherent through the period.'
+                  : 'The next period inherits material constraints or unresolved operational risk.',
             };
             reports = appendBounded(reports, report, MAX_REPORTS);
-            sequence += 1;
-            logbook = appendBounded(
-              logbook,
-              {
-                id: `log-${String(sequence).padStart(4, '0')}`,
-                simulationMinute: elapsedMinutes,
-                author: 'Shift system',
-                category: 'shift',
-                message: `${currentShiftLabel} shift closed with grade ${grade}.`,
-                relatedId: report.id,
-              },
-              MAX_LOG_ENTRIES
-            );
             currentShiftKey = context.shiftKey;
             currentShiftLabel = context.shiftLabel;
             shiftStartedAtMinute = elapsedMinutes;
             shiftMetrics = { ...ZERO_SHIFT_METRICS };
           }
 
-          const constraints = makeConstraints(
-            { orders, activeOrderId, incidents: state.incidents, elapsedMinutes, personnel },
-            context,
-            incidentEffect
-          );
+          const constraints = makeConstraints(constraintInput, context, incidentEffect);
           const activeOrder = orders.find((order) => order.id === activeOrderId);
           const execution = deriveExecution(activeOrder, elapsedMinutes, context);
           if (
-            execution.orderId !== state.execution?.orderId ||
-            execution.stage !== state.execution?.stage
+            execution.orderId !== state.execution.orderId ||
+            execution.stage !== state.execution.stage
           ) {
             sequence += 1;
             logbook = appendBounded(
@@ -1433,9 +1150,9 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
               {
                 id: `log-${String(sequence).padStart(4, '0')}`,
                 simulationMinute: elapsedMinutes,
-                author: 'Production execution',
+                source: 'Production execution',
                 category: execution.stage === 'quality_hold' ? 'quality' : 'operation',
-                message: getExecutionStageMessage(execution),
+                message: executionMessage(execution),
                 relatedId: execution.orderId,
               },
               MAX_LOG_ENTRIES
@@ -1443,11 +1160,10 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
           }
 
           return {
+            initialized: true,
             elapsedMinutes,
             orders,
             activeOrderId,
-            personnel,
-            assignments: assignments.slice(-80),
             economics,
             shiftMetrics,
             reports,
@@ -1465,8 +1181,6 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
         });
       },
 
-      getIncidentEffect: () => combinedIncidentEffect(get().incidents),
-
       getActiveProductionPlan: () => {
         const state = get();
         const order = state.orders.find((candidate) => candidate.id === state.activeOrderId);
@@ -1476,63 +1190,29 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
           sourceMaterial: order.recipe.sourceMaterial,
           finishedMaterial: order.recipe.finishedMaterial,
           lineSetpointPercent:
-            state.execution?.orderId === order.id ? state.execution.lineSetpointPercent : 100,
+            state.execution.orderId === order.id ? state.execution.lineSetpointPercent : 100,
         };
       },
 
       getProductionMultiplier: () => {
         const state = get();
-        const incidentMultiplier = combinedIncidentEffect(state.incidents).productionMultiplier;
-        const activeAssignments = state.assignments.filter(
-          (assignment) => assignment.status === 'active' && assignment.kind !== 'break'
-        );
-        const operationalAssignments = activeAssignments.filter((assignment) =>
-          ['production', 'forklift', 'supervision'].includes(assignment.kind)
-        );
-        const personnelMultiplier = operationalAssignments.length
-          ? clamp(
-              operationalAssignments.reduce(
-                (sum, assignment) => sum + assignment.effectiveness,
-                0
-              ) / operationalAssignments.length,
-              0.65,
-              1.08
-            )
-          : 1;
-        const setpointMultiplier = clamp(
-          (state.execution?.lineSetpointPercent ?? 100) / 100,
-          0,
-          1.08
-        );
-        return clamp(incidentMultiplier * personnelMultiplier * setpointMultiplier, 0, 1.08);
+        const incident = combinedIncidentEffect(state.incidents).productionMultiplier;
+        const setpoint = clamp(state.execution.lineSetpointPercent / 100, 0, 1.08);
+        return clamp(incident * setpoint, 0, 1.08);
       },
 
-      getWorkerEffectiveness: (workerId, kind) => {
-        const assignments = get().assignments.filter(
-          (assignment) =>
-            assignment.workerId === workerId &&
-            assignment.status === 'active' &&
-            (!kind || assignment.kind === kind)
-        );
-        return assignments.length
-          ? assignments.reduce((sum, assignment) => sum + assignment.effectiveness, 0) /
-              assignments.length
-          : 1;
-      },
-
+      getIncidentEffect: () => combinedIncidentEffect(get().incidents),
       resetCampaign: () => set(emptyState()),
     }),
     {
-      name: 'millos-operations-campaign',
+      name: 'millos-autonomous-operations',
       storage: safeJSONStorage,
-      version: 1,
+      version: 2,
       partialize: (state) => ({
         initialized: state.initialized,
         elapsedMinutes: state.elapsedMinutes,
         orders: state.orders,
         activeOrderId: state.activeOrderId,
-        personnel: state.personnel,
-        assignments: state.assignments,
         incidents: state.incidents,
         economics: state.economics,
         shiftMetrics: state.shiftMetrics,
@@ -1547,10 +1227,6 @@ export const useOperationsCampaignStore = create<OperationsCampaignState>()(
         currentShiftLabel: state.currentShiftLabel,
         shiftStartedAtMinute: state.shiftStartedAtMinute,
         sequence: state.sequence,
-      }),
-      merge: (persisted, current) => ({
-        ...current,
-        ...(persisted && typeof persisted === 'object' ? persisted : {}),
       }),
     }
   )

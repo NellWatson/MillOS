@@ -62,6 +62,11 @@ export const Cat = React.memo<CatProps>(
       if (!isSleeping) groupRef.current.position.y = yOffset;
     });
 
+    // Segment counts below stay where they are. The `onClick` on this group puts
+    // every mesh under it into R3F's interaction list, so all of them are
+    // raycast on each pointer move with no picking proxy to fall back on; and at
+    // scale 0.4 the largest part is a 0.48 m sphere, with ears at 64 mm and eyes
+    // at 32 mm. A faceted critter is the art direction here, not neglect.
     return (
       <group position={position} rotation={[0, rotation, 0]} scale={0.4} onClick={handlePet}>
         <group ref={groupRef}>

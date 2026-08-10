@@ -17,10 +17,10 @@ const mockStrategicResponse = {
   tradeoff: 'Slightly higher energy cost vs meeting production target',
   actionPlan: [
     'Increase Line 3 speed by 15%',
-    'Reassign idle workers to Line 3',
+    'Rebalance the autonomous feed route to Line 3',
     'Monitor quality every 10min',
   ],
-  recommendWorker: 'Marcus Chen',
+  recommendedSystem: 'Line 3 feed controller',
   confidenceScores: {
     overall: 87,
     reasoning: 'Based on current load, quality metrics, and weather forecast',

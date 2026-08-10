@@ -78,29 +78,6 @@ export const OpenDockOpening: React.FC<OpenDockOpeningProps> = ({
         </mesh>
       </group>
 
-      {/* Safety bollards - prevent vehicles from hitting frame */}
-      {[-halfWidth - 2, halfWidth + 2].map((x, i) => (
-        <group key={`bollard-${i}`} position={[x, 0, 2]}>
-          {/* Bollard post */}
-          <mesh position={[0, 0.5, 0]} castShadow>
-            <cylinderGeometry args={[0.2, 0.2, 1, 16]} />
-            <meshStandardMaterial color="#eab308" metalness={0.3} roughness={0.6} />
-          </mesh>
-          {/* Base plate */}
-          <mesh position={[0, FLOOR_LAYERS.wornPrimary, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <circleGeometry args={[0.35, 16]} />
-            <meshStandardMaterial
-              color="#374151"
-              metalness={0.6}
-              roughness={0.4}
-              polygonOffset
-              polygonOffsetFactor={POLYGON_OFFSET.standard.factor}
-              polygonOffsetUnits={POLYGON_OFFSET.standard.units}
-            />
-          </mesh>
-        </group>
-      ))}
-
       {/* Warning stripes at floor level */}
       <mesh position={[0, FLOOR_LAYERS.safetyMain, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[width + 2, 1.5]} />

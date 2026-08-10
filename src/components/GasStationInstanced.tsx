@@ -31,20 +31,235 @@ const SHOP_WALL_SURFACE = {
 } as const;
 
 // ============================================================================
+// Designed forecourt geometry
+// ============================================================================
+// Every geometry in this section is module-level and drawn either through an
+// InstancedMesh or as the station's one pylon, so its vertex count is a one-off
+// scene cost at any instance count. No mesh in this file carries pointer
+// handlers or a custom raycast, so none of them needs the picking proxy the
+// corrugated silo shell does (`raycastSiloShell`, machines/CompactMachines.tsx).
+//
+// Profiles were designed and previewed in Blender before being transcribed -
+// scripts/blender/specs/gas-station.json, run through
+// scripts/blender/machine_part_preview.py. The numbers below are the ones that
+// were looked at, not a retyped approximation.
+
+/**
+ * Forecourt canopy column.
+ *
+ * Rendered 0.5 m across and 5 m tall, four of them at (+/-6, 2.5, +/-4). The
+ * previous `CylinderGeometry(0.25, 0.25, 5, 16)` was a bare tube - right
+ * diameter, no story. A clad forecourt pillar has three features this profile
+ * now carries, and all three survive the 11 m the pumps are seen from:
+ *
+ *  - a 940 mm kick skirt at full width, the scuff sleeve every real forecourt
+ *    column wears. The apron plane sits at y=0.08, so 860 mm of it shows.
+ *  - a chamfer and collar stepping down onto a slimmer 360 mm clad shaft. That
+ *    step is what makes the skirt read as a base instead of as a ring; the
+ *    first draft kept a 398 mm shaft and previewed as a dumbbell.
+ *  - a conical haunch spreading back to full width at y=4.32 and holding it to
+ *    y=4.40, the underside of the canopy fascia (a 0.4 m band centred on 4.6).
+ *    Above 4.40 the column is inside the fascia box and invisible, so the
+ *    profile spends nothing up there beyond a neck and a stub. Meeting the
+ *    soffit exactly is safe here because what arrives at 4.40 is the capital's
+ *    vertical wall - an edge contact, not a coplanar face. Contrast the pylon
+ *    below, whose shoe ends in a horizontal annulus and so has to finish 60 mm
+ *    inside the cabinet rather than flush with it.
+ *
+ * Envelope unchanged: max radius 0.25, y in [-2.5, 2.5], so the four instance
+ * positions and the canopy slab above them need no retuning.
+ *
+ * The 16 segments are unchanged as well. They were raised from 8 for a
+ * facet-chord reason that still holds, and re-bumping them would be a density
+ * change wearing a design's clothes - the slimmer shaft improves the chord on
+ * its own, from 98 mm to 70 mm. 17 x 14 = 238 vertices, shared by all four.
+ */
+function createCanopyColumnGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -2.5), // underside cap centre, at apron level
+    new THREE.Vector2(0.25, -2.5), // skirt rim - envelope max radius
+    new THREE.Vector2(0.25, -1.56), // kick skirt top, 940 mm up
+    new THREE.Vector2(0.236, -1.48), // skirt cap chamfer
+    new THREE.Vector2(0.198, -1.43), // shoulder
+    new THREE.Vector2(0.198, -1.36), // collar band
+    new THREE.Vector2(0.18, -1.3), // step onto the clad shaft
+    new THREE.Vector2(0.18, 1.24), // clad shaft, 360 mm across
+    new THREE.Vector2(0.194, 1.32), // haunch springs
+    new THREE.Vector2(0.25, 1.82), // haunch back to full width (world y 4.32)
+    new THREE.Vector2(0.25, 1.9), // capital edge at the fascia soffit (4.40)
+    new THREE.Vector2(0.205, 1.96), // neck into the fascia
+    new THREE.Vector2(0.205, 2.5), // stub buried in the canopy slab
+    new THREE.Vector2(0.0, 2.5),
+  ];
+  return new THREE.LatheGeometry(profile, 16);
+}
+
+/**
+ * Dead Dino pylon sign pole.
+ *
+ * 8 m tall, carrying a 4 x 5 m cabinet whose underside is at y=4.70. Only the
+ * bottom 4.70 m is ever visible - everything above that is inside the cabinet
+ * box - and the previous `CylinderGeometry(0.15, 0.15, 8, 16)` spent that whole
+ * visible run as one unbroken 300 mm pipe.
+ *
+ * A pylon reads by hierarchy, not by thickness:
+ *  - a 1.12 m ground shroud at full width, the only move large enough to
+ *    survive the 20-60 m this sign is actually read from;
+ *  - a conical transition and collar onto a shaft that tapers 232 -> 208 mm
+ *    over its run, so the pole looks carried rather than extruded;
+ *  - a 340 mm mounting shoe flaring to 264 mm just under the cabinet and
+ *    running 60 mm up inside it, so the shoe's top annulus is hidden instead of
+ *    landing coplanar with the cabinet's underside and z-fighting it.
+ *
+ * Envelope unchanged: max radius 0.15, y in [-4, 4] about the mesh's y=4, so
+ * the cabinet, borders and both dino logos above it stay exactly where they are.
+ * 16 segments unchanged; the narrower shaft takes the facet chord from 59 mm to
+ * 45 mm on its own. One singleton mesh: 17 x 14 = 238 vertices, once.
+ */
+function createSignPoleGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -4.0), // base cap centre, at apron level
+    new THREE.Vector2(0.15, -4.0), // shroud rim - envelope max radius
+    new THREE.Vector2(0.15, -2.88), // shroud wall, 1.12 m tall
+    new THREE.Vector2(0.144, -2.8), // shroud cap chamfer
+    new THREE.Vector2(0.12, -2.62), // conical transition onto the shaft
+    new THREE.Vector2(0.12, -2.48), // base collar band
+    new THREE.Vector2(0.116, -2.4), // weld step onto the shaft
+    new THREE.Vector2(0.104, 0.22), // tapered shaft, 232 -> 208 mm
+    new THREE.Vector2(0.102, 0.34), // under the mounting shoe
+    new THREE.Vector2(0.132, 0.42), // shoe flare (world y 4.42)
+    new THREE.Vector2(0.132, 0.76), // shoe top, 60 mm inside the cabinet
+    new THREE.Vector2(0.092, 0.8), // step onto the stub
+    new THREE.Vector2(0.092, 4.0), // stub inside the cabinet
+    new THREE.Vector2(0.0, 4.0),
+  ];
+  return new THREE.LatheGeometry(profile, 16);
+}
+
+/**
+ * Fuel nozzle spout.
+ *
+ * 120 mm long. The old `CylinderGeometry(0.015, 0.012, 0.12, 6)` was a barely
+ * tapered stub; a real spout is mostly a slim barrel with two collars that do
+ * all the reading:
+ *
+ *  - an 18.4 mm barrel with a rolled lip at the tip;
+ *  - a splash sleeve stepping up behind it;
+ *  - a full-width 30 mm vapour-recovery boot at the handle end, then the boss.
+ *
+ * Kept at 6 sides on purpose. Rendering the identical profile at 12 segments
+ * was indistinguishable at 0.45 m (the closest a first-person camera gets) and
+ * cost 2.01 mm of envelope: three.js puts lathe vertices ON the circle, so a
+ * hexagon's z half-extent is 0.866r while any multiple of 4 gives r. Six holds
+ * max radius 0.015 and y in [-0.06, 0.06] exactly.
+ *
+ * 7 x 12 = 84 vertices, shared across the four pumps.
+ */
+function createNozzleSpoutGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -0.06), // tip cap centre
+    new THREE.Vector2(0.0084, -0.06), // tip bore lip
+    new THREE.Vector2(0.0104, -0.057), // rolled tip flare
+    new THREE.Vector2(0.0092, -0.053), // back off the roll
+    new THREE.Vector2(0.0092, -0.013), // barrel, 18.4 mm across
+    new THREE.Vector2(0.011, -0.008), // step up to the splash sleeve
+    new THREE.Vector2(0.011, 0.009), // splash sleeve
+    new THREE.Vector2(0.015, 0.015), // vapour boot rim - envelope max radius
+    new THREE.Vector2(0.015, 0.034), // boot band
+    new THREE.Vector2(0.0126, 0.041), // shoulder onto the boss
+    new THREE.Vector2(0.0126, 0.06), // boss at the handle face
+    new THREE.Vector2(0.0, 0.06),
+  ];
+  return new THREE.LatheGeometry(profile, 6);
+}
+
+/**
+ * Hose swivel at the pump - a hex union nut, and hexagonal on purpose.
+ *
+ * The old `CylinderGeometry(0.035, 0.035, 0.06, 6)` was already six-sided by
+ * accident. A union nut genuinely is a hexagon, so the six sides stay and the
+ * budget goes into the profile instead: a flange washer against the pump skin,
+ * a chamfer onto 26 mm of wrench flat, a chamfer off it, and a 56 mm crimped
+ * ferrule that swallows the 50 mm hose. Holding 6 also keeps the envelope
+ * exactly - max radius 0.035, y in [-0.03, 0.03] - for the same
+ * inscribed-polygon reason as the spout.
+ *
+ * 7 x 9 = 63 vertices, shared across the four pumps.
+ */
+function createHoseSwivelGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -0.03), // pump-face cap centre
+    new THREE.Vector2(0.03, -0.03), // flange washer rim
+    new THREE.Vector2(0.03, -0.0245), // washer edge
+    new THREE.Vector2(0.0262, -0.02), // chamfer up onto the nut
+    new THREE.Vector2(0.035, -0.014), // flats begin - envelope max radius
+    new THREE.Vector2(0.035, 0.012), // 26 mm of wrench flat
+    new THREE.Vector2(0.028, 0.0225), // chamfer off the flats
+    new THREE.Vector2(0.028, 0.03), // crimped ferrule at the hose
+    new THREE.Vector2(0.0, 0.03),
+  ];
+  return new THREE.LatheGeometry(profile, 6);
+}
+
+// ---------------------------------------------------------------------------
+// Pump hose: a drape, not a rod.
+// ---------------------------------------------------------------------------
+// The old hose was `CylinderGeometry(0.025, 0.025, 0.6, 6)` - a rigid stick.
+// Worse, as placed it met nothing at either end: its upper end sat at
+// (y 0.776, z 1.283) while the swivel it was meant to leave was at
+// (y 0.55, z 1.25), so it hung 226 mm off nothing and speared straight through
+// the nozzle-holder box on the way down.
+//
+// A hanging hose is a plane curve, which `LatheGeometry` cannot express but a
+// torus arc can, and a torus arc has closed-form endpoints - so the fit is
+// checked by arithmetic rather than by eye. The arc is fitted to run from the
+// swivel's ferrule mouth to the top face of the nozzle handle:
+//
+//   start (ring angle 0)          -> y 0.5501, z 1.3400  (ferrule mouth 1.35)
+//   end   (ring angle HOSE_ARC)   -> y 0.3201, z 1.5301  (handle top 1.5278)
+//
+// A deeper droop was tried and rejected by measurement, not taste: past ~120
+// degrees the arc swings back inboard far enough to re-enter the nozzle-holder
+// box (world z 1.20-1.30). At 110 degrees the hose clears the holder face by
+// 8.5 mm and the pump island by 94 mm, with 350 mm of hose over a 298 mm span.
+//
+// This is the one part here whose envelope deliberately changes - it is a
+// different curve, not a reshaped rod. The only things that position it are the
+// four matrices in `pumpHoseData` below, in this file, updated in the same
+// change; nothing outside this module references the hose geometry.
+//
+// 9 x 21 = 189 vertices, shared across the four pumps.
+const HOSE_ARC_RADIUS = 0.18209;
+const HOSE_ARC = 1.91986; // 110 degrees of sweep
+const HOSE_ARC_START = 2.87233; // 164.573 degrees - puts ring angle 0 on the swivel
+const HOSE_CENTRE_Y = 0.50166;
+const HOSE_CENTRE_Z = 1.51556; // mirrored to -Z for the back-to-back pump
+// The shaped spout's rear shoulder must meet the rotated handle rather than
+// merely overlap it in elevation. At the old 0.750 m offset their transformed
+// bounds left a measured 5.24 mm air gap. 0.7448 closes that gap without
+// changing the hose, swivel, handle, or pump envelopes.
+const NOZZLE_SPOUT_Z_OFFSET = 0.7448;
+// The one placement change here, and it is forced: at the old 0.35 the swivel
+// sat at z=1.25 entirely inside the opaque nozzle-holder box (world z
+// 1.20-1.30, y 0.35-0.85), so its shape was never drawn at all and the hose had
+// nowhere visible to start. 0.42 puts it 50 mm proud of the holder face with
+// the flange still tucked 10 mm inside, so there is no gap to see through.
+const SWIVEL_Z_OFFSET = 0.42;
+
+// ============================================================================
 // Module-level shared geometries (singleton instances)
 // ============================================================================
 const GEOMETRIES = {
   shelfProduct: new THREE.BoxGeometry(0.15, 0.25, 0.2),
   drinkBottle: new THREE.CylinderGeometry(0.1, 0.1, 0.4, 8),
-  // 5 m columns standing free against the sky and passed close by on the
-  // forecourt, where 8 sides read as a faceted post rather than a steel pillar.
-  canopyColumn: new THREE.CylinderGeometry(0.25, 0.25, 5, 16),
+  canopyColumn: createCanopyColumnGeometry(),
+  signPole: createSignPoleGeometry(),
   magazine: new THREE.BoxGeometry(0.6, 0.35, 0.02),
   // Pump hose/handle geometries
-  hoseSegment: new THREE.CylinderGeometry(0.025, 0.025, 0.6, 6),
+  hoseSegment: new THREE.TorusGeometry(HOSE_ARC_RADIUS, 0.025, 8, 20, HOSE_ARC),
   nozzleHandle: new THREE.BoxGeometry(0.06, 0.15, 0.04),
-  nozzleSpout: new THREE.CylinderGeometry(0.015, 0.012, 0.12, 6),
-  hoseConnector: new THREE.CylinderGeometry(0.035, 0.035, 0.06, 6),
+  nozzleSpout: createNozzleSpoutGeometry(),
+  hoseConnector: createHoseSwivelGeometry(),
 };
 
 // ============================================================================
@@ -76,6 +291,14 @@ const MATERIALS = {
   hose: new THREE.MeshStandardMaterial({
     color: '#1a1a1a',
     roughness: 0.8,
+    // The hose is a torus ARC, and three.js does not cap an arc's two ends the
+    // way CylinderGeometry capped the rod this replaced. Both mouths are seated
+    // into neighbours but neither is fully swallowed - the handle mouth is a
+    // 50 mm ring whose centre sits only 1.6 mm under the handle's top face, so
+    // about half of it stands proud. DoubleSide shows the tube's inner wall
+    // there instead of a see-through backface. Four small instances; the culling
+    // saving given up is nil.
+    side: THREE.DoubleSide,
   }),
   nozzleMetal: new THREE.MeshStandardMaterial({
     color: '#2d2d2d',
@@ -211,14 +434,20 @@ export const GasStation = React.memo<GasStationProps>(
 
       pairXPositions.forEach((pairX) => {
         // Pump facing +Z (at z=0.9, rotated 90° around Y)
-        // Hose hangs toward +Z direction
+        // Hose drapes out toward +Z.
         const plusZPumpZ = 0.9;
-        pos.set(pairX, 0.5, plusZPumpZ + 0.5);
-        quaternion.setFromEuler(new THREE.Euler(-0.4, 0, 0)); // Angle toward +Z
+        // THREE.Euler 'XYZ' composes Rx*Ry*Rz, so this spins the torus about
+        // its own axis by HOSE_ARC_START first and then stands the ring up in
+        // the YZ plane. Ring angle a then lands at
+        // (y = centreY + R*sin(a + start), z = centreZ + R*cos(a + start)).
+        pos.set(pairX, HOSE_CENTRE_Y, HOSE_CENTRE_Z);
+        quaternion.setFromEuler(new THREE.Euler(0, -Math.PI / 2, HOSE_ARC_START));
         matrix.compose(pos, quaternion, scale);
         hoseMatrices.push(matrix.clone());
 
-        pos.set(pairX, 0.55, plusZPumpZ + 0.35);
+        // +Y of the swivel is its ferrule, so it has to point away from the
+        // pump. This was a plain cylinder before and symmetric either way.
+        pos.set(pairX, 0.55, plusZPumpZ + SWIVEL_Z_OFFSET);
         quaternion.setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
         matrix.compose(pos, quaternion, scale);
         connectorMatrices.push(matrix.clone());
@@ -228,21 +457,22 @@ export const GasStation = React.memo<GasStationProps>(
         matrix.compose(pos, quaternion, scale);
         handleMatrices.push(matrix.clone());
 
-        pos.set(pairX, 0.15, plusZPumpZ + 0.75);
+        pos.set(pairX, 0.15, plusZPumpZ + NOZZLE_SPOUT_Z_OFFSET);
         quaternion.setFromEuler(new THREE.Euler(-0.8, 0, 0));
         matrix.compose(pos, quaternion, scale);
         spoutMatrices.push(matrix.clone());
 
         // Pump facing -Z (at z=-0.9, rotated -90° around Y)
-        // Hose hangs toward -Z direction
+        // Hose drapes out toward -Z: the same arc with +PI/2 about Y, which
+        // mirrors z and leaves y alone.
         const minusZPumpZ = -0.9;
-        pos.set(pairX, 0.5, minusZPumpZ - 0.5);
-        quaternion.setFromEuler(new THREE.Euler(0.4, 0, 0)); // Angle toward -Z
+        pos.set(pairX, HOSE_CENTRE_Y, -HOSE_CENTRE_Z);
+        quaternion.setFromEuler(new THREE.Euler(0, Math.PI / 2, HOSE_ARC_START));
         matrix.compose(pos, quaternion, scale);
         hoseMatrices.push(matrix.clone());
 
-        pos.set(pairX, 0.55, minusZPumpZ - 0.35);
-        quaternion.setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
+        pos.set(pairX, 0.55, minusZPumpZ - SWIVEL_Z_OFFSET);
+        quaternion.setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
         matrix.compose(pos, quaternion, scale);
         connectorMatrices.push(matrix.clone());
 
@@ -251,7 +481,7 @@ export const GasStation = React.memo<GasStationProps>(
         matrix.compose(pos, quaternion, scale);
         handleMatrices.push(matrix.clone());
 
-        pos.set(pairX, 0.15, minusZPumpZ - 0.75);
+        pos.set(pairX, 0.15, minusZPumpZ - NOZZLE_SPOUT_Z_OFFSET);
         quaternion.setFromEuler(new THREE.Euler(0.8, 0, 0));
         matrix.compose(pos, quaternion, scale);
         spoutMatrices.push(matrix.clone());
@@ -637,9 +867,11 @@ export const GasStation = React.memo<GasStationProps>(
 
         {/* ========== DEAD DINO SIGN ========== */}
         <group position={[10, 0, 0]}>
-          {/* Sign pole */}
-          <mesh position={[0, 4, 0]} castShadow>
-            <cylinderGeometry args={[0.15, 0.15, 8, 8]} />
+          {/* Sign pole - see createSignPoleGeometry. Ground shroud, tapered
+              shaft and a mounting shoe under the cabinet, still 16 sides and
+              still radius 0.15 by y +/-4, so everything stacked above is
+              untouched. */}
+          <mesh position={[0, 4, 0]} geometry={GEOMETRIES.signPole} castShadow>
             <meshStandardMaterial color="#757575" roughness={0.5} metalness={0.3} />
           </mesh>
           {/* Sign background - orange for fun retro gas station vibe */}

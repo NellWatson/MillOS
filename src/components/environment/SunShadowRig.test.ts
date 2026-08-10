@@ -100,8 +100,17 @@ describe('normalBiasForTexel', () => {
 
 describe('isInsideFactoryFootprint', () => {
   it('classifies every benchmark camera the way the shadow fit needs', () => {
-    const inside = ['interior', 'silos', 'milling', 'packing', 'personnelClose', 'forklift'];
-    const outside = ['overview', 'shipping', 'yard', 'water', 'village', 'farm'];
+    const inside = ['interior', 'silos', 'milling', 'packing', 'processFloor', 'forklift'];
+    const outside = [
+      'overview',
+      'shipping',
+      'yard',
+      'water',
+      'village',
+      'farm',
+      'tankFarm',
+      'logisticsClose',
+    ];
     for (const name of inside) {
       const [x, , z] = SITE_LAYOUT.cameras[name as keyof typeof SITE_LAYOUT.cameras].position;
       expect(isInsideFactoryFootprint(x, z)).toBe(true);

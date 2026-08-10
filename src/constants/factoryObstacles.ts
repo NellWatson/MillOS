@@ -34,7 +34,7 @@ const createCentredObstacle = (
  * Returns the collision footprint for every canonical machine anchor.
  * Plansifters are elevated, so only their four suspension columns block the floor.
  */
-export function createMachineObstacles(workerPadding = 1): FactoryObstacle[] {
+export function createMachineObstacles(clearancePadding = 1): FactoryObstacle[] {
   const obstacles: FactoryObstacle[] = [];
 
   SITE_LAYOUT.machines.silos.forEach((anchor) => {
@@ -43,7 +43,7 @@ export function createMachineObstacles(workerPadding = 1): FactoryObstacle[] {
         anchor.id,
         anchor.position,
         SITE_LAYOUT.machineDimensions.silo,
-        workerPadding
+        clearancePadding
       )
     );
   });
@@ -54,7 +54,7 @@ export function createMachineObstacles(workerPadding = 1): FactoryObstacle[] {
         anchor.id,
         anchor.position,
         SITE_LAYOUT.machineDimensions.rollerMill,
-        workerPadding
+        clearancePadding
       )
     );
   });
@@ -86,7 +86,7 @@ export function createMachineObstacles(workerPadding = 1): FactoryObstacle[] {
         anchor.id,
         anchor.position,
         SITE_LAYOUT.machineDimensions.packer,
-        workerPadding
+        clearancePadding
       )
     );
   });

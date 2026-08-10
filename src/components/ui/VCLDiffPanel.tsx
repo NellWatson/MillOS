@@ -28,7 +28,6 @@ export const VCLDiffPanel: React.FC = () => {
     };
   }, []);
 
-  const workers = useProductionStore((state) => state.workers);
   const machines = useProductionStore((state) => state.machines);
   const alerts = useUIStore((state) => state.alerts);
   const gameTime = useGameSimulationStore((state) => state.gameTime);
@@ -37,19 +36,12 @@ export const VCLDiffPanel: React.FC = () => {
 
   // Generate current VCL and track changes
   useEffect(() => {
-    const shiftStart: Record<string, number> = { morning: 6, afternoon: 14, night: 22 };
-    const start = shiftStart[currentShift] || 6;
-    const elapsed = (gameTime - start + 24) % 24;
-    const shiftProgress = Math.min(1, Math.max(0, elapsed / 8));
-
     try {
       const newVCL = encodeFactoryContextVCL(
         machines,
-        workers,
         currentShift,
         weather,
         gameTime,
-        shiftProgress,
         alerts.map((a) => ({ type: a.type }))
       );
 
@@ -61,7 +53,7 @@ export const VCLDiffPanel: React.FC = () => {
     } catch {
       // Ignore encoding errors
     }
-  }, [machines, workers, currentShift, weather, gameTime, alerts, currentVCL]);
+  }, [machines, currentShift, weather, gameTime, alerts, currentVCL]);
 
   const handleCopy = async () => {
     if (copyTimerRef.current) clearTimeout(copyTimerRef.current);

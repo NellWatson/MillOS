@@ -11,6 +11,8 @@ export interface AtmosphereState {
   readonly cloudCoverage: number;
   readonly lightMultiplier: number;
   readonly wetness: number;
+  /** Active precipitation rate. Unlike wetness, this is zero for damp overcast weather. */
+  readonly precipitation: number;
   readonly wind: number;
   /**
    * `THREE.FogExp2` density, replacing the previous `fogNear` / `fogFar` pair.
@@ -60,6 +62,7 @@ const WEATHER_PROFILES = {
     cloudCoverage: 0.2,
     lightMultiplier: 1,
     wetness: 0,
+    precipitation: 0,
     wind: 0.2,
     fogDensity: 0.002,
   },
@@ -67,6 +70,7 @@ const WEATHER_PROFILES = {
     cloudCoverage: 0.52,
     lightMultiplier: 0.82,
     wetness: 0.08,
+    precipitation: 0,
     wind: 0.36,
     fogDensity: 0.0027,
   },
@@ -74,6 +78,7 @@ const WEATHER_PROFILES = {
     cloudCoverage: 0.74,
     lightMultiplier: 0.66,
     wetness: 0.82,
+    precipitation: 0.62,
     wind: 0.58,
     fogDensity: 0.0039,
   },
@@ -81,12 +86,16 @@ const WEATHER_PROFILES = {
     cloudCoverage: 0.9,
     lightMultiplier: 0.42,
     wetness: 1,
+    precipitation: 1,
     wind: 0.92,
     fogDensity: 0.0054,
   },
 } as const satisfies Record<
   AtmosphereWeather,
-  Pick<AtmosphereState, 'cloudCoverage' | 'lightMultiplier' | 'wetness' | 'wind' | 'fogDensity'>
+  Pick<
+    AtmosphereState,
+    'cloudCoverage' | 'lightMultiplier' | 'wetness' | 'precipitation' | 'wind' | 'fogDensity'
+  >
 >;
 
 /**
@@ -112,6 +121,7 @@ export function createAtmosphereState(): MutableAtmosphereState {
     cloudCoverage: WEATHER_PROFILES.clear.cloudCoverage,
     lightMultiplier: WEATHER_PROFILES.clear.lightMultiplier,
     wetness: WEATHER_PROFILES.clear.wetness,
+    precipitation: WEATHER_PROFILES.clear.precipitation,
     wind: WEATHER_PROFILES.clear.wind,
     fogDensity: WEATHER_PROFILES.clear.fogDensity,
   };
@@ -159,6 +169,7 @@ export function sampleAtmosphere(
   target.cloudCoverage = profile.cloudCoverage;
   target.lightMultiplier = profile.lightMultiplier;
   target.wetness = profile.wetness;
+  target.precipitation = profile.precipitation;
   target.wind = profile.wind;
   target.fogDensity = profile.fogDensity;
   return target;

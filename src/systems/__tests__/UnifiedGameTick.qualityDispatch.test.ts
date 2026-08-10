@@ -45,6 +45,7 @@ describe('UnifiedGameTick shipping quality interlock', () => {
       qcLab: { ...state.qcLab, certificationStatus: 'expired' },
     }));
     useTruckScheduleStore.getState().setTruckDocked('shipping', true);
+    useTruckScheduleStore.getState().setTruckTransferReady('shipping', true);
 
     unifiedGameTick(tickContext);
 
@@ -57,6 +58,7 @@ describe('UnifiedGameTick shipping quality interlock', () => {
 
   it('loads released goods while docked and dispatches them on departure', () => {
     useTruckScheduleStore.getState().setTruckDocked('shipping', true);
+    useTruckScheduleStore.getState().setTruckTransferReady('shipping', true);
 
     for (let index = 0; index < 20; index += 1) {
       unifiedGameTick({ ...tickContext, deltaSeconds: 0.5, tickCount: index + 1 });

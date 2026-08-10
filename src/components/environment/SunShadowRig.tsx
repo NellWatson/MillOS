@@ -401,7 +401,7 @@ export function SunShadowRig(): null {
       //
       // What this trades: casters that move are up to two frames stale in the
       // shadow map. At the measured frame rates that is under 40 ms - about 5 cm
-      // for a walking worker and 17 cm for a forklift at full speed - against a
+      // for the inspection camera and 17 cm for a forklift at full speed, against a
       // shadow whose own texel is 12 to 22 cm wide. The error is smaller than
       // the sampling grid it lands on.
       //

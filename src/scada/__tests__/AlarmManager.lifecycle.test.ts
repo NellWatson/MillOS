@@ -23,7 +23,7 @@ const secondTag: TagDefinition = {
   machineId: 'rm-102',
 };
 
-describe('AlarmManager operator lifecycle', () => {
+describe('AlarmManager control lifecycle', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-27T12:00:00Z'));
@@ -101,7 +101,7 @@ describe('AlarmManager operator lifecycle', () => {
 
     const newerAlarm = manager.getActiveAlarms().find((alarm) => alarm.tagId === secondTag.id);
     expect(newerAlarm).toBeDefined();
-    manager.acknowledge(newerAlarm!.id, 'Simulation operator');
+    manager.acknowledge(newerAlarm!.id, 'Autonomous controller');
 
     expect(manager.getActiveAlarms().map((alarm) => alarm.tagId)).toEqual([tag.id, secondTag.id]);
   });

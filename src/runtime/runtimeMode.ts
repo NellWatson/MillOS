@@ -7,9 +7,9 @@ export type BenchmarkScene =
   | 'milling'
   | 'sifting'
   | 'packing'
-  | 'personnel'
-  | 'personnel-close'
-  | 'personnel-feminine'
+  | 'process-floor'
+  | 'tank-farm'
+  | 'logistics-close'
   | 'forklift'
   | 'shipping'
   | 'receiving'
@@ -51,9 +51,9 @@ const BENCHMARK_SCENES: ReadonlySet<string> = new Set<BenchmarkScene>([
   'milling',
   'sifting',
   'packing',
-  'personnel',
-  'personnel-close',
-  'personnel-feminine',
+  'process-floor',
+  'tank-farm',
+  'logistics-close',
   'forklift',
   'shipping',
   'receiving',

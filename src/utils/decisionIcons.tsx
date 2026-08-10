@@ -12,7 +12,7 @@ import {
   AlertTriangle,
   Zap,
   Wrench,
-  Users,
+  Network,
   Target,
   Shield,
   Bot,
@@ -42,8 +42,8 @@ export function getDecisionTypeIcon(
 ): React.ReactNode {
   const sizeClass = iconSizeClasses[size];
   switch (type) {
-    case 'assignment':
-      return <Users className={`${sizeClass} text-green-400`} />;
+    case 'coordination':
+      return <Network className={`${sizeClass} text-green-400`} />;
     case 'optimization':
       return <Zap className={`${sizeClass} text-cyan-400`} />;
     case 'prediction':
@@ -84,7 +84,7 @@ export function getDecisionStatusIcon(
  */
 export function getDecisionTypeColor(type: DecisionType | string): string {
   switch (type) {
-    case 'assignment':
+    case 'coordination':
       return 'from-blue-500 to-blue-600';
     case 'optimization':
       return 'from-green-500 to-green-600';
@@ -117,7 +117,7 @@ export function getDecisionPriorityBadge(priority: DecisionPriority): string {
  */
 export function getDecisionTypeTextColor(type: DecisionType | string): string {
   switch (type) {
-    case 'assignment':
+    case 'coordination':
       return 'text-blue-400';
     case 'optimization':
       return 'text-green-400';

@@ -42,8 +42,8 @@ function generateMaintenanceLogs(machine: MachineData): MaintenanceRecord[] {
     return x - Math.floor(x);
   };
 
-  // Technician pool - deterministically select based on machine
-  const technicians = ['J. Smith', 'M. Chen', 'R. Davis', 'A. Kumar', 'S. Wilson'];
+  // Autonomous service-unit pool, selected deterministically by machine.
+  const serviceUnits = ['ASU-01', 'ASU-02', 'ASU-03', 'ASU-04', 'ASU-05'];
 
   // Maintenance types by machine type
   const maintenanceTasksByType: Record<MachineType, string[]> = {
@@ -119,7 +119,7 @@ function generateMaintenanceLogs(machine: MachineData): MaintenanceRecord[] {
     logDate.setDate(logDate.getDate() - (i * 7 + daysBack));
 
     const taskIndex = Math.floor(seededRandom(i * 7) * tasks.length);
-    const techIndex = Math.floor(seededRandom(i * 11) * technicians.length);
+    const serviceUnitIndex = Math.floor(seededRandom(i * 11) * serviceUnits.length);
 
     // Vary maintenance type based on machine status for realism
     let type = maintenanceTypes[i];
@@ -131,7 +131,7 @@ function generateMaintenanceLogs(machine: MachineData): MaintenanceRecord[] {
       id: `${machine.id}-maint-${i}`,
       date: logDate.toISOString().split('T')[0],
       type,
-      technician: technicians[techIndex],
+      serviceUnit: serviceUnits[serviceUnitIndex],
       notes: tasks[taskIndex],
       duration: Math.floor(seededRandom(i * 13) * 60) + 30, // 30-90 minutes
     });
@@ -362,7 +362,7 @@ export const MachineInspector: React.FC<{ machine: MachineData }> = ({ machine }
                   <span className="text-[10px] text-slate-500">{log.date}</span>
                 </div>
                 <p className="text-[10px] text-slate-400 truncate">{log.notes}</p>
-                <p className="text-[10px] text-slate-500">Tech: {log.technician}</p>
+                <p className="text-[10px] text-slate-500">Service unit: {log.serviceUnit}</p>
               </div>
             </div>
           ))}

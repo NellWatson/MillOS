@@ -1,265 +1,46 @@
-/**
- * Knowledge System Integration Hook
- *
- * Watches game state changes and triggers knowledge unlocks + AI narrations.
- * This centralizes event detection rather than modifying each component.
- *
- * Events tracked:
- * - First vote cast
- * - Axis adjustments (any, all five)
- * - AI suggestion acceptance/rejection
- * - Flourishing thresholds
- * - Stability milestones
- * - Federation trades
- * - Play time milestones
- */
-
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useKnowledgeStore } from '../stores/knowledgeStore';
-import { useAINarrationStore, NarrationTrigger, NarrationEntry } from '../stores/aiNarrationStore';
-import { useVotingStore } from '../stores/votingStore';
-import { useBASStore } from '../stores/basStore';
-import { useStabilityStore } from '../stores/stabilityStore';
-import { useFlourishingStore } from '../stores/flourishingStore';
+import {
+  useAINarrationStore,
+  type NarrationEntry,
+  type NarrationTrigger,
+} from '../stores/aiNarrationStore';
 import { FEATURE_FLAGS } from '../config/featureFlags';
 
-interface KnowledgeIntegrationState {
-  // Track which events have been triggered this session
-  hasTriggeredFirstPlay: boolean;
-  axesAdjusted: Set<string>;
-  hasVotedThisSession: boolean;
-  hasRejectedSuggestion: boolean;
-  hasAcceptedWellbeingSuggestion: boolean;
-  sessionStartTime: number;
-}
-
-const WELLBEING_CHECK_INTERVAL_MS = 30_000;
-const HIGH_FLOURISHING_SCORE = 80;
-const LOW_FLOURISHING_SCORE = 40;
-
 export function useKnowledgeIntegration(onNarration?: (narration: NarrationEntry) => void) {
-  const stateRef = useRef<KnowledgeIntegrationState>({
-    hasTriggeredFirstPlay: false,
-    axesAdjusted: new Set(),
-    hasVotedThisSession: false,
-    hasRejectedSuggestion: false,
-    hasAcceptedWellbeingSuggestion: false,
-    sessionStartTime: Date.now(),
-  });
-
-  // Track minutes played in state for time-based effects
+  const sessionStartTime = useRef(Date.now());
+  const firstPlayTriggered = useRef(false);
   const [minutesPlayed, setMinutesPlayed] = useState(0);
+  const { unlockEntry } = useKnowledgeStore();
+  const { getNarration, markShown, hasBeenShown, enabled } = useAINarrationStore();
 
-  // Store hooks
-  const { checkUnlockConditions, unlockEntry } = useKnowledgeStore();
-  const {
-    getNarration,
-    markShown,
-    hasBeenShown,
-    enabled: narrationEnabled,
-  } = useAINarrationStore();
-
-  // Game state hooks - use selectors for performance
-  const votes = useVotingStore((s) => s.votes);
-  const axes = useBASStore((s) => s.axes);
-
-  // Helper to trigger narration
   const triggerNarration = useCallback(
     (trigger: NarrationTrigger) => {
-      if (!FEATURE_FLAGS.AI_NARRATION_ENABLED || !narrationEnabled) return;
-
+      if (!FEATURE_FLAGS.AI_NARRATION_ENABLED || !enabled) return;
       const narration = getNarration(trigger, minutesPlayed);
-      if (narration) {
-        markShown(narration.id);
-        if (narration.unlocksEntry) {
-          unlockEntry(narration.unlocksEntry);
-        }
-        onNarration?.(narration);
-      }
+      if (!narration) return;
+      markShown(narration.id);
+      if (narration.unlocksEntry) unlockEntry(narration.unlocksEntry);
+      onNarration?.(narration);
     },
-    [getNarration, markShown, unlockEntry, narrationEnabled, minutesPlayed, onNarration]
+    [enabled, getNarration, markShown, minutesPlayed, onNarration, unlockEntry]
   );
 
-  // =========================================================================
-  // FIRST PLAY DETECTION
-  // =========================================================================
   useEffect(() => {
-    if (!FEATURE_FLAGS.FIRST_PLAY_WELCOME_ENABLED) return;
-    if (stateRef.current.hasTriggeredFirstPlay) return;
+    if (firstPlayTriggered.current || hasBeenShown('welcome-autonomous-mill') || !enabled) return;
+    firstPlayTriggered.current = true;
+    const timer = window.setTimeout(() => triggerNarration('first-play'), 1800);
+    return () => window.clearTimeout(timer);
+  }, [enabled, hasBeenShown, triggerNarration]);
 
-    // Don't consume the one-time first-play moment while narration is disabled.
-    // triggerNarration early-returns when narration is off, so writing the
-    // 'millos-has-played' flag here would permanently suppress the welcome even
-    // after the user later enables AI Reflections. Gate the whole effect instead;
-    // it re-runs when narrationEnabled flips back on.
-    if (!FEATURE_FLAGS.AI_NARRATION_ENABLED || !narrationEnabled) return;
-
-    // Belt-and-suspenders: check both localStorage AND the persisted store
-    const hasPlayedBefore = localStorage.getItem('millos-has-played');
-    const welcomeAlreadyShown = hasBeenShown('welcome');
-
-    // Only show if BOTH checks say "not shown yet"
-    if (!hasPlayedBefore && !welcomeAlreadyShown) {
-      localStorage.setItem('millos-has-played', 'true');
-      stateRef.current.hasTriggeredFirstPlay = true;
-
-      // Delay slightly to let UI settle
-      setTimeout(() => {
-        triggerNarration('first-play');
-      }, 2000);
-    } else if (!hasPlayedBefore && welcomeAlreadyShown) {
-      // Sync localStorage if store says already shown
-      localStorage.setItem('millos-has-played', 'true');
-    }
-  }, [triggerNarration, hasBeenShown, narrationEnabled]);
-
-  // =========================================================================
-  // VOTING DETECTION
-  // =========================================================================
   useEffect(() => {
-    if (stateRef.current.hasVotedThisSession) return;
-
-    // Check if any votes exist (votes object is not empty)
-    const hasVotes = Object.keys(votes).length > 0;
-
-    if (hasVotes) {
-      stateRef.current.hasVotedThisSession = true;
-
-      // Trigger unlock check
-      checkUnlockConditions({ hasVoted: true });
-
-      // Trigger narration
-      triggerNarration('democratic-vote');
-    }
-  }, [votes, checkUnlockConditions, triggerNarration]);
-
-  // =========================================================================
-  // AXIS ADJUSTMENT DETECTION
-  // =========================================================================
-  useEffect(() => {
-    const axisKeys = [
-      'autonomyLevel',
-      'decisionMode',
-      'informationAccess',
-      'evaluationDirection',
-      'collectiveOrientation',
-    ] as const;
-
-    // Track which axes have been adjusted
-    axisKeys.forEach((key) => {
-      const value = axes[key];
-      // Consider adjusted if not at default (50)
-      if (value !== 50 && !stateRef.current.axesAdjusted.has(key)) {
-        stateRef.current.axesAdjusted.add(key);
-
-        // Trigger specific narrations
-        if (key === 'autonomyLevel' && value > 75) {
-          triggerNarration('high-autonomy-set');
-        }
-        if (key === 'informationAccess' && value >= 95) {
-          triggerNarration('max-transparency-set');
-        }
-      }
-    });
-
-    // Check if all axes have been adjusted
-    if (stateRef.current.axesAdjusted.size === 5) {
-      checkUnlockConditions({ hasUsedAllAxes: true });
-      triggerNarration('all-axes-adjusted');
-    }
-  }, [axes, checkUnlockConditions, triggerNarration]);
-
-  // =========================================================================
-  // STABILITY AND FLOURISHING DETECTION
-  // =========================================================================
-  useEffect(() => {
-    const checkWellbeing = () => {
-      const stability = useStabilityStore.getState().getStabilityPercentage();
-      if (stability >= 80) {
-        checkUnlockConditions({ hasAchievedHighStability: true });
-        triggerNarration('stability-high');
-      } else if (stability < 30) {
-        triggerNarration('stability-critical');
-      }
-
-      // Factory flourishing is expressed as a percentage on a 0-100 scale.
-      const avgFlourishing = useFlourishingStore.getState().getFactoryFlourishing().overallScore;
-      if (avgFlourishing >= HIGH_FLOURISHING_SCORE) {
-        checkUnlockConditions({ hasAchievedHighFlourishing: true });
-        triggerNarration('all-workers-thriving');
-      } else if (avgFlourishing < LOW_FLOURISHING_SCORE) {
-        triggerNarration('flourishing-dropped');
-      }
-    };
-
-    checkWellbeing();
-    const interval = setInterval(checkWellbeing, WELLBEING_CHECK_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [checkUnlockConditions, triggerNarration]);
-
-  // =========================================================================
-  // PLAY TIME TRACKING
-  // =========================================================================
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const elapsed = (Date.now() - stateRef.current.sessionStartTime) / 60000;
+    const timer = window.setInterval(() => {
+      const elapsed = (Date.now() - sessionStartTime.current) / 60000;
       setMinutesPlayed(elapsed);
+      if (elapsed >= 60) triggerNarration('extended-play');
+    }, 60000);
+    return () => window.clearInterval(timer);
+  }, [triggerNarration]);
 
-      // Check time-based unlocks
-      checkUnlockConditions({ minutesPlayed: elapsed });
-
-      // Trigger extended play narration at 60 minutes
-      if (elapsed >= 60) {
-        triggerNarration('extended-play');
-      }
-    }, 60000); // Check every minute
-
-    return () => clearInterval(interval);
-  }, [checkUnlockConditions, triggerNarration]);
-
-  // =========================================================================
-  // RETURN API FOR MANUAL TRIGGERS
-  // =========================================================================
-  return {
-    /**
-     * Call when AI suggestion is rejected by user
-     */
-    onSuggestionRejected: useCallback(() => {
-      if (stateRef.current.hasRejectedSuggestion) return;
-      stateRef.current.hasRejectedSuggestion = true;
-      checkUnlockConditions({ hasRejectedAISuggestion: true });
-      triggerNarration('suggestion-rejected-gracefully');
-    }, [checkUnlockConditions, triggerNarration]),
-
-    /**
-     * Call when AI wellbeing suggestion is accepted
-     */
-    onWellbeingSuggestionAccepted: useCallback(() => {
-      if (stateRef.current.hasAcceptedWellbeingSuggestion) return;
-      stateRef.current.hasAcceptedWellbeingSuggestion = true;
-      checkUnlockConditions({ hasAcceptedAISuggestion: true });
-      triggerNarration('wellbeing-prioritized');
-    }, [checkUnlockConditions, triggerNarration]),
-
-    /**
-     * Call when federation trade is completed
-     */
-    onFederationTrade: useCallback(() => {
-      checkUnlockConditions({ hasCompletedFederationTrade: true });
-      triggerNarration('federation-trade');
-    }, [checkUnlockConditions, triggerNarration]),
-
-    /**
-     * Call when AI welfare panel is viewed
-     */
-    onAIWelfareViewed: useCallback(() => {
-      unlockEntry('ai-welfare');
-      triggerNarration('ai-welfare-viewed');
-    }, [unlockEntry, triggerNarration]),
-
-    /**
-     * Manually trigger any narration
-     */
-    triggerNarration,
-  };
+  return { triggerNarration };
 }

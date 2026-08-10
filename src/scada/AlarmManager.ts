@@ -312,28 +312,28 @@ export class AlarmManager {
   }
 
   /**
-   * Acknowledge an alarm. Operator must acknowledge to clear RTN_UNACK alarms.
+   * Acknowledge an alarm. A control source must acknowledge RTN_UNACK alarms.
    */
-  acknowledge(alarmId: string, operator: string, note?: string): boolean {
+  acknowledge(alarmId: string, controlSource: string, note?: string): boolean {
     const alarm = this.activeAlarms.get(alarmId);
     if (!alarm) {
       return false;
     }
 
     const now = Date.now();
-    alarm.acknowledgedBy = operator;
+    alarm.acknowledgedBy = controlSource;
     alarm.acknowledgedAt = now;
     alarm.acknowledgementNote = note?.trim() || undefined;
 
     if (alarm.state === 'UNACK') {
       // Active alarm - mark as acknowledged
       alarm.state = 'ACKED';
-      logger.scada.info(`[AlarmManager] ALARM ACKED: ${alarm.tagName} by ${operator}`);
+      logger.scada.info(`[AlarmManager] ALARM ACKED: ${alarm.tagName} by ${controlSource}`);
     } else if (alarm.state === 'RTN_UNACK') {
       // Returned to normal - archive and clear
       this.archiveAlarm(alarm, now);
       this.activeAlarms.delete(alarmId);
-      logger.scada.info(`[AlarmManager] ALARM CLEARED (RTN): ${alarm.tagName} by ${operator}`);
+      logger.scada.info(`[AlarmManager] ALARM CLEARED (RTN): ${alarm.tagName} by ${controlSource}`);
     }
 
     this.notifyListeners();
@@ -343,12 +343,12 @@ export class AlarmManager {
   /**
    * Acknowledge all active alarms
    */
-  acknowledgeAll(operator: string, note?: string): number {
+  acknowledgeAll(controlSource: string, note?: string): number {
     let count = 0;
     const alarmIds = Array.from(this.activeAlarms.keys());
 
     alarmIds.forEach((id) => {
-      if (this.acknowledge(id, operator, note)) {
+      if (this.acknowledge(id, controlSource, note)) {
         count++;
       }
     });
@@ -379,7 +379,7 @@ export class AlarmManager {
   setDisposition(
     tagId: string,
     disposition: Exclude<AlarmDisposition, 'IN_SERVICE'>,
-    operator: string,
+    controlSource: string,
     reason: string,
     durationMs?: number
   ): void {
@@ -388,7 +388,7 @@ export class AlarmManager {
       tagId,
       disposition,
       suppressedAt: now,
-      suppressedBy: operator,
+      suppressedBy: controlSource,
       reason,
       expiresAt: durationMs ? now + durationMs : undefined,
     });
@@ -399,16 +399,16 @@ export class AlarmManager {
     logger.scada.info(`[AlarmManager] ${disposition} for ${tagId}: ${reason}`);
   }
 
-  suppress(tagId: string, operator: string, reason: string, durationMs?: number): void {
-    this.setDisposition(tagId, 'SUPPRESSED', operator, reason, durationMs);
+  suppress(tagId: string, controlSource: string, reason: string, durationMs?: number): void {
+    this.setDisposition(tagId, 'SUPPRESSED', controlSource, reason, durationMs);
   }
 
-  shelve(tagId: string, operator: string, reason: string, durationMs?: number): void {
-    this.setDisposition(tagId, 'SHELVED', operator, reason, durationMs);
+  shelve(tagId: string, controlSource: string, reason: string, durationMs?: number): void {
+    this.setDisposition(tagId, 'SHELVED', controlSource, reason, durationMs);
   }
 
-  takeOutOfService(tagId: string, operator: string, reason: string): void {
-    this.setDisposition(tagId, 'OUT_OF_SERVICE', operator, reason);
+  takeOutOfService(tagId: string, controlSource: string, reason: string): void {
+    this.setDisposition(tagId, 'OUT_OF_SERVICE', controlSource, reason);
   }
 
   /**
@@ -462,7 +462,7 @@ export class AlarmManager {
         return priorityOrder[a.priority] - priorityOrder[b.priority];
       }
 
-      // Within one priority, alarms still awaiting an operator response stay
+      // Within one priority, alarms still awaiting an controlSource response stay
       // above acknowledged conditions. This keeps a newer ACKED entry from
       // visually burying an older UNACK or RTN_UNACK alarm.
       const attentionOrder: Record<AlarmState, number> = {

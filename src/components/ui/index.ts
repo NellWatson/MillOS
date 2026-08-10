@@ -28,7 +28,6 @@ export { DecisionReplay, DecisionReplayTrigger } from './DecisionReplay';
 export { MultiObjectiveDashboard } from './MultiObjectiveDashboard';
 
 // Phase 4 Enhancements
-export { ShiftHandoverSummary } from './ShiftHandoverSummary';
 export { CostEstimationOverlay } from './CostEstimationOverlay';
 export { WeatherEffectsOverlay } from './WeatherEffectsOverlay';
 

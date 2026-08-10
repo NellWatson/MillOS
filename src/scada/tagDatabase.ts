@@ -1,7 +1,7 @@
 /**
  * SCADA Tag Database for MillOS
  *
- * Complete definition of 86 SCADA tags covering all 4 production zones:
+ * Complete SCADA definition covering all 4 production zones:
  * - Zone 1: Silos (raw material storage)
  * - Zone 2: Roller Mills (milling floor)
  * - Zone 3: Plansifters (sifting)
@@ -16,6 +16,7 @@
  * - ATTRIBUTE: PV=process value, SP=setpoint, CMD=command
  */
 
+import { UTILITY_ASSET_DEFINITIONS } from '../constants/utilityAssets';
 import { TagDefinition } from './types';
 
 // ============================================================================
@@ -92,7 +93,9 @@ const siloTags: TagDefinition[] = SILO_NAMES.flatMap((name, idx) => [
     machineId: SILO_IDS[idx],
     group: 'HUMIDITY' as const,
     simulation: {
-      baseValue: 12 + Math.random() * 2,
+      // Stable per-silo baseline keeps benchmark captures and replay sessions
+      // reproducible while the adapter still supplies live measurement noise.
+      baseValue: [12.4, 13.1, 12.7, 13.6, 12.2][idx],
       noiseAmplitude: 0.15,
       driftRate: 0.0005,
       correlatedWith: ['AMBIENT.HT001.PV'],
@@ -384,7 +387,7 @@ const packerTags: TagDefinition[] = PACKER_NUMBERS.flatMap((num, idx) => [
   {
     id: `PACKER_${num}.CT001.PV`,
     name: `Packer ${num} Bag Count`,
-    description: `Packing Line ${num} bags produced this shift`,
+    description: `Packing Line ${num} bags produced in the active run window`,
     dataType: 'INT32' as const,
     accessMode: 'READ' as const,
     engUnit: 'bags',
@@ -687,7 +690,210 @@ const utilityTags: TagDefinition[] = [
   },
 ];
 
-/** Stable IDs used by the material-flow bridge and operator workspace. */
+export interface UtilityAssetTagIds {
+  level: string;
+  temperature: string;
+  pressure: string;
+}
+
+const utilityAssetArea = (assetId: string): string =>
+  assetId
+    .replace(/^utility-/, 'UTILITY_')
+    .replaceAll('-', '_')
+    .toUpperCase();
+
+/** Stable SCADA identities for the instruments mounted on each visible vessel. */
+export const getUtilityAssetTagIds = (assetId: string): UtilityAssetTagIds => {
+  const area = utilityAssetArea(assetId);
+  return {
+    level: `${area}.LT001.PV`,
+    temperature: `${area}.TT001.PV`,
+    pressure: `${area}.PT001.PV`,
+  };
+};
+
+export const UTILITY_ASSET_TAG_IDS: Readonly<Record<string, UtilityAssetTagIds>> =
+  Object.fromEntries(
+    UTILITY_ASSET_DEFINITIONS.map((asset) => [asset.id, getUtilityAssetTagIds(asset.id)])
+  );
+
+const utilityAssetTags: TagDefinition[] = UTILITY_ASSET_DEFINITIONS.flatMap((asset) => {
+  const ids = UTILITY_ASSET_TAG_IDS[asset.id];
+  const isPressurised = asset.kind === 'lpg_vessel';
+  return [
+    {
+      id: ids.level,
+      name: `${asset.label} Level`,
+      description: `${asset.contents} level in ${asset.label}`,
+      dataType: 'FLOAT32' as const,
+      accessMode: 'READ' as const,
+      engUnit: '%',
+      engLow: 0,
+      engHigh: 100,
+      alarmLo: 20,
+      alarmLoLo: 10,
+      deadband: 0.5,
+      machineId: asset.id,
+      group: 'LEVEL' as const,
+      simulation: {
+        baseValue: asset.nominalLevelPercent,
+        noiseAmplitude: 0,
+        driftRate: 0,
+      },
+    },
+    {
+      id: ids.temperature,
+      name: `${asset.label} Temperature`,
+      description: `${asset.contents} bulk temperature in ${asset.label}`,
+      dataType: 'FLOAT32' as const,
+      accessMode: 'READ' as const,
+      engUnit: 'C',
+      engLow: -40,
+      engHigh: 80,
+      alarmHi: isPressurised ? 40 : 38,
+      alarmHiHi: isPressurised ? 50 : 48,
+      deadband: 0.5,
+      machineId: asset.id,
+      group: 'TEMPERATURE' as const,
+      simulation: {
+        baseValue: asset.nominalTemperatureC,
+        noiseAmplitude: 0,
+        driftRate: 0,
+      },
+    },
+    {
+      id: ids.pressure,
+      name: `${asset.label} Pressure`,
+      description: `${asset.contents} vessel pressure in ${asset.label}`,
+      dataType: 'FLOAT32' as const,
+      accessMode: 'READ' as const,
+      engUnit: 'bar',
+      engLow: 0,
+      engHigh: isPressurised ? 16 : 2,
+      alarmHi: isPressurised ? 10 : 0.6,
+      alarmHiHi: isPressurised ? 12 : 1,
+      deadband: isPressurised ? 0.1 : 0.02,
+      machineId: asset.id,
+      group: 'PRESSURE' as const,
+      simulation: {
+        baseValue: asset.nominalPressureBar,
+        noiseAmplitude: 0,
+        driftRate: 0,
+      },
+    },
+  ];
+});
+
+export interface VehicleTagIds {
+  speed: string;
+  steeringOrArticulation: string;
+  phase: string;
+  interlock: string;
+}
+
+/** Stable read-only telemetry identities for the autonomous vehicle fleet. */
+export const VEHICLE_TAG_IDS = {
+  'forklift-1': {
+    speed: 'FLT01.ST001.PV',
+    steeringOrArticulation: 'FLT01.PT001.PV',
+    phase: 'FLT01.ZS001.PV',
+    interlock: 'FLT01.ZS002.PV',
+  },
+  'forklift-2': {
+    speed: 'FLT02.ST001.PV',
+    steeringOrArticulation: 'FLT02.PT001.PV',
+    phase: 'FLT02.ZS001.PV',
+    interlock: 'FLT02.ZS002.PV',
+  },
+  'shipping-truck': {
+    speed: 'TRUCK_SHIPPING.ST001.PV',
+    steeringOrArticulation: 'TRUCK_SHIPPING.PT001.PV',
+    phase: 'TRUCK_SHIPPING.ZS001.PV',
+    interlock: 'TRUCK_SHIPPING.ZS002.PV',
+  },
+  'receiving-truck': {
+    speed: 'TRUCK_RECEIVING.ST001.PV',
+    steeringOrArticulation: 'TRUCK_RECEIVING.PT001.PV',
+    phase: 'TRUCK_RECEIVING.ZS001.PV',
+    interlock: 'TRUCK_RECEIVING.ZS002.PV',
+  },
+} as const satisfies Readonly<Record<string, VehicleTagIds>>;
+
+const vehicleTags: TagDefinition[] = Object.entries(VEHICLE_TAG_IDS).flatMap(([vehicleId, ids]) => {
+  const isTruck = vehicleId.endsWith('-truck');
+  const label = vehicleId
+    .split('-')
+    .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+  return [
+    {
+      id: ids.speed,
+      name: `${label} Ground Speed`,
+      description: `Distance-derived ground speed for autonomous ${label}`,
+      dataType: 'FLOAT32' as const,
+      accessMode: 'READ' as const,
+      engUnit: isTruck ? 'km/h' : 'm/s',
+      engLow: 0,
+      engHigh: isTruck ? 80 : 4,
+      deadband: 0.05,
+      machineId: vehicleId,
+      group: 'SPEED' as const,
+      simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+    },
+    {
+      id: ids.steeringOrArticulation,
+      name: `${label} ${isTruck ? 'Articulation' : 'Steering'}`,
+      description: isTruck
+        ? `Tractor to trailer articulation angle for autonomous ${label}`
+        : `Rear axle steering angle for autonomous ${label}`,
+      dataType: 'FLOAT32' as const,
+      accessMode: 'READ' as const,
+      engUnit: 'deg',
+      engLow: isTruck ? -40 : -35,
+      engHigh: isTruck ? 40 : 35,
+      alarmLo: isTruck ? -32 : undefined,
+      alarmHi: isTruck ? 32 : undefined,
+      alarmLoLo: isTruck ? -38 : undefined,
+      alarmHiHi: isTruck ? 38 : undefined,
+      deadband: 0.25,
+      machineId: vehicleId,
+      group: 'POSITION' as const,
+      simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+    },
+    {
+      id: ids.phase,
+      name: `${label} Motion Phase`,
+      description: `Encoded deterministic route or service phase for autonomous ${label}`,
+      dataType: 'INT16' as const,
+      accessMode: 'READ' as const,
+      engUnit: 'state',
+      engLow: 0,
+      engHigh: 32,
+      deadband: 0,
+      machineId: vehicleId,
+      group: 'STATUS' as const,
+      simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+    },
+    {
+      id: ids.interlock,
+      name: `${label} ${isTruck ? 'Transfer Interlock' : 'Stop Reason'}`,
+      description: isTruck
+        ? `Dock transfer-ready permissive for autonomous ${label}`
+        : `Encoded safety or logistics stop reason for autonomous ${label}`,
+      dataType: isTruck ? ('BOOL' as const) : ('INT16' as const),
+      accessMode: 'READ' as const,
+      engUnit: isTruck ? 'ready' : 'state',
+      engLow: 0,
+      engHigh: isTruck ? 1 : 16,
+      deadband: 0,
+      machineId: vehicleId,
+      group: 'STATUS' as const,
+      simulation: { baseValue: 0, noiseAmplitude: 0, driftRate: 0 },
+    },
+  ];
+});
+
+/** Stable IDs used by the material-flow bridge and control workspace. */
 export const OPERATION_TAG_IDS = {
   rawInventory: 'OPERATIONS.WT001.PV',
   inProcess: 'OPERATIONS.WT002.PV',
@@ -902,15 +1108,17 @@ const operationalTags: TagDefinition[] = [
 // Complete Tag Database Export
 // ============================================================================
 
-/** All SCADA tags for MillOS (87 tags) */
+/** All process, utility, and operational SCADA tags for MillOS. */
 export const MILL_TAGS: TagDefinition[] = [
   ...siloTags, // 20 tags
   ...rollerMillTags, // 24 tags (4 mills x 6)
   ...plansifterTags, // 12 tags
   ...packerTags, // 12 tags
   ...utilityTags, // 10 tags
+  ...utilityAssetTags, // 15 tags (5 visible vessels x 3 instruments)
+  ...vehicleTags, // 16 tags (4 autonomous vehicles x 4)
   ...operationalTags, // 13 tags
-]; // Total: 91 tags
+];
 
 /** Get tags by machine ID */
 export function getTagsByMachine(machineId: string): TagDefinition[] {
@@ -943,6 +1151,7 @@ export function getTagsWithAlarms(): TagDefinition[] {
   );
 }
 
-// Tag database loaded: 86 tags total
+// Tag database loaded: 122 tags total
 // Zone 1 (Silos): 20 tags, Zone 2 (Mills): 24 tags, Zone 3 (Sifters): 12 tags
-// Zone 4 (Packers): 12 tags, Utility: 10 tags, Operations: 8 tags
+// Zone 4 (Packers): 12 tags, Utility: 10 tags, Visible utility assets: 15 tags,
+// Autonomous vehicles: 16 tags, Operations: 13 tags

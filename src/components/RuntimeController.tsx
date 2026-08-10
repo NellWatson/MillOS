@@ -77,14 +77,29 @@ interface RuntimeTextureIssue {
 
 export interface RuntimeMotionTelemetry {
   speed?: number;
+  acceleration?: number;
   steeringAngle?: number;
+  innerSteeringAngle?: number;
+  outerSteeringAngle?: number;
   wheelRotation?: number;
+  wheelTravel?: number;
+  routeDistance?: number;
   forkHeight?: number;
   mastTilt?: number;
   trailerAngle?: number;
+  articulation?: number;
   doorOpenAmount?: number;
   landingGearAmount?: number;
   cargo?: 'pallet' | 'empty';
+  loadPhase?: string;
+  servicePhase?: string;
+  stopReason?: string;
+  active?: boolean;
+  parkingBrake?: boolean;
+  chocksDeployed?: boolean;
+  dockLocked?: boolean;
+  levelerDeployed?: boolean;
+  safetyHold?: boolean;
   stopped?: boolean;
 }
 
@@ -135,6 +150,11 @@ export interface RuntimeTelemetrySnapshot {
   shaderStates: RuntimeShaderState[];
   textureIssues: RuntimeTextureIssue[];
   worldIntegrity: WorldIntegrityReport;
+  humanPresence: {
+    passed: boolean;
+    workerStoreCount: number;
+    sceneObjects: string[];
+  };
   motion: RuntimeMotionState;
   audio: ReturnType<typeof audioManager.getDiagnostics>;
   sceneChildren: number;
@@ -181,9 +201,9 @@ const BENCHMARK_CAMERAS: Record<BenchmarkScene, BenchmarkCameraPose> = {
   milling: SITE_LAYOUT.cameras.milling,
   sifting: SITE_LAYOUT.cameras.sifting,
   packing: SITE_LAYOUT.cameras.packing,
-  personnel: SITE_LAYOUT.cameras.personnel,
-  'personnel-close': SITE_LAYOUT.cameras.personnelClose,
-  'personnel-feminine': SITE_LAYOUT.cameras.personnelFeminine,
+  'process-floor': SITE_LAYOUT.cameras.processFloor,
+  'tank-farm': SITE_LAYOUT.cameras.tankFarm,
+  'logistics-close': SITE_LAYOUT.cameras.logisticsClose,
   forklift: SITE_LAYOUT.cameras.forklift,
   shipping: SITE_LAYOUT.cameras.shipping,
   receiving: SITE_LAYOUT.cameras.receiving,
@@ -233,11 +253,17 @@ function rounded(value: number, precision: number = 2): number {
 
 const MOTION_NUMBER_KEYS = [
   'speed',
+  'acceleration',
   'steeringAngle',
+  'innerSteeringAngle',
+  'outerSteeringAngle',
   'wheelRotation',
+  'wheelTravel',
+  'routeDistance',
   'forkHeight',
   'mastTilt',
   'trailerAngle',
+  'articulation',
   'doorOpenAmount',
   'landingGearAmount',
 ] as const satisfies ReadonlyArray<keyof RuntimeMotionTelemetry>;
@@ -252,7 +278,22 @@ export function readRuntimeMotionTelemetry(
     if (typeof value === 'number' && Number.isFinite(value)) telemetry[key] = rounded(value, 4);
   });
   if (userData.cargo === 'pallet' || userData.cargo === 'empty') telemetry.cargo = userData.cargo;
-  if (typeof userData.stopped === 'boolean') telemetry.stopped = userData.stopped;
+  const stringKeys = ['loadPhase', 'servicePhase', 'stopReason'] as const;
+  stringKeys.forEach((key) => {
+    if (typeof userData[key] === 'string') telemetry[key] = userData[key];
+  });
+  const booleanKeys = [
+    'active',
+    'parkingBrake',
+    'chocksDeployed',
+    'dockLocked',
+    'levelerDeployed',
+    'safetyHold',
+    'stopped',
+  ] as const;
+  booleanKeys.forEach((key) => {
+    if (typeof userData[key] === 'boolean') telemetry[key] = userData[key];
+  });
   return telemetry;
 }
 
@@ -367,7 +408,6 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
           data: {
             type: decision.type,
             machineId: decision.machineId ?? null,
-            workerId: decision.workerId ?? null,
           },
         });
       }
@@ -464,7 +504,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       currentGame.setGameSpeed(previousGameInputs.gameSpeed);
       currentGame.setWeather(previousGameInputs.weather);
     };
-  }, [camera, controls, mode]);
+  }, [camera, controls, mode, scene]);
 
   useEffect(() => {
     let observer: PerformanceObserver | null = null;
@@ -564,6 +604,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       );
       const geometryIds = new Set<string>();
       const materialIds = new Set<string>();
+      const humanSceneObjects = new Set<string>();
       const sceneGraph: RuntimeSceneGraphStats = {
         objects: 0,
         meshes: 0,
@@ -575,6 +616,18 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       };
       scene.traverse((object) => {
         sceneGraph.objects += 1;
+        const objectName = object.name.toLowerCase();
+        if (
+          objectName.startsWith('worker-') ||
+          objectName.startsWith('remote-player') ||
+          objectName === 'seated-vehicle-operator' ||
+          objectName.startsWith('dock-spotter') ||
+          objectName.startsWith('warehouse-worker') ||
+          typeof object.userData.workerId === 'string' ||
+          typeof object.userData.operatorName === 'string'
+        ) {
+          humanSceneObjects.add(object.name || object.type);
+        }
         if (!(object instanceof THREE.Mesh)) return;
         sceneGraph.meshes += 1;
         if (object.visible) sceneGraph.visibleMeshes += 1;
@@ -619,6 +672,11 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       scene.updateMatrixWorld(true);
       const motion = motionSnapshot();
       const worldIntegrity = inspectWorldIntegrity(scene);
+      const humanPresence = {
+        passed: humanSceneObjects.size === 0,
+        workerStoreCount: 0,
+        sceneObjects: [...humanSceneObjects].sort(),
+      };
       const diagnosticRays = Object.fromEntries(
         [
           ['centre', 0, 0],
@@ -754,6 +812,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
         shaderStates,
         textureIssues,
         worldIntegrity,
+        humanPresence,
         motion,
         audio: audioManager.getDiagnostics(),
         sceneChildren: scene.children.length,
@@ -820,11 +879,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
               efficiency: machine.metrics.efficiency,
             },
           })),
-          workerPositions: production.workers.map((worker) => ({
-            id: worker.id,
-            position: worker.position,
-            task: worker.currentTask,
-          })),
+          mobileEquipmentPositions: [],
           alerts: alerts.slice(0, 20).map((alert) => ({
             id: alert.id,
             type: alert.type,

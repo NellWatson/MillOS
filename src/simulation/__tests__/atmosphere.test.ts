@@ -18,13 +18,19 @@ describe('atmosphere sampling', () => {
     expect(dusk.twilight).toBeGreaterThan(noon.twilight);
   });
 
-  it('uses one weather event for cloud, light, wetness, wind, and fog', () => {
+  it('uses one weather event for cloud, light, precipitation, wetness, wind, and fog', () => {
     const clear = sampleAtmosphere(2, 12, 'clear');
+    const cloudy = sampleAtmosphere(2, 12, 'cloudy');
+    const rain = sampleAtmosphere(2, 12, 'rain');
     const storm = sampleAtmosphere(2, 12, 'storm');
 
     expect(storm.cloudCoverage).toBeGreaterThan(clear.cloudCoverage);
     expect(storm.lightMultiplier).toBeLessThan(clear.lightMultiplier);
     expect(storm.wetness).toBeGreaterThan(clear.wetness);
+    expect(cloudy.wetness).toBeGreaterThan(0);
+    expect(cloudy.precipitation).toBe(0);
+    expect(rain.precipitation).toBeGreaterThan(cloudy.precipitation);
+    expect(storm.precipitation).toBeGreaterThan(rain.precipitation);
     expect(storm.wind).toBeGreaterThan(clear.wind);
     // The ordering flips with the model: linear fog got THICKER by pulling its
     // near and far planes IN, exponential fog by raising density.

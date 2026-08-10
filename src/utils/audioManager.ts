@@ -84,30 +84,13 @@ class AudioManager {
   // Pre-generated noise buffers to avoid blocking main thread during playback
   private cachedNoiseBuffers: {
     brown4s?: AudioBuffer; // 4-second brown noise for compressor
-    pink4s?: AudioBuffer; // 4-second pink noise for PA speech
+    pink4s?: AudioBuffer; // Reusable 4-second pink-noise bed
     white1s?: AudioBuffer; // 1-second white noise for various effects
   } = {};
   private noiseBuffersGenerated: boolean = false;
 
   get initialized(): boolean {
     return this._initialized;
-  }
-
-  /**
-   * Speech synthesis must only be entered after a user gesture has initialized
-   * audio. Besides satisfying browser autoplay policies, this prevents the
-   * first ambient PA announcement from synchronously initializing the host
-   * voice service during an otherwise idle simulation.
-   */
-  get canSpeakAnnouncements(): boolean {
-    return (
-      this._initialized &&
-      this._ttsPrimed &&
-      this._ttsEnabled &&
-      !this._muted &&
-      typeof window !== 'undefined' &&
-      'speechSynthesis' in window
-    );
   }
 
   // Ambient sound nodes
@@ -135,10 +118,6 @@ class AudioManager {
     { source: AudioBufferSourceNode; gain: GainNode; lfo: OscillatorNode }
   > = new Map();
   private backgroundMuted = false;
-
-  // Radio chatter state
-  private radioChatterActive: boolean = false;
-  private radioChatterInterval: NodeJS.Timeout | number | null = null;
 
   // Outdoor ambient sounds
   private outdoorNodes: {
@@ -267,13 +246,6 @@ class AudioManager {
   private victoryAudio: HTMLAudioElement | null = null;
   private _quotaReached: boolean = false;
 
-  // TTS (Text-to-Speech) for PA announcements
-  private _ttsEnabled: boolean = true; // On by default
-  private _ttsVoice: SpeechSynthesisVoice | null = null;
-  private _ttsVoiceLoaded: boolean = false;
-  private _ttsPrimed: boolean = false; // Prevents repeated priming from canceling speech
-  private _ttsPrimerComplete: boolean = false; // True once primer utterance has finished
-
   // PA tannoy reverb/echo effect chain
   private paReverbChain: {
     inputGain: GainNode;
@@ -286,20 +258,6 @@ class AudioManager {
     dryGain: GainNode;
     output: GainNode;
   } | null = null;
-
-  // Speech reverb simulation (plays during TTS to simulate voice bouncing in factory)
-  private speechReverbNodes: {
-    source: AudioBufferSourceNode;
-    gain: GainNode;
-  } | null = null;
-  private speechReverbPulseInterval: NodeJS.Timeout | number | null = null;
-
-  // PA announcement queue - prevents messages from cutting each other off
-  private announcementQueue: Array<{ text: string; priority: number }> = [];
-  private isAnnouncementPlaying: boolean = false;
-  private speechDuckPriority = 0;
-  private announcementChimeTimeout: ReturnType<typeof setTimeout> | null = null;
-  private announcementSafetyTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     // Load persisted settings from localStorage
@@ -322,7 +280,6 @@ class AudioManager {
         musicEnabled: this._musicEnabled,
         musicVolume: this._musicVolume,
         machineVolume: this._machineVolume,
-        ttsEnabled: this._ttsEnabled,
       };
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(settings));
     } catch {
@@ -344,7 +301,6 @@ class AudioManager {
           this._musicVolume = Math.max(0, Math.min(1, settings.musicVolume));
         if (typeof settings.machineVolume === 'number')
           this._machineVolume = Math.max(0, Math.min(1, settings.machineVolume));
-        if (typeof settings.ttsEnabled === 'boolean') this._ttsEnabled = settings.ttsEnabled;
       }
     } catch {
       // localStorage may not be available or data may be corrupted
@@ -424,9 +380,7 @@ class AudioManager {
   // Note: Each machine type has a different base volume (0.06/0.05/0.045)
   // We use an average base of 0.05 for volume updates
   private updateMachineVolumes(): void {
-    const effectiveVolume = this._muted
-      ? 0
-      : this._machineVolume * 0.05 * this.getSpeechDuckFactor();
+    const effectiveVolume = this._muted ? 0 : this._machineVolume * 0.05;
     this.machineNodes.forEach((node) => {
       if (node.gain) {
         node.gain.gain.setTargetAtTime(effectiveVolume, this.audioContext?.currentTime ?? 0, 0.15);
@@ -576,7 +530,7 @@ class AudioManager {
       this.cachedNoiseBuffers.brown4s =
         this.generateNoiseBufferInternal(4, 'brown', sampleRate) ?? undefined;
 
-      // Generate 4-second pink noise (for PA speech - covers 2-4s range)
+      // Generate a reusable 4-second pink-noise bed
       this.cachedNoiseBuffers.pink4s =
         this.generateNoiseBufferInternal(4, 'pink', sampleRate) ?? undefined;
 
@@ -784,23 +738,8 @@ class AudioManager {
   private updateMusicVolume(): void {
     if (this.musicAudio) {
       // Music has its own independent volume control
-      this.musicAudio.volume = this._muted ? 0 : this._musicVolume * this.getSpeechDuckFactor();
+      this.musicAudio.volume = this._muted ? 0 : this._musicVolume;
     }
-  }
-
-  private getSpeechDuckFactor(): number {
-    if (this.speechDuckPriority >= 4) return 0.18;
-    if (this.speechDuckPriority >= 3) return 0.3;
-    if (this.speechDuckPriority > 0) return 0.45;
-    return 1;
-  }
-
-  private setSpeechDuckPriority(priority: number): void {
-    this.speechDuckPriority = Math.min(4, Math.max(0, priority));
-    this.updateMusicVolume();
-    this.updateMachineVolumes();
-    this.updateAmbientSpatialVolumes();
-    this.adjustAmbientForTimeOfDay();
   }
 
   startMusic(): void {
@@ -1702,55 +1641,6 @@ class AudioManager {
     }
   }
 
-  // === FOOTSTEP SOUNDS ===
-
-  private lastFootstepTime: Map<string, number> = new Map();
-
-  playFootstep(workerId: string) {
-    if (this.getEffectiveVolume() === 0) return;
-
-    const now = Date.now();
-    const lastPlayed = this.lastFootstepTime.get(workerId) || 0;
-    if (now - lastPlayed < 280) return; // Limit footstep rate
-    this.lastFootstepTime.set(workerId, now);
-
-    try {
-      const ctx = this.getContext();
-      const masterGain = this.getMasterGain();
-      if (!ctx || !masterGain) return;
-      const currentTime = ctx.currentTime;
-
-      // Soft boot on concrete sound
-      const buffer = this.createNoiseBuffer(0.15, 'brown');
-      if (!buffer) return;
-      const source = ctx.createBufferSource();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-
-      source.buffer = buffer;
-
-      // Random variation in pitch for natural feel
-      const pitchVar = 0.8 + Math.random() * 0.4;
-      filter.type = 'bandpass';
-      filter.frequency.setValueAtTime(200 * pitchVar, currentTime);
-      filter.Q.setValueAtTime(2, currentTime);
-
-      // Quick attack, fast decay
-      const vol = 0.015 + Math.random() * 0.008;
-      gain.gain.setValueAtTime(vol, currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + 0.08);
-
-      source.connect(filter);
-      filter.connect(gain);
-      gain.connect(masterGain);
-
-      source.start(currentTime);
-      source.stop(currentTime + 0.1);
-    } catch (e) {
-      audioLog.warn('Clunk sound playback failed', e);
-    }
-  }
-
   // === AI DECISION SOUNDS ===
 
   // AI critical decision alert sound
@@ -2035,49 +1925,6 @@ class AudioManager {
     if (ctx && ctx.state === 'suspended') {
       await ctx.resume();
     }
-
-    // Initialize TTS during user gesture (required for mobile browsers)
-    // Mobile browsers require speechSynthesis to be "primed" from a user interaction
-    // Only do this once to avoid canceling ongoing speech
-    if (!this._ttsPrimed) {
-      this._ttsPrimed = true;
-      this.initTTSVoice();
-
-      // iOS Safari workaround: "warm up" speech synthesis with a silent utterance
-      // This ensures the first real announcement can play without gesture restrictions
-      if ('speechSynthesis' in window) {
-        // Prime with a truly silent but pronounceable utterance
-        // Using '.' instead of ' ' because a space may not trigger actual synthesis
-        // Volume 0 is truly silent but still "primes" the audio system
-        const primer = new SpeechSynthesisUtterance('.');
-        primer.volume = 0; // Completely silent
-        primer.rate = 2; // Fast but not extreme (rate=10 may cause issues)
-        primer.onend = () => {
-          audioLog.debug('[TTS] Primer completed normally');
-          this._ttsPrimerComplete = true;
-        };
-        primer.onerror = (e) => {
-          // Even on error, mark as complete so real announcements can proceed
-          // Note: "canceled" errors are expected if we cancel() before primer finishes
-          audioLog.debug('[TTS] Primer error:', e.error, '(proceeding anyway)');
-          this._ttsPrimerComplete = true;
-        };
-        window.speechSynthesis.speak(primer);
-        audioLog.debug('[TTS] Primer spoken for gesture activation');
-
-        // Safety: if primer doesn't complete within 2s, mark as complete anyway
-        // (Reduced from 3s since primer should be very fast)
-        setTimeout(() => {
-          if (!this._ttsPrimerComplete) {
-            audioLog.debug('[TTS] Primer timeout - marking complete');
-            this._ttsPrimerComplete = true;
-          }
-        }, 2000);
-      } else {
-        // No speechSynthesis support - mark as complete to not block
-        this._ttsPrimerComplete = true;
-      }
-    }
   }
 
   // === SPATIAL AUDIO SUPPORT ===
@@ -2195,7 +2042,7 @@ class AudioManager {
     const wallAttenuation = this.calculateWallAttenuation(x, z);
 
     // Combined factor
-    const combinedFactor = interiorFalloff * wallAttenuation * this.getSpeechDuckFactor();
+    const combinedFactor = interiorFalloff * wallAttenuation;
 
     const currentTime = this.audioContext.currentTime;
     const rampTime = 0.4; // Slightly longer ramp for smoother transitions
@@ -2274,177 +2121,6 @@ class AudioManager {
     }
   }
 
-  // === WORKER VOICE SOUNDS ===
-
-  private workerVoiceActive: boolean = false;
-  private workerVoiceInterval: NodeJS.Timeout | number | null = null;
-
-  startWorkerVoices() {
-    if (this.workerVoiceActive) return;
-    this.workerVoiceActive = true;
-
-    const playRandomVoice = () => {
-      if (!this.workerVoiceActive || this.getEffectiveVolume() === 0) return;
-
-      // Skip playback when tab hidden but keep scheduling to resume when visible
-      if (this._isTabVisible) {
-        const voiceType = Math.random();
-        if (voiceType < 0.35) {
-          this.playWorkerShout();
-        } else if (voiceType < 0.6) {
-          this.playWorkerWhistle();
-        } else {
-          this.playWorkerCall();
-        }
-      }
-
-      // Schedule next voice (15-45 seconds)
-      const nextDelay = 15000 + Math.random() * 30000;
-      this.workerVoiceInterval = setTimeout(playRandomVoice, nextDelay);
-    };
-
-    // Start with a delay
-    this.workerVoiceInterval = setTimeout(playRandomVoice, 10000 + Math.random() * 15000);
-  }
-
-  stopWorkerVoices() {
-    this.workerVoiceActive = false;
-    if (this.workerVoiceInterval) {
-      clearTimeout(this.workerVoiceInterval);
-      this.workerVoiceInterval = null;
-    }
-  }
-
-  // Worker shout sound (like "Hey!" or "Clear!")
-  private playWorkerShout() {
-    if (this.getEffectiveVolume() === 0) return;
-
-    try {
-      const ctx = this.getContext();
-      const masterGain = this.getMasterGain();
-      if (!ctx || !masterGain) return;
-      const currentTime = ctx.currentTime;
-
-      // Create a voice-like sound using formants
-      const fundamentalFreq = 150 + Math.random() * 100; // Male voice range
-
-      // Multiple oscillators for formant simulation
-      const formants = [
-        { freq: fundamentalFreq, gain: 0.3 },
-        { freq: fundamentalFreq * 2, gain: 0.15 },
-        { freq: 700 + Math.random() * 300, gain: 0.1 }, // First formant
-        { freq: 1200 + Math.random() * 400, gain: 0.05 }, // Second formant
-      ];
-
-      const duration = 0.2 + Math.random() * 0.15;
-
-      formants.forEach(({ freq, gain: formantGain }) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        const filter = ctx.createBiquadFilter();
-
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(freq, currentTime);
-        // Pitch drop for natural speech
-        osc.frequency.exponentialRampToValueAtTime(freq * 0.7, currentTime + duration);
-
-        filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(2000, currentTime);
-
-        gain.gain.setValueAtTime(0, currentTime);
-        gain.gain.linearRampToValueAtTime(formantGain * 0.015, currentTime + 0.02);
-        gain.gain.setValueAtTime(formantGain * 0.015, currentTime + duration * 0.7);
-        gain.gain.exponentialRampToValueAtTime(0.001, currentTime + duration);
-
-        osc.connect(filter);
-        filter.connect(gain);
-        gain.connect(masterGain);
-
-        osc.start(currentTime);
-        osc.stop(currentTime + duration + 0.1);
-      });
-    } catch (e) {
-      audioLog.warn('Failed to stop worker voices', e);
-    }
-  }
-
-  // Worker whistle (attention-getting)
-  private playWorkerWhistle() {
-    if (this.getEffectiveVolume() === 0) return;
-
-    try {
-      const ctx = this.getContext();
-      const masterGain = this.getMasterGain();
-      if (!ctx || !masterGain) return;
-      const currentTime = ctx.currentTime;
-
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = 'sine';
-      // Two-tone whistle
-      osc.frequency.setValueAtTime(1200, currentTime);
-      osc.frequency.setValueAtTime(1600, currentTime + 0.15);
-      osc.frequency.setValueAtTime(1200, currentTime + 0.3);
-
-      gain.gain.setValueAtTime(0, currentTime);
-      gain.gain.linearRampToValueAtTime(0.02, currentTime + 0.02);
-      gain.gain.setValueAtTime(0.02, currentTime + 0.4);
-      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + 0.5);
-
-      osc.connect(gain);
-      gain.connect(masterGain);
-
-      osc.start(currentTime);
-      osc.stop(currentTime + 0.55);
-    } catch (e) {
-      audioLog.warn('Audio playback failed', e);
-    }
-  }
-
-  // Worker call (muffled distant voice)
-  private playWorkerCall() {
-    if (this.getEffectiveVolume() === 0) return;
-
-    try {
-      const ctx = this.getContext();
-      const masterGain = this.getMasterGain();
-      if (!ctx || !masterGain) return;
-      const currentTime = ctx.currentTime;
-
-      // Use noise filtered to sound like distant muffled speech
-      const duration = 0.4 + Math.random() * 0.3;
-      const buffer = this.createNoiseBuffer(duration + 0.2, 'pink');
-      if (!buffer) return;
-      const source = ctx.createBufferSource();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-
-      source.buffer = buffer;
-
-      // Bandpass for voice-like quality
-      filter.type = 'bandpass';
-      filter.frequency.setValueAtTime(400 + Math.random() * 200, currentTime);
-      filter.Q.setValueAtTime(3, currentTime);
-
-      // Syllable-like envelope
-      gain.gain.setValueAtTime(0, currentTime);
-      gain.gain.linearRampToValueAtTime(0.012, currentTime + 0.03);
-      gain.gain.linearRampToValueAtTime(0.006, currentTime + duration * 0.3);
-      gain.gain.linearRampToValueAtTime(0.012, currentTime + duration * 0.5);
-      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + duration);
-
-      source.connect(filter);
-      filter.connect(gain);
-      gain.connect(masterGain);
-
-      source.start(currentTime);
-      source.stop(currentTime + duration + 0.1);
-    } catch (e) {
-      audioLog.warn('Audio playback failed', e);
-    }
-  }
-
   // === TIME-OF-DAY AUDIO ===
 
   private currentTimeOfDay: 'day' | 'night' = 'day';
@@ -2489,9 +2165,8 @@ class AudioManager {
       this.currentTimeOfDay,
       this.currentWeather
     );
-    const duck = this.getSpeechDuckFactor();
     (Object.keys(mix) as Array<keyof OutdoorAmbientMix>).forEach((key) => {
-      const target = mix[key] * duck;
+      const target = mix[key];
       if (Math.abs((this.lastOutdoorTargets[key] ?? -1) - target) < 0.00001) return;
       this.lastOutdoorTargets[key] = target;
       this.outdoorNodes[key]?.gain.gain.setTargetAtTime(target, currentTime, 0.8);
@@ -3166,158 +2841,6 @@ class AudioManager {
         audioLog.warn('Failed to stop forklift engine', { forkliftId }, e);
       }
       this.forkliftEngines.delete(forkliftId);
-    }
-  }
-
-  // === RADIO CHATTER SOUNDS ===
-
-  startRadioChatter() {
-    if (this.radioChatterActive) return;
-    this.radioChatterActive = true;
-
-    // Play random radio sounds at random intervals
-    const playRandomChatter = () => {
-      if (!this.radioChatterActive || this.getEffectiveVolume() === 0) return;
-
-      // Skip playback when tab hidden but keep scheduling to resume when visible
-      if (this._isTabVisible) {
-        const chatterType = Math.random();
-        if (chatterType < 0.4) {
-          this.playRadioStatic();
-        } else if (chatterType < 0.7) {
-          this.playRadioBeep();
-        } else {
-          this.playRadioSquelch();
-        }
-      }
-
-      // Schedule next chatter (8-25 seconds)
-      const nextDelay = 8000 + Math.random() * 17000;
-      this.radioChatterInterval = setTimeout(playRandomChatter, nextDelay);
-    };
-
-    // Start with a delay
-    this.radioChatterInterval = setTimeout(playRandomChatter, 5000 + Math.random() * 10000);
-  }
-
-  stopRadioChatter() {
-    this.radioChatterActive = false;
-    if (this.radioChatterInterval) {
-      clearTimeout(this.radioChatterInterval);
-      this.radioChatterInterval = null;
-    }
-  }
-
-  // Radio static burst
-  private playRadioStatic() {
-    if (this.getEffectiveVolume() === 0) return;
-
-    try {
-      const ctx = this.getContext();
-      const masterGain = this.getMasterGain();
-      if (!ctx || !masterGain) return;
-      const currentTime = ctx.currentTime;
-
-      const duration = 0.3 + Math.random() * 0.4;
-      const buffer = this.createNoiseBuffer(duration + 0.2, 'white');
-      if (!buffer) return;
-      const source = ctx.createBufferSource();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-
-      source.buffer = buffer;
-
-      // Radio-like bandpass filter
-      filter.type = 'bandpass';
-      filter.frequency.setValueAtTime(1200, currentTime);
-      filter.Q.setValueAtTime(5, currentTime);
-
-      // Quick fade in/out
-      gain.gain.setValueAtTime(0, currentTime);
-      gain.gain.linearRampToValueAtTime(0.015, currentTime + 0.02);
-      gain.gain.setValueAtTime(0.015, currentTime + duration);
-      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + duration + 0.1);
-
-      source.connect(filter);
-      filter.connect(gain);
-      gain.connect(masterGain);
-
-      source.start(currentTime);
-      source.stop(currentTime + duration + 0.2);
-    } catch (e) {
-      audioLog.warn('Failed to stop radio chatter', e);
-    }
-  }
-
-  // Radio acknowledgment beep
-  private playRadioBeep() {
-    if (this.getEffectiveVolume() === 0) return;
-
-    try {
-      const ctx = this.getContext();
-      const masterGain = this.getMasterGain();
-      if (!ctx || !masterGain) return;
-      const currentTime = ctx.currentTime;
-
-      // Double beep
-      for (let i = 0; i < 2; i++) {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        const startTime = currentTime + i * 0.12;
-
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(1800, startTime);
-
-        gain.gain.setValueAtTime(0, startTime);
-        gain.gain.linearRampToValueAtTime(0.025, startTime + 0.01);
-        gain.gain.setValueAtTime(0.025, startTime + 0.06);
-        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.08);
-
-        osc.connect(gain);
-        gain.connect(masterGain);
-
-        osc.start(startTime);
-        osc.stop(startTime + 0.1);
-      }
-    } catch (e) {
-      audioLog.warn('Audio playback failed', e);
-    }
-  }
-
-  // Radio squelch sound (click when releasing talk button)
-  private playRadioSquelch() {
-    if (this.getEffectiveVolume() === 0) return;
-
-    try {
-      const ctx = this.getContext();
-      const masterGain = this.getMasterGain();
-      if (!ctx || !masterGain) return;
-      const currentTime = ctx.currentTime;
-
-      // Squelch is a brief burst of noise followed by silence
-      const buffer = this.createNoiseBuffer(0.15, 'white');
-      if (!buffer) return;
-      const source = ctx.createBufferSource();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-
-      source.buffer = buffer;
-
-      filter.type = 'highpass';
-      filter.frequency.setValueAtTime(800, currentTime);
-      filter.frequency.exponentialRampToValueAtTime(3000, currentTime + 0.08);
-
-      gain.gain.setValueAtTime(0.02, currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + 0.1);
-
-      source.connect(filter);
-      filter.connect(gain);
-      gain.connect(masterGain);
-
-      source.start(currentTime);
-      source.stop(currentTime + 0.15);
-    } catch (e) {
-      audioLog.warn('Audio playback failed', e);
     }
   }
 
@@ -4005,12 +3528,10 @@ class AudioManager {
 
       // Skip playback when tab hidden but keep scheduling to resume when visible
       if (this._isTabVisible) {
-        // Only play ambient factory sounds (shift bells and PA tones)
-        // The PA chime is reserved for speakAnnouncement() which plays chime + actual TTS text
-        // Playing chime here without text causes confusing "ghost chimes"
+        // Automated cycle bells and signal tones communicate plant state without voices.
         const announcementType = Math.random();
         if (announcementType < 0.5) {
-          this.playShiftBell();
+          this.playCycleBell();
         } else {
           this.playPATone();
         }
@@ -4032,89 +3553,7 @@ class AudioManager {
     }
   }
 
-  private playPAChime() {
-    if (this.getEffectiveVolume() === 0) return;
-
-    try {
-      const ctx = this.getContext();
-      const paReverb = this.getPAReverbChain();
-      if (!ctx || !paReverb) return;
-      const currentTime = ctx.currentTime;
-
-      // Classic three-tone chime - routed through tannoy reverb for echo effect
-      const notes = [523, 659, 784]; // C5, E5, G5
-      notes.forEach((freq, i) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        const startTime = currentTime + i * 0.3;
-
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, startTime);
-
-        gain.gain.setValueAtTime(0, startTime);
-        gain.gain.linearRampToValueAtTime(0.04, startTime + 0.02);
-        gain.gain.setValueAtTime(0.04, startTime + 0.2);
-        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.6);
-
-        osc.connect(gain);
-        // Route through PA reverb chain for tannoy echo effect
-        gain.connect(paReverb.inputGain);
-
-        osc.start(startTime);
-        osc.stop(startTime + 0.65);
-      });
-
-      // Follow with muffled speech-like sound
-      setTimeout(() => this.playPASpeech(), 1200);
-    } catch (e) {
-      audioLog.warn('PA chime playback failed', e);
-    }
-  }
-
-  private playPASpeech() {
-    if (this.getEffectiveVolume() === 0) return;
-
-    try {
-      const ctx = this.getContext();
-      const paReverb = this.getPAReverbChain();
-      if (!ctx || !paReverb) return;
-      const currentTime = ctx.currentTime;
-
-      const duration = 2 + Math.random() * 2;
-      const buffer = this.createNoiseBuffer(duration + 0.5, 'pink');
-      if (!buffer) return;
-      const source = ctx.createBufferSource();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-
-      source.buffer = buffer;
-      filter.type = 'bandpass';
-      filter.frequency.setValueAtTime(600, currentTime);
-      filter.Q.setValueAtTime(2, currentTime);
-
-      // Modulate to simulate speech rhythm
-      gain.gain.setValueAtTime(0, currentTime);
-      const syllables = Math.floor(duration * 3);
-      for (let i = 0; i < syllables; i++) {
-        const t = currentTime + (i / syllables) * duration;
-        gain.gain.linearRampToValueAtTime(0.012 + Math.random() * 0.006, t);
-        gain.gain.linearRampToValueAtTime(0.004, t + 0.1);
-      }
-      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + duration);
-
-      source.connect(filter);
-      filter.connect(gain);
-      // Route through PA reverb chain for tannoy echo effect
-      gain.connect(paReverb.inputGain);
-
-      source.start(currentTime);
-      source.stop(currentTime + duration + 0.2);
-    } catch (e) {
-      audioLog.warn('PA speech playback failed', e);
-    }
-  }
-
-  playShiftBell() {
+  playCycleBell() {
     if (this.getEffectiveVolume() === 0) return;
 
     try {
@@ -4148,7 +3587,7 @@ class AudioManager {
         });
       }
     } catch (e) {
-      audioLog.warn('Shift bell playback failed', e);
+      audioLog.warn('Cycle bell playback failed', e);
     }
   }
 
@@ -5365,607 +4804,8 @@ class AudioManager {
     }
   }
 
-  // Radio dispatch chatter at guard shack
-  playRadioDispatch() {
-    if (this.getEffectiveVolume() === 0) return;
-
-    try {
-      const ctx = this.getContext();
-      const masterGain = this.getMasterGain();
-      if (!ctx || !masterGain) return;
-      const currentTime = ctx.currentTime;
-
-      // Static burst + voice-like modulation
-      const duration = 1.5 + Math.random() * 1;
-
-      // Static noise
-      const buffer = this.createNoiseBuffer(duration, 'white');
-      if (!buffer) return;
-      const source = ctx.createBufferSource();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-      const filter2 = ctx.createBiquadFilter();
-
-      source.buffer = buffer;
-
-      // Bandpass for radio quality
-      filter.type = 'bandpass';
-      filter.frequency.setValueAtTime(1200, currentTime);
-      filter.Q.setValueAtTime(5, currentTime);
-
-      // Voice-like modulation with second filter
-      filter2.type = 'lowpass';
-      filter2.frequency.setValueAtTime(2500, currentTime);
-
-      // Crackling envelope
-      gain.gain.setValueAtTime(0, currentTime);
-      gain.gain.linearRampToValueAtTime(0.02, currentTime + 0.05);
-
-      // Random volume variations to simulate speech patterns
-      const numVariations = Math.floor(duration * 4);
-      for (let i = 0; i < numVariations; i++) {
-        const t = currentTime + 0.1 + (i / numVariations) * (duration - 0.2);
-        const vol = 0.01 + Math.random() * 0.015;
-        gain.gain.linearRampToValueAtTime(vol, t);
-      }
-
-      gain.gain.linearRampToValueAtTime(0.02, currentTime + duration - 0.05);
-      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + duration);
-
-      source.connect(filter);
-      filter.connect(filter2);
-      filter2.connect(gain);
-      gain.connect(masterGain);
-
-      source.start(currentTime);
-      source.stop(currentTime + duration);
-
-      // Add squelch tail
-      setTimeout(
-        () => {
-          this.playRadioSquelch();
-        },
-        duration * 1000 - 100
-      );
-    } catch (e) {
-      audioLog.warn('Radio dispatch sound failed', e);
-    }
-  }
-
-  // === TEXT-TO-SPEECH (TTS) FOR PA ANNOUNCEMENTS ===
-
-  // TTS enabled getter/setter
-  get ttsEnabled(): boolean {
-    return this._ttsEnabled;
-  }
-
-  set ttsEnabled(value: boolean) {
-    this._ttsEnabled = value;
-    if (!value) {
-      this.stopTTS();
-    }
-    this.saveSettings();
-    this.notifyListeners();
-  }
-
-  // Returns true if TTS is currently speaking an announcement
-  get isTTSSpeaking(): boolean {
-    return this.isAnnouncementPlaying;
-  }
-
-  /**
-   * Includes speech waiting for voice or primer initialization, so consumers
-   * do not mistake the short pre-speech queueing interval for completion.
-   */
-  get hasPendingAnnouncementSpeech(): boolean {
-    return this.isAnnouncementPlaying || this.announcementQueue.length > 0;
-  }
-
-  // Initialize TTS voice - call after user interaction (browser requirement)
-  private initTTSVoice(): void {
-    if (this._ttsVoiceLoaded || !('speechSynthesis' in window)) return;
-
-    const loadVoices = () => {
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length === 0) return;
-
-      // Use British voices for PA announcements - prefer British, fall back to any English on mobile
-      const preferredBritishVoices = [
-        'Google UK English Female',
-        'Google UK English Male',
-        'Microsoft Hazel - English (United Kingdom)',
-        'Microsoft George - English (United Kingdom)',
-        'Daniel (United Kingdom)',
-        'Kate',
-        'Serena',
-        'Daniel',
-        // iOS-specific voice names
-        'Karen', // Australian but close
-        'Moira', // Irish
-        'Fiona', // Scottish
-      ];
-
-      // First pass: exact preferred British voice matches
-      for (const preferred of preferredBritishVoices) {
-        const found = voices.find((v) => v.name === preferred || v.name.includes(preferred));
-        if (found) {
-          this._ttsVoice = found;
-          audioLog.info(`TTS voice selected (British): ${found.name}`);
-          break;
-        }
-      }
-
-      // Second pass: any voice with UK/British in name or en-GB locale
-      if (!this._ttsVoice) {
-        const britishVoice = voices.find(
-          (v) =>
-            v.lang === 'en-GB' ||
-            v.lang === 'en_GB' ||
-            v.name.toLowerCase().includes('uk') ||
-            v.name.toLowerCase().includes('british') ||
-            v.name.toLowerCase().includes('united kingdom')
-        );
-        if (britishVoice) {
-          this._ttsVoice = britishVoice;
-          audioLog.info(`TTS voice selected (British fallback): ${britishVoice.name}`);
-        }
-      }
-
-      // Third pass: fall back to ANY English voice rather than silence
-      if (!this._ttsVoice) {
-        const anyEnglishVoice = voices.find((v) => v.lang.startsWith('en'));
-        if (anyEnglishVoice) {
-          this._ttsVoice = anyEnglishVoice;
-          audioLog.info(`TTS voice selected (English fallback): ${anyEnglishVoice.name}`);
-        }
-      }
-
-      // Fourth pass: fall back to ANY voice at all
-      if (!this._ttsVoice && voices.length > 0) {
-        this._ttsVoice = voices[0];
-        audioLog.info(`TTS voice selected (any fallback): ${voices[0].name}`);
-      }
-
-      if (!this._ttsVoice) {
-        audioLog.warn('No voices available - PA announcements will be silent');
-      }
-
-      this._ttsVoiceLoaded = true;
-    };
-
-    // Chrome loads voices asynchronously
-    if (window.speechSynthesis.getVoices().length) {
-      loadVoices();
-    } else {
-      window.speechSynthesis.onvoiceschanged = loadVoices;
-
-      // iOS Safari fallback: onvoiceschanged may not fire reliably
-      // Poll for voices a few times as a backup
-      let attempts = 0;
-      const pollVoices = () => {
-        if (this._ttsVoiceLoaded || attempts >= 10) return;
-        attempts++;
-        const voices = window.speechSynthesis.getVoices();
-        if (voices.length > 0) {
-          loadVoices();
-        } else {
-          setTimeout(pollVoices, 250);
-        }
-      };
-      setTimeout(pollVoices, 100);
-    }
-  }
-
-  // Speak a PA announcement using TTS with tannoy echo effect
-  // Messages are queued so they don't cut each other off
-  speakAnnouncement(text: string, priority: number = 2): void {
-    audioLog.debug('[TTS] speakAnnouncement called:', text.substring(0, 40) + '...');
-
-    if (!this._ttsEnabled) {
-      audioLog.debug('[TTS] Blocked: TTS disabled');
-      return;
-    }
-    if (this._muted) {
-      audioLog.debug('[TTS] Blocked: Audio muted');
-      return;
-    }
-    if (!('speechSynthesis' in window)) {
-      audioLog.debug('[TTS] Blocked: speechSynthesis not supported');
-      return;
-    }
-
-    // Add to queue
-    this.announcementQueue.push({
-      text,
-      priority: Math.min(4, Math.max(1, priority)),
-    });
-    audioLog.debug('[TTS] Added to queue, length:', this.announcementQueue.length);
-
-    // Ensure voice is loaded
-    if (!this._ttsVoiceLoaded) {
-      audioLog.debug('[TTS] Voice not loaded, initializing...');
-      this.initTTSVoice();
-      // Voice will load async; processAnnouncementQueue will check for voice
-    }
-
-    // If nothing is currently playing, start processing the queue
-    // (will check for voice availability inside)
-    if (!this.isAnnouncementPlaying) {
-      audioLog.debug('[TTS] Starting queue processing');
-      this.processAnnouncementQueue();
-    } else {
-      audioLog.debug('[TTS] Already playing, queued for later');
-    }
-  }
-
-  // Process the next announcement in the queue
-  private processAnnouncementQueue(): void {
-    audioLog.debug('[TTS] processAnnouncementQueue called, queue:', this.announcementQueue.length);
-
-    // Check if queue is empty
-    if (this.announcementQueue.length === 0) {
-      audioLog.debug('[TTS] Queue empty, stopping');
-      this.isAnnouncementPlaying = false;
-      this.setSpeechDuckPriority(0);
-      return;
-    }
-
-    // Check if conditions prevent playback
-    if (!this._ttsEnabled || this._muted) {
-      audioLog.debug('[TTS] Blocked in queue processing:', {
-        ttsEnabled: this._ttsEnabled,
-        muted: this._muted,
-      });
-      this.isAnnouncementPlaying = false;
-      this.setSpeechDuckPriority(0);
-      return;
-    }
-
-    // If voice not loaded yet, retry after a short delay
-    if (!this._ttsVoice) {
-      audioLog.debug('[TTS] Voice not ready, retrying in 500ms');
-      setTimeout(() => this.processAnnouncementQueue(), 500);
-      return;
-    }
-
-    // Wait for primer to complete before speaking real announcements
-    // This prevents collision with the "warm up" utterance on Chrome
-    if (!this._ttsPrimerComplete) {
-      audioLog.debug('[TTS] Waiting for primer to complete, retrying in 300ms');
-      setTimeout(() => this.processAnnouncementQueue(), 300);
-      return;
-    }
-
-    audioLog.debug('[TTS] Voice ready, speaking...');
-    this.isAnnouncementPlaying = true;
-    const queuedAnnouncement = this.announcementQueue.shift();
-    // Safety check: if shift() returns undefined (queue was emptied between checks), bail out
-    if (queuedAnnouncement === undefined) {
-      this.isAnnouncementPlaying = false;
-      this.setSpeechDuckPriority(0);
-      return;
-    }
-    const { text, priority } = queuedAnnouncement;
-
-    // Clear any existing safety timeout
-    if (this.announcementSafetyTimeout) {
-      clearTimeout(this.announcementSafetyTimeout);
-      this.announcementSafetyTimeout = null;
-    }
-
-    // Safety timeout: if announcement doesn't complete within 30 seconds, force reset
-    // This prevents the PA system from getting stuck when speechSynthesis callbacks fail
-    // At rate 0.85, longer announcements can take 15-20 seconds to speak
-    this.announcementSafetyTimeout = setTimeout(() => {
-      audioLog.debug('[TTS] Safety timeout triggered - resetting');
-      this.stopSpeechReverb();
-      this.isAnnouncementPlaying = false;
-      this.setSpeechDuckPriority(0);
-      // Cancel any stuck speech
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
-      // Continue processing queue
-      this.processAnnouncementQueue();
-    }, 30000);
-
-    try {
-      const utterance = new SpeechSynthesisUtterance(text);
-
-      // Configure voice settings for PA-style delivery
-      utterance.voice = this._ttsVoice;
-      utterance.rate = 0.85; // Slightly slower for PA clarity
-      utterance.pitch = 0.95; // Slightly lower for authoritative PA tone
-      utterance.volume = this._volume * 0.75; // Slightly quieter to blend with reverb
-
-      // Helper to clear safety timeout when speech completes normally
-      const clearSafetyTimeout = () => {
-        if (this.announcementSafetyTimeout) {
-          clearTimeout(this.announcementSafetyTimeout);
-          this.announcementSafetyTimeout = null;
-        }
-      };
-
-      // When speech starts, begin continuous reverb simulation
-      utterance.onstart = () => {
-        audioLog.debug('[TTS] Speech STARTED');
-        this.setSpeechDuckPriority(priority);
-        this.startSpeechReverb();
-      };
-
-      // When speech ends, stop reverb, play reverberant echo tail, then process next in queue
-      utterance.onend = () => {
-        audioLog.debug('[TTS] Speech ENDED');
-        clearSafetyTimeout();
-        this.stopSpeechReverb();
-        this.setSpeechDuckPriority(0);
-        this.playPAReverbTail();
-        // Wait for reverb tail to finish before next announcement (1.5s delay)
-        setTimeout(() => {
-          this.processAnnouncementQueue();
-        }, 1500);
-      };
-      utterance.onerror = (e) => {
-        audioLog.debug('[TTS] Speech ERROR:', e.error);
-        // "interrupted" and "canceled" errors happen when cancelling speech
-        // (e.g. before new announcement, or iOS Safari workaround calling cancel())
-        // This is usually expected behavior, so don't log as error
-        if (e.error !== 'interrupted' && e.error !== 'canceled') {
-          audioLog.warn('TTS error', e);
-        }
-
-        clearSafetyTimeout();
-        this.stopSpeechReverb();
-        this.setSpeechDuckPriority(0);
-
-        // Even on error, continue processing queue after a short delay
-        setTimeout(() => {
-          this.processAnnouncementQueue();
-        }, 500);
-      };
-
-      // Play PA chime first, then speak with slight overlap on chime tail
-      audioLog.debug('[TTS] Playing chime, will speak in 0.95s');
-      this.playPAChime();
-      this.announcementChimeTimeout = setTimeout(() => {
-        if (this._ttsEnabled && !this._muted) {
-          // CRITICAL: Cancel before speaking to work around Chrome's 15-second pause bug
-          // If speechSynthesis is idle for ~15 seconds, subsequent speak() calls fail silently.
-          // Calling cancel() first resets the internal state and allows speech to proceed.
-          // NOTE: We must wait ~100ms after cancel() for Chrome to fully process it,
-          // otherwise our new utterance may also get cancelled (race condition).
-          audioLog.debug('[TTS] Cancelling any stale speech...');
-          window.speechSynthesis.cancel();
-
-          // Small delay after cancel() to let Chrome's internal state settle
-          setTimeout(() => {
-            if (!this._ttsEnabled || this._muted) {
-              audioLog.debug('[TTS] Conditions changed during cancel delay, skipping');
-              clearSafetyTimeout();
-              this.processAnnouncementQueue();
-              return;
-            }
-
-            audioLog.debug('[TTS] Calling speechSynthesis.speak() now, volume:', this._volume);
-            audioLog.debug('[TTS] speechSynthesis state:', {
-              speaking: window.speechSynthesis.speaking,
-              pending: window.speechSynthesis.pending,
-              paused: window.speechSynthesis.paused,
-            });
-            window.speechSynthesis.speak(utterance);
-            audioLog.debug('[TTS] speak() called, waiting for onstart...');
-          }, 100);
-        } else {
-          audioLog.debug('[TTS] Conditions changed during chime, skipping');
-          clearSafetyTimeout();
-          // If conditions changed during chime, process next
-          this.processAnnouncementQueue();
-        }
-      }, 950); // Slight overlap with chime tail (~0.25s)
-    } catch (e) {
-      audioLog.warn('TTS playback failed', e);
-      this.isAnnouncementPlaying = false;
-      this.setSpeechDuckPriority(0);
-      // Try next announcement
-      setTimeout(() => {
-        this.processAnnouncementQueue();
-      }, 500);
-    }
-  }
-
-  // Start continuous reverb simulation during TTS speech
-  // This creates filtered noise routed through the PA reverb chain to simulate
-  // voice bouncing around the factory space while speaking
-  private startSpeechReverb(): void {
-    if (this.getEffectiveVolume() === 0) return;
-    this.stopSpeechReverb(); // Clean up any existing
-
-    try {
-      const ctx = this.getContext();
-      const paReverb = this.getPAReverbChain();
-      if (!ctx || !paReverb) return;
-
-      // Create a long looping noise buffer for continuous reverb
-      const duration = 4;
-      const buffer = this.createNoiseBuffer(duration, 'pink');
-      if (!buffer) return;
-
-      const source = ctx.createBufferSource();
-      const gain = ctx.createGain();
-      const bandpass = ctx.createBiquadFilter();
-
-      source.buffer = buffer;
-      source.loop = true;
-
-      // Bandpass filter to match speech frequencies (vowel formants ~300-3000Hz)
-      bandpass.type = 'bandpass';
-      bandpass.frequency.value = 800;
-      bandpass.Q.value = 0.8;
-
-      // Subtle continuous reverb presence
-      gain.gain.value = 0.015;
-
-      source.connect(bandpass);
-      bandpass.connect(gain);
-      gain.connect(paReverb.inputGain);
-
-      source.start();
-
-      this.speechReverbNodes = { source, gain };
-
-      // Set up interval to pulse additional reverb bursts (simulates word echoes)
-      this.speechReverbPulseInterval = setInterval(() => {
-        this.pulseSpeechReverb();
-      }, 400); // Pulse every ~400ms to sync roughly with speech cadence
-    } catch (e) {
-      audioLog.warn('Failed to start speech reverb', e);
-    }
-  }
-
-  // Create a single reverb pulse during speech (simulates a word echoing)
-  private pulseSpeechReverb(): void {
-    if (this.getEffectiveVolume() === 0) return;
-
-    try {
-      const ctx = this.getContext();
-      const paReverb = this.getPAReverbChain();
-      if (!ctx || !paReverb) return;
-      const currentTime = ctx.currentTime;
-
-      // Short burst of filtered noise that decays quickly
-      const duration = 0.3;
-      const buffer = this.createNoiseBuffer(duration, 'pink');
-      if (!buffer) return;
-
-      const source = ctx.createBufferSource();
-      const gain = ctx.createGain();
-      const bandpass = ctx.createBiquadFilter();
-
-      source.buffer = buffer;
-
-      // Match speech frequencies
-      bandpass.type = 'bandpass';
-      bandpass.frequency.value = 700 + Math.random() * 400; // Vary slightly for natural feel
-      bandpass.Q.value = 1.0;
-
-      // Quick attack, fast decay
-      gain.gain.setValueAtTime(0.02, currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + duration);
-
-      source.connect(bandpass);
-      bandpass.connect(gain);
-      gain.connect(paReverb.inputGain);
-
-      source.start(currentTime);
-      source.stop(currentTime + duration + 0.1);
-    } catch (e) {
-      // Ignore pulse errors
-    }
-  }
-
-  // Stop the continuous speech reverb effect
-  private stopSpeechReverb(): void {
-    if (this.speechReverbPulseInterval) {
-      clearInterval(this.speechReverbPulseInterval as NodeJS.Timeout);
-      this.speechReverbPulseInterval = null;
-    }
-
-    if (this.speechReverbNodes) {
-      try {
-        const ctx = this.getContext();
-        if (ctx) {
-          const currentTime = ctx.currentTime;
-          // Fade out over 200ms before stopping
-          this.speechReverbNodes.gain.gain.setValueAtTime(
-            this.speechReverbNodes.gain.gain.value,
-            currentTime
-          );
-          this.speechReverbNodes.gain.gain.exponentialRampToValueAtTime(0.0001, currentTime + 0.2);
-          this.speechReverbNodes.source.stop(currentTime + 0.25);
-        } else {
-          this.speechReverbNodes.source.stop();
-        }
-      } catch (e) {
-        // Source may already be stopped
-      }
-      this.speechReverbNodes = null;
-    }
-  }
-
-  // Play a reverberant tail after TTS announcements to simulate echo in the factory space
-  private playPAReverbTail(): void {
-    if (this.getEffectiveVolume() === 0) return;
-
-    try {
-      const ctx = this.getContext();
-      const paReverb = this.getPAReverbChain();
-      if (!ctx || !paReverb) return;
-      const currentTime = ctx.currentTime;
-
-      // Create a longer filtered noise burst that fades out like factory hall reverb
-      const duration = 1.8;
-      const buffer = this.createNoiseBuffer(duration, 'pink');
-      if (!buffer) return;
-
-      const source = ctx.createBufferSource();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-
-      source.buffer = buffer;
-
-      // Bandpass to match speech frequencies - slightly wider for more presence
-      filter.type = 'bandpass';
-      filter.frequency.value = 600;
-      filter.Q.value = 1.2;
-
-      // Longer decay for pronounced reverb tail effect
-      gain.gain.setValueAtTime(0.025, currentTime);
-      gain.gain.setValueAtTime(0.022, currentTime + 0.1);
-      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + duration);
-
-      source.connect(filter);
-      filter.connect(gain);
-      // Route through PA reverb for cascading echo effect
-      gain.connect(paReverb.inputGain);
-
-      source.start(currentTime);
-      source.stop(currentTime + duration + 0.5);
-    } catch (e) {
-      audioLog.warn('PA reverb tail failed', e);
-    }
-  }
-
-  // Stop current TTS playback and clear announcement queue
-  stopTTS(): void {
-    this.stopSpeechReverb();
-    // Clear the announcement queue
-    this.announcementQueue = [];
-    this.isAnnouncementPlaying = false;
-    this.setSpeechDuckPriority(0);
-    // Cancel any pending chime timeout
-    if (this.announcementChimeTimeout) {
-      clearTimeout(this.announcementChimeTimeout);
-      this.announcementChimeTimeout = null;
-    }
-    // Cancel the queue safety timeout so it cannot re-run processAnnouncementQueue
-    if (this.announcementSafetyTimeout) {
-      clearTimeout(this.announcementSafetyTimeout);
-      this.announcementSafetyTimeout = null;
-    }
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-  }
-
-  // Check if TTS is currently speaking
-  isSpeaking(): boolean {
-    return 'speechSynthesis' in window && window.speechSynthesis.speaking;
-  }
-
   getDiagnostics(): {
     activeNodes: number;
-    queuedSpeech: number;
-    speechActive: boolean;
     contextState: AudioContextState | 'not-created';
   } {
     const objectNodeCount =
@@ -5981,8 +4821,6 @@ class AudioManager {
       this.reeferNodes.size;
     return {
       activeNodes: objectNodeCount + mappedNodeCount,
-      queuedSpeech: this.announcementQueue.length,
-      speechActive: this.isAnnouncementPlaying,
       contextState: this.audioContext?.state ?? 'not-created',
     };
   }
@@ -5992,8 +4830,6 @@ class AudioManager {
     this.stopMusic();
     this.stopAmbientSounds();
     this.stopOutdoorAmbient();
-    this.stopRadioChatter();
-    this.stopWorkerVoices();
     this.stopNightAmbient();
     this.stopPASystem();
     this.stopRain();
@@ -6025,8 +4861,6 @@ class AudioManager {
     this.reeferNodes.forEach((_node, id) => {
       this.stopReeferSound(id);
     });
-    // Stop any in-flight TTS speech, clear its queue, and cancel its timers
-    this.stopTTS();
   }
 }
 

@@ -18,19 +18,149 @@ import {
 } from './flow/spoutRoutes';
 
 const PIPE_RADIUS = SPOUT_PIPE_RADIUS;
-// 12 radial segments: an 8-sided 0.17 m pipe reads as a visible octagon at
-// interior camera distances. Instanced, so this is one geometry either way.
-const PIPE_FLANGE_GEOMETRY = new THREE.CylinderGeometry(
-  PIPE_RADIUS + 0.05,
-  PIPE_RADIUS + 0.05,
-  0.12,
-  12
-);
-// Same 12 segments as the flange above, for the same reason: these are
-// instanced at [0.1, height, 0.1] - 0.2 m columns standing 10-12 m through the
-// interior - so they are read at closer range than the 0.17 m pipe that
-// argument was originally made about.
-const PIPE_SUPPORT_GEOMETRY = new THREE.CylinderGeometry(1, 1, 1, 12);
+
+/**
+ * Bolted spout joint, instanced every 3-4 m along every route.
+ *
+ * Rendered 0.44 m across x 0.12 m long on a 0.34 m tube, and the camera walks
+ * underneath these runs, so the previous `CylinderGeometry(0.22, 0.22, 0.12,
+ * 12)` read as a plain collar slid onto the pipe: no hub, no joint, nothing to
+ * say the network is bolted up in sections rather than extruded in one piece.
+ *
+ * This is the real part - two weld-neck half-flanges back to back. Four
+ * features carry, and all four were previewed at the pixel footprint of a 7 m
+ * look up at a ceiling-height run (`pipe_flange_far` in
+ * scripts/blender/specs/conveyors-spouting.json):
+ *   - a tapered hub at each end, so the collar grows out of the tube instead
+ *     of being pasted onto it;
+ *   - a flat back face where the hub meets the plate;
+ *   - a 17 mm plate rim band with a chamfer above and below. The chamfers are
+ *     SHORT profile segments beside long ones, and LatheGeometry weights its
+ *     normal average by segment length, so they shade as crisp machined edges
+ *     rather than the soft 45-degree corner a bare step produces;
+ *   - a 24 mm deep groove on the centreline - the silhouette notch that reads
+ *     as TWO flanges from across the mill.
+ *
+ * The profile ends at r = 0.14, INSIDE the 0.17 m tube. A lathe is open at
+ * both profile ends; tucking them under the pipe surface hides those openings
+ * without paying for two cap fans. 0.14 is set by the WORST tier, not the
+ * nominal radius: `radialSegments` drops to 6 on `low`, and a hexagon of
+ * circumradius 0.17 has an apothem of 0.17 * cos(30 deg) = 0.1472, so an inner
+ * rim at 0.15 pokes out through the flats of its own pipe over about a third
+ * of the circumference. 0.14 clears the hex flats by 7 mm and the 8- and
+ * 12-sided tiers by more.
+ *
+ * Envelope is identical to the cylinder it replaces - max radius 0.22, y in
+ * [-0.06, 0.06] - so no flange matrix needs retuning. Radii are authored
+ * against `SPOUT_PIPE_RADIUS` = 0.17 (rim = radius + 0.05, as before). Segments
+ * stay at 12 to match the tube's high-tier `radialSegments`: a rounder flange
+ * on a 12-sided pipe would only make the pipe look coarser.
+ */
+function createPipeFlangeGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.14, -0.06), // hub root, tucked inside the tube
+    new THREE.Vector2(0.188, -0.06), // hub end face - envelope y min
+    new THREE.Vector2(0.194, -0.0545), // hub end chamfer
+    new THREE.Vector2(0.202, -0.04), // hub cone rising to the plate
+    new THREE.Vector2(0.202, -0.0355), // hub shoulder
+    new THREE.Vector2(0.216, -0.0355), // plate back face
+    new THREE.Vector2(0.22, -0.0315), // plate back chamfer
+    new THREE.Vector2(0.22, -0.0145), // plate rim band - envelope max radius
+    new THREE.Vector2(0.216, -0.0105), // plate front chamfer
+    new THREE.Vector2(0.196, -0.008), // step into the joint groove
+    new THREE.Vector2(0.196, 0.008), // groove floor
+    new THREE.Vector2(0.216, 0.0105),
+    new THREE.Vector2(0.22, 0.0145),
+    new THREE.Vector2(0.22, 0.0315),
+    new THREE.Vector2(0.216, 0.0355),
+    new THREE.Vector2(0.202, 0.0355),
+    new THREE.Vector2(0.202, 0.04),
+    new THREE.Vector2(0.194, 0.0545),
+    new THREE.Vector2(0.188, 0.06), // envelope y max
+    new THREE.Vector2(0.14, 0.06),
+  ];
+  return new THREE.LatheGeometry(profile, 12);
+}
+
+const PIPE_FLANGE_GEOMETRY = createPipeFlangeGeometry();
+
+/**
+ * Pipe-rack column, instanced at [0.1, height, 0.1] with height 10-12: a 0.2 m
+ * round column standing the full height of the interior.
+ *
+ * One `CylinderGeometry(1, 1, 1, 12)` used to serve BOTH this and the cross
+ * beam below, at wildly different non-uniform scales, and that is why neither
+ * could have features: any detail authored in unit y renders 11 m long on the
+ * column and 3 m long on the beam. They are two geometries now. There are five
+ * of each, both instanced, so the split costs one extra draw call and nothing
+ * per-instance.
+ *
+ * Features are placed where the camera actually is. At 11 m tall and 0.2 m
+ * across you read the foot as you walk past it and the head where the cross
+ * beam lands; mid-height is a featureless tube from every angle, so it is left
+ * BARE rather than given a splice collar nobody can see. What it gets: a
+ * 0.23 m grout pedestal at the floor with a chamfered top shoulder, a slim
+ * 0.156 m shaft, and a 0.18 m capital collar under the beam.
+ *
+ * Envelope unchanged - max radius 1.0, y in [-0.5, 0.5] - so the pedestal and
+ * capital sit exactly on the old cylinder's skin and no instance matrix moves.
+ * The SHAFT is what got thinner; insetting the body is the only way to stand a
+ * plate proud without growing the part.
+ */
+function createPipeColumnGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -0.5), // pedestal underside centre (on the floor)
+    new THREE.Vector2(1.0, -0.5), // pedestal rim - envelope max radius, y min
+    new THREE.Vector2(1.0, -0.47909), // pedestal band, 0.23 m at scale 11
+    new THREE.Vector2(0.94, -0.47727), // pedestal top chamfer
+    new THREE.Vector2(0.78, -0.47727), // pedestal top face
+    new THREE.Vector2(0.78, 0.47818), // bare shaft - 10.5 m, deliberately plain
+    new THREE.Vector2(0.94, 0.48), // capital underside chamfer
+    new THREE.Vector2(1.0, 0.48182),
+    new THREE.Vector2(1.0, 0.49818), // capital band, 0.18 m
+    new THREE.Vector2(0.94, 0.5), // capital top chamfer - envelope y max
+    new THREE.Vector2(0.0, 0.5),
+  ];
+  return new THREE.LatheGeometry(profile, 12);
+}
+
+const PIPE_COLUMN_GEOMETRY = createPipeColumnGeometry();
+
+/**
+ * Pipe-rack cross beam, instanced at [0.08, 3, 0.08] and rotated 90 degrees
+ * about Z: a 0.16 m strut spanning 3 m across the head of each column.
+ *
+ * Viewed from the floor, 10 m below, so the only things that can read are the
+ * silhouette steps. It gets three: bolted end plates at both ends, a slimmed
+ * 0.128 m web between them, and two U-bolt clamp saddles where spouting is
+ * strapped down. That last pair is what turns a smooth rod into a rack member.
+ *
+ * Envelope unchanged - max radius 1.0, y in [-0.5, 0.5]; the end plates hold
+ * the extremes and the web is inset behind them.
+ */
+function createPipeCrossBeamGeometry(): THREE.LatheGeometry {
+  const profile = [
+    new THREE.Vector2(0.0, -0.5), // end plate outer face centre
+    new THREE.Vector2(1.0, -0.5), // end plate rim - envelope max radius, y min
+    new THREE.Vector2(1.0, -0.49333), // plate band, 20 mm at scale 3
+    new THREE.Vector2(0.8, -0.48667), // step in to the web
+    new THREE.Vector2(0.8, -0.2),
+    new THREE.Vector2(0.95, -0.19333), // U-bolt clamp saddle
+    new THREE.Vector2(0.95, -0.17333),
+    new THREE.Vector2(0.8, -0.16667),
+    new THREE.Vector2(0.8, 0.16667),
+    new THREE.Vector2(0.95, 0.17333), // second saddle
+    new THREE.Vector2(0.95, 0.19333),
+    new THREE.Vector2(0.8, 0.2),
+    new THREE.Vector2(0.8, 0.48667),
+    new THREE.Vector2(1.0, 0.49333),
+    new THREE.Vector2(1.0, 0.5), // envelope y max
+    new THREE.Vector2(0.0, 0.5),
+  ];
+  return new THREE.LatheGeometry(profile, 12);
+}
+
+const PIPE_CROSS_BEAM_GEOMETRY = createPipeCrossBeamGeometry();
 const PIPE_FLANGE_MATERIAL = new THREE.MeshStandardMaterial({
   // Machined joint faces read brighter and tighter than the tube body - that
   // contrast is what makes a spouting run legible from across the mill.
@@ -310,13 +440,17 @@ const PipeSupports: React.FC = React.memo(() => {
     <group name="process-spouting-supports">
       <instancedMesh
         ref={verticalRef}
-        args={[PIPE_SUPPORT_GEOMETRY, PIPE_MATERIALS.supportGray, PIPE_SUPPORT_POSITIONS.length]}
+        args={[PIPE_COLUMN_GEOMETRY, PIPE_MATERIALS.supportGray, PIPE_SUPPORT_POSITIONS.length]}
         castShadow
         receiveShadow
       />
       <instancedMesh
         ref={crossBeamRef}
-        args={[PIPE_SUPPORT_GEOMETRY, PIPE_MATERIALS.supportSlate, PIPE_SUPPORT_POSITIONS.length]}
+        args={[
+          PIPE_CROSS_BEAM_GEOMETRY,
+          PIPE_MATERIALS.supportSlate,
+          PIPE_SUPPORT_POSITIONS.length,
+        ]}
         receiveShadow
       />
     </group>

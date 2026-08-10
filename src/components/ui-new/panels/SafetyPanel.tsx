@@ -1,15 +1,6 @@
 import React, { Suspense, useState } from 'react';
-import {
-  Shield,
-  Cloud,
-  Thermometer,
-  Map,
-  AlertTriangle,
-  Play,
-  Square,
-  Activity,
-} from 'lucide-react';
-import { useGameSimulationStore, useProductionStore } from '../../../stores';
+import { Shield, Cloud, AlertTriangle, Activity } from 'lucide-react';
+import { useGameSimulationStore } from '../../../stores';
 import { useShallow } from 'zustand/react/shallow';
 import { audioManager } from '../../../utils/audioManager';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
@@ -52,11 +43,6 @@ export const SafetyPanel: React.FC = () => {
     emergencyActive,
     emergencyDrillMode,
     crisisActive,
-    startEmergencyDrill,
-    endEmergencyDrill,
-    shiftChangeActive,
-    currentShift,
-    startShiftHandover,
     weather,
     setWeather,
     safetyEvents,
@@ -67,13 +53,6 @@ export const SafetyPanel: React.FC = () => {
       emergencyActive: state.emergencyActive,
       emergencyDrillMode: state.emergencyDrillMode,
       crisisActive: state.crisisState.active,
-      startEmergencyDrill: state.startEmergencyDrill,
-      endEmergencyDrill: state.endEmergencyDrill,
-      shiftChangeActive: state.shiftChangeActive,
-      currentShift: state.currentShift,
-      // startShiftHandover (not the plain triggerShiftChange): same walk-out
-      // flags, plus the supervisor handoff bookkeeping the richer flow tracks
-      startShiftHandover: state.startShiftHandover,
       weather: state.weather,
       setWeather: state.setWeather,
       safetyEvents: state.safetyEvents,
@@ -82,15 +61,6 @@ export const SafetyPanel: React.FC = () => {
     }))
   );
   const activeSafetyEvent = safetyEvents.find((event) => event.id === activeSafetyEventId);
-
-  const { showHeatMap, setShowHeatMap, clearHeatMap, workerCount } = useProductionStore(
-    useShallow((state) => ({
-      showHeatMap: state.showHeatMap,
-      setShowHeatMap: state.setShowHeatMap,
-      clearHeatMap: state.clearHeatMap,
-      workerCount: state.workers.length,
-    }))
-  );
 
   const weatherOptions: Array<{
     value: 'clear' | 'cloudy' | 'rain' | 'storm';
@@ -214,43 +184,6 @@ export const SafetyPanel: React.FC = () => {
                 </div>
               )}
 
-              {/* Drill Button */}
-              <div className="bg-slate-800/50 p-3 rounded-xl border border-white/5">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm font-medium text-slate-200">Fire Drill</span>
-                  {emergencyDrillMode && (
-                    <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded animate-pulse">
-                      ACTIVE
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-500 mb-3">Test facility evacuation protocols.</p>
-                <button
-                  onClick={() =>
-                    emergencyDrillMode ? endEmergencyDrill() : startEmergencyDrill(workerCount)
-                  }
-                  disabled={emergencyActive && !emergencyDrillMode}
-                  aria-disabled={emergencyActive && !emergencyDrillMode}
-                  title={
-                    emergencyActive && !emergencyDrillMode
-                      ? 'Cannot start drill during active emergency'
-                      : undefined
-                  }
-                  className={`w-full py-2 rounded-lg font-bold text-xs transition-colors flex items-center justify-center gap-2 ${
-                    emergencyDrillMode
-                      ? 'bg-red-700 hover:bg-red-800 text-white'
-                      : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
-                  }`}
-                >
-                  {emergencyDrillMode ? (
-                    <Square size={12} fill="currentColor" />
-                  ) : (
-                    <Play size={12} fill="currentColor" />
-                  )}
-                  {emergencyDrillMode ? 'END DRILL' : 'START DRILL'}
-                </button>
-              </div>
-
               {/* E-Stop Button */}
               <button
                 type="button"
@@ -308,67 +241,13 @@ export const SafetyPanel: React.FC = () => {
                       aria-label={`Set weather to ${opt.label}`}
                       className={`px-2 py-1.5 rounded text-xs font-medium transition-colors ${
                         weather === opt.value
-                          ? 'bg-blue-600 text-white'
+                          ? 'bg-blue-700 text-white'
                           : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700'
                       }`}
                     >
                       {opt.label}
                     </button>
                   ))}
-                </div>
-              </div>
-
-              {/* Shift Change */}
-              <div className="pt-3 border-t border-white/5">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs text-slate-400">Current Shift</span>
-                  <span className="text-xs font-mono text-cyan-400 capitalize">{currentShift}</span>
-                </div>
-                <button
-                  onClick={() => startShiftHandover()}
-                  disabled={shiftChangeActive}
-                  aria-disabled={shiftChangeActive}
-                  title={shiftChangeActive ? 'Shift handover already in progress' : undefined}
-                  className="w-full bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 py-2 rounded-lg text-xs font-medium"
-                >
-                  {shiftChangeActive ? 'Handover in Progress...' : 'Trigger Shift Handover'}
-                </button>
-              </div>
-            </div>
-          </section>
-
-          {/* Analytics Layers */}
-          <section>
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-              <Map size={14} className="text-purple-400" />
-              Analytics Layers
-            </h3>
-
-            <div className="bg-slate-800/50 p-3 rounded-xl border border-white/5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Thermometer size={14} className="text-slate-400" />
-                  <span className="text-sm text-slate-300">Worker Heatmap</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {showHeatMap && (
-                    <button
-                      onClick={() => clearHeatMap()}
-                      className="text-[10px] text-slate-500 hover:text-white transition-colors"
-                    >
-                      Clear History
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setShowHeatMap(!showHeatMap)}
-                    aria-pressed={showHeatMap}
-                    aria-label="Toggle worker heatmap"
-                    className={`px-3 py-1 rounded-full text-[10px] font-bold transition-colors ${
-                      showHeatMap ? 'bg-teal-700 text-white' : 'bg-slate-700 text-white/70'
-                    }`}
-                  >
-                    {showHeatMap ? 'ON' : 'OFF'}
-                  </button>
                 </div>
               </div>
             </div>

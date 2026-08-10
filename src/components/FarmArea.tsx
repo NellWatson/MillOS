@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState, useEffect } from 'react';
+import React, { useRef, useMemo, useEffect } from 'react';
 import { useFrame, ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 
@@ -20,9 +20,283 @@ import { PROCEDURAL_TEXTURES, OUTDOOR_MATERIALS } from '../utils/sharedMaterials
 import { RENDER_ORDER } from '../constants/renderLayers';
 import { SITE_LAYOUT } from '../constants/siteLayout';
 import { generateCobblestoneRoughness } from '../textures';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
+import { createAtmosphereState, sampleAtmosphere } from '../simulation/atmosphere';
+import {
+  createAnimalWanderPlan,
+  getAnimalActivityMultiplier,
+  getWindmillAngularSpeed,
+  type WanderBounds,
+} from '../simulation/ambientWorld';
 
 /** Hoisted so the barnyard material does not allocate a Vector2 per render. */
 const FARM_COBBLE_NORMAL_SCALE = new THREE.Vector2(0.4, 0.4);
+
+/**
+ * Every lathe profile in this file was designed and previewed in Blender before
+ * it was written down - `scripts/blender/specs/gen_farm_windmill.py` generates
+ * the points and probes them against the parts they have to sit against, and
+ * `scripts/blender/machine_part_preview.py --spec scripts/blender/specs/
+ * farm-windmill.json` renders each one at its real instance scale and viewing
+ * distance. The numbers below are transcribed from that spec unchanged; if a
+ * profile needs to move, change it there, look at the render, and copy back.
+ */
+const lathe = (points: [number, number][], segments: number) =>
+  new THREE.LatheGeometry(
+    points.map(([r, y]) => new THREE.Vector2(r, y)),
+    segments
+  );
+
+/**
+ * Barnyard wallow with an authored, asymmetric shoreline. The old circle only
+ * became a smoother circle when its segment count doubled. This keeps the same
+ * four-metre maximum footprint while turning the budget into a muddy outline
+ * shaped by hoof traffic and drainage.
+ */
+function createMudPuddleGeometry(): THREE.ShapeGeometry {
+  const outline: ReadonlyArray<readonly [number, number]> = [
+    [2, 0],
+    [1.78, 0.62],
+    [1.45, 1.18],
+    [0.83, 1.63],
+    [0, 1.82],
+    [-0.68, 1.67],
+    [-1.43, 1.26],
+    [-1.92, 0.58],
+    [-2, 0],
+    [-1.86, -0.72],
+    [-1.34, -1.4],
+    [-0.55, -1.82],
+    [0, -2],
+    [0.73, -1.72],
+    [1.4, -1.35],
+    [1.82, -0.68],
+  ];
+  const shape = new THREE.Shape();
+  shape.moveTo(outline[0][0], outline[0][1]);
+  outline.slice(1).forEach(([x, y]) => shape.lineTo(x, y));
+  shape.closePath();
+  return new THREE.ShapeGeometry(shape);
+}
+
+/**
+ * Windmill tower - replaces `CylinderGeometry(0.8, 1.2, 6, 20)`, a straight
+ * truncated cone. Drawn once at scale 1.5, so 3.6 m across the base and 9 m
+ * tall: the tallest thing in the farm and read against open sky.
+ *
+ * A tower mill is not a cone. Four features carry at 30 m and all four are in
+ * this profile:
+ *  - a splayed base course, giving a crisp ground line instead of a cut edge;
+ *  - a BATTERED wall - the taper is concave, steeper at the foot and near
+ *    vertical at the curb, which is what separates masonry from sheet pipe;
+ *  - a corbelled reefing gallery at world y 1.86-2.06, the one horizontal break
+ *    in the taper (a parapet ring above it was built and rejected on the render:
+ *    shelf plus ring reads as a pipe coupling, one shelf reads as a balcony);
+ *  - a curb band at world y 5.32-5.68, the ring the cap turns on and the collar
+ *    the windshaft emerges from.
+ *
+ * The batter is load-bearing, not decoration. The blade arms sweep down to
+ * world y 2.499 with their inner face at z = 0.975, and the straight cone this
+ * replaces is 1.033 wide there - the sails have been passing through the
+ * masonry. The battered wall is 0.901 at that height, so they now clear it by
+ * 0.074 (0.11 m in world). Nothing between world y 2.5 and 6.0 exceeds 0.862.
+ *
+ * Envelope is identical to the cone: max radius 1.2, y in [-3, +3]. The top
+ * radius is free (0.8 -> 0.64) because it is not on the envelope and is hidden
+ * under the cap's underside disc; the narrower top is what turns the cap from a
+ * lid into an overhanging crown.
+ *
+ * 34 profile points at the SAME 20 segments as before - 34 x 21 = 714 vertices
+ * (LatheGeometry duplicates the seam ring, so it is points x (segments + 1);
+ * the Blender harness prints points x segments and reads 34 low). Drawn once
+ * for the single windmill, and it carries no pointer handlers, so it needs no
+ * picking proxy.
+ */
+function createWindmillTowerGeometry(): THREE.LatheGeometry {
+  return lathe(
+    [
+      [0.0, -3.0], // underside cap centre
+      [1.2, -3.0], // ground line - envelope max radius
+      [1.198, -2.93], // base course, near vertical
+      [1.17, -2.88], // chamfer off the base course; the batter springs here
+      [1.147, -2.687], // battered wall: concave, sampled every 0.193
+      [1.125, -2.493],
+      [1.102, -2.3],
+      [1.08, -2.107],
+      [1.057, -1.913],
+      [1.036, -1.72],
+      [1.014, -1.527],
+      [0.992, -1.333],
+      [0.971, -1.14],
+      [1.036, -1.108], // gallery corbel springs off the wall
+      [1.118, -1.066],
+      [1.15, -1.03], // deck edge - the gallery's widest point
+      [1.15, -0.986], // deck fascia
+      [1.128, -0.962], // kerb chamfer
+      [0.986, -0.938], // deck top - the flat that reads as a shadow line
+      [0.948, -0.93], // wall resumes
+      [0.904, -0.529], // battered wall continues, sampled every 0.401
+      [0.862, -0.128],
+      [0.821, 0.274],
+      [0.782, 0.675],
+      [0.744, 1.076],
+      [0.708, 1.477],
+      [0.674, 1.879],
+      [0.646, 2.28],
+      [0.8, 2.316], // curb band, corbelled sharply out
+      [0.8, 2.68],
+      [0.728, 2.72], // chamfer back to the wall
+      [0.64, 2.78],
+      [0.64, 3.0], // top - hidden under the cap
+      [0.0, 3.0],
+    ],
+    20
+  );
+}
+
+/**
+ * Windmill cap - replaces `ConeGeometry(1, 1.5, 20)`, a plain spike. Drawn at
+ * scale 1.5: 3 m across and 2.25 m tall, sitting on a 1.92 m tower top.
+ *
+ * An ogee ("boat") cap, the English tower-mill form: a boarded fascia with a
+ * drip lip at the eave, a near-vertical skirt for the bottom third, a knuckle
+ * where the flank turns over into the swell, then a neck, a finial ball and a
+ * point. A first pass with the knuckle low read as a plain hemisphere at 9 m;
+ * holding the skirt at ~0.93 until y = -0.23 is what makes the ogee legible.
+ *
+ * Envelope identical to the cone: max radius 1.0, y in [-0.75, +0.75]. That is
+ * not a formality - the blade arms sweep vertically through the eave plane at
+ * radius 0.975-1.025, so the eave rim holds 1.0 for a single ring at the bottom
+ * and tucks in and up immediately, reaching 0.975 at y = -0.707 against the
+ * cone's -0.7125. The pre-existing 25 mm graze is unchanged, not deepened.
+ *
+ * 28 points at the tower's 20 segments so their facet boundaries line up at the
+ * eave. 588 vertices, drawn once.
+ *
+ * Known limit: LatheGeometry averages normals across adjacent profile segments,
+ * so the drip lip is a shaded ring rather than a crease. At 9 m the cap reads as
+ * dome-plus-eave; the ogee knuckle is the softest feature here. Duplicating the
+ * lip's two points would harden it if that ever matters.
+ */
+function createWindmillCapGeometry(): THREE.LatheGeometry {
+  return lathe(
+    [
+      [0.0, -0.75], // underside centre - envelope min y
+      [0.965, -0.75], // underside, flat to just inside the rim
+      [1.0, -0.744], // eave rim - envelope max radius
+      [0.986, -0.716], // drip lip tucks in and up
+      [0.948, -0.686], // head of the boarded fascia
+      [0.936, -0.61], // skirt: the boarded flank runs near vertical
+      [0.932, -0.48],
+      [0.926, -0.35],
+      [0.914, -0.232],
+      [0.892, -0.128], // knuckle - the ogee turns over here
+      [0.852, -0.032],
+      [0.788, 0.07],
+      [0.7, 0.17],
+      [0.596, 0.262],
+      [0.478, 0.344],
+      [0.352, 0.414],
+      [0.238, 0.462],
+      [0.14, 0.5],
+      [0.08, 0.52],
+      [0.058, 0.538], // neck
+      [0.052, 0.566],
+      [0.136, 0.598], // finial ball
+      [0.158, 0.64],
+      [0.134, 0.684],
+      [0.08, 0.712],
+      [0.04, 0.73], // point
+      [0.014, 0.75], // envelope max y
+      [0.0, 0.75],
+    ],
+    20
+  );
+}
+
+/**
+ * Windshaft boss - replaces `CylinderGeometry(0.2, 0.2, 0.3, 12)`.
+ *
+ * The old hub was a plain drum lathed about Y and drawn with no rotation, so it
+ * stood as a vertical peg while the sails turned about Z: the one part of the
+ * windmill whose axis pointed the wrong way. This profile is lathed about the
+ * same axis and the MESH is rotated a quarter turn about X so that axis lies
+ * along Z. Rotating swaps which axes the half-extents fall on but not their
+ * values or the centre, and the mesh is the only user of the geometry.
+ *
+ * The shape is a cast-iron poll end: a tail flange that stays buried in the
+ * tower's curb band, a waisted barrel, a socket collar wide enough to span the
+ * blade-arm plane (boss-local 0.075-0.125, where the arms actually cross), and
+ * a domed nose that caps the crossing. The nose is deliberately shallow - the
+ * envelope only leaves 0.034 of length past the collar.
+ *
+ * Envelope unchanged: max radius 0.2, axial half-length 0.15. 16 points at the
+ * same 12 segments - 208 vertices, drawn once.
+ */
+function createWindmillHubGeometry(): THREE.LatheGeometry {
+  return lathe(
+    [
+      [0.0, -0.15], // inboard face centre - envelope min axial
+      [0.12, -0.15],
+      [0.15, -0.138],
+      [0.17, -0.12], // tail flange, buried in the tower curb
+      [0.17, -0.094],
+      [0.15, -0.08],
+      [0.134, -0.03], // waisted barrel
+      [0.138, 0.014],
+      [0.184, 0.042], // sail-socket collar shoulder
+      [0.2, 0.062], // collar - envelope max radius
+      [0.2, 0.116], // collar band spans the blade-arm plane
+      [0.186, 0.126],
+      [0.15, 0.136], // nose cap
+      [0.096, 0.146],
+      [0.04, 0.15],
+      [0.0, 0.15], // nose centre - envelope max axial
+    ],
+    12
+  );
+}
+
+/**
+ * Round hay bale - replaces `CylinderGeometry(0.5, 0.5, 0.8, 16)`.
+ *
+ * The smallest of these redesigns and the one closest to being left alone: the
+ * cylinder's proportions were already right. What it lacked was corners. A
+ * machine-rolled bale has no square edge anywhere - the ends roll over into the
+ * barrel - and a hard 90 degree rim is what made it read as an oil drum at the
+ * 4 m the farm path passes it. The rolled shoulder is the whole of the change
+ * and the only part that carries; the wall between the shoulders is straight to
+ * within 3 mm, which is honest to a net-wrapped bale and is not a barrel.
+ *
+ * Envelope unchanged: max radius 0.5 (now at mid-height rather than along the
+ * whole wall), axial half-length 0.4. The end face is held flat out to r 0.44 so
+ * the twine ring still lies on it; the ring's outer radius comes in to match.
+ *
+ * 15 points at the same 16 segments - 255 vertices, shared across four bales
+ * (four draw calls, one one-off vertex cost).
+ */
+function createHayBaleGeometry(): THREE.LatheGeometry {
+  return lathe(
+    [
+      [0.0, -0.4],
+      [0.23, -0.4],
+      [0.44, -0.4], // end face stays flat out to 0.44 for the twine ring
+      [0.47, -0.39],
+      [0.489, -0.366], // shoulder rolls over
+      [0.497, -0.33],
+      [0.4995, -0.255],
+      [0.5, 0.0], // barrel bulge - envelope max radius
+      [0.4995, 0.255],
+      [0.497, 0.33],
+      [0.489, 0.366],
+      [0.47, 0.39],
+      [0.44, 0.4],
+      [0.23, 0.4],
+      [0.0, 0.4],
+    ],
+    16
+  );
+}
 
 // Create farm-specific cobble textures with proper world-scale repeat
 // Barnyard is 20x15 units, path is 3x14 units - tile every 10 units
@@ -68,8 +342,10 @@ const _animDir = new THREE.Vector3();
 // Shared Geometries - created once at module load
 const SG = {
   fencePost: new THREE.CylinderGeometry(0.08, 0.1, 1, 6),
-  hayBale: new THREE.CylinderGeometry(0.5, 0.5, 0.8, 16),
-  hayRing: new THREE.RingGeometry(0.2, 0.48, 16),
+  hayBale: createHayBaleGeometry(),
+  // 0.43 outer, not 0.48: the bale's end face is now flat only out to r 0.44
+  // before the shoulder rolls away, and the old rim floated 44 mm off the hay.
+  hayRing: new THREE.RingGeometry(0.2, 0.43, 16),
   troughBody: new THREE.BoxGeometry(1.5, 0.5, 0.6),
   troughWater: new THREE.BoxGeometry(1.3, 0.05, 0.45),
   troughLeg: new THREE.BoxGeometry(0.15, 0.2, 0.5),
@@ -82,7 +358,7 @@ const SG = {
   carrotLeaf: new THREE.ConeGeometry(0.1, 0.2, 4),
   cabbage: new THREE.SphereGeometry(0.2, 8, 8),
   farmGround: new THREE.PlaneGeometry(45, 45),
-  mudPuddle: new THREE.CircleGeometry(2, 16),
+  mudPuddle: createMudPuddleGeometry(),
   chickenBody: new THREE.SphereGeometry(0.2, 8, 8),
   chickenHead: new THREE.SphereGeometry(0.12, 8, 8),
   chickenBeak: new THREE.ConeGeometry(0.03, 0.08, 4),
@@ -117,31 +393,27 @@ const SG = {
   sheepEar: new THREE.BoxGeometry(0.1, 0.05, 0.08),
   sheepEye: new THREE.SphereGeometry(0.025, 6, 6),
   sheepLeg: new THREE.CylinderGeometry(0.04, 0.035, 0.25, 6),
-  // The windmill is a 6 m landmark read against open sky, and at 2.4 m across
-  // an 8-sided tower showed its facets and a polygonal top rim from anywhere in
-  // the farm. A masonry tower should read smooth, so these carry more segments
-  // than the surrounding props. The cap matches the tower's count so their
-  // facet boundaries line up at the eave.
+  // The windmill is a 6 m landmark read against open sky. Segment counts here
+  // are unchanged (20 for the tower and cap so their facets line up at the
+  // eave, 12 for the hub); what changed is the shape - see the profile
+  // factories above.
   //
   // Deliberately NOT applied to the trees below: their faceting reads as the
   // site's stylization rather than as a defect, and a smooth cone is no more
   // tree-like than a hexagonal one.
-  windmillTower: new THREE.CylinderGeometry(0.8, 1.2, 6, 20),
-  windmillCap: new THREE.ConeGeometry(1, 1.5, 20),
-  windmillHub: new THREE.CylinderGeometry(0.2, 0.2, 0.3, 12),
+  windmillTower: createWindmillTowerGeometry(),
+  windmillCap: createWindmillCapGeometry(),
+  windmillHub: createWindmillHubGeometry(),
   windmillBladeArm: new THREE.BoxGeometry(0.15, 3, 0.05),
   windmillBladeSail: new THREE.BoxGeometry(0.5, 2.5, 0.02),
-  windmillDoor: new THREE.BoxGeometry(0.6, 1.6, 0.1),
+  // 0.18 deep, not 0.1: the battered wall drops from r 1.181 to 0.988 across
+  // the door's height, so a 0.1 panel that sat flush at the sill floated 65 mm
+  // off the wall at the head. Deeper and tilted (see the call site) it stays
+  // 60-70 mm proud along its whole height instead.
+  windmillDoor: new THREE.BoxGeometry(0.6, 1.6, 0.18),
   // Grain Field
   cornStalk: new THREE.CylinderGeometry(0.05, 0.08, 1.8, 4),
   cornLeaf: new THREE.ConeGeometry(0.1, 0.8, 3),
-  // Scarecrow
-  scarecrowPole: new THREE.CylinderGeometry(0.08, 0.08, 2.5, 5),
-  scarecrowArm: new THREE.CylinderGeometry(0.06, 0.06, 1.8, 5),
-  pumpkinHead: new THREE.SphereGeometry(0.35, 10, 10),
-  strawHat: new THREE.ConeGeometry(0.6, 0.4, 8),
-  crowBody: new THREE.ConeGeometry(0.1, 0.3, 4),
-  crowHead: new THREE.SphereGeometry(0.08, 4, 4),
 };
 
 // Shared Materials - with procedural textures
@@ -281,7 +553,7 @@ const SM = {
     roughness: 0.7,
     side: THREE.DoubleSide,
   }),
-  // Grain Field & Scarecrow. White base: the old flat '#8bc34a' is now
+  // Grain field. White base: the old flat '#8bc34a' is now
   // supplied per stalk through `instanceColor` (see InstancedGrainField), so
   // keeping the tint here would multiply the crop colour twice.
   cornGreen: new THREE.MeshStandardMaterial({
@@ -289,11 +561,6 @@ const SM = {
     roughness: 0.9,
     side: THREE.DoubleSide,
   }),
-  pumpkinOrange: new THREE.MeshStandardMaterial({ color: '#ff6f00', roughness: 0.8 }),
-  strawHat: new THREE.MeshStandardMaterial({ color: '#e6c229', roughness: 1 }),
-  denimBlue: new THREE.MeshStandardMaterial({ color: '#1565c0', roughness: 0.9 }),
-  plaidRed: new THREE.MeshStandardMaterial({ color: '#b71c1c', roughness: 0.9 }),
-  crowBlack: new THREE.MeshStandardMaterial({ color: '#212121', roughness: 0.6 }),
 };
 
 // The crop sways. `SM.cornGreen` is consumed ONLY by the three InstancedMeshes
@@ -465,8 +732,12 @@ export const Barn = React.memo<{ position: [number, number, number] }>(({ positi
         </mesh>
       </React.Fragment>
     ))}
+    {/* Gable louvre: a 1.6 m near-black disc face-on against red siding, so its
+        OUTLINE is the whole read and a 16-gon showed its corners (0.312 m facet
+        chord). 32 halves that for 16 vertices on a mesh drawn once, and stays a
+        multiple of 4 so the disc still reaches exactly +-0.8. */}
     <mesh position={[0, 5, 4.05]}>
-      <circleGeometry args={[0.8, 16]} />
+      <circleGeometry args={[0.8, 32]} />
       <primitive object={SM.barnWindow} attach="material" />
     </mesh>
     <mesh position={[0, 16.75, 0]} castShadow>
@@ -735,7 +1006,26 @@ interface AnimalState {
   target: THREE.Vector3;
   isIdle: boolean;
   idleTime: number;
+  seed: number;
+  sequenceStep: number;
 }
+
+const CHICKEN_WANDER_BOUNDS: WanderBounds = { minX: 9, maxX: 15, minZ: -8, maxZ: -2 };
+const PIG_WANDER_BOUNDS: WanderBounds = { minX: -14, maxX: -10, minZ: -7, maxZ: -3 };
+const COW_WANDER_BOUNDS: WanderBounds = { minX: -5, maxX: 15, minZ: 10, maxZ: 20 };
+
+const createAnimalState = (seed: number, bounds: WanderBounds): AnimalState => {
+  const plan = createAnimalWanderPlan(seed, 0, bounds);
+  return {
+    target: new THREE.Vector3(plan.x, 0, plan.z),
+    isIdle: false,
+    idleTime: 0,
+    seed,
+    sequenceStep: 1,
+  };
+};
+
+const _farmAtmosphere = createAtmosphereState();
 
 const Chicken: React.FC<{
   position: [number, number, number];
@@ -938,7 +1228,10 @@ export const WindmillComp: React.FC<{
       <primitive object={SG.windmillCap} attach="geometry" />
       <primitive object={SM.woodBrown} attach="material" />
     </mesh>
-    <mesh position={[0, 5.5, 0.9]} castShadow>
+    {/* Quarter turn about X lays the boss along Z, the axis the sails turn
+        about. Its tail stays buried in the tower's curb band and its collar
+        spans the plane the blade arms cross in. */}
+    <mesh position={[0, 5.5, 0.9]} rotation={[Math.PI / 2, 0, 0]} castShadow>
       <primitive object={SG.windmillHub} attach="geometry" />
       <primitive object={SM.woodBrown} attach="material" />
     </mesh>
@@ -956,7 +1249,12 @@ export const WindmillComp: React.FC<{
         </group>
       ))}
     </group>
-    <mesh position={[0, 0.9, 1.15]}>
+    {/* Re-seated for the battered wall. A flat panel cannot hug a curve, so the
+        door is leaned back by the wall's own slope over its height (r 1.181 at
+        the sill, 0.988 at the head: atan(0.193 / 1.6) = 6.87 deg) and centred
+        on the wall radius at its mid-height. It then stands 65-72 mm proud (72
+        at the sill, 69 mid, 65 at the head) instead of wedging. */}
+    <mesh position={[0, 0.9, 1.059]} rotation={[-0.1199, 0, 0]}>
       <primitive object={SG.windmillDoor} attach="geometry" />
       <primitive object={SM.woodBrown} attach="material" />
     </mesh>
@@ -1152,144 +1450,6 @@ const Horse = React.memo<{
   </group>
 ));
 Horse.displayName = 'Horse';
-
-const Crow = React.memo<{ position: [number, number, number]; rotation?: number }>(
-  ({ position, rotation = 0 }) => {
-    const [isExcited, setIsExcited] = useState(false);
-    const [hearts, setHearts] = useState<{ id: number; pos: [number, number, number] }[]>([]);
-    const nextHeartId = useRef(0);
-
-    const handlePet = (e: ThreeEvent<MouseEvent>) => {
-      e.stopPropagation();
-      setIsExcited(true);
-      playCritterSound('crow');
-      const id = nextHeartId.current++;
-      setHearts((prev) => [...prev, { id, pos: [0, 1.0, 0] }]);
-    };
-
-    const removeHeart = (id: number) => {
-      setHearts((prev) => prev.filter((h) => h.id !== id));
-    };
-
-    useEffect(() => {
-      if (isExcited) {
-        const t = setTimeout(() => setIsExcited(false), 500);
-        return () => clearTimeout(t);
-      }
-    }, [isExcited]);
-
-    return (
-      <group position={position} rotation={[0, rotation, 0]} scale={0.6} onClick={handlePet}>
-        <group rotation={[isExcited ? 0.5 : 0, 0, 0]} position={[0, isExcited ? 0.2 : 0, 0]}>
-          <mesh position={[0, 0.15, 0]}>
-            <primitive object={SG.crowBody} attach="geometry" />
-            <primitive object={SM.crowBlack} attach="material" />
-          </mesh>
-          <mesh position={[0, 0.35, 0.1]}>
-            <primitive object={SG.crowHead} attach="geometry" />
-            <primitive object={SM.crowBlack} attach="material" />
-          </mesh>
-          {/* Beak */}
-          <mesh position={[0, 0.35, 0.18]} rotation={[1.5, 0, 0]}>
-            <coneGeometry args={[0.03, 0.1, 4]} />
-            <meshStandardMaterial color="#fb8c00" />
-          </mesh>
-          {/* Wings */}
-          <mesh position={[0.12, 0.2, 0]} rotation={[0, 0, -0.5]}>
-            <boxGeometry args={[0.05, 0.25, 0.15]} />
-            <primitive object={SM.crowBlack} attach="material" />
-          </mesh>
-          <mesh position={[-0.12, 0.2, 0]} rotation={[0, 0, 0.5]}>
-            <boxGeometry args={[0.05, 0.25, 0.15]} />
-            <primitive object={SM.crowBlack} attach="material" />
-          </mesh>
-          {/* Tail */}
-          <mesh position={[0, 0.1, -0.15]} rotation={[-0.5, 0, 0]}>
-            <boxGeometry args={[0.1, 0.2, 0.02]} />
-            <primitive object={SM.crowBlack} attach="material" />
-          </mesh>
-        </group>
-        {hearts.map((h) => (
-          <HeartParticle key={h.id} position={h.pos} onComplete={() => removeHeart(h.id)} />
-        ))}
-      </group>
-    );
-  }
-);
-Crow.displayName = 'Crow';
-
-const Scarecrow = React.memo<{ position: [number, number, number]; rotation?: number }>(
-  ({ position, rotation = 0 }) => (
-    <group position={position} rotation={[0, rotation, 0]}>
-      {/* Pole */}
-      <mesh position={[0, 1.25, 0]} castShadow>
-        <primitive object={SG.scarecrowPole} attach="geometry" />
-        <primitive object={SM.woodBrown} attach="material" />
-      </mesh>
-      {/* Arms */}
-      <mesh position={[0, 1.8, 0]} rotation={[0, 0, 1.57]} castShadow>
-        <primitive object={SG.scarecrowArm} attach="geometry" />
-        <primitive object={SM.woodBrown} attach="material" />
-      </mesh>
-      {/* Shirt */}
-      <mesh position={[0, 1.8, 0]} castShadow>
-        <boxGeometry args={[0.55, 0.9, 0.3]} />
-        <primitive object={SM.plaidRed} attach="material" />
-      </mesh>
-      {/* Straw hands */}
-      <mesh position={[0.9, 1.8, 0]}>
-        <sphereGeometry args={[0.15, 8, 8]} />
-        <primitive object={SM.hay} attach="material" />
-      </mesh>
-      <mesh position={[-0.9, 1.8, 0]}>
-        <sphereGeometry args={[0.15, 8, 8]} />
-        <primitive object={SM.hay} attach="material" />
-      </mesh>
-      {/* Jeans */}
-      <group position={[0, 1.0, 0]}>
-        <mesh position={[-0.15, 0, 0]}>
-          <boxGeometry args={[0.18, 0.9, 0.22]} />
-          <primitive object={SM.denimBlue} attach="material" />
-        </mesh>
-        <mesh position={[0.15, 0, 0]}>
-          <boxGeometry args={[0.18, 0.9, 0.22]} />
-          <primitive object={SM.denimBlue} attach="material" />
-        </mesh>
-      </group>
-      {/* Scarf */}
-      <mesh position={[0, 2.25, 0]} rotation={[0.2, 0, 0]}>
-        <torusGeometry args={[0.2, 0.08, 8, 16]} />
-        <meshStandardMaterial color="#d32f2f" />
-      </mesh>
-      {/* Head */}
-      <mesh position={[0, 2.5, 0]} castShadow>
-        <primitive object={SG.pumpkinHead} attach="geometry" />
-        <primitive object={SM.pumpkinOrange} attach="material" />
-      </mesh>
-      {/* Eyes/Mouth */}
-      <mesh position={[0.12, 2.55, 0.28]} rotation={[0.2, 0.2, 0]}>
-        <coneGeometry args={[0.06, 0.05, 3]} />
-        <meshStandardMaterial color="#3e2723" />
-      </mesh>
-      <mesh position={[-0.12, 2.55, 0.28]} rotation={[0.2, -0.2, 0]}>
-        <coneGeometry args={[0.06, 0.05, 3]} />
-        <meshStandardMaterial color="#3e2723" />
-      </mesh>
-      <mesh position={[0, 2.45, 0.3]} rotation={[0, 0, 0]}>
-        <torusGeometry args={[0.08, 0.02, 3, 8, 3]} /> {/* Smile */}
-        <meshStandardMaterial color="#3e2723" />
-      </mesh>
-      {/* Hat */}
-      <mesh position={[0, 2.85, 0]} castShadow>
-        <primitive object={SG.strawHat} attach="geometry" />
-        <primitive object={SM.strawHat} attach="material" />
-      </mesh>
-      {/* Crow on Hat */}
-      <Crow position={[0.2, 3.05, 0]} rotation={0.5} />
-    </group>
-  )
-);
-Scarecrow.displayName = 'Scarecrow';
 
 const InstancedGrainField = React.memo(() => {
   const stalksRef = useRef<THREE.InstancedMesh>(null);
@@ -1516,11 +1676,7 @@ export const FarmArea: React.FC = () => {
     []
   );
   const chickenStates = useRef<AnimalState[]>(
-    Array.from({ length: 5 }, () => ({
-      target: new THREE.Vector3(12 + (Math.random() - 0.5) * 8, 0, -5 + (Math.random() - 0.5) * 8),
-      isIdle: false,
-      idleTime: 0,
-    }))
+    Array.from({ length: 5 }, (_, index) => createAnimalState(100 + index, CHICKEN_WANDER_BOUNDS))
   );
 
   // --- Pig Refs & State ---
@@ -1533,11 +1689,7 @@ export const FarmArea: React.FC = () => {
     []
   );
   const pigStates = useRef<AnimalState[]>(
-    Array.from({ length: 3 }, () => ({
-      target: new THREE.Vector3(-12 + (Math.random() - 0.5) * 4, 0, -5 + (Math.random() - 0.5) * 4),
-      isIdle: false,
-      idleTime: 0,
-    }))
+    Array.from({ length: 3 }, (_, index) => createAnimalState(200 + index, PIG_WANDER_BOUNDS))
   );
 
   // --- Cow Refs & State ---
@@ -1550,11 +1702,7 @@ export const FarmArea: React.FC = () => {
     []
   );
   const cowStates = useRef<AnimalState[]>(
-    Array.from({ length: 3 }, () => ({
-      target: new THREE.Vector3(5 + (Math.random() - 0.5) * 15, 0, 15 + (Math.random() - 0.5) * 8),
-      isIdle: false,
-      idleTime: 0,
-    }))
+    Array.from({ length: 3 }, (_, index) => createAnimalState(300 + index, COW_WANDER_BOUNDS))
   );
 
   const sheepRefs = useMemo(
@@ -1563,6 +1711,7 @@ export const FarmArea: React.FC = () => {
   );
 
   const windmillBladesRef = useRef<THREE.Group>(null);
+  const windmillAngleRef = useRef(0);
   const frameCountRef = useRef(0);
 
   // Petting interaction state
@@ -1629,12 +1778,6 @@ export const FarmArea: React.FC = () => {
       state.idleTime -= delta;
       if (state.idleTime <= 0) {
         state.isIdle = false;
-        // Pick new target within bounds
-        state.target.set(
-          bounds.minX + Math.random() * (bounds.maxX - bounds.minX),
-          yOffset,
-          bounds.minZ + Math.random() * (bounds.maxZ - bounds.minZ)
-        );
       }
     } else {
       // Move towards target
@@ -1644,7 +1787,10 @@ export const FarmArea: React.FC = () => {
 
       if (dist < 0.1) {
         state.isIdle = true;
-        state.idleTime = 2 + Math.random() * 4; // Idle for 2-6 seconds
+        const nextPlan = createAnimalWanderPlan(state.seed, state.sequenceStep, bounds);
+        state.sequenceStep += 1;
+        state.target.set(nextPlan.x, yOffset, nextPlan.z);
+        state.idleTime = nextPlan.idleSeconds;
       } else {
         direction.normalize();
 
@@ -1660,20 +1806,27 @@ export const FarmArea: React.FC = () => {
 
   // SINGLE useFrame - THROTTLED/BATCHED
   useFrame((state, delta) => {
+    const { gameDay, gameTime, gameSpeed, weather, isTabVisible } =
+      useGameSimulationStore.getState();
+    if (!isTabVisible || gameSpeed <= 0) return;
+
     // Cap delta for tab-switch recovery (prevents large jumps after tab is inactive)
     const cappedDelta = Math.min(delta, 0.1);
     frameCountRef.current++;
     const time = state.clock.elapsedTime;
+    const atmosphere = sampleAtmosphere(gameDay, gameTime, weather, _farmAtmosphere);
+    const animalActivity = getAnimalActivityMultiplier(weather, gameTime);
 
     // Windmill: every 2nd frame (30 FPS)
     if (frameCountRef.current % 2 === 0 && windmillBladesRef.current) {
-      windmillBladesRef.current.rotation.z = time * 0.5;
+      windmillAngleRef.current += cappedDelta * 2 * getWindmillAngularSpeed(atmosphere.wind);
+      windmillBladesRef.current.rotation.z = windmillAngleRef.current;
     }
 
     // Animals: every 2nd frame for smooth movement (30 FPS)
     // We update movement slightly more often than the body animations (pecking/wagging)
     if (frameCountRef.current % 2 === 0) {
-      const adjustDelta = cappedDelta * 2; // Compensate for skipping frames
+      const adjustDelta = cappedDelta * 2 * animalActivity; // Compensate for skipped frames
 
       // Chickens
       chickenRefs.forEach((ref, i) => {
@@ -1682,7 +1835,7 @@ export const FarmArea: React.FC = () => {
           chickenStates.current[i],
           adjustDelta,
           1.5, // Speed
-          { minX: 9, maxX: 15, minZ: -8, maxZ: -2 } // Bounds (tighter, near coop)
+          CHICKEN_WANDER_BOUNDS
         );
       });
 
@@ -1693,7 +1846,7 @@ export const FarmArea: React.FC = () => {
           pigStates.current[i],
           adjustDelta,
           0.8, // Speed
-          { minX: -14, maxX: -10, minZ: -7, maxZ: -3 } // Bounds
+          PIG_WANDER_BOUNDS
         );
       });
 
@@ -1704,7 +1857,7 @@ export const FarmArea: React.FC = () => {
           cowStates.current[i],
           adjustDelta,
           0.5, // Speed
-          { minX: -5, maxX: 15, minZ: 10, maxZ: 20 } // Bounds
+          COW_WANDER_BOUNDS
         );
       });
     }
@@ -1966,9 +2119,6 @@ export const FarmArea: React.FC = () => {
         {/* Simple Grain Field - Instanced Loops */}
         {/* Simple Grain Field - Instanced Loops */}
         <InstancedGrainField />
-
-        {/* Cute Scarecrow in the middle */}
-        <Scarecrow position={[0, 0, 0]} rotation={0.2} />
       </group>
 
       {/* Paint Horse next to hay bales */}
