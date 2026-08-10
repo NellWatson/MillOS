@@ -1,5 +1,5 @@
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
-import { useProgress } from '@react-three/drei';
+import * as THREE from 'three';
 import { FEATURE_FLAGS } from '../config/featureFlags';
 import { recoverableLazy } from '../utils/recoverableLazy';
 
@@ -12,11 +12,86 @@ interface LoadingScreenProps {
   maximumLoadTimeMs?: number;
 }
 
+interface LoadingProgress {
+  progress: number;
+  active: boolean;
+  loaded: number;
+  total: number;
+  item: string;
+  errors: string[];
+}
+
+const EMPTY_PROGRESS: LoadingProgress = {
+  progress: 0,
+  active: false,
+  loaded: 0,
+  total: 0,
+  item: '',
+  errors: [],
+};
+
+/**
+ * Track Three's default asset queue without importing the complete Drei package
+ * into the critical startup path. The previous callbacks are preserved so a
+ * host integration can observe the same queue independently.
+ */
+function useLoadingProgress(): LoadingProgress {
+  const [state, setState] = useState<LoadingProgress>(EMPTY_PROGRESS);
+
+  useEffect(() => {
+    const manager = THREE.DefaultLoadingManager;
+    const previous = {
+      onStart: manager.onStart,
+      onLoad: manager.onLoad,
+      onProgress: manager.onProgress,
+      onError: manager.onError,
+    };
+
+    const update = (url: string, loaded: number, total: number, active: boolean): void => {
+      const progress = total > 0 ? (loaded / total) * 100 : 0;
+      setState((current) => ({ ...current, progress, active, loaded, total, item: url }));
+    };
+
+    const onStart: THREE.LoadingManager['onStart'] = (url, loaded, total) => {
+      previous.onStart?.(url, loaded, total);
+      update(url, loaded, total, true);
+    };
+    const onLoad: THREE.LoadingManager['onLoad'] = () => {
+      previous.onLoad?.();
+      setState((current) => ({ ...current, progress: 100, active: false }));
+    };
+    const onProgress: THREE.LoadingManager['onProgress'] = (url, loaded, total) => {
+      previous.onProgress?.(url, loaded, total);
+      update(url, loaded, total, loaded < total);
+    };
+    const onError: THREE.LoadingManager['onError'] = (url) => {
+      previous.onError?.(url);
+      setState((current) =>
+        current.errors.includes(url) ? current : { ...current, errors: [...current.errors, url] }
+      );
+    };
+
+    manager.onStart = onStart;
+    manager.onLoad = onLoad;
+    manager.onProgress = onProgress;
+    manager.onError = onError;
+
+    return () => {
+      if (manager.onStart === onStart) manager.onStart = previous.onStart;
+      if (manager.onLoad === onLoad) manager.onLoad = previous.onLoad;
+      if (manager.onProgress === onProgress) manager.onProgress = previous.onProgress;
+      if (manager.onError === onError) manager.onError = previous.onError;
+    };
+  }, []);
+
+  return state;
+}
+
 export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   minimumLoadTimeMs = 700,
   maximumLoadTimeMs = 8000,
 }) => {
-  const { progress, active, loaded, total, item, errors } = useProgress();
+  const { progress, active, loaded, total, item, errors } = useLoadingProgress();
   const [showLoading, setShowLoading] = useState(true);
   const [minimumTimePassed, setMinimumTimePassed] = useState(false);
   const [firstFrameRendered, setFirstFrameRendered] = useState(

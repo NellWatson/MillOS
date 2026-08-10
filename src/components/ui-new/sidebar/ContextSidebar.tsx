@@ -17,10 +17,7 @@ import { MachineData } from '../../../types';
 import { AboutModal } from '../../AboutModal';
 import { RecoverableFeatureBoundary } from '../../ErrorBoundary';
 import { recoverableLazy } from '../../../utils/recoverableLazy';
-import {
-  CURRENT_RELEASE_VERSION,
-  SELECTABLE_RELEASE_VERSIONS,
-} from '../../../config/releaseVersions';
+import { CURRENT_RELEASE_VERSION, SELECTABLE_RELEASES } from '../../../config/releaseVersions';
 
 // Lazy load the heavy panels
 const AICommandCenter = recoverableLazy(() =>
@@ -208,9 +205,9 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
                       }}
                       aria-label="Select MillOS version"
                     >
-                      {SELECTABLE_RELEASE_VERSIONS.map((version) => (
-                        <option key={version} value={version}>
-                          {version.slice(1)}
+                      {SELECTABLE_RELEASES.map((release) => (
+                        <option key={release.version} value={release.version}>
+                          {release.displayLabel}
                         </option>
                       ))}
                     </select>

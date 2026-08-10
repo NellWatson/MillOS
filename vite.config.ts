@@ -187,24 +187,19 @@ export default defineConfig((): UserConfig => {
           main: path.resolve(__dirname, 'index.html'),
         },
         output: {
-          // Manual chunks for better caching and parallel loading
-          manualChunks: {
-            // Three.js ecosystem (largest dependencies)
-            'three-core': ['three'],
-            // Fiber/Drei depend directly on React and Zustand. Keeping that
-            // tightly coupled runtime together prevents circular vendor chunks.
-            'three-fiber': [
-              'react',
-              'react-dom',
-              'zustand',
-              '@react-three/fiber',
-              '@react-three/drei',
-            ],
-            // UI libraries
-            'ui-vendor': ['framer-motion'],
-            // Utilities
-            icons: ['lucide-react'],
-            'math-utils': ['maath'],
+          // Manual chunks for better caching and parallel loading. Match package
+          // paths rather than package entry points so React's JSX runtimes and
+          // React DOM's client entry do not fall back into the application chunk.
+          manualChunks(id) {
+            if (id.includes('/node_modules/three/build/')) return 'three-core';
+            if (id.includes('/node_modules/@react-three/fiber/')) return 'three-fiber';
+            if (/\/node_modules\/(?:react|react-dom|scheduler|zustand)(?:\/|$)/.test(id)) {
+              return 'react-core';
+            }
+            if (id.includes('/node_modules/framer-motion/')) return 'ui-vendor';
+            if (id.includes('/node_modules/lucide-react/')) return 'icons';
+            if (id.includes('/node_modules/maath/')) return 'math-utils';
+            return undefined;
           },
         },
       },

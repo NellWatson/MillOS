@@ -35,8 +35,9 @@ export type WebGPUStatus =
   | 'error';
 
 // Gemini pricing per 1M tokens (paid tier, text), per model in the fallback
-// chain. Verified against https://ai.google.dev/gemini-api/docs/pricing (June 2026).
+// chain. Verified against https://ai.google.dev/gemini-api/docs/pricing (August 2026).
 const GEMINI_COST_PER_1M: Record<string, { input: number; output: number }> = {
+  'gemini-3.6-flash': { input: 1.5, output: 7.5 },
   'gemini-3.5-flash': { input: 1.5, output: 9.0 },
   'gemini-3-flash-preview': { input: 0.5, output: 3.0 },
   'gemini-2.5-flash': { input: 0.3, output: 2.5 },

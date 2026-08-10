@@ -203,4 +203,22 @@ describe('StaticMeshBatch', () => {
       mergedMeshes: 1,
     });
   });
+
+  it('accumulates diagnostics when candidates are processed in startup slices', () => {
+    const root = new THREE.Group();
+    const firstPair = [makeBox(-4), makeBox(-2)];
+    const secondPair = [makeBox(2), makeBox(4)];
+    root.add(...firstPair, ...secondPair);
+
+    const candidates = collectStaticBatchCandidates(root);
+    createStaticMeshBatches(root, candidates.slice(0, 2), 'slice:0', 2);
+    createStaticMeshBatches(root, candidates.slice(2), 'slice:1', 2);
+
+    expect(root.userData.staticBatchStats).toMatchObject({
+      optimizedOriginals: 4,
+      batches: 2,
+      instancedOriginals: 4,
+      instancedBatches: 2,
+    });
+  });
 });

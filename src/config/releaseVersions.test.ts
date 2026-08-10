@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import releaseMatrix from '../../release-matrix.json';
-import { CURRENT_RELEASE_VERSION, SELECTABLE_RELEASE_VERSIONS } from './releaseVersions';
+import {
+  CURRENT_RELEASE_VERSION,
+  SELECTABLE_RELEASES,
+  SELECTABLE_RELEASE_VERSIONS,
+} from './releaseVersions';
 
 describe('MillOS release versions', () => {
   it('defaults to v0.40 while preserving every published release', () => {
@@ -10,6 +14,12 @@ describe('MillOS release versions', () => {
       releaseMatrix.releases.map((release) => release.version)
     );
     expect(new Set(SELECTABLE_RELEASE_VERSIONS).size).toBe(SELECTABLE_RELEASE_VERSIONS.length);
+    expect(SELECTABLE_RELEASES.map((release) => release.displayLabel)).toEqual([
+      '0.40 (current)',
+      '0.30 (historical)',
+      '0.20 (historical)',
+      '0.10 (historical)',
+    ]);
   });
 
   it('records the historical v0.30 package metadata discrepancy explicitly', () => {

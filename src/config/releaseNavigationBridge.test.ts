@@ -31,6 +31,12 @@ describe('historical release navigation bridge', () => {
       'v0.20',
       'v0.10',
     ]);
+    expect(Array.from(selector?.options ?? []).map((option) => option.textContent)).toEqual([
+      '0.40 (current)',
+      '0.30 (historical)',
+      '0.20 (historical)',
+      '0.10 (historical)',
+    ]);
     expect(selector?.value).toBe('v0.20');
     expect(go?.disabled).toBe(true);
 

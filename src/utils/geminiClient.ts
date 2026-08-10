@@ -17,12 +17,14 @@ import { logger } from './logger';
  * the previous hardcoded single ID ('gemini-3-flash-preview') left live AI
  * silently dead once that preview model was retired.
  *
- * Verified against https://ai.google.dev/gemini-api/docs/models (June 2026):
- * - gemini-3.5-flash: stable GA (May 2026), no announced shutdown
+ * Verified against https://ai.google.dev/gemini-api/docs/latest-model (August 2026):
+ * - gemini-3.6-flash: stable GA and the recommended 3.5 Flash migration target
+ * - gemini-3.5-flash: stable GA fallback
  * - gemini-3-flash-preview: preview tier (restrictive rate limits)
  * - gemini-2.5-flash: legacy stable, shutdown announced for 2026-10-16
  */
 export const GEMINI_MODEL_CANDIDATES = [
+  'gemini-3.6-flash',
   'gemini-3.5-flash',
   'gemini-3-flash-preview',
   'gemini-2.5-flash',
@@ -82,46 +84,12 @@ class GeminiClient {
   private readonly CACHE_MAX_SIZE = 10;
 
   /**
-   * Robust hash function for cache keys
-   *
-   * Uses a full-prompt hash to prevent collisions entirely.
-   * No normalization is applied - exact prompt matching only.
-   *
-   * Previous approaches with number normalization caused collisions:
-   * - "Temperature: 95" vs "Temperature: 45" -> same hash (BAD)
-   * - "Machine RM-101" vs "Machine RM-999" -> same hash (BAD)
-   *
-   * Current approach: Hash the ENTIRE prompt without normalization.
-   * This ensures semantically different prompts never collide.
-   * Trade-off: Slightly lower cache hit rate for truly identical content
-   * with different timestamps, but zero false cache hits.
-   */
-  private hashPrompt(prompt: string): string {
-    // Use djb2 hash algorithm on the full prompt for collision resistance
-    // This is a well-tested hash with good distribution properties
-    let hash1 = 5381;
-    let hash2 = 52711;
-
-    for (let i = 0; i < prompt.length; i++) {
-      const char = prompt.charCodeAt(i);
-      hash1 = (hash1 * 33) ^ char;
-      hash2 = (hash2 * 33) ^ char;
-    }
-
-    // Combine both hashes for better collision resistance
-    // Using unsigned right shift to ensure positive numbers
-    const combined = ((hash1 >>> 0) * 4096 + (hash2 >>> 0)) >>> 0;
-
-    // Include prompt length as additional discriminator
-    return `cache-v2-${combined.toString(36)}-${prompt.length}`;
-  }
-
-  /**
-   * Check cache for a similar prompt
+   * Check the bounded cache for an exact prompt. The full string is the key,
+   * avoiding the false hits that a lossy numeric normalizer or 32-bit hash can
+   * produce for different plant states.
    */
   private getCachedResponse(prompt: string): string | null {
-    const cacheKey = this.hashPrompt(prompt);
-    const cached = this.responseCache.get(cacheKey);
+    const cached = this.responseCache.get(prompt);
 
     if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
       logger.info('[GeminiClient] Cache hit for strategic decision');
@@ -130,7 +98,7 @@ class GeminiClient {
 
     // Clean up expired entry
     if (cached) {
-      this.responseCache.delete(cacheKey);
+      this.responseCache.delete(prompt);
     }
 
     return null;
@@ -140,15 +108,13 @@ class GeminiClient {
    * Store response in cache
    */
   private setCachedResponse(prompt: string, response: string): void {
-    const cacheKey = this.hashPrompt(prompt);
-
     // Evict oldest if at capacity
     if (this.responseCache.size >= this.CACHE_MAX_SIZE) {
       const oldestKey = this.responseCache.keys().next().value;
       if (oldestKey) this.responseCache.delete(oldestKey);
     }
 
-    this.responseCache.set(cacheKey, { response, timestamp: Date.now() });
+    this.responseCache.set(prompt, { response, timestamp: Date.now() });
   }
 
   /**
@@ -179,8 +145,6 @@ class GeminiClient {
     this.model = this.genAI.getGenerativeModel({
       model: GEMINI_MODEL_CANDIDATES[this.modelIndex],
       generationConfig: {
-        temperature: 0.7,
-        topP: 0.9,
         maxOutputTokens: 2048,
       },
     });
