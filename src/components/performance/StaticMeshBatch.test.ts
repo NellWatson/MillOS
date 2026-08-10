@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { collectStaticBatchCandidates, createStaticMeshBatches } from './StaticMeshBatch';
+import {
+  collectStaticBatchCandidates,
+  createStaticMeshBatches,
+  orderStaticBatchCandidatesForChunking,
+} from './StaticMeshBatch';
 
 const makeBox = (x: number, color: string = '#778899'): THREE.Mesh => {
   const mesh = new THREE.Mesh(
@@ -220,5 +224,30 @@ describe('StaticMeshBatch', () => {
       instancedOriginals: 4,
       instancedBatches: 2,
     });
+  });
+
+  it('orders lazy traversal results by batching affinity before startup slicing', () => {
+    const root = new THREE.Group();
+    const standardLeft = makeBox(1);
+    const basicLeft = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 2, 3),
+      new THREE.MeshBasicMaterial({ color: '#778899' })
+    );
+    basicLeft.position.x = 2;
+    const standardRight = makeBox(3);
+    const basicRight = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 2, 3),
+      new THREE.MeshBasicMaterial({ color: '#778899' })
+    );
+    basicRight.position.x = 4;
+    root.add(standardLeft, basicLeft, standardRight, basicRight);
+
+    const candidates = collectStaticBatchCandidates(root);
+    const ordered = orderStaticBatchCandidatesForChunking(root, candidates);
+    const materialTypes = ordered.map(({ mesh }) => (mesh.material as THREE.Material).type);
+
+    expect(materialTypes[0]).toBe(materialTypes[1]);
+    expect(materialTypes[2]).toBe(materialTypes[3]);
+    expect(new Set(materialTypes)).toEqual(new Set(['MeshBasicMaterial', 'MeshStandardMaterial']));
   });
 });

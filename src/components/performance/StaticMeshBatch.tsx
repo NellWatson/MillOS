@@ -384,6 +384,50 @@ const finalizeCandidateCollection = (
   return collection.candidates;
 };
 
+/**
+ * Keep compatible candidates adjacent before bounded startup chunking. Lazy
+ * module resolution can change scene-traversal order without changing the
+ * authored world; slicing that incidental order allowed a compatible group to
+ * straddle a 512-candidate boundary and made the final draw-call count vary.
+ *
+ * Spatial cell and render-state fields remain ahead of material affinity so
+ * the existing culling and compatibility contracts are unchanged. Sorting a
+ * copy also preserves the collection order used by diagnostics and callers.
+ */
+export const orderStaticBatchCandidatesForChunking = (
+  root: THREE.Group,
+  candidates: readonly BatchCandidate[]
+): BatchCandidate[] => {
+  const inverseRoot = root.matrixWorld.clone().invert();
+  const relativeMatrix = new THREE.Matrix4();
+  const relativePosition = new THREE.Vector3();
+  const keyed = candidates.map((candidate) => {
+    relativeMatrix.multiplyMatrices(inverseRoot, candidate.matrixWorld);
+    relativePosition.setFromMatrixPosition(relativeMatrix);
+    const cellX = Math.floor(relativePosition.x / MERGE_CELL_SIZE_METRES);
+    const cellZ = Math.floor(relativePosition.z / MERGE_CELL_SIZE_METRES);
+    const { mesh } = candidate;
+    return {
+      candidate,
+      key: [
+        cellX,
+        cellZ,
+        mesh.castShadow,
+        mesh.receiveShadow,
+        mesh.renderOrder,
+        mesh.layers.mask,
+        candidate.mergeMaterialSignature,
+        candidate.geometryAttributeSignature,
+        candidate.batchMaterialSignature,
+        candidate.geometrySignature,
+      ].join('||'),
+    };
+  });
+
+  keyed.sort((left, right) => left.key.localeCompare(right.key));
+  return keyed.map(({ candidate }) => candidate);
+};
+
 export const collectStaticBatchCandidates = (root: THREE.Group): BatchCandidate[] => {
   root.updateWorldMatrix(true, true);
   const collection = createCandidateCollection();
@@ -691,14 +735,15 @@ export const StaticMeshBatch: React.FC<StaticMeshBatchProps> = ({
           (candidates) => {
             sampleTimer = window.setTimeout(() => {
               if (cancelled) return;
+              const orderedCandidates = orderStaticBatchCandidatesForChunking(root, candidates);
               const candidateChunks: BatchCandidate[][] = [];
               for (
                 let start = 0;
-                start < candidates.length;
+                start < orderedCandidates.length;
                 start += MAX_BATCH_CANDIDATES_PER_TASK
               ) {
                 candidateChunks.push(
-                  candidates.slice(start, start + MAX_BATCH_CANDIDATES_PER_TASK)
+                  orderedCandidates.slice(start, start + MAX_BATCH_CANDIDATES_PER_TASK)
                 );
               }
 

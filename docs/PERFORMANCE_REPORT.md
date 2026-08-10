@@ -1,20 +1,36 @@
 # MillOS v0.40 Performance Report
 
-**Baseline commit:** `dd414cf53fcb648908a5227cae7ac8d7a62c413d`
+**Source baseline:** `0235c8985e67e91b7c4f9a90d1d696e9e8689d70`
 **Measured:** 2026-08-10
-**Status:** Green on the versioned Vite preview baseline
+**Status:** Green on the targeted local v0.40 preview and accepted full-view baseline
 
 ## Current acceptance baseline
 
-| View | Average FPS | p95 frame time | Draw calls | Result |
-|---|---:|---:|---:|---|
-| Overview | 84.0 | 13.8 ms | 1,245 | Pass |
-| Interior | 107.2 | 10.8 ms | 822 | Pass |
-| Shipping | 89.2 | 13.0 ms | 1,070 | Pass |
-| Receiving | 92.5 | 12.1 ms | 1,021 | Pass |
-| Water | 75.3 | 14.8 ms | 1,407 | Pass |
+| View | Average FPS | p95 frame time | Draw calls | Evidence | Result |
+|---|---:|---:|---:|---|---|
+| Overview | 78.0 | 15.0 ms | 1,232 | Current candidate | Pass |
+| Interior | 101.9 | 11.5 ms | 822 | Accepted source baseline | Pass |
+| Shipping | 85.4 | 13.6 ms | 1,078 | Accepted source baseline | Pass |
+| Receiving | 91.4 | 12.2 ms | 1,021 | Accepted source baseline | Pass |
+| Water | 71.8 | 15.8 ms | 1,269 | Current candidate | Pass |
 
-All five views remain above 60 FPS and below the 16.7 ms p95 frame budget. The water view is the next draw-call target, despite meeting the frame-time budget.
+All five views remain above 60 FPS and below the 16.7 ms p95 frame budget. The
+water view dropped from 1,426 calls on the accepted source baseline to 1,269,
+an 11.0 percent reduction. The factory machine bodies remain mounted and
+visible through the windows. Only distant spouting, flow effects, and conveyor
+detail are culled beyond 200 metres, with a 190-metre return threshold to avoid
+visibility chatter.
+
+Static exterior batching now orders compatible candidates before bounded
+startup chunking. Two independent scene loads produced the same 2,126
+candidates, 1,945 optimized originals, and 192 batches. This removes the lazy
+module resolution order from steady-state batching results.
+
+Interior, shipping, and receiving retain their last accepted source-baseline
+samples in this report. Their declared camera positions are inside the
+190-metre detail return threshold. Browser acceptance on the current candidate
+passed separately; a host-saturated aggregate sample was excluded rather than
+presented as comparable frame-time evidence.
 
 ## Startup
 
@@ -28,18 +44,18 @@ These measurements use the versioned Vite preview path. A bare Python static ser
 ## Delivery
 
 - Initial JavaScript: 0.42 MiB gzip across five files.
-- Production build: 3,587 transformed modules.
+- Production build: 3,588 transformed modules.
 - Physics, WebGPU, SCADA, charts, and post-processing remain deferred chunks.
 - The service worker isolates caches by deployment scope and build identity.
 - Historical release payload size is tracked separately from current v0.40 startup transfer.
 
 ## Current optimization priorities
 
-1. Reduce the water-view draw calls by at least 10 percent without changing its authored appearance.
-2. Preserve or improve each view's p95 frame time while integrating visible geometry changes.
+1. Keep the water view at or below 1,283 draw calls while preserving the authored machine silhouettes.
+2. Preserve each view's p95 frame time while integrating visible geometry changes.
 3. Keep native first useful frame at or below 350 ms and Fast 3G at or below 3.2 seconds.
 4. Reject shader cache keys containing time, randomness, or other per-frame values.
-5. Measure runtime, effective DPR, and visual output after every geometry or shader wave.
+5. Measure runtime, effective DPR, static-batch diagnostics, and visual output after every geometry or shader wave.
 
 ## Required commands
 
