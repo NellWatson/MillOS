@@ -344,91 +344,13 @@ export const MyComponent = () => {
 
 ---
 
-### 23. 3D Canvas Not Keyboard Accessible (WCAG 2.1.1 Keyboard - Level A)
+### 23. 3D Canvas Keyboard Navigation (WCAG 2.1.1 Keyboard - Level A)
 
-**Issue:** OrbitControls only work with mouse, no keyboard camera navigation.
+**Status:** Implemented in `CameraController.tsx`, `FirstPersonController.tsx`, and `PhysicsFirstPersonController.tsx`, with shared input policy in `cameraNavigation.ts`.
 
-**Impact:** Keyboard-only users cannot explore the 3D environment.
+**Controls:** WASD and arrow keys translate, Q/E move down and up, and Shift increases speed. Physical key codes keep movement consistent across keyboard layouts. Navigation pauses for focused interface controls, browser blur, and hidden tabs. Collision resolution preserves the orbit target offset so blocked movement does not twist the view.
 
-**Recommendation:**
-
-Implement keyboard controls for 3D navigation:
-
-```tsx
-// src/components/KeyboardCameraControls.tsx
-import { useEffect } from 'react';
-import { useThree } from '@react-three/fiber';
-
-interface KeyboardCameraControlsProps {
-  enabled?: boolean;
-  rotateSpeed?: number;
-  zoomSpeed?: number;
-}
-
-export const KeyboardCameraControls: React.FC<KeyboardCameraControlsProps> = ({
-  enabled = true,
-  rotateSpeed = 0.05,
-  zoomSpeed = 0.5,
-}) => {
-  const { camera } = useThree();
-
-  useEffect(() => {
-    if (!enabled) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Prevent default if we handle the key
-      const handled = true;
-
-      switch (e.key) {
-        case 'ArrowLeft':
-          // Rotate camera left
-          camera.position.x -= rotateSpeed;
-          break;
-        case 'ArrowRight':
-          // Rotate camera right
-          camera.position.x += rotateSpeed;
-          break;
-        case 'ArrowUp':
-          // Rotate camera up
-          camera.position.y += rotateSpeed;
-          break;
-        case 'ArrowDown':
-          // Rotate camera down
-          camera.position.y -= rotateSpeed;
-          break;
-        case '+':
-        case '=':
-          // Zoom in
-          camera.position.z -= zoomSpeed;
-          break;
-        case '-':
-        case '_':
-          // Zoom out
-          camera.position.z += zoomSpeed;
-          break;
-        default:
-          return; // Don't prevent default for unhandled keys
-      }
-
-      if (handled) {
-        e.preventDefault();
-        camera.lookAt(0, 0, 0); // Keep looking at center
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [camera, enabled, rotateSpeed, zoomSpeed]);
-
-  return null;
-};
-
-// Usage in MillScene.tsx
-<Canvas>
-  <KeyboardCameraControls />
-  {/* Rest of scene */}
-</Canvas>
-```
+**Ongoing Recommendation:** Keep the DOM dashboards and panels fully operable without navigating the 3D scene, and retain automated keyboard and focus-safety coverage.
 
 **Alternative: Provide 2D Representations**
 

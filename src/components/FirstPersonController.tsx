@@ -5,6 +5,12 @@ import * as THREE from 'three';
 import { FACTORY_ZONE_Z } from '../constants/factoryLayout';
 import { WORLD_RADIUS } from '../constants/siteLayout';
 import { useUIStore } from '../stores/uiStore';
+import {
+  clampNavigationDelta,
+  getNavigationIntent,
+  shouldHandleNavigationKey,
+  shouldPreventNavigationDefault,
+} from '../utils/cameraNavigation';
 
 // Movement configuration
 const MOVE_SPEED = 12; // Units per second (walking speed)
@@ -138,51 +144,6 @@ const COLLISION_BOXES: Array<{
 // Track pressed keys
 const pressedKeys = new Set<string>();
 
-/**
- * Physical key codes this controller consumes.
- *
- * `KeyW`/`KeyA`/`KeyS`/`KeyD` are positions, not letters, so these bindings
- * hold on AZERTY, QWERTZ, Dvorak and Colemak without a per-layout table.
- * `KeyQ`/`KeyE` drive vertical movement; both Shift keys sprint.
- */
-const MOVEMENT_CODES: ReadonlySet<string> = new Set([
-  'KeyW',
-  'KeyA',
-  'KeyS',
-  'KeyD',
-  'KeyQ',
-  'KeyE',
-  'ShiftLeft',
-  'ShiftRight',
-  'Space',
-  'ArrowUp',
-  'ArrowDown',
-  'ArrowLeft',
-  'ArrowRight',
-]);
-
-/** Keys whose default action scrolls the page and must be suppressed. */
-const SCROLLING_CODES: ReadonlySet<string> = new Set([
-  'Space',
-  'ArrowUp',
-  'ArrowDown',
-  'ArrowLeft',
-  'ArrowRight',
-]);
-
-/**
- * True when the event originates from somewhere the user is entering text.
- *
- * Checking only input/textarea misses contenteditable surfaces and select
- * elements, where arrow keys and letters are meaningful to the control.
- */
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  const tag = target.tagName;
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
-}
-
 /** Vertical travel rate for Q/E, in units per second. */
 const VERTICAL_SPEED = 8;
 /** Ceiling for Q/E ascent, high enough to clear the roof but not the sky. */
@@ -250,13 +211,9 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
   // identical on every layout, which is why it is the standard choice for
   // game movement. It is also immune to Shift and AltGr changing the character.
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (isTypingTarget(e.target)) return;
-
-    if (MOVEMENT_CODES.has(e.code)) {
+    if (shouldHandleNavigationKey(e)) {
       pressedKeys.add(e.code);
-      // Space and the arrows scroll the page by default, which fights the
-      // pointer-locked view.
-      if (SCROLLING_CODES.has(e.code)) e.preventDefault();
+      if (shouldPreventNavigationDefault(e.code)) e.preventDefault();
     }
   }, []);
 
@@ -267,19 +224,24 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
   const handleBlur = useCallback(() => {
     pressedKeys.clear();
   }, []);
+  const handleVisibilityChange = useCallback(() => {
+    if (document.hidden) pressedKeys.clear();
+  }, []);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('blur', handleBlur);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       pressedKeys.clear();
     };
-  }, [handleKeyDown, handleKeyUp, handleBlur]);
+  }, [handleKeyDown, handleKeyUp, handleBlur, handleVisibilityChange]);
 
   // Collision detection
   const checkCollision = useCallback((newX: number, newZ: number): boolean => {
@@ -332,14 +294,11 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
   // Movement update
   useFrame((_, delta) => {
     if (!isLocked.current) return;
+    const movementDelta = clampNavigationDelta(delta);
+    const keyboardIntent = getNavigationIntent(pressedKeys);
 
     // Get movement input
-    direction.current.set(0, 0, 0);
-
-    if (pressedKeys.has('KeyW') || pressedKeys.has('ArrowUp')) direction.current.z -= 1;
-    if (pressedKeys.has('KeyS') || pressedKeys.has('ArrowDown')) direction.current.z += 1;
-    if (pressedKeys.has('KeyA') || pressedKeys.has('ArrowLeft')) direction.current.x -= 1;
-    if (pressedKeys.has('KeyD') || pressedKeys.has('ArrowRight')) direction.current.x += 1;
+    direction.current.set(keyboardIntent.strafe, 0, -keyboardIntent.forward);
 
     // Normalize diagonal movement
     if (direction.current.length() > 0) {
@@ -347,15 +306,12 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
     }
 
     // Apply sprint multiplier
-    const sprinting = pressedKeys.has('ShiftLeft') || pressedKeys.has('ShiftRight');
-    const speedScale = sprinting ? SPRINT_MULTIPLIER : 1;
+    const speedScale = keyboardIntent.sprint ? SPRINT_MULTIPLIER : 1;
     const speed = MOVE_SPEED * speedScale;
 
     // Q descends, E ascends. Held separately from the horizontal direction so a
     // diagonal walk does not dilute the climb rate when both are pressed.
-    let verticalInput = 0;
-    if (pressedKeys.has('KeyE')) verticalInput += 1;
-    if (pressedKeys.has('KeyQ')) verticalInput -= 1;
+    const verticalInput = keyboardIntent.vertical;
 
     // Calculate world-space movement based on camera direction
     const forward = forwardRef.current.set(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -384,16 +340,13 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
       // CLIMBING PHYSICS: W/S moves Up/Down
       const climbSpeed = speed * 0.8;
 
-      if (pressedKeys.has('KeyW') || pressedKeys.has('ArrowUp'))
-        velocity.current.y += climbSpeed * delta;
-      if (pressedKeys.has('KeyS') || pressedKeys.has('ArrowDown'))
-        velocity.current.y -= climbSpeed * delta;
+      velocity.current.y += keyboardIntent.forward * climbSpeed * movementDelta;
       // Q/E climb the ladder too, so the vertical binding is consistent.
-      velocity.current.y += verticalInput * climbSpeed * delta;
+      velocity.current.y += verticalInput * climbSpeed * movementDelta;
 
       // Allow some horizontal movement to guide onto/off ladder
-      velocity.current.addScaledVector(right, direction.current.x * speed * 0.5 * delta);
-      velocity.current.addScaledVector(forward, -direction.current.z * speed * 0.5 * delta);
+      velocity.current.addScaledVector(right, direction.current.x * speed * 0.5 * movementDelta);
+      velocity.current.addScaledVector(forward, -direction.current.z * speed * 0.5 * movementDelta);
 
       // Update height
       currentHeight.current += velocity.current.y;
@@ -413,8 +366,8 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
       velocity.current.y = 0; // Reset vertical velocity accumulation for next frame logic
     } else {
       // WALKING PHYSICS
-      velocity.current.addScaledVector(forward, -direction.current.z * speed * delta);
-      velocity.current.addScaledVector(right, direction.current.x * speed * delta);
+      velocity.current.addScaledVector(forward, -direction.current.z * speed * movementDelta);
+      velocity.current.addScaledVector(right, direction.current.x * speed * movementDelta);
 
       // Calculate new position
       const newX = camera.position.x + velocity.current.x;
@@ -433,7 +386,7 @@ export const FirstPersonController: React.FC<FirstPersonControllerProps> = ({ on
       // why an unconditional ground-snap and a fly control cannot coexist.
       if (verticalInput !== 0) {
         currentHeight.current = THREE.MathUtils.clamp(
-          currentHeight.current + verticalInput * VERTICAL_SPEED * speedScale * delta,
+          currentHeight.current + verticalInput * VERTICAL_SPEED * speedScale * movementDelta,
           PLAYER_HEIGHT,
           MAX_FREE_HEIGHT
         );
@@ -507,12 +460,20 @@ export const FPSInstructions: React.FC<{ visible: boolean }> = ({ visible }) => 
 
           <div className="bg-slate-800/50 rounded-lg p-3">
             <div className="flex items-center gap-2 mb-2">
+              <kbd className="px-2 py-1 bg-slate-700 rounded text-white text-sm font-mono">Q</kbd>
+              <kbd className="px-2 py-1 bg-slate-700 rounded text-white text-sm font-mono">E</kbd>
+            </div>
+            <span className="text-slate-400 text-sm">Move down / up</span>
+          </div>
+
+          <div className="bg-slate-800/50 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2">
               <span className="text-slate-300 text-sm">Mouse</span>
             </div>
             <span className="text-slate-400 text-sm">Look around</span>
           </div>
 
-          <div className="bg-slate-800/50 rounded-lg p-3">
+          <div className="bg-slate-800/50 rounded-lg p-3 col-span-2">
             <div className="flex items-center gap-2 mb-2">
               <kbd className="px-2 py-1 bg-slate-700 rounded text-white text-sm font-mono">
                 Shift

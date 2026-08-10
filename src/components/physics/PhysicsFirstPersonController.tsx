@@ -18,12 +18,23 @@ import {
   createCollisionGroups,
   WORLD_RADIUS,
 } from '../../physics/PhysicsConfig';
+import {
+  clampNavigationDelta,
+  getNavigationIntent,
+  shouldHandleNavigationKey,
+  shouldPreventNavigationDefault,
+} from '../../utils/cameraNavigation';
 
 // Movement configuration
 const FPS_FOV = 105;
 const ORBIT_FOV = 65;
 const MOUSE_SENSITIVITY = 1.5;
 const PLAYER_RADIUS = PHYSICS_CONFIG.player.capsuleRadius;
+const VERTICAL_SPEED = 8;
+const MIN_BODY_HEIGHT = 0.02;
+const MAX_CAMERA_HEIGHT = 60;
+const PHYSICS_SPRINT_MULTIPLIER =
+  PHYSICS_CONFIG.player.maxSprintVelocity / PHYSICS_CONFIG.player.maxLinearVelocity;
 
 // Track pressed keys (module level to persist across renders)
 const pressedKeys = new Set<string>();
@@ -112,20 +123,32 @@ export const PhysicsFirstPersonController: React.FC<PhysicsFirstPersonController
   // Keyboard event handlers
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      pressedKeys.add(e.key.toLowerCase());
+      if (shouldHandleNavigationKey(e)) {
+        pressedKeys.add(e.code);
+        if (shouldPreventNavigationDefault(e.code)) e.preventDefault();
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      pressedKeys.delete(e.key.toLowerCase());
+      pressedKeys.delete(e.code);
+    };
+
+    const clearPressedKeys = () => pressedKeys.clear();
+    const handleVisibilityChange = () => {
+      if (document.hidden) clearPressedKeys();
     };
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', clearPressedKeys);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
-      pressedKeys.clear();
+      window.removeEventListener('blur', clearPressedKeys);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearPressedKeys();
     };
   }, []);
 
@@ -136,15 +159,11 @@ export const PhysicsFirstPersonController: React.FC<PhysicsFirstPersonController
     if (!rigidBodyRef.current || !isLocked.current) return;
 
     const rb = rigidBodyRef.current;
-    const cappedDelta = Math.min(delta, 0.1);
+    const cappedDelta = clampNavigationDelta(delta);
+    const keyboardIntent = getNavigationIntent(pressedKeys);
 
     // Get movement input
-    const dir = directionRef.current.set(0, 0, 0);
-
-    if (pressedKeys.has('w')) dir.z -= 1;
-    if (pressedKeys.has('s')) dir.z += 1;
-    if (pressedKeys.has('a')) dir.x -= 1;
-    if (pressedKeys.has('d')) dir.x += 1;
+    const dir = directionRef.current.set(keyboardIntent.strafe, 0, -keyboardIntent.forward);
 
     // Normalize diagonal movement
     if (dir.lengthSq() > 0) {
@@ -167,7 +186,7 @@ export const PhysicsFirstPersonController: React.FC<PhysicsFirstPersonController
     moveVec.addScaledVector(right, dir.x);
 
     // Determine force and max speed
-    const isSprinting = pressedKeys.has('shift');
+    const isSprinting = keyboardIntent.sprint;
     const force = isSprinting ? PHYSICS_CONFIG.player.sprintForce : PHYSICS_CONFIG.player.moveForce;
     const maxSpeed = isSprinting
       ? PHYSICS_CONFIG.player.maxSprintVelocity
@@ -187,6 +206,33 @@ export const PhysicsFirstPersonController: React.FC<PhysicsFirstPersonController
 
     // Clamp velocity
     clampVelocity(rb, maxSpeed);
+
+    // Q/E provide collision-aware vertical inspection movement in the Rapier
+    // path as well as the default controller. With gravity disabled, zero input
+    // deliberately holds the current inspection altitude.
+    const currentPosition = rb.translation();
+    const maxBodyHeight = MAX_CAMERA_HEIGHT - PHYSICS_CONFIG.player.height;
+    let verticalVelocity =
+      keyboardIntent.vertical * VERTICAL_SPEED * (isSprinting ? PHYSICS_SPRINT_MULTIPLIER : 1);
+    if (
+      (currentPosition.y <= MIN_BODY_HEIGHT && verticalVelocity < 0) ||
+      (currentPosition.y >= maxBodyHeight && verticalVelocity > 0)
+    ) {
+      verticalVelocity = 0;
+    }
+    const currentVelocity = rb.linvel();
+    rb.setLinvel({ x: currentVelocity.x, y: verticalVelocity, z: currentVelocity.z }, true);
+
+    if (currentPosition.y < MIN_BODY_HEIGHT || currentPosition.y > maxBodyHeight) {
+      rb.setTranslation(
+        {
+          x: currentPosition.x,
+          y: THREE.MathUtils.clamp(currentPosition.y, MIN_BODY_HEIGHT, maxBodyHeight),
+          z: currentPosition.z,
+        },
+        true
+      );
+    }
 
     // Sync camera to physics body position
     const pos = rb.translation();

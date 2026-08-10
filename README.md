@@ -141,6 +141,7 @@ Fully functional emergency evacuation simulation:
 
 Immersive walkthrough experience with:
 - **WASD movement** with collision detection against machines
+- **Q/E vertical movement** for elevated inspection
 - **Sprint mode** (Shift key) for faster exploration
 - **Mouse look** with pointer lock controls
 - **105° FOV** for immersive factory tours
@@ -791,6 +792,7 @@ MODBUS_PORT=502
 |-------|--------|
 | **V** | Toggle first-person mode |
 | **WASD** | Move forward/left/back/right |
+| **Q / E** | Move down/up |
 | **Shift** | Sprint (3.6x speed) |
 | **Mouse** | Look around |
 | **Esc** | Exit first-person mode |
