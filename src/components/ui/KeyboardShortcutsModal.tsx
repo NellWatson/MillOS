@@ -35,7 +35,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
         { key: '1-5', description: 'Camera presets' },
         { key: '0', description: 'Reset camera view' },
         { key: 'V', description: 'First-person mode' },
-        { key: 'Shift', description: 'Sprint (FPS mode)' },
+        { key: 'Shift', description: 'Move faster / sprint' },
       ],
     },
     {
