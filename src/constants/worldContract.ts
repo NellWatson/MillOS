@@ -19,6 +19,7 @@ export const CONTINUOUS_WORLD_LAYER_IDS = [
 export const PRESENT_WORLD_LAYER_IDS = [
   'optimized-sky-system',
   'optimized-horizon-backdrop',
+  'near-horizon-city',
   'sun-visual',
   'moon-visual',
 ] as const;

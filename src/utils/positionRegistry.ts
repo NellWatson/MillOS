@@ -36,7 +36,23 @@ class PositionRegistry {
     y = 0,
     kind: EntityPosition['kind'] = 'forklift'
   ): void {
+    const existing = this.positions.get(id);
+    if (existing) {
+      existing.x = x;
+      existing.y = y;
+      existing.z = z;
+      existing.dirX = dirX;
+      existing.dirZ = dirZ;
+      existing.isStopped = isStopped;
+      existing.kind = kind;
+      return;
+    }
     this.positions.set(id, { id, x, y, z, dirX, dirZ, isStopped, kind });
+  }
+
+  /** Read the live position without allocating a registry snapshot. */
+  get(id: string): EntityPosition | undefined {
+    return this.positions.get(id);
   }
 
   unregister(id: string): void {

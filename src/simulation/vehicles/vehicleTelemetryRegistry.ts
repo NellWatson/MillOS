@@ -1,14 +1,14 @@
 export type VehicleTelemetryType = 'forklift' | 'truck';
 
 export interface VehicleTelemetrySnapshot {
-  readonly id: string;
-  readonly type: VehicleTelemetryType;
-  readonly speedMps: number;
-  readonly steeringRadians: number;
-  readonly phase: string;
-  readonly stopReason: string;
-  readonly articulationRadians: number;
-  readonly transferReady: boolean;
+  id: string;
+  type: VehicleTelemetryType;
+  speedMps: number;
+  steeringRadians: number;
+  phase: string;
+  stopReason: string;
+  articulationRadians: number;
+  transferReady: boolean;
 }
 
 class VehicleTelemetryRegistry {
@@ -21,6 +21,17 @@ class VehicleTelemetryRegistry {
       !Number.isFinite(snapshot.steeringRadians) ||
       !Number.isFinite(snapshot.articulationRadians)
     ) {
+      return;
+    }
+    const existing = this.vehicles.get(snapshot.id);
+    if (existing) {
+      existing.type = snapshot.type;
+      existing.speedMps = snapshot.speedMps;
+      existing.steeringRadians = snapshot.steeringRadians;
+      existing.phase = snapshot.phase;
+      existing.stopReason = snapshot.stopReason;
+      existing.articulationRadians = snapshot.articulationRadians;
+      existing.transferReady = snapshot.transferReady;
       return;
     }
     this.vehicles.set(snapshot.id, { ...snapshot });

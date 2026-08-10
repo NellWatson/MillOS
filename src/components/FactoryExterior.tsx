@@ -7,7 +7,6 @@ import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { playCritterSound } from '../utils/critterAudio';
 import { HeartParticle } from './effects/HeartParticle';
 import { useModelTextures } from '../utils/machineTextures';
-import { useProductionStore } from '../stores/productionStore';
 import {
   EXTERIOR_LAYERS,
   FLOOR_LAYERS,
@@ -19,12 +18,15 @@ import {
 import { SITE_LAYOUT } from '../constants/siteLayout';
 import { UTILITY_ASSET_DEFINITIONS } from '../constants/utilityAssets';
 import { createCelestialState, sampleAtmosphere, sampleCelestial } from '../simulation/atmosphere';
-import {
-  calculateShippingTruckState,
-  calculateReceivingTruckState,
-} from './truckbay/useTruckPhysics';
+import { positionRegistry } from '../utils/positionRegistry';
 import { PROCEDURAL_TEXTURES, TREE_MATERIALS } from '../utils/sharedMaterials';
 import { generateMachineORM } from '../textures';
+import { shouldCheckpointOpen } from './exterior/checkpointLogic';
+import {
+  EXTERIOR_LAMP_LENS_MATERIAL,
+  ExteriorLampDriver,
+  ExteriorLampPool,
+} from './exterior/ExteriorLighting';
 // OUTDOOR_MATERIALS removed - grass plane now handled by TerrainGround
 import { GasStation } from './GasStationInstanced';
 import {
@@ -3117,6 +3119,7 @@ const PathLamp: React.FC<{
   style?: 'modern' | 'victorian';
 }> = React.memo(({ position, style = 'modern' }) => (
   <group position={position}>
+    <ExteriorLampPool radius={style === 'victorian' ? 5.5 : 4.8} />
     {/* Pole */}
     <mesh position={[0, 2, 0]} castShadow>
       <cylinderGeometry args={[0.08, 0.1, 4, 8]} />
@@ -3133,9 +3136,8 @@ const PathLamp: React.FC<{
           <boxGeometry args={[0.4, 0.5, 0.4]} />
           <meshStandardMaterial color="#1f2937" roughness={0.5} metalness={0.3} />
         </mesh>
-        <mesh position={[0, -0.1, 0]}>
+        <mesh position={[0, -0.1, 0]} material={EXTERIOR_LAMP_LENS_MATERIAL}>
           <boxGeometry args={[0.3, 0.25, 0.3]} />
-          <meshBasicMaterial color="#fef3c7" />
         </mesh>
       </group>
     ) : (
@@ -3144,9 +3146,8 @@ const PathLamp: React.FC<{
           <cylinderGeometry args={[0.2, 0.15, 0.3, 8]} />
           <meshStandardMaterial color="#4b5563" roughness={0.5} metalness={0.4} />
         </mesh>
-        <mesh position={[0, -0.1, 0]}>
+        <mesh position={[0, -0.1, 0]} material={EXTERIOR_LAMP_LENS_MATERIAL}>
           <cylinderGeometry args={[0.12, 0.15, 0.15, 8]} />
-          <meshBasicMaterial color="#fef3c7" />
         </mesh>
       </group>
     )}
@@ -5590,106 +5591,50 @@ const CheckpointBarrier: React.FC<{
   const barrierArm2Ref = useRef<THREE.Group>(null);
   const lightRef = useRef<THREE.MeshBasicMaterial>(null);
   const light2Ref = useRef<THREE.MeshBasicMaterial>(null);
+  const openRef = useRef(false);
+  const dock = checkpointType ?? (position[2] > 0 ? 'shipping' : 'receiving');
+  const checkpointPosition = useMemo(
+    () => ({ x: position[0], z: position[2] }),
+    [position[0], position[2]]
+  );
 
-  // Get production speed for synchronized truck timing
-  const productionSpeed = useProductionStore((s) => s.productionSpeed);
-
-  // Animate the barrier arms - raise when trucks approach
-  useFrame((state) => {
+  // Follow the same live tractor and trailer poses that are rendered in the
+  // yard. This replaces the old duplicate clock animation, which could open a
+  // barrier for an imaginary truck while the visible one remained elsewhere.
+  useFrame((state, delta) => {
     const time = state.clock.elapsedTime;
-    const adjustedTime = time * (productionSpeed * 0.25 + 0.2);
-    const CYCLE_LENGTH = 60;
+    openRef.current = shouldCheckpointOpen(
+      openRef.current,
+      checkpointPosition,
+      positionRegistry.get(`${dock}-truck-cab`),
+      positionRegistry.get(`${dock}-truck-trailer`)
+    );
+    const targetAngle = openRef.current ? Math.PI / 2 : 0;
+    const safeDelta = Math.min(Math.max(delta, 0), 0.1);
 
-    // Calculate truck positions
-    const shippingCycle = adjustedTime % CYCLE_LENGTH;
-    const receivingCycle = (adjustedTime + CYCLE_LENGTH / 2) % CYCLE_LENGTH;
-
-    const shippingState = calculateShippingTruckState(shippingCycle, time);
-    const receivingState = calculateReceivingTruckState(receivingCycle, time);
-
-    // Checkpoint positions: shipping at z=110, receiving at z=-110
-    // Detect when trucks are within range of this checkpoint
-    const DETECTION_RANGE = 40; // Units from checkpoint to start raising
-    const checkpointZ = position[2];
-
-    // Determine if this checkpoint should respond to shipping or receiving trucks
-    const isShippingCheckpoint = checkpointType === 'shipping' || checkpointZ > 0;
-
-    let shouldRaiseInbound = false; // Barrier 1 (left side, z=+3 relative)
-    let shouldRaiseOutbound = false; // Barrier 2 (right side, z=-3 relative)
-
-    if (isShippingCheckpoint) {
-      // Shipping checkpoint at z=110
-      // Truck enters from z=200 (coming from positive z towards dock at z=53)
-      // Truck exits towards z=200 (going from dock back to road)
-      const truckZ = shippingState.z;
-
-      // Entering phases: truck coming from road towards dock
-      // 'entering' is when truck is on straight approach, 'slowing' would be deceleration
-      const isEntering = shippingState.phase === 'entering' || shippingState.phase === 'slowing';
-      // Leaving phases: truck going from dock back to road
-      // 'accelerating' is when truck actually passes checkpoint on the way out
-      const isLeaving =
-        shippingState.phase === 'turning_out' ||
-        shippingState.phase === 'accelerating' ||
-        shippingState.phase === 'leaving';
-
-      if (isEntering && truckZ > checkpointZ - 20 && truckZ < checkpointZ + DETECTION_RANGE) {
-        shouldRaiseInbound = true;
-      }
-      if (isLeaving && truckZ > checkpointZ - 20 && truckZ < checkpointZ + DETECTION_RANGE) {
-        shouldRaiseOutbound = true;
-      }
-    } else {
-      // Receiving checkpoint at z=-110
-      const truckZ = receivingState.z;
-
-      // Entering phases: truck coming from road (z=-200) towards dock (z=-53)
-      const isEntering = receivingState.phase === 'entering' || receivingState.phase === 'slowing';
-      // Leaving phases: truck going from dock back to road
-      // 'accelerating' is when truck actually passes checkpoint on the way out
-      const isLeaving =
-        receivingState.phase === 'turning_out' ||
-        receivingState.phase === 'accelerating' ||
-        receivingState.phase === 'leaving';
-
-      if (isEntering && truckZ < checkpointZ + 20 && truckZ > checkpointZ - DETECTION_RANGE) {
-        shouldRaiseInbound = true;
-      }
-      if (isLeaving && truckZ < checkpointZ + 20 && truckZ > checkpointZ - DETECTION_RANGE) {
-        shouldRaiseOutbound = true;
-      }
-    }
-
-    // Target angles: 0 = down, PI/2 = up
-    // Both booms raise together when truck approaches from either direction
-    const shouldRaiseBoth = shouldRaiseInbound || shouldRaiseOutbound;
-    const targetAngle1 = shouldRaiseBoth ? Math.PI / 2 : 0;
-    const targetAngle2 = shouldRaiseBoth ? Math.PI / 2 : 0;
-
-    // Smooth animation for barrier 1 (faster response)
     if (barrierArmRef.current) {
-      const currentAngle1 = barrierArmRef.current.rotation.z;
-      const diff1 = targetAngle1 - currentAngle1;
-      barrierArmRef.current.rotation.z += diff1 * 0.08;
+      barrierArmRef.current.rotation.z = THREE.MathUtils.damp(
+        barrierArmRef.current.rotation.z,
+        targetAngle,
+        5.2,
+        safeDelta
+      );
     }
-
-    // Smooth animation for barrier 2
     if (barrierArm2Ref.current) {
-      const currentAngle2 = barrierArm2Ref.current.rotation.z;
-      const diff2 = targetAngle2 - currentAngle2;
-      barrierArm2Ref.current.rotation.z += diff2 * 0.08;
+      barrierArm2Ref.current.rotation.z = THREE.MathUtils.damp(
+        barrierArm2Ref.current.rotation.z,
+        targetAngle,
+        5.2,
+        safeDelta
+      );
     }
 
-    // Flashing warning lights when barrier is down (truck approaching)
     const flash = Math.sin(time * 4) > 0;
-    const isUp1 = barrierArmRef.current && barrierArmRef.current.rotation.z > Math.PI / 4;
-    const isUp2 = barrierArm2Ref.current && barrierArm2Ref.current.rotation.z > Math.PI / 4;
     if (lightRef.current) {
-      lightRef.current.color.setHex(flash && !isUp1 ? 0xff0000 : 0x440000);
+      lightRef.current.color.setHex(flash && openRef.current ? 0xff2b1f : 0x440500);
     }
     if (light2Ref.current) {
-      light2Ref.current.color.setHex(flash && !isUp2 ? 0xff0000 : 0x440000);
+      light2Ref.current.color.setHex(flash && openRef.current ? 0xff2b1f : 0x440500);
     }
   });
 
@@ -5801,7 +5746,12 @@ const CheckpointBarrier: React.FC<{
         </mesh>
 
         {/* Barrier arm pivot - swings inward across road */}
-        <group ref={barrierArmRef} position={[0, 2.9, 0]}>
+        <group
+          ref={barrierArmRef}
+          name={`${dock}-checkpoint-inbound-arm`}
+          position={[0, 2.9, 0]}
+          userData={{ noStaticBatch: true, dynamic: true }}
+        >
           <mesh position={[armLength / 2, 0, 0]} castShadow>
             <boxGeometry args={[armLength, 0.2, 0.2]} />
             <meshStandardMaterial color="#ffffff" roughness={0.5} />
@@ -5844,7 +5794,13 @@ const CheckpointBarrier: React.FC<{
         </mesh>
 
         {/* Barrier arm pivot - swings inward across road (rotated 180°) */}
-        <group ref={barrierArm2Ref} position={[0, 2.9, 0]} rotation={[0, Math.PI, 0]}>
+        <group
+          ref={barrierArm2Ref}
+          name={`${dock}-checkpoint-outbound-arm`}
+          position={[0, 2.9, 0]}
+          rotation={[0, Math.PI, 0]}
+          userData={{ noStaticBatch: true, dynamic: true }}
+        >
           <mesh position={[armLength / 2, 0, 0]} castShadow>
             <boxGeometry args={[armLength, 0.2, 0.2]} />
             <meshStandardMaterial color="#ffffff" roughness={0.5} />
@@ -5967,6 +5923,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
 
   return (
     <group>
+      <ExteriorLampDriver />
       <WaterAnimationManager />
       {/* ========== EXTERIOR GRASS GROUND ========== */}
       {/* DISABLED: Replaced by TerrainGround unified terrain system */}
@@ -7272,6 +7229,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
       ].map(([x, z], i) => (
         <group key={`lamp-${i}`} position={[x, 0, z]}>
           <GroundBlob position={[0, 0]} scale={2.4} />
+          <ExteriorLampPool radius={7} />
           {/* Pole */}
           <mesh position={[0, 3, 0]} castShadow>
             <cylinderGeometry args={[0.1, 0.15, 6, 8]} />
@@ -7283,9 +7241,8 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
             <meshStandardMaterial color="#263238" roughness={0.5} metalness={0.4} />
           </mesh>
           {/* Light bulb area */}
-          <mesh position={[0, 5.9, 0]}>
+          <mesh position={[0, 5.9, 0]} material={EXTERIOR_LAMP_LENS_MATERIAL}>
             <cylinderGeometry args={[0.25, 0.35, 0.3, 8]} />
-            <meshBasicMaterial color="#fff9c4" />
           </mesh>
         </group>
       ))}

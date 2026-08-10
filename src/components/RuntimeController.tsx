@@ -103,6 +103,13 @@ export interface RuntimeMotionTelemetry {
   stopped?: boolean;
 }
 
+export interface RuntimeNamedObjectPose {
+  name: string;
+  position: [number, number, number];
+  rotation: [number, number, number];
+  visible: boolean;
+}
+
 interface RuntimeMotionEntity extends RuntimeMotionTelemetry {
   id: string;
   type: 'forklift' | 'truck';
@@ -170,6 +177,8 @@ export interface MillOSRuntimeTelemetry {
   reset: () => void;
   snapshot: () => RuntimeTelemetrySnapshot;
   motionSnapshot: () => RuntimeMotionState;
+  namedObjectsSnapshot: (names: string[]) => RuntimeNamedObjectPose[];
+  setCameraPose: (position: [number, number, number], target: [number, number, number]) => void;
   setPerfDebug: (patch: Partial<PerfDebugSettings>) => void;
 }
 
@@ -181,6 +190,7 @@ declare global {
 
 interface RuntimeControllerProps {
   adaptiveEnabled: boolean;
+  orbitControlsRef?: React.RefObject<OrbitLikeControls | null>;
 }
 
 interface OrbitLikeControls {
@@ -314,7 +324,10 @@ export function rendererCounterPerFrame(
   return Math.round(total / divisor);
 }
 
-export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEnabled }) => {
+export const RuntimeController: React.FC<RuntimeControllerProps> = ({
+  adaptiveEnabled,
+  orbitControlsRef,
+}) => {
   const mode = getRuntimeMode();
   const { camera, gl, scene, controls } = useThree();
   const firstFrameAtRef = useRef<number | null>(null);
@@ -580,6 +593,32 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       };
     };
 
+    const namedObjectPosition = new THREE.Vector3();
+    const namedObjectsSnapshot = (names: string[]): RuntimeNamedObjectPose[] => {
+      scene.updateMatrixWorld(true);
+      return names.flatMap((name) => {
+        const object = scene.getObjectByName(name);
+        if (!object) return [];
+        object.getWorldPosition(namedObjectPosition);
+        return [
+          {
+            name,
+            position: [
+              rounded(namedObjectPosition.x),
+              rounded(namedObjectPosition.y),
+              rounded(namedObjectPosition.z),
+            ],
+            rotation: [
+              rounded(object.rotation.x, 4),
+              rounded(object.rotation.y, 4),
+              rounded(object.rotation.z, 4),
+            ],
+            visible: object.visible,
+          },
+        ];
+      });
+    };
+
     const snapshot = (): RuntimeTelemetrySnapshot => {
       const values = frameTimesRef.current;
       const sorted = [...values].sort((a, b) => a - b);
@@ -835,6 +874,14 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       reset,
       snapshot,
       motionSnapshot,
+      namedObjectsSnapshot,
+      setCameraPose: (position, target) => {
+        camera.position.set(...position);
+        camera.lookAt(...target);
+        const orbitControls = orbitControlsRef?.current ?? (controls as OrbitLikeControls | null);
+        orbitControls?.target?.set(...target);
+        orbitControls?.update?.();
+      },
       setPerfDebug: (patch) => {
         useGraphicsStore.setState((state) => ({
           graphics: {
@@ -852,7 +899,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       observer?.disconnect();
       delete window.__MILLOS_RUNTIME__;
     };
-  }, [camera, gl, mode, scene]);
+  }, [camera, controls, gl, mode, orbitControlsRef, scene]);
 
   useFrame((_state, delta) => {
     const frameMs = delta * 1000;

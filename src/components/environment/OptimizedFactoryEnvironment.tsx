@@ -2,6 +2,7 @@ import { InteriorLightRig } from './InteriorLightRig';
 import { OptimizedSkySystem } from './OptimizedSkySystem';
 import { SceneEnvironmentIBL } from './SceneEnvironmentIBL';
 import { SunShadowRig } from './SunShadowRig';
+import { NearHorizonCity } from './NearHorizonCity';
 
 /**
  * Default-quality environment. The shell belongs to
@@ -31,6 +32,7 @@ export function OptimizedFactoryEnvironment() {
   return (
     <group name="optimized-factory-environment">
       <OptimizedSkySystem />
+      <NearHorizonCity />
       <SunShadowRig />
       {/* Owns the hemisphere fill as well as `scene.environment`, so the two
           cannot drift: both are driven from the sky's live band colours. */}

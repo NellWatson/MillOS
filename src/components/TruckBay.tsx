@@ -8,7 +8,6 @@ import { useAudioInitialized } from '../hooks/useAudioState';
 import { useProductionStore } from '../stores/productionStore';
 import { selectSafetyHoldActive, useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
-import { useMaterialFlowStore } from '../stores/materialFlowStore';
 import { useOperationsCampaignStore } from '../stores/operationsCampaignStore';
 import { useTruckScheduleStore, type TruckLifecyclePhase } from '../stores/truckScheduleStore';
 import { FLOOR_LAYERS, POLYGON_OFFSET, RENDER_ORDER } from '../constants/renderLayers';
@@ -35,7 +34,14 @@ import { vehicleTelemetryRegistry } from '../simulation/vehicles/vehicleTelemetr
 import { positionRegistry } from '../utils/positionRegistry';
 import { OptimizedTruckVisual, TRUCK_WHEEL_RADIUS } from './truckbay/OptimizedTruckBay';
 import { getRuntimeMode } from '../runtime/runtimeMode';
+import { toSimulationMinutes } from '../simulation/simulationClock';
 import { PROCEDURAL_TEXTURES } from '../utils/sharedMaterials';
+import {
+  EXTERIOR_LAMP_LENS_MATERIAL,
+  ExteriorLampPool,
+  ExteriorPointLight,
+} from './exterior/ExteriorLighting';
+import { IndustrialRoadTunnel } from './scenery/Tunnel';
 // Import animation system functions and TruckAnimationManager
 import {
   TruckAnimationManager,
@@ -364,9 +370,9 @@ const LABEL_ANCHORS = [
  * iteration on every terrain, wall, machine and vehicle fragment in frame.
  *
  * They are therefore mounted only on `high` and `ultra`. This is a stated
- * medium-and-below fidelity trade: the poles and the status housings still
- * render (the status lens keeps its emissive), but at night on medium the yard
- * loses the lamp pools on the asphalt.
+ * medium-and-below fidelity trade: real point lights remain high/ultra only,
+ * while shared emissive lenses and additive asphalt pools preserve the night
+ * read without adding a scene-wide light loop.
  *
  * GATED ON QUALITY, NEVER ON TIME OF DAY. A light count that changed at dusk
  * would change the program cache key of every material in the scene and
@@ -2244,95 +2250,6 @@ const NoIdlingSign: React.FC<{ position: [number, number, number]; rotation?: nu
   </group>
 );
 
-// Road tunnel - clean mountain tunnel for trucks to disappear into
-const RoadTunnel: React.FC<{
-  position: [number, number, number];
-  rotation?: number;
-  roadWidth?: number;
-}> = ({ position, rotation = 0, roadWidth = 10 }) => {
-  const tunnelWidth = roadWidth + 2;
-  const tunnelHeight = 7;
-  const tunnelDepth = 90;
-
-  return (
-    <group position={position} rotation={[0, rotation, 0]}>
-      {/* ========== MOUNTAIN/HILLSIDE ========== */}
-      {/* Sloped hillside - left */}
-      <mesh position={[-tunnelWidth / 2 - 6, 4, -tunnelDepth / 2]} rotation={[0, 0, 0.3]}>
-        <boxGeometry args={[12, 10, tunnelDepth + 10]} />
-        <meshStandardMaterial color="#5a6a4a" roughness={0.95} />
-      </mesh>
-      {/* Sloped hillside - right */}
-      <mesh position={[tunnelWidth / 2 + 6, 4, -tunnelDepth / 2]} rotation={[0, 0, -0.3]}>
-        <boxGeometry args={[12, 10, tunnelDepth + 10]} />
-        <meshStandardMaterial color="#5a6a4a" roughness={0.95} />
-      </mesh>
-      {/* Mountain top */}
-      <mesh position={[0, 12, -tunnelDepth / 2]}>
-        <boxGeometry args={[tunnelWidth + 24, 6, tunnelDepth + 10]} />
-        <meshStandardMaterial color="#6a7a5a" roughness={0.95} />
-      </mesh>
-
-      {/* ========== TUNNEL PORTAL ========== */}
-      {/* Concrete portal frame - left */}
-      <mesh position={[-tunnelWidth / 2 - 0.5, tunnelHeight / 2, 0]}>
-        <boxGeometry args={[1, tunnelHeight, 2]} />
-        <meshStandardMaterial color="#4b5563" roughness={0.8} />
-      </mesh>
-      {/* Concrete portal frame - right */}
-      <mesh position={[tunnelWidth / 2 + 0.5, tunnelHeight / 2, 0]}>
-        <boxGeometry args={[1, tunnelHeight, 2]} />
-        <meshStandardMaterial color="#4b5563" roughness={0.8} />
-      </mesh>
-      {/* Concrete portal top */}
-      <mesh position={[0, tunnelHeight + 0.5, 0]}>
-        <boxGeometry args={[tunnelWidth + 2, 1, 2]} />
-        <meshStandardMaterial color="#4b5563" roughness={0.8} />
-      </mesh>
-
-      {/* ========== TUNNEL INTERIOR ========== */}
-      {/* Ceiling */}
-      <mesh position={[0, tunnelHeight, -tunnelDepth / 2]}>
-        <boxGeometry args={[tunnelWidth, 0.3, tunnelDepth]} />
-        <meshStandardMaterial color="#111111" roughness={1} />
-      </mesh>
-      {/* Left wall */}
-      <mesh position={[-tunnelWidth / 2, tunnelHeight / 2, -tunnelDepth / 2]}>
-        <boxGeometry args={[0.3, tunnelHeight, tunnelDepth]} />
-        <meshStandardMaterial color="#151515" roughness={1} />
-      </mesh>
-      {/* Right wall */}
-      <mesh position={[tunnelWidth / 2, tunnelHeight / 2, -tunnelDepth / 2]}>
-        <boxGeometry args={[0.3, tunnelHeight, tunnelDepth]} />
-        <meshStandardMaterial color="#151515" roughness={1} />
-      </mesh>
-      {/* Back wall - pure black void */}
-      <mesh position={[0, tunnelHeight / 2, -tunnelDepth]}>
-        <planeGeometry args={[tunnelWidth, tunnelHeight]} />
-        <meshBasicMaterial color="#000000" />
-      </mesh>
-
-      {/* ========== ROAD SURFACE ========== */}
-      {/* Road into tunnel */}
-      <mesh position={[0, 0.05, -tunnelDepth / 2]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[roadWidth, tunnelDepth]} />
-        <meshStandardMaterial {...ROAD_TARMAC_SURFACE} />
-      </mesh>
-      {/* Road approach */}
-      <mesh position={[0, 0.06, 10]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[roadWidth, 20]} />
-        <meshStandardMaterial {...ROAD_TARMAC_SURFACE} />
-      </mesh>
-
-      {/* Center line marking */}
-      <mesh position={[0, 0.07, 5]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[0.15, 10]} />
-        <meshBasicMaterial color="#fbbf24" />
-      </mesh>
-    </group>
-  );
-};
-
 // Pallet staging area with stacked pallets
 export const PalletStaging: React.FC<{ position: [number, number, number] }> = ({ position }) => (
   <group position={position}>
@@ -2691,7 +2608,7 @@ const DockLeveler: React.FC<{
 };
 
 const TRUCK_CONTROLLER_STEP_SECONDS = 1 / 60;
-const MAXIMUM_TRUCK_CONTROLLER_DELTA_SECONDS = 0.5;
+const MAXIMUM_TRUCK_CONTROLLER_DELTA_SECONDS = 0.1;
 
 interface DockVisualState {
   readonly docked: boolean;
@@ -2818,8 +2735,6 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
   const receivingControllerRef = useRef<TruckControllerState>(initialReceivingController);
   const shippingAccumulatorRef = useRef(0);
   const receivingAccumulatorRef = useRef(0);
-  const priorSimulationTimeRef = useRef(0);
-  const simulationTimeInitializedRef = useRef(false);
 
   // PERFORMANCE: Consolidate store subscriptions with useShallow
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
@@ -2873,7 +2788,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
     }
   }, [audioReady, productionSpeed, safetyHoldActive]);
 
-  useFrame(({ camera }) => {
+  useFrame(({ camera }, delta) => {
     // Signage gate. Runs before the tab-visibility guard so a tab that comes
     // back never spends a frame with 33 labels drawn from 180 m away.
     labelFrameRef.current += 1;
@@ -2890,13 +2805,26 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
     }
 
     if (!isTabVisible) return;
-    const simulationTime = useMaterialFlowStore.getState().simulationTime;
-    const simulationDelta = simulationTimeInitializedRef.current
-      ? Math.max(0, simulationTime - priorSimulationTimeRef.current)
-      : 0;
-    simulationTimeInitializedRef.current = true;
-    priorSimulationTimeRef.current = simulationTime;
-    const controllerDelta = Math.min(MAXIMUM_TRUCK_CONTROLLER_DELTA_SECONDS, simulationDelta);
+    const gameSimulation = useGameSimulationStore.getState();
+    const gameSpeed = gameSimulation.gameSpeed;
+    const campaignProductionMultiplier = useOperationsCampaignStore
+      .getState()
+      .getProductionMultiplier();
+    // The simulation store publishes at 2 Hz. Reading its accumulated time here
+    // made each truck execute roughly 30 fixed steps in one render and then
+    // remain still for the next half second. Feed the deterministic controller
+    // from render delta instead, while retaining the same production scaling.
+    const controllerDelta =
+      gameSpeed > 0
+        ? Math.min(
+            MAXIMUM_TRUCK_CONTROLLER_DELTA_SECONDS,
+            Math.max(0, delta) * productionSpeed * campaignProductionMultiplier
+          )
+        : 0;
+    const simulationMinutes = toSimulationMinutes({
+      day: gameSimulation.gameDay,
+      hour: gameSimulation.gameTime,
+    });
     const shippingServiceComplete =
       useOperationsCampaignStore.getState().execution.dispatchLoad.status === 'ready';
 
@@ -2936,7 +2864,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         useTruckScheduleStore.getState().consumeTruckArrival(dock);
       }
       if (departedThisFrame) {
-        useTruckScheduleStore.getState().recordTruckDeparture(dock, simulationTime / 60);
+        useTruckScheduleStore.getState().recordTruckDeparture(dock, simulationMinutes);
       }
 
       const truckState = getTruckControllerPose(controller, safetyHoldActive);
@@ -3373,6 +3301,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           [30, 55],
         ].map(([x, z], i) => (
           <group key={i} position={[x, 0, z]}>
+            <ExteriorLampPool radius={12.5} />
             {/* Light pole - 14 units tall, centered at y=7, so top is at y=14 */}
             <mesh position={[0, 7, 0]}>
               <cylinderGeometry args={[0.12, 0.15, 14, 8]} />
@@ -3383,8 +3312,11 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
               <boxGeometry args={[2, 0.4, 1]} />
               <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
             </mesh>
+            <mesh position={[0, 13.97, 0]} material={EXTERIOR_LAMP_LENS_MATERIAL}>
+              <boxGeometry args={[1.55, 0.08, 0.72]} />
+            </mesh>
             {yardLampsEnabled && (
-              <pointLight position={[0, 14, 0]} intensity={30} distance={35} color="#fef3c7" />
+              <ExteriorPointLight position={[0, 14, 0]} intensity={30} distance={35} />
             )}
           </group>
         ))}
@@ -3402,7 +3334,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
         {/* Road tunnel - trucks enter and disappear into mountains */}
         {/* Positioned so truck at z=250 is inside the 50-unit deep tunnel */}
-        <RoadTunnel position={[20, 0, 170]} rotation={Math.PI} roadWidth={10} />
+        <IndustrialRoadTunnel position={[20, 0, 170]} rotation={Math.PI} roadWidth={10} />
 
         {/* Road extension connecting truck yard to tunnel */}
         <mesh position={[20, 0.07, 115]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -3779,6 +3711,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           [30, -55],
         ].map(([x, z], i) => (
           <group key={i} position={[x, 0, z]}>
+            <ExteriorLampPool radius={12.5} />
             {/* Light pole - 14 units tall, centered at y=7, so top is at y=14 */}
             <mesh position={[0, 7, 0]}>
               <cylinderGeometry args={[0.12, 0.15, 14, 8]} />
@@ -3789,8 +3722,11 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
               <boxGeometry args={[2, 0.4, 1]} />
               <meshStandardMaterial color="#374151" metalness={0.6} roughness={0.4} />
             </mesh>
+            <mesh position={[0, 13.97, 0]} material={EXTERIOR_LAMP_LENS_MATERIAL}>
+              <boxGeometry args={[1.55, 0.08, 0.72]} />
+            </mesh>
             {yardLampsEnabled && (
-              <pointLight position={[0, 14, 0]} intensity={30} distance={35} color="#fef3c7" />
+              <ExteriorPointLight position={[0, 14, 0]} intensity={30} distance={35} />
             )}
           </group>
         ))}
@@ -3808,7 +3744,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
         {/* Road tunnel - trucks enter and disappear into mountains */}
         {/* Positioned so truck at z=-250 is inside the 50-unit deep tunnel */}
-        <RoadTunnel position={[-20, 0, -170]} rotation={0} roadWidth={10} />
+        <IndustrialRoadTunnel position={[-20, 0, -170]} rotation={0} roadWidth={10} />
 
         {/* Road extension connecting truck yard to tunnel */}
         <mesh position={[-20, 0.07, -115]} rotation={[-Math.PI / 2, 0, 0]}>

@@ -10,7 +10,7 @@ import { CameraController, useCameraStore } from './components/CameraController'
 import { FirstPersonController } from './components/FirstPersonController';
 import ErrorBoundary from './components/ErrorBoundary';
 import { LoadingScreen } from './components/LoadingScreen';
-import { MachineData, MachineType } from './types';
+import { MachineData } from './types';
 import type { ForkliftData } from './components/ForkliftSystem';
 import { audioManager } from './utils/audioManager';
 import { gpuResourceManager } from './utils/GPUResourceManager';
@@ -21,8 +21,6 @@ import { RENDERER_TONE_MAPPING, TONE_EXPOSURE } from './constants/colorGrade';
 import { useUIStore } from './stores/uiStore';
 import { useGameSimulationStore } from './stores/gameSimulationStore';
 import { useProductionStore } from './stores/productionStore';
-import { useMaterialFlowStore } from './stores/materialFlowStore';
-import { safeDivide } from './utils/typeGuards';
 import { initializeSCADASync } from './store';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -499,84 +497,6 @@ const App: React.FC = () => {
     };
   }, [runtimeMode.benchmark]);
 
-  // Headless production simulation - runs regardless of camera position
-  // This ensures bags are counted even when ConveyorSystem isn't rendering
-  // PERF: Reduced from 1s to 5s interval to minimize store update cascades
-  //
-  // GAME TIME SCALING: Production now scales with gameSpeed so that
-  // the daily target (15,000 bags) is achievable within a game day.
-  // At gameSpeed=180 (default), 1 game day = 8 real minutes.
-  useEffect(() => {
-    // Base production: 12 bags/sec at productionSpeed=1.0, gameSpeed=60
-    // This yields ~15,000 bags/game-day at default settings (gameSpeed=180, productionSpeed~0.9)
-    const BAGS_PER_SECOND_BASE = 12;
-    const INTERVAL_SECONDS = 5;
-    const BAGS_PER_TICK = BAGS_PER_SECOND_BASE * INTERVAL_SECONDS;
-
-    const interval = setInterval(() => {
-      const store = useProductionStore.getState();
-      const gameStore = useGameSimulationStore.getState();
-
-      // Skip if tab is hidden or game is paused
-      if (!gameStore.isTabVisible) return;
-      if (gameStore.gameSpeed === 0) return;
-
-      // Scale by game speed: at 180x, production is 3x faster than at 60x
-      // This makes production happen in "game time" not "real time"
-      const gameSpeedFactor = gameStore.gameSpeed / 60;
-
-      // Calculate bags based on production speed and game speed
-      // productionSpeed is typically 0.8-1.2
-      const bagsThisTick = BAGS_PER_TICK * productionSpeed * gameSpeedFactor;
-
-      // Only produce if we have running machines (packers)
-      const runningPackerMachines = store.machines.filter(
-        (m) => m.type === MachineType.PACKER && (m.status === 'running' || m.status === 'warning')
-      );
-      const runningPackers = runningPackerMachines.length;
-
-      if (runningPackers > 0) {
-        // Scale by number of running packers (3 packers at full = 100%)
-        const packerScale = runningPackers / 3;
-
-        // Couple production to the material-flow simulation so silo starvation,
-        // jams and breakdowns visibly dent throughput. currentPackerFlowRate is
-        // kg/sec at the final packing stage; nominal max is the packers'
-        // 25 kg/sec processingRate (materialFlowStore) per running packer.
-        const NOMINAL_PACKER_KG_PER_SEC = 25;
-        const flowStore = useMaterialFlowStore.getState();
-        const flowRate = flowStore.currentPackerFlowRate;
-        const flowSimLive =
-          Number.isFinite(flowRate) && (flowRate > 0 || flowStore.totalMaterialProcessed > 0);
-
-        let healthFactor: number;
-        if (flowSimLive) {
-          healthFactor = Math.max(
-            0,
-            Math.min(1, safeDivide(flowRate, NOMINAL_PACKER_KG_PER_SEC * runningPackers, 1))
-          );
-        } else {
-          // Flow network not initialized yet: fall back to average packer
-          // efficiency so degraded machines still produce less than pristine ones.
-          const avgEfficiency = safeDivide(
-            runningPackerMachines.reduce((sum, m) => sum + (m.metrics.efficiency ?? 100), 0),
-            runningPackers * 100,
-            1
-          );
-          healthFactor = Math.max(0, Math.min(1, avgEfficiency));
-        }
-
-        const finalBags = Math.round(bagsThisTick * packerScale * healthFactor * 10) / 10;
-
-        if (finalBags > 0) {
-          store.incrementBagsProduced(finalBags);
-        }
-      }
-    }, INTERVAL_SECONDS * 1000); // Run every 5 seconds
-
-    return () => clearInterval(interval);
-  }, [productionSpeed]);
-
   // Initialize SCADA system - uses same consolidated subscription
   const enableSCADA = useGraphicsStore((state) => state.graphics.enableSCADA);
   useEffect(() => {
@@ -900,7 +820,10 @@ const App: React.FC = () => {
             {/* Mobile touch-to-look handler (inside Canvas for R3F access) */}
             {isMobile && !fpsMode && <TouchLookHandler orbitControlsRef={orbitControlsRef} />}
 
-            <RuntimeController adaptiveEnabled={enableAdaptiveQuality} />
+            <RuntimeController
+              adaptiveEnabled={enableAdaptiveQuality}
+              orbitControlsRef={orbitControlsRef}
+            />
           </Canvas>
         </ErrorBoundary>
       </main>

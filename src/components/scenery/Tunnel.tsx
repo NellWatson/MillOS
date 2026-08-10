@@ -15,13 +15,14 @@
  * of them needs a picking proxy the way `raycastSiloShell` does.
  */
 
-import React, { useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { TUNNEL_MATERIALS, PROCEDURAL_TEXTURES } from '../../utils/sharedMaterials';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { createAtmosphereState, sampleAtmosphere } from '../../simulation/atmosphere';
 import { getCulvertWaterHeight } from '../../simulation/ambientWorld';
+import { EXTERIOR_LAMP_LENS_MATERIAL, ExteriorLampPool } from '../exterior/ExteriorLighting';
 
 interface TunnelProps {
   position: [number, number, number];
@@ -241,6 +242,95 @@ const CULVERT_END_RING = createCulvertEndRingGeometry();
 const CORRUGATED_CULVERT = createCorrugatedCulvertGeometry();
 const BRICK_ARCH = createBrickArchGeometry();
 const _culvertAtmosphere = createAtmosphereState();
+const CULVERT_BORE = new THREE.CylinderGeometry(0.89, 0.89, 1, 32, 1, true);
+const CULVERT_WATER = new THREE.PlaneGeometry(1, 1);
+const CULVERT_RIPRAP = new THREE.IcosahedronGeometry(1, 1);
+const CULVERT_BORE_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#222724',
+  roughness: 1,
+  metalness: 0,
+  side: THREE.BackSide,
+});
+const CULVERT_RIPRAP_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#77766e',
+  roughness: 0.98,
+  metalness: 0,
+});
+
+const CULVERT_RIPRAP_OFFSETS = [
+  [-0.56, -0.7, -1.28, 0.22],
+  [0.5, -0.68, -1.24, 0.18],
+  [-0.7, -0.74, 1.2, 0.2],
+  [0.62, -0.72, 1.26, 0.24],
+] as const;
+
+export function createRoadTunnelHillsideGeometry(depth = 90): THREE.ExtrudeGeometry {
+  const shape = new THREE.Shape();
+  shape.moveTo(-22, 0);
+  shape.lineTo(22, 0);
+  shape.lineTo(19, 9);
+  shape.lineTo(12, 16);
+  shape.lineTo(3, 20);
+  shape.lineTo(-7, 18.2);
+  shape.lineTo(-17, 12);
+  shape.closePath();
+
+  const opening = new THREE.Path();
+  opening.moveTo(-5, 0);
+  opening.lineTo(-5, 3.5);
+  opening.absarc(0, 3.5, 5, Math.PI, 0, true);
+  opening.lineTo(5, 0);
+  opening.closePath();
+  shape.holes.push(opening);
+
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth,
+    bevelEnabled: false,
+    curveSegments: 18,
+    steps: 1,
+  });
+  geometry.translate(0, 0, -depth);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+const ROAD_TUNNEL_DEPTH = 90;
+const ROAD_TUNNEL_HILLSIDE = createRoadTunnelHillsideGeometry(ROAD_TUNNEL_DEPTH);
+const ROAD_TUNNEL_EARTH_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#ffffff',
+  map: PROCEDURAL_TEXTURES.grassColor,
+  roughnessMap: PROCEDURAL_TEXTURES.grassRoughness,
+  roughness: 1,
+  metalness: 0,
+  emissive: '#33462f',
+  emissiveMap: PROCEDURAL_TEXTURES.grassColor,
+  emissiveIntensity: 0.72,
+});
+const ROAD_TUNNEL_PORTAL_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#a7aaa4',
+  roughness: 0.94,
+  metalness: 0,
+});
+const ROAD_TUNNEL_ROAD_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#ffffff',
+  map: PROCEDURAL_TEXTURES.tarmacColor,
+  roughnessMap: PROCEDURAL_TEXTURES.tarmacRoughness,
+  roughness: 1,
+  metalness: 0,
+});
+const ROAD_TUNNEL_VOID_MATERIAL = new THREE.MeshBasicMaterial({ color: '#030405' });
+const ROAD_TUNNEL_LINE_MATERIAL = new THREE.MeshBasicMaterial({
+  color: '#d6b14e',
+  depthWrite: false,
+  polygonOffset: true,
+  polygonOffsetFactor: -2,
+  polygonOffsetUnits: -2,
+});
+const ROAD_TUNNEL_WING_GEOMETRY = new THREE.BoxGeometry(0.75, 4.8, 8);
+const ROAD_TUNNEL_WALL_GEOMETRY = new THREE.BoxGeometry(1, 3.5, ROAD_TUNNEL_DEPTH);
+const ROAD_TUNNEL_LENS_GEOMETRY = new THREE.BoxGeometry(1.1, 0.22, 0.18);
 
 /**
  * Drainage Culvert - precast concrete pipe for water drainage
@@ -259,27 +349,43 @@ const _culvertAtmosphere = createAtmosphereState();
 export const DrainageCulvert: React.FC<TunnelProps> = React.memo(
   ({ position, rotation = 0, length = 5, radius = 0.8 }) => {
     const waterRef = useRef<THREE.Mesh>(null);
+    const targetWaterHeightRef = useRef(-radius * 0.52);
+
+    useEffect(() => {
+      const updateTarget = (state: ReturnType<typeof useGameSimulationStore.getState>): void => {
+        const atmosphere = sampleAtmosphere(
+          state.gameDay,
+          state.gameTime,
+          state.weather,
+          _culvertAtmosphere
+        );
+        targetWaterHeightRef.current = getCulvertWaterHeight(
+          radius,
+          atmosphere.wetness,
+          atmosphere.precipitation
+        );
+      };
+      updateTarget(useGameSimulationStore.getState());
+      return useGameSimulationStore.subscribe(updateTarget);
+    }, [radius]);
 
     useFrame((_, delta) => {
       if (!waterRef.current) return;
-      const { gameDay, gameTime, weather, isTabVisible } = useGameSimulationStore.getState();
-      if (!isTabVisible) return;
-      const atmosphere = sampleAtmosphere(gameDay, gameTime, weather, _culvertAtmosphere);
-      const targetHeight = getCulvertWaterHeight(
-        radius,
-        atmosphere.wetness,
-        atmosphere.precipitation
-      );
+      if (!useGameSimulationStore.getState().isTabVisible) return;
       waterRef.current.position.y = THREE.MathUtils.damp(
         waterRef.current.position.y,
-        targetHeight,
+        targetWaterHeightRef.current,
         3,
         Math.min(delta, 0.1)
       );
     });
 
     return (
-      <group position={position} rotation={[0, rotation, 0]}>
+      <group
+        name={`drainage-culvert-${position[0]}-${position[2]}`}
+        position={position}
+        rotation={[0, rotation, 0]}
+      >
         {/* Jointed precast barrel */}
         <mesh
           geometry={DRAINAGE_PIPE}
@@ -290,6 +396,15 @@ export const DrainageCulvert: React.FC<TunnelProps> = React.memo(
         >
           <primitive object={TUNNEL_MATERIALS.concrete} attach="material" />
         </mesh>
+
+        {/* A dark back-facing liner makes the pipe read as a hollow bore from
+            either mouth instead of a one-sided white shell. */}
+        <mesh
+          geometry={CULVERT_BORE}
+          material={CULVERT_BORE_MATERIAL}
+          rotation={[0, 0, Math.PI / 2]}
+          scale={[radius, Math.max(0.1, length - radius * 0.25), radius]}
+        />
 
         {/* Flared end sections, each facing out of its own mouth */}
         <mesh
@@ -309,9 +424,53 @@ export const DrainageCulvert: React.FC<TunnelProps> = React.memo(
           <primitive object={TUNNEL_MATERIALS.concrete} attach="material" />
         </mesh>
 
+        {/* Cast headwalls, angled wing walls, and splash aprons give each mouth
+            a believable load path into the embankment. */}
+        {[-1, 1].map((end) => (
+          <group key={`headwall-${end}`} position={[end * (length / 2 + radius * 0.13), 0, 0]}>
+            <mesh position={[0, radius * 0.62, 0]} castShadow receiveShadow>
+              <boxGeometry args={[radius * 0.28, radius * 0.42, radius * 2.7]} />
+              <primitive object={TUNNEL_MATERIALS.concrete} attach="material" />
+            </mesh>
+            {[-1, 1].map((side) => (
+              <mesh
+                key={`wing-${side}`}
+                position={[end * radius * 0.24, -radius * 0.1, side * radius * 1.2]}
+                rotation={[0, side * end * 0.28, 0]}
+                castShadow
+                receiveShadow
+              >
+                <boxGeometry args={[radius * 0.18, radius * 1.25, radius * 0.75]} />
+                <primitive object={TUNNEL_MATERIALS.concrete} attach="material" />
+              </mesh>
+            ))}
+            <mesh position={[end * radius * 0.58, -radius * 0.69, 0]} receiveShadow>
+              <boxGeometry args={[radius * 1.2, radius * 0.1, radius * 2.55]} />
+              <primitive object={TUNNEL_MATERIALS.concrete} attach="material" />
+            </mesh>
+            {CULVERT_RIPRAP_OFFSETS.map(([x, y, z, scale], index) => (
+              <mesh
+                key={`riprap-${index}`}
+                geometry={CULVERT_RIPRAP}
+                material={CULVERT_RIPRAP_MATERIAL}
+                position={[end * radius * x, radius * y, radius * z]}
+                scale={[radius * scale * 1.35, radius * scale, radius * scale]}
+                rotation={[index * 0.31, index * 0.67, index * 0.19]}
+                castShadow
+              />
+            ))}
+          </group>
+        ))}
+
         {/* Water surface inside */}
-        <mesh ref={waterRef} position={[0, -radius * 0.52, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[length, radius * 1.2]} />
+        <mesh
+          ref={waterRef}
+          geometry={CULVERT_WATER}
+          position={[0, -radius * 0.52, 0]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          scale={[length, radius * 1.2, 1]}
+          userData={{ noStaticBatch: true, dynamic: true }}
+        >
           <primitive object={TUNNEL_MATERIALS.water} attach="material" />
         </mesh>
       </group>
@@ -384,6 +543,134 @@ export const BrickTunnel: React.FC<TunnelProps & { width?: number; height?: numb
   }
 );
 BrickTunnel.displayName = 'BrickTunnel';
+
+/**
+ * Full-scale road portal used by both logistics routes. One perforated hillside
+ * replaces three intersecting boxes, while the shared hollow arch supplies a
+ * real curved soffit and a deep concrete barrel around the truck clearance.
+ */
+export const IndustrialRoadTunnel: React.FC<{
+  position: [number, number, number];
+  rotation?: number;
+  roadWidth?: number;
+}> = React.memo(({ position, rotation = 0, roadWidth = 10 }) => {
+  const outerHalfWidth = roadWidth / 2 + 1;
+  const horizontalScale = roadWidth / 10;
+  const roadLength = ROAD_TUNNEL_DEPTH + 20;
+
+  return (
+    <group name="industrial-road-tunnel" position={position} rotation={[0, rotation, 0]}>
+      <mesh
+        geometry={ROAD_TUNNEL_HILLSIDE}
+        material={ROAD_TUNNEL_EARTH_MATERIAL}
+        scale={[horizontalScale, 1, 1]}
+        castShadow
+        receiveShadow
+      />
+
+      {/* Segmented concrete vault, including the visible portal archivolt. */}
+      <mesh
+        geometry={BRICK_ARCH}
+        position={[0, 3.5, -ROAD_TUNNEL_DEPTH / 2]}
+        rotation={[Math.PI / 2, 0, 0]}
+        scale={[outerHalfWidth, ROAD_TUNNEL_DEPTH, outerHalfWidth]}
+        castShadow
+        receiveShadow
+      >
+        <primitive object={TUNNEL_MATERIALS.concrete} attach="material" />
+      </mesh>
+
+      {/* A shallow, separately lit portal ring keeps the entrance legible
+          against the earth cut. The long barrel remains recessed behind it,
+          so the mouth has a real reveal instead of one dark coplanar edge. */}
+      <mesh
+        geometry={BRICK_ARCH}
+        material={ROAD_TUNNEL_PORTAL_MATERIAL}
+        position={[0, 3.5, 0.34]}
+        rotation={[Math.PI / 2, 0, 0]}
+        scale={[outerHalfWidth, 1.25, outerHalfWidth]}
+        castShadow
+        receiveShadow
+      />
+
+      {[-1, 1].map((side) => (
+        <React.Fragment key={`road-tunnel-side-${side}`}>
+          <mesh
+            material={ROAD_TUNNEL_PORTAL_MATERIAL}
+            position={[side * (roadWidth / 2 + 0.5), 1.75, 0.34]}
+            castShadow
+            receiveShadow
+          >
+            <boxGeometry args={[1, 3.5, 1.25]} />
+          </mesh>
+          <mesh
+            geometry={ROAD_TUNNEL_WALL_GEOMETRY}
+            position={[side * (roadWidth / 2 + 0.5), 1.75, -ROAD_TUNNEL_DEPTH / 2]}
+            scale={[horizontalScale, 1, 1]}
+            castShadow
+            receiveShadow
+          >
+            <primitive object={TUNNEL_MATERIALS.concrete} attach="material" />
+          </mesh>
+          <mesh
+            geometry={ROAD_TUNNEL_WING_GEOMETRY}
+            position={[side * (roadWidth / 2 + 2.15), 2.35, 2.7]}
+            rotation={[0, side * -0.28, 0]}
+            scale={[horizontalScale, 1, 1]}
+            castShadow
+            receiveShadow
+          >
+            <primitive object={TUNNEL_MATERIALS.concrete} attach="material" />
+          </mesh>
+          <group position={[side * roadWidth * 0.39, 0, 1.4]}>
+            <ExteriorLampPool radius={6.5} />
+            <mesh
+              geometry={ROAD_TUNNEL_LENS_GEOMETRY}
+              material={EXTERIOR_LAMP_LENS_MATERIAL}
+              position={[0, 4.15, 0]}
+            />
+          </group>
+        </React.Fragment>
+      ))}
+
+      {/* Continuous road, centre line, and drainage channels cross the portal
+          without coplanar surfaces. */}
+      <mesh
+        geometry={CULVERT_WATER}
+        material={ROAD_TUNNEL_ROAD_MATERIAL}
+        position={[0, 0.065, 10 - roadLength / 2]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        scale={[roadWidth, roadLength, 1]}
+        receiveShadow
+      />
+      <mesh
+        geometry={CULVERT_WATER}
+        material={ROAD_TUNNEL_LINE_MATERIAL}
+        position={[0, 0.09, 10 - roadLength / 2]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        scale={[0.16, roadLength, 1]}
+      />
+      {[-1, 1].map((side) => (
+        <mesh
+          key={`drain-${side}`}
+          position={[side * (roadWidth / 2 - 0.22), 0.1, -ROAD_TUNNEL_DEPTH / 2]}
+        >
+          <boxGeometry args={[0.3, 0.12, ROAD_TUNNEL_DEPTH]} />
+          <meshStandardMaterial color="#596064" roughness={0.82} metalness={0.08} />
+        </mesh>
+      ))}
+
+      {/* A recessed end cap preserves depth while hiding the vehicle reset. */}
+      <mesh
+        geometry={CULVERT_WATER}
+        material={ROAD_TUNNEL_VOID_MATERIAL}
+        position={[0, 4.2, -ROAD_TUNNEL_DEPTH + 0.08]}
+        scale={[roadWidth, 8.4, 1]}
+      />
+    </group>
+  );
+});
+IndustrialRoadTunnel.displayName = 'IndustrialRoadTunnel';
 
 /**
  * Metal Culvert - corrugated steel pipe

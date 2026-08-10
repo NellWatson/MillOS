@@ -367,7 +367,7 @@ interface MountainRidgeSpec {
 /**
  * Angular resolution of one ridge ring.
  *
- * Raised from 192. At a ring radius of 280 to 325 world units, 192 segments put
+ * Raised from 192. At a ring radius of 248 to 318 world units, 192 segments put
  * a facet edge every 1.875 degrees, which is plainly visible as straight
  * chords along a summit. 384 halves that, and the whole backdrop is still only
  * 5,775 vertices across all three rings - nothing at a 60k-245k triangle
@@ -477,10 +477,10 @@ export function createMountainRidgeGeometry({
 
 const horizonRadius = SITE_LAYOUT.world.horizonRadius;
 const farMountainGeometry = createMountainRidgeGeometry({
-  radius: horizonRadius + 65,
+  radius: horizonRadius + 58,
   baseY: -17,
   // THE FAR RING IS ALSO AN OCCLUDER, NOT ONLY A SILHOUETTE. The authored
-  // ground disc stops at radius 255 while this ring is camera-locked at 325, so
+  // ground disc stops at radius 255 while this ring is camera-locked at 318, so
   // wherever the ring's profile dips below the ground's apparent horizon the
   // terrain BEYOND it shows through the gap - a strip of ground hanging in the
   // sky above the mountains. The old linear fog hid that strip by saturating;
@@ -500,7 +500,7 @@ const farMountainGeometry = createMountainRidgeGeometry({
   colors: ['#42574c', '#717a76', '#e9eff2'],
 });
 const midMountainGeometry = createMountainRidgeGeometry({
-  radius: horizonRadius + 40,
+  radius: horizonRadius + 20,
   baseY: -20,
   minHeight: 3,
   maxHeight: 58,
@@ -511,7 +511,10 @@ const midMountainGeometry = createMountainRidgeGeometry({
   colors: ['#3f5548', '#6e7873', '#eaf0f2'],
 });
 const nearHillGeometry = createMountainRidgeGeometry({
-  radius: horizonRadius + 18,
+  // Pull the green foothill inside the nominal horizon so it once again frames
+  // the playable zone. Its slope grows outward to 276, behind the city and
+  // authored landmarks, while the sky remains a genuine analytic skybox.
+  radius: horizonRadius - 12,
   baseY: -16,
   minHeight: 2,
   maxHeight: 42,
@@ -580,7 +583,7 @@ const cameraForwardScratch = new THREE.Vector3();
  * One ridge material per ring, differing only in how much air is in front of it.
  *
  * `uAerial` is the whole depth cue. The three rings sit at camera-relative
- * radii 278 / 300 / 325 - close enough together that geometry alone cannot
+ * radii 248 / 280 / 318 - close enough together that geometry alone cannot
  * separate them - so the separation has to come from extinction.
  */
 function createRidgeMaterial(aerial: number, name: string): THREE.ShaderMaterial {
@@ -591,7 +594,7 @@ function createRidgeMaterial(aerial: number, name: string): THREE.ShaderMaterial
     vertexColors: true,
     side: THREE.FrontSide,
     // DEPTH TEST AND WRITE STAY ON. The rings are camera-locked in X and Z, so
-    // they sit at a fixed 278-325 from the viewer, while site geometry on the
+    // they sit at a fixed 248-318 from the viewer, while site geometry on the
     // far side of the world reaches roughly 413 away from the `overview`
     // camera. The ring is supposed to occlude that - it is what hides the far
     // rim of the ground disc where the frustum clips it. Turning depth off
@@ -1058,7 +1061,7 @@ export function OptimizedSkySystem() {
 
       <group ref={horizonGroupRef} name="optimized-horizon-backdrop" dispose={null}>
         {/* fog stays OFF on all three rings even after the switch to
-            exponential fog: at a camera-locked 278-325 they would all sit on
+            exponential fog: at a camera-locked 248-318 they would all sit on
             roughly the same fog factor, which would flatten exactly the
             per-ring separation `uAerial` exists to create. */}
         <mesh
