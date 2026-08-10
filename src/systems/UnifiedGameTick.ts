@@ -51,6 +51,36 @@ const GRAIN_DELIVERY_KG = 15000;
 // A shipping truck can load up to 5 t of finished flour or semolina.
 const FINISHED_GOODS_SHIPMENT_KG = 5000;
 const SHIPPING_LOAD_RATE_KG_PER_SECOND = 400;
+const BAGS_PER_SECOND_BASE = 12;
+const NOMINAL_PACKER_KG_PER_SECOND = 25;
+const NOMINAL_PACKER_COUNT = 3;
+let _bagProductionCarry = 0;
+
+export const calculateBagsProducedForTick = (
+  deltaSeconds: number,
+  productionSpeed: number,
+  gameSpeed: number,
+  runningPackerCount: number,
+  healthFactor: number
+): number => {
+  if (
+    !Number.isFinite(deltaSeconds) ||
+    !Number.isFinite(productionSpeed) ||
+    !Number.isFinite(gameSpeed) ||
+    !Number.isFinite(runningPackerCount) ||
+    !Number.isFinite(healthFactor)
+  ) {
+    return 0;
+  }
+  return (
+    BAGS_PER_SECOND_BASE *
+    Math.max(0, deltaSeconds) *
+    Math.max(0, productionSpeed) *
+    (Math.max(0, gameSpeed) / 60) *
+    (Math.max(0, runningPackerCount) / NOMINAL_PACKER_COUNT) *
+    Math.max(0, Math.min(1, healthFactor))
+  );
+};
 
 function sumMaterialInventory(flow: MaterialFlowState, materialType: MaterialType): number {
   let total = 0;
@@ -460,10 +490,12 @@ function unifiedGameTick(ctx: TickContext): void {
 
   // 3. Count running packers for throughput calculation
   let runningPackerCount = 0;
+  let runningPackerEfficiencySum = 0;
   for (let i = 0; i < machines.length; i++) {
     const m = machines[i];
     if (m.type === 'PACKER' && (m.status === 'running' || m.status === 'warning')) {
       runningPackerCount++;
+      runningPackerEfficiencySum += m.metrics.efficiency ?? 100;
     }
   }
 
@@ -517,7 +549,6 @@ function unifiedGameTick(ctx: TickContext): void {
   // Throughput: actual production rate in bags per game-hour
   // Based on App.tsx production formula: 12 bags/sec base × productionSpeed × gameSpeedFactor × packerScale
   // Converted to bags per game-hour for display
-  const BAGS_PER_SECOND_BASE = 12;
   const gameSpeedFactor = safeGameSpeed / 60;
   const packerScale = runningPackerCount / 3; // 3 packers at full capacity
 
@@ -628,7 +659,35 @@ function unifiedGameTick(ctx: TickContext): void {
       : undefined
   );
 
-  // 4c. Grain deliveries: when a receiving truck docks, it refills the
+  // 4c. Count completed bags on the same central 500 ms cadence as the
+  // material network. The former five-second interval produced visually large
+  // jumps and created a second simulation clock. Fractional carry keeps this
+  // smooth without losing production to integer rounding.
+  if (runningPackerCount > 0) {
+    const liveFlow = useMaterialFlowStore.getState();
+    const flowRate = liveFlow.currentPackerFlowRate;
+    const flowSimulationLive =
+      Number.isFinite(flowRate) && (flowRate > 0 || liveFlow.totalMaterialProcessed > 0);
+    const fallbackEfficiency = runningPackerEfficiencySum / Math.max(1, runningPackerCount * 100);
+    const healthFactor = flowSimulationLive
+      ? Math.max(0, Math.min(1, flowRate / (NOMINAL_PACKER_KG_PER_SECOND * runningPackerCount)))
+      : Math.max(0, Math.min(1, fallbackEfficiency));
+
+    _bagProductionCarry += calculateBagsProducedForTick(
+      deltaSeconds,
+      effectiveProductionSpeed,
+      safeGameSpeed,
+      runningPackerCount,
+      healthFactor
+    );
+    const completedBags = Math.floor(_bagProductionCarry);
+    if (completedBags > 0) {
+      _bagProductionCarry -= completedBags;
+      useProductionStore.getState().incrementBagsProduced(completedBags);
+    }
+  }
+
+  // 4d. Grain deliveries: when a receiving truck docks, it refills the
   // emptiest silo — without this the silos drain dry in under an hour of
   // simulation and the flow network starves permanently.
   const receivingTransferReady =
@@ -641,7 +700,7 @@ function unifiedGameTick(ctx: TickContext): void {
   }
   _lastReceivingTransferReady = receivingTransferReady;
 
-  // 4d. Loading is a docked operation. Product remains conserved in finished
+  // 4e. Loading is a docked operation. Product remains conserved in finished
   // goods until the vehicle actually departs, when the material store creates
   // the authoritative dispatch manifest. The load snapshot is operational
   // intent only, never a second inventory ledger.

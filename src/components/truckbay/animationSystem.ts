@@ -199,10 +199,36 @@ export const TruckAnimationManager: React.FC = () => {
             ? 3
             : 4;
 
+    // Structural motion must remain smooth at every preset. Throttling a dock
+    // leveler or door to 20 Hz made its transform visibly step even when the
+    // renderer itself sustained 60 Hz. Decorative loops remain throttled.
+    animationRegistry.forEach((anim) => {
+      if (anim.type !== 'lerp') return;
+      const mesh = anim.mesh as THREE.Object3D;
+      const {
+        target,
+        speed = 0.1,
+        property = 'position',
+        axis = 'x',
+        autoHide,
+        hideThreshold,
+      } = anim.data as LerpAnimData;
+      if (!mesh) return;
+
+      const currVal = mesh[property][axis];
+      if (Math.abs(currVal - target) <= 0.001) return;
+      const newVal = THREE.MathUtils.lerp(currVal, target, getAnimationDampingAlpha(speed, delta));
+      mesh[property][axis] = newVal;
+      if (autoHide && property === 'position') {
+        mesh.visible = newVal > (hideThreshold ?? 0);
+      }
+    });
+
     if (shouldRunThisFrame(throttle)) {
       const adjustDelta = delta * throttle;
 
       animationRegistry.forEach((anim) => {
+        if (anim.type === 'lerp') return;
         // 1. Rotation Animation
         if (anim.type === 'rotation') {
           const mesh = anim.mesh as THREE.Object3D;
@@ -219,37 +245,6 @@ export const TruckAnimationManager: React.FC = () => {
           if (mat) {
             mat.emissiveIntensity =
               min + (Math.sin(time * (speed as number) + offset) * 0.5 + 0.5) * (max - min);
-          }
-        }
-
-        // 3. Lerp (Position/Rotation/Scale) Animation
-        else if (anim.type === 'lerp') {
-          const mesh = anim.mesh as THREE.Object3D;
-          const lerpData = anim.data as LerpAnimData;
-          const {
-            target,
-            speed = 0.1,
-            property = 'position',
-            axis = 'x',
-            autoHide,
-            hideThreshold,
-          } = lerpData;
-
-          if (mesh) {
-            const currVal = mesh[property][axis];
-            if (Math.abs(currVal - target) > 0.001) {
-              const newVal = THREE.MathUtils.lerp(
-                currVal,
-                target,
-                getAnimationDampingAlpha(speed, adjustDelta)
-              );
-              mesh[property][axis] = newVal;
-
-              // Optional visibility toggle for "slide out" effects
-              if (autoHide && property === 'position') {
-                mesh.visible = newVal > (hideThreshold ?? 0);
-              }
-            }
           }
         }
 

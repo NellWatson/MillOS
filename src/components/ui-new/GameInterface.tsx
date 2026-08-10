@@ -24,25 +24,27 @@ import { useAnnouncementsStore } from '../../stores/announcementsStore';
 import { useMobileControlStore } from '../../stores/mobileControlStore';
 import { KeyboardShortcutsModal } from '../ui/KeyboardShortcutsModal';
 import { OnboardingGuide, type OnboardingStep } from './onboarding/OnboardingGuide';
+import { useCameraStore } from '../CameraController';
+import { getTourCameraPreset } from './onboarding/tourCamera';
 
 const INTRO_STEPS: OnboardingStep[] = [
   {
     title: 'Follow the process',
     icon: 'factory',
     content:
-      'Grain moves from the rear silos through milling and sifting, then reaches packing and shipping. Drag to orbit. Scroll or pinch to zoom.',
+      'The camera is flying to the full site. Grain moves from the rear silos through milling and sifting, then reaches packing and shipping. Drag to orbit. Scroll or pinch to zoom.',
   },
   {
     title: 'Protect today’s target',
     icon: 'goal',
     content:
-      'The status bar compares output with the active run target. Alarms, stoppages, quality loss, and route conflicts reduce throughput.',
+      'The tour is flying to packing. The status bar compares output with the active run target. Alarms, stoppages, quality loss, and route conflicts reduce throughput.',
   },
   {
     title: 'Inspect before acting',
     icon: 'controls',
     content:
-      'Select a machine to inspect it. The bottom dock opens production, safety, autonomy, and simulated SCADA. Press ? for keyboard controls.',
+      'The tour is flying to milling. Select a machine to inspect it. The bottom dock opens production, safety, autonomy, and simulated SCADA. Press ? for keyboard controls.',
   },
 ];
 
@@ -129,6 +131,11 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
       if (timer) clearTimeout(timer);
     };
   }, [hasSeenIntro]);
+
+  useEffect(() => {
+    const preset = getTourCameraPreset(introStep);
+    if (preset !== null) useCameraStore.getState().setPreset(preset);
+  }, [introStep]);
 
   const handleIntroNext = () => {
     const next = (introStep ?? 0) + 1;
