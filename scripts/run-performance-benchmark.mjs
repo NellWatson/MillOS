@@ -25,6 +25,7 @@ const NETWORK_PROFILES = {
   },
 };
 const PA_MODES = new Set(['focused', 'characterful', 'off']);
+const CELESTIAL_EVIDENCE_TIMES = Object.freeze({ sun: 12, moon: 0 });
 
 function readArgument(name, fallback) {
   const prefix = `--${name}=`;
@@ -512,11 +513,16 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
     });
   });
 
+  // Named celestial views are evidence cameras, so they must show the body
+  // named by the scene. A global daytime capture previously aimed the moon
+  // camera below the horizon and produced a convincing screenshot of the
+  // ground. Ordinary scenes still honour the requested simulation hour.
+  const sceneTime = CELESTIAL_EVIDENCE_TIMES[scene] ?? options.time;
   const query = new URLSearchParams({
     benchmark: scene,
     duration: String(options.durationSeconds),
     quality: options.quality,
-    time: String(options.time),
+    time: String(sceneTime),
     weather: options.weather,
     scada: scadaEnabled ? 'on' : 'off',
     pa: options.paMode,
@@ -683,6 +689,7 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
   const motionAcceptance = evaluateMotionAcceptance(motionSamples, motionSummary);
   const result = {
     scene,
+    sceneTime,
     variant,
     scadaEnabled,
     url: page.url(),
