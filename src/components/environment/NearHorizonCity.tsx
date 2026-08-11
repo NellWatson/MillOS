@@ -30,19 +30,20 @@ export const buildNearCitySpecs = (count = 42): NearCityBuildingSpec[] =>
     const positionInBand = Math.floor(index / 3);
     const progress = buildingsInBand <= 1 ? 0.5 : positionInBand / (buildingsInBand - 1);
     const angle =
-      THREE.MathUtils.lerp(-1.06, -0.2, progress) + (deterministicNoise(index, 6) - 0.5) * 0.035;
+      THREE.MathUtils.lerp(-1, -0.12, progress) + (deterministicNoise(index, 6) - 0.5) * 0.045;
     // Three shallow depth bands create real parallax and an enclosing district
     // silhouette without bringing city geometry into the operational yard.
-    const radius = 210 + districtBand * 14 + deterministicNoise(index, 0) * 7;
-    const landmark = deterministicNoise(index, 1) > 0.9;
-    const height = 9 + deterministicNoise(index, 2) * 19 + districtBand * 1.5 + (landmark ? 8 : 0);
+    const radius = 184 + districtBand * 16 + deterministicNoise(index, 0) * 8;
+    const landmark = deterministicNoise(index, 1) > 0.93;
+    const height =
+      6.5 + deterministicNoise(index, 2) * 13 + districtBand * 1.25 + (landmark ? 6 : 0);
     const x = Math.cos(angle) * radius;
     const z = Math.sin(angle) * radius;
     return {
       x,
       z,
-      width: 4 + deterministicNoise(index, 3) * 3.2,
-      depth: 4 + deterministicNoise(index, 4) * 4.5,
+      width: 5.5 + deterministicNoise(index, 3) * 5.5,
+      depth: 5 + deterministicNoise(index, 4) * 5.5,
       height,
       yaw: Math.atan2(-x, -z),
       tone: deterministicNoise(index, 5),
@@ -54,38 +55,40 @@ export const buildNearCitySpecs = (count = 42): NearCityBuildingSpec[] =>
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
 const CITY_BODY_MATERIAL = new THREE.MeshStandardMaterial({
   color: '#ffffff',
+  emissive: '#222927',
+  emissiveIntensity: 0.22,
   roughness: 0.88,
   metalness: 0.04,
   vertexColors: true,
 });
 const CITY_ROOF_MATERIAL = new THREE.MeshStandardMaterial({
-  color: '#4b5052',
+  color: '#666d6c',
   roughness: 0.82,
   metalness: 0.08,
 });
 const CITY_WINDOW_MATERIAL = new THREE.MeshStandardMaterial({
-  color: '#263d48',
+  color: '#647d88',
   emissive: '#ffca72',
   emissiveIntensity: 0,
   roughness: 0.36,
   metalness: 0.06,
 });
 const CITY_MECHANICAL_MATERIAL = new THREE.MeshStandardMaterial({
-  color: '#626b6c',
+  color: '#7a8483',
   roughness: 0.7,
   metalness: 0.18,
 });
 const CITY_STACK_MATERIAL = new THREE.MeshStandardMaterial({
-  color: '#3f4547',
+  color: '#58605f',
   roughness: 0.58,
   metalness: 0.28,
 });
 const CITY_BODY_COLOURS = [
-  new THREE.Color('#858986'),
-  new THREE.Color('#91877c'),
-  new THREE.Color('#78858a'),
-  new THREE.Color('#827d78'),
-  new THREE.Color('#8c908a'),
+  new THREE.Color('#9ba39e'),
+  new THREE.Color('#aa9f91'),
+  new THREE.Color('#8fa1a6'),
+  new THREE.Color('#9e9690'),
+  new THREE.Color('#a5aaa2'),
 ] as const;
 
 interface WindowSpec {

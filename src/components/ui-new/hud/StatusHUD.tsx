@@ -209,7 +209,8 @@ export const StatusHUD: React.FC = () => {
 
           <div
             className="flex items-center gap-1.5 text-[10px] text-cyan-300 font-mono"
-            aria-label={`Throughput ${throughput} bags per hour`}
+            aria-label={`Final packer throughput ${throughput} bags per hour`}
+            title="Measured from final-stage packer mass flow"
           >
             <span>{throughput.toLocaleString()} BAGS/H</span>
           </div>

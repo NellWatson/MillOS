@@ -52,7 +52,6 @@ export interface KnowledgeEntry {
   seeInAction: string[];
   unlockCondition: UnlockCondition;
   quote?: KnowledgeQuote;
-  portraitPath?: string;
 }
 
 export interface UnlockContext {

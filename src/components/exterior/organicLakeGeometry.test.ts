@@ -23,6 +23,13 @@ describe('organic lake geometry', () => {
     expectFiniteGeometry(bank);
     expect(water.getAttribute('uv').count).toBe(water.getAttribute('position').count);
     expect(bank.getAttribute('color').count).toBe(bank.getAttribute('position').count);
+    expect(water.getAttribute('position').count).toBeGreaterThan(72 * 4);
+
+    const bankPositions = bank.getAttribute('position');
+    const bankHeights = Array.from({ length: bankPositions.count }, (_, index) =>
+      bankPositions.getZ(index)
+    );
+    expect(Math.max(...bankHeights) - Math.min(...bankHeights)).toBeGreaterThan(0.1);
 
     water.dispose();
     bank.dispose();
@@ -32,16 +39,14 @@ describe('organic lake geometry', () => {
     const segments = 24;
     const water = createOrganicLakeSurfaceGeometry(12, 8, segments);
     const positions = water.getAttribute('position');
-    const boundaryOffset = 1;
-
-    expect(positions.getX(boundaryOffset)).toBeCloseTo(
-      positions.getX(boundaryOffset + segments),
-      6
-    );
-    expect(positions.getY(boundaryOffset)).toBeCloseTo(
-      positions.getY(boundaryOffset + segments),
-      6
-    );
+    const radialSegments = (positions.count - 1) / (segments + 1);
+    expect(Number.isInteger(radialSegments)).toBe(true);
+    for (let ring = 0; ring < radialSegments; ring += 1) {
+      const first = 1 + ring * (segments + 1);
+      const last = first + segments;
+      expect(positions.getX(first)).toBeCloseTo(positions.getX(last), 6);
+      expect(positions.getY(first)).toBeCloseTo(positions.getY(last), 6);
+    }
 
     water.dispose();
   });

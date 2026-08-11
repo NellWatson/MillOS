@@ -32,7 +32,7 @@ const INTRO_STEPS: OnboardingStep[] = [
     title: 'Follow the process',
     icon: 'factory',
     content:
-      'The camera is flying to the full site. Grain moves from the rear silos through milling and sifting, then reaches packing and shipping. Drag to orbit. Scroll or pinch to zoom.',
+      'The camera is flying to the full site. Grain moves from the rear silos through milling and sifting, then reaches packing and shipping. Use W A S D to move, Q and E to descend or climb, drag to orbit, and scroll or pinch to zoom.',
   },
   {
     title: 'Protect today’s target',

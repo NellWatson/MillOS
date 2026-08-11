@@ -24,7 +24,7 @@ import {
 import { useTruckScheduleStore } from '../stores/truckScheduleStore';
 import { useBreakdownStore, type BreakdownType } from '../stores/breakdownStore';
 import { useUIStore } from '../stores/uiStore';
-import type { MachineData } from '../types';
+import { BAG_WEIGHT_KG, type MachineData } from '../types';
 import {
   useOperationsCampaignStore,
   type DispatchLoadSnapshot,
@@ -51,36 +51,31 @@ const GRAIN_DELIVERY_KG = 15000;
 // A shipping truck can load up to 5 t of finished flour or semolina.
 const FINISHED_GOODS_SHIPMENT_KG = 5000;
 const SHIPPING_LOAD_RATE_KG_PER_SECOND = 400;
-const BAGS_PER_SECOND_BASE = 12;
-const NOMINAL_PACKER_KG_PER_SECOND = 25;
-const NOMINAL_PACKER_COUNT = 3;
 let _bagProductionCarry = 0;
 
 export const calculateBagsProducedForTick = (
   deltaSeconds: number,
-  productionSpeed: number,
-  gameSpeed: number,
-  runningPackerCount: number,
-  healthFactor: number
+  packerFlowKgPerSecond: number,
+  bagWeightKg: number = BAG_WEIGHT_KG
 ): number => {
   if (
     !Number.isFinite(deltaSeconds) ||
-    !Number.isFinite(productionSpeed) ||
-    !Number.isFinite(gameSpeed) ||
-    !Number.isFinite(runningPackerCount) ||
-    !Number.isFinite(healthFactor)
+    !Number.isFinite(packerFlowKgPerSecond) ||
+    !Number.isFinite(bagWeightKg) ||
+    bagWeightKg <= 0
   ) {
     return 0;
   }
-  return (
-    BAGS_PER_SECOND_BASE *
-    Math.max(0, deltaSeconds) *
-    Math.max(0, productionSpeed) *
-    (Math.max(0, gameSpeed) / 60) *
-    (Math.max(0, runningPackerCount) / NOMINAL_PACKER_COUNT) *
-    Math.max(0, Math.min(1, healthFactor))
-  );
+  return (Math.max(0, deltaSeconds) * Math.max(0, packerFlowKgPerSecond)) / bagWeightKg;
 };
+
+export const calculatePackerThroughputBagsPerHour = (
+  packerFlowKgPerSecond: number,
+  bagWeightKg: number = BAG_WEIGHT_KG
+): number =>
+  Number.isFinite(packerFlowKgPerSecond) && Number.isFinite(bagWeightKg) && bagWeightKg > 0
+    ? Math.round((Math.max(0, packerFlowKgPerSecond) / bagWeightKg) * 3600)
+    : 0;
 
 function sumMaterialInventory(flow: MaterialFlowState, materialType: MaterialType): number {
   let total = 0;
@@ -490,12 +485,10 @@ function unifiedGameTick(ctx: TickContext): void {
 
   // 3. Count running packers for throughput calculation
   let runningPackerCount = 0;
-  let runningPackerEfficiencySum = 0;
   for (let i = 0; i < machines.length; i++) {
     const m = machines[i];
     if (m.type === 'PACKER' && (m.status === 'running' || m.status === 'warning')) {
       runningPackerCount++;
-      runningPackerEfficiencySum += m.metrics.efficiency ?? 100;
     }
   }
 
@@ -546,22 +539,12 @@ function unifiedGameTick(ctx: TickContext): void {
         ) / 10
       : 100;
 
-  // Throughput: actual production rate in bags per game-hour
-  // Based on App.tsx production formula: 12 bags/sec base × productionSpeed × gameSpeedFactor × packerScale
-  // Converted to bags per game-hour for display
-  const gameSpeedFactor = safeGameSpeed / 60;
-  const packerScale = runningPackerCount / 3; // 3 packers at full capacity
-
-  // Production per real second
-  const bagsPerRealSecond =
-    BAGS_PER_SECOND_BASE * effectiveProductionSpeed * gameSpeedFactor * packerScale;
-
-  // Convert to bags per game-hour: realSeconds per gameHour = 3600 / safeGameSpeed
-  // Guard against division by zero (paused state handled above, but be safe)
-  const realSecondsPerGameHour = safeGameSpeed > 0 ? 3600 / safeGameSpeed : 0;
-  const bagsPerGameHour = bagsPerRealSecond * realSecondsPerGameHour;
-
-  _metricsUpdate.throughput = Math.round(bagsPerGameHour);
+  // The operator KPI follows the same final-stage mass flow used by SCADA.
+  // This value is from the preceding material tick, so it is one 500 ms sample
+  // behind the scene while remaining stable and free of an extra store write.
+  _metricsUpdate.throughput = calculatePackerThroughputBagsPerHour(
+    useMaterialFlowStore.getState().currentPackerFlowRate
+  );
 
   // 5. Update store - machines only if changed, metrics always
   if (anyMachineChanged) {
@@ -659,27 +642,14 @@ function unifiedGameTick(ctx: TickContext): void {
       : undefined
   );
 
-  // 4c. Count completed bags on the same central 500 ms cadence as the
-  // material network. The former five-second interval produced visually large
-  // jumps and created a second simulation clock. Fractional carry keeps this
-  // smooth without losing production to integer rounding.
+  // 4c. Convert the exact final-stage mass flow into completed 25 kg bags on
+  // the same central cadence. Fractional carry preserves mass across ticks.
+  // The HUD, SCADA packer-flow tag, finished inventory and bag counter now all
+  // describe the same packer output rather than parallel rate estimates.
   if (runningPackerCount > 0) {
     const liveFlow = useMaterialFlowStore.getState();
     const flowRate = liveFlow.currentPackerFlowRate;
-    const flowSimulationLive =
-      Number.isFinite(flowRate) && (flowRate > 0 || liveFlow.totalMaterialProcessed > 0);
-    const fallbackEfficiency = runningPackerEfficiencySum / Math.max(1, runningPackerCount * 100);
-    const healthFactor = flowSimulationLive
-      ? Math.max(0, Math.min(1, flowRate / (NOMINAL_PACKER_KG_PER_SECOND * runningPackerCount)))
-      : Math.max(0, Math.min(1, fallbackEfficiency));
-
-    _bagProductionCarry += calculateBagsProducedForTick(
-      deltaSeconds,
-      effectiveProductionSpeed,
-      safeGameSpeed,
-      runningPackerCount,
-      healthFactor
-    );
+    _bagProductionCarry += calculateBagsProducedForTick(deltaSeconds, flowRate);
     const completedBags = Math.floor(_bagProductionCarry);
     if (completedBags > 0) {
       _bagProductionCarry -= completedBags;

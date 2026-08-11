@@ -139,7 +139,10 @@ const BEACON_SWEEP_RATE = 4;
  * illumination while it is moving rather than only when it stops.
  *
  * The wedge is additive geometry rather than a spotlight for the same reason:
- * a mesh's `visible` flag costs nothing, a light's changes every shader.
+ * a mesh's `visible` flag costs nothing, a light's changes every shader. The
+ * real point light is reserved for high and ultra because each point light
+ * adds a loop to every lit material in the complete scene. Medium retains the
+ * emissive beacon and sweeping pool without that scene-wide shader cost.
  */
 const WarningLight = React.memo<{
   isStopped: boolean;
@@ -153,6 +156,8 @@ const WarningLight = React.memo<{
   const lightRef = useRef<THREE.PointLight>(null);
   const sweepRef = useRef<THREE.Group>(null);
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const graphicsQuality = useGraphicsStore((state) => state.graphics.quality);
+  const realLightEnabled = graphicsQuality === 'high' || graphicsQuality === 'ultra';
 
   useFrame((state, delta) => {
     // PERFORMANCE: Skip animations when tab hidden
@@ -220,7 +225,9 @@ const WarningLight = React.memo<{
           />
         </mesh>
       </group>
-      <pointLight ref={lightRef} color={color} intensity={0} distance={7} decay={2} />
+      {realLightEnabled && (
+        <pointLight ref={lightRef} color={color} intensity={0} distance={7} decay={2} />
+      )}
     </group>
   );
 });

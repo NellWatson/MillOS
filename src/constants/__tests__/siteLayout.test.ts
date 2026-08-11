@@ -74,12 +74,32 @@ describe('canonical site layout', () => {
 
     const tankFarm = getServiceAssetBounds(SITE_LAYOUT.serviceYard.utilityTankFarm);
     expect(boundsOverlapXZ(tankFarm, propaneClearance)).toBe(false);
-    expect(propaneClearance.maxX).toBeLessThanOrEqual(SITE_LAYOUT.perimeter.maxX);
-    expect(tankFarm.maxX).toBeLessThan(SITE_LAYOUT.perimeter.maxX);
-    expect(tankFarm.minZ).toBeGreaterThan(SITE_LAYOUT.perimeter.minZ);
 
-    const telemetryHub = getServiceAssetBounds(SITE_LAYOUT.serviceYard.fleetTelemetryHub);
-    expect(telemetryHub.minX).toBeGreaterThan(SITE_LAYOUT.docks.shipping.apron.maxX);
+    for (const asset of bounds) {
+      expect(boundsOverlapXZ(asset.bounds, FACTORY_BOUNDS), `${asset.id} crosses factory`).toBe(
+        false
+      );
+      expect(asset.bounds.minX, `${asset.id} west perimeter`).toBeGreaterThanOrEqual(
+        SITE_LAYOUT.perimeter.minX
+      );
+      expect(asset.bounds.maxX, `${asset.id} east perimeter`).toBeLessThanOrEqual(
+        SITE_LAYOUT.perimeter.maxX
+      );
+      expect(asset.bounds.minZ, `${asset.id} north perimeter`).toBeGreaterThanOrEqual(
+        SITE_LAYOUT.perimeter.minZ
+      );
+      expect(asset.bounds.maxZ, `${asset.id} south perimeter`).toBeLessThanOrEqual(
+        SITE_LAYOUT.perimeter.maxZ
+      );
+      expect(
+        boundsOverlapXZ(asset.bounds, SITE_LAYOUT.docks.shipping.apron),
+        `${asset.id} crosses shipping apron`
+      ).toBe(false);
+      expect(
+        boundsOverlapXZ(asset.bounds, SITE_LAYOUT.docks.receiving.apron),
+        `${asset.id} crosses receiving apron`
+      ).toBe(false);
+    }
   });
 
   it('keeps canonical forklift swept corridors clear of machines and service assets', () => {

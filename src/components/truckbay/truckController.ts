@@ -364,6 +364,53 @@ export function getTruckControllerPose(
   return poseFromState(state, safetyHold);
 }
 
+const interpolateScalar = (from: number, to: number, alpha: number): number =>
+  from + (to - from) * alpha;
+
+const interpolateAngle = (from: number, to: number, alpha: number): number =>
+  normalizeVehicleAngle(from + shortestVehicleAngle(from, to) * alpha);
+
+/**
+ * Produces a render-only pose between deterministic 60 Hz controller ticks.
+ * Discrete phase and interlock authority comes from the current state while
+ * position, articulation, wheel travel and service mechanisms move at the
+ * display refresh rate. This removes repeated poses on 90/120/144 Hz displays
+ * without making simulation outcomes depend on render cadence.
+ */
+export function interpolateTruckControllerState(
+  previous: TruckControllerState,
+  current: TruckControllerState,
+  alpha: number
+): TruckControllerState {
+  const t = Math.max(0, Math.min(1, Number.isFinite(alpha) ? alpha : 0));
+  if (previous.active !== current.active || previous.dock !== current.dock) return current;
+
+  const samePhase = previous.phase === current.phase;
+  const sameServicePhase = previous.servicePhase === current.servicePhase;
+  return {
+    ...current,
+    phaseDistance: samePhase
+      ? interpolateScalar(previous.phaseDistance, current.phaseDistance, t)
+      : current.phaseDistance,
+    phaseElapsed: samePhase
+      ? interpolateScalar(previous.phaseElapsed, current.phaseElapsed, t)
+      : current.phaseElapsed,
+    serviceElapsed: sameServicePhase
+      ? interpolateScalar(previous.serviceElapsed, current.serviceElapsed, t)
+      : current.serviceElapsed,
+    motion: {
+      speed: interpolateScalar(previous.motion.speed, current.motion.speed, t),
+      acceleration: interpolateScalar(previous.motion.acceleration, current.motion.acceleration, t),
+    },
+    x: interpolateScalar(previous.x, current.x, t),
+    z: interpolateScalar(previous.z, current.z, t),
+    tractorYaw: interpolateAngle(previous.tractorYaw, current.tractorYaw, t),
+    trailerYaw: interpolateAngle(previous.trailerYaw, current.trailerYaw, t),
+    steeringAngle: interpolateScalar(previous.steeringAngle, current.steeringAngle, t),
+    wheelTravel: interpolateScalar(previous.wheelTravel, current.wheelTravel, t),
+  };
+}
+
 export function stepTruckController(
   prior: TruckControllerState,
   input: TruckControllerInput

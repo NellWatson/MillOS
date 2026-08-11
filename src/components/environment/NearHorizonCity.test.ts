@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { SITE_LAYOUT } from '../../constants/siteLayout';
 import { buildNearCitySpecs } from './NearHorizonCity';
 
 describe('near horizon city layout', () => {
@@ -8,8 +9,11 @@ describe('near horizon city layout', () => {
     expect(first).toHaveLength(42);
     first.forEach((building) => {
       expect(Object.values(building).every(Number.isFinite)).toBe(true);
-      expect(Math.hypot(building.x, building.z)).toBeGreaterThanOrEqual(210);
-      expect(Math.hypot(building.x, building.z)).toBeLessThanOrEqual(245);
+      expect(Math.hypot(building.x, building.z)).toBeGreaterThanOrEqual(184);
+      expect(Math.hypot(building.x, building.z)).toBeLessThanOrEqual(224);
+      expect(building.height).toBeGreaterThanOrEqual(6.5);
+      expect(building.height).toBeLessThan(30);
+      expect(building.width).toBeGreaterThanOrEqual(5.5);
       expect(building.districtBand).toBeGreaterThanOrEqual(0);
       expect(building.districtBand).toBeLessThanOrEqual(2);
       expect(building.roofStyle).toBeGreaterThanOrEqual(0);
@@ -31,8 +35,12 @@ describe('near horizon city layout', () => {
   });
 
   it('stays clear of the authored castle footprint', () => {
+    const castle = SITE_LAYOUT.landmarks.castle;
+    const castleClearance = Math.max(...castle.footprint) * castle.scale * 0.5;
     buildNearCitySpecs().forEach((building) => {
-      expect(Math.hypot(building.x - 45, building.z + 200)).toBeGreaterThan(45);
+      expect(
+        Math.hypot(building.x - castle.position[0], building.z - castle.position[2])
+      ).toBeGreaterThan(castleClearance);
     });
   });
 });
