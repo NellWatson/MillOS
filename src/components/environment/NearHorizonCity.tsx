@@ -13,6 +13,8 @@ export interface NearCityBuildingSpec {
   readonly height: number;
   readonly yaw: number;
   readonly tone: number;
+  readonly roofStyle: number;
+  readonly districtBand: number;
 }
 
 const deterministicNoise = (index: number, channel: number): number => {
@@ -21,13 +23,19 @@ const deterministicNoise = (index: number, channel: number): number => {
 };
 
 /** A compact, world-anchored skyline that restores nearby parallax. */
-export const buildNearCitySpecs = (count = 32): NearCityBuildingSpec[] =>
+export const buildNearCitySpecs = (count = 42): NearCityBuildingSpec[] =>
   Array.from({ length: count }, (_, index) => {
-    const progress = count <= 1 ? 0.5 : index / (count - 1);
-    const angle = THREE.MathUtils.lerp(-1.08, -0.25, progress);
-    const radius = 225 + deterministicNoise(index, 0) * 15;
+    const districtBand = index % 3;
+    const buildingsInBand = Math.ceil(count / 3);
+    const positionInBand = Math.floor(index / 3);
+    const progress = buildingsInBand <= 1 ? 0.5 : positionInBand / (buildingsInBand - 1);
+    const angle =
+      THREE.MathUtils.lerp(-1.06, -0.2, progress) + (deterministicNoise(index, 6) - 0.5) * 0.035;
+    // Three shallow depth bands create real parallax and an enclosing district
+    // silhouette without bringing city geometry into the operational yard.
+    const radius = 210 + districtBand * 14 + deterministicNoise(index, 0) * 7;
     const landmark = deterministicNoise(index, 1) > 0.9;
-    const height = 8 + deterministicNoise(index, 2) * 20 + (landmark ? 8 : 0);
+    const height = 9 + deterministicNoise(index, 2) * 19 + districtBand * 1.5 + (landmark ? 8 : 0);
     const x = Math.cos(angle) * radius;
     const z = Math.sin(angle) * radius;
     return {
@@ -38,6 +46,8 @@ export const buildNearCitySpecs = (count = 32): NearCityBuildingSpec[] =>
       height,
       yaw: Math.atan2(-x, -z),
       tone: deterministicNoise(index, 5),
+      roofStyle: Math.floor(deterministicNoise(index, 7) * 3),
+      districtBand,
     };
   });
 
@@ -49,22 +59,33 @@ const CITY_BODY_MATERIAL = new THREE.MeshStandardMaterial({
   vertexColors: true,
 });
 const CITY_ROOF_MATERIAL = new THREE.MeshStandardMaterial({
-  color: '#59636b',
-  roughness: 0.78,
-  metalness: 0.12,
+  color: '#4b5052',
+  roughness: 0.82,
+  metalness: 0.08,
 });
 const CITY_WINDOW_MATERIAL = new THREE.MeshStandardMaterial({
-  color: '#4b7189',
+  color: '#263d48',
   emissive: '#ffca72',
   emissiveIntensity: 0,
-  roughness: 0.28,
-  metalness: 0.12,
+  roughness: 0.36,
+  metalness: 0.06,
+});
+const CITY_MECHANICAL_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#626b6c',
+  roughness: 0.7,
+  metalness: 0.18,
+});
+const CITY_STACK_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#3f4547',
+  roughness: 0.58,
+  metalness: 0.28,
 });
 const CITY_BODY_COLOURS = [
-  new THREE.Color('#84949c'),
-  new THREE.Color('#958d82'),
-  new THREE.Color('#758c9a'),
-  new THREE.Color('#899693'),
+  new THREE.Color('#858986'),
+  new THREE.Color('#91877c'),
+  new THREE.Color('#78858a'),
+  new THREE.Color('#827d78'),
+  new THREE.Color('#8c908a'),
 ] as const;
 
 interface WindowSpec {
@@ -72,6 +93,16 @@ interface WindowSpec {
   readonly y: number;
   readonly z: number;
   readonly width: number;
+  readonly yaw: number;
+}
+
+interface RooftopSpec {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly width: number;
+  readonly height: number;
+  readonly depth: number;
   readonly yaw: number;
 }
 
@@ -108,9 +139,50 @@ export const NearHorizonCity: React.FC = () => {
     });
     return result;
   }, [buildings]);
+  const rooftopEquipment = useMemo<RooftopSpec[]>(
+    () =>
+      buildings
+        .filter((building) => building.roofStyle !== 0)
+        .map((building, index) => ({
+          x: building.x,
+          y: building.height + 0.34,
+          z: building.z,
+          width: building.width * (0.22 + deterministicNoise(index, 11) * 0.16),
+          height: 0.65 + deterministicNoise(index, 12) * 0.55,
+          depth: building.depth * (0.2 + deterministicNoise(index, 13) * 0.14),
+          yaw: building.yaw,
+        })),
+    [buildings]
+  );
+  const stacks = useMemo<RooftopSpec[]>(
+    () =>
+      buildings
+        .filter((building) => building.roofStyle === 2)
+        .map((building, index) => {
+          const radialLength = Math.hypot(building.x, building.z);
+          const inwardX = -building.x / radialLength;
+          const inwardZ = -building.z / radialLength;
+          const tangentX = -inwardZ;
+          const tangentZ = inwardX;
+          const offset = building.width * (deterministicNoise(index, 14) - 0.5) * 0.45;
+          const height = 1.8 + deterministicNoise(index, 15) * 2.1;
+          return {
+            x: building.x + tangentX * offset,
+            y: building.height + height / 2,
+            z: building.z + tangentZ * offset,
+            width: 0.22 + deterministicNoise(index, 16) * 0.18,
+            height,
+            depth: 0.22 + deterministicNoise(index, 17) * 0.18,
+            yaw: building.yaw,
+          };
+        }),
+    [buildings]
+  );
   const bodiesRef = useRef<THREE.InstancedMesh>(null);
   const roofsRef = useRef<THREE.InstancedMesh>(null);
   const windowsRef = useRef<THREE.InstancedMesh>(null);
+  const equipmentRef = useRef<THREE.InstancedMesh>(null);
+  const stacksRef = useRef<THREE.InstancedMesh>(null);
   const initialLightLevel = getExteriorLampLevel(
     useGameSimulationStore.getState().gameTime,
     useGameSimulationStore.getState().weather
@@ -122,7 +194,9 @@ export const NearHorizonCity: React.FC = () => {
     const bodies = bodiesRef.current;
     const roofs = roofsRef.current;
     const windowMesh = windowsRef.current;
-    if (!bodies || !roofs || !windowMesh) return;
+    const equipmentMesh = equipmentRef.current;
+    const stackMesh = stacksRef.current;
+    if (!bodies || !roofs || !windowMesh || !equipmentMesh || !stackMesh) return;
     const matrix = new THREE.Matrix4();
     const position = new THREE.Vector3();
     const rotation = new THREE.Quaternion();
@@ -134,10 +208,16 @@ export const NearHorizonCity: React.FC = () => {
       rotation.setFromEuler(euler.set(0, building.yaw, 0));
       scale.set(building.width, building.height, building.depth);
       bodies.setMatrixAt(index, matrix.compose(position, rotation, scale));
-      bodies.setColorAt(index, CITY_BODY_COLOURS[Math.floor(building.tone * 4) % 4]);
+      bodies.setColorAt(
+        index,
+        CITY_BODY_COLOURS[
+          Math.floor(building.tone * CITY_BODY_COLOURS.length) % CITY_BODY_COLOURS.length
+        ]
+      );
 
       position.set(building.x, building.height - 0.35, building.z);
-      scale.set(building.width * 0.72, 0.7, building.depth * 0.72);
+      const roofInset = building.roofStyle === 0 ? 0.76 : 0.66;
+      scale.set(building.width * roofInset, 0.7, building.depth * roofInset);
       roofs.setMatrixAt(index, matrix.compose(position, rotation, scale));
     });
     windows.forEach((window, index) => {
@@ -146,14 +226,30 @@ export const NearHorizonCity: React.FC = () => {
       scale.set(window.width, 0.54, 0.09);
       windowMesh.setMatrixAt(index, matrix.compose(position, rotation, scale));
     });
+    rooftopEquipment.forEach((equipment, index) => {
+      position.set(equipment.x, equipment.y, equipment.z);
+      rotation.setFromEuler(euler.set(0, equipment.yaw, 0));
+      scale.set(equipment.width, equipment.height, equipment.depth);
+      equipmentMesh.setMatrixAt(index, matrix.compose(position, rotation, scale));
+    });
+    stacks.forEach((stack, index) => {
+      position.set(stack.x, stack.y, stack.z);
+      rotation.setFromEuler(euler.set(0, stack.yaw, 0));
+      scale.set(stack.width, stack.height, stack.depth);
+      stackMesh.setMatrixAt(index, matrix.compose(position, rotation, scale));
+    });
     bodies.instanceMatrix.needsUpdate = true;
     bodies.instanceColor!.needsUpdate = true;
     roofs.instanceMatrix.needsUpdate = true;
     windowMesh.instanceMatrix.needsUpdate = true;
+    equipmentMesh.instanceMatrix.needsUpdate = true;
+    stackMesh.instanceMatrix.needsUpdate = true;
     bodies.computeBoundingSphere();
     roofs.computeBoundingSphere();
     windowMesh.computeBoundingSphere();
-  }, [buildings, windows]);
+    equipmentMesh.computeBoundingSphere();
+    stackMesh.computeBoundingSphere();
+  }, [buildings, rooftopEquipment, stacks, windows]);
 
   useEffect(
     () =>
@@ -192,6 +288,18 @@ export const NearHorizonCity: React.FC = () => {
         name="near-city-windows"
         args={[UNIT_BOX, CITY_WINDOW_MATERIAL, windows.length]}
         renderOrder={RENDER_ORDER.cityNear + 2}
+      />
+      <instancedMesh
+        ref={equipmentRef}
+        name="near-city-rooftop-equipment"
+        args={[UNIT_BOX, CITY_MECHANICAL_MATERIAL, rooftopEquipment.length]}
+        renderOrder={RENDER_ORDER.cityNear + 1}
+      />
+      <instancedMesh
+        ref={stacksRef}
+        name="near-city-stacks"
+        args={[UNIT_BOX, CITY_STACK_MATERIAL, stacks.length]}
+        renderOrder={RENDER_ORDER.cityNear + 1}
       />
     </group>
   );

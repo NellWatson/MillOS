@@ -28,9 +28,11 @@ const createLampPoolTexture = (): THREE.DataTexture => {
       const distance = Math.sqrt(dx * dx + dy * dy) * 2;
       const alpha = Math.pow(Math.max(0, 1 - distance), 2.2);
       const offset = (y * size + x) * 4;
+      // Keep hue in the material, not in both the texture and material. The
+      // previous double tint produced opaque mustard circles at full night.
       data[offset] = 255;
-      data[offset + 1] = 235;
-      data[offset + 2] = 176;
+      data[offset + 1] = 255;
+      data[offset + 2] = 255;
       data[offset + 3] = Math.round(alpha * 255);
     }
   }
@@ -54,13 +56,13 @@ export const EXTERIOR_LAMP_LENS_MATERIAL = new THREE.MeshStandardMaterial({
 });
 
 const LAMP_POOL_MATERIAL = new THREE.MeshBasicMaterial({
-  color: '#ffd98a',
+  color: '#ffe8b8',
   map: createLampPoolTexture(),
   transparent: true,
   opacity: 0,
   blending: THREE.AdditiveBlending,
   depthWrite: false,
-  toneMapped: false,
+  toneMapped: true,
   polygonOffset: true,
   polygonOffsetFactor: POLYGON_OFFSET.exteriorOverlay.factor,
   polygonOffsetUnits: POLYGON_OFFSET.exteriorOverlay.units,
@@ -104,7 +106,7 @@ export const ExteriorLampDriver: React.FC = () => {
     // Additive pools are deliberately restrained. At full night they should
     // reveal the road surface and fixture spacing without merging into a flat
     // amber carpet when several yard poles overlap.
-    LAMP_POOL_MATERIAL.opacity = level * 0.36;
+    LAMP_POOL_MATERIAL.opacity = level * 0.24;
     pointLights.forEach(({ light, baseIntensity }) => {
       light.intensity = baseIntensity * level;
     });

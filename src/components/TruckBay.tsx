@@ -85,6 +85,16 @@ const APRON_CONCRETE_ROUGHNESS = cloneYardTexture(PROCEDURAL_TEXTURES.concreteRo
 const YARD_TARMAC_SURFACE = {
   color: '#ffffff',
   map: YARD_TARMAC_MAP,
+  // The shipping and receiving aprons sit beneath the factory mass in the
+  // authored cameras. Even with shadows disabled their rough dielectric
+  // response landed below display black, erasing the aggregate and making the
+  // whole logistics zone read as a void. Reusing the albedo as a very low
+  // emissive contribution acts as a baked diffuse-sky floor: it preserves the
+  // texture, adds no geometry or texture allocation, and does not flatten the
+  // site's global key/fill ratio.
+  emissive: '#ffffff',
+  emissiveMap: YARD_TARMAC_MAP,
+  emissiveIntensity: 0.1,
   roughnessMap: YARD_TARMAC_ROUGHNESS,
   roughness: 1,
   metalness: 0,
@@ -3301,7 +3311,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           [30, 55],
         ].map(([x, z], i) => (
           <group key={i} position={[x, 0, z]}>
-            <ExteriorLampPool radius={12.5} />
+            <ExteriorLampPool radius={10} />
             {/* Light pole - 14 units tall, centered at y=7, so top is at y=14 */}
             <mesh position={[0, 7, 0]}>
               <cylinderGeometry args={[0.12, 0.15, 14, 8]} />
@@ -3711,7 +3721,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           [30, -55],
         ].map(([x, z], i) => (
           <group key={i} position={[x, 0, z]}>
-            <ExteriorLampPool radius={12.5} />
+            <ExteriorLampPool radius={10} />
             {/* Light pole - 14 units tall, centered at y=7, so top is at y=14 */}
             <mesh position={[0, 7, 0]}>
               <cylinderGeometry args={[0.12, 0.15, 14, 8]} />

@@ -252,29 +252,19 @@ const GRAPHICS_PRESETS: Record<GraphicsQuality, GraphicsSettings> = {
     // THE `enableMachineTextures` HOLD, stated once here for all four tiers.
     // The KTX2 asset set is complete and correct (1024px, 11 mip levels, and
     // `textureCompression.ts` binds LinearMipmapLinear/Linear + RepeatWrapping).
-    // The LOADER is not. Three preconditions must ALL hold before any tier
-    // flips this to true:
+    // The JPG fallback now also supplies mipmaps, linear filtering,
+    // anisotropy, and explicit colour spaces. One acceptance condition remains
+    // before any tier flips this to true:
     //
-    //  1. SAMPLING. `machineTextures.ts` -> `loadJpgTexture` sets
-    //     `magFilter = NearestFilter`, `generateMipmaps = false`,
-    //     `minFilter = LinearFilter` and no anisotropy. That is not just the
-    //     no-KTX2 fallback: `safeLoadTexture` returns this JPG SYNCHRONOUSLY as
-    //     the placeholder while the KTX2 resolves, so point sampling with no
-    //     mip chain is on the hot path. A 55 m conveyor belt whose UVs scroll
-    //     every frame, and the ground/floor planes at grazing angles, would
-    //     shimmer violently.
-    //  2. COLOUR SPACE. Neither loader path declares `SRGBColorSpace` on the
-    //     `_color` maps. Bound as `material.map` at the three default
-    //     (NoColorSpace) they are read as linear and render washed out - the
-    //     exact class of bug the DataTexture colour-space pass just removed
-    //     repo-wide.
-    //  3. AUTHORED-MATERIAL OVERRIDE. This does not layer onto the authored
+    //  AUTHORED-MATERIAL OVERRIDE. This does not layer onto the authored
     //     look, it replaces it. `ConveyorSystem.activeMaps` swaps the authored
     //     procedural `beltTextures` for the KTX2 set the instant
     //     `conveyorTextures.color` is non-null, and `FactoryFloor`,
     //     `ReflectiveFloor` and `FactoryExterior` do the same for concrete,
     //     water and grass. Flipping this silently overrides recently authored
-    //     materials with an unmeasured external set.
+    //     materials with an unmeasured external set. It therefore stays behind
+    //     the hold until blind A/B art review and the five-view performance
+    //     benchmark accept the replacement as a set.
     //
     // Live consumers, for whoever does the audit: ConveyorSystem.tsx:751,
     // FactoryExterior.tsx:5252, FactoryFloor.tsx:38+254, ReflectiveFloor.tsx:16,

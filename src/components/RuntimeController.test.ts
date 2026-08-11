@@ -3,8 +3,10 @@ import { SITE_LAYOUT, type Vec3Tuple } from '../constants/siteLayout';
 import { sampleAtmosphere, sampleCelestial } from '../simulation/atmosphere';
 import {
   readRuntimeMotionTelemetry,
+  readRuntimeCheckpointTelemetry,
   rendererCounterPerFrame,
   resolveBenchmarkCamera,
+  summarizeFramePacing,
 } from './RuntimeController';
 
 function normalizedDirection(from: Vec3Tuple, to: Vec3Tuple): Vec3Tuple {
@@ -31,6 +33,43 @@ describe('rendererCounterPerFrame', () => {
     expect(rendererCounterPerFrame(12, 0, true)).toBe(12);
     expect(rendererCounterPerFrame(Number.NaN, 10, true)).toBe(0);
     expect(rendererCounterPerFrame(-1, 10, true)).toBe(0);
+  });
+});
+
+describe('summarizeFramePacing', () => {
+  it('reports tail latency, variability, and threshold counts', () => {
+    const frames = [...Array.from({ length: 98 }, () => 10), 20, 50];
+    expect(summarizeFramePacing(frames)).toEqual({
+      sampleCount: 100,
+      averageFrameMs: 10.5,
+      p50FrameMs: 10,
+      p95FrameMs: 10,
+      p99FrameMs: 20,
+      frameTimeStdDevMs: 4.09,
+      onePercentLowFps: 20,
+      worstFrameMs: 50,
+      averageFps: 95.24,
+      framesOver16_7Ms: 2,
+      framesOver25Ms: 1,
+      framesOver50Ms: 0,
+    });
+  });
+
+  it('ignores non-finite samples and handles an empty window', () => {
+    expect(summarizeFramePacing([Number.NaN, Number.POSITIVE_INFINITY, -1, 0])).toEqual({
+      sampleCount: 0,
+      averageFrameMs: 0,
+      p50FrameMs: 0,
+      p95FrameMs: 0,
+      p99FrameMs: 0,
+      frameTimeStdDevMs: 0,
+      onePercentLowFps: 0,
+      worstFrameMs: 0,
+      averageFps: 0,
+      framesOver16_7Ms: 0,
+      framesOver25Ms: 0,
+      framesOver50Ms: 0,
+    });
   });
 });
 
@@ -104,5 +143,35 @@ describe('readRuntimeMotionTelemetry', () => {
 
   it('rejects invalid cargo and stopped states', () => {
     expect(readRuntimeMotionTelemetry({ cargo: 'grain', stopped: 'no' })).toEqual({});
+  });
+});
+
+describe('readRuntimeCheckpointTelemetry', () => {
+  it('publishes finite gate phase, dwell, and arm state', () => {
+    expect(
+      readRuntimeCheckpointTelemetry('shipping-checkpoint', {
+        gateOpen: true,
+        gatePhase: 'opening',
+        clearanceSecondsRemaining: 1.23456,
+        armAngle: 0.87654,
+      })
+    ).toEqual({
+      id: 'shipping-checkpoint',
+      gateOpen: true,
+      phase: 'opening',
+      clearanceSecondsRemaining: 1.23,
+      armAngle: 0.8765,
+    });
+  });
+
+  it('rejects incomplete or invalid checkpoint telemetry', () => {
+    expect(
+      readRuntimeCheckpointTelemetry('receiving-checkpoint', {
+        gateOpen: false,
+        gatePhase: 'jammed',
+        clearanceSecondsRemaining: 0,
+        armAngle: Number.NaN,
+      })
+    ).toBeNull();
   });
 });

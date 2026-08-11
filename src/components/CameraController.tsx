@@ -34,6 +34,19 @@ const SPRINT_MULTIPLIER = 3.6; // Speed multiplier when holding Shift
 const MIN_CAMERA_HEIGHT = 1.5; // Minimum camera Y to prevent ground clipping (25% lower than 2.0)
 const MIN_TARGET_HEIGHT = 0.5; // Minimum orbit target Y (above floor level)
 
+/**
+ * Authored preset and tour flights own their complete path and endpoint. The
+ * manual collision solver must not stop one at a factory wall while it travels
+ * from an exterior overview to an interior machine. Manual input cancels the
+ * flight before moving, so it immediately returns to collision-protected
+ * navigation even though React's `isAnimating` snapshot can remain true for
+ * the rest of that frame.
+ */
+export const shouldResolveCameraCollisionForFrame = (
+  isAnimating: boolean,
+  manualMovementApplied: boolean
+): boolean => !isAnimating || manualMovementApplied;
+
 // Camera preset definitions based on MillOS factory zones
 export interface CameraPreset {
   name: string;
@@ -96,6 +109,7 @@ interface CameraStore {
   setPreset: (index: number) => void;
   focusOn: (position: [number, number, number], target: [number, number, number]) => void;
   clearAnimation: () => void;
+  cancelAnimation: () => void;
 }
 
 export const useCameraStore = create<CameraStore>((set) => ({
@@ -122,6 +136,13 @@ export const useCameraStore = create<CameraStore>((set) => ({
       isAnimating: true,
     }),
   clearAnimation: () => set({ isAnimating: false }),
+  cancelAnimation: () =>
+    set({
+      activePreset: null,
+      targetPosition: null,
+      targetLookAt: null,
+      isAnimating: false,
+    }),
 }));
 
 // Camera controller component - must be inside Canvas
@@ -137,7 +158,8 @@ export const CameraController: React.FC<CameraControllerProps> = ({
   targetSpeed = 0.15,
 }) => {
   const { camera } = useThree();
-  const { targetPosition, targetLookAt, isAnimating, clearAnimation } = useCameraStore();
+  const { targetPosition, targetLookAt, isAnimating, clearAnimation, cancelAnimation } =
+    useCameraStore();
   const animationProgress = useRef(0);
   const animationStartPosition = useRef(new THREE.Vector3());
   const animationStartLookAt = useRef(new THREE.Vector3());
@@ -232,7 +254,7 @@ export const CameraController: React.FC<CameraControllerProps> = ({
     let manualMovementApplied = false;
 
     if (hasManualInput && isAnimating) {
-      clearAnimation();
+      cancelAnimation();
     }
 
     // Handle WASD/Arrow key movement OR D-pad move mode
@@ -352,23 +374,27 @@ export const CameraController: React.FC<CameraControllerProps> = ({
       orbitControlsRef.current.target.y = MIN_TARGET_HEIGHT;
     }
 
-    const collisionStart = manualMovementApplied
-      ? manualCameraStart.current
-      : previousCameraPosition.current;
-    const collision = resolveCameraCollision(
-      [collisionStart.x, collisionStart.y, collisionStart.z],
-      [camera.position.x, camera.position.y, camera.position.z]
-    );
-    camera.position.set(...collision.position);
-    if (manualMovementApplied && orbitControlsRef?.current) {
-      syncOrbitTargetToAcceptedTranslation(
-        orbitControlsRef.current.target,
-        manualTargetStart.current,
-        manualCameraStart.current,
-        camera.position
+    if (shouldResolveCameraCollisionForFrame(isAnimating, manualMovementApplied)) {
+      const collisionStart = manualMovementApplied
+        ? manualCameraStart.current
+        : previousCameraPosition.current;
+      const collision = resolveCameraCollision(
+        [collisionStart.x, collisionStart.y, collisionStart.z],
+        [camera.position.x, camera.position.y, camera.position.z]
       );
+      camera.position.set(...collision.position);
+      if (manualMovementApplied && orbitControlsRef?.current) {
+        syncOrbitTargetToAcceptedTranslation(
+          orbitControlsRef.current.target,
+          manualTargetStart.current,
+          manualCameraStart.current,
+          camera.position
+        );
+      }
+      camera.userData.lastCollision = collision.collidedWith;
+    } else {
+      camera.userData.lastCollision = null;
     }
-    camera.userData.lastCollision = collision.collidedWith;
 
     if (orbitControlsRef?.current && orbitControlsRef.current.target.y < MIN_TARGET_HEIGHT) {
       orbitControlsRef.current.target.y = MIN_TARGET_HEIGHT;

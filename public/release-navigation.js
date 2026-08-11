@@ -75,10 +75,16 @@
         .forEach((selector) => buildNavigation(selector, matrix));
     };
     enhance();
-    new MutationObserver(enhance).observe(document.documentElement, {
+    const observer = new MutationObserver(enhance);
+    observer.observe(document.documentElement, {
       childList: true,
       subtree: true,
     });
+    // Historical pages can remain open for long sessions, but the observer has
+    // no work once the document is being discarded. Disconnecting at pagehide
+    // also prevents a queued callback from touching a torn-down document in
+    // browser-backed tests.
+    window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
   };
 
   install().catch(() => {

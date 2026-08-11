@@ -426,11 +426,11 @@ describe('GraphicsStore', () => {
     });
 
     it('holds external PBR machine textures off at every tier', () => {
-      // Not an oversight. `machineTextures.ts` -> `loadJpgTexture` still binds
-      // NearestFilter with `generateMipmaps = false` on the synchronous
-      // placeholder path, declares no colour space on `_color` maps, and the
-      // flag OVERRIDES rather than layers onto the authored materials. See the
-      // three preconditions recorded on the `low` preset.
+      // Not an oversight. Sampling and colour-space preconditions are fixed,
+      // but this flag still OVERRIDES rather than layers onto the authored
+      // materials. It remains off until blind A/B art review and the five-view
+      // performance benchmark accept that replacement. See the hold recorded
+      // on the `low` preset.
       Object.values(GRAPHICS_PRESETS).forEach((preset) => {
         expect(preset.enableMachineTextures).toBe(false);
       });

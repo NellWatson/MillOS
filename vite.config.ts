@@ -29,6 +29,44 @@ const CURRENT_AUDIO_FILES = new Set([
   'Fanfare for Space.mp3',
 ]);
 
+/**
+ * Vite's default public-directory copy duplicates every immutable historical
+ * release into `dist`, only for `finalizeCurrentBuild` to delete those copies
+ * at closeBundle. Besides wasting build time, that transient duplication can
+ * exceed the available release-runner disk. Development still uses Vite's
+ * ordinary public directory and `serveStaticVersions`; build mode uses this
+ * filtered copy instead.
+ */
+function copyCurrentPublicFiles(): Plugin {
+  return {
+    name: 'copy-current-public-files',
+    apply: 'build',
+    writeBundle() {
+      const sourceDirectory = path.resolve(__dirname, 'public');
+      const outputDirectory = path.resolve(__dirname, 'dist');
+      fs.cpSync(sourceDirectory, outputDirectory, {
+        recursive: true,
+        filter(source) {
+          const relative = path.relative(sourceDirectory, source);
+          if (relative === '') return true;
+          const segments = relative.split(path.sep);
+          if (/^v\d+\.\d+$/.test(segments[0])) return false;
+          const basename = path.basename(source);
+          if (basename === '.DS_Store' || basename === 'blocked_commands.log') return false;
+          if (
+            segments.length === 1 &&
+            basename.toLocaleLowerCase().endsWith('.mp3') &&
+            !CURRENT_AUDIO_FILES.has(basename)
+          ) {
+            return false;
+          }
+          return true;
+        },
+      });
+    },
+  };
+}
+
 function finalizeCurrentBuild({
   buildId,
   cacheVersion,
@@ -147,6 +185,10 @@ export default defineConfig((): UserConfig => {
 
   return {
     base: basePath,
+    // Public resolution remains available to both dev and Rollup. The build
+    // section disables only Vite's unfiltered copy; our plugin copies the
+    // current-release subset after bundles have been written.
+    publicDir: 'public',
     server: {
       port: 3000,
       host: '0.0.0.0',
@@ -162,6 +204,7 @@ export default defineConfig((): UserConfig => {
     plugins: [
       serveStaticVersions(),
       react(),
+      copyCurrentPublicFiles(),
       finalizeCurrentBuild({
         buildId,
         cacheVersion,
@@ -178,6 +221,7 @@ export default defineConfig((): UserConfig => {
     },
     // Build optimization for better bundle splitting and caching
     build: {
+      copyPublicDir: false,
       target: 'es2020',
       minify: 'esbuild', // esbuild is faster, terser for smaller bundles
       sourcemap: false, // Disable for production (saves ~30% bundle size)

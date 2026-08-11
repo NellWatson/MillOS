@@ -60,6 +60,10 @@ interface RuntimeRayHit {
   type: string;
   distance: number;
   material: string;
+  materialColor: string | null;
+  map: string | null;
+  receiveShadow: boolean;
+  renderOrder: number;
 }
 
 interface RuntimeShaderState {
@@ -110,6 +114,16 @@ export interface RuntimeNamedObjectPose {
   visible: boolean;
 }
 
+export type RuntimeCheckpointPhase = 'closed' | 'opening' | 'open' | 'closing';
+
+export interface RuntimeCheckpointState {
+  id: 'receiving-checkpoint' | 'shipping-checkpoint';
+  gateOpen: boolean;
+  phase: RuntimeCheckpointPhase;
+  clearanceSecondsRemaining: number;
+  armAngle: number;
+}
+
 interface RuntimeMotionEntity extends RuntimeMotionTelemetry {
   id: string;
   type: 'forklift' | 'truck';
@@ -134,8 +148,12 @@ export interface RuntimeTelemetrySnapshot {
   p50FrameMs: number;
   p95FrameMs: number;
   p99FrameMs: number;
+  frameTimeStdDevMs: number;
+  onePercentLowFps: number;
   worstFrameMs: number;
   averageFps: number;
+  framesOver16_7Ms: number;
+  framesOver25Ms: number;
   framesOver50Ms: number;
   longTasks: Array<{ startTime: number; duration: number }>;
   renderer: RuntimeRendererStats;
@@ -163,6 +181,7 @@ export interface RuntimeTelemetrySnapshot {
     sceneObjects: string[];
   };
   motion: RuntimeMotionState;
+  checkpoints: RuntimeCheckpointState[];
   audio: ReturnType<typeof audioManager.getDiagnostics>;
   sceneChildren: number;
   quality: string;
@@ -177,9 +196,37 @@ export interface MillOSRuntimeTelemetry {
   reset: () => void;
   snapshot: () => RuntimeTelemetrySnapshot;
   motionSnapshot: () => RuntimeMotionState;
+  checkpointSnapshot: () => RuntimeCheckpointState[];
   namedObjectsSnapshot: (names: string[]) => RuntimeNamedObjectPose[];
   setCameraPose: (position: [number, number, number], target: [number, number, number]) => void;
   setPerfDebug: (patch: Partial<PerfDebugSettings>) => void;
+}
+
+const CHECKPOINT_PHASES = new Set<RuntimeCheckpointPhase>(['closed', 'opening', 'open', 'closing']);
+
+export function readRuntimeCheckpointTelemetry(
+  id: RuntimeCheckpointState['id'],
+  userData: Record<string, unknown>
+): RuntimeCheckpointState | null {
+  const phase = userData.gatePhase;
+  const clearanceSecondsRemaining = userData.clearanceSecondsRemaining;
+  const armAngle = userData.armAngle;
+  if (
+    typeof userData.gateOpen !== 'boolean' ||
+    typeof phase !== 'string' ||
+    !CHECKPOINT_PHASES.has(phase as RuntimeCheckpointPhase) ||
+    !Number.isFinite(clearanceSecondsRemaining) ||
+    !Number.isFinite(armAngle)
+  ) {
+    return null;
+  }
+  return {
+    id,
+    gateOpen: userData.gateOpen,
+    phase: phase as RuntimeCheckpointPhase,
+    clearanceSecondsRemaining: rounded(clearanceSecondsRemaining as number),
+    armAngle: rounded(armAngle as number, 4),
+  };
 }
 
 declare global {
@@ -259,6 +306,56 @@ function percentile(sortedValues: number[], fraction: number): number {
 function rounded(value: number, precision: number = 2): number {
   const scale = 10 ** precision;
   return Math.round(value * scale) / scale;
+}
+
+export interface FramePacingSummary {
+  sampleCount: number;
+  averageFrameMs: number;
+  p50FrameMs: number;
+  p95FrameMs: number;
+  p99FrameMs: number;
+  frameTimeStdDevMs: number;
+  onePercentLowFps: number;
+  worstFrameMs: number;
+  averageFps: number;
+  framesOver16_7Ms: number;
+  framesOver25Ms: number;
+  framesOver50Ms: number;
+}
+
+/** Summarize one contiguous render sample without hiding slow or invalid frames. */
+export function summarizeFramePacing(frameTimes: readonly number[]): FramePacingSummary {
+  const values = frameTimes.filter(
+    (value) => Number.isFinite(value) && value > 0 && value < 120_000
+  );
+  const sorted = [...values].sort((left, right) => left - right);
+  const average =
+    values.length > 0 ? values.reduce((total, value) => total + value, 0) / values.length : 0;
+  const variance =
+    values.length > 0
+      ? values.reduce((total, value) => total + (value - average) ** 2, 0) / values.length
+      : 0;
+  const slowSampleCount = values.length > 0 ? Math.max(1, Math.ceil(values.length * 0.01)) : 0;
+  const slowestFrames = slowSampleCount > 0 ? sorted.slice(-slowSampleCount) : [];
+  const slowestAverage =
+    slowestFrames.length > 0
+      ? slowestFrames.reduce((total, value) => total + value, 0) / slowestFrames.length
+      : 0;
+
+  return {
+    sampleCount: values.length,
+    averageFrameMs: rounded(average),
+    p50FrameMs: rounded(percentile(sorted, 0.5)),
+    p95FrameMs: rounded(percentile(sorted, 0.95)),
+    p99FrameMs: rounded(percentile(sorted, 0.99)),
+    frameTimeStdDevMs: rounded(Math.sqrt(variance)),
+    onePercentLowFps: rounded(slowestAverage > 0 ? 1000 / slowestAverage : 0),
+    worstFrameMs: rounded(sorted.at(-1) ?? 0),
+    averageFps: rounded(average > 0 ? 1000 / average : 0),
+    framesOver16_7Ms: values.filter((value) => value > 16.7).length,
+    framesOver25Ms: values.filter((value) => value > 25).length,
+    framesOver50Ms: values.filter((value) => value > 50).length,
+  };
 }
 
 const MOTION_NUMBER_KEYS = [
@@ -619,11 +716,17 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({
       });
     };
 
+    const checkpointSnapshot = (): RuntimeCheckpointState[] =>
+      (['receiving-checkpoint', 'shipping-checkpoint'] as const).flatMap((id) => {
+        const object = scene.getObjectByName(id);
+        if (!object) return [];
+        const telemetry = readRuntimeCheckpointTelemetry(id, object.userData);
+        return telemetry ? [telemetry] : [];
+      });
+
     const snapshot = (): RuntimeTelemetrySnapshot => {
       const values = frameTimesRef.current;
-      const sorted = [...values].sort((a, b) => a - b);
-      const average =
-        values.length > 0 ? values.reduce((total, value) => total + value, 0) / values.length : 0;
+      const framePacing = summarizeFramePacing(values);
       const bufferSize = gl.getDrawingBufferSize(drawingBufferSizeRef.current);
       const cssWidth = Math.max(1, gl.domElement.clientWidth);
       const cssHeight = Math.max(1, gl.domElement.clientHeight);
@@ -716,6 +819,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({
 
       scene.updateMatrixWorld(true);
       const motion = motionSnapshot();
+      const checkpoints = checkpointSnapshot();
       const worldIntegrity = inspectWorldIntegrity(scene);
       const humanPresence = {
         passed: humanSceneObjects.size === 0,
@@ -728,6 +832,9 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({
           ['top', 0, 0.9],
           ['upperLeft', -0.8, 0.8],
           ['upperRight', 0.8, 0.8],
+          ['lowerCentre', 0, -0.65],
+          ['lowerLeft', -0.65, -0.65],
+          ['lowerRight', 0.65, -0.65],
         ].map(([label, x, y]) => {
           raycasterRef.current.setFromCamera(new THREE.Vector2(x as number, y as number), camera);
           const hits = raycasterRef.current
@@ -738,11 +845,19 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({
               const firstMaterial = Array.isArray(object.material)
                 ? object.material[0]
                 : object.material;
+              const materialWithSurface = firstMaterial as THREE.Material & {
+                color?: THREE.Color;
+                map?: THREE.Texture | null;
+              };
               return {
                 name: object.name || object.parent?.name || '(unnamed)',
                 type: object.type,
                 distance: rounded(hit.distance),
                 material: firstMaterial?.name || firstMaterial?.type || '(none)',
+                materialColor: materialWithSurface.color?.getHexString() ?? null,
+                map: materialWithSurface.map?.name || materialWithSurface.map?.source?.uuid || null,
+                receiveShadow: object.receiveShadow,
+                renderOrder: object.renderOrder,
               };
             });
           return [label as string, hits];
@@ -799,14 +914,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({
         capturedAt: rounded(performance.now()),
         ready: firstFrameAtRef.current !== null,
         firstFrameAt: firstFrameAtRef.current,
-        sampleCount: values.length,
-        averageFrameMs: rounded(average),
-        p50FrameMs: rounded(percentile(sorted, 0.5)),
-        p95FrameMs: rounded(percentile(sorted, 0.95)),
-        p99FrameMs: rounded(percentile(sorted, 0.99)),
-        worstFrameMs: rounded(sorted.at(-1) ?? 0),
-        averageFps: rounded(average > 0 ? 1000 / average : 0),
-        framesOver50Ms: values.filter((value) => value > 50).length,
+        ...framePacing,
         longTasks: [...longTasksRef.current],
         renderer: {
           vendor,
@@ -859,6 +967,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({
         worldIntegrity,
         humanPresence,
         motion,
+        checkpoints,
         audio: audioManager.getDiagnostics(),
         sceneChildren: scene.children.length,
         quality: graphics.quality,
@@ -874,6 +983,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({
       reset,
       snapshot,
       motionSnapshot,
+      checkpointSnapshot,
       namedObjectsSnapshot,
       setCameraPose: (position, target) => {
         camera.position.set(...position);
