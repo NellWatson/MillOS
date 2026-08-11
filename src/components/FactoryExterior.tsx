@@ -1503,8 +1503,8 @@ const Lake: React.FC<{
   const safeH = Number.isFinite(size?.[1]) && size[1] > 0 ? size[1] : 20;
   const mainRadiusX = Math.max(0.1, safeW / 2 - 1);
   const mainRadiusZ = Math.max(0.1, safeH / 2 - 1);
-  const shoreRadiusX = Math.max(0.1, safeW / 2 + 2);
-  const shoreRadiusZ = Math.max(0.1, safeH / 2 + 2);
+  const shoreRadiusX = Math.max(0.1, safeW / 2 + 1.2);
+  const shoreRadiusZ = Math.max(0.1, safeH / 2 + 1.2);
   const waterGeometry = useMemo(
     () => createOrganicLakeSurfaceGeometry(mainRadiusX, mainRadiusZ),
     [mainRadiusX, mainRadiusZ]

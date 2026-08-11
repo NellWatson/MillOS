@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createTruckController,
   getTruckControllerPose,
+  interpolateTruckControllerState,
   stepTruckController,
 } from './truckController';
 
@@ -206,5 +207,45 @@ describe('schedule-owned articulated truck controller', () => {
     expect(restricted.state.wheelTravel).toBeCloseTo(clear.state.wheelTravel, 1);
     expect(restricted.maximumArticulation).toBeLessThanOrEqual(0.7 + 1e-8);
     expect(restricted.maximumSteering).toBeLessThanOrEqual(0.55 + 1e-8);
+  });
+
+  it('interpolates render poses smoothly across the angle wrap', () => {
+    const previous = {
+      ...createTruckController('shipping'),
+      x: 10,
+      z: 20,
+      tractorYaw: Math.PI - 0.1,
+      trailerYaw: Math.PI - 0.2,
+      steeringAngle: -0.2,
+      wheelTravel: 40,
+      phaseElapsed: 2,
+      motion: { speed: 4, acceleration: 0.5 },
+    };
+    const current = {
+      ...previous,
+      x: 14,
+      z: 24,
+      tractorYaw: -Math.PI + 0.1,
+      trailerYaw: -Math.PI + 0.2,
+      steeringAngle: 0.2,
+      wheelTravel: 44,
+      phaseElapsed: 3,
+      motion: { speed: 6, acceleration: 1.5 },
+    };
+
+    const display = interpolateTruckControllerState(previous, current, 0.5);
+    expect(display.x).toBe(12);
+    expect(display.z).toBe(22);
+    expect(display.wheelTravel).toBe(42);
+    expect(display.steeringAngle).toBeCloseTo(0);
+    expect(display.motion).toEqual({ speed: 5, acceleration: 1 });
+    expect(Math.abs(Math.abs(display.tractorYaw) - Math.PI)).toBeLessThan(1e-8);
+    expect(Math.abs(Math.abs(display.trailerYaw) - Math.PI)).toBeLessThan(1e-8);
+  });
+
+  it('keeps active transitions discrete so trucks never ghost into or out of the yard', () => {
+    const previous = createTruckController('shipping', false);
+    const current = createTruckController('shipping', true);
+    expect(interpolateTruckControllerState(previous, current, 0.25)).toBe(current);
   });
 });

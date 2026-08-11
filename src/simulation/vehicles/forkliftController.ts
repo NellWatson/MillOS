@@ -79,6 +79,8 @@ export const FORKLIFT_WHEELBASE_METRES = 1.55;
 export const FORKLIFT_REAR_TRACK_METRES = 1.05;
 export const FORKLIFT_MAXIMUM_STEERING_RADIANS = 0.56;
 export const FORKLIFT_MAXIMUM_STEERING_RATE = 1.4;
+const FORKLIFT_MAXIMUM_SUBSTEP_SECONDS = 1 / 60;
+const FORKLIFT_MAXIMUM_REQUEST_SECONDS = 0.25;
 
 const UNLOADED_LIMITS: LongitudinalMotionLimits = {
   maximumForwardSpeed: 3.5,
@@ -153,11 +155,11 @@ export function distanceAheadOnClosedPath(
   return direct >= 0 ? direct : path.totalLength + direct;
 }
 
-export function stepForkliftMotion(
+const stepForkliftMotionOnce = (
   state: ForkliftMotionState,
   plan: ForkliftRoutePlan,
   request: ForkliftMotionRequest
-): ForkliftMotionState {
+): ForkliftMotionState => {
   const limits = request.loaded ? LOADED_LIMITS : UNLOADED_LIMITS;
   const lookAheadBeforeStep = sampleArcLengthPath(
     plan.path,
@@ -214,6 +216,49 @@ export function stepForkliftMotion(
     z: sample.z,
     stopReason: request.stopReason,
   };
+};
+
+/**
+ * Integrate at no more than 60 Hz per kinematic step. A dropped render frame
+ * can otherwise feed a 100 to 200 ms impulse into acceleration and steering,
+ * producing the visible lurch that makes an autonomous forklift look keyed by
+ * hand. Substeps retain render-rate motion while keeping jerk, braking and
+ * movement-authority results bounded across common display cadences.
+ */
+export function stepForkliftMotion(
+  state: ForkliftMotionState,
+  plan: ForkliftRoutePlan,
+  request: ForkliftMotionRequest
+): ForkliftMotionState {
+  let remainingTime = Math.min(
+    FORKLIFT_MAXIMUM_REQUEST_SECONDS,
+    Math.max(0, Number.isFinite(request.deltaSeconds) ? request.deltaSeconds : 0)
+  );
+  if (remainingTime <= 0) return state;
+
+  let current = state;
+  let remainingAuthority = Number.isFinite(request.maximumTravelDistance)
+    ? Math.max(0, request.maximumTravelDistance ?? 0)
+    : undefined;
+
+  while (remainingTime > 1e-9) {
+    const deltaSeconds = Math.min(FORKLIFT_MAXIMUM_SUBSTEP_SECONDS, remainingTime);
+    const wheelTravelBefore = current.wheelTravel;
+    current = stepForkliftMotionOnce(current, plan, {
+      ...request,
+      deltaSeconds,
+      maximumTravelDistance: remainingAuthority,
+    });
+    if (remainingAuthority !== undefined) {
+      remainingAuthority = Math.max(
+        0,
+        remainingAuthority - Math.max(0, current.wheelTravel - wheelTravelBefore)
+      );
+    }
+    remainingTime -= deltaSeconds;
+  }
+
+  return current;
 }
 
 /**

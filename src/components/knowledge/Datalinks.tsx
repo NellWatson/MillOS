@@ -326,18 +326,10 @@ export function Datalinks({ isOpen, onClose }: DatalinksProps) {
                                       : 'hover:bg-slate-800/50 border-l-2 border-transparent'
                                   }`}
                                 >
-                                  {entry.portraitPath ? (
-                                    <img
-                                      src={entry.portraitPath}
-                                      alt={entry.title}
-                                      className="w-6 h-6 rounded-full object-cover border border-slate-600"
-                                    />
-                                  ) : (
-                                    <KnowledgeIconComponent
-                                      icon={entry.icon}
-                                      className="w-4 h-4 text-slate-400"
-                                    />
-                                  )}
+                                  <KnowledgeIconComponent
+                                    icon={entry.icon}
+                                    className="w-4 h-4 text-slate-400"
+                                  />
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
                                       <span className="text-sm truncate text-slate-200">

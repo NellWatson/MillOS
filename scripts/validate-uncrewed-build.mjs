@@ -12,7 +12,8 @@ const DESIGN_FILES = [
 ];
 
 const forbiddenPathPatterns = [
-  { label: 'portrait directory', pattern: /(^|\/)assets\/workers(\/|$)/i },
+  { label: 'worker asset directory', pattern: /(^|\/)assets\/workers(\/|$)/i },
+  { label: 'portrait directory', pattern: /(^|\/)portraits(\/|$)/i },
   { label: 'character model directory', pattern: /(^|\/)models\/worker(\/|$)/i },
   {
     label: 'human-specific asset filename',
@@ -27,7 +28,11 @@ const forbiddenRuntimePatterns = [
     pattern:
       /WorkerSystemNew|WorkerDetailPanel|WorkforcePanel|WorkerModel|RemotePlayerAvatar|SeatedVehicleOperator|DockSpotter|WarehouseWorkerWithPalletJack/,
   },
-  { label: 'human asset URL', pattern: /assets\/workers|models\/worker|worker-(masculine|feminine)/i },
+  {
+    label: 'human asset URL',
+    pattern: /assets\/workers|models\/worker|worker-(masculine|feminine)/i,
+  },
+  { label: 'portrait asset URL', pattern: /portraitPath|[/\\]portraits[/\\]/i },
   {
     label: 'portrait roster',
     pattern: /marcus_chen|sarah_mitchell|james_rodriguez|emily_ronson|jennifer_lee/i,
@@ -87,12 +92,14 @@ async function main() {
   for (const file of sourceFiles) {
     if (isArchivedPath(file.relative) || isTestSource(file.relative)) continue;
     for (const rule of forbiddenPathPatterns) {
-      if (rule.pattern.test(file.relative)) failures.push(`active source ${rule.label}: ${file.relative}`);
+      if (rule.pattern.test(file.relative))
+        failures.push(`active source ${rule.label}: ${file.relative}`);
     }
     if (!/\.[cm]?[jt]sx?$/i.test(file.relative)) continue;
     const content = await readFile(file.absolute, 'utf8');
     for (const rule of forbiddenRuntimePatterns) {
-      if (rule.pattern.test(content)) failures.push(`active source ${rule.label}: ${file.relative}`);
+      if (rule.pattern.test(content))
+        failures.push(`active source ${rule.label}: ${file.relative}`);
     }
   }
 
@@ -100,7 +107,8 @@ async function main() {
   for (const file of publicFiles) {
     if (isArchivedPath(file.relative)) continue;
     for (const rule of forbiddenPathPatterns) {
-      if (rule.pattern.test(file.relative)) failures.push(`current public ${rule.label}: ${file.relative}`);
+      if (rule.pattern.test(file.relative))
+        failures.push(`current public ${rule.label}: ${file.relative}`);
     }
   }
 
@@ -118,7 +126,7 @@ async function main() {
   }
 
   console.log(
-    `Uncrewed delivery contract passed: ${files.length} delivery files and ${sourceFiles.length} source files; no human assets, host voices, personnel modules, or personnel design studies.`
+    `Uncrewed v0.40 contract passed: ${files.length} current delivery files and ${sourceFiles.length} active source files contain no human assets, portraits, host voices, personnel modules, or personnel design studies. Archived releases and source provenance remain outside this current-release gate.`
   );
 }
 

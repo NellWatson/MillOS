@@ -103,7 +103,7 @@ describe('forklift controller', () => {
     expect(disengaged.cargoEngaged).toBe(false);
   });
 
-  it('preserves route progress across common rendering frequencies', () => {
+  it('preserves route progress across common and degraded rendering frequencies', () => {
     const plan = createForkliftRoutePlan(points, actions);
     const simulate = (framesPerSecond: number) => {
       let state = createInitialForkliftMotion(plan, [0, 0, 0]);
@@ -118,9 +118,9 @@ describe('forklift controller', () => {
       return state;
     };
 
-    const results = [30, 60, 120].map(simulate);
+    const results = [15, 30, 60, 120].map(simulate);
     const wheelTravel = results.map((state) => state.wheelTravel);
-    expect(Math.max(...wheelTravel) - Math.min(...wheelTravel)).toBeLessThan(0.15);
+    expect(Math.max(...wheelTravel) - Math.min(...wheelTravel)).toBeLessThan(0.05);
     for (const state of results) {
       expect(Number.isFinite(state.x)).toBe(true);
       expect(Number.isFinite(state.z)).toBe(true);
@@ -187,6 +187,30 @@ describe('forklift controller', () => {
       maximumTravelDistance: 0.01,
     });
     expect(state.wheelTravel - wheelTravel).toBeCloseTo(0.01);
+    expect(state.speed).toBe(0);
+  });
+
+  it('substeps a dropped frame without violating a nearby movement authority', () => {
+    const plan = createForkliftRoutePlan(points, actions);
+    let state = createInitialForkliftMotion(plan, [0, 0, 0]);
+    for (let frame = 0; frame < 180; frame += 1) {
+      state = stepForkliftMotion(state, plan, {
+        targetSpeed: 2,
+        stopReason: 'none',
+        loaded: false,
+        deltaSeconds: 1 / 60,
+      });
+    }
+
+    const wheelTravel = state.wheelTravel;
+    state = stepForkliftMotion(state, plan, {
+      targetSpeed: 2,
+      stopReason: 'none',
+      loaded: false,
+      deltaSeconds: 0.2,
+      maximumTravelDistance: 0.08,
+    });
+    expect(state.wheelTravel - wheelTravel).toBeCloseTo(0.08);
     expect(state.speed).toBe(0);
   });
 });

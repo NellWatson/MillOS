@@ -265,18 +265,7 @@ export function KnowledgeEntryCard({ entry, onClose, onNavigate }: KnowledgeEntr
           Back to list
         </button>
         <div className="flex items-start gap-4">
-          {entry.portraitPath ? (
-            <img
-              src={entry.portraitPath}
-              alt={entry.title}
-              className="w-16 h-16 rounded-full object-cover border-2 border-amber-500/50"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-          ) : (
-            <KnowledgeIconComponent icon={entry.icon} className="w-10 h-10 text-amber-400" />
-          )}
+          <KnowledgeIconComponent icon={entry.icon} className="w-10 h-10 text-amber-400" />
           <div>
             <span className="text-xs text-amber-500 uppercase tracking-wide">
               {getCategoryLabel(entry.category)}

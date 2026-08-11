@@ -27,6 +27,7 @@ import {
 import {
   createTruckController,
   getTruckControllerPose,
+  interpolateTruckControllerState,
   stepTruckController,
   type TruckControllerState,
 } from './truckbay/truckController';
@@ -1157,63 +1158,68 @@ const TruckWashStation: React.FC<{ position: [number, number, number]; rotation?
 export const FleetTelemetryHub: React.FC<{
   position: [number, number, number];
   rotation?: number;
-}> = ({ position, rotation = 0 }) => (
-  <group name="fleet-telemetry-hub" position={position} rotation={[0, rotation, 0]}>
-    <mesh position={[0, 2, 0]} castShadow receiveShadow>
-      <boxGeometry args={[8, 4, 6]} />
-      <meshStandardMaterial color="#4b5563" roughness={0.78} metalness={0.12} />
-    </mesh>
-    <mesh position={[0, 4.15, 0]} castShadow>
-      <boxGeometry args={[8.6, 0.3, 6.6]} />
-      <meshStandardMaterial color="#1f2937" roughness={0.62} metalness={0.35} />
-    </mesh>
-    <mesh position={[0, 1.5, 3.04]}>
-      <boxGeometry args={[2.8, 2.7, 0.12]} />
-      <meshStandardMaterial color="#111827" roughness={0.5} metalness={0.65} />
-    </mesh>
-    {[-0.82, 0, 0.82].map((x, index) => (
-      <group key={x} position={[x, 1.62, 3.12]}>
-        <mesh>
-          <boxGeometry args={[0.58, 1.85, 0.08]} />
-          <meshStandardMaterial color="#0f172a" roughness={0.42} metalness={0.55} />
+}> = ({ position, rotation = 0 }) => {
+  const yardLampsEnabled = useYardLampsEnabled();
+  return (
+    <group name="fleet-telemetry-hub" position={position} rotation={[0, rotation, 0]}>
+      <mesh position={[0, 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[8, 4, 6]} />
+        <meshStandardMaterial color="#4b5563" roughness={0.78} metalness={0.12} />
+      </mesh>
+      <mesh position={[0, 4.15, 0]} castShadow>
+        <boxGeometry args={[8.6, 0.3, 6.6]} />
+        <meshStandardMaterial color="#1f2937" roughness={0.62} metalness={0.35} />
+      </mesh>
+      <mesh position={[0, 1.5, 3.04]}>
+        <boxGeometry args={[2.8, 2.7, 0.12]} />
+        <meshStandardMaterial color="#111827" roughness={0.5} metalness={0.65} />
+      </mesh>
+      {[-0.82, 0, 0.82].map((x, index) => (
+        <group key={x} position={[x, 1.62, 3.12]}>
+          <mesh>
+            <boxGeometry args={[0.58, 1.85, 0.08]} />
+            <meshStandardMaterial color="#0f172a" roughness={0.42} metalness={0.55} />
+          </mesh>
+          {[0.48, 0.12, -0.24, -0.6].map((y, lightIndex) => (
+            <mesh key={y} position={[0, y, 0.05]}>
+              <boxGeometry args={[0.34, 0.08, 0.025]} />
+              <meshStandardMaterial
+                color={lightIndex === index ? '#67e8f9' : '#22c55e'}
+                emissive={lightIndex === index ? '#0891b2' : '#15803d'}
+                emissiveIntensity={1.2}
+                toneMapped={false}
+              />
+            </mesh>
+          ))}
+        </group>
+      ))}
+      <group position={[0, 5.4, 0]}>
+        <mesh position={[0, 1.1, 0]}>
+          <cylinderGeometry args={[0.08, 0.12, 2.2, 12]} />
+          <meshStandardMaterial color="#94a3b8" roughness={0.28} metalness={0.82} />
         </mesh>
-        {[0.48, 0.12, -0.24, -0.6].map((y, lightIndex) => (
-          <mesh key={y} position={[0, y, 0.05]}>
-            <boxGeometry args={[0.34, 0.08, 0.025]} />
-            <meshStandardMaterial
-              color={lightIndex === index ? '#67e8f9' : '#22c55e'}
-              emissive={lightIndex === index ? '#0891b2' : '#15803d'}
-              emissiveIntensity={1.2}
-              toneMapped={false}
-            />
+        {[0, Math.PI / 2].map((rotationY) => (
+          <mesh key={rotationY} position={[0, 2.15, 0]} rotation={[0, rotationY, 0]}>
+            <boxGeometry args={[2.4, 0.08, 0.08]} />
+            <meshStandardMaterial color="#cbd5e1" roughness={0.3} metalness={0.8} />
           </mesh>
         ))}
+        {yardLampsEnabled && (
+          <pointLight position={[0, 2.2, 0]} intensity={2} distance={8} color="#22d3ee" />
+        )}
       </group>
-    ))}
-    <group position={[0, 5.4, 0]}>
-      <mesh position={[0, 1.1, 0]}>
-        <cylinderGeometry args={[0.08, 0.12, 2.2, 12]} />
-        <meshStandardMaterial color="#94a3b8" roughness={0.28} metalness={0.82} />
-      </mesh>
-      {[0, Math.PI / 2].map((rotationY) => (
-        <mesh key={rotationY} position={[0, 2.15, 0]} rotation={[0, rotationY, 0]}>
-          <boxGeometry args={[2.4, 0.08, 0.08]} />
-          <meshStandardMaterial color="#cbd5e1" roughness={0.3} metalness={0.8} />
+      <group position={[0, 3.5, 3.2]}>
+        <mesh>
+          <boxGeometry args={[4.8, 0.65, 0.12]} />
+          <meshStandardMaterial color="#0c4a6e" roughness={0.45} metalness={0.3} />
         </mesh>
-      ))}
-      <pointLight position={[0, 2.2, 0]} intensity={2} distance={8} color="#22d3ee" />
+        <Text position={[0, 0, 0.07]} fontSize={0.24} color="#ecfeff" anchorX="center">
+          FLEET TELEMETRY
+        </Text>
+      </group>
     </group>
-    <group position={[0, 3.5, 3.2]}>
-      <mesh>
-        <boxGeometry args={[4.8, 0.65, 0.12]} />
-        <meshStandardMaterial color="#0c4a6e" roughness={0.45} metalness={0.3} />
-      </mesh>
-      <Text position={[0, 0, 0.07]} fontSize={0.24} color="#ecfeff" anchorX="center">
-        FLEET TELEMETRY
-      </Text>
-    </group>
-  </group>
-);
+  );
+};
 
 // Propane tank cage
 export const PropaneTankCage: React.FC<{
@@ -2124,6 +2130,7 @@ const GuardShack: React.FC<{
 }> = ({ position, rotation = 0, gateOpen }) => {
   const gateRef = useRef<THREE.Mesh>(null);
   const guardId = useId();
+  const yardLampsEnabled = useYardLampsEnabled();
 
   useEffect(() => {
     if (!gateRef.current) return;
@@ -2166,11 +2173,11 @@ const GuardShack: React.FC<{
         <boxGeometry args={[0.9, 2, 0.05]} />
         <meshStandardMaterial color="#374151" roughness={0.6} />
       </mesh>
-      <mesh position={[0, 3.3, 1.5]}>
+      <mesh position={[0, 3.3, 1.5]} material={EXTERIOR_LAMP_LENS_MATERIAL}>
         <boxGeometry args={[0.3, 0.2, 0.3]} />
-        <meshStandardMaterial color="#fef3c7" emissive="#fef3c7" emissiveIntensity={0.5} />
       </mesh>
-      <pointLight position={[0, 3, 2]} intensity={15} distance={15} color="#fef3c7" />
+      <ExteriorLampPool radius={5.5} />
+      {yardLampsEnabled && <ExteriorPointLight position={[0, 3, 2]} intensity={15} distance={15} />}
       <group position={[3, 0, 0]}>
         <mesh position={[0, 1, 0]}>
           <boxGeometry args={[0.4, 2, 0.4]} />
@@ -2475,12 +2482,10 @@ const HeadlightBeam: React.FC<{
   rotation: [number, number, number];
   isOn: boolean;
 }> = ({ position, rotation, isOn }) => {
-  if (!isOn) return null;
-
   return (
     <group position={position} rotation={rotation}>
       {/* Cone rotated to point forward (Z direction) - tip at light source, base spreading forward */}
-      <mesh position={[0, 0, 2]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh visible={isOn} position={[0, 0, 2]} rotation={[-Math.PI / 2, 0, 0]}>
         <coneGeometry args={[1.5, 4, 8, 1, true]} />
         <meshBasicMaterial
           color="#fef3c7"
@@ -2495,7 +2500,7 @@ const HeadlightBeam: React.FC<{
         target-position={[0, 0, 5]}
         angle={0.4}
         penumbra={0.5}
-        intensity={5}
+        intensity={isOn ? 5 : 0}
         distance={20}
         color="#fef3c7"
       />
@@ -2743,6 +2748,8 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
   const receivingTruckStateRef = useRef<TruckAnimState>(initialReceivingState);
   const shippingControllerRef = useRef<TruckControllerState>(initialShippingController);
   const receivingControllerRef = useRef<TruckControllerState>(initialReceivingController);
+  const shippingPreviousControllerRef = useRef<TruckControllerState>(initialShippingController);
+  const receivingPreviousControllerRef = useRef<TruckControllerState>(initialReceivingController);
   const shippingAccumulatorRef = useRef(0);
   const receivingAccumulatorRef = useRef(0);
 
@@ -2841,6 +2848,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
     const advanceTruck = (
       dock: 'shipping' | 'receiving',
       controllerRef: React.MutableRefObject<TruckControllerState>,
+      previousControllerRef: React.MutableRefObject<TruckControllerState>,
       accumulatorRef: React.MutableRefObject<number>,
       truckStateRef: React.MutableRefObject<TruckAnimState>,
       truckRef: React.MutableRefObject<THREE.Group | null>,
@@ -2852,10 +2860,12 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
     ): void => {
       const scheduleBefore = useTruckScheduleStore.getState().truckSchedule[dock];
       let controller = controllerRef.current;
+      let previousController = previousControllerRef.current;
       let accumulator = accumulatorRef.current + controllerDelta;
       let departedThisFrame = false;
 
       while (accumulator >= TRUCK_CONTROLLER_STEP_SECONDS) {
+        previousController = controller;
         const result = stepTruckController(controller, {
           deltaSeconds: TRUCK_CONTROLLER_STEP_SECONDS,
           arrivalReady: scheduleBefore.arrivalReady,
@@ -2868,6 +2878,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         accumulator -= TRUCK_CONTROLLER_STEP_SECONDS;
       }
       controllerRef.current = controller;
+      previousControllerRef.current = previousController;
       accumulatorRef.current = accumulator;
 
       if (scheduleBefore.arrivalReady && controller.active) {
@@ -2877,9 +2888,14 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         useTruckScheduleStore.getState().recordTruckDeparture(dock, simulationMinutes);
       }
 
-      const truckState = getTruckControllerPose(controller, safetyHoldActive);
+      const displayController = interpolateTruckControllerState(
+        previousController,
+        controller,
+        accumulator / TRUCK_CONTROLLER_STEP_SECONDS
+      );
+      const truckState = getTruckControllerPose(displayController, safetyHoldActive);
       truckStateRef.current = truckState;
-      wheelRotationRef.current = controller.wheelTravel / TRUCK_WHEEL_RADIUS;
+      wheelRotationRef.current = displayController.wheelTravel / TRUCK_WHEEL_RADIUS;
 
       if (truckRef.current) {
         truckRef.current.visible = truckState.active;
@@ -2893,11 +2909,11 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           phase: truckState.phase,
           servicePhase: truckState.servicePhase,
           speed: truckState.speed,
-          acceleration: controller.motion.acceleration,
+          acceleration: displayController.motion.acceleration,
           steeringAngle: truckState.steeringAngle,
           wheelRotation: wheelRotationRef.current,
-          wheelTravel: controller.wheelTravel,
-          routeDistance: controller.phaseDistance,
+          wheelTravel: displayController.wheelTravel,
+          routeDistance: displayController.phaseDistance,
           trailerAngle: truckState.trailerAngle,
           articulation: truckState.articulation,
           parkingBrake: truckState.parkingBrake,
@@ -3049,6 +3065,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
     advanceTruck(
       'shipping',
       shippingControllerRef,
+      shippingPreviousControllerRef,
       shippingAccumulatorRef,
       shippingTruckStateRef,
       shippingTruckRef,
@@ -3061,6 +3078,7 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
     advanceTruck(
       'receiving',
       receivingControllerRef,
+      receivingPreviousControllerRef,
       receivingAccumulatorRef,
       receivingTruckStateRef,
       receivingTruckRef,

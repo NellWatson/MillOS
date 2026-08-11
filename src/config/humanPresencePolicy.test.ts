@@ -60,6 +60,7 @@ describe('v0.40 uncrewed-site contract', () => {
   it('does not expose character models, portraits, or host voices to production', () => {
     const prohibitedPublicPaths = [
       'public/assets/workers',
+      'public/portraits',
       'public/models/worker',
       'public/textures/compressed/worker_color.ktx2',
       'public/textures/compressed/worker_normal.ktx2',
@@ -88,6 +89,13 @@ describe('v0.40 uncrewed-site contract', () => {
     expect(productionAudioSources).not.toMatch(
       /speechSynthesis|SpeechSynthesis|ttsEnabled|speakAnnouncement|startWorkerVoices|startRadioChatter|playRadioDispatch|WorkerModel|WORKER_ASSET_PATHS|WORKER_VARIANTS/
     );
+
+    const knowledgeSources = [
+      source('src/stores/knowledgeStore.ts'),
+      source('src/components/knowledge/Datalinks.tsx'),
+      source('src/components/knowledge/KnowledgeEntryCard.tsx'),
+    ].join('\n');
+    expect(knowledgeSources).not.toMatch(/portraitPath|[/\\]portraits[/\\]|<img\b/i);
   });
 
   it('keeps current design guidance and source-only modules uncrewed', () => {
