@@ -21,7 +21,7 @@ import { createCelestialState, sampleAtmosphere, sampleCelestial } from '../simu
 import { positionRegistry } from '../utils/positionRegistry';
 import { PROCEDURAL_TEXTURES, TREE_MATERIALS } from '../utils/sharedMaterials';
 import { generateMachineORM } from '../textures';
-import { shouldCheckpointOpen } from './exterior/checkpointLogic';
+import { createCheckpointGateState, stepCheckpointGate } from './exterior/checkpointLogic';
 import {
   EXTERIOR_LAMP_LENS_MATERIAL,
   ExteriorLampDriver,
@@ -5587,11 +5587,13 @@ const CheckpointBarrier: React.FC<{
   roadWidth?: number;
   checkpointType?: 'shipping' | 'receiving';
 }> = ({ position, rotation = 0, label = 'CHECKPOINT', roadWidth = 16, checkpointType }) => {
+  const checkpointRootRef = useRef<THREE.Group>(null);
   const barrierArmRef = useRef<THREE.Group>(null);
   const barrierArm2Ref = useRef<THREE.Group>(null);
   const lightRef = useRef<THREE.MeshBasicMaterial>(null);
   const light2Ref = useRef<THREE.MeshBasicMaterial>(null);
   const openRef = useRef(false);
+  const gateStateRef = useRef(createCheckpointGateState());
   const dock = checkpointType ?? (position[2] > 0 ? 'shipping' : 'receiving');
   const checkpointPosition = useMemo(
     () => ({ x: position[0], z: position[2] }),
@@ -5603,12 +5605,14 @@ const CheckpointBarrier: React.FC<{
   // barrier for an imaginary truck while the visible one remained elsewhere.
   useFrame((state, delta) => {
     const time = state.clock.elapsedTime;
-    openRef.current = shouldCheckpointOpen(
-      openRef.current,
+    gateStateRef.current = stepCheckpointGate(
+      gateStateRef.current,
       checkpointPosition,
       positionRegistry.get(`${dock}-truck-cab`),
-      positionRegistry.get(`${dock}-truck-trailer`)
+      positionRegistry.get(`${dock}-truck-trailer`),
+      delta
     );
+    openRef.current = gateStateRef.current.open;
     const targetAngle = openRef.current ? Math.PI / 2 : 0;
     const safeDelta = Math.min(Math.max(delta, 0), 0.1);
 
@@ -5629,12 +5633,35 @@ const CheckpointBarrier: React.FC<{
       );
     }
 
-    const flash = Math.sin(time * 4) > 0;
+    const currentAngle = barrierArmRef.current?.rotation.z ?? 0;
+    const armMoving = Math.abs(currentAngle - targetAngle) > 0.04;
+    const armRaised = currentAngle > Math.PI / 2 - 0.12;
+    const flash = Math.sin(time * 7) > 0;
+    const signalColor = armMoving
+      ? flash
+        ? 0xffb000
+        : 0x4a2600
+      : armRaised && openRef.current
+        ? 0x35d46f
+        : 0xef2929;
     if (lightRef.current) {
-      lightRef.current.color.setHex(flash && openRef.current ? 0xff2b1f : 0x440500);
+      lightRef.current.color.setHex(signalColor);
     }
     if (light2Ref.current) {
-      light2Ref.current.color.setHex(flash && openRef.current ? 0xff2b1f : 0x440500);
+      light2Ref.current.color.setHex(signalColor);
+    }
+    if (checkpointRootRef.current) {
+      checkpointRootRef.current.userData.gateOpen = openRef.current;
+      checkpointRootRef.current.userData.gatePhase = armMoving
+        ? openRef.current
+          ? 'opening'
+          : 'closing'
+        : openRef.current
+          ? 'open'
+          : 'closed';
+      checkpointRootRef.current.userData.clearanceSecondsRemaining =
+        gateStateRef.current.clearanceSecondsRemaining;
+      checkpointRootRef.current.userData.armAngle = currentAngle;
     }
   });
 
@@ -5647,7 +5674,20 @@ const CheckpointBarrier: React.FC<{
   const boothOffset = roadWidth / 2 + 2 + boothWidth / 2;
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group
+      ref={checkpointRootRef}
+      name={`${dock}-checkpoint`}
+      position={position}
+      rotation={[0, rotation, 0]}
+      userData={{
+        noStaticBatch: true,
+        dynamic: true,
+        gateOpen: false,
+        gatePhase: 'closed',
+        clearanceSecondsRemaining: 0,
+        armAngle: 0,
+      }}
+    >
       {/* ===== CHECKPOINT BOOTH (beside road on LEFT side) ===== */}
       <group position={[-boothOffset, 0, 0]}>
         {/* Booth base/platform */}

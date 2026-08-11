@@ -45,6 +45,7 @@ describe('historical release navigation bridge', () => {
     selector.dispatchEvent(new dom.window.Event('change'));
     expect(go.disabled).toBe(false);
     expect(go.getAttribute('aria-label')).toBe('Switch to MillOS version 0.40');
+    dom.window.dispatchEvent(new dom.window.Event('pagehide'));
     dom.window.close();
   });
 });

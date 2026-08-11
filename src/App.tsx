@@ -767,6 +767,7 @@ const App: React.FC = () => {
                     ) : (
                       <DeferredOrbitControls
                         ref={orbitControlsRef}
+                        onStart={() => useCameraStore.getState().cancelAnimation()}
                         maxPolarAngle={
                           runtimeMode.benchmark &&
                           (runtimeMode.benchmarkScene === 'sun' ||

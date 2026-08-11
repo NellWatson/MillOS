@@ -3,7 +3,7 @@ import { AreaChart, Area, ResponsiveContainer } from 'recharts';
 import { useProductionStore } from '../stores/productionStore';
 import { useSafetyStore } from '../stores/safetyStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
-import { MachineType, MachineData } from '../types';
+import { BAG_WEIGHT_KG, MachineType, MachineData } from '../types';
 
 interface MetricsData {
   time: string;
@@ -11,6 +11,11 @@ interface MetricsData {
   efficiency: number;
   quality: number;
 }
+
+export const bagsPerHourToTonnesPerHour = (bagsPerHour: number): number => {
+  const safeBagsPerHour = Number.isFinite(bagsPerHour) ? Math.max(0, bagsPerHour) : 0;
+  return Math.round(((safeBagsPerHour * BAG_WEIGHT_KG) / 1000) * 10) / 10;
+};
 
 // Energy consumption by machine type (kWh when running)
 const MACHINE_ENERGY_CONSUMPTION: Record<MachineType, { running: number; idle: number }> = {
@@ -115,11 +120,8 @@ function getFacilityBaseLoad(gameTime: number): { lighting: number; hvac: number
 }
 
 export const ProductionMetrics: React.FC = () => {
-  const [data, setData] = useState<MetricsData[]>([]);
-
   // Get real metrics from the stores
   const storeMetrics = useProductionStore((state) => state.metrics);
-  const productionSpeed = useProductionStore((state) => state.productionSpeed);
   const machines = useProductionStore((state) => state.machines);
   const safetyMetrics = useSafetyStore((state) => state.safetyMetrics);
   const emergencyActive = useGameSimulationStore((state) => state.emergencyActive);
@@ -127,29 +129,12 @@ export const ProductionMetrics: React.FC = () => {
 
   // Calculate real-time metrics based on actual store data
   const liveMetrics = React.useMemo(() => {
-    // Filter to only productive machines for efficiency calculation
-    // Silos and control room don't contribute to production throughput
-    const productiveMachineTypes = [
-      MachineType.ROLLER_MILL,
-      MachineType.PLANSIFTER,
-      MachineType.PACKER,
-    ];
-    const productiveMachines = machines.filter((m) => productiveMachineTypes.includes(m.type));
-    const runningMachines = productiveMachines.filter((m) => m.status === 'running').length;
-    const totalMachines = productiveMachines.length || 1;
-    const machineEfficiency = (runningMachines / totalMachines) * 100;
-
-    // Base throughput scales with production speed and machine efficiency
-    // Maximum realistic throughput is 5000 t/hr for this mill
-    const MAX_REALISTIC_THROUGHPUT = 5000;
-    const baseThroughput = 1000;
-    const actualThroughput = Math.min(
-      MAX_REALISTIC_THROUGHPUT,
-      Math.max(0, Math.round(baseThroughput * productionSpeed * (machineEfficiency / 100) + 200))
-    );
-
-    // Bags per minute from production speed
-    const bagsPerMinute = Math.round(35 * productionSpeed + runningMachines * 1.5);
+    // The unified tick owns the packer-derived bags/hour figure. The metrics
+    // card only converts that conserved value into display units, so the HUD,
+    // SCADA, target widget, and chart cannot tell different production stories.
+    const bagsPerHour = Math.max(0, storeMetrics.throughput);
+    const tonnesPerHour = bagsPerHourToTonnesPerHour(bagsPerHour);
+    const bagsPerMinute = Math.round(bagsPerHour / 60);
 
     // REAL ENERGY CALCULATION
     // During emergency stop, machines are idle so calculate normally (they're set to idle)
@@ -167,14 +152,23 @@ export const ProductionMetrics: React.FC = () => {
       : Math.round(machineEnergy + baseLoad.lighting + baseLoad.hvac + baseLoad.other);
 
     return {
-      throughput: emergencyActive ? 0 : actualThroughput,
+      throughput: emergencyActive ? 0 : tonnesPerHour,
       efficiency: storeMetrics.efficiency,
       quality: storeMetrics.quality,
       uptime: storeMetrics.uptime,
       bagsPerMinute: emergencyActive ? 0 : bagsPerMinute,
       energyUsage,
     };
-  }, [storeMetrics, productionSpeed, machines, emergencyActive, gameTime]);
+  }, [storeMetrics, machines, emergencyActive, gameTime]);
+
+  const [data, setData] = useState<MetricsData[]>(() => [
+    {
+      time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      throughput: liveMetrics.throughput,
+      efficiency: liveMetrics.efficiency,
+      quality: liveMetrics.quality,
+    },
+  ]);
 
   // Track previous efficiency for trend calculation
   const prevEfficiencyRef = useRef(storeMetrics.efficiency);
@@ -195,23 +189,6 @@ export const ProductionMetrics: React.FC = () => {
     if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
     return `${seconds}s`;
   };
-
-  // Generate initial data based on current metrics
-  useEffect(() => {
-    const initialData: MetricsData[] = [];
-    const now = new Date();
-    for (let i = 30; i >= 0; i--) {
-      const time = new Date(now.getTime() - i * 60000);
-      // Generate historical data with slight variance from current values
-      initialData.push({
-        time: time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-        throughput: liveMetrics.throughput * (0.95 + Math.random() * 0.1),
-        efficiency: storeMetrics.efficiency * (0.98 + Math.random() * 0.04),
-        quality: storeMetrics.quality * (0.99 + Math.random() * 0.02),
-      });
-    }
-    setData(initialData);
-  }, []); // Run once on mount - uses initial values to seed historical data
 
   // Keep the latest metrics in a ref so the sampling interval can read them
   // without being torn down and recreated on every metric change. Listing the
@@ -277,7 +254,7 @@ export const ProductionMetrics: React.FC = () => {
       {/* Mini Charts */}
       <div className="bg-slate-800/30 rounded p-1.5 border border-slate-700/30">
         <div className="flex items-center justify-between mb-0.5">
-          <span className="text-[9px] text-slate-400">Production (30m)</span>
+          <span className="text-[9px] text-slate-400">Recent production</span>
           <span className="text-[8px] text-cyan-400 flex items-center gap-0.5">
             <span className="w-1 h-1 bg-cyan-400 rounded-full animate-pulse" />
             Live
@@ -286,7 +263,7 @@ export const ProductionMetrics: React.FC = () => {
         <div
           className="h-10"
           role="img"
-          aria-label={`Production throughput chart showing current value of ${liveMetrics.throughput} tons per hour over the last 30 minutes`}
+          aria-label={`Recent production throughput chart showing a current value of ${liveMetrics.throughput} tonnes per hour`}
         >
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data}>
@@ -308,7 +285,7 @@ export const ProductionMetrics: React.FC = () => {
         </div>
         {/* Accessible data table for screen readers */}
         <table className="sr-only">
-          <caption>Production throughput data for the last 30 minutes</caption>
+          <caption>Recent sampled production throughput data</caption>
           <thead>
             <tr>
               <th>Time</th>
@@ -321,7 +298,7 @@ export const ProductionMetrics: React.FC = () => {
             {data.slice(-5).map((point, idx) => (
               <tr key={idx}>
                 <td>{point.time}</td>
-                <td>{point.throughput.toFixed(0)}</td>
+                <td>{point.throughput.toFixed(1)}</td>
                 <td>{point.efficiency.toFixed(1)}</td>
                 <td>{point.quality.toFixed(1)}</td>
               </tr>

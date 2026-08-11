@@ -154,10 +154,12 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   const handleIntroSkip = () => {
     setHasSeenIntro(true);
     setIntroStep(null);
+    useCameraStore.getState().cancelAnimation();
   };
 
   const handleIntroClose = () => {
     setIntroStep(null);
+    useCameraStore.getState().cancelAnimation();
   };
 
   // AI Narration - get current narration to display
