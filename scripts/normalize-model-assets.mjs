@@ -53,39 +53,11 @@ const paths = {
     source: path.join(SOURCE_ROOT, 'forklift', 'forklift-original.glb'),
     output: path.join(OUTPUT_ROOT, 'forklift', 'forklift.glb'),
   },
-  worker: {
-    source: path.join(SOURCE_ROOT, 'worker', 'worker-original.glb'),
-    output: path.join(OUTPUT_ROOT, 'worker', 'worker.glb'),
-  },
-  workerMasculine: {
-    source: path.join(SOURCE_ROOT, 'worker-quaternius', 'worker-masculine-source.gltf'),
-    output: path.join(OUTPUT_ROOT, 'worker', 'worker-masculine.glb'),
-  },
-  workerFeminine: {
-    source: path.join(SOURCE_ROOT, 'worker-quaternius', 'worker-feminine-source.gltf'),
-    output: path.join(OUTPUT_ROOT, 'worker', 'worker-feminine.glb'),
-  },
   silo: {
     source: path.join(SOURCE_ROOT, 'machines', 'silo-unity-original.glb'),
     output: path.join(OUTPUT_ROOT, 'machines', 'silo.glb'),
   },
 };
-const legacyWorkerTexture = {
-  source: path.join(SOURCE_ROOT, 'worker', 'Textures', 'texture-a.png'),
-  output: path.join(OUTPUT_ROOT, 'worker', 'Textures', 'texture-a.png'),
-};
-const workerClipDefinitions = [
-  ['Idle', 'worker-idle'],
-  ['Walk', 'worker-walk'],
-  ['Run', 'worker-run'],
-  ['Idle_Neutral', 'worker-break'],
-  ['Interact', 'worker-inspect'],
-  ['Interact', 'worker-repair'],
-  ['Idle_Neutral', 'worker-supervise'],
-  ['Wave', 'worker-radio'],
-  ['Interact', 'worker-sample'],
-];
-const WORKER_TARGET_HEIGHT = 1.72;
 
 async function sha256(file) {
   const bytes = await readFile(file);
@@ -142,11 +114,6 @@ function slug(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '');
-}
-
-function multiplyScale(node, factor) {
-  const scale = node.getScale();
-  node.setScale([scale[0] * factor, scale[1] * factor, scale[2] * factor]);
 }
 
 function centreSceneBelow(document, scene) {
@@ -314,7 +281,7 @@ async function normalizeForklift(io, source, output) {
     dark: material('structural-graphite', '#263238', 0.72, 0.32),
     rubber: material('industrial-rubber', '#111619', 0, 0.88),
     metal: material('galvanized-steel', '#74828a', 0.86, 0.28),
-    seat: material('operator-seat', '#30383b', 0, 0.78),
+    seat: material('control-seat', '#30383b', 0, 0.78),
     glass: material('lamp-glass', '#bcecff', 0, 0.12)
       .setEmissiveFactor([0.35, 0.55, 0.62])
       .setAlphaMode('BLEND')
@@ -398,104 +365,6 @@ async function normalizeForklift(io, source, output) {
     textures: root.listTextures().length,
     animations: root.listAnimations().map((animation) => animation.getName()),
     simplified,
-  };
-}
-
-async function normalizeWorker(io, source, output) {
-  const document = await io.read(source);
-  const root = document.getRoot();
-  const scene = root.listScenes()[0];
-  if (!scene) throw new Error('Worker source has no scene');
-
-  const initialBounds = getBounds(scene);
-  const initialHeight = initialBounds.max[1] - initialBounds.min[1];
-  const targetHeight = 1.72;
-  const scaleFactor = initialHeight > 0 ? targetHeight / initialHeight : 1;
-  scene.listChildren().forEach((node) => multiplyScale(node, scaleFactor));
-  centreSceneBelow(document, scene);
-
-  scene.setName('MillOS_Worker');
-  root.listAnimations().forEach((animation, index) => {
-    animation.setName(index === 0 ? 'worker-motion' : `worker-motion-${index + 1}`);
-  });
-  Object.assign(root.getAsset(), {
-    generator: `MillOS asset pipeline, glTF-Transform ${GLTF_TRANSFORM_VERSION}`,
-    copyright: 'Cesium Man, Cesium, CC BY 4.0',
-  });
-
-  await writeBinaryGLB(io, output, document);
-  return {
-    bounds: getBounds(scene),
-    materials: root.listMaterials().length,
-    textures: root.listTextures().length,
-    animations: root.listAnimations().map((animation) => animation.getName()),
-  };
-}
-
-function selectWorkerAnimation(document, sourceName, targetName) {
-  const sourceAnimation = document
-    .getRoot()
-    .listAnimations()
-    .find((animation) => animation.getName() === sourceName);
-  if (!sourceAnimation) throw new Error(`Worker animation ${sourceName} is missing`);
-
-  const targetAnimation = document.createAnimation(targetName);
-  const samplerMap = new Map();
-  for (const sourceSampler of sourceAnimation.listSamplers()) {
-    const targetSampler = document
-      .createAnimationSampler(`${targetName}-sampler`)
-      .setInput(sourceSampler.getInput())
-      .setOutput(sourceSampler.getOutput())
-      .setInterpolation(sourceSampler.getInterpolation());
-    samplerMap.set(sourceSampler, targetSampler);
-    targetAnimation.addSampler(targetSampler);
-  }
-
-  for (const sourceChannel of sourceAnimation.listChannels()) {
-    const targetSampler = samplerMap.get(sourceChannel.getSampler());
-    const targetNode = sourceChannel.getTargetNode();
-    const targetPath = sourceChannel.getTargetPath();
-    if (!targetSampler || !targetNode || !targetPath) continue;
-    const targetChannel = document
-      .createAnimationChannel(`${targetName}-${targetNode.getName()}-${targetPath}`)
-      .setTargetNode(targetNode)
-      .setTargetPath(targetPath)
-      .setSampler(targetSampler);
-    targetAnimation.addChannel(targetChannel);
-  }
-
-  return targetAnimation;
-}
-
-async function normalizeAuthoredWorker(io, source, output, bodyType) {
-  const document = await io.read(source);
-  const root = document.getRoot();
-  const scene = root.listScenes()[0];
-  if (!scene) throw new Error(`${bodyType} worker source has no scene`);
-
-  const sourceAnimations = [...root.listAnimations()];
-  for (const [sourceName, targetName] of workerClipDefinitions) {
-    selectWorkerAnimation(document, sourceName, targetName);
-  }
-  sourceAnimations.forEach((animation) => animation.dispose());
-
-  const initialBounds = getBounds(scene);
-  const initialHeight = initialBounds.max[1] - initialBounds.min[1];
-  const scaleFactor = initialHeight > 0 ? WORKER_TARGET_HEIGHT / initialHeight : 1;
-  scene.listChildren().forEach((node) => multiplyScale(node, scaleFactor));
-  centreSceneBelow(document, scene);
-  scene.setName(`MillOS_Worker_${bodyType}`);
-  Object.assign(root.getAsset(), {
-    generator: `MillOS v0.40 worker pipeline, glTF-Transform ${GLTF_TRANSFORM_VERSION}`,
-    copyright: `Ultimate Modular ${bodyType === 'masculine' ? 'Men' : 'Women'} Worker by Quaternius, CC0 1.0`,
-  });
-
-  await writeBinaryGLB(io, output, document);
-  return {
-    bounds: getBounds(scene),
-    materials: root.listMaterials().length,
-    textures: root.listTextures().length,
-    animations: root.listAnimations().map((animation) => animation.getName()),
   };
 }
 
@@ -854,18 +723,17 @@ async function main() {
     await mkdir(path.dirname(asset.output), { recursive: true });
     await preserveSource(asset.source, asset.output);
   }
-  await preserveSource(legacyWorkerTexture.source, legacyWorkerTexture.output);
 
   if (DRY_RUN) {
     console.log(
-      'Source assets are preserved. Run without --dry-run to create runtime derivatives.'
+      'Autonomous equipment sources are preserved. Run without --dry-run to create runtime derivatives.'
     );
     return;
   }
 
   const io = await createIO();
-  // A filtered run leaves the forklift, the workers and the twenty-nine
-  // untouched generated assets exactly as they were, so their rows have to come
+  // A filtered run leaves the forklift and the untouched generated
+  // assets exactly as they were, so their rows have to come
   // from the report on disk rather than from a normalization that did not run.
   const previous = ONLY ? JSON.parse(await readFile(reportPath, 'utf8')) : null;
   if (ONLY && !Array.isArray(previous?.generated)) {
@@ -880,23 +748,6 @@ async function main() {
         generatedAt: new Date().toISOString(),
         sourcePolicy: 'immutable',
         forklift: await normalizeForklift(io, paths.forklift.source, paths.forklift.output),
-        worker: {
-          action: 'compatibility-derivative-retained',
-          reason:
-            'The compact Kenney fallback has an independently validated Draco and two-clip contract. The historical source normalizer cannot reproduce that derivative exactly.',
-        },
-        workerMasculine: await normalizeAuthoredWorker(
-          io,
-          paths.workerMasculine.source,
-          paths.workerMasculine.output,
-          'masculine'
-        ),
-        workerFeminine: await normalizeAuthoredWorker(
-          io,
-          paths.workerFeminine.source,
-          paths.workerFeminine.output,
-          'feminine'
-        ),
         silo: {
           action: 'quarantined',
           reason:
@@ -927,8 +778,6 @@ async function main() {
 
   if (!ONLY) {
     await rm(paths.silo.output, { force: true });
-    await rm(path.join(OUTPUT_ROOT, 'worker', 'baseColor.jpg'), { force: true });
-    await rm(legacyWorkerTexture.output, { force: true });
   }
   await mkdir(REPORT_ROOT, { recursive: true });
   if (!ONLY) {
@@ -946,7 +795,7 @@ async function main() {
     ONLY
       ? `Normalized ${selected.length} of ${GENERATED_ASSETS.length} generated assets ` +
           `(${ONLY.join(', ')}); the rest of the report is carried forward. Report: ${reportPath}`
-      : `Normalized forklift, worker and ${GENERATED_ASSETS.length} generated assets. Report: ${reportPath}`
+      : `Normalized forklift and ${GENERATED_ASSETS.length} generated assets. Report: ${reportPath}`
   );
 }
 

@@ -12,7 +12,6 @@ import {
   Clock,
   Target,
   Factory,
-  Users,
   Gauge,
   TrendingUp,
   AlertTriangle,
@@ -42,7 +41,7 @@ export const DecisionReplay: React.FC<DecisionReplayProps> = ({ decision, onClos
 
   const getTypeColor = (type: string) => {
     switch (type) {
-      case 'assignment':
+      case 'coordination':
         return 'text-blue-400 bg-blue-500/20';
       case 'optimization':
         return 'text-green-400 bg-green-500/20';
@@ -173,17 +172,6 @@ export const DecisionReplay: React.FC<DecisionReplayProps> = ({ decision, onClos
               </div>
             )}
 
-            {/* Worker Context (if available) */}
-            {decision.workerId && (
-              <div className="bg-slate-800/30 rounded-lg p-3">
-                <div className="flex items-center gap-2 text-slate-400 mb-2">
-                  <Users className="w-3.5 h-3.5" />
-                  <span className="text-[10px] uppercase">Assigned Worker</span>
-                </div>
-                <p className="text-sm text-emerald-400 font-mono">{decision.workerId}</p>
-              </div>
-            )}
-
             {decision.provenance && (
               <>
                 <section
@@ -260,9 +248,11 @@ export const DecisionReplay: React.FC<DecisionReplayProps> = ({ decision, onClos
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-lg bg-slate-800/30 p-3">
-                    <div className="mb-1 text-[10px] uppercase text-slate-400">Affected people</div>
+                    <div className="mb-1 text-[10px] uppercase text-slate-400">
+                      Affected systems
+                    </div>
                     <p className="text-xs text-slate-200">
-                      {decision.provenance.affectedPeople.join(', ')}
+                      {decision.provenance.affectedSystems.join(', ')}
                     </p>
                   </div>
                   <div className="rounded-lg bg-slate-800/30 p-3">
@@ -291,9 +281,7 @@ export const DecisionReplay: React.FC<DecisionReplayProps> = ({ decision, onClos
                   )}
                 </div>
               ) : (
-                <p className="text-xs text-slate-400">
-                  Awaiting an operator or automatic response.
-                </p>
+                <p className="text-xs text-slate-400">Awaiting an automatic control response.</p>
               )}
             </section>
 

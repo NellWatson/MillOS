@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState, useEffect } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { useFrame, ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 
@@ -31,6 +31,14 @@ import { PROCEDURAL_TEXTURES, OUTDOOR_MATERIALS } from '../utils/sharedMaterials
 import { EXTERIOR_LAYERS, RENDER_ORDER } from '../constants/renderLayers';
 import { SITE_LAYOUT } from '../constants/siteLayout';
 import { generateCobblestoneRoughness } from '../textures';
+import { useGameSimulationStore } from '../stores/gameSimulationStore';
+import { createAtmosphereState, sampleAtmosphere } from '../simulation/atmosphere';
+import {
+  createAnimalWanderPlan,
+  getAnimalActivityMultiplier,
+  getWindmillAngularSpeed,
+  type WanderBounds,
+} from '../simulation/ambientWorld';
 
 /** Hoisted so the barnyard material does not allocate a Vector2 per render. */
 const FARM_COBBLE_NORMAL_SCALE = new THREE.Vector2(0.4, 0.4);
@@ -612,7 +620,7 @@ const SM = {
     roughness: 0.7,
     side: THREE.DoubleSide,
   }),
-  // Grain Field & Scarecrow. White base: the old flat '#8bc34a' is now
+  // Grain field. White base: the old flat '#8bc34a' is now
   // supplied per stalk through `instanceColor` (see InstancedGrainField), so
   // keeping the tint here would multiply the crop colour twice.
   cornGreen: new THREE.MeshStandardMaterial({
@@ -1181,7 +1189,26 @@ interface AnimalState {
   target: THREE.Vector3;
   isIdle: boolean;
   idleTime: number;
+  seed: number;
+  sequenceStep: number;
 }
+
+const CHICKEN_WANDER_BOUNDS: WanderBounds = { minX: 9, maxX: 15, minZ: -8, maxZ: -2 };
+const PIG_WANDER_BOUNDS: WanderBounds = { minX: -14, maxX: -10, minZ: -7, maxZ: -3 };
+const COW_WANDER_BOUNDS: WanderBounds = { minX: -5, maxX: 15, minZ: 10, maxZ: 20 };
+
+const createAnimalState = (seed: number, bounds: WanderBounds): AnimalState => {
+  const plan = createAnimalWanderPlan(seed, 0, bounds);
+  return {
+    target: new THREE.Vector3(plan.x, 0, plan.z),
+    isIdle: false,
+    idleTime: 0,
+    seed,
+    sequenceStep: 1,
+  };
+};
+
+const _farmAtmosphere = createAtmosphereState();
 
 /**
  * Quarter turn, same as `CowPrimitiveBody` and for the same measured reason:
@@ -2189,11 +2216,7 @@ export const FarmArea: React.FC = () => {
     []
   );
   const chickenStates = useRef<AnimalState[]>(
-    Array.from({ length: 5 }, () => ({
-      target: new THREE.Vector3(12 + (Math.random() - 0.5) * 8, 0, -5 + (Math.random() - 0.5) * 8),
-      isIdle: false,
-      idleTime: 0,
-    }))
+    Array.from({ length: 5 }, (_, index) => createAnimalState(100 + index, CHICKEN_WANDER_BOUNDS))
   );
 
   // --- Pig Refs & State ---
@@ -2214,11 +2237,7 @@ export const FarmArea: React.FC = () => {
   const pigRoot = useRef<number[]>(new Array(3).fill(0));
   const pigStride = useRef<number[]>(new Array(3).fill(0));
   const pigStates = useRef<AnimalState[]>(
-    Array.from({ length: 3 }, () => ({
-      target: new THREE.Vector3(-12 + (Math.random() - 0.5) * 4, 0, -5 + (Math.random() - 0.5) * 4),
-      isIdle: false,
-      idleTime: 0,
-    }))
+    Array.from({ length: 3 }, (_, index) => createAnimalState(200 + index, PIG_WANDER_BOUNDS))
   );
 
   // --- Cow Refs & State ---
@@ -2254,11 +2273,7 @@ export const FarmArea: React.FC = () => {
   // that can swing; the primitive fallback has four fixed cylinders.
   const cowStride = useRef<number[]>(new Array(3).fill(0));
   const cowStates = useRef<AnimalState[]>(
-    Array.from({ length: 3 }, () => ({
-      target: new THREE.Vector3(5 + (Math.random() - 0.5) * 15, 0, 15 + (Math.random() - 0.5) * 8),
-      isIdle: false,
-      idleTime: 0,
-    }))
+    Array.from({ length: 3 }, (_, index) => createAnimalState(300 + index, COW_WANDER_BOUNDS))
   );
 
   const sheepRefs = useMemo(
@@ -2281,6 +2296,7 @@ export const FarmArea: React.FC = () => {
   const horseShakeState = useRef(0);
 
   const windmillBladesRef = useRef<THREE.Group>(null);
+  const windmillAngleRef = useRef(0);
   const frameCountRef = useRef(0);
 
   // Petting interaction state
@@ -2354,12 +2370,6 @@ export const FarmArea: React.FC = () => {
       state.idleTime -= delta;
       if (state.idleTime <= 0) {
         state.isIdle = false;
-        // Pick new target within bounds
-        state.target.set(
-          bounds.minX + Math.random() * (bounds.maxX - bounds.minX),
-          yOffset,
-          bounds.minZ + Math.random() * (bounds.maxZ - bounds.minZ)
-        );
       }
     } else {
       // Move towards target
@@ -2369,7 +2379,10 @@ export const FarmArea: React.FC = () => {
 
       if (dist < 0.1) {
         state.isIdle = true;
-        state.idleTime = 2 + Math.random() * 4; // Idle for 2-6 seconds
+        const nextPlan = createAnimalWanderPlan(state.seed, state.sequenceStep, bounds);
+        state.sequenceStep += 1;
+        state.target.set(nextPlan.x, yOffset, nextPlan.z);
+        state.idleTime = nextPlan.idleSeconds;
       } else {
         direction.normalize();
 
@@ -2385,20 +2398,27 @@ export const FarmArea: React.FC = () => {
 
   // SINGLE useFrame - THROTTLED/BATCHED
   useFrame((state, delta) => {
+    const { gameDay, gameTime, gameSpeed, weather, isTabVisible } =
+      useGameSimulationStore.getState();
+    if (!isTabVisible || gameSpeed <= 0) return;
+
     // Cap delta for tab-switch recovery (prevents large jumps after tab is inactive)
     const cappedDelta = Math.min(delta, 0.1);
     frameCountRef.current++;
     const time = state.clock.elapsedTime;
+    const atmosphere = sampleAtmosphere(gameDay, gameTime, weather, _farmAtmosphere);
+    const animalActivity = getAnimalActivityMultiplier(weather, gameTime);
 
     // Windmill: every 2nd frame (30 FPS)
     if (frameCountRef.current % 2 === 0 && windmillBladesRef.current) {
-      windmillBladesRef.current.rotation.z = time * 0.5;
+      windmillAngleRef.current += cappedDelta * 2 * getWindmillAngularSpeed(atmosphere.wind);
+      windmillBladesRef.current.rotation.z = windmillAngleRef.current;
     }
 
     // Animals: every 2nd frame for smooth movement (30 FPS)
     // We update movement slightly more often than the body animations (pecking/wagging)
     if (frameCountRef.current % 2 === 0) {
-      const adjustDelta = cappedDelta * 2; // Compensate for skipping frames
+      const adjustDelta = cappedDelta * 2 * animalActivity; // Compensate for skipped frames
 
       // Chickens
       chickenRefs.forEach((ref, i) => {
@@ -2407,7 +2427,7 @@ export const FarmArea: React.FC = () => {
           chickenStates.current[i],
           adjustDelta,
           1.5, // Speed
-          { minX: 9, maxX: 15, minZ: -8, maxZ: -2 } // Bounds (tighter, near coop)
+          CHICKEN_WANDER_BOUNDS
         );
       });
 
@@ -2418,7 +2438,7 @@ export const FarmArea: React.FC = () => {
           pigStates.current[i],
           adjustDelta,
           0.8, // Speed
-          { minX: -14, maxX: -10, minZ: -7, maxZ: -3 } // Bounds
+          PIG_WANDER_BOUNDS
         );
       });
 
@@ -2429,7 +2449,7 @@ export const FarmArea: React.FC = () => {
           cowStates.current[i],
           adjustDelta,
           0.5, // Speed
-          { minX: -5, maxX: 15, minZ: 10, maxZ: 20 } // Bounds
+          COW_WANDER_BOUNDS
         );
       });
     }
@@ -2818,9 +2838,6 @@ export const FarmArea: React.FC = () => {
         {/* Simple Grain Field - Instanced Loops */}
         {/* Simple Grain Field - Instanced Loops */}
         <InstancedGrainField />
-
-        {/* Cute Scarecrow in the middle */}
-        <Scarecrow position={[0, 0, 0]} rotation={0.2} />
       </group>
 
       {/* Paint Horse next to hay bales */}

@@ -1,7 +1,6 @@
 import React, { useState, Suspense, useEffect, useCallback, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
-import { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
 import { trackRender } from './utils/renderProfiler';
 import './utils/perfMonitor';
@@ -11,7 +10,7 @@ import { CameraController, useCameraStore } from './components/CameraController'
 import { FirstPersonController } from './components/FirstPersonController';
 import ErrorBoundary from './components/ErrorBoundary';
 import { LoadingScreen } from './components/LoadingScreen';
-import { MachineData, MachineType, WorkerData, createInitialWorkers } from './types';
+import { MachineData } from './types';
 import type { ForkliftData } from './components/ForkliftSystem';
 import { audioManager } from './utils/audioManager';
 import { gpuResourceManager } from './utils/GPUResourceManager';
@@ -22,8 +21,6 @@ import { RENDERER_TONE_MAPPING, TONE_EXPOSURE } from './constants/colorGrade';
 import { useUIStore } from './stores/uiStore';
 import { useGameSimulationStore } from './stores/gameSimulationStore';
 import { useProductionStore } from './stores/productionStore';
-import { useMaterialFlowStore } from './stores/materialFlowStore';
-import { safeDivide } from './utils/typeGuards';
 import { initializeSCADASync } from './store';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -39,8 +36,6 @@ if (import.meta.env.DEV) {
   devWindow.useFPSStore = useFPSStore;
 }
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { useSafetySimulation } from './hooks/useSafetySimulation';
-import { useMultiplayerSync } from './multiplayer';
 import { useMobileDetection } from './hooks/useMobileDetection';
 import { TouchLookHandler } from './components/mobile/TouchLookHandler';
 import { MobileFirstPersonController } from './components/mobile/MobileFirstPersonController';
@@ -60,6 +55,7 @@ import { installAtmosphericFogChunks } from './shaders/atmosphericFog';
 installAtmosphericFogChunks();
 
 const PhysicsScene = recoverableLazy(() => import('./components/PhysicsScene'));
+const DeferredOrbitControls = recoverableLazy(() => import('./components/SceneOrbitControls'));
 const AuthoredMillScene = recoverableLazy(() =>
   import('./components/MillScene').then((module) => ({ default: module.MillScene }))
 );
@@ -195,7 +191,6 @@ const App: React.FC = () => {
 
   // New UI handles panels via Dock/Sidebar, but we still need some state for selection
   const [selectedMachine, setSelectedMachine] = useState<MachineData | null>(null);
-  const [selectedWorker, setSelectedWorker] = useState<WorkerData | null>(null);
   const [selectedForklift, setSelectedForklift] = useState<ForkliftData | null>(null);
 
   // AI/SCADA panel state - synced bidirectionally with GameInterface via props
@@ -238,12 +233,10 @@ const App: React.FC = () => {
   // Memoized callbacks
   const handleCloseSelection = useCallback(() => {
     setSelectedMachine(null);
-    setSelectedWorker(null);
   }, []);
 
   const handleSelectMachine = useCallback((machine: MachineData) => {
     setSelectedMachine(machine);
-    setSelectedWorker(null); // Mutual exclusion
   }, []);
   const handleFocusMachine = useCallback(
     (machineId: string) => {
@@ -264,11 +257,6 @@ const App: React.FC = () => {
     },
     [handleSelectMachine]
   );
-  const handleSelectWorker = useCallback((worker: WorkerData) => {
-    setSelectedWorker(worker);
-    setSelectedMachine(null); // Mutual exclusion
-  }, []);
-
   const handleSelectForklift = useCallback(
     (forklift: ForkliftData) => setSelectedForklift(forklift),
     []
@@ -341,8 +329,6 @@ const App: React.FC = () => {
     setShowSCADAPanel,
     selectedMachine,
     setSelectedMachine,
-    selectedWorker,
-    setSelectedWorker,
     productionSpeed,
     setProductionSpeed,
     showZones,
@@ -351,12 +337,6 @@ const App: React.FC = () => {
     setAutoRotate,
     setQualityNotification,
   });
-
-  // Initialize multiplayer state synchronization
-  useMultiplayerSync();
-
-  // Safety simulation - syncs game days to safety metrics & generates random events
-  useSafetySimulation();
 
   // Initialize audio on first user interaction (required by Web Audio API)
   const initializeAudio = useCallback(() => {
@@ -367,8 +347,6 @@ const App: React.FC = () => {
         .then(() => {
           audioManager.startAmbientSounds();
           audioManager.startOutdoorAmbient(); // Birds, wind, distant traffic
-          audioManager.startRadioChatter(); // Radio static/beeps from workers
-          audioManager.startWorkerVoices(); // Distant shouts/whistles from workers
           audioManager.startPASystem(); // PA announcements and shift bells
           audioManager.startCompressorCycling(); // Industrial air compressor cycling
           audioManager.startMetalClanks(); // Random metal clanks from factory floor
@@ -520,118 +498,6 @@ const App: React.FC = () => {
     };
   }, [runtimeMode.benchmark]);
 
-  // Initialize VCP update loop
-  useEffect(() => {
-    // VCP remains available to normal sessions, but its periodic store writes
-    // do not belong in a deterministic fixed-camera render benchmark.
-    if (runtimeMode.benchmark) return;
-
-    let active = true;
-    let stopLoop: (() => void) | undefined;
-
-    import('./protocols/vcp')
-      .then(({ startVCPUpdateLoop, stopVCPUpdateLoop }) => {
-        if (!active) return;
-        startVCPUpdateLoop();
-        stopLoop = stopVCPUpdateLoop;
-      })
-      .catch(() => {
-        stopLoop = undefined;
-      });
-
-    return () => {
-      active = false;
-      stopLoop?.();
-    };
-  }, [runtimeMode.benchmark]);
-
-  // Initialize workers at app startup (not tied to 3D scene rendering)
-  // This ensures workers are available in the store for UI even when camera is outside factory
-  useEffect(() => {
-    const store = useProductionStore.getState();
-    if (store.workers.length === 0) {
-      store.setWorkers(createInitialWorkers());
-    }
-  }, []);
-
-  // Headless production simulation - runs regardless of camera position
-  // This ensures bags are counted even when ConveyorSystem isn't rendering
-  // PERF: Reduced from 1s to 5s interval to minimize store update cascades
-  //
-  // GAME TIME SCALING: Production now scales with gameSpeed so that
-  // the daily target (15,000 bags) is achievable within a game day.
-  // At gameSpeed=180 (default), 1 game day = 8 real minutes.
-  useEffect(() => {
-    // Base production: 12 bags/sec at productionSpeed=1.0, gameSpeed=60
-    // This yields ~15,000 bags/game-day at default settings (gameSpeed=180, productionSpeed~0.9)
-    const BAGS_PER_SECOND_BASE = 12;
-    const INTERVAL_SECONDS = 5;
-    const BAGS_PER_TICK = BAGS_PER_SECOND_BASE * INTERVAL_SECONDS;
-
-    const interval = setInterval(() => {
-      const store = useProductionStore.getState();
-      const gameStore = useGameSimulationStore.getState();
-
-      // Skip if tab is hidden or game is paused
-      if (!gameStore.isTabVisible) return;
-      if (gameStore.gameSpeed === 0) return;
-
-      // Scale by game speed: at 180x, production is 3x faster than at 60x
-      // This makes production happen in "game time" not "real time"
-      const gameSpeedFactor = gameStore.gameSpeed / 60;
-
-      // Calculate bags based on production speed and game speed
-      // productionSpeed is typically 0.8-1.2
-      const bagsThisTick = BAGS_PER_TICK * productionSpeed * gameSpeedFactor;
-
-      // Only produce if we have running machines (packers)
-      const runningPackerMachines = store.machines.filter(
-        (m) => m.type === MachineType.PACKER && (m.status === 'running' || m.status === 'warning')
-      );
-      const runningPackers = runningPackerMachines.length;
-
-      if (runningPackers > 0) {
-        // Scale by number of running packers (3 packers at full = 100%)
-        const packerScale = runningPackers / 3;
-
-        // Couple production to the material-flow simulation so silo starvation,
-        // jams and breakdowns visibly dent throughput. currentPackerFlowRate is
-        // kg/sec at the final packing stage; nominal max is the packers'
-        // 25 kg/sec processingRate (materialFlowStore) per running packer.
-        const NOMINAL_PACKER_KG_PER_SEC = 25;
-        const flowStore = useMaterialFlowStore.getState();
-        const flowRate = flowStore.currentPackerFlowRate;
-        const flowSimLive =
-          Number.isFinite(flowRate) && (flowRate > 0 || flowStore.totalMaterialProcessed > 0);
-
-        let healthFactor: number;
-        if (flowSimLive) {
-          healthFactor = Math.max(
-            0,
-            Math.min(1, safeDivide(flowRate, NOMINAL_PACKER_KG_PER_SEC * runningPackers, 1))
-          );
-        } else {
-          // Flow network not initialized yet: fall back to average packer
-          // efficiency so degraded machines still produce less than pristine ones.
-          const avgEfficiency = safeDivide(
-            runningPackerMachines.reduce((sum, m) => sum + (m.metrics.efficiency ?? 100), 0),
-            runningPackers * 100,
-            1
-          );
-          healthFactor = Math.max(0, Math.min(1, avgEfficiency));
-        }
-
-        const finalBags = Math.round(bagsThisTick * packerScale * healthFactor * 10) / 10;
-
-        if (finalBags > 0) {
-          store.incrementBagsProduced(finalBags);
-        }
-      }
-    }, INTERVAL_SECONDS * 1000); // Run every 5 seconds
-
-    return () => clearInterval(interval);
-  }, [productionSpeed]);
-
   // Initialize SCADA system - uses same consolidated subscription
   const enableSCADA = useGraphicsStore((state) => state.graphics.enableSCADA);
   useEffect(() => {
@@ -716,9 +582,10 @@ const App: React.FC = () => {
 
       {/* 3D Canvas keyboard accessibility notice - visible to screen readers */}
       <div role="note" aria-label="3D visualization keyboard controls" className="sr-only">
-        The 3D factory visualization is interactive. Press V to toggle first-person view mode. Use
-        keyboard shortcuts: I for AI panel, O for SCADA, Escape to close panels. Press 1-5 to switch
-        camera presets. Arrow keys control camera in first-person mode.
+        The 3D factory visualization is interactive. Use W, A, S, D or the arrow keys to move, Q and
+        E to move down and up, and Shift to move faster. Press V to toggle first-person view mode.
+        Press 1-5 to switch camera presets. Keyboard movement pauses while an interface control has
+        focus.
       </div>
 
       {showOperationalUI && !deferredUIReady && <StartupInterface />}
@@ -731,7 +598,6 @@ const App: React.FC = () => {
               showZones={showZones}
               setShowZones={setShowZones}
               selectedMachine={selectedMachine}
-              selectedWorker={selectedWorker}
               selectedForklift={selectedForklift}
               onCloseSelection={handleCloseSelection}
               onClearForklift={() => setSelectedForklift(null)}
@@ -780,7 +646,7 @@ const App: React.FC = () => {
             // stays the one tier that is purely forward-rendered.
             shadows={canvasQuality === 'low' ? false : { type: THREE.PCFSoftShadowMap }}
             camera={{
-              position: [35, 25, 20], // Start inside factory so workers/production initialize
+              position: [35, 25, 20], // Start inside factory so production is immediately readable
               fov: 65,
               near: CAMERA_DEPTH.near,
               far: CAMERA_DEPTH.far,
@@ -875,7 +741,6 @@ const App: React.FC = () => {
                         productionSpeed={productionSpeed}
                         showZones={showZones}
                         onSelectMachine={handleSelectMachine}
-                        onSelectWorker={handleSelectWorker}
                         onSelectForklift={handleSelectForklift}
                       />
                     }
@@ -888,7 +753,6 @@ const App: React.FC = () => {
                       showZones={showZones}
                       onLockChange={handleLockChange}
                       onSelectMachine={handleSelectMachine}
-                      onSelectWorker={handleSelectWorker}
                       onSelectForklift={handleSelectForklift}
                     />
                   </ErrorBoundary>
@@ -902,8 +766,9 @@ const App: React.FC = () => {
                         <FirstPersonController onLockChange={handleLockChange} />
                       )
                     ) : (
-                      <OrbitControls
+                      <DeferredOrbitControls
                         ref={orbitControlsRef}
+                        onStart={() => useCameraStore.getState().cancelAnimation()}
                         /*
                          * A BENCHMARK OR ART RUN SCRIPTS THE CAMERA, AND THE
                          * ORBIT RIG WAS EDITING THE POSE IT WAS HANDED.
@@ -960,7 +825,6 @@ const App: React.FC = () => {
                       productionSpeed={productionSpeed}
                       showZones={showZones}
                       onSelectMachine={handleSelectMachine}
-                      onSelectWorker={handleSelectWorker}
                       onSelectForklift={handleSelectForklift}
                     />
                   </>
@@ -975,7 +839,7 @@ const App: React.FC = () => {
             {!fpsMode && !runtimeMode.benchmark && (
               <CameraController
                 orbitControlsRef={orbitControlsRef}
-                autoRotateEnabled={autoRotate && !selectedMachine && !selectedWorker}
+                autoRotateEnabled={autoRotate && !selectedMachine}
                 targetSpeed={0.15}
               />
             )}
@@ -983,7 +847,10 @@ const App: React.FC = () => {
             {/* Mobile touch-to-look handler (inside Canvas for R3F access) */}
             {isMobile && !fpsMode && <TouchLookHandler orbitControlsRef={orbitControlsRef} />}
 
-            <RuntimeController adaptiveEnabled={enableAdaptiveQuality} />
+            <RuntimeController
+              adaptiveEnabled={enableAdaptiveQuality}
+              orbitControlsRef={orbitControlsRef}
+            />
           </Canvas>
         </ErrorBoundary>
       </main>

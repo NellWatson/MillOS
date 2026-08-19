@@ -8,8 +8,6 @@ vi.mock('lucide-react', () => ({
   Home: () => <span data-testid="icon-home" />,
   Brain: () => <span data-testid="icon-brain" />,
   Activity: () => <span data-testid="icon-activity" />,
-  Users: () => <span data-testid="icon-users" />,
-  HardHat: () => <span data-testid="icon-hardhat" />,
   Shield: () => <span data-testid="icon-shield" />,
   Settings: () => <span data-testid="icon-settings" />,
   Eye: () => <span data-testid="icon-eye" />,
@@ -28,7 +26,7 @@ describe('Dock Component', () => {
     expect(screen.getByLabelText('Mill Overview')).toBeInTheDocument();
     expect(screen.getByLabelText('AI Partner')).toBeInTheDocument();
     expect(screen.getByLabelText('Simulated SCADA')).toBeInTheDocument();
-    expect(screen.getByLabelText('Workforce')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Workforce')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Bilateral Autonomy System (BAS)')).toBeInTheDocument();
     expect(screen.getByLabelText('Safety & Emergency')).toBeInTheDocument();
     expect(screen.getByLabelText('Settings')).toBeInTheDocument();
@@ -52,16 +50,24 @@ describe('Dock Component', () => {
     render(<Dock activeMode="overview" onModeChange={handleModeChange} />);
 
     fireEvent.click(screen.getByLabelText('AI Partner'));
-    expect(handleModeChange).toHaveBeenCalledWith('ai');
+    expect(handleModeChange).toHaveBeenCalledWith('ai', screen.getByLabelText('AI Partner'));
   });
 
   it('groups secondary workspaces and view controls behind one menu', () => {
     const handleModeChange = vi.fn();
-    render(<Dock activeMode="overview" onModeChange={handleModeChange} />);
+    const handleDatalinksOpen = vi.fn();
+    render(
+      <Dock
+        activeMode="overview"
+        onModeChange={handleModeChange}
+        onDatalinksOpen={handleDatalinksOpen}
+      />
+    );
 
     fireEvent.click(screen.getByLabelText('More workspaces and view controls'));
-    fireEvent.click(screen.getByRole('menuitem', { name: /Multiplayer/ }));
-    expect(handleModeChange).toHaveBeenCalledWith('multiplayer');
+    fireEvent.click(screen.getByRole('menuitem', { name: /Datalinks/ }));
+    expect(handleDatalinksOpen).toHaveBeenCalledOnce();
+    expect(handleModeChange).not.toHaveBeenCalled();
   });
 
   it('has accessible labels for screen readers', () => {

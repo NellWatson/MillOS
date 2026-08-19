@@ -7,6 +7,7 @@
     "dev": "vite --port 3000",
     "build": "vite build",
     "build:archives": "node scripts/package-static-archives.mjs",
+    "build:pages-staging": "node scripts/build-pages-staging.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -38,7 +39,9 @@
     "validate:bundle": "node scripts/validate-bundle.mjs",
     "validate:reachability": "node scripts/audit-module-reachability.mjs",
     "analyze:materials": "node scripts/analyze-material-sharing.mjs",
-    "measure:surfaces": "node scripts/measure-surface-contrast.mjs"
+    "measure:surfaces": "node scripts/measure-surface-contrast.mjs",
+    "validate:uncrewed": "node scripts/validate-uncrewed-build.mjs",
+    "validate:releases": "node scripts/validate-release-matrix.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -51,7 +54,6 @@
     "framer-motion": "^12.23.26",
     "lucide-react": "^0.562.0",
     "maath": "^0.10.8",
-    "peerjs": "^1.5.5",
     "postprocessing": "^6.38.2",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",

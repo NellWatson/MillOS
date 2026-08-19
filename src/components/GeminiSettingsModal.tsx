@@ -40,14 +40,12 @@ const VisualizationToggles: React.FC = () => {
   const showVCLDebug = useAIConfigStore((s) => s.showVCLDebug);
   const showEnergyDashboard = useAIConfigStore((s) => s.showEnergyDashboard);
   const showCostOverlay = useAIConfigStore((s) => s.showCostOverlay);
-  const showShiftHandover = useAIConfigStore((s) => s.showShiftHandover);
   const setShowCascadeVisualization = useAIConfigStore((s) => s.setShowCascadeVisualization);
   const setShowProductionTarget = useAIConfigStore((s) => s.setShowProductionTarget);
   const setShowStrategicOverlay = useAIConfigStore((s) => s.setShowStrategicOverlay);
   const setShowVCLDebug = useAIConfigStore((s) => s.setShowVCLDebug);
   const setShowEnergyDashboard = useAIConfigStore((s) => s.setShowEnergyDashboard);
   const setShowCostOverlay = useAIConfigStore((s) => s.setShowCostOverlay);
-  const setShowShiftHandover = useAIConfigStore((s) => s.setShowShiftHandover);
 
   // `key` is the actual keyboard shortcut wired in useKeyboardShortcuts.ts.
   // Toggles without a registered key handler omit `key` (button-only).
@@ -89,11 +87,6 @@ const VisualizationToggles: React.FC = () => {
     },
     // No keyboard handler registered: button-only toggle.
     { label: 'VCL Context', enabled: showVCLDebug, setEnabled: setShowVCLDebug },
-    {
-      label: 'Shift Handover',
-      enabled: showShiftHandover,
-      setEnabled: setShowShiftHandover,
-    },
   ];
 
   return (

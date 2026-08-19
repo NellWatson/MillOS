@@ -6,6 +6,14 @@ import react from '@vitejs/plugin-react-swc'; // SWC is 20x faster than Babel
 const packageMetadata = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')
 ) as { version?: string };
+const releaseMatrix = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, 'release-matrix.json'), 'utf8')
+) as { releases: Array<{ version: string; type: string }> };
+const STATIC_RELEASE_VERSIONS = new Set(
+  releaseMatrix.releases
+    .filter((release) => release.type === 'static')
+    .map((release) => release.version)
+);
 
 const CURRENT_AUDIO_FILES = new Set([
   'The Builder.mp3',
@@ -21,14 +29,50 @@ const CURRENT_AUDIO_FILES = new Set([
   'Fanfare for Space.mp3',
 ]);
 
+/**
+ * Vite's default public-directory copy duplicates every immutable historical
+ * release into `dist`, only for `finalizeCurrentBuild` to delete those copies
+ * at closeBundle. Besides wasting build time, that transient duplication can
+ * exceed the available release-runner disk. Development still uses Vite's
+ * ordinary public directory and `serveStaticVersions`; build mode uses this
+ * filtered copy instead.
+ */
+function copyCurrentPublicFiles(): Plugin {
+  return {
+    name: 'copy-current-public-files',
+    apply: 'build',
+    writeBundle() {
+      const sourceDirectory = path.resolve(__dirname, 'public');
+      const outputDirectory = path.resolve(__dirname, 'dist');
+      fs.cpSync(sourceDirectory, outputDirectory, {
+        recursive: true,
+        filter(source) {
+          const relative = path.relative(sourceDirectory, source);
+          if (relative === '') return true;
+          const segments = relative.split(path.sep);
+          if (/^v\d+\.\d+$/.test(segments[0])) return false;
+          const basename = path.basename(source);
+          if (basename === '.DS_Store' || basename === 'blocked_commands.log') return false;
+          if (
+            segments.length === 1 &&
+            basename.toLocaleLowerCase().endsWith('.mp3') &&
+            !CURRENT_AUDIO_FILES.has(basename)
+          ) {
+            return false;
+          }
+          return true;
+        },
+      });
+    },
+  };
+}
+
 function finalizeCurrentBuild({
   buildId,
   cacheVersion,
-  rootDeployment,
 }: {
   buildId: string;
   cacheVersion: string;
-  rootDeployment: boolean;
 }): Plugin {
   return {
     name: 'finalize-current-build',
@@ -64,8 +108,6 @@ function finalizeCurrentBuild({
         }
       }
 
-      if (!rootDeployment) return;
-
       for (const entry of fs.readdirSync(outputDirectory, { withFileTypes: true })) {
         if (entry.isDirectory() && /^v\d+\.\d+$/.test(entry.name)) {
           fs.rmSync(path.join(outputDirectory, entry.name), { recursive: true, force: true });
@@ -82,15 +124,14 @@ function finalizeCurrentBuild({
   };
 }
 
-// Plugin to serve static v0.10 and v0.20 builds during development
+// Serve the immutable static archives declared by the release matrix in development.
 function serveStaticVersions(): Plugin {
   return {
     name: 'serve-static-versions',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        // Handle both v0.10 and v0.20 static builds
-        const versionMatch = req.url?.match(/^\/(v0\.10|v0\.20)(\/|$)/);
-        if (versionMatch && req.url) {
+        const versionMatch = req.url?.match(/^\/(v\d+\.\d+)(\/|$)/);
+        if (versionMatch && req.url && STATIC_RELEASE_VERSIONS.has(versionMatch[1])) {
           const version = versionMatch[1];
           const urlPath = req.url.replace(/\?.*$/, ''); // Remove query string
           let filePath = path.join(__dirname, 'public', urlPath);
@@ -144,6 +185,10 @@ export default defineConfig((): UserConfig => {
 
   return {
     base: basePath,
+    // Public resolution remains available to both dev and Rollup. The build
+    // section disables only Vite's unfiltered copy; our plugin copies the
+    // current-release subset after bundles have been written.
+    publicDir: 'public',
     server: {
       port: 3000,
       host: '0.0.0.0',
@@ -159,10 +204,10 @@ export default defineConfig((): UserConfig => {
     plugins: [
       serveStaticVersions(),
       react(),
+      copyCurrentPublicFiles(),
       finalizeCurrentBuild({
         buildId,
         cacheVersion,
-        rootDeployment: !version,
       }),
     ],
     define: {
@@ -176,6 +221,7 @@ export default defineConfig((): UserConfig => {
     },
     // Build optimization for better bundle splitting and caching
     build: {
+      copyPublicDir: false,
       target: 'es2020',
       minify: 'esbuild', // esbuild is faster, terser for smaller bundles
       sourcemap: false, // Disable for production (saves ~30% bundle size)
@@ -185,24 +231,19 @@ export default defineConfig((): UserConfig => {
           main: path.resolve(__dirname, 'index.html'),
         },
         output: {
-          // Manual chunks for better caching and parallel loading
-          manualChunks: {
-            // Three.js ecosystem (largest dependencies)
-            'three-core': ['three'],
-            // Fiber/Drei depend directly on React and Zustand. Keeping that
-            // tightly coupled runtime together prevents circular vendor chunks.
-            'three-fiber': [
-              'react',
-              'react-dom',
-              'zustand',
-              '@react-three/fiber',
-              '@react-three/drei',
-            ],
-            // UI libraries
-            'ui-vendor': ['framer-motion'],
-            // Utilities
-            icons: ['lucide-react'],
-            'math-utils': ['maath'],
+          // Manual chunks for better caching and parallel loading. Match package
+          // paths rather than package entry points so React's JSX runtimes and
+          // React DOM's client entry do not fall back into the application chunk.
+          manualChunks(id) {
+            if (id.includes('/node_modules/three/build/')) return 'three-core';
+            if (id.includes('/node_modules/@react-three/fiber/')) return 'three-fiber';
+            if (/\/node_modules\/(?:react|react-dom|scheduler|zustand)(?:\/|$)/.test(id)) {
+              return 'react-core';
+            }
+            if (id.includes('/node_modules/framer-motion/')) return 'ui-vendor';
+            if (id.includes('/node_modules/lucide-react/')) return 'icons';
+            if (id.includes('/node_modules/maath/')) return 'math-utils';
+            return undefined;
           },
         },
       },

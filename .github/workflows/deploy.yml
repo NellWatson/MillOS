@@ -18,97 +18,48 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --force
 
-      # Gate: never publish a broken build to production. Mirrors CI's checks so
-      # a push to main that fails typecheck/lint/tests stops here instead of
-      # deploying. (deploy.yml runs independently of ci.yml, so it must re-gate.)
-      - name: Validate (typecheck + lint + test)
+      - name: Validate release source
         run: |
           npm run typecheck
           npm run lint
+          npm run format:check
           npm test
+          npm run validate:releases
 
-      # Build v0.30 (current) to /v0.30/ subdirectory
-      - name: Build v0.30 current
-        run: VERSION=v0.30 npm run build
-
-      - name: Setup staging with v0.30 current
+      - name: Rebuild the deployed v0.30 release for preservation
         run: |
-          mkdir -p staging/v0.30
-          cp -r dist/* staging/v0.30/
+          V030_SOURCE_SHA=$(node -e "const m=require('./release-matrix.json'); process.stdout.write(m.releases.find((r) => r.version === 'v0.30').sourceCommit)")
+          git worktree add --detach "$RUNNER_TEMP/millos-v030" "$V030_SOURCE_SHA"
+          npm ci --force --ignore-scripts --prefix "$RUNNER_TEMP/millos-v030"
+          VERSION=v0.30 npm run build --prefix "$RUNNER_TEMP/millos-v030"
 
-      # v0.20 is pre-built in public/v0.20/ - copy to staging
-      - name: Copy v0.20 to staging
-        run: cp -r public/v0.20 staging/v0.20
+      - name: Build current release
+        run: VERSION="v$(node -p "require('./package.json').version.split('.').slice(0, 2).join('.')")" npm run build
 
-      # v0.10 is pre-built in public/v0.10/ - copy to staging (legacy)
-      - name: Copy v0.10 to staging
-        run: cp -r public/v0.10 staging/v0.10
-
-      # Copy music files to legacy versions for music backport
-      - name: Copy music files to v0.10
-        run: cp public/*.mp3 staging/v0.10/
-
-      - name: Copy music files to v0.20
-        run: cp public/*.mp3 staging/v0.20/
-
-      # Root redirects to v0.30 (current). The canonical URL (https://www.millos.net/)
-      # IS this page, so it must carry the full SEO/OG head — crawlers and link
-      # unfurlers don't follow the meta-refresh, and a contentless redirect page
-      # made social cards and search results blank.
-      - name: Create root redirect
+      - name: Stage current and archived releases
         run: |
-          cat > staging/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <meta http-equiv="refresh" content="0;url=/v0.30/">
-            <title>MillOS | AI-Powered Grain Mill Digital Twin</title>
-            <meta name="description" content="MillOS - AI-Powered Grain Mill Digital Twin Simulator. A browser-based 3D industrial simulation featuring autonomous workers, intelligent forklifts, real-time production metrics, and SCADA integration." />
-            <link rel="canonical" href="https://www.millos.net/" />
-            <meta property="og:type" content="website" />
-            <meta property="og:url" content="https://www.millos.net/" />
-            <meta property="og:title" content="MillOS | AI-Powered Grain Mill Digital Twin" />
-            <meta property="og:description" content="A browser-based 3D industrial simulation featuring autonomous workers, intelligent forklifts, real-time production metrics, and SCADA integration. An agentic AI experiment by Nell Watson." />
-            <meta property="og:image" content="https://www.millos.net/og-image.png" />
-            <meta property="og:image:width" content="3456" />
-            <meta property="og:image:height" content="1993" />
-            <meta property="og:site_name" content="MillOS" />
-            <meta name="twitter:card" content="summary_large_image" />
-            <meta name="twitter:url" content="https://www.millos.net/" />
-            <meta name="twitter:title" content="MillOS | AI-Powered Grain Mill Digital Twin" />
-            <meta name="twitter:description" content="A browser-based 3D industrial simulation featuring autonomous workers, intelligent forklifts, real-time production metrics, and SCADA integration." />
-            <meta name="twitter:image" content="https://www.millos.net/og-image.png" />
-            <meta name="twitter:creator" content="@NellWatson" />
-          </head>
-          <body>
-            <p>Redirecting to <a href="/v0.30/">MillOS v0.30</a>...</p>
-          </body>
-          </html>
-          EOF
-
-      # The custom-domain CNAME must sit at the published artifact root, or the
-      # GitHub Pages custom domain unsets on every deploy. Copy the repo-root CNAME.
-      - name: Copy CNAME for custom domain
-        run: cp CNAME staging/CNAME
+          npm run build:pages-staging -- \
+            --archive-build "v0.30=$RUNNER_TEMP/millos-v030/dist"
+          npm run validate:releases -- --staging staging
 
       - name: Setup Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v6
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: staging
 
@@ -121,4 +72,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

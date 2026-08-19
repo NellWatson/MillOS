@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { collectStaticBatchCandidates, createStaticMeshBatches } from './StaticMeshBatch';
+import {
+  collectStaticBatchCandidates,
+  createStaticMeshBatches,
+  orderStaticBatchCandidatesForChunking,
+} from './StaticMeshBatch';
 import { applyBatchWorldSurface, hasWorldSurface } from '../../utils/worldSurface';
 
 const makeBox = (x: number, color: string = '#778899'): THREE.Mesh => {
@@ -244,6 +248,49 @@ describe('StaticMeshBatch', () => {
       mergedOriginals: 4,
       mergedMeshes: 1,
     });
+  });
+
+  it('accumulates diagnostics when candidates are processed in startup slices', () => {
+    const root = new THREE.Group();
+    const firstPair = [makeBox(-4), makeBox(-2)];
+    const secondPair = [makeBox(2), makeBox(4)];
+    root.add(...firstPair, ...secondPair);
+
+    const candidates = collectStaticBatchCandidates(root);
+    createStaticMeshBatches(root, candidates.slice(0, 2), 'slice:0', 2);
+    createStaticMeshBatches(root, candidates.slice(2), 'slice:1', 2);
+
+    expect(root.userData.staticBatchStats).toMatchObject({
+      optimizedOriginals: 4,
+      batches: 2,
+      instancedOriginals: 4,
+      instancedBatches: 2,
+    });
+  });
+
+  it('orders lazy traversal results by batching affinity before startup slicing', () => {
+    const root = new THREE.Group();
+    const standardLeft = makeBox(1);
+    const basicLeft = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 2, 3),
+      new THREE.MeshBasicMaterial({ color: '#778899' })
+    );
+    basicLeft.position.x = 2;
+    const standardRight = makeBox(3);
+    const basicRight = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 2, 3),
+      new THREE.MeshBasicMaterial({ color: '#778899' })
+    );
+    basicRight.position.x = 4;
+    root.add(standardLeft, basicLeft, standardRight, basicRight);
+
+    const candidates = collectStaticBatchCandidates(root);
+    const ordered = orderStaticBatchCandidatesForChunking(root, candidates);
+    const materialTypes = ordered.map(({ mesh }) => (mesh.material as THREE.Material).type);
+
+    expect(materialTypes[0]).toBe(materialTypes[1]);
+    expect(materialTypes[2]).toBe(materialTypes[3]);
+    expect(new Set(materialTypes)).toEqual(new Set(['MeshBasicMaterial', 'MeshStandardMaterial']));
   });
 });
 

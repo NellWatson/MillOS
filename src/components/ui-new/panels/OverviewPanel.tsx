@@ -16,6 +16,9 @@ import {
   Map,
   Image,
   Download,
+  Link2,
+  ShieldCheck,
+  FlaskConical,
 } from 'lucide-react';
 import { useProductionStore } from '../../../stores/productionStore';
 import { useGameSimulationStore } from '../../../stores/gameSimulationStore';
@@ -23,8 +26,9 @@ import { useSafetyStore } from '../../../stores/safetyStore';
 import { useUIStore } from '../../../stores/uiStore';
 import { useHistoricalPlaybackStore } from '../../../stores/historicalPlaybackStore';
 import { useMaterialFlowStore } from '../../../stores/materialFlowStore';
+import { useQCLabStore, type QCTestType } from '../../../stores/qcLabStore';
 import { useShallow } from 'zustand/react/shallow';
-import { AchievementsPanel, WorkerLeaderboard } from '../../GameFeatures';
+import { AchievementsPanel } from '../../GameFeatures';
 import { TimelinePlayback } from '../../ui/TimelinePlayback';
 import { recoverableLazy } from '../../../utils/recoverableLazy';
 import { RecoverableFeatureBoundary } from '../../ErrorBoundary';
@@ -71,10 +75,10 @@ const GameSpeedControls: React.FC = React.memo(() => {
         onClick={() => setGameSpeed(0)}
         aria-label="Pause"
         aria-pressed={gameSpeed === 0}
-        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
+        className={`flex min-h-11 flex-1 items-center justify-center gap-1 rounded-lg py-2 text-xs font-bold transition-all ${
           gameSpeed === 0
-            ? 'bg-orange-600 text-white'
-            : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+            ? 'bg-orange-800 text-white'
+            : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
         }`}
         title="Pause"
       >
@@ -83,10 +87,10 @@ const GameSpeedControls: React.FC = React.memo(() => {
       <button
         onClick={() => setGameSpeed(180)}
         aria-pressed={gameSpeed === 180}
-        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
+        className={`flex min-h-11 flex-1 items-center justify-center gap-1 rounded-lg py-2 text-xs font-bold transition-all ${
           gameSpeed === 180
-            ? 'bg-orange-600 text-white'
-            : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+            ? 'bg-orange-800 text-white'
+            : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
         }`}
         title="Normal (1x - 24hrs in 8min)"
       >
@@ -96,10 +100,10 @@ const GameSpeedControls: React.FC = React.memo(() => {
       <button
         onClick={() => setGameSpeed(1800)}
         aria-pressed={gameSpeed === 1800}
-        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
+        className={`flex min-h-11 flex-1 items-center justify-center gap-1 rounded-lg py-2 text-xs font-bold transition-all ${
           gameSpeed === 1800
-            ? 'bg-orange-600 text-white'
-            : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+            ? 'bg-orange-800 text-white'
+            : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
         }`}
         title="Fast (10x)"
       >
@@ -109,10 +113,10 @@ const GameSpeedControls: React.FC = React.memo(() => {
       <button
         onClick={() => setGameSpeed(10800)}
         aria-pressed={gameSpeed === 10800}
-        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${
+        className={`flex min-h-11 flex-1 items-center justify-center gap-1 rounded-lg py-2 text-xs font-bold transition-all ${
           gameSpeed === 10800
-            ? 'bg-orange-600 text-white'
-            : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+            ? 'bg-orange-800 text-white'
+            : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
         }`}
         title="Ultra (60x)"
       >
@@ -217,13 +221,258 @@ const MaterialTraceabilitySection: React.FC = React.memo(() => {
   );
 });
 
+const BatchGenealogySection: React.FC = React.memo(() => {
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  const productionBatches = useMaterialFlowStore((state) => state.productionBatches);
+  const sourceLotCount = useMaterialFlowStore((state) => state.sourceLots.size);
+  const genealogyErrorKg = useMaterialFlowStore((state) => state.getGenealogyBalance().errorKg);
+  const qcLab = useQCLabStore((state) => state.qcLab);
+  const startQCTest = useQCLabStore((state) => state.startQCTest);
+  const completeQCTest = useQCLabStore((state) => state.completeQCTest);
+  const triggerContaminationAlert = useQCLabStore((state) => state.triggerContaminationAlert);
+  const resolveContaminationAlert = useQCLabStore((state) => state.resolveContaminationAlert);
+  const latestBatches = useMemo(() => productionBatches.slice(-4).reverse(), [productionBatches]);
+  const selectedTrace = selectedBatchId
+    ? useMaterialFlowStore.getState().getBatchTrace(selectedBatchId)
+    : null;
+
+  const runConformingTest = (batchId: string, testType: QCTestType) => {
+    const batch = useMaterialFlowStore
+      .getState()
+      .productionBatches.find((candidate) => candidate.id === batchId);
+    if (!batch) return;
+    const sourceLotIds = [...new Set(batch.sourceContributions.map((source) => source.lotId))];
+    startQCTest(batch.packerId, {
+      batchId,
+      sourceLotIds,
+      testType,
+      controlSource: 'Autonomous QC controller',
+    });
+    completeQCTest({
+      machineId: batch.packerId,
+      batchId,
+      sourceLotIds,
+      testType,
+      controlSource: 'Autonomous QC controller',
+      controlNote:
+        testType === 'retest'
+          ? 'Conforming retest completed after corrective investigation'
+          : 'Routine batch release test completed',
+      grade: 'A',
+      moistureContent: 13.2,
+      proteinLevel: 11.8,
+      ashContent: 0.52,
+      particleSize: 120,
+      passed: true,
+    });
+    if (testType === 'retest') {
+      useQCLabStore
+        .getState()
+        .qcLab.contaminationAlerts.filter(
+          (alert) => !alert.resolved && alert.batchIds.includes(batchId)
+        )
+        .forEach((alert) =>
+          resolveContaminationAlert(
+            alert.id,
+            'released',
+            'Autonomous QC controller',
+            'Conforming retest released the investigated scope'
+          )
+        );
+    }
+  };
+
+  const recallBatch = (batchId: string) => {
+    const unresolved = useQCLabStore
+      .getState()
+      .qcLab.contaminationAlerts.find(
+        (alert) => !alert.resolved && alert.batchIds.includes(batchId)
+      );
+    const alertId =
+      unresolved?.id ??
+      triggerContaminationAlert({
+        batchIds: [batchId],
+        severity: 'high',
+        controlSource: 'Autonomous QC controller',
+        controlNote: 'Targeted batch recall investigation',
+      });
+    resolveContaminationAlert(
+      alertId,
+      'recalled',
+      'Autonomous QC controller',
+      'Affected batch recalled and isolated from dispatch'
+    );
+  };
+
+  return (
+    <section className="rounded-xl border border-white/5 bg-slate-800/50 p-3">
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div>
+          <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
+            <Link2 size={14} className="text-cyan-400" aria-hidden="true" />
+            Batch genealogy and quality
+          </h3>
+          <p className="mt-1 text-[10px] text-slate-500">
+            {sourceLotCount} source lots, {productionBatches.length} production batches
+          </p>
+        </div>
+        <div
+          role="status"
+          className={`rounded border px-2 py-1 font-mono text-[10px] ${
+            Math.abs(genealogyErrorKg) <= 0.01
+              ? 'border-emerald-500/40 text-emerald-300'
+              : 'border-amber-500/50 text-amber-300'
+          }`}
+        >
+          Genealogy {genealogyErrorKg >= 0 ? '+' : ''}
+          {genealogyErrorKg.toFixed(2)} kg
+        </div>
+      </div>
+      {latestBatches.length === 0 ? (
+        <p className="py-2 text-xs text-slate-500">
+          Packing is building the first traceable batch.
+        </p>
+      ) : (
+        <ol className="space-y-2" aria-label="Latest production batches">
+          {latestBatches.map((batch) => {
+            const unresolvedAlert = qcLab.contaminationAlerts.some(
+              (alert) => !alert.resolved && alert.batchIds.includes(batch.id)
+            );
+            return (
+              <li
+                key={batch.id}
+                className="rounded-lg border border-slate-700/60 bg-slate-900/35 p-2.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="font-mono text-[11px] font-semibold text-slate-200">
+                      {batch.id.toUpperCase()}
+                    </div>
+                    <div className="mt-0.5 text-[10px] text-slate-500">
+                      {batch.materialType.replaceAll('_', ' ')}, {batch.availableKg.toFixed(1)} kg
+                      available
+                    </div>
+                  </div>
+                  <span
+                    className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider ${
+                      batch.disposition === 'released'
+                        ? 'bg-emerald-500/15 text-emerald-300'
+                        : batch.disposition === 'hold'
+                          ? 'bg-amber-500/15 text-amber-300'
+                          : 'bg-red-500/15 text-red-300'
+                    }`}
+                  >
+                    {batch.disposition}
+                  </span>
+                </div>
+                {batch.dispositionReason && (
+                  <p className="mt-1 text-[10px] text-slate-400">{batch.dispositionReason}</p>
+                )}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    aria-expanded={selectedBatchId === batch.id}
+                    onClick={() =>
+                      setSelectedBatchId((current) => (current === batch.id ? null : batch.id))
+                    }
+                    className="min-h-11 rounded bg-slate-700 px-3 text-xs font-semibold text-white hover:bg-slate-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
+                  >
+                    {selectedBatchId === batch.id ? 'Hide trace' : 'Trace batch'}
+                  </button>
+                  {batch.disposition === 'released' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => runConformingTest(batch.id, 'initial')}
+                        className="inline-flex min-h-11 items-center gap-1.5 rounded bg-cyan-700 px-3 text-xs font-semibold text-white hover:bg-cyan-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
+                      >
+                        <FlaskConical size={14} aria-hidden="true" />
+                        Test batch
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          triggerContaminationAlert({
+                            batchIds: [batch.id],
+                            severity: 'medium',
+                            controlSource: 'Autonomous QC controller',
+                            controlNote: 'Automated targeted quality hold initiated',
+                          })
+                        }
+                        className="min-h-11 rounded bg-amber-800 px-3 text-xs font-semibold text-white hover:bg-amber-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-300"
+                      >
+                        Place hold
+                      </button>
+                    </>
+                  )}
+                  {batch.disposition === 'hold' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => runConformingTest(batch.id, 'retest')}
+                        className="inline-flex min-h-11 items-center gap-1.5 rounded bg-emerald-700 px-3 text-xs font-semibold text-white hover:bg-emerald-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-300"
+                      >
+                        <ShieldCheck size={14} aria-hidden="true" />
+                        Retest and release
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => recallBatch(batch.id)}
+                        className="min-h-11 rounded bg-red-700 px-3 text-xs font-semibold text-white hover:bg-red-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-300"
+                      >
+                        Recall batch
+                      </button>
+                    </>
+                  )}
+                  {unresolvedAlert && (
+                    <span
+                      role="status"
+                      className="flex min-h-11 items-center text-xs text-amber-300"
+                    >
+                      Investigation active
+                    </span>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      {selectedTrace && (
+        <div
+          className="mt-3 rounded-lg border border-cyan-500/25 bg-cyan-950/15 p-2.5"
+          role="region"
+          aria-label={`Trace for ${selectedTrace.batch.id}`}
+        >
+          <div className="text-[10px] font-bold uppercase tracking-wider text-cyan-300">
+            Upstream provenance
+          </div>
+          <ul className="mt-2 space-y-2">
+            {selectedTrace.sourceLots.map(({ lot, amount, paths }) => (
+              <li key={lot.id} className="text-[10px] text-slate-300">
+                <div className="flex justify-between gap-2">
+                  <span className="font-mono text-cyan-200">{lot.id}</span>
+                  <span>{amount.toFixed(1)} kg</span>
+                </div>
+                <div className="mt-0.5 text-slate-500">
+                  {lot.supplier}, {lot.disposition}.{' '}
+                  {paths.map((path) => path.join(' to ')).join('; ')}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+});
+
 // Optimized OverviewPanel - No longer subscribes to high-frequency gameTime
 export const OverviewPanel: React.FC = React.memo(() => {
   const metrics = useProductionStore((state) => state.metrics);
   const totalBagsProduced = useProductionStore((state) => state.totalBagsProduced);
   const productionTarget = useProductionStore((state) => state.productionTarget);
   const machines = useProductionStore((state) => state.machines);
-  const workers = useProductionStore((state) => state.workers);
   const dockStatus = useProductionStore((state) => state.dockStatus);
 
   const weather = useGameSimulationStore((state) => state.weather);
@@ -244,10 +493,7 @@ export const OverviewPanel: React.FC = React.memo(() => {
     0,
     Math.min(
       100,
-      100 -
-        (safetyMetrics?.nearMisses ?? 0) * 5 -
-        (safetyMetrics?.safetyStops ?? 0) * 2 -
-        (safetyMetrics?.workerEvasions ?? 0)
+      100 - (safetyMetrics?.nearMisses ?? 0) * 5 - (safetyMetrics?.safetyStops ?? 0) * 2
     )
   );
 
@@ -343,15 +589,15 @@ export const OverviewPanel: React.FC = React.memo(() => {
         <GameSpeedControls />
       </section>
 
-      {/* Weather & Workers */}
+      {/* Weather & Site Mode */}
       <section className="grid grid-cols-2 gap-2">
         <div className="bg-slate-800/50 border border-white/5 rounded-xl p-3">
           <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Weather</div>
           <div className="text-sm font-bold text-white capitalize">{weather}</div>
         </div>
         <div className="bg-slate-800/50 border border-white/5 rounded-xl p-3">
-          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Workers</div>
-          <div className="text-sm font-bold text-white">{workers.length} on shift</div>
+          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Site Mode</div>
+          <div className="text-sm font-bold text-white">Uncrewed</div>
         </div>
       </section>
 
@@ -420,6 +666,7 @@ export const OverviewPanel: React.FC = React.memo(() => {
       </section>
 
       <MaterialTraceabilitySection />
+      <BatchGenealogySection />
 
       {/* Maintenance (breakdowns, predictive alerts, parts, schedule) */}
       <section>
@@ -532,7 +779,6 @@ const DockCard: React.FC<{ label: string; status: string; eta: number }> = ({
 // Quick Actions Section with Gamification Controls
 const QuickActionsSection: React.FC = () => {
   const [showAchievements, setShowAchievements] = useState(false);
-  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const achievements = useProductionStore((state) => state.achievements);
   const { showMiniMap, setShowMiniMap } = useUIStore(
     useShallow((state) => ({
@@ -606,20 +852,6 @@ const QuickActionsSection: React.FC = () => {
             )}
           </button>
 
-          {/* Leaderboard */}
-          <button
-            onClick={() => setShowLeaderboard(!showLeaderboard)}
-            className={`py-2.5 px-3 rounded-lg flex items-center gap-2 transition-colors ${
-              showLeaderboard
-                ? 'bg-cyan-600 text-white'
-                : 'bg-slate-700/80 text-slate-300 hover:bg-slate-600'
-            }`}
-            title="Leaderboard"
-          >
-            <TrendingUp size={16} className={showLeaderboard ? 'text-white' : 'text-cyan-400'} />
-            <span className="text-xs font-medium">Leaderboard</span>
-          </button>
-
           {/* Replay History */}
           <button
             onClick={handleToggleReplay}
@@ -680,7 +912,6 @@ const QuickActionsSection: React.FC = () => {
       {/* Panels */}
       <AnimatePresence>
         {showAchievements && <AchievementsPanel onClose={() => setShowAchievements(false)} />}
-        {showLeaderboard && <WorkerLeaderboard onClose={() => setShowLeaderboard(false)} />}
       </AnimatePresence>
     </>
   );

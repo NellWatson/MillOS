@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { cpus, loadavg } from 'node:os';
-import { mkdir, access, writeFile } from 'node:fs/promises';
+import { mkdir, access, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { chromium } from '@playwright/test';
@@ -12,7 +12,6 @@ const DEFAULT_OUTPUT = path.join(ROOT, 'test-results', 'runtime-benchmarks');
 const DEFAULT_SCENES = ['overview', 'interior', 'shipping', 'receiving', 'water'];
 const PERF_SYSTEMS = {
   trucks: 'disableTruckBay',
-  workers: 'disableWorkerSystem',
   forklifts: 'disableForkliftSystem',
   conveyors: 'disableConveyorSystem',
   machines: 'disableMachines',
@@ -31,6 +30,7 @@ const NETWORK_PROFILES = {
   },
 };
 const PA_MODES = new Set(['focused', 'characterful', 'off']);
+const CELESTIAL_EVIDENCE_TIMES = Object.freeze({ sun: 12, moon: 0 });
 
 function readArgument(name, fallback) {
   const prefix = `--${name}=`;
@@ -133,13 +133,32 @@ if (unknownSystems.length > 0) {
 }
 
 const budgets = {
-  firstFrameMs: 8000,
-  averageFps: 55,
-  p95FrameMs: 25,
-  effectiveDpr: 1,
+  firstFrameMs: options.networkProfile === 'native' ? 350 : 3200,
+  averageFps: 60,
+  p95FrameMs: 16.7,
+  p99FrameMs: 25,
+  onePercentLowFps: 45,
+  effectiveDprTolerance: 0.03,
   maximumLongTaskMs: 100,
+  maximumFramesOver50Ms: 0,
 };
 
+function expectedEffectiveDpr(snapshot) {
+  const maximumDpr = snapshot.quality === 'low' ? 1 : 2;
+  return Math.max(0.4, Math.min(options.deviceScaleFactor * snapshot.resolutionScale, maximumDpr));
+}
+
+function evaluateEffectiveDpr(snapshot) {
+  const expected = expectedEffectiveDpr(snapshot);
+  const measured = snapshot.canvas.effectiveDpr;
+  const delta = Math.abs(measured - expected);
+  return {
+    passed: delta <= budgets.effectiveDprTolerance,
+    expected: Number(expected.toFixed(2)),
+    measured: Number(measured.toFixed(2)),
+    delta: Number(delta.toFixed(3)),
+  };
+}
 
 let previewProcess = null;
 let captureLock = null;
@@ -205,13 +224,23 @@ async function waitForServer(url, timeoutMs = 30000) {
 }
 
 async function startPreview() {
-  await access(path.join(ROOT, 'dist', 'index.html')).catch(() => {
+  const indexPath = path.join(ROOT, 'dist', 'index.html');
+  await access(indexPath).catch(() => {
     throw new Error('dist/index.html is missing. Run npm run build before the benchmark.');
   });
 
-  const url = `http://127.0.0.1:${options.previewPort}`;
+  const builtIndex = await readFile(indexPath, 'utf8');
+  const versionMatch = builtIndex.match(/(?:src|href)=["']\/(v\d+\.\d+)\/assets\//);
+  const builtVersion = versionMatch?.[1] ?? '';
+  const previewBase = builtVersion ? `/${builtVersion}` : '';
+  const rootUrl = `http://127.0.0.1:${options.previewPort}`;
+  const url = `${rootUrl}${previewBase}`;
   const viteEntry = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
+  let previewStdout = '';
   let previewStderr = '';
+  const previewEnvironment = { ...process.env, BROWSER: 'none' };
+  if (builtVersion) previewEnvironment.VERSION = builtVersion;
+  else delete previewEnvironment.VERSION;
   previewProcess = spawn(
     process.execPath,
     [
@@ -226,30 +255,42 @@ async function startPreview() {
     {
       cwd: ROOT,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, BROWSER: 'none' },
+      env: previewEnvironment,
     }
   );
   previewProcess.stderr.on('data', (chunk) => {
     previewStderr += chunk;
   });
-  await Promise.race([
-    waitForServer(url),
-    new Promise((_, reject) => {
-      previewProcess.once('exit', (code) => {
-        reject(
-          new Error(
-            `Preview exited before becoming ready on port ${options.previewPort} ` +
-              `(code ${String(code)}): ${previewStderr.trim() || 'no stderr'}`
-          )
-        );
-      });
-    }),
-  ]);
+  previewProcess.stdout.on('data', (chunk) => {
+    previewStdout += chunk;
+  });
+  try {
+    await Promise.race([
+      waitForServer(url),
+      new Promise((_, reject) => {
+        previewProcess.once('exit', (code) => {
+          reject(
+            new Error(
+              `Preview exited before becoming ready on port ${options.previewPort} ` +
+                `(code ${String(code)}): ${previewStderr.trim() || 'no stderr'}`
+            )
+          );
+        });
+      }),
+    ]);
+  } catch (error) {
+    await stopPreview();
+    const cause = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `${cause}\nPreview stdout: ${previewStdout.trim() || 'none'}\n` +
+        `Preview stderr: ${previewStderr.trim() || 'none'}`
+    );
+  }
   return url;
 }
 
 async function stopPreview() {
-  if (!previewProcess || previewProcess.killed) return;
+  if (!previewProcess || previewProcess.killed || previewProcess.exitCode !== null) return;
   previewProcess.kill('SIGTERM');
   await new Promise((resolve) => {
     const timer = setTimeout(resolve, 3000);
@@ -263,31 +304,56 @@ async function stopPreview() {
 function evaluateBudgets(snapshot, diagnostics) {
   const longestTask = Math.max(0, ...snapshot.longTasks.map((task) => task.duration));
   const enforceWorldIntegrity = options.disabledSystems.length === 0;
+  const effectiveDpr = evaluateEffectiveDpr(snapshot);
+  const checkpoints = snapshot.checkpoints ?? [];
+  const checkpointIds = new Set(checkpoints.map((checkpoint) => checkpoint.id));
+  const checkpointsValid =
+    checkpointIds.has('receiving-checkpoint') &&
+    checkpointIds.has('shipping-checkpoint') &&
+    checkpoints.every(
+      (checkpoint) =>
+        typeof checkpoint.gateOpen === 'boolean' &&
+        ['closed', 'opening', 'open', 'closing'].includes(checkpoint.phase) &&
+        Number.isFinite(checkpoint.clearanceSecondsRemaining) &&
+        checkpoint.clearanceSecondsRemaining >= 0 &&
+        Number.isFinite(checkpoint.armAngle) &&
+        checkpoint.armAngle >= -0.02 &&
+        checkpoint.armAngle <= Math.PI / 2 + 0.02 &&
+        (checkpoint.phase !== 'closed' || checkpoint.armAngle <= 0.12) &&
+        (checkpoint.phase !== 'open' || checkpoint.armAngle >= Math.PI / 2 - 0.12)
+    );
   const triage = classifyDiagnostics(diagnostics);
   const checks = {
     firstFrame: snapshot.firstFrameAt !== null && snapshot.firstFrameAt <= budgets.firstFrameMs,
     averageFps: snapshot.averageFps >= budgets.averageFps,
     p95Frame: snapshot.p95FrameMs <= budgets.p95FrameMs,
-    effectiveDpr: snapshot.canvas.effectiveDpr >= budgets.effectiveDpr,
+    p99Frame: snapshot.p99FrameMs <= budgets.p99FrameMs,
+    onePercentLow: snapshot.onePercentLowFps >= budgets.onePercentLowFps,
+    effectiveDpr: effectiveDpr.passed,
     longTasks: longestTask <= budgets.maximumLongTaskMs,
+    framesOver50Ms: snapshot.framesOver50Ms <= budgets.maximumFramesOver50Ms,
     worldIntegrity: !enforceWorldIntegrity || snapshot.worldIntegrity?.passed === true,
     // A subsystem that threw during construction can leave frame pacing looking
     // healthy precisely because the work it should have been doing never ran.
     pageClean: triage.actionable.length === 0,
+    uncrewed: snapshot.humanPresence?.passed === true,
+    checkpoints: checkpointsValid,
   };
   return {
     checks,
     passed: Object.values(checks).every(Boolean),
     longestTask,
     diagnosticTriage: triage,
+    effectiveDpr,
   };
 }
 
 function evaluateStartupBudget(snapshot, diagnostics) {
   const triage = classifyDiagnostics(diagnostics);
+  const effectiveDpr = evaluateEffectiveDpr(snapshot);
   const checks = {
     firstFrame: snapshot.firstFrameAt !== null && snapshot.firstFrameAt <= budgets.firstFrameMs,
-    effectiveDpr: snapshot.canvas.effectiveDpr >= budgets.effectiveDpr,
+    effectiveDpr: effectiveDpr.passed,
     pageClean: triage.actionable.length === 0,
   };
   return {
@@ -295,6 +361,7 @@ function evaluateStartupBudget(snapshot, diagnostics) {
     passed: Object.values(checks).every(Boolean),
     longestTask: Math.max(0, ...snapshot.longTasks.map((task) => task.duration)),
     diagnosticTriage: triage,
+    effectiveDpr,
   };
 }
 
@@ -366,11 +433,17 @@ async function waitForRuntimeStage(page, label, predicate, timeoutMs, diagnostic
 function summarizeMotion(samples) {
   const numericTelemetryKeys = [
     'speed',
+    'acceleration',
     'steeringAngle',
+    'innerSteeringAngle',
+    'outerSteeringAngle',
     'wheelRotation',
+    'wheelTravel',
+    'routeDistance',
     'forkHeight',
     'mastTilt',
     'trailerAngle',
+    'articulation',
     'doorOpenAmount',
     'landingGearAmount',
   ];
@@ -383,6 +456,7 @@ function summarizeMotion(samples) {
         distance: 0,
         phases: [],
         cargoStates: [],
+        stopReasons: [],
         telemetry: {},
         lastPosition: null,
       };
@@ -398,6 +472,9 @@ function summarizeMotion(samples) {
       }
       if (entity.cargo && current.cargoStates.at(-1) !== entity.cargo) {
         current.cargoStates.push(entity.cargo);
+      }
+      if (entity.stopReason && current.stopReasons.at(-1) !== entity.stopReason) {
+        current.stopReasons.push(entity.stopReason);
       }
       for (const key of numericTelemetryKeys) {
         const value = entity[key];
@@ -431,6 +508,179 @@ function summarizeMotion(samples) {
       ])
     ),
   }));
+}
+
+function summarizeMotionPacing(samples) {
+  const timelines = new Map();
+  for (const sample of samples) {
+    for (const entity of sample.entities) {
+      const timeline = timelines.get(entity.id) ?? [];
+      timeline.push({ elapsedMs: sample.elapsedMs, ...entity });
+      timelines.set(entity.id, timeline);
+    }
+  }
+
+  return [...timelines.entries()].map(([id, timeline]) => {
+    let movingSamples = 0;
+    let currentPlateau = 0;
+    let maxMovingPlateauSamples = 0;
+    let maxSingleStepDistance = 0;
+    let maxInferredSpeed = 0;
+    let maxJerk = 0;
+    let previousAcceleration = null;
+
+    for (let index = 1; index < timeline.length; index += 1) {
+      const previous = timeline[index - 1];
+      const current = timeline[index];
+      const deltaSeconds = Math.max(0.001, (current.elapsedMs - previous.elapsedMs) / 1000);
+      const distance = Math.hypot(
+        current.position[0] - previous.position[0],
+        current.position[1] - previous.position[1],
+        current.position[2] - previous.position[2]
+      );
+      maxSingleStepDistance = Math.max(maxSingleStepDistance, distance);
+      maxInferredSpeed = Math.max(maxInferredSpeed, distance / deltaSeconds);
+
+      const moving =
+        (current.speed ?? 0) > 0.25 &&
+        current.active !== false &&
+        current.stopped !== true &&
+        (current.stopReason === undefined || current.stopReason === 'none');
+      if (moving) {
+        movingSamples += 1;
+        if (distance < 0.002) {
+          currentPlateau += 1;
+          maxMovingPlateauSamples = Math.max(maxMovingPlateauSamples, currentPlateau);
+        } else {
+          currentPlateau = 0;
+        }
+      } else {
+        currentPlateau = 0;
+      }
+
+      if (Number.isFinite(current.acceleration)) {
+        if (previousAcceleration !== null) {
+          maxJerk = Math.max(
+            maxJerk,
+            Math.abs(current.acceleration - previousAcceleration) / deltaSeconds
+          );
+        }
+        previousAcceleration = current.acceleration;
+      }
+    }
+
+    return {
+      id,
+      sampleCount: timeline.length,
+      movingSamples,
+      maxMovingPlateauSamples,
+      maxSingleStepDistance: Number(maxSingleStepDistance.toFixed(3)),
+      maxInferredSpeed: Number(maxInferredSpeed.toFixed(2)),
+      maxJerk: Number(maxJerk.toFixed(2)),
+    };
+  });
+}
+
+function evaluateMotionAcceptance(samples, summary, pacing) {
+  if (!options.motionEnabled) return { passed: true, checks: [] };
+  const expectedIds = ['forklift-1', 'forklift-2', 'receiving-truck', 'shipping-truck'];
+  const observedIds = new Set(summary.map((entity) => entity.id));
+  const completeFleet = expectedIds.every((id) => observedIds.has(id));
+  const finiteTelemetry = samples.every((sample) =>
+    sample.entities.every(
+      (entity) =>
+        Number.isFinite(entity.speed) &&
+        Number.isFinite(entity.steeringAngle) &&
+        Number.isFinite(entity.wheelTravel) &&
+        Number.isFinite(entity.routeDistance)
+    )
+  );
+  const boundedSteering = samples.every((sample) =>
+    sample.entities.every((entity) => Math.abs(entity.steeringAngle ?? 0) <= 0.61)
+  );
+  const boundedArticulation = samples.every((sample) =>
+    sample.entities
+      .filter((entity) => entity.type === 'truck')
+      .every((entity) => Math.abs(entity.articulation ?? 0) <= 0.701)
+  );
+  const movingEntities = summary.filter((entity) => entity.distance > 0.25);
+  const stationaryEntities = summary.filter((entity) => entity.distance <= 0.25);
+  const stationaryStatesExplained = stationaryEntities.every((entity) =>
+    entity.stopReasons.some((reason) => reason !== 'none')
+  );
+  const wheelTravelFollowsMotion = movingEntities.every(
+    (entity) => Math.abs(entity.telemetry.wheelTravel?.delta ?? 0) > 0.1
+  );
+  const pacedMovingEntities = pacing.filter((entity) => entity.movingSamples > 0);
+  const continuousMotion = pacedMovingEntities.every(
+    (entity) => entity.maxMovingPlateauSamples <= 2
+  );
+  const boundedFrameDisplacement = pacing.every((entity) => entity.maxSingleStepDistance <= 1.5);
+  const checks = [
+    { id: 'complete-fleet', passed: completeFleet, observed: [...observedIds].sort() },
+    { id: 'finite-telemetry', passed: finiteTelemetry },
+    { id: 'bounded-steering', passed: boundedSteering },
+    { id: 'bounded-articulation', passed: boundedArticulation },
+    { id: 'vehicle-motion-observed', passed: movingEntities.length > 0 },
+    {
+      id: 'stationary-vehicles-have-interlock-reason',
+      passed: stationaryStatesExplained,
+      observed: stationaryEntities.map((entity) => ({
+        id: entity.id,
+        stopReasons: entity.stopReasons,
+      })),
+    },
+    { id: 'wheel-travel-follows-motion', passed: wheelTravelFollowsMotion },
+    {
+      id: 'display-cadence-motion-observed',
+      passed: pacedMovingEntities.length > 0,
+      observed: pacedMovingEntities.map((entity) => entity.id),
+    },
+    {
+      id: 'moving-vehicles-have-no-staccato-plateau',
+      passed: continuousMotion,
+      observed: pacing.map((entity) => ({
+        id: entity.id,
+        maxMovingPlateauSamples: entity.maxMovingPlateauSamples,
+      })),
+    },
+    {
+      id: 'single-frame-displacement-is-bounded',
+      passed: boundedFrameDisplacement,
+      observed: pacing.map((entity) => ({
+        id: entity.id,
+        maxSingleStepDistance: entity.maxSingleStepDistance,
+      })),
+    },
+  ];
+  return { passed: checks.every((check) => check.passed), checks };
+}
+
+async function collectDisplayCadenceMotion(page, durationMs) {
+  return page.evaluate(
+    ({ sampleDurationMs, sampleIntervalMs }) =>
+      new Promise((resolve) => {
+        const startedAt = performance.now();
+        let lastSampleAt = Number.NEGATIVE_INFINITY;
+        const samples = [];
+
+        const sample = (now) => {
+          if (now - lastSampleAt >= sampleIntervalMs) {
+            const motion = window.__MILLOS_RUNTIME__?.motionSnapshot();
+            if (motion) samples.push({ elapsedMs: Math.round(now - startedAt), ...motion });
+            lastSampleAt = now;
+          }
+          if (now - startedAt >= sampleDurationMs) {
+            resolve(samples);
+            return;
+          }
+          requestAnimationFrame(sample);
+        };
+
+        requestAnimationFrame(sample);
+      }),
+    { sampleDurationMs: durationMs, sampleIntervalMs: 50 }
+  );
 }
 
 async function waitForRuntimeSettled(
@@ -514,11 +764,16 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
     });
   });
 
+  // Named celestial views are evidence cameras, so they must show the body
+  // named by the scene. A global daytime capture previously aimed the moon
+  // camera below the horizon and produced a convincing screenshot of the
+  // ground. Ordinary scenes still honour the requested simulation hour.
+  const sceneTime = CELESTIAL_EVIDENCE_TIMES[scene] ?? options.time;
   const query = new URLSearchParams({
     benchmark: scene,
     duration: String(options.durationSeconds),
     quality: options.quality,
-    time: String(options.time),
+    time: String(sceneTime),
     weather: options.weather,
     scada: scadaEnabled ? 'on' : 'off',
     pa: options.paMode,
@@ -634,18 +889,9 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
   // hundreds of milliseconds. It is evidence collection, not application
   // frame work, so reset telemetry after the capture and before sampling.
   await page.evaluate(() => window.__MILLOS_RUNTIME__?.reset());
-  const motionSamples = motionStart ? [{ elapsedMs: 0, ...motionStart }] : [];
+  let motionSamples = motionStart ? [{ elapsedMs: 0, ...motionStart }] : [];
   if (options.motionEnabled) {
-    const durationMs = options.durationSeconds * 1000;
-    const sampleIntervalMs = 2000;
-    let elapsedMs = 0;
-    while (elapsedMs < durationMs) {
-      const waitMs = Math.min(sampleIntervalMs, durationMs - elapsedMs);
-      await page.waitForTimeout(waitMs);
-      elapsedMs += waitMs;
-      const motion = await page.evaluate(() => window.__MILLOS_RUNTIME__?.motionSnapshot());
-      if (motion) motionSamples.push({ elapsedMs, ...motion });
-    }
+    motionSamples = await collectDisplayCadenceMotion(page, options.durationSeconds * 1000);
   } else {
     await page.waitForTimeout(options.durationSeconds * 1000);
   }
@@ -686,8 +932,12 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
     });
   const budget = evaluateBudgets(snapshot, { consoleErrors, pageErrors, failedRequests });
   const load = machineLoad();
+  const motionSummary = summarizeMotion(motionSamples);
+  const motionPacing = summarizeMotionPacing(motionSamples);
+  const motionAcceptance = evaluateMotionAcceptance(motionSamples, motionSummary, motionPacing);
   const result = {
     scene,
+    sceneTime,
     variant,
     scadaEnabled,
     url: page.url(),
@@ -696,6 +946,7 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
     domStacks,
     budget,
     load,
+    motionAcceptance,
     diagnostics: {
       consoleErrors,
       pageErrors,
@@ -707,7 +958,8 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
     startup,
     motionStart,
     motionSamples,
-    motionSummary: summarizeMotion(motionSamples),
+    motionSummary,
+    motionPacing,
     motionDelta:
       motionStart === null
         ? null
@@ -798,6 +1050,10 @@ async function main() {
     : [];
   const report = {
     generatedAt: new Date().toISOString(),
+    sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    }).trim(),
     baseUrl,
     browser: options.browserChannel
       ? `Playwright ${options.browserChannel} channel`
@@ -816,7 +1072,10 @@ async function main() {
     systemComparisons: {
       scada: scadaComparisons,
     },
-    passed: results.every((result) => result.budget.passed),
+    passed: results.every(
+      (result) =>
+        result.budget.passed && (options.startupOnly || result.motionAcceptance?.passed === true)
+    ),
     results,
   };
   const reportPath = path.join(options.output, 'benchmark.json');
@@ -829,8 +1088,9 @@ async function main() {
         `${result.scene} startup: ${metric.firstFrameAt.toFixed(1)} ms first useful frame, DPR ${metric.canvas.effectiveDpr.toFixed(2)}, ${result.budget.passed ? 'PASS' : 'FAIL'}`
       );
     } else {
+      const passed = result.budget.passed && result.motionAcceptance.passed;
       console.log(
-        `${result.scene}${options.compareScada ? ` (${result.variant})` : ''}: ${metric.averageFps.toFixed(1)} FPS, p95 ${metric.p95FrameMs.toFixed(1)} ms, ${metric.renderer.calls} calls, DPR ${metric.canvas.effectiveDpr.toFixed(2)}, world ${metric.worldIntegrity?.passed ? 'continuous' : options.disabledSystems.length > 0 ? 'isolated' : 'BROKEN'}, ${result.budget.passed ? 'PASS' : 'FAIL'}`
+        `${result.scene}${options.compareScada ? ` (${result.variant})` : ''}: ${metric.averageFps.toFixed(1)} FPS, 1% low ${metric.onePercentLowFps.toFixed(1)} FPS, p95 ${metric.p95FrameMs.toFixed(1)} ms, p99 ${metric.p99FrameMs.toFixed(1)} ms, ${metric.renderer.calls} calls, DPR ${metric.canvas.effectiveDpr.toFixed(2)}, world ${metric.worldIntegrity?.passed ? 'continuous' : options.disabledSystems.length > 0 ? 'isolated' : 'BROKEN'}, ${options.motionEnabled ? `motion ${result.motionAcceptance.passed ? 'valid' : 'INVALID'}, ` : ''}${passed ? 'PASS' : 'FAIL'}`
       );
     }
     // Print the page's own complaints. A `pageClean` failure with no visible

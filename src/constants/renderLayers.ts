@@ -341,8 +341,6 @@ export const SURFACE_LAYERS = {
  * Used for selection rings, recommendation halos, status indicators.
  */
 export const INDICATOR_HEIGHTS = {
-  /** Worker selection/recommendation ring */
-  workerRing: 0.06,
   /** Machine status ring */
   machineRing: 0.08,
   /** Fire drill exit marker */
@@ -364,8 +362,6 @@ export const DECAL_OFFSET = {
   label: POLYGON_OFFSET.moderate,
   /** Dynamic highlights/selections */
   selection: POLYGON_OFFSET.moderate,
-  /** Worker recommendation ring */
-  workerRing: POLYGON_OFFSET.moderate,
   /** Conveyor belt markings */
   conveyor: POLYGON_OFFSET.standard,
   /** Forklift decals and markings */

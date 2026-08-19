@@ -5,7 +5,6 @@ import {
   Home,
   Brain,
   Activity,
-  Users,
   Shield,
   Settings,
   Play,
@@ -17,23 +16,18 @@ import {
   Clock,
   Wifi,
   WifiOff,
-  UserPlus,
-  Copy,
-  Check,
   Gauge,
   Package,
   FastForward,
-  Siren,
   Heart,
+  Truck,
 } from 'lucide-react';
 import type { DockMode } from '../ui-new/dock/Dock';
 import { useProductionStore } from '../../stores/productionStore';
 import { useUIStore } from '../../stores/uiStore';
-import { useMultiplayerStore } from '../../stores/multiplayerStore';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useSafetyStore } from '../../stores/safetyStore';
-import { useAIConfigStore } from '../../stores/aiConfigStore';
-import { useWorkerMoodStore } from '../../stores/workerMoodStore';
+import { useOperationsCampaignStore } from '../../stores/operationsCampaignStore';
 import { EmergencyStopButton } from '../ui/EmergencyStopButton';
 
 interface MobilePanelProps {
@@ -72,16 +66,12 @@ const getPanelIcon = (mode: DockMode) => {
       return <Brain className={iconClass} />;
     case 'scada':
       return <Activity className={iconClass} />;
-    case 'workforce':
-      return <Users className={iconClass} />;
     case 'safety':
       return <Shield className={iconClass} />;
     case 'settings':
       return <Settings className={iconClass} />;
     case 'management':
       return <Heart className={iconClass} />;
-    case 'multiplayer':
-      return <Users className={iconClass} />;
     default:
       return <Home className={iconClass} />;
   }
@@ -96,16 +86,12 @@ const getPanelTitle = (mode: DockMode) => {
       return 'AI Partner';
     case 'scada':
       return 'Simulated SCADA';
-    case 'workforce':
-      return 'Workforce';
     case 'safety':
       return 'Safety & Emergency';
     case 'settings':
       return 'Settings';
     case 'management':
       return 'Bilateral Autonomy';
-    case 'multiplayer':
-      return 'Multiplayer';
     default:
       return 'Panel';
   }
@@ -124,6 +110,11 @@ const OverviewContent: React.FC = () => {
   const setGameSpeed = useGameSimulationStore((s) => s.setGameSpeed);
 
   const safetyMetrics = useSafetyStore((s) => s.safetyMetrics);
+  const campaignOrders = useOperationsCampaignStore((s) => s.orders);
+  const campaignIncidents = useOperationsCampaignStore((s) => s.incidents);
+  const campaignConstraints = useOperationsCampaignStore((s) => s.constraints);
+  const campaignEconomics = useOperationsCampaignStore((s) => s.economics);
+  const campaignExecution = useOperationsCampaignStore((s) => s.execution);
 
   // Machine status counts
   const machineStats = {
@@ -138,10 +129,7 @@ const OverviewContent: React.FC = () => {
     0,
     Math.min(
       100,
-      100 -
-        (safetyMetrics?.nearMisses ?? 0) * 5 -
-        (safetyMetrics?.safetyStops ?? 0) * 2 -
-        (safetyMetrics?.workerEvasions ?? 0)
+      100 - (safetyMetrics?.nearMisses ?? 0) * 5 - (safetyMetrics?.safetyStops ?? 0) * 2
     )
   );
 
@@ -310,6 +298,56 @@ const OverviewContent: React.FC = () => {
       </div>
 
       {/* Total Production */}
+      <div className="rounded-lg border border-cyan-500/20 bg-cyan-950/20 p-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-300">
+            Operations campaign
+          </span>
+          <span className="font-mono text-[10px] text-slate-300">
+            {campaignOrders.filter((order) => order.status === 'fulfilled').length}/
+            {campaignOrders.length} orders
+          </span>
+        </div>
+        <div className="mt-1 grid grid-cols-2 gap-2 text-[9px]">
+          <div className="text-slate-400">
+            Active incidents:{' '}
+            <span className="font-semibold text-amber-300">
+              {campaignIncidents.filter((incident) => incident.phase !== 'resolved').length}
+            </span>
+          </div>
+          <div className="text-slate-400">
+            Revenue:{' '}
+            <span className="font-semibold text-emerald-300">
+              £{campaignEconomics.revenue.toFixed(0)}
+            </span>
+          </div>
+        </div>
+        <div className="mt-1.5 rounded bg-slate-950/35 p-1.5 text-[9px]">
+          <div className="flex items-center justify-between gap-2">
+            <span className="capitalize text-cyan-200">
+              {campaignExecution.stage.replaceAll('_', ' ')}
+            </span>
+            <span className="font-mono text-slate-300">
+              {campaignExecution.lineSetpointPercent.toFixed(0)}% setpoint
+            </span>
+          </div>
+          <div className="mt-1 flex items-center justify-between gap-2 text-slate-400">
+            <span className="flex items-center gap-1">
+              <Truck className="h-3 w-3" aria-hidden="true" /> Outbound
+            </span>
+            <span className="font-mono">
+              {campaignExecution.dispatchLoad.loadedKg.toFixed(0)} /{' '}
+              {campaignExecution.dispatchLoad.capacityKg.toFixed(0)} kg
+            </span>
+          </div>
+        </div>
+        {campaignConstraints[0] && (
+          <p className="mt-1.5 text-[9px] text-amber-100">
+            {campaignConstraints[0].label}: {campaignConstraints[0].detail}
+          </p>
+        )}
+      </div>
+
       <div className="text-center py-2 bg-gradient-to-r from-cyan-900/20 to-blue-900/20 rounded-lg border border-cyan-500/20">
         <div className="text-[10px] text-slate-500">Total Bags</div>
         <div className="text-xl font-bold font-mono text-cyan-400">
@@ -364,83 +402,15 @@ const MachineStatusBadge: React.FC<{ label: string; count: number; color: string
   );
 };
 
-// Safety panel content with fire drill
+// Safety panel content for the uncrewed site
 const SafetyContent: React.FC = () => {
-  const drillMetrics = useGameSimulationStore((s) => s.drillMetrics);
-  const startEmergencyDrill = useGameSimulationStore((s) => s.startEmergencyDrill);
-  const endEmergencyDrill = useGameSimulationStore((s) => s.endEmergencyDrill);
-  const workers = useProductionStore((s) => s.workers);
-
-  const evacuatedCount = drillMetrics.evacuatedWorkerIds.length;
-  const totalWorkers = drillMetrics.totalWorkers || workers.length;
-  const evacuationProgress = totalWorkers > 0 ? (evacuatedCount / totalWorkers) * 100 : 0;
-
-  // Calculate elapsed time
-  const elapsedSeconds = drillMetrics.active
-    ? Math.floor((Date.now() - drillMetrics.startTime) / 1000)
-    : (drillMetrics.finalTimeSeconds ?? 0);
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   return (
     <div className="space-y-3">
       {/* Emergency Stop */}
       <EmergencyStopButton />
 
-      {/* Fire Drill Section */}
-      <div className="bg-slate-800/50 rounded-lg p-3">
-        <div className="flex items-center gap-2 mb-2">
-          <Siren className="w-4 h-4 text-orange-400" />
-          <span className="text-sm font-medium text-white">Fire Drill</span>
-        </div>
-
-        {drillMetrics.active ? (
-          <>
-            {/* Active drill UI */}
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-400">Evacuated</span>
-                <span className="text-orange-400 font-mono">
-                  {evacuatedCount}/{totalWorkers}
-                </span>
-              </div>
-              <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-orange-500 transition-all duration-300"
-                  style={{ width: `${evacuationProgress}%` }}
-                />
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-slate-500">Time: {formatTime(elapsedSeconds)}</span>
-                <button
-                  onClick={endEmergencyDrill}
-                  className="px-3 py-1 bg-slate-600 hover:bg-slate-500 rounded text-xs font-medium text-white transition-colors"
-                >
-                  END DRILL
-                </button>
-              </div>
-              {drillMetrics.evacuationComplete && (
-                <div className="text-center py-1 bg-green-600/20 border border-green-500/30 rounded text-green-400 text-xs font-bold">
-                  ALL CLEAR - {formatTime(drillMetrics.finalTimeSeconds ?? elapsedSeconds)}
-                </div>
-              )}
-            </div>
-          </>
-        ) : (
-          <button
-            onClick={() => startEmergencyDrill(workers.length)}
-            className="w-full py-2 bg-orange-600 hover:bg-orange-500 rounded text-sm font-medium text-white transition-colors"
-          >
-            START DRILL
-          </button>
-        )}
-      </div>
-
       <div className="text-[10px] text-slate-500 text-center">
-        Emergency stop halts production. Fire drill tests evacuation.
+        Emergency stop halts production and autonomous logistics.
       </div>
     </div>
   );
@@ -530,6 +500,8 @@ const AIContent: React.FC = () => {
 const SCADAContent: React.FC = () => {
   const metrics = useProductionStore((s) => s.metrics);
   const scadaLive = useProductionStore((s) => s.scadaLive);
+  const campaignExecution = useOperationsCampaignStore((s) => s.execution);
+  const utilityAssets = useOperationsCampaignStore((s) => s.utilityAssets);
 
   const MetricCard: React.FC<{
     label: string;
@@ -589,330 +561,86 @@ const SCADAContent: React.FC = () => {
           icon={<CheckCircle className="w-3 h-3" />}
         />
       </div>
-    </div>
-  );
-};
-
-// Workforce panel content
-const WorkforceContent: React.FC = () => {
-  const workers = useProductionStore((s) => s.workers);
-  const satisfaction = useProductionStore((s) => s.workerSatisfaction);
-
-  const activeWorkers = workers.filter((w) => w.currentTask !== 'idle').length;
-  const totalWorkers = workers.length;
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2 text-xs text-slate-400">
-        <Users className="w-4 h-4" />
-        <span>Workforce Status</span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div className="bg-slate-800/50 rounded-lg p-3 text-center">
-          <div className="text-2xl font-bold text-white">
-            {activeWorkers}/{totalWorkers}
-          </div>
-          <div className="text-[10px] text-slate-400">Active Workers</div>
+      <div className="rounded-lg border border-cyan-500/20 bg-cyan-950/15 p-2">
+        <div className="flex items-center justify-between text-[10px]">
+          <span className="uppercase text-slate-400">Execution route</span>
+          <span className="capitalize text-cyan-200">
+            {campaignExecution.stage.replaceAll('_', ' ')}
+          </span>
         </div>
-        <div className="bg-slate-800/50 rounded-lg p-3 text-center">
-          <div className="text-2xl font-bold text-cyan-400">{satisfaction.overallScore}%</div>
-          <div className="text-[10px] text-slate-400">Satisfaction</div>
+        <div className="mt-1 text-xs font-semibold text-white">
+          {campaignExecution.sourceMaterial?.replaceAll('_', ' ') ?? 'No source'} to{' '}
+          {campaignExecution.finishedMaterial?.replaceAll('_', ' ') ?? 'no product'}
+        </div>
+        <div className="mt-1 text-[10px] text-slate-400">
+          QC {campaignExecution.qualityReleased ? 'released' : 'held'},{' '}
+          {campaignExecution.releasedFinishedKg.toFixed(0)} kg available
         </div>
       </div>
-
-      <div className="bg-slate-800/50 rounded-lg p-2">
-        <div className="flex justify-between text-xs mb-1">
-          <span className="text-slate-400">Productivity Bonus</span>
-          <span className="text-green-400">+{satisfaction.productivityBonus}%</span>
+      <div>
+        <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+          Utility vessels
         </div>
-        <div className="w-full h-1.5 bg-slate-700 rounded-full">
-          <div
-            className="h-full bg-green-500 rounded-full transition-all"
-            style={{ width: `${Math.min(100, satisfaction.overallScore)}%` }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Multiplayer panel content
-const MultiplayerTrustNotice: React.FC = () => (
-  <p className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-2 text-[11px] leading-relaxed text-amber-100">
-    Trusted friends, experimental. The host owns the simulation state. Guest sessions end if the
-    host leaves.
-  </p>
-);
-
-const MultiplayerContent: React.FC = () => {
-  const connectionState = useMultiplayerStore((s) => s.connectionState);
-  const roomCode = useMultiplayerStore((s) => s.roomCode);
-  const isHost = useMultiplayerStore((s) => s.isHost);
-  const remotePlayers = useMultiplayerStore((s) => s._remoteRosterArray);
-  const createRoom = useMultiplayerStore((s) => s.createRoom);
-  const leaveRoom = useMultiplayerStore((s) => s.leaveRoom);
-
-  const [copied, setCopied] = React.useState(false);
-  const copyTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [confirmLeave, setConfirmLeave] = React.useState(false);
-  const leaveTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  React.useEffect(() => {
-    return () => {
-      if (copyTimeoutRef.current) {
-        clearTimeout(copyTimeoutRef.current);
-      }
-      if (leaveTimeoutRef.current) {
-        clearTimeout(leaveTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // Two-tap confirm so an accidental touch can't end the shared session.
-  const handleLeaveClick = () => {
-    if (confirmLeave) {
-      if (leaveTimeoutRef.current) {
-        clearTimeout(leaveTimeoutRef.current);
-        leaveTimeoutRef.current = null;
-      }
-      setConfirmLeave(false);
-      leaveRoom();
-      return;
-    }
-    setConfirmLeave(true);
-    if (leaveTimeoutRef.current) {
-      clearTimeout(leaveTimeoutRef.current);
-    }
-    leaveTimeoutRef.current = setTimeout(() => setConfirmLeave(false), 3000);
-  };
-
-  const copyRoomCode = () => {
-    if (roomCode) {
-      navigator.clipboard
-        ?.writeText(roomCode)
-        .then(() => {
-          setCopied(true);
-          if (copyTimeoutRef.current) {
-            clearTimeout(copyTimeoutRef.current);
-          }
-          copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
-        })
-        .catch(() => {
-          /* clipboard write failed; leave UI unchanged */
-        });
-    }
-  };
-
-  if (connectionState === 'disconnected') {
-    return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <Users className="w-4 h-4" />
-          <span>Multiplayer</span>
-        </div>
-        <MultiplayerTrustNotice />
-        <button
-          onClick={createRoom}
-          className="w-full p-3 bg-cyan-600 hover:bg-cyan-500 rounded-lg flex items-center justify-center gap-2 text-white font-medium transition-colors"
-        >
-          <UserPlus className="w-5 h-5" />
-          Create Room
-        </button>
-        <div className="text-[10px] text-slate-500 text-center">
-          Share the room code with friends to play together
-        </div>
-      </div>
-    );
-  }
-
-  // While the session is still establishing, show a loading indicator instead
-  // of the connected room view (mirrors the desktop MultiplayerLobby).
-  if (connectionState === 'connecting' || connectionState === 'reconnecting') {
-    return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <Users className="w-4 h-4" />
-          <span>Multiplayer</span>
-        </div>
-        <MultiplayerTrustNotice />
-        <div className="bg-slate-800/50 rounded-lg p-3 text-center">
-          <div className="flex items-center justify-center gap-2 text-yellow-400 text-xs">
-            <Wifi className="w-4 h-4 animate-pulse" />
-            {connectionState === 'reconnecting' ? 'Reconnecting...' : 'Connecting...'}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <Users className="w-4 h-4" />
-          <span>Room: {roomCode}</span>
-        </div>
-        <button
-          onClick={copyRoomCode}
-          className="p-1.5 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
-          aria-label={copied ? 'Room code copied' : 'Copy room code'}
-        >
-          {copied ? (
-            <Check className="w-4 h-4 text-green-400" />
-          ) : (
-            <Copy className="w-4 h-4 text-slate-300" />
-          )}
-        </button>
-      </div>
-      <MultiplayerTrustNotice />
-
-      <div className="bg-slate-800/50 rounded-lg p-2">
-        <div className="text-xs text-slate-400 mb-2">
-          {isHost ? 'You are the host' : 'Connected as guest'}
-        </div>
-        <div className="text-sm text-white">
-          {remotePlayers.length + 1} player{remotePlayers.length !== 0 ? 's' : ''} in room
-        </div>
-        {remotePlayers.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {remotePlayers.slice(0, 3).map((player) => (
-              <div key={player.id} className="flex items-center gap-2 text-xs">
-                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: player.color }} />
-                <span className="text-slate-300">{player.name}</span>
+        <div className="grid grid-cols-2 gap-1.5">
+          {utilityAssets.map((asset) => (
+            <div key={asset.id} className="rounded bg-slate-800/50 p-2">
+              <div className="truncate text-[9px] font-semibold text-slate-200">{asset.label}</div>
+              <div className="mt-0.5 font-mono text-xs text-cyan-300">
+                {asset.levelPercent.toFixed(1)}%
               </div>
-            ))}
-            {remotePlayers.length > 3 && (
-              <div className="text-[10px] text-slate-500">+{remotePlayers.length - 3} more</div>
-            )}
-          </div>
-        )}
+              <div className="font-mono text-[9px] text-slate-500">
+                {asset.temperatureC.toFixed(1)} °C · {asset.pressureBar.toFixed(2)} bar
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
-
-      <button
-        onClick={handleLeaveClick}
-        className="w-full p-2 bg-red-600/80 hover:bg-red-500/80 rounded-lg text-white text-sm font-medium transition-colors"
-      >
-        {confirmLeave ? 'Tap again to confirm' : 'Leave Room'}
-      </button>
     </div>
   );
 };
 
-// Management Style panel content (simplified for mobile)
+// Autonomous plant status for compact layouts
 const ManagementContent: React.FC = () => {
-  const managementGenerosity = useAIConfigStore((s) => s.managementGenerosity);
-  const setManagementGenerosity = useAIConfigStore((s) => s.setManagementGenerosity);
-  const getGrantRate = useAIConfigStore((s) => s.getGrantRate);
-  const averageTrust = useWorkerMoodStore((s) => s.getAverageManagementTrust());
-  const averageInitiative = useWorkerMoodStore((s) => s.getAverageInitiative());
-  const productivityMultiplier = useWorkerMoodStore((s) => s.getWorkforceProductivityMultiplier());
-
-  const grantRate = getGrantRate();
-  const styleLabel =
-    managementGenerosity >= 80
-      ? 'Generous'
-      : managementGenerosity >= 60
-        ? 'Kind'
-        : managementGenerosity >= 40
-          ? 'Balanced'
-          : managementGenerosity >= 20
-            ? 'Firm'
-            : 'Strict';
-
-  const PRESETS = [
-    { name: 'Strict', value: 10 },
-    { name: 'Balanced', value: 50 },
-    { name: 'Kind', value: 75 },
-    { name: 'Generous', value: 95 },
-  ];
+  const machines = useProductionStore((state) => state.machines);
+  const metrics = useProductionStore((state) => state.metrics);
+  const incidents = useOperationsCampaignStore((state) => state.incidents);
+  const activeAssets = machines.filter((machine) => machine.status === 'running').length;
+  const openIncidents = incidents.filter((incident) => incident.phase !== 'resolved').length;
+  const readiness = Math.max(0, Math.round(metrics.uptime - openIncidents * 8));
 
   return (
     <div className="space-y-3">
-      {/* Current Style */}
-      <div className="flex items-center justify-between bg-slate-800/50 rounded-lg p-3">
+      <div className="flex items-center justify-between rounded-lg bg-slate-800/50 p-3">
         <div className="flex items-center gap-2">
-          <Heart
-            className={`w-5 h-5 ${managementGenerosity >= 60 ? 'text-green-400' : managementGenerosity >= 40 ? 'text-blue-400' : 'text-amber-400'}`}
-          />
-          <span className="text-sm font-medium text-white">{styleLabel}</span>
+          <Heart className="h-5 w-5 text-cyan-400" />
+          <span className="text-sm font-medium text-white">Autonomous readiness</span>
         </div>
-        <span className="text-lg font-bold font-mono text-cyan-400">{managementGenerosity}%</span>
+        <span className="font-mono text-lg font-bold text-cyan-400">{readiness}%</span>
       </div>
-
-      {/* Preset Buttons */}
-      <div className="grid grid-cols-4 gap-2">
-        {PRESETS.map((preset) => (
-          <button
-            key={preset.name}
-            onClick={() => setManagementGenerosity(preset.value)}
-            className={`py-2 rounded text-xs font-medium transition-colors ${
-              Math.abs(managementGenerosity - preset.value) < 10
-                ? 'bg-cyan-600 text-white'
-                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-            }`}
-          >
-            {preset.name}
-          </button>
-        ))}
-      </div>
-
-      {/* Slider */}
-      <input
-        id="mobile-management-generosity"
-        type="range"
-        min="0"
-        max="100"
-        value={managementGenerosity}
-        onChange={(e) => setManagementGenerosity(parseInt(e.target.value))}
-        className="w-full h-2 rounded-lg appearance-none cursor-pointer accent-cyan-500 bg-gradient-to-r from-red-600 via-blue-500 to-green-500"
-        aria-label="Management generosity"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={managementGenerosity}
-        aria-valuetext={`${managementGenerosity} percent, ${styleLabel} style`}
-      />
-
-      {/* Key Metrics */}
-      <div className="grid grid-cols-4 gap-2">
-        <div className="bg-slate-800/50 rounded p-2 text-center">
-          <div className="text-sm font-bold text-cyan-400">{(grantRate * 100).toFixed(0)}%</div>
-          <div className="text-[9px] text-slate-500">Grant</div>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded bg-slate-800/50 p-2 text-center">
+          <div className="text-sm font-bold text-emerald-400">{activeAssets}</div>
+          <div className="text-[9px] text-slate-500">Active assets</div>
         </div>
-        <div className="bg-slate-800/50 rounded p-2 text-center">
-          <div className="text-sm font-bold text-white">{averageTrust.toFixed(0)}%</div>
-          <div className="text-[9px] text-slate-500">Trust</div>
+        <div className="rounded bg-slate-800/50 p-2 text-center">
+          <div className="text-sm font-bold text-cyan-400">{metrics.throughput}</div>
+          <div className="text-[9px] text-slate-500">Bags per hour</div>
         </div>
-        <div className="bg-slate-800/50 rounded p-2 text-center">
-          <div className="text-sm font-bold text-white">{averageInitiative.toFixed(0)}%</div>
-          <div className="text-[9px] text-slate-500">Initiative</div>
-        </div>
-        <div className="bg-slate-800/50 rounded p-2 text-center">
+        <div className="rounded bg-slate-800/50 p-2 text-center">
           <div
-            className={`text-sm font-bold ${productivityMultiplier >= 1.0 ? 'text-green-400' : 'text-amber-400'}`}
+            className={
+              openIncidents
+                ? 'text-sm font-bold text-amber-400'
+                : 'text-sm font-bold text-emerald-400'
+            }
           >
-            {(productivityMultiplier * 100).toFixed(0)}%
+            {openIncidents}
           </div>
-          <div className="text-[9px] text-slate-500">Output</div>
+          <div className="text-[9px] text-slate-500">Open incidents</div>
         </div>
       </div>
-
-      {/* Info */}
-      <div className="text-[10px] text-slate-500 text-center">
-        Higher generosity builds trust → improves productivity
-      </div>
-    </div>
-  );
-};
-
-// Placeholder content for other panels
-const PlaceholderContent: React.FC<{ mode: DockMode }> = ({ mode }) => {
-  return (
-    <div className="flex items-center justify-center h-full text-slate-400">
-      <div className="text-center">
-        <div className="mb-2">{getPanelIcon(mode)}</div>
-        <div className="text-sm">{getPanelTitle(mode)} panel</div>
-        <div className="text-xs text-slate-500 mt-1">This panel is unavailable on mobile.</div>
+      <div className="text-center text-[10px] text-slate-500">
+        Process, logistics, safety, and dispatch remain under closed-loop control.
       </div>
     </div>
   );
@@ -920,6 +648,7 @@ const PlaceholderContent: React.FC<{ mode: DockMode }> = ({ mode }) => {
 
 // Get content based on mode
 const getPanelContent = (mode: DockMode | null) => {
+  if (!mode) return null;
   switch (mode) {
     case 'overview':
       return <OverviewContent />;
@@ -927,18 +656,12 @@ const getPanelContent = (mode: DockMode | null) => {
       return <AIContent />;
     case 'scada':
       return <SCADAContent />;
-    case 'workforce':
-      return <WorkforceContent />;
-    case 'multiplayer':
-      return <MultiplayerContent />;
     case 'safety':
       return <SafetyContent />;
     case 'settings':
       return <SettingsContent />;
     case 'management':
       return <ManagementContent />;
-    default:
-      return mode ? <PlaceholderContent mode={mode} /> : null;
   }
 };
 

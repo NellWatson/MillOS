@@ -11,40 +11,16 @@ import {
 import { useMobileControlStore } from '../stores/mobileControlStore';
 import { SITE_LAYOUT, getVisibleSiteCellsForView } from '../constants/siteLayout';
 import { resolveCameraCollision } from '../utils/cameraCollision';
+import {
+  clampNavigationDelta,
+  getNavigationIntent,
+  shouldHandleNavigationKey,
+  shouldPreventNavigationDefault,
+  syncOrbitTargetToAcceptedTranslation,
+} from '../utils/cameraNavigation';
 
 // Movement key tracking
 const pressedKeys = new Set<string>();
-
-/**
- * Physical key codes this controller consumes.
- *
- * Keyed on `event.code`, not `event.key`: `key` reports the produced character,
- * which is layout dependent (AZERTY emits z/q/s/d for the WASD positions,
- * QWERTZ emits 'y' for W), so a character-keyed table leaves movement dead on
- * those keyboards. `code` is positional and identical everywhere.
- */
-const MOVEMENT_CODES: ReadonlySet<string> = new Set([
-  'KeyW',
-  'KeyA',
-  'KeyS',
-  'KeyD',
-  'KeyQ',
-  'KeyE',
-  'ShiftLeft',
-  'ShiftRight',
-  'ArrowUp',
-  'ArrowDown',
-  'ArrowLeft',
-  'ArrowRight',
-]);
-
-/** True when the event comes from somewhere the user is entering text. */
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  const tag = target.tagName;
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
-}
 
 // Reusable vector for the D-pad look offset (avoids a per-frame Vector3
 // allocation while the mobile look control is held).
@@ -57,6 +33,19 @@ const VERTICAL_SPEED = 15; // Units per second for up/down
 const SPRINT_MULTIPLIER = 3.6; // Speed multiplier when holding Shift
 const MIN_CAMERA_HEIGHT = 1.5; // Minimum camera Y to prevent ground clipping (25% lower than 2.0)
 const MIN_TARGET_HEIGHT = 0.5; // Minimum orbit target Y (above floor level)
+
+/**
+ * Authored preset and tour flights own their complete path and endpoint. The
+ * manual collision solver must not stop one at a factory wall while it travels
+ * from an exterior overview to an interior machine. Manual input cancels the
+ * flight before moving, so it immediately returns to collision-protected
+ * navigation even though React's `isAnimating` snapshot can remain true for
+ * the rest of that frame.
+ */
+export const shouldResolveCameraCollisionForFrame = (
+  isAnimating: boolean,
+  manualMovementApplied: boolean
+): boolean => !isAnimating || manualMovementApplied;
 
 // Camera preset definitions based on MillOS factory zones
 export interface CameraPreset {
@@ -120,6 +109,7 @@ interface CameraStore {
   setPreset: (index: number) => void;
   focusOn: (position: [number, number, number], target: [number, number, number]) => void;
   clearAnimation: () => void;
+  cancelAnimation: () => void;
 }
 
 export const useCameraStore = create<CameraStore>((set) => ({
@@ -146,6 +136,13 @@ export const useCameraStore = create<CameraStore>((set) => ({
       isAnimating: true,
     }),
   clearAnimation: () => set({ isAnimating: false }),
+  cancelAnimation: () =>
+    set({
+      activePreset: null,
+      targetPosition: null,
+      targetLookAt: null,
+      isAnimating: false,
+    }),
 }));
 
 // Camera controller component - must be inside Canvas
@@ -161,7 +158,8 @@ export const CameraController: React.FC<CameraControllerProps> = ({
   targetSpeed = 0.15,
 }) => {
   const { camera } = useThree();
-  const { targetPosition, targetLookAt, isAnimating, clearAnimation } = useCameraStore();
+  const { targetPosition, targetLookAt, isAnimating, clearAnimation, cancelAnimation } =
+    useCameraStore();
   const animationProgress = useRef(0);
   const animationStartPosition = useRef(new THREE.Vector3());
   const animationStartLookAt = useRef(new THREE.Vector3());
@@ -173,16 +171,15 @@ export const CameraController: React.FC<CameraControllerProps> = ({
   const moveDirection = useRef(new THREE.Vector3());
   const forward = useRef(new THREE.Vector3());
   const right = useRef(new THREE.Vector3());
+  const manualCameraStart = useRef(new THREE.Vector3());
+  const manualTargetStart = useRef(new THREE.Vector3());
 
   // Set up keyboard listeners for WASD/Arrow movement
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isTypingTarget(e.target)) return;
-
-      if (MOVEMENT_CODES.has(e.code)) {
+      if (shouldHandleNavigationKey(e)) {
         pressedKeys.add(e.code);
-        // Arrow keys scroll the page by default, which fights camera movement.
-        if (e.code.startsWith('Arrow')) e.preventDefault();
+        if (shouldPreventNavigationDefault(e.code)) e.preventDefault();
       }
     };
 
@@ -194,19 +191,26 @@ export const CameraController: React.FC<CameraControllerProps> = ({
     const handleBlur = () => {
       pressedKeys.clear();
     };
+    const handleVisibilityChange = () => {
+      if (document.hidden) pressedKeys.clear();
+    };
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('blur', handleBlur);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      pressedKeys.clear();
     };
   }, []);
 
   useFrame((_, delta) => {
+    const movementDelta = clampNavigationDelta(delta);
     if (!cameraPositionInitialized.current) {
       previousCameraPosition.current.copy(camera.position);
       cameraPositionInitialized.current = true;
@@ -227,8 +231,8 @@ export const CameraController: React.FC<CameraControllerProps> = ({
       let phi = Math.acos(Math.max(-1, Math.min(1, offset.y / radius))); // polar angle
 
       // Apply rotation
-      theta -= dpadDirection.x * LOOK_SPEED * delta;
-      phi += dpadDirection.y * LOOK_SPEED * delta;
+      theta -= dpadDirection.x * LOOK_SPEED * movementDelta;
+      phi += dpadDirection.y * LOOK_SPEED * movementDelta;
 
       // Clamp polar angle
       phi = Math.max(0.2, Math.min(Math.PI / 2 - 0.05, phi));
@@ -244,19 +248,13 @@ export const CameraController: React.FC<CameraControllerProps> = ({
 
     // Combine keyboard and D-pad move input
     const hasDpadMoveInput = dpadDirection && dpadMode === 'move';
-    // Shift is a modifier, not a direction: counting it would let a held sprint
-    // key cancel a running preset animation without the camera moving at all.
-    let hasKeyboardInput = false;
-    for (const code of pressedKeys) {
-      if (code !== 'ShiftLeft' && code !== 'ShiftRight') {
-        hasKeyboardInput = true;
-        break;
-      }
-    }
+    const keyboardIntent = getNavigationIntent(pressedKeys);
+    const hasKeyboardInput = keyboardIntent.hasMotion;
     const hasManualInput = Boolean(dpadDirection || hasKeyboardInput);
+    let manualMovementApplied = false;
 
     if (hasManualInput && isAnimating) {
-      clearAnimation();
+      cancelAnimation();
     }
 
     // Handle WASD/Arrow key movement OR D-pad move mode
@@ -264,6 +262,11 @@ export const CameraController: React.FC<CameraControllerProps> = ({
       // Get forward direction (from camera to target, but flattened on XZ plane)
       forward.current.subVectors(orbitControlsRef.current.target, camera.position);
       forward.current.y = 0;
+      if (forward.current.lengthSq() < 1e-8) {
+        camera.getWorldDirection(forward.current);
+        forward.current.y = 0;
+      }
+      if (forward.current.lengthSq() < 1e-8) forward.current.set(0, 0, -1);
       forward.current.normalize();
 
       // Get right direction (perpendicular to forward)
@@ -273,20 +276,10 @@ export const CameraController: React.FC<CameraControllerProps> = ({
       moveDirection.current.set(0, 0, 0);
 
       // Forward/Backward (W/S or Up/Down arrows or D-pad Y)
-      if (pressedKeys.has('KeyW') || pressedKeys.has('ArrowUp')) {
-        moveDirection.current.add(forward.current);
-      }
-      if (pressedKeys.has('KeyS') || pressedKeys.has('ArrowDown')) {
-        moveDirection.current.sub(forward.current);
-      }
+      moveDirection.current.addScaledVector(forward.current, keyboardIntent.forward);
 
       // Left/Right strafe (A/D or Left/Right arrows or D-pad X)
-      if (pressedKeys.has('KeyA') || pressedKeys.has('ArrowLeft')) {
-        moveDirection.current.sub(right.current);
-      }
-      if (pressedKeys.has('KeyD') || pressedKeys.has('ArrowRight')) {
-        moveDirection.current.add(right.current);
-      }
+      moveDirection.current.addScaledVector(right.current, keyboardIntent.strafe);
 
       // D-pad move input (when in move mode)
       if (hasDpadMoveInput && dpadDirection) {
@@ -303,18 +296,12 @@ export const CameraController: React.FC<CameraControllerProps> = ({
       }
 
       // Up/Down (Q/E for vertical movement)
-      if (pressedKeys.has('KeyQ')) {
-        moveDirection.current.y -= 1;
-      }
-      if (pressedKeys.has('KeyE')) {
-        moveDirection.current.y += 1;
-      }
+      moveDirection.current.y += keyboardIntent.vertical;
 
       // Apply movement if there's any
       if (moveDirection.current.length() > 0) {
         // Apply sprint multiplier if shift is held
-        const speedMultiplier =
-          pressedKeys.has('ShiftLeft') || pressedKeys.has('ShiftRight') ? SPRINT_MULTIPLIER : 1;
+        const speedMultiplier = keyboardIntent.sprint ? SPRINT_MULTIPLIER : 1;
 
         // Normalize horizontal movement but keep vertical separate
         const verticalMove = moveDirection.current.y;
@@ -322,15 +309,18 @@ export const CameraController: React.FC<CameraControllerProps> = ({
 
         if (moveDirection.current.length() > 0) {
           moveDirection.current.normalize();
-          moveDirection.current.multiplyScalar(MOVE_SPEED * speedMultiplier * delta);
+          moveDirection.current.multiplyScalar(MOVE_SPEED * speedMultiplier * movementDelta);
         }
 
         // Add vertical movement
-        moveDirection.current.y = verticalMove * VERTICAL_SPEED * speedMultiplier * delta;
+        moveDirection.current.y = verticalMove * VERTICAL_SPEED * speedMultiplier * movementDelta;
 
         // Move both camera and orbit target together
+        manualCameraStart.current.copy(camera.position);
+        manualTargetStart.current.copy(orbitControlsRef.current.target);
         camera.position.add(moveDirection.current);
         orbitControlsRef.current.target.add(moveDirection.current);
+        manualMovementApplied = true;
 
         // Clamp camera and target height to prevent ground clipping
         if (camera.position.y < MIN_CAMERA_HEIGHT) {
@@ -343,12 +333,14 @@ export const CameraController: React.FC<CameraControllerProps> = ({
     }
     // Frame-rate independent exponential smoothing for perfectly smooth rotation
     if (orbitControlsRef?.current) {
-      const target = autoRotateEnabled ? targetSpeed : 0;
+      const target = autoRotateEnabled && !hasManualInput ? targetSpeed : 0;
       // Exponential decay smoothing - completely frame-rate independent
       // smoothTime controls how quickly we reach target (lower = faster)
       const smoothTime = 2.5; // seconds to reach ~63% of target
-      const alpha = 1 - Math.exp(-delta / smoothTime);
-      currentSpeed.current += (target - currentSpeed.current) * alpha;
+      const alpha = 1 - Math.exp(-movementDelta / smoothTime);
+      currentSpeed.current = hasManualInput
+        ? 0
+        : currentSpeed.current + (target - currentSpeed.current) * alpha;
       orbitControlsRef.current.autoRotateSpeed = currentSpeed.current;
     }
 
@@ -356,7 +348,7 @@ export const CameraController: React.FC<CameraControllerProps> = ({
     // lerp never followed a predictable easing curve and could stop short.
     if (isAnimating && targetPosition && targetLookAt && !hasManualInput) {
       const animationDuration = 0.9;
-      animationProgress.current += delta / animationDuration;
+      animationProgress.current += movementDelta / animationDuration;
       const t = Math.min(animationProgress.current, 1);
       const easeT = t * t * (3 - 2 * t);
 
@@ -382,16 +374,31 @@ export const CameraController: React.FC<CameraControllerProps> = ({
       orbitControlsRef.current.target.y = MIN_TARGET_HEIGHT;
     }
 
-    const collision = resolveCameraCollision(
-      [
-        previousCameraPosition.current.x,
-        previousCameraPosition.current.y,
-        previousCameraPosition.current.z,
-      ],
-      [camera.position.x, camera.position.y, camera.position.z]
-    );
-    camera.position.set(...collision.position);
-    camera.userData.lastCollision = collision.collidedWith;
+    if (shouldResolveCameraCollisionForFrame(isAnimating, manualMovementApplied)) {
+      const collisionStart = manualMovementApplied
+        ? manualCameraStart.current
+        : previousCameraPosition.current;
+      const collision = resolveCameraCollision(
+        [collisionStart.x, collisionStart.y, collisionStart.z],
+        [camera.position.x, camera.position.y, camera.position.z]
+      );
+      camera.position.set(...collision.position);
+      if (manualMovementApplied && orbitControlsRef?.current) {
+        syncOrbitTargetToAcceptedTranslation(
+          orbitControlsRef.current.target,
+          manualTargetStart.current,
+          manualCameraStart.current,
+          camera.position
+        );
+      }
+      camera.userData.lastCollision = collision.collidedWith;
+    } else {
+      camera.userData.lastCollision = null;
+    }
+
+    if (orbitControlsRef?.current && orbitControlsRef.current.target.y < MIN_TARGET_HEIGHT) {
+      orbitControlsRef.current.target.y = MIN_TARGET_HEIGHT;
+    }
     previousCameraPosition.current.copy(camera.position);
   });
 

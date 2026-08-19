@@ -31,19 +31,19 @@ export const generateTarmac = (
   options: TarmacOptions = {}
 ): THREE.DataTexture => {
   const {
-    // Authored in sRGB. 0.26 sRGB decodes to ~0.055 linear, which is the
-    // measured reflectance of weathered asphalt. The previous 0.15 was written
-    // to look right when the byte was (incorrectly) consumed as raw linear;
-    // decoded properly it would be ~0.019 linear - near-black tarmac.
-    baseColor = [0.26, 0.27, 0.29],
+    // Authored in sRGB. 0.40 sRGB decodes to ~0.133 linear, keeping directly
+    // lit roads dark and weathered without crushing their aggregate detail.
+    // Covered logistics aprons apply their own restrained diffuse-sky floor;
+    // raising this shared map further would over-light every road on the site.
+    baseColor = [0.4, 0.41, 0.43],
     aggregateAmount = 0.4,
     wearAmount = 0.3,
     oilStains = true,
   } = options;
 
-  // v3: aggregate cell size doubled (see the hash call below). Bumped so the
-  // module-level texture cache cannot serve a v2 texture across an HMR reload.
-  const cacheKey = `tarmac-v3-${size}-${baseColor.join(',')}-${aggregateAmount}-${wearAmount}-${oilStains}`;
+  // v5: corrected direct-light albedo. Bumped so HMR cannot retain the former
+  // darker cached texture.
+  const cacheKey = `tarmac-v5-${size}-${baseColor.join(',')}-${aggregateAmount}-${wearAmount}-${oilStains}`;
 
   return getTexture(cacheKey, () => {
     const data = new Uint8Array(size * size * 4);

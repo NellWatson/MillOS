@@ -396,44 +396,6 @@ export const PIPE_MATERIALS = {
   }),
 } as const;
 
-// === WORKER/HUMAN MATERIALS ===
-export const WORKER_MATERIALS = {
-  // Skin tones - indexed by character code for deterministic selection
-  skin: [
-    new THREE.MeshStandardMaterial({ color: '#f5d0c5', roughness: 0.6 }),
-    new THREE.MeshStandardMaterial({ color: '#d4a574', roughness: 0.6 }),
-    new THREE.MeshStandardMaterial({ color: '#8d5524', roughness: 0.6 }),
-    new THREE.MeshStandardMaterial({ color: '#c68642', roughness: 0.6 }),
-    new THREE.MeshStandardMaterial({ color: '#e0ac69', roughness: 0.6 }),
-    new THREE.MeshStandardMaterial({ color: '#ffdbac', roughness: 0.6 }),
-    new THREE.MeshStandardMaterial({ color: '#f1c27d', roughness: 0.6 }),
-    new THREE.MeshStandardMaterial({ color: '#cd8c52', roughness: 0.6 }),
-  ],
-  // Hair colors
-  hair: [
-    new THREE.MeshStandardMaterial({ color: '#1a1a1a', roughness: 0.9 }),
-    new THREE.MeshStandardMaterial({ color: '#3d2314', roughness: 0.9 }),
-    new THREE.MeshStandardMaterial({ color: '#8b4513', roughness: 0.9 }),
-    new THREE.MeshStandardMaterial({ color: '#d4a574', roughness: 0.9 }),
-    new THREE.MeshStandardMaterial({ color: '#4a3728', roughness: 0.9 }),
-    new THREE.MeshStandardMaterial({ color: '#2d1810', roughness: 0.9 }),
-    new THREE.MeshStandardMaterial({ color: '#654321', roughness: 0.9 }),
-    new THREE.MeshStandardMaterial({ color: '#8b0000', roughness: 0.9 }),
-  ],
-  // Uniform colors by role
-  supervisorUniform: new THREE.MeshStandardMaterial({ color: '#1e40af', roughness: 0.6 }),
-  engineerUniform: new THREE.MeshStandardMaterial({ color: '#374151', roughness: 0.6 }),
-  safetyUniform: new THREE.MeshStandardMaterial({ color: '#166534', roughness: 0.6 }),
-  qualityUniform: new THREE.MeshStandardMaterial({ color: '#7c3aed', roughness: 0.6 }),
-  maintenanceUniform: new THREE.MeshStandardMaterial({ color: '#9a3412', roughness: 0.6 }),
-  operatorUniform: new THREE.MeshStandardMaterial({ color: '#475569', roughness: 0.6 }),
-  // Vest
-  safetyVest: new THREE.MeshStandardMaterial({ color: '#f97316', roughness: 0.7 }),
-  // Pants colors
-  darkPants: new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.7 }),
-  navyPants: new THREE.MeshStandardMaterial({ color: '#1e3a5f', roughness: 0.7 }),
-} as const;
-
 // === MACHINE-SPECIFIC MATERIALS ===
 // Note: `machineSurfaces.ts` owns the shading of the four real machine types.
 // This group is the older shared set still used by `Machines.tsx`,
@@ -916,18 +878,6 @@ export const getMaterialForQuality = (
   quality: 'low' | 'medium' | 'high' | 'ultra'
 ): THREE.Material => {
   return quality === 'low' ? basicMaterial : standardMaterial;
-};
-
-// Helper to get skin material by worker ID
-export const getSkinMaterial = (workerId: string): THREE.MeshStandardMaterial => {
-  const index = workerId.charCodeAt(workerId.length - 1) % WORKER_MATERIALS.skin.length;
-  return WORKER_MATERIALS.skin[index];
-};
-
-// Helper to get hair material by worker ID
-export const getHairMaterial = (workerId: string): THREE.MeshStandardMaterial => {
-  const index = workerId.charCodeAt(0) % WORKER_MATERIALS.hair.length;
-  return WORKER_MATERIALS.hair[index];
 };
 
 // === TUNNEL MATERIALS ===

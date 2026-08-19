@@ -22,10 +22,12 @@ describe('BreakdownStore', () => {
     useBreakdownStore.setState({
       activeBreakdowns: [],
       breakdownHistory: [],
+      workOrders: [],
       predictiveAlerts: [],
       partsInventory: { ...DEFAULT_INVENTORY },
       maintenanceSchedule: [],
       lastBreakdownTime: 0,
+      idSequence: 0,
     });
   });
 
@@ -34,108 +36,162 @@ describe('BreakdownStore', () => {
   });
 
   describe('Failure/Repair State Machine', () => {
-    it('should create a breakdown with the requested type and zero progress', () => {
-      const { triggerBreakdown } = useBreakdownStore.getState();
-      const breakdown = triggerBreakdown('rm-101', 'Roller Mill 101', 'overheating');
+    const createRepair = (
+      type: 'mechanical' | 'electrical' | 'overheating' | 'vibration_failure' = 'mechanical'
+    ) => {
+      return useBreakdownStore.getState().triggerBreakdown('rm-101', 'Roller Mill 101', type)!;
+    };
 
-      expect(breakdown).not.toBeNull();
-      expect(breakdown!.machineId).toBe('rm-101');
-      expect(breakdown!.type).toBe('overheating');
-      expect(breakdown!.repairProgress).toBe(0);
-      expect(breakdown!.resolved).toBe(false);
-      expect(breakdown!.estimatedRepairTime).toBeGreaterThanOrEqual(30);
-      expect(breakdown!.estimatedRepairTime).toBeLessThanOrEqual(60);
-      expect(useBreakdownStore.getState().activeBreakdowns).toHaveLength(1);
+    it('creates deterministic breakdown and work-order identities', () => {
+      const first = useBreakdownStore
+        .getState()
+        .triggerBreakdown('rm-101', 'Roller Mill 101', 'overheating')!;
+      const second = useBreakdownStore
+        .getState()
+        .triggerBreakdown('rm-102', 'Roller Mill 102', 'electrical')!;
+
+      expect(first.id).toBe('breakdown-00001');
+      expect(first.workOrderId).toBe('wo-00001');
+      expect(second.id).toBe('breakdown-00002');
+      expect(first.repairProgress).toBe(0);
+      expect(first.resolved).toBe(false);
+      expect(useBreakdownStore.getState().workOrders[0]).toMatchObject({
+        id: 'wo-00001',
+        breakdownId: first.id,
+        phase: 'diagnosed',
+        cause: 'overheating',
+        requiredParts: ['filters', 'sensors'],
+      });
     });
 
-    it('should not allow two active breakdowns on the same machine', () => {
-      const { triggerBreakdown } = useBreakdownStore.getState();
-      const first = triggerBreakdown('rm-101', 'Roller Mill 101', 'mechanical');
-      const second = triggerBreakdown('rm-101', 'Roller Mill 101', 'electrical');
+    it('does not allow two active breakdowns on the same machine', () => {
+      const first = useBreakdownStore
+        .getState()
+        .triggerBreakdown('rm-101', 'Roller Mill 101', 'mechanical');
+      const second = useBreakdownStore
+        .getState()
+        .triggerBreakdown('rm-101', 'Roller Mill 101', 'electrical');
 
       expect(first).not.toBeNull();
       expect(second).toBeNull();
       expect(useBreakdownStore.getState().activeBreakdowns).toHaveLength(1);
+      expect(useBreakdownStore.getState().workOrders).toHaveLength(1);
     });
 
-    it('should assign a repair worker to a breakdown', () => {
-      const { triggerBreakdown, assignRepairWorker } = useBreakdownStore.getState();
-      const breakdown = triggerBreakdown('rm-102', 'Roller Mill 102', 'mechanical')!;
+    it('starts an autonomous repair when all required parts are available', () => {
+      const breakdown = useBreakdownStore
+        .getState()
+        .triggerBreakdown('rm-101', 'Roller Mill 101', 'mechanical')!;
 
-      assignRepairWorker(breakdown.id, 'worker-7', 'Maria Santos');
+      const result = useBreakdownStore.getState().startRepair(breakdown.id);
 
-      const active = useBreakdownStore.getState().activeBreakdowns[0];
-      expect(active.assignedWorkerId).toBe('worker-7');
-      expect(active.assignedWorkerName).toBe('Maria Santos');
+      expect(result).toEqual({ started: true, missingParts: [] });
+      expect(useBreakdownStore.getState().partsInventory).toEqual({
+        ...DEFAULT_INVENTORY,
+        bearings: 9,
+        belts: 7,
+      });
     });
 
-    it('should accumulate repair progress without exceeding 100', () => {
-      const { triggerBreakdown, updateRepairProgress } = useBreakdownStore.getState();
-      const breakdown = triggerBreakdown('rm-103', 'Roller Mill 103', 'electrical')!;
-
-      updateRepairProgress(breakdown.id, 40);
-      expect(useBreakdownStore.getState().activeBreakdowns[0].repairProgress).toBe(40);
-
-      updateRepairProgress(breakdown.id, 30);
-      expect(useBreakdownStore.getState().activeBreakdowns[0].repairProgress).toBe(70);
-    });
-
-    it('should auto-resolve into history when repair progress reaches 100', () => {
-      const { triggerBreakdown, updateRepairProgress } = useBreakdownStore.getState();
-      const breakdown = triggerBreakdown('rm-104', 'Roller Mill 104', 'vibration_failure')!;
-
-      updateRepairProgress(breakdown.id, 60);
-      updateRepairProgress(breakdown.id, 60); // 120 -> clamps to 100 -> resolves
-
+    it('atomically consumes all required parts when repair starts', () => {
+      const breakdown = createRepair('mechanical');
+      const result = useBreakdownStore.getState().startRepair(breakdown.id);
       const state = useBreakdownStore.getState();
-      expect(state.activeBreakdowns).toHaveLength(0);
-      expect(state.breakdownHistory).toHaveLength(1);
-      expect(state.breakdownHistory[0].id).toBe(breakdown.id);
-      expect(state.breakdownHistory[0].resolved).toBe(true);
-      expect(state.breakdownHistory[0].repairProgress).toBe(100);
+
+      expect(result.started).toBe(true);
+      expect(state.partsInventory.bearings).toBe(9);
+      expect(state.partsInventory.belts).toBe(7);
+      expect(state.workOrders[0]).toMatchObject({
+        phase: 'repairing',
+        consumedParts: ['bearings', 'belts'],
+      });
     });
 
-    it('should resolve a breakdown directly and record history', () => {
-      const { triggerBreakdown, resolveBreakdown } = useBreakdownStore.getState();
-      const breakdown = triggerBreakdown('sifter-a', 'Plansifter A', 'mechanical')!;
+    it('keeps the work order blocked when any required part is missing', () => {
+      useBreakdownStore.setState((state) => ({
+        partsInventory: { ...state.partsInventory, motors: 0 },
+      }));
+      const breakdown = createRepair('electrical');
 
-      resolveBreakdown(breakdown.id);
+      const result = useBreakdownStore.getState().startRepair(breakdown.id);
 
+      expect(result).toEqual({
+        started: false,
+        reason: 'missing_parts',
+        missingParts: ['motors'],
+      });
+      expect(useBreakdownStore.getState().workOrders[0].phase).toBe('awaiting_parts');
+      expect(useBreakdownStore.getState().partsInventory.sensors).toBe(12);
+    });
+
+    it('requires repair completion, verification, and explicit restart in order', () => {
+      const breakdown = createRepair();
       const state = useBreakdownStore.getState();
-      expect(state.activeBreakdowns).toHaveLength(0);
-      expect(state.breakdownHistory[0].resolved).toBe(true);
+      expect(state.startRepair(breakdown.id).started).toBe(true);
+
+      state.updateRepairProgress(breakdown.id, 120);
+      let current = useBreakdownStore.getState();
+      expect(current.activeBreakdowns[0].repairProgress).toBe(100);
+      expect(current.workOrders[0].phase).toBe('verification');
+      expect(current.activeBreakdowns).toHaveLength(1);
+      expect(current.breakdownHistory).toHaveLength(0);
+
+      expect(current.requestMachineRestart(breakdown.id)).toBe(false);
+      expect(current.verifyRepair(breakdown.id)).toBe(true);
+      expect(useBreakdownStore.getState().requestMachineRestart(breakdown.id)).toBe(true);
+      expect(useBreakdownStore.getState().confirmMachineRestart(breakdown.id)).toBe(true);
+
+      current = useBreakdownStore.getState();
+      expect(current.activeBreakdowns).toHaveLength(0);
+      expect(current.breakdownHistory[0]).toMatchObject({
+        id: breakdown.id,
+        resolved: true,
+        repairProgress: 100,
+      });
+      expect(current.workOrders[0].phase).toBe('returned_to_service');
+      expect(current.workOrders[0].audit.map((entry) => entry.phase)).toEqual([
+        'diagnosed',
+        'repairing',
+        'verification',
+        'ready_to_restart',
+        'restart_requested',
+        'returned_to_service',
+      ]);
     });
 
-    it('should ignore progress/resolve calls for unknown breakdown ids', () => {
-      const { triggerBreakdown, updateRepairProgress, resolveBreakdown } =
-        useBreakdownStore.getState();
-      triggerBreakdown('rm-101', 'Roller Mill 101', 'mechanical');
-
-      updateRepairProgress('no-such-id', 50);
-      resolveBreakdown('no-such-id');
-
+    it('tracks downtime on active faults and freezes it after restart', () => {
+      const breakdown = createRepair();
       const state = useBreakdownStore.getState();
-      expect(state.activeBreakdowns).toHaveLength(1);
-      expect(state.activeBreakdowns[0].repairProgress).toBe(0);
-      expect(state.breakdownHistory).toHaveLength(0);
+      state.tickDowntime(12.5);
+      state.startRepair(breakdown.id);
+      state.updateRepairProgress(breakdown.id, 100);
+      state.verifyRepair(breakdown.id);
+      state.requestMachineRestart(breakdown.id);
+      state.confirmMachineRestart(breakdown.id);
+      state.tickDowntime(10);
+
+      const current = useBreakdownStore.getState();
+      expect(current.workOrders[0].downtimeSeconds).toBe(12.5);
+      expect(current.breakdownHistory[0].downtimeSeconds).toBe(12.5);
     });
 
-    it('should allow a new breakdown on a machine after the previous one resolves', () => {
-      const { triggerBreakdown, resolveBreakdown } = useBreakdownStore.getState();
-      const first = triggerBreakdown('rm-101', 'Roller Mill 101', 'mechanical')!;
-      resolveBreakdown(first.id);
+    it('does not let the compatibility resolve action bypass causality', () => {
+      const breakdown = createRepair();
+      useBreakdownStore.getState().resolveBreakdown(breakdown.id);
 
-      const second = triggerBreakdown('rm-101', 'Roller Mill 101', 'overheating');
-      expect(second).not.toBeNull();
       expect(useBreakdownStore.getState().activeBreakdowns).toHaveLength(1);
+      expect(useBreakdownStore.getState().workOrders[0].phase).toBe('diagnosed');
     });
 
-    it('should find the active breakdown for a machine', () => {
-      const { triggerBreakdown, getBreakdownForMachine } = useBreakdownStore.getState();
-      triggerBreakdown('packer-0', 'Packer Line 1', 'electrical');
+    it('finds active faults and work orders by identity', () => {
+      const breakdown = useBreakdownStore
+        .getState()
+        .triggerBreakdown('packer-0', 'Packer Line 1', 'electrical')!;
+      const state = useBreakdownStore.getState();
 
-      expect(getBreakdownForMachine('packer-0')?.machineId).toBe('packer-0');
-      expect(getBreakdownForMachine('packer-1')).toBeUndefined();
+      expect(state.getBreakdownForMachine('packer-0')?.id).toBe(breakdown.id);
+      expect(state.getBreakdownForMachine('packer-1')).toBeUndefined();
+      expect(state.getWorkOrderForBreakdown(breakdown.id)?.id).toBe(breakdown.workOrderId);
     });
   });
 

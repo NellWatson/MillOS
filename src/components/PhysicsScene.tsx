@@ -5,11 +5,10 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { MillScene } from './MillScene';
 import { PhysicsFirstPersonController } from './physics/PhysicsFirstPersonController';
 import { FactoryColliders } from './physics/FactoryColliders';
-import { ExitZoneSensors } from './physics/ExitZoneSensors';
 import { PhysicsDebug } from './physics/PhysicsDebug';
 import { MobileFirstPersonController } from './mobile/MobileFirstPersonController';
 import { isBenchmarkRuntime } from '../runtime/runtimeMode';
-import type { MachineData, WorkerData } from '../types';
+import type { MachineData } from '../types';
 import type { ForkliftData } from './ForkliftSystem';
 
 interface PhysicsSceneProps {
@@ -20,7 +19,6 @@ interface PhysicsSceneProps {
   showZones: boolean;
   onLockChange: (locked: boolean) => void;
   onSelectMachine: (machine: MachineData) => void;
-  onSelectWorker: (worker: WorkerData) => void;
   onSelectForklift: (forklift: ForkliftData) => void;
 }
 
@@ -32,12 +30,10 @@ export const PhysicsScene: React.FC<PhysicsSceneProps> = ({
   showZones,
   onLockChange,
   onSelectMachine,
-  onSelectWorker,
   onSelectForklift,
 }) => (
   <Physics gravity={[0, -9.81, 0]} timeStep={1 / 60}>
     <FactoryColliders />
-    <ExitZoneSensors />
     <PhysicsDebug />
 
     {fpsMode ? (
@@ -77,7 +73,6 @@ export const PhysicsScene: React.FC<PhysicsSceneProps> = ({
       productionSpeed={productionSpeed}
       showZones={showZones}
       onSelectMachine={onSelectMachine}
-      onSelectWorker={onSelectWorker}
       onSelectForklift={onSelectForklift}
     />
   </Physics>

@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { ProductionMetrics } from '../ProductionMetrics';
+import { bagsPerHourToTonnesPerHour, ProductionMetrics } from '../ProductionMetrics';
 import { useProductionStore } from '../../stores/productionStore';
 import { useSafetyStore } from '../../stores/safetyStore';
 import { MachineType } from '../../types';
@@ -90,7 +90,7 @@ describe('ProductionMetrics', () => {
       safetyMetrics: {
         nearMisses: 0,
         safetyStops: 2,
-        workerEvasions: 1,
+        routeConflicts: 1,
         lastIncidentTime: null,
         daysSinceIncident: 127,
       },
@@ -173,31 +173,27 @@ describe('ProductionMetrics', () => {
       expect(screen.getByText('2')).toBeInTheDocument();
     });
 
-    it('should display worker evasions from store', () => {
+    it('should display route conflicts from store', () => {
       render(<ProductionMetrics />);
 
-      // Worker evasions value
+      // Route-conflict value
       expect(screen.getByText('1')).toBeInTheDocument();
     });
   });
 
   describe('Live Metrics Calculation', () => {
-    it('should calculate throughput based on production speed and machines', () => {
-      // Set production speed
-      useProductionStore.setState({ productionSpeed: 1.5 });
-
+    it('should convert the authoritative bags-per-hour rate to tonnes per hour', () => {
       render(<ProductionMetrics />);
 
-      // Throughput should be calculated (base + speed factor + machine factor)
-      // The exact value depends on the calculation formula
-      const throughputElements = screen.getAllByText(/t\/hr/i);
-      expect(throughputElements.length).toBeGreaterThan(0);
+      expect(bagsPerHourToTonnesPerHour(1200)).toBe(30);
+      expect(screen.getByText('30')).toBeInTheDocument();
+      expect(screen.getAllByText(/t\/hr/i).length).toBeGreaterThan(0);
     });
 
-    it('should calculate bags per minute', () => {
+    it('should derive bags per minute from the same authoritative rate', () => {
       render(<ProductionMetrics />);
 
-      // Bags per minute label should exist
+      expect(screen.getByText('20')).toBeInTheDocument();
       expect(screen.getByText(/bags\/min/i)).toBeInTheDocument();
     });
 
@@ -241,7 +237,7 @@ describe('ProductionMetrics', () => {
           safetyMetrics: {
             nearMisses: 1,
             safetyStops: 5,
-            workerEvasions: 3,
+            routeConflicts: 3,
             lastIncidentTime: Date.now(),
             daysSinceIncident: 0,
           },
@@ -277,7 +273,7 @@ describe('ProductionMetrics', () => {
         safetyMetrics: {
           nearMisses: 0,
           safetyStops: 0,
-          workerEvasions: 0,
+          routeConflicts: 0,
           lastIncidentTime: null,
           daysSinceIncident: 127,
         },
@@ -294,7 +290,7 @@ describe('ProductionMetrics', () => {
         safetyMetrics: {
           nearMisses: 1,
           safetyStops: 1,
-          workerEvasions: 0,
+          routeConflicts: 0,
           lastIncidentTime: fiveMinutesAgo,
           daysSinceIncident: 0,
         },
@@ -313,7 +309,7 @@ describe('ProductionMetrics', () => {
         safetyMetrics: {
           nearMisses: 0,
           safetyStops: 0,
-          workerEvasions: 0,
+          routeConflicts: 0,
           lastIncidentTime: null,
           daysSinceIncident: 127,
         },
@@ -329,7 +325,7 @@ describe('ProductionMetrics', () => {
         safetyMetrics: {
           nearMisses: 0,
           safetyStops: 3,
-          workerEvasions: 0,
+          routeConflicts: 0,
           lastIncidentTime: null,
           daysSinceIncident: 127,
         },

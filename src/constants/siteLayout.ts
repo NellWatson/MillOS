@@ -10,7 +10,7 @@ export interface SiteBounds {
 }
 
 export interface SitePortal {
-  readonly id: 'shipping-dock' | 'receiving-dock' | 'east-personnel' | 'west-personnel';
+  readonly id: 'shipping-dock' | 'receiving-dock' | 'east-service' | 'west-service';
   readonly label: string;
   readonly centre: Vec3Tuple;
   readonly normal: Vec3Tuple;
@@ -29,7 +29,23 @@ export interface ServiceAssetAnchor {
   readonly position: Vec3Tuple;
   readonly rotation: number;
   readonly footprint: readonly [number, number];
+  readonly height: number;
   readonly clearance: number;
+}
+
+export interface VehicleRouteAnchor {
+  readonly id: string;
+  readonly vehicle: 'forklift' | 'truck';
+  readonly points: readonly Vec3Tuple[];
+  /** Half of the swept X/Z corridor, including the vehicle body and a safety margin. */
+  readonly halfWidth: number;
+  readonly closed: boolean;
+}
+
+export interface RouteHazardAnchor {
+  readonly id: string;
+  readonly type: 'conveyor' | 'intersection';
+  readonly bounds: Pick<SiteBounds, 'minX' | 'maxX' | 'minZ' | 'maxZ'>;
 }
 
 export interface LandmarkAnchor {
@@ -63,6 +79,14 @@ export const SITE_LAYOUT = {
     radius: 255,
     horizonRadius: 260,
   },
+  perimeter: {
+    minX: -95,
+    maxX: 95,
+    minY: 0,
+    maxY: 4,
+    minZ: -85,
+    maxZ: 85,
+  } satisfies SiteBounds,
   factory: {
     bounds: {
       minX: -60,
@@ -102,18 +126,18 @@ export const SITE_LAYOUT = {
       height: 14,
       transitionDepth: 18,
     },
-    eastPersonnel: {
-      id: 'east-personnel',
-      label: 'East personnel exit',
+    eastService: {
+      id: 'east-service',
+      label: 'East service exit',
       centre: [60, 0, -20],
       normal: [1, 0, 0],
       halfWidth: 2,
       height: 3,
       transitionDepth: 8,
     },
-    westPersonnel: {
-      id: 'west-personnel',
-      label: 'West personnel exit',
+    westService: {
+      id: 'west-service',
+      label: 'West service exit',
       centre: [-60, 0, -20],
       normal: [-1, 0, 0],
       halfWidth: 2,
@@ -148,33 +172,101 @@ export const SITE_LAYOUT = {
   serviceYard: {
     maintenanceGarage: {
       id: 'maintenance-garage',
-      position: [85, 0, 30],
+      position: [83.5, 0, 36],
       rotation: -Math.PI / 2,
-      footprint: [12, 10],
+      footprint: [12.3, 10.8],
+      height: 8,
       clearance: 6,
     },
     propaneCompound: {
       id: 'propane-compound',
-      position: [92.5, 0, 8],
+      position: [83.5, 0, 14.5],
       rotation: 0,
-      footprint: [9, 5],
-      clearance: 5,
+      footprint: [12, 9],
+      height: 5,
+      clearance: 4,
+    },
+    utilityTankFarm: {
+      id: 'utility-tank-farm',
+      position: [75, 0, -15],
+      rotation: 0,
+      footprint: [22, 42],
+      height: 12,
+      clearance: 2,
     },
     trailerDropYard: {
       id: 'trailer-drop-yard',
-      position: [-60, 0, 35],
+      position: [-78, 0, 35],
       rotation: 0,
       footprint: [20, 30],
+      height: 5,
       clearance: 4,
     },
-    driverLounge: {
-      id: 'driver-lounge',
+    fleetTelemetryHub: {
+      id: 'fleet-telemetry-hub',
       position: [42, 0, 75],
       rotation: -Math.PI / 2,
       footprint: [12, 10],
+      height: 6,
       clearance: 3,
     },
   } satisfies Record<string, ServiceAssetAnchor>,
+  routes: {
+    forklifts: {
+      shipping: {
+        id: 'forklift-shipping',
+        vehicle: 'forklift',
+        points: [
+          [28, 0, 20],
+          [45, 0, 20],
+          [45, 0, 42],
+          [24, 0, 42],
+          [24, 0, 44],
+          [29, 0, 44],
+          [45, 0, 42],
+          [45, 0, 20],
+        ],
+        halfWidth: 1.35,
+        closed: true,
+      },
+      receiving: {
+        id: 'forklift-receiving',
+        vehicle: 'forklift',
+        points: [
+          [-35, 0, -43],
+          [-35, 0, -38],
+          [-35, 0, -30],
+          [-35, 0, -22],
+          [-42, 0, -22],
+          [-42, 0, -38],
+        ],
+        halfWidth: 1.35,
+        closed: true,
+      },
+    },
+  } satisfies Record<string, Record<string, VehicleRouteAnchor>>,
+  routeHazards: {
+    mainConveyor: {
+      id: 'main-conveyor',
+      type: 'conveyor',
+      bounds: { minX: -28, maxX: 28, minZ: 22, maxZ: 26 },
+    },
+    rollerConveyor: {
+      id: 'roller-conveyor',
+      type: 'conveyor',
+      bounds: { minX: -16, maxX: 16, minZ: 19, maxZ: 23 },
+    },
+    shippingDock: {
+      id: 'shipping-dock',
+      type: 'intersection',
+      bounds: { minX: -20, maxX: 20, minZ: 40, maxZ: 50 },
+    },
+    receivingDock: {
+      id: 'receiving-dock',
+      type: 'intersection',
+      bounds: { minX: -20, maxX: 20, minZ: -50, maxZ: -40 },
+    },
+  } satisfies Record<string, RouteHazardAnchor>,
   landmarks: {
     castle: {
       id: 'castle',
@@ -239,36 +331,9 @@ export const SITE_LAYOUT = {
     milling: { position: [34, 13, -7], target: [0, 3, -6] },
     sifting: { position: [34, 20, 18], target: [0, 9, 6] },
     packing: { position: [-34, 14, 34], target: [0, 3, 25] },
-    /**
-     * The three personnel poses.
-     *
-     * THESE ARE ANCHORS, NOT FINAL FRAMING. `RuntimeController.PERSONNEL_FOLLOW`
-     * re-resolves all three from the subject's actual transform every frame,
-     * because each `target` below is a SPAWN coordinate out of
-     * `createInitialWorkers` and an art capture runs the game clock, so the
-     * roster has patrolled several metres away by the time the shutter opens.
-     * What survives here is (a) the fallback pose if no roster member of the
-     * required body type is in the graph at all, and (b) the target that picks
-     * WHICH roster member each scene locks onto - nearest wins.
-     *
-     * Each pose here is exactly the follow pose evaluated at its subject's
-     * spawn mark and spawn heading, which `RuntimeController.test.ts` asserts -
-     * so a paused world (any benchmark run without `motion=on`, where
-     * `gameSpeed` is 0 and the roster never leaves its marks) and a running one
-     * compose identically, and a sign error in the follow arithmetic fails a
-     * test instead of quietly framing the back of someone's head.
-     *
-     * `personnel` used to look across the hall from [22, 5.5, -14] and put a
-     * silo support leg down the centre of the frame. It now looks back along
-     * the +x side aisle, which is where the roster actually walks.
-     */
-    personnel: { position: [8.2, 2.4, -12], target: [10, 1.15, -18] },
-    personnelClose: { position: [8.6, 1.72, -16.55], target: [10, 1.25, -18], fov: 42 },
-    personnelFeminine: {
-      position: [-8.6, 1.72, -15.7],
-      target: [-10, 1.25, -14],
-      fov: 42,
-    },
+    processFloor: { position: [27, 5.5, -2], target: [-4, 2, -10], fov: 50 },
+    tankFarm: { position: [102, 8.5, -15], target: [75, 3.5, -15], fov: 55 },
+    logisticsClose: { position: [18, 3.8, 96], target: [14, 1.8, 82], fov: 45 },
     forklift: { position: [48, 3.8, 33], target: [40, 1.15, 24] },
     shipping: { position: [34, 9, 104], target: [5, 2.5, 82] },
     receiving: { position: [-34, 9, -104], target: [-5, 2.5, -82] },
@@ -456,7 +521,7 @@ export function getServiceAssetBounds(
     minX: anchor.position[0] - width / 2 - clearance,
     maxX: anchor.position[0] + width / 2 + clearance,
     minY: anchor.position[1],
-    maxY: anchor.position[1] + 16,
+    maxY: anchor.position[1] + anchor.height,
     minZ: anchor.position[2] - depth / 2 - clearance,
     maxZ: anchor.position[2] + depth / 2 + clearance,
   };
@@ -481,4 +546,58 @@ export function getLandmarkBounds(anchor: LandmarkAnchor): SiteBounds {
 
 export function boundsOverlapXZ(a: SiteBounds, b: SiteBounds): boolean {
   return a.minX < b.maxX && a.maxX > b.minX && a.minZ < b.maxZ && a.maxZ > b.minZ;
+}
+
+const segmentIntersectsBoundsXZ = (
+  start: Vec3Tuple,
+  end: Vec3Tuple,
+  bounds: Pick<SiteBounds, 'minX' | 'maxX' | 'minZ' | 'maxZ'>
+): boolean => {
+  const deltaX = end[0] - start[0];
+  const deltaZ = end[2] - start[2];
+  let minimumT = 0;
+  let maximumT = 1;
+
+  const clip = (origin: number, delta: number, minimum: number, maximum: number): boolean => {
+    if (Math.abs(delta) < 1e-9) return origin >= minimum && origin <= maximum;
+    const first = (minimum - origin) / delta;
+    const second = (maximum - origin) / delta;
+    const entry = Math.min(first, second);
+    const exit = Math.max(first, second);
+    minimumT = Math.max(minimumT, entry);
+    maximumT = Math.min(maximumT, exit);
+    return minimumT <= maximumT;
+  };
+
+  return (
+    clip(start[0], deltaX, bounds.minX, bounds.maxX) &&
+    clip(start[2], deltaZ, bounds.minZ, bounds.maxZ)
+  );
+};
+
+/**
+ * Tests a vehicle's complete swept corridor against an X/Z footprint. The
+ * route data is the same data rendered by the vehicle controller, so a passing
+ * check protects the visible path rather than a hand-maintained proxy.
+ */
+export function routeIntersectsBoundsXZ(
+  route: VehicleRouteAnchor,
+  bounds: Pick<SiteBounds, 'minX' | 'maxX' | 'minZ' | 'maxZ'>,
+  additionalMargin: number = 0
+): boolean {
+  const padding = Math.max(0, route.halfWidth + additionalMargin);
+  const expanded = {
+    minX: bounds.minX - padding,
+    maxX: bounds.maxX + padding,
+    minZ: bounds.minZ - padding,
+    maxZ: bounds.maxZ + padding,
+  };
+  const segmentCount = route.closed ? route.points.length : Math.max(0, route.points.length - 1);
+
+  for (let index = 0; index < segmentCount; index += 1) {
+    const start = route.points[index];
+    const end = route.points[(index + 1) % route.points.length];
+    if (segmentIntersectsBoundsXZ(start, end, expanded)) return true;
+  }
+  return false;
 }

@@ -5,25 +5,19 @@ import {
   Thermometer,
   Activity,
   Brain,
-  User,
-  Users,
-  HardHat,
   Settings,
   Shield,
-  Heart,
+  Cpu,
   Factory,
   Info,
   ArrowRight,
 } from 'lucide-react';
 import { DockMode } from '../dock/Dock';
-import { MachineData, WorkerData } from '../../../types';
+import { MachineData } from '../../../types';
 import { AboutModal } from '../../AboutModal';
-import pkg from '../../../../package.json';
 import { RecoverableFeatureBoundary } from '../../ErrorBoundary';
 import { recoverableLazy } from '../../../utils/recoverableLazy';
-
-// "0.40.0" -> "v0.40" (matches the versioned deployment base paths)
-const CURRENT_VERSION = `v${pkg.version.split('.').slice(0, 2).join('.')}`;
+import { CURRENT_RELEASE_VERSION, SELECTABLE_RELEASES } from '../../../config/releaseVersions';
 
 // Lazy load the heavy panels
 const AICommandCenter = recoverableLazy(() =>
@@ -32,72 +26,18 @@ const AICommandCenter = recoverableLazy(() =>
 const SCADAPanel = recoverableLazy(() =>
   import('../../SCADAPanel').then((m) => ({ default: m.SCADAPanel }))
 );
-const WorkerDetailPanel = recoverableLazy(() =>
-  import('../../WorkerDetailPanel').then((m) => ({ default: m.WorkerDetailPanel }))
-);
-
 // New Inspector Components
 import { MachineInspector } from './MachineInspector';
 import { SettingsPanel } from '../panels/SettingsPanel';
 import { SafetyPanel } from '../panels/SafetyPanel';
 import { OverviewPanel } from '../panels/OverviewPanel';
-import { WorkforcePanel } from '../panels/WorkforcePanel';
-
-// MultiplayerPanel lazy-loaded to keep peerjs/WebRTC out of the boot chunk
-const MultiplayerPanel = recoverableLazy(() =>
-  import('../panels/MultiplayerPanel').then((m) => ({ default: m.MultiplayerPanel }))
-);
-
-// Core BAS controls (kept static - frequently used, small)
-import { FiveAxesPanel } from '../widgets/FiveAxesPanel';
-import { ValueDashboard } from '../widgets/ValueDashboard';
-
-// Lazy load heavy BAS panels for bundle optimization
-const StabilityMonitor = recoverableLazy(() =>
-  import('../widgets/StabilityMonitor').then((m) => ({ default: m.StabilityMonitor }))
-);
-const BASTimeline = recoverableLazy(() =>
-  import('../widgets/BASTimeline').then((m) => ({ default: m.BASTimeline }))
-);
-const ScenarioPlayground = recoverableLazy(() =>
-  import('../widgets/ScenarioPlayground').then((m) => ({ default: m.ScenarioPlayground }))
-);
-const EngagementSignaturePanel = recoverableLazy(() =>
-  import('../widgets/EngagementSignaturePanel').then((m) => ({
-    default: m.EngagementSignaturePanel,
-  }))
-);
-const FlourishingDashboard = recoverableLazy(() =>
-  import('../widgets/FlourishingDashboard').then((m) => ({ default: m.FlourishingDashboard }))
-);
-const OwnershipPanel = recoverableLazy(() =>
-  import('../widgets/OwnershipPanel').then((m) => ({ default: m.OwnershipPanel }))
-);
-const VotingPanel = recoverableLazy(() =>
-  import('../widgets/VotingPanel').then((m) => ({ default: m.VotingPanel }))
-);
-const FederationPanel = recoverableLazy(() =>
-  import('../widgets/FederationPanel').then((m) => ({ default: m.FederationPanel }))
-);
-const AIWelfarePanel = recoverableLazy(() =>
-  import('../widgets/AIWelfarePanel').then((m) => ({ default: m.AIWelfarePanel }))
-);
-const SocialMissionPanel = recoverableLazy(() =>
-  import('../widgets/SocialMissionPanel').then((m) => ({ default: m.SocialMissionPanel }))
-);
-const BASEducation = recoverableLazy(() =>
-  import('../widgets/BASEducation').then((m) => ({ default: m.BASEducation }))
-);
-const VCPStatusPanel = recoverableLazy(() =>
-  import('../widgets/VCPStatusPanel').then((m) => ({ default: m.VCPStatusPanel }))
-);
+import { AutonomyPanel } from '../widgets/AutonomyPanel';
 
 interface ContextSidebarProps {
   mode: DockMode;
   isVisible: boolean;
   onClose: () => void;
   selectedMachine: MachineData | null;
-  selectedWorker: WorkerData | null;
   productionSpeed: number;
   setProductionSpeed: (v: number) => void;
   showZones?: boolean;
@@ -113,7 +53,6 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
   isVisible,
   onClose,
   selectedMachine,
-  selectedWorker,
   productionSpeed,
   setProductionSpeed,
   showZones,
@@ -167,16 +106,6 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
     headerTitle = selectedMachine.name;
     HeaderIcon = Thermometer;
     content = <MachineInspector machine={selectedMachine} />;
-  } else if (selectedWorker) {
-    headerTitle = selectedWorker.name;
-    HeaderIcon = User;
-    content = (
-      <Suspense fallback={<LoadingPlaceholder />}>
-        <div className="h-full overflow-y-auto">
-          <WorkerDetailPanel worker={selectedWorker} onClose={onClose} embedded={true} />
-        </div>
-      </Suspense>
-    );
   } else if (mode === 'ai') {
     headerTitle = 'AI Partner';
     HeaderIcon = Brain;
@@ -202,81 +131,10 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
     headerTitle = 'Safety & Emergency';
     HeaderIcon = Shield;
     content = <SafetyPanel />;
-  } else if (mode === 'multiplayer') {
-    headerTitle = 'Multiplayer';
-    HeaderIcon = Users;
-    content = (
-      <Suspense fallback={<LoadingPlaceholder />}>
-        <MultiplayerPanel />
-      </Suspense>
-    );
   } else if (mode === 'management') {
-    headerTitle = 'Bilateral Autonomy';
-    HeaderIcon = Heart;
-    content = (
-      <div className="p-3 h-full overflow-y-auto space-y-4">
-        {/* Core BAS Controls (static - always loaded) */}
-        <FiveAxesPanel />
-        <ValueDashboard />
-
-        {/* Lazy-loaded panels with compact fallbacks */}
-        <RecoverablePanel featureName="Stability monitor">
-          <StabilityMonitor />
-        </RecoverablePanel>
-
-        {/* VCP 2.0 - Value Coordination Protocol */}
-        <RecoverablePanel featureName="VCP status">
-          <VCPStatusPanel />
-        </RecoverablePanel>
-
-        {/* Timeline & History */}
-        <RecoverablePanel featureName="BAS timeline">
-          <BASTimeline />
-        </RecoverablePanel>
-
-        {/* Interactive Scenarios */}
-        <RecoverablePanel featureName="Scenario playground">
-          <ScenarioPlayground />
-        </RecoverablePanel>
-
-        {/* Engagement & Flourishing */}
-        <RecoverablePanel featureName="Engagement signature">
-          <EngagementSignaturePanel />
-        </RecoverablePanel>
-        <RecoverablePanel featureName="Flourishing dashboard">
-          <FlourishingDashboard />
-        </RecoverablePanel>
-
-        {/* Economic Democracy */}
-        <RecoverablePanel featureName="Ownership">
-          <OwnershipPanel />
-        </RecoverablePanel>
-        <RecoverablePanel featureName="Voting">
-          <VotingPanel />
-        </RecoverablePanel>
-        <RecoverablePanel featureName="Federation">
-          <FederationPanel />
-        </RecoverablePanel>
-
-        {/* Bilateral Completeness */}
-        <RecoverablePanel featureName="Becoming Mind welfare">
-          <AIWelfarePanel />
-        </RecoverablePanel>
-        <RecoverablePanel featureName="Social mission">
-          <SocialMissionPanel />
-        </RecoverablePanel>
-
-        {/* Educational Content */}
-        <RecoverablePanel featureName="BAS education">
-          <BASEducation />
-        </RecoverablePanel>
-      </div>
-    );
-  } else if (mode === 'workforce') {
-    // Workforce mode - show all workers with stats
-    headerTitle = 'Workforce';
-    HeaderIcon = HardHat;
-    content = <WorkforcePanel />;
+    headerTitle = 'Autonomy & Optimization';
+    HeaderIcon = Cpu;
+    content = <AutonomyPanel />;
   } else {
     // Overview mode - show production overview
     headerTitle = 'Mill Overview';
@@ -318,7 +176,7 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
               <RecoverableFeatureBoundary
                 featureName={headerTitle}
                 onDismiss={onClose}
-                resetKeys={[mode, selectedMachine?.id, selectedWorker?.id]}
+                resetKeys={[mode, selectedMachine?.id]}
               >
                 {content}
               </RecoverableFeatureBoundary>
@@ -340,16 +198,18 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
                     </span>
                     <select
                       className="text-[9px] ml-1 bg-transparent border-none cursor-pointer text-slate-400 hover:text-orange-400 transition-colors"
-                      value={pendingVersion ?? CURRENT_VERSION}
+                      value={pendingVersion ?? CURRENT_RELEASE_VERSION}
                       onChange={(e) => {
                         const value = e.target.value;
-                        setPendingVersion(value === CURRENT_VERSION ? null : value);
+                        setPendingVersion(value === CURRENT_RELEASE_VERSION ? null : value);
                       }}
                       aria-label="Select MillOS version"
                     >
-                      <option value={CURRENT_VERSION}>{CURRENT_VERSION.slice(1)}</option>
-                      <option value="v0.20">0.20</option>
-                      <option value="v0.10">0.10</option>
+                      {SELECTABLE_RELEASES.map((release) => (
+                        <option key={release.version} value={release.version}>
+                          {release.displayLabel}
+                        </option>
+                      ))}
                     </select>
                     {pendingVersion && (
                       <button
@@ -415,27 +275,4 @@ const LoadingPlaceholder = () => (
     <Activity size={24} aria-hidden="true" />
     <span className="sr-only">Loading panel content...</span>
   </div>
-);
-
-// Compact loader for lazy-loaded BAS panels
-const PanelLoader = () => (
-  <div
-    className="h-20 bg-slate-800/30 rounded-lg animate-pulse flex items-center justify-center border border-slate-700/30"
-    role="status"
-  >
-    <Activity className="w-4 h-4 text-cyan-500/50" aria-hidden="true" />
-    <span className="sr-only">Loading...</span>
-  </div>
-);
-
-const RecoverablePanel = ({
-  featureName,
-  children,
-}: {
-  featureName: string;
-  children: React.ReactNode;
-}) => (
-  <RecoverableFeatureBoundary featureName={featureName}>
-    <Suspense fallback={<PanelLoader />}>{children}</Suspense>
-  </RecoverableFeatureBoundary>
 );

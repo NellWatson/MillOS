@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "currentVersion": "v0.40",
+  "releases": [
+    {
+      "version": "v0.40",
+      "label": "0.40",
+      "type": "current"
+    },
+    {
+      "version": "v0.30",
+      "label": "0.30",
+      "type": "source-build",
+      "sourceCommit": "20bcbe044fc6d7ca7275999fec63ddce83fd49d0",
+      "sourcePackageVersion": "0.20.0",
+      "identityNote": "Historically deployed as v0.30 with stale package metadata.",
+      "reproducibleBuild": {
+        "verifiedAt": "2026-08-10",
+        "productionUrl": "https://www.millos.net/v0.30/",
+        "indexSha256": "5b4b9ea0f69b1ad3b9168cc5cc24e3730cf5647389a06f03e6012f73622af482",
+        "mainAsset": "assets/main-xJkxcQe9.js",
+        "mainSha256": "099078d6ba669ada3d011883129444cffb8b5ef75bf536f31f01fad7ae0b69d7"
+      }
+    },
+    {
+      "version": "v0.20",
+      "label": "0.20",
+      "type": "static",
+      "sourcePath": "public/v0.20"
+    },
+    {
+      "version": "v0.10",
+      "label": "0.10",
+      "type": "static",
+      "sourcePath": "public/v0.10"
+    }
+  ]
+}

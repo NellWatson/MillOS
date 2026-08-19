@@ -184,7 +184,7 @@ export const MILLOS_TERRAIN_REGIONS: TerrainRegion[] = [
   // ============================================
 
   // ============================================
-  // EMPLOYEE PARKING - Light asphalt
+  // VISITOR PARKING, light asphalt
   // ============================================
   {
     channel: TerrainChannel.ASPHALT,

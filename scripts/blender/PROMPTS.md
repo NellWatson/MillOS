@@ -10,7 +10,7 @@ Two modes, two jobs. Pick by what the output has to survive.
 | "What would this shape look like" | **MCP** |
 | Poking at a `.blend` you already have open | **MCP** |
 
-The deciding fact for this repo: MillOS machines are **procedural instanced geometry in TypeScript**, not GLBs. Only the forklift and three workers are real assets, and their glTF file order is load-bearing. So most Blender work here ends as TS or as a pipeline change — not as a new `.glb`.
+The deciding fact for this repo: MillOS machines are **procedural instanced geometry in TypeScript**, not GLBs. The forklift is the only current runtime character-scale GLB, and its glTF file order is load-bearing. MillOS v0.40 is permanently uncrewed: do not design, restore, or reference people, operators, drivers, personnel portraits, or character assets. Most Blender work here therefore ends as TS or as a pipeline change, not as a new `.glb`.
 
 ---
 
@@ -35,6 +35,9 @@ Constraints specific to MillOS — treat these as hard:
    simplifyPrimitive/meshopt, not in a modeller.
 
 2. assets/source/models/ is immutable provenance. Read it; never write it.
+
+2a. v0.40 is uncrewed. Do not add people to vehicles or scenery, and do not
+    create operator, driver, worker, avatar, portrait, or character studies.
 
 3. Blender's world is Z-up; three.js is Y-up. If you build a lathe or profile
    Y-up to match the runtime, an unrotated Blender camera frames it correctly.
@@ -78,7 +81,7 @@ Verify before claiming done, and show the output:
   npm run validate:assets     # asset gate: bounds, budgets, required nodes/clips
   npm run typecheck && npm run lint
   npm run build
-  npm test                    # baseline is 91 files / 1603 tests
+  npm test                    # record the live baseline; do not copy stale counts
 And for anything visible or interactive, actually run it — the repo rule is
 that a build is not a runtime. Load the dev server and confirm in the scene.
 

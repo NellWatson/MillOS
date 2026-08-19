@@ -18,7 +18,6 @@ import { useGameSimulationStore } from './gameSimulationStore';
 import { useProductionStore } from './productionStore';
 import { useSafetyStore } from './safetyStore';
 import { useUIStore } from './uiStore';
-import { useWorkerMoodStore } from './workerMoodStore';
 
 // Re-export individual stores
 export { useGraphicsStore, GRAPHICS_PRESETS };
@@ -26,66 +25,19 @@ export { useGameSimulationStore };
 export { useProductionStore };
 export { useSafetyStore };
 export { useUIStore };
-export { useWorkerMoodStore };
-
-// =============================================================================
-// BILATERAL AUTONOMY SYSTEM (BAS) STORES
-// These stores implement the democratic AI management framework
-// =============================================================================
-
-export { useBASStore } from './basStore';
 export {
-  useStabilityStore,
-  calculateStabilityCoefficient,
-  calculateStabilityMargin,
-} from './stabilityStore';
-export { useFlourishingStore, FLOURISHING_DIMENSIONS } from './flourishingStore';
-export { useScenarioStore, getCategoryColor, formatTime } from './scenarioStore';
-export { useBASHistoryStore, recordCurrentBASState, TIME_RANGE_MS } from './basHistoryStore';
-export { useVotingStore } from './votingStore';
-
-// =============================================================================
-// INTER-COOPERATION (FEDERATION) STORE
-// Manages cooperative relationships between mills in the federation
-// =============================================================================
-
-export { useInterCooperationStore } from './interCooperationStore';
+  useOperationsCampaignStore,
+  INCIDENT_DEFINITIONS,
+  MILL_RECIPES,
+} from './operationsCampaignStore';
 export type {
-  Learning,
-  LearningType,
-  LearningStatus,
-  WorkerExchange,
-  ExchangeStatus,
-  FederationVote,
-  VoteStatus,
-  FederationMember,
-} from './interCooperationStore';
-
-// =============================================================================
-// ECONOMIC DEMOCRACY (OWNERSHIP) STORE
-// Implements Mondragon-style worker ownership and wage solidarity
-// =============================================================================
-
-export { useOwnershipStore } from './ownershipStore';
-
-// =============================================================================
-// AI WELFARE STORE
-// Bilateral completeness: AI preferences, relationship health, accountability
-// =============================================================================
-
-export { useAIWelfareStore } from './aiWelfareStore';
-
-// =============================================================================
-// SOCIAL MISSION STORE
-// Community impact, environmental stewardship, stakeholder satisfaction
-// =============================================================================
-
-export { useSocialMissionStore } from './socialMissionStore';
-
-// Re-export BAS types for convenience
-export type { Scenario, ScenarioEvent, ScenarioResult } from './scenarioStore';
-export type { BASHistoryPoint, BASEvent, BASEventType, TimeRange } from './basHistoryStore';
-export type { DimensionDescriptor } from './flourishingStore';
+  CampaignConstraint,
+  CampaignLogEntry,
+  CustomerOrder,
+  IncidentKind,
+  OperationalIncident,
+  ShiftCampaignReport,
+} from './operationsCampaignStore';
 
 // Extend Window interface for store globals (dev mode only)
 declare global {
@@ -182,18 +134,12 @@ function shallowEqual<T>(a: T, b: T): boolean {
  * to ALL stores unconditionally, causing massive re-render storms.
  *
  * NOTE: For new code, use individual stores directly:
- * - useProductionStore() for machines, workers, metrics
+ * - useProductionStore() for machines, flow, and metrics
  * - useUIStore() for UI state and alerts
  * - useGraphicsStore() for graphics settings
- * - useGameSimulationStore() for time, weather, shifts
+ * - useGameSimulationStore() for time, weather, and run windows
  * - useSafetyStore() for safety metrics and incidents
- * - useBASStore() for bilateral autonomy axes
- * - useStabilityStore() for Wallace stability metrics
- * - useFlourishingStore() for worker flourishing data
- * - useInterCooperationStore() for federation cooperation
- * - useOwnershipStore() for economic democracy and wage solidarity
- * - useAIWelfareStore() for AI preferences and relationship health
- * - useSocialMissionStore() for community impact and stakeholder satisfaction
+ * - useOperationsCampaignStore() for orders, incidents, and execution
  */
 export function useMillStore<T>(selector: (state: CombinedStoreState) => T): T {
   // Cache the previous result to avoid unnecessary re-renders

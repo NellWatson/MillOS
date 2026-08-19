@@ -32,7 +32,7 @@ describe('AlertSystem', () => {
       safetyMetrics: {
         nearMisses: 0,
         safetyStops: 0,
-        workerEvasions: 0,
+        routeConflicts: 0,
         lastIncidentTime: null,
         daysSinceIncident: 127,
       },

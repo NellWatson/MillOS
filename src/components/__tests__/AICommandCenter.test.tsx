@@ -61,6 +61,7 @@ vi.mock('lucide-react', () => ({
   Shield: () => null,
   User: () => null,
   Users: () => null,
+  Network: () => null,
   Wrench: () => null,
   Zap: () => null,
   Eye: () => null,
@@ -157,10 +158,6 @@ describe('AICommandCenter', () => {
       efficiency: 87.5,
       quality: 94.2,
       uptime: 98.1,
-    },
-    workerSatisfaction: {
-      averageEnergy: 75,
-      averageSatisfaction: 80,
     },
     recordDecisionResponse: vi.fn(),
   };
@@ -374,7 +371,7 @@ describe('AICommandCenter', () => {
         {
           id: 'status-pending',
           timestamp: new Date(),
-          type: 'assignment',
+          type: 'coordination',
           action: 'Pending task',
           reasoning: 'Test',
           confidence: 75,
@@ -385,7 +382,7 @@ describe('AICommandCenter', () => {
         {
           id: 'status-progress',
           timestamp: new Date(),
-          type: 'assignment',
+          type: 'coordination',
           action: 'In progress task',
           reasoning: 'Test',
           confidence: 75,
@@ -396,7 +393,7 @@ describe('AICommandCenter', () => {
         {
           id: 'status-completed',
           timestamp: new Date(),
-          type: 'assignment',
+          type: 'coordination',
           action: 'Completed task',
           reasoning: 'Test',
           confidence: 75,

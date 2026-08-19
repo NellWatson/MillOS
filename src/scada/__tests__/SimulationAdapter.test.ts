@@ -99,6 +99,34 @@ describe('SimulationAdapter', () => {
       await adapter.connect();
       expect(adapter.isConnected()).toBe(true);
     });
+
+    it('produces the same telemetry sequence for the same tag catalogue', async () => {
+      const secondAdapter = new SimulationAdapter(sampleTags);
+      await adapter.connect();
+      await secondAdapter.connect();
+
+      const firstValues = await adapter.readAllTags();
+      const secondValues = await secondAdapter.readAllTags();
+      expect(secondValues.map(({ tagId, value, quality }) => ({ tagId, value, quality }))).toEqual(
+        firstValues.map(({ tagId, value, quality }) => ({ tagId, value, quality }))
+      );
+
+      await vi.advanceTimersByTimeAsync(3100);
+      const firstLater = await adapter.readAllTags();
+      const secondLater = await secondAdapter.readAllTags();
+      expect(secondLater.map(({ tagId, value, quality }) => ({ tagId, value, quality }))).toEqual(
+        firstLater.map(({ tagId, value, quality }) => ({ tagId, value, quality }))
+      );
+      await secondAdapter.disconnect();
+    });
+
+    it('does not mutate a shared tag catalogue when a setpoint is written', async () => {
+      const originalSetpoint = sampleTags[2].simulation?.baseValue;
+      await adapter.connect();
+      await adapter.writeTag('TEST.SP001.SP', 1800);
+
+      expect(sampleTags[2].simulation?.baseValue).toBe(originalSetpoint);
+    });
   });
 
   describe('Read Operations', () => {

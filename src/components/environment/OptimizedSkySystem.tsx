@@ -68,8 +68,8 @@ void main() {
 
   float mu = max(dot(direction, sunDir), 0.0);
   float horizonWeight = mix(1.0, 2.4, 1.0 - abs(sunDir.y));
-  float mieBroad = pow(mu, 4.0) * 0.55 * horizonWeight;
-  float mieTight = pow(mu, 220.0) * 2.20;
+  float mieBroad = pow(mu, 4.0) * 0.38 * horizonWeight;
+  float mieTight = pow(mu, 220.0) * 1.35;
   float rayleigh = (1.0 + mu * mu) * 0.045;
   float haze = exp(-max(height, 0.0) * 5.5) * (0.06 + daylight * 0.11);
   sky += uSunTint * (mieBroad + mieTight) * uSunOpacity;
@@ -250,17 +250,14 @@ function createRadialGlowTexture(size: number): THREE.DataTexture {
 /**
  * Sun disc size.
  *
- * At `CELESTIAL_RADIUS` 345 the old 5.2 radius subtended 2*atan(5.2/345) =
- * 1.73 degrees, 3.3x the real sun's 0.53. A disc that large reads as a cartoon
- * blob and can never produce a convincing glare silhouette. 2.2 is 0.73
- * degrees: still a shade generous, deliberately, because bloom is currently
- * inert (`BLOOM.luminanceThreshold` is 1.0 and no material in the scene authors
- * emissive above it) so nothing else is left to give the disc presence. If the
- * post domain ever raises the sun core above 1.0 linear, this can go to 1.6 and
- * be physically exact.
+ * At `CELESTIAL_RADIUS` 345 the original 5.2 radius subtended 1.73 degrees and
+ * read as a cartoon blob. The later 2.2 radius was physically restrained but
+ * disappeared inside the analytic Mie glare at normal display resolution.
+ * 3.4 subtends 1.13 degrees: deliberately stylised, legible beside the authored
+ * moon, and still compact enough to retain a crisp glare silhouette.
  */
-const sunGeometry = new THREE.SphereGeometry(2.2, 20, 14);
-const sunGlowGeometry = new THREE.SphereGeometry(3.8, 18, 12);
+const sunGeometry = new THREE.SphereGeometry(3.4, 24, 16);
+const sunGlowGeometry = new THREE.SphereGeometry(5.6, 20, 14);
 const moonGeometry = new THREE.SphereGeometry(7.4, 32, 24);
 const SKY_RADIUS = 180;
 const CELESTIAL_RADIUS = 345;
@@ -370,7 +367,7 @@ interface MountainRidgeSpec {
 /**
  * Angular resolution of one ridge ring.
  *
- * Raised from 192. At a ring radius of 280 to 325 world units, 192 segments put
+ * Raised from 192. At a ring radius of 248 to 318 world units, 192 segments put
  * a facet edge every 1.875 degrees, which is plainly visible as straight
  * chords along a summit. 384 halves that, and the whole backdrop is still only
  * 5,775 vertices across all three rings - nothing at a 60k-245k triangle
@@ -480,10 +477,10 @@ export function createMountainRidgeGeometry({
 
 const horizonRadius = SITE_LAYOUT.world.horizonRadius;
 const farMountainGeometry = createMountainRidgeGeometry({
-  radius: horizonRadius + 65,
+  radius: horizonRadius + 58,
   baseY: -17,
   // THE FAR RING IS ALSO AN OCCLUDER, NOT ONLY A SILHOUETTE. The authored
-  // ground disc stops at radius 255 while this ring is camera-locked at 325, so
+  // ground disc stops at radius 255 while this ring is camera-locked at 318, so
   // wherever the ring's profile dips below the ground's apparent horizon the
   // terrain BEYOND it shows through the gap - a strip of ground hanging in the
   // sky above the mountains. The old linear fog hid that strip by saturating;
@@ -503,7 +500,7 @@ const farMountainGeometry = createMountainRidgeGeometry({
   colors: ['#42574c', '#717a76', '#e9eff2'],
 });
 const midMountainGeometry = createMountainRidgeGeometry({
-  radius: horizonRadius + 40,
+  radius: horizonRadius + 20,
   baseY: -20,
   minHeight: 3,
   maxHeight: 58,
@@ -514,7 +511,10 @@ const midMountainGeometry = createMountainRidgeGeometry({
   colors: ['#3f5548', '#6e7873', '#eaf0f2'],
 });
 const nearHillGeometry = createMountainRidgeGeometry({
-  radius: horizonRadius + 18,
+  // Pull the green foothill inside the nominal horizon so it once again frames
+  // the playable zone. Its slope grows outward to 276, behind the city and
+  // authored landmarks, while the sky remains a genuine analytic skybox.
+  radius: horizonRadius - 12,
   baseY: -16,
   minHeight: 2,
   maxHeight: 42,
@@ -583,7 +583,7 @@ const cameraForwardScratch = new THREE.Vector3();
  * One ridge material per ring, differing only in how much air is in front of it.
  *
  * `uAerial` is the whole depth cue. The three rings sit at camera-relative
- * radii 278 / 300 / 325 - close enough together that geometry alone cannot
+ * radii 248 / 280 / 318 - close enough together that geometry alone cannot
  * separate them - so the separation has to come from extinction.
  */
 function createRidgeMaterial(aerial: number, name: string): THREE.ShaderMaterial {
@@ -594,7 +594,7 @@ function createRidgeMaterial(aerial: number, name: string): THREE.ShaderMaterial
     vertexColors: true,
     side: THREE.FrontSide,
     // DEPTH TEST AND WRITE STAY ON. The rings are camera-locked in X and Z, so
-    // they sit at a fixed 278-325 from the viewer, while site geometry on the
+    // they sit at a fixed 248-318 from the viewer, while site geometry on the
     // far side of the world reaches roughly 413 away from the `overview`
     // camera. The ring is supposed to occlude that - it is what hides the far
     // rim of the ground disc where the frustum clips it. Turning depth off
@@ -694,7 +694,7 @@ export function OptimizedSkySystem() {
         sunDirection: { value: new THREE.Vector3(0.5, 0.75, -0.4).normalize() },
       },
     });
-    material.customProgramCacheKey = () => 'millos-optimized-sky-v5';
+    material.customProgramCacheKey = () => 'millos-optimized-sky-v6';
     return material;
   }, []);
 
@@ -769,7 +769,7 @@ export function OptimizedSkySystem() {
     // The mountain rings are an optical horizon rather than site geometry.
     // Keeping their horizontal origin at the camera preserves continuous
     // parallax-free distance and prevents the far slopes clipping as the
-    // operator traverses the authored site. Their vertical datum stays tied
+    // inspection camera traverses the authored site. Their vertical datum stays tied
     // to the terrain so the ranges never float with camera height.
     if (horizonGroupRef.current) {
       horizonGroupRef.current.position.x = state.camera.position.x;
@@ -841,12 +841,11 @@ export function OptimizedSkySystem() {
       response,
       delta
     );
-    // The halo now carries the sun's apparent size on its own: the core sphere
-    // shrank from 1.73 to 0.73 degrees, and with bloom inert there is nothing
-    // else to make a physically-sized disc read.
+    // The halo supports the readable core without becoming the sun's apparent
+    // size on its own. Golden hour earns a wider, warmer aureole.
     sunHaloMaterial.opacity = THREE.MathUtils.damp(
       sunHaloMaterial.opacity,
-      celestial.sunOpacity * (0.3 + celestial.goldenHour * 0.22),
+      celestial.sunOpacity * (0.22 + celestial.goldenHour * 0.2),
       response,
       delta
     );
@@ -1028,7 +1027,7 @@ export function OptimizedSkySystem() {
           <sprite
             name="sun-halo"
             material={sunHaloMaterial}
-            scale={[38, 38, 1]}
+            scale={[30, 30, 1]}
             renderOrder={RENDER_ORDER.sunMoon - 1}
           />
           <mesh
@@ -1062,7 +1061,7 @@ export function OptimizedSkySystem() {
 
       <group ref={horizonGroupRef} name="optimized-horizon-backdrop" dispose={null}>
         {/* fog stays OFF on all three rings even after the switch to
-            exponential fog: at a camera-locked 278-325 they would all sit on
+            exponential fog: at a camera-locked 248-318 they would all sit on
             roughly the same fog factor, which would flatten exactly the
             per-ring separation `uAerial` exists to create. */}
         <mesh

@@ -41,7 +41,7 @@ export const generateConcrete = (
 
         // Surface noise (aggregate texture) - signed so the mean stays at
         // base, 5 octaves at the coarse scale plus a fine pore octave so the
-        // slab still has grain when a worker walks past the camera.
+        // slab still has grain during close inspection.
         const noise1 = fbmNoiseSigned(nx * 20, ny * 20, 5) * 0.13;
         const noise2 = fbmNoiseSigned(nx * 50, ny * 50, 3) * 0.07;
         const noise3 = fbmNoiseSigned(nx * 160, ny * 160, 2) * 0.035;

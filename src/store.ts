@@ -12,7 +12,11 @@
 
 import { logger } from './utils/logger';
 import { scadaToStoreMetrics } from './scada/SCADABridge';
-import { OPERATION_TAG_IDS } from './scada/tagDatabase';
+import { OPERATION_TAG_IDS, UTILITY_ASSET_TAG_IDS, VEHICLE_TAG_IDS } from './scada/tagDatabase';
+import {
+  vehicleTelemetryRegistry,
+  type VehicleTelemetrySnapshot,
+} from './simulation/vehicles/vehicleTelemetryRegistry';
 import type { MachineData } from './types';
 
 // Re-export everything from the new stores
@@ -36,7 +40,15 @@ export type { GraphicsQuality, GraphicsSettings } from './stores/graphicsStore';
 import { initializeSCADA, shutdownSCADA } from './scada/SCADAService';
 import { useProductionStore, useUIStore } from './stores';
 import { useMaterialFlowStore, type MaterialFlowState } from './stores/materialFlowStore';
-import { useBreakdownStore, type PartsInventory } from './stores/breakdownStore';
+import {
+  useOperationsCampaignStore,
+  type UtilityAssetTelemetry,
+} from './stores/operationsCampaignStore';
+import {
+  useBreakdownStore,
+  type MaintenanceWorkOrder,
+  type PartsInventory,
+} from './stores/breakdownStore';
 import { getDispatchQualityStatus, useQCLabStore, type QCLabState } from './stores/qcLabStore';
 import { shallow } from 'zustand/shallow';
 
@@ -47,14 +59,20 @@ const MACHINE_SYNC_DEBOUNCE_MS = 200;
 export function buildOperationalTelemetry(
   flow: MaterialFlowState,
   parts: PartsInventory,
-  qcLab: QCLabState
+  qcLab: QCLabState,
+  workOrders: MaintenanceWorkOrder[] = [],
+  utilityAssets: readonly UtilityAssetTelemetry[] = [],
+  vehicleTelemetry: readonly VehicleTelemetrySnapshot[] = []
 ): Record<string, number> {
   let totalInventoryKg = 0;
   let rawInventoryKg = 0;
   let finishedGoodsKg = 0;
 
   flow.machineBuffers.forEach((buffer) => {
-    [...buffer.inputBuffer, ...buffer.outputBuffer].forEach((material) => {
+    buffer.inputBuffer.forEach((material) => {
+      totalInventoryKg += material.amount;
+    });
+    buffer.outputBuffer.forEach((material) => {
       totalInventoryKg += material.amount;
     });
     if (buffer.machineType === 'silo') {
@@ -74,15 +92,26 @@ export function buildOperationalTelemetry(
     0,
     totalInventoryKg - rawInventoryKg - finishedGoodsKg + inTransitKg
   );
-  const lastReceiving = [...flow.manifests]
-    .reverse()
-    .find((manifest) => manifest.kind === 'receiving');
-  const lastShipping = [...flow.manifests]
-    .reverse()
-    .find((manifest) => manifest.kind === 'shipping');
+  let lastReceiving: MaterialFlowState['manifests'][number] | undefined;
+  let lastShipping: MaterialFlowState['manifests'][number] | undefined;
+  for (let index = flow.manifests.length - 1; index >= 0; index -= 1) {
+    const manifest = flow.manifests[index];
+    if (!lastReceiving && manifest.kind === 'receiving') lastReceiving = manifest;
+    if (!lastShipping && manifest.kind === 'shipping') lastShipping = manifest;
+    if (lastReceiving && lastShipping) break;
+  }
   const partsStock = Object.values(parts).reduce((sum, count) => sum + count, 0);
+  const activeQualityHolds = flow.productionBatches.filter(
+    (batch) => batch.disposition === 'hold' && batch.availableKg > 0
+  ).length;
+  const recalledBatches = flow.productionBatches.filter(
+    (batch) => batch.disposition === 'recalled'
+  ).length;
+  const openWorkOrders = workOrders.filter(
+    (workOrder) => workOrder.phase !== 'returned_to_service'
+  );
 
-  return {
+  const values: Record<string, number> = {
     [OPERATION_TAG_IDS.rawInventory]: rawInventoryKg / 1000,
     [OPERATION_TAG_IDS.inProcess]: inProcessKg / 1000,
     [OPERATION_TAG_IDS.finishedGoods]: finishedGoodsKg / 1000,
@@ -91,8 +120,90 @@ export function buildOperationalTelemetry(
     [OPERATION_TAG_IDS.lastReceiving]: (lastReceiving?.actualKg ?? 0) / 1000,
     [OPERATION_TAG_IDS.lastShipping]: (lastShipping?.actualKg ?? 0) / 1000,
     [OPERATION_TAG_IDS.partsStock]: partsStock,
-    [OPERATION_TAG_IDS.shippingReleased]: getDispatchQualityStatus(qcLab).released ? 1 : 0,
+    [OPERATION_TAG_IDS.shippingReleased]: getDispatchQualityStatus(qcLab, flow.productionBatches)
+      .released
+      ? 1
+      : 0,
+    [OPERATION_TAG_IDS.activeQualityHolds]: activeQualityHolds,
+    [OPERATION_TAG_IDS.recalledBatches]: recalledBatches,
+    [OPERATION_TAG_IDS.openWorkOrders]: openWorkOrders.length,
+    [OPERATION_TAG_IDS.maintenanceDowntime]: openWorkOrders.reduce(
+      (sum, workOrder) => sum + workOrder.downtimeSeconds,
+      0
+    ),
   };
+
+  utilityAssets.forEach((asset) => {
+    const tagIds = UTILITY_ASSET_TAG_IDS[asset.id];
+    if (!tagIds) return;
+    values[tagIds.level] = asset.levelPercent;
+    values[tagIds.temperature] = asset.temperatureC;
+    values[tagIds.pressure] = asset.pressureBar;
+  });
+
+  const phaseCodes: Readonly<Record<string, number>> = {
+    idle: 0,
+    carrying: 1,
+    aligning: 2,
+    lowering: 3,
+    engaging: 4,
+    lifting: 5,
+    releasing: 6,
+    retracting: 7,
+    complete: 8,
+    entering: 10,
+    slowing: 11,
+    turning_in: 12,
+    straightening: 13,
+    positioning: 14,
+    stopping_to_back: 15,
+    backing: 16,
+    final_adjustment: 17,
+    docked: 18,
+    preparing_to_leave: 19,
+    pulling_out: 20,
+    turning_out: 21,
+    accelerating: 22,
+    leaving: 23,
+    'parking-brake': 24,
+    chocking: 25,
+    'dock-locking': 26,
+    'leveler-deploying': 27,
+    'door-opening': 28,
+    transfer: 29,
+    'door-closing': 30,
+    'leveler-stowing': 31,
+    'dock-unlocking': 32,
+    unchocking: 33,
+    'departure-ready': 34,
+  };
+  const stopCodes: Readonly<Record<string, number>> = {
+    none: 0,
+    'simulation-paused': 1,
+    'emergency-stop': 2,
+    'route-blocked': 3,
+    'vehicle-yield': 4,
+    'crossing-reservation': 5,
+    'logistics-interlock': 6,
+    'load-operation': 7,
+    'safety-hold': 8,
+    scheduled: 9,
+  };
+  vehicleTelemetry.forEach((vehicle) => {
+    const tagIds = VEHICLE_TAG_IDS[vehicle.id as keyof typeof VEHICLE_TAG_IDS];
+    if (!tagIds) return;
+    values[tagIds.speed] = Math.abs(vehicle.speedMps) * (vehicle.type === 'truck' ? 3.6 : 1);
+    values[tagIds.steeringOrArticulation] =
+      (vehicle.type === 'truck' ? vehicle.articulationRadians : vehicle.steeringRadians) *
+      (180 / Math.PI);
+    values[tagIds.phase] = phaseCodes[vehicle.phase] ?? 0;
+    values[tagIds.interlock] =
+      vehicle.type === 'truck'
+        ? Number(vehicle.transferReady)
+        : (stopCodes[vehicle.stopReason] ?? 0);
+  });
+
+  return values;
 }
 
 /**
@@ -160,7 +271,10 @@ export function initializeSCADASync(): () => void {
         const values = buildOperationalTelemetry(
           useMaterialFlowStore.getState(),
           useBreakdownStore.getState().partsInventory,
-          useQCLabStore.getState().qcLab
+          useQCLabStore.getState().qcLab,
+          useBreakdownStore.getState().workOrders,
+          useOperationsCampaignStore.getState().utilityAssets,
+          vehicleTelemetryRegistry.getAll()
         );
         const nextSignature = Object.values(values)
           .map((value) => value.toFixed(3))
@@ -170,18 +284,15 @@ export function initializeSCADASync(): () => void {
         service.updateOperationalValues(values);
       };
       const unsubMaterialFlow = useMaterialFlowStore.subscribe(syncOperationalTelemetry);
-      const unsubParts = useBreakdownStore.subscribe(
-        (state) => state.partsInventory,
-        syncOperationalTelemetry,
-        { fireImmediately: true, equalityFn: shallow }
-      );
+      const unsubMaintenance = useBreakdownStore.subscribe(syncOperationalTelemetry);
       const unsubQuality = useQCLabStore.subscribe(
         (state) => state.qcLab,
         syncOperationalTelemetry,
         { fireImmediately: true }
       );
+      const unsubUtilityAssets = useOperationsCampaignStore.subscribe(syncOperationalTelemetry);
       syncOperationalTelemetry();
-      cleanupFunctions.push(unsubMaterialFlow, unsubParts, unsubQuality);
+      cleanupFunctions.push(unsubMaterialFlow, unsubMaintenance, unsubQuality, unsubUtilityAssets);
 
       // 3. SCADA → STORE: Sync critical alarms to alerts
       // This displays SCADA alarms in the main UI alert system

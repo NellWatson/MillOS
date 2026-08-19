@@ -42,7 +42,6 @@ import { applyVehicleSurface } from '../../utils/vehicleSurface';
 import { applyWorldSurface } from '../../utils/worldSurface';
 import { PROCEDURAL_TEXTURES } from '../../utils/sharedMaterials';
 import { RENDER_ORDER } from '../../constants/renderLayers';
-import { SeatedVehicleOperator } from './VehicleOperator';
 
 /**
  * Authored-GLB material overrides.
@@ -142,7 +141,7 @@ const createAuthoredForkliftMaterials = (grime: number): AuthoredForkliftMateria
   );
   const seat = applyWorldSurface(
     new THREE.MeshPhysicalMaterial({
-      name: 'operator-seat',
+      name: 'control-seat',
       color: linearColor(0.0295568, 0.0395462, 0.043735),
       roughness: 0.85,
       metalness: 0,
@@ -185,7 +184,7 @@ const createAuthoredForkliftMaterials = (grime: number): AuthoredForkliftMateria
     'structural-graphite': graphite,
     'industrial-rubber': rubber,
     'galvanized-steel': steel,
-    'operator-seat': seat,
+    'control-seat': seat,
     'lamp-glass': lampGlass,
   };
   return { byName, ram, lampGlass, all: [paint, graphite, rubber, steel, seat, lampGlass, ram] };
@@ -220,11 +219,12 @@ const CARGO_FADE_DURATION = 0.25;
 interface ForkliftModelProps {
   hasCargo: boolean;
   isMoving: boolean;
-  operatorName: string;
   speedMultiplier?: number;
   forkHeightRef?: React.MutableRefObject<number>; // Ref for fork animation - avoids re-renders
   mastTiltRef?: React.MutableRefObject<number>;
   steeringAngleRef?: React.MutableRefObject<number>;
+  innerSteeringAngleRef?: React.MutableRefObject<number>;
+  outerSteeringAngleRef?: React.MutableRefObject<number>;
   /** Road/mill-floor film strength, 0..1. Per fleet vehicle, not shared. */
   grime?: number;
 }
@@ -545,10 +545,11 @@ const setCompactInstances = (
 const CompactForklift: React.FC<ForkliftModelProps> = ({
   hasCargo,
   isMoving,
-  operatorName,
   forkHeightRef,
   mastTiltRef,
   steeringAngleRef,
+  innerSteeringAngleRef,
+  outerSteeringAngleRef,
 }) => {
   const modelRef = useRef<THREE.Group>(null);
   const wheelRef = useRef<THREE.InstancedMesh>(null);
@@ -656,10 +657,18 @@ const CompactForklift: React.FC<ForkliftModelProps> = ({
     compactWheelSpin.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, wheelAngleRef.current);
 
     compactWheelPositions.forEach(([x, y, z], index) => {
-      compactWheelSteering.setFromAxisAngle(
-        THREE.Object3D.DEFAULT_UP,
-        index >= 2 ? (steeringAngleRef?.current ?? 0) : 0
-      );
+      const centreSteering = steeringAngleRef?.current ?? 0;
+      const rearSteering =
+        index === 2
+          ? centreSteering > 0
+            ? (outerSteeringAngleRef?.current ?? centreSteering)
+            : (innerSteeringAngleRef?.current ?? centreSteering)
+          : index === 3
+            ? centreSteering > 0
+              ? (innerSteeringAngleRef?.current ?? centreSteering)
+              : (outerSteeringAngleRef?.current ?? centreSteering)
+            : 0;
+      compactWheelSteering.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, rearSteering);
       compactWheelQuaternion
         .copy(compactWheelSteering)
         .multiply(compactWheelOrientation)
@@ -719,9 +728,6 @@ const CompactForklift: React.FC<ForkliftModelProps> = ({
         castShadow
         receiveShadow
       />
-      <group position={[0, 1.03, -0.52]} scale={0.68}>
-        <SeatedVehicleOperator name={operatorName} />
-      </group>
       <mesh
         geometry={compactForkliftGeometry.steeringWheel}
         material={compactForkliftMaterial.dark}
@@ -887,7 +893,6 @@ const measureWheelRadius = (node: THREE.Object3D): number => {
 const GLTFForklift: React.FC<ForkliftModelProps> = ({
   hasCargo,
   isMoving,
-  operatorName,
   forkHeightRef,
   mastTiltRef,
   steeringAngleRef,
@@ -1116,9 +1121,6 @@ const GLTFForklift: React.FC<ForkliftModelProps> = ({
   return (
     <group ref={modelRef}>
       <primitive object={clonedScene} scale={FORKLIFT_MODEL_SCALE} />
-      <group position={[0, 0.93, -0.22]} scale={0.68}>
-        <SeatedVehicleOperator name={operatorName} />
-      </group>
       {/* Add cargo on top if needed - always mounted, opacity animated */}
       <group ref={cargoMastRef} name="authored-forklift-cargo-mast">
         <group
@@ -1182,9 +1184,13 @@ const ProceduralForklift: React.FC<ForkliftModelProps> = ({
   isMoving,
   forkHeightRef,
   mastTiltRef,
+  steeringAngleRef,
+  innerSteeringAngleRef,
+  outerSteeringAngleRef,
 }) => {
   const modelRef = useRef<THREE.Group>(null);
   const wheelRefs = useRef<THREE.Mesh[]>([]);
+  const wheelGroupRefs = useRef<THREE.Group[]>([]);
   const mastAssemblyRef = useRef<THREE.Group>(null);
   const forkTiltRef = useRef<THREE.Group>(null);
   const cargoTiltRef = useRef<THREE.Group>(null);
@@ -1247,6 +1253,18 @@ const ProceduralForklift: React.FC<ForkliftModelProps> = ({
     }
 
     if (!modelRef.current) return;
+    const centreSteering = steeringAngleRef?.current ?? 0;
+    wheelGroupRefs.current.forEach((wheelGroup, index) => {
+      if (index < 2 || !wheelGroup) return;
+      wheelGroup.rotation.y =
+        index === 2
+          ? centreSteering > 0
+            ? (outerSteeringAngleRef?.current ?? centreSteering)
+            : (innerSteeringAngleRef?.current ?? centreSteering)
+          : centreSteering > 0
+            ? (innerSteeringAngleRef?.current ?? centreSteering)
+            : (outerSteeringAngleRef?.current ?? centreSteering);
+    });
     modelRef.current.getWorldPosition(worldPositionRef.current);
     if (!hasPreviousWorldPositionRef.current) {
       previousWorldPositionRef.current.copy(worldPositionRef.current);
@@ -1266,6 +1284,9 @@ const ProceduralForklift: React.FC<ForkliftModelProps> = ({
 
   const setWheelRef = (index: number) => (el: THREE.Mesh | null) => {
     if (el) wheelRefs.current[index] = el;
+  };
+  const setWheelGroupRef = (index: number) => (el: THREE.Group | null) => {
+    if (el) wheelGroupRefs.current[index] = el;
   };
 
   return (
@@ -1439,7 +1460,7 @@ const ProceduralForklift: React.FC<ForkliftModelProps> = ({
         [-0.7, 0.25, -0.9],
         [0.7, 0.25, -0.9],
       ].map((pos, i) => (
-        <group key={i} position={pos as [number, number, number]}>
+        <group ref={setWheelGroupRef(i)} key={i} position={pos as [number, number, number]}>
           {/* Tire */}
           <mesh ref={setWheelRef(i)} castShadow rotation={[0, 0, Math.PI / 2]}>
             <cylinderGeometry
@@ -1595,8 +1616,8 @@ const DetailedForkliftModel: React.FC<ForkliftModelProps> = (props) => {
 };
 
 // Main export. Low keeps the compact fallback. Medium and above use the
-// normalized authored vehicle so the default experience has a credible cab,
-// mast, tyres, and operator silhouette.
+// normalized authored vehicle so the default experience has a credible
+// uncrewed control station, mast, tyres, and hydraulic hardware.
 export const ForkliftModel: React.FC<ForkliftModelProps> = (props) => {
   const quality = useGraphicsStore((state) => state.graphics.quality);
 

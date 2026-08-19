@@ -4,7 +4,7 @@ import { ContextSidebar } from './sidebar/ContextSidebar';
 import { StatusHUD } from './hud/StatusHUD';
 import { EmergencyOverlay } from '../EmergencyOverlay';
 import { AlertSystem } from '../AlertSystem';
-import { MachineData, WorkerData } from '../../types';
+import { MachineData } from '../../types';
 import {
   PAAnnouncementSystem,
   GamificationBar,
@@ -23,27 +23,28 @@ import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useAnnouncementsStore } from '../../stores/announcementsStore';
 import { useMobileControlStore } from '../../stores/mobileControlStore';
 import { KeyboardShortcutsModal } from '../ui/KeyboardShortcutsModal';
-import { startVoteGenerator } from '../../stores/votingStore';
 import { OnboardingGuide, type OnboardingStep } from './onboarding/OnboardingGuide';
+import { useCameraStore } from '../CameraController';
+import { getTourCameraPreset } from './onboarding/tourCamera';
 
 const INTRO_STEPS: OnboardingStep[] = [
   {
     title: 'Follow the process',
     icon: 'factory',
     content:
-      'Grain moves from the rear silos through milling and sifting, then reaches packing and shipping. Drag to orbit. Scroll or pinch to zoom.',
+      'The camera is flying to the full site. Grain moves from the rear silos through milling and sifting, then reaches packing and shipping. Use W A S D to move, Q and E to descend or climb, drag to orbit, and scroll or pinch to zoom.',
   },
   {
     title: 'Protect today’s target',
     icon: 'goal',
     content:
-      'The status bar compares output with the shift target. Alarms, stoppages, quality loss, and unsafe choices reduce throughput.',
+      'The tour is flying to packing. The status bar compares output with the active run target. Alarms, stoppages, quality loss, and route conflicts reduce throughput.',
   },
   {
     title: 'Inspect before acting',
     icon: 'controls',
     content:
-      'Select a machine to inspect it. The bottom dock opens production, safety, BAS, and simulated SCADA. Press ? for keyboard controls.',
+      'The tour is flying to milling. Select a machine to inspect it. The bottom dock opens production, safety, autonomy, and simulated SCADA. Press ? for keyboard controls.',
   },
 ];
 
@@ -53,7 +54,6 @@ interface GameInterfaceProps {
   showZones: boolean;
   setShowZones: (v: boolean) => void;
   selectedMachine: MachineData | null;
-  selectedWorker: WorkerData | null;
   onCloseSelection: () => void;
   // Keyboard shortcut state bridge
   showAIPanel?: boolean;
@@ -69,7 +69,6 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   showZones,
   setShowZones,
   selectedMachine,
-  selectedWorker,
   onCloseSelection,
   showAIPanel,
   showSCADAPanel,
@@ -133,6 +132,11 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
     };
   }, [hasSeenIntro]);
 
+  useEffect(() => {
+    const preset = getTourCameraPreset(introStep);
+    if (preset !== null) useCameraStore.getState().setPreset(preset);
+  }, [introStep]);
+
   const handleIntroNext = () => {
     const next = (introStep ?? 0) + 1;
     if (next >= INTRO_STEPS.length) {
@@ -150,15 +154,13 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   const handleIntroSkip = () => {
     setHasSeenIntro(true);
     setIntroStep(null);
+    useCameraStore.getState().cancelAnimation();
   };
 
   const handleIntroClose = () => {
     setIntroStep(null);
+    useCameraStore.getState().cancelAnimation();
   };
-
-  // Low-frequency worker-vote producer so Democratic Voting sees activity
-  // during normal play (contextual worker-initiated votes every ~5 minutes).
-  useEffect(() => startVoteGenerator(), []);
 
   // AI Narration - get current narration to display
   const { getNarration, markShown } = useAINarrationStore();
@@ -190,11 +192,11 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
 
   // Sync external selection with Dock/Sidebar state
   useEffect(() => {
-    if (selectedMachine || selectedWorker) {
+    if (selectedMachine) {
       // Show sidebar when something is selected
       setSidebarVisible(true);
     }
-  }, [selectedMachine, selectedWorker]);
+  }, [selectedMachine]);
 
   // Sync keyboard-driven panel flags (I = AI, O = SCADA) into activeMode.
   //
@@ -234,19 +236,16 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   }, [activeMode]);
 
   // Handler for Dock interactions
-  const handleModeChange = (mode: DockMode) => {
-    const activeElement = document.activeElement;
-    if (activeElement instanceof HTMLElement) {
-      sidebarTriggerRef.current = activeElement;
-    }
+  const handleModeChange = (mode: DockMode, trigger?: HTMLElement) => {
+    const exactTrigger =
+      trigger ??
+      document.querySelector<HTMLElement>(`[data-dock-mode="${mode}"]`) ??
+      (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    sidebarTriggerRef.current = exactTrigger;
 
     if (
       activeMode === mode &&
-      (mode === 'ai' ||
-        mode === 'settings' ||
-        mode === 'scada' ||
-        mode === 'safety' ||
-        mode === 'multiplayer')
+      (mode === 'ai' || mode === 'settings' || mode === 'scada' || mode === 'safety')
     ) {
       // Toggle off if clicking the same active mode for panels
       setActiveMode('overview');
@@ -282,8 +281,7 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
       activeMode === 'ai' ||
       activeMode === 'scada' ||
       activeMode === 'settings' ||
-      activeMode === 'safety' ||
-      activeMode === 'multiplayer'
+      activeMode === 'safety'
     ) {
       // Notify parent of panel state changes for keyboard shortcut sync
       if (activeMode === 'ai') onAIPanelChange?.(false);
@@ -346,7 +344,6 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
           isVisible={isSidebarVisible}
           onClose={handleSidebarClose}
           selectedMachine={selectedMachine}
-          selectedWorker={selectedWorker}
           productionSpeed={productionSpeed}
           setProductionSpeed={setProductionSpeed}
           showZones={showZones}

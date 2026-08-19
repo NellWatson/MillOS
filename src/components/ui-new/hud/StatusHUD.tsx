@@ -156,7 +156,7 @@ export const StatusHUD: React.FC = () => {
       100 -
         (safetyMetrics?.nearMisses ?? 0) * 5 -
         (safetyMetrics?.safetyStops ?? 0) * 2 -
-        (safetyMetrics?.workerEvasions ?? 0)
+        (safetyMetrics?.routeConflicts ?? 0)
     )
   );
 
@@ -209,7 +209,8 @@ export const StatusHUD: React.FC = () => {
 
           <div
             className="flex items-center gap-1.5 text-[10px] text-cyan-300 font-mono"
-            aria-label={`Throughput ${throughput} bags per hour`}
+            aria-label={`Final packer throughput ${throughput} bags per hour`}
+            title="Measured from final-stage packer mass flow"
           >
             <span>{throughput.toLocaleString()} BAGS/H</span>
           </div>
@@ -229,7 +230,7 @@ export const StatusHUD: React.FC = () => {
 
           <div
             className="flex items-center gap-1.5 text-[10px] text-slate-200"
-            aria-label={`${currentShift} shift, simulation time ${Math.floor(gameTime)
+            aria-label={`${currentShift} run window, simulation time ${Math.floor(gameTime)
               .toString()
               .padStart(2, '0')}:${Math.floor((gameTime % 1) * 60)
               .toString()

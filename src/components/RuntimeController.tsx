@@ -12,11 +12,6 @@ import { useIncidentReplayStore } from '../stores/incidentReplayStore';
 import { useTruckScheduleStore } from '../stores/truckScheduleStore';
 import { useAnnouncementsStore } from '../stores/announcementsStore';
 import { getRuntimeMode, type BenchmarkScene, type RuntimeMode } from '../runtime/runtimeMode';
-import {
-  PERSONNEL_FOLLOW,
-  findPersonnelSubject,
-  resolvePersonnelFollowPose,
-} from '../runtime/personnelReview';
 import { SITE_LAYOUT, type Vec3Tuple } from '../constants/siteLayout';
 import { inspectWorldIntegrity, type WorldIntegrityReport } from '../constants/worldContract';
 import { sampleAtmosphere, sampleCelestial } from '../simulation/atmosphere';
@@ -84,6 +79,10 @@ interface RuntimeRayHit {
   type: string;
   distance: number;
   material: string;
+  materialColor: string | null;
+  map: string | null;
+  receiveShadow: boolean;
+  renderOrder: number;
 }
 
 interface RuntimeShaderState {
@@ -101,15 +100,47 @@ interface RuntimeTextureIssue {
 
 export interface RuntimeMotionTelemetry {
   speed?: number;
+  acceleration?: number;
   steeringAngle?: number;
+  innerSteeringAngle?: number;
+  outerSteeringAngle?: number;
   wheelRotation?: number;
+  wheelTravel?: number;
+  routeDistance?: number;
   forkHeight?: number;
   mastTilt?: number;
   trailerAngle?: number;
+  articulation?: number;
   doorOpenAmount?: number;
   landingGearAmount?: number;
   cargo?: 'pallet' | 'empty';
+  loadPhase?: string;
+  servicePhase?: string;
+  stopReason?: string;
+  active?: boolean;
+  parkingBrake?: boolean;
+  chocksDeployed?: boolean;
+  dockLocked?: boolean;
+  levelerDeployed?: boolean;
+  safetyHold?: boolean;
   stopped?: boolean;
+}
+
+export interface RuntimeNamedObjectPose {
+  name: string;
+  position: [number, number, number];
+  rotation: [number, number, number];
+  visible: boolean;
+}
+
+export type RuntimeCheckpointPhase = 'closed' | 'opening' | 'open' | 'closing';
+
+export interface RuntimeCheckpointState {
+  id: 'receiving-checkpoint' | 'shipping-checkpoint';
+  gateOpen: boolean;
+  phase: RuntimeCheckpointPhase;
+  clearanceSecondsRemaining: number;
+  armAngle: number;
 }
 
 interface RuntimeMotionEntity extends RuntimeMotionTelemetry {
@@ -136,8 +167,12 @@ export interface RuntimeTelemetrySnapshot {
   p50FrameMs: number;
   p95FrameMs: number;
   p99FrameMs: number;
+  frameTimeStdDevMs: number;
+  onePercentLowFps: number;
   worstFrameMs: number;
   averageFps: number;
+  framesOver16_7Ms: number;
+  framesOver25Ms: number;
   framesOver50Ms: number;
   longTasks: Array<{ startTime: number; duration: number }>;
   renderer: RuntimeRendererStats;
@@ -171,7 +206,13 @@ export interface RuntimeTelemetrySnapshot {
    * leaves no trace at all. This is the assembly saying what it did.
    */
   staticBatches: RuntimeStaticBatchReport[];
+  humanPresence: {
+    passed: boolean;
+    workerStoreCount: number;
+    sceneObjects: string[];
+  };
   motion: RuntimeMotionState;
+  checkpoints: RuntimeCheckpointState[];
   audio: ReturnType<typeof audioManager.getDiagnostics>;
   sceneChildren: number;
   quality: string;
@@ -199,6 +240,9 @@ export interface MillOSRuntimeTelemetry {
   reset: () => void;
   snapshot: () => RuntimeTelemetrySnapshot;
   motionSnapshot: () => RuntimeMotionState;
+  checkpointSnapshot: () => RuntimeCheckpointState[];
+  namedObjectsSnapshot: (names: string[]) => RuntimeNamedObjectPose[];
+  setCameraPose: (position: [number, number, number], target: [number, number, number]) => void;
   setPerfDebug: (patch: Partial<PerfDebugSettings>) => void;
   /**
    * Group every material instance in the graph by how it would actually draw.
@@ -490,6 +534,33 @@ export interface RuntimeMaterialAudit {
   worstDuplicates: Array<{ count: number; fingerprint: string }>;
 }
 
+const CHECKPOINT_PHASES = new Set<RuntimeCheckpointPhase>(['closed', 'opening', 'open', 'closing']);
+
+export function readRuntimeCheckpointTelemetry(
+  id: RuntimeCheckpointState['id'],
+  userData: Record<string, unknown>
+): RuntimeCheckpointState | null {
+  const phase = userData.gatePhase;
+  const clearanceSecondsRemaining = userData.clearanceSecondsRemaining;
+  const armAngle = userData.armAngle;
+  if (
+    typeof userData.gateOpen !== 'boolean' ||
+    typeof phase !== 'string' ||
+    !CHECKPOINT_PHASES.has(phase as RuntimeCheckpointPhase) ||
+    !Number.isFinite(clearanceSecondsRemaining) ||
+    !Number.isFinite(armAngle)
+  ) {
+    return null;
+  }
+  return {
+    id,
+    gateOpen: userData.gateOpen,
+    phase: phase as RuntimeCheckpointPhase,
+    clearanceSecondsRemaining: rounded(clearanceSecondsRemaining as number),
+    armAngle: rounded(armAngle as number, 4),
+  };
+}
+
 declare global {
   interface Window {
     __MILLOS_RUNTIME__?: MillOSRuntimeTelemetry;
@@ -498,6 +569,7 @@ declare global {
 
 interface RuntimeControllerProps {
   adaptiveEnabled: boolean;
+  orbitControlsRef?: React.RefObject<OrbitLikeControls | null>;
 }
 
 interface OrbitLikeControls {
@@ -518,9 +590,9 @@ const BENCHMARK_CAMERAS: Record<BenchmarkScene, BenchmarkCameraPose> = {
   milling: SITE_LAYOUT.cameras.milling,
   sifting: SITE_LAYOUT.cameras.sifting,
   packing: SITE_LAYOUT.cameras.packing,
-  personnel: SITE_LAYOUT.cameras.personnel,
-  'personnel-close': SITE_LAYOUT.cameras.personnelClose,
-  'personnel-feminine': SITE_LAYOUT.cameras.personnelFeminine,
+  'process-floor': SITE_LAYOUT.cameras.processFloor,
+  'tank-farm': SITE_LAYOUT.cameras.tankFarm,
+  'logistics-close': SITE_LAYOUT.cameras.logisticsClose,
   forklift: SITE_LAYOUT.cameras.forklift,
   shipping: SITE_LAYOUT.cameras.shipping,
   receiving: SITE_LAYOUT.cameras.receiving,
@@ -559,10 +631,6 @@ export function resolveBenchmarkCamera(
   ];
   return { ...camera, target };
 }
-
-const _followPosition = new THREE.Vector3();
-const _followQuaternion = new THREE.Quaternion();
-const _followEuler = new THREE.Euler();
 
 /**
  * Identity of a material as the renderer sees it.
@@ -659,6 +727,12 @@ function materialFingerprint(material: THREE.Material): string {
  * the scene graph gains a wrapper.
  */
 function findBranchRoot(scene: THREE.Scene): THREE.Object3D {
+  // The Canvas owns a small unnamed helper sibling beside `world-root`, so the
+  // dominant-child descent below collapsed every diagnostic into a single
+  // 1,400-mesh branch. Prefer the authored root explicitly and keep the
+  // heuristic for isolated test scenes that have no `world-root`.
+  const authoredRoot = scene.getObjectByName('world-root');
+  if (authoredRoot) return authoredRoot;
   const countMeshes = (root: THREE.Object3D) => {
     let meshes = 0;
     root.traverse((object) => {
@@ -1225,13 +1299,69 @@ function rounded(value: number, precision: number = 2): number {
   return Math.round(value * scale) / scale;
 }
 
+export interface FramePacingSummary {
+  sampleCount: number;
+  averageFrameMs: number;
+  p50FrameMs: number;
+  p95FrameMs: number;
+  p99FrameMs: number;
+  frameTimeStdDevMs: number;
+  onePercentLowFps: number;
+  worstFrameMs: number;
+  averageFps: number;
+  framesOver16_7Ms: number;
+  framesOver25Ms: number;
+  framesOver50Ms: number;
+}
+
+/** Summarize one contiguous render sample without hiding slow or invalid frames. */
+export function summarizeFramePacing(frameTimes: readonly number[]): FramePacingSummary {
+  const values = frameTimes.filter(
+    (value) => Number.isFinite(value) && value > 0 && value < 120_000
+  );
+  const sorted = [...values].sort((left, right) => left - right);
+  const average =
+    values.length > 0 ? values.reduce((total, value) => total + value, 0) / values.length : 0;
+  const variance =
+    values.length > 0
+      ? values.reduce((total, value) => total + (value - average) ** 2, 0) / values.length
+      : 0;
+  const slowSampleCount = values.length > 0 ? Math.max(1, Math.ceil(values.length * 0.01)) : 0;
+  const slowestFrames = slowSampleCount > 0 ? sorted.slice(-slowSampleCount) : [];
+  const slowestAverage =
+    slowestFrames.length > 0
+      ? slowestFrames.reduce((total, value) => total + value, 0) / slowestFrames.length
+      : 0;
+
+  return {
+    sampleCount: values.length,
+    averageFrameMs: rounded(average),
+    p50FrameMs: rounded(percentile(sorted, 0.5)),
+    p95FrameMs: rounded(percentile(sorted, 0.95)),
+    p99FrameMs: rounded(percentile(sorted, 0.99)),
+    frameTimeStdDevMs: rounded(Math.sqrt(variance)),
+    onePercentLowFps: rounded(slowestAverage > 0 ? 1000 / slowestAverage : 0),
+    worstFrameMs: rounded(sorted.at(-1) ?? 0),
+    averageFps: rounded(average > 0 ? 1000 / average : 0),
+    framesOver16_7Ms: values.filter((value) => value > 16.7).length,
+    framesOver25Ms: values.filter((value) => value > 25).length,
+    framesOver50Ms: values.filter((value) => value > 50).length,
+  };
+}
+
 const MOTION_NUMBER_KEYS = [
   'speed',
+  'acceleration',
   'steeringAngle',
+  'innerSteeringAngle',
+  'outerSteeringAngle',
   'wheelRotation',
+  'wheelTravel',
+  'routeDistance',
   'forkHeight',
   'mastTilt',
   'trailerAngle',
+  'articulation',
   'doorOpenAmount',
   'landingGearAmount',
 ] as const satisfies ReadonlyArray<keyof RuntimeMotionTelemetry>;
@@ -1246,7 +1376,22 @@ export function readRuntimeMotionTelemetry(
     if (typeof value === 'number' && Number.isFinite(value)) telemetry[key] = rounded(value, 4);
   });
   if (userData.cargo === 'pallet' || userData.cargo === 'empty') telemetry.cargo = userData.cargo;
-  if (typeof userData.stopped === 'boolean') telemetry.stopped = userData.stopped;
+  const stringKeys = ['loadPhase', 'servicePhase', 'stopReason'] as const;
+  stringKeys.forEach((key) => {
+    if (typeof userData[key] === 'string') telemetry[key] = userData[key];
+  });
+  const booleanKeys = [
+    'active',
+    'parkingBrake',
+    'chocksDeployed',
+    'dockLocked',
+    'levelerDeployed',
+    'safetyHold',
+    'stopped',
+  ] as const;
+  booleanKeys.forEach((key) => {
+    if (typeof userData[key] === 'boolean') telemetry[key] = userData[key];
+  });
   return telemetry;
 }
 
@@ -1270,7 +1415,10 @@ export function rendererCounterPerFrame(
 /** JSON has no NaN or Infinity; a poisoned counter must not arrive as a 0. */
 const finiteOrNull = (value: number): number | null => (Number.isFinite(value) ? value : null);
 
-export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEnabled }) => {
+export const RuntimeController: React.FC<RuntimeControllerProps> = ({
+  adaptiveEnabled,
+  orbitControlsRef,
+}) => {
   const mode = getRuntimeMode();
   const { camera, gl, scene, controls } = useThree();
   const firstFrameAtRef = useRef<number | null>(null);
@@ -1279,8 +1427,6 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
   const drawingBufferSizeRef = useRef(new THREE.Vector2());
   const raycasterRef = useRef(new THREE.Raycaster());
   const lastReplayCaptureRef = useRef(0);
-  /** Locked subject for the personnel review cameras; see PERSONNEL_FOLLOW. */
-  const followSubjectRef = useRef<THREE.Object3D | null>(null);
 
   useAdaptiveQuality(adaptiveEnabled && !mode.benchmark);
 
@@ -1366,7 +1512,6 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
           data: {
             type: decision.type,
             machineId: decision.machineId ?? null,
-            workerId: decision.workerId ?? null,
           },
         });
       }
@@ -1463,7 +1608,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       currentGame.setGameSpeed(previousGameInputs.gameSpeed);
       currentGame.setWeather(previousGameInputs.weather);
     };
-  }, [camera, controls, mode]);
+  }, [camera, controls, mode, scene]);
 
   useEffect(() => {
     let observer: PerformanceObserver | null = null;
@@ -1539,11 +1684,43 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       };
     };
 
+    const namedObjectPosition = new THREE.Vector3();
+    const namedObjectsSnapshot = (names: string[]): RuntimeNamedObjectPose[] => {
+      scene.updateMatrixWorld(true);
+      return names.flatMap((name) => {
+        const object = scene.getObjectByName(name);
+        if (!object) return [];
+        object.getWorldPosition(namedObjectPosition);
+        return [
+          {
+            name,
+            position: [
+              rounded(namedObjectPosition.x),
+              rounded(namedObjectPosition.y),
+              rounded(namedObjectPosition.z),
+            ],
+            rotation: [
+              rounded(object.rotation.x, 4),
+              rounded(object.rotation.y, 4),
+              rounded(object.rotation.z, 4),
+            ],
+            visible: object.visible,
+          },
+        ];
+      });
+    };
+
+    const checkpointSnapshot = (): RuntimeCheckpointState[] =>
+      (['receiving-checkpoint', 'shipping-checkpoint'] as const).flatMap((id) => {
+        const object = scene.getObjectByName(id);
+        if (!object) return [];
+        const telemetry = readRuntimeCheckpointTelemetry(id, object.userData);
+        return telemetry ? [telemetry] : [];
+      });
+
     const snapshot = (): RuntimeTelemetrySnapshot => {
       const values = frameTimesRef.current;
-      const sorted = [...values].sort((a, b) => a - b);
-      const average =
-        values.length > 0 ? values.reduce((total, value) => total + value, 0) / values.length : 0;
+      const framePacing = summarizeFramePacing(values);
       const bufferSize = gl.getDrawingBufferSize(drawingBufferSizeRef.current);
       const cssWidth = Math.max(1, gl.domElement.clientWidth);
       const cssHeight = Math.max(1, gl.domElement.clientHeight);
@@ -1563,6 +1740,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       );
       const geometryIds = new Set<string>();
       const materialIds = new Set<string>();
+      const humanSceneObjects = new Set<string>();
       const sceneGraph: RuntimeSceneGraphStats = {
         objects: 0,
         meshes: 0,
@@ -1574,6 +1752,18 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       };
       scene.traverse((object) => {
         sceneGraph.objects += 1;
+        const objectName = object.name.toLowerCase();
+        if (
+          objectName.startsWith('worker-') ||
+          objectName.startsWith('remote-player') ||
+          objectName === 'seated-vehicle-operator' ||
+          objectName.startsWith('dock-spotter') ||
+          objectName.startsWith('warehouse-worker') ||
+          typeof object.userData.workerId === 'string' ||
+          typeof object.userData.operatorName === 'string'
+        ) {
+          humanSceneObjects.add(object.name || object.type);
+        }
         if (!(object instanceof THREE.Mesh)) return;
         sceneGraph.meshes += 1;
         if (object.visible) sceneGraph.visibleMeshes += 1;
@@ -1618,6 +1808,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
 
       scene.updateMatrixWorld(true);
       const motion = motionSnapshot();
+      const checkpoints = checkpointSnapshot();
       const worldIntegrity = inspectWorldIntegrity(scene);
       const staticBatches: RuntimeStaticBatchReport[] = [];
       scene.traverse((object) => {
@@ -1627,12 +1818,20 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
         if (!stats) return;
         staticBatches.push({ name: object.name || object.type, ...stats });
       });
+      const humanPresence = {
+        passed: humanSceneObjects.size === 0,
+        workerStoreCount: 0,
+        sceneObjects: [...humanSceneObjects].sort(),
+      };
       const diagnosticRays = Object.fromEntries(
         [
           ['centre', 0, 0],
           ['top', 0, 0.9],
           ['upperLeft', -0.8, 0.8],
           ['upperRight', 0.8, 0.8],
+          ['lowerCentre', 0, -0.65],
+          ['lowerLeft', -0.65, -0.65],
+          ['lowerRight', 0.65, -0.65],
         ].map(([label, x, y]) => {
           raycasterRef.current.setFromCamera(new THREE.Vector2(x as number, y as number), camera);
           const hits = raycasterRef.current
@@ -1643,11 +1842,19 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
               const firstMaterial = Array.isArray(object.material)
                 ? object.material[0]
                 : object.material;
+              const materialWithSurface = firstMaterial as THREE.Material & {
+                color?: THREE.Color;
+                map?: THREE.Texture | null;
+              };
               return {
                 name: object.name || object.parent?.name || '(unnamed)',
                 type: object.type,
                 distance: rounded(hit.distance),
                 material: firstMaterial?.name || firstMaterial?.type || '(none)',
+                materialColor: materialWithSurface.color?.getHexString() ?? null,
+                map: materialWithSurface.map?.name || materialWithSurface.map?.source?.uuid || null,
+                receiveShadow: object.receiveShadow,
+                renderOrder: object.renderOrder,
               };
             });
           return [label as string, hits];
@@ -1704,14 +1911,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
         capturedAt: rounded(performance.now()),
         ready: firstFrameAtRef.current !== null,
         firstFrameAt: firstFrameAtRef.current,
-        sampleCount: values.length,
-        averageFrameMs: rounded(average),
-        p50FrameMs: rounded(percentile(sorted, 0.5)),
-        p95FrameMs: rounded(percentile(sorted, 0.95)),
-        p99FrameMs: rounded(percentile(sorted, 0.99)),
-        worstFrameMs: rounded(sorted.at(-1) ?? 0),
-        averageFps: rounded(average > 0 ? 1000 / average : 0),
-        framesOver50Ms: values.filter((value) => value > 50).length,
+        ...framePacing,
         longTasks: [...longTasksRef.current],
         renderer: {
           vendor,
@@ -1771,7 +1971,9 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
         textureIssues,
         worldIntegrity,
         staticBatches,
+        humanPresence,
         motion,
+        checkpoints,
         audio: audioManager.getDiagnostics(),
         sceneChildren: scene.children.length,
         quality: graphics.quality,
@@ -1791,6 +1993,15 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       lightRig: () => reportLights(scene, gl),
       inspectObjects: (query, limit = 12) => reportObjects(scene, query, limit),
       sampleObjects: (query, limit = 400) => sampleObjects(scene, query, limit),
+      checkpointSnapshot,
+      namedObjectsSnapshot,
+      setCameraPose: (position, target) => {
+        camera.position.set(...position);
+        camera.lookAt(...target);
+        const orbitControls = orbitControlsRef?.current ?? (controls as OrbitLikeControls | null);
+        orbitControls?.target?.set(...target);
+        orbitControls?.update?.();
+      },
       setPerfDebug: (patch) => {
         useGraphicsStore.setState((state) => ({
           graphics: {
@@ -1808,7 +2019,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       observer?.disconnect();
       delete window.__MILLOS_RUNTIME__;
     };
-  }, [camera, gl, mode, scene]);
+  }, [camera, controls, gl, mode, orbitControlsRef, scene]);
 
   useFrame((_state, delta) => {
     const frameMs = delta * 1000;
@@ -1818,38 +2029,6 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       frameTimesRef.current.push(frameMs);
       if (frameTimesRef.current.length > 7200) {
         frameTimesRef.current.shift();
-      }
-    }
-
-    // Personnel review cameras re-derive their pose from the subject every
-    // frame; see `runtime/personnelReview.ts` for why the hold alone is not
-    // enough. This runs at the default frame priority, which is AFTER drei's
-    // OrbitControls at -1, so the pose written here is the one that renders.
-    if (mode.benchmark) {
-      const follow = PERSONNEL_FOLLOW[mode.benchmarkScene];
-      if (follow) {
-        let subject = followSubjectRef.current;
-        // Re-resolve when the locked subject leaves the graph - a roster change
-        // or an unmount would otherwise freeze the camera on a detached object
-        // whose transform no longer updates.
-        if (!subject || !subject.parent) {
-          subject = findPersonnelSubject(scene, mode.benchmarkScene, _followPosition);
-          followSubjectRef.current = subject;
-        }
-        if (subject) {
-          subject.getWorldPosition(_followPosition);
-          subject.getWorldQuaternion(_followQuaternion);
-          _followEuler.setFromQuaternion(_followQuaternion, 'YXZ');
-          const pose = resolvePersonnelFollowPose(
-            follow,
-            [_followPosition.x, _followPosition.y, _followPosition.z],
-            _followEuler.y
-          );
-          camera.position.set(...pose.position);
-          camera.lookAt(...pose.target);
-          const orbit = controls as OrbitLikeControls | null;
-          if (orbit?.target) orbit.target.set(...pose.target);
-        }
       }
     }
 
@@ -1873,11 +2052,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
               efficiency: machine.metrics.efficiency,
             },
           })),
-          workerPositions: production.workers.map((worker) => ({
-            id: worker.id,
-            position: worker.position,
-            task: worker.currentTask,
-          })),
+          mobileEquipmentPositions: [],
           alerts: alerts.slice(0, 20).map((alert) => ({
             id: alert.id,
             type: alert.type,

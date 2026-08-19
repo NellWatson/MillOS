@@ -35,7 +35,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
         { key: '1-5', description: 'Camera presets' },
         { key: '0', description: 'Reset camera view' },
         { key: 'V', description: 'First-person mode' },
-        { key: 'Shift', description: 'Sprint (FPS mode)' },
+        { key: 'Shift', description: 'Move faster / sprint' },
       ],
     },
     {
@@ -59,7 +59,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
         { key: 'Ctrl+B', description: 'Blueprint mode (see-through walls)' },
         { key: '+/-', description: 'Adjust production speed' },
         { key: 'ESC', description: 'Close panels' },
-        { key: 'Click', description: 'Select machine/worker' },
+        { key: 'Click', description: 'Select machine or vehicle' },
       ],
     },
     {

@@ -58,7 +58,7 @@ const OUTPUT_ROOT = path.join(ROOT, 'test-results', 'art-review');
  * Named scene sets. `art` is the coverage the earlier ad-hoc review rounds
  * converged on (recovered from the aaa-* capture directories) plus `yard`: every
  * distinct material family, lighting condition, and viewing distance the mill
- * presents, at 12 scenes rather than all 19, because review cost scales with
+ * presents, at 13 scenes rather than all 19, because review cost scales with
  * frame count and the omitted scenes duplicate a covered look.
  */
 const SCENE_SETS = {
@@ -69,12 +69,13 @@ const SCENE_SETS = {
     'milling',
     'packing',
     'shipping',
+    'logistics-close',
     'yard',
     'water',
     'village',
     'farm',
     'forklift',
-    'personnel-close',
+    'tank-farm',
   ],
   quick: ['overview', 'interior', 'milling', 'village'],
   exterior: ['overview', 'silos', 'yard', 'shipping', 'water', 'village', 'farm', 'sun', 'moon'],
@@ -85,7 +86,7 @@ const SCENE_SETS = {
    * subject grades something else.
    */
   generated: ['farm', 'paddock', 'village', 'square'],
-  interior: ['interior', 'milling', 'sifting', 'packing', 'personnel-close', 'garage'],
+  interior: ['interior', 'milling', 'sifting', 'packing', 'process-floor', 'garage'],
   full: null, // resolved to every valid scene after parsing the source
 };
 

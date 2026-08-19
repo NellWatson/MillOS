@@ -5,6 +5,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { selectSafetyHoldActive, useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useProductionStore } from '../../stores/productionStore';
 import { useMaterialFlowStore } from '../../stores/materialFlowStore';
+import { useOperationsCampaignStore } from '../../stores/operationsCampaignStore';
 import {
   DECAL_OFFSET,
   FLOOR_LAYERS,
@@ -16,7 +17,6 @@ import { getRuntimeMode } from '../../runtime/runtimeMode';
 import { createLinearDataTexture } from '../../utils/textureGenerator';
 import { applyVehicleSurface } from '../../utils/vehicleSurface';
 import { applyWorldSurface } from '../../utils/worldSurface';
-import { SeatedVehicleOperator } from '../models/VehicleOperator';
 import {
   TRUCK_CYCLE_SECONDS,
   applyTruckSafetyHold,
@@ -25,6 +25,7 @@ import {
   getTruckBenchmarkControllerStart,
   getTruckScheduleStatus,
   isTruckDockedPhase,
+  resolveTrailerLoadSettle,
   type TruckAnimState,
 } from './useTruckPhysics';
 
@@ -38,7 +39,10 @@ const HUB = new THREE.CylinderGeometry(0.25, 0.25, 0.42, 16);
 const STEERING_WHEEL = new THREE.TorusGeometry(0.22, 0.025, 8, 18);
 const FUEL_TANK = new THREE.CylinderGeometry(0.38, 0.38, 1.65, 16);
 const EXHAUST_STACK = new THREE.CylinderGeometry(0.09, 0.11, 2.3, 10);
-const HEADLIGHT_BEAM = new THREE.ConeGeometry(2.1, 9, 12, 1, true);
+// Headlight spill belongs on the road. Translucent cone volumes turn into a
+// faceted boulder when the two lamps overlap from an oblique camera angle.
+// One feathered ground projection also costs one draw instead of two.
+const HEADLIGHT_POOL = new THREE.PlaneGeometry(4.4, 9);
 export const TRUCK_WHEEL_RADIUS = 0.52;
 
 /**
@@ -268,7 +272,7 @@ const CAB_PITCH_CENTRE_Z = 0.4;
  *
  * At 1280 px across a 79-degree horizontal field, one world metre is 1280 /
  * (2 d tan 39.7deg) px, so at 115 m a metre is 6.7 px. The parts gated here are
- * 0.05-0.24 m across (window pillars, mirror glass, the dash, the driver behind
+ * 0.05-0.24 m across (window pillars, mirror glass, and the dash behind
  * 0.55-opacity glazing) - between a third of a pixel and one and a half. The
  * silhouette parts are NOT gated: the cab shell, roof fairing, greenhouse
  * glazing, grille, bumper, exhaust stacks, every lamp, the wheels and the whole
@@ -287,7 +291,6 @@ interface TruckVisualProps {
   readonly wheelRotationRef: React.MutableRefObject<number>;
   readonly company?: string;
   readonly plateNumber?: string;
-  readonly operatorName?: string;
   /**
    * Road-film strength, 0..1. Deliberately a prop: the two trucks share a
    * module-level material table, and identical wear on both reads as a tiling
@@ -295,6 +298,8 @@ interface TruckVisualProps {
    * differ, which by itself stops them reading as clones.
    */
   readonly grime?: number;
+  /** Conserved outbound load progress, used for a subtle trailer suspension settle. */
+  readonly loadRatio?: number;
 }
 
 function TruckIdentityDecals({
@@ -518,8 +523,8 @@ export function OptimizedTruckVisual({
   wheelRotationRef,
   company = 'MILL LOGISTICS',
   plateNumber = 'MILL 001',
-  operatorName = 'Driver',
   grime = 0.7,
+  loadRatio = 0,
 }: TruckVisualProps) {
   const cabRef = useRef<THREE.Group>(null);
   const trailerRef = useRef<THREE.Group>(null);
@@ -651,14 +656,44 @@ export function OptimizedTruckVisual({
   );
   const beamMaterial = useMemo(
     () =>
-      new THREE.MeshBasicMaterial({
-        color: '#ffeccb',
+      new THREE.ShaderMaterial({
         transparent: true,
-        opacity: 0.05,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
-        side: THREE.DoubleSide,
-        toneMapped: true,
+        toneMapped: false,
+        uniforms: {
+          beamColor: { value: new THREE.Color('#ffe0a3') },
+          beamOpacity: { value: 0.16 },
+        },
+        vertexShader: /* glsl */ `
+          varying vec2 vUv;
+
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: /* glsl */ `
+          uniform vec3 beamColor;
+          uniform float beamOpacity;
+          varying vec2 vUv;
+
+          void main() {
+            // PlaneGeometry's positive UV Y maps toward local negative Z after
+            // the horizontal rotation. Flip it so zero is at the lamps and one
+            // travels forward down the road.
+            float distanceAlong = 1.0 - vUv.y;
+            float halfWidth = mix(0.06, 0.48, distanceAlong);
+            float lateralDistance = abs(vUv.x - 0.5);
+            float lateralFade = 1.0 - smoothstep(halfWidth * 0.52, halfWidth, lateralDistance);
+            float nearFade = smoothstep(0.0, 0.09, distanceAlong);
+            float farFade = 1.0 - smoothstep(0.5, 1.0, distanceAlong);
+            float centreSeparation = 0.82 + 0.18 * cos((vUv.x - 0.5) * 13.0);
+            float alpha = lateralFade * nearFade * farFade * centreSeparation * beamOpacity;
+            if (alpha < 0.002) discard;
+            gl_FragColor = vec4(beamColor, alpha);
+          }
+        `,
       }),
     []
   );
@@ -943,7 +978,11 @@ export function OptimizedTruckVisual({
         pitchSin * CAB_PITCH_CENTRE_Z + (1 - Math.cos(state.cabRoll)) * CAB_ROLL_CENTRE_Y;
       cabRef.current.position.z = (1 - Math.cos(state.cabPitch)) * CAB_PITCH_CENTRE_Z;
     }
-    if (trailerRef.current) trailerRef.current.rotation.y = state.trailerAngle;
+    if (trailerRef.current) {
+      trailerRef.current.rotation.y = state.trailerAngle;
+      trailerRef.current.position.y = -resolveTrailerLoadSettle(loadRatio);
+      trailerRef.current.userData.loadRatio = THREE.MathUtils.clamp(loadRatio, 0, 1);
+    }
 
     // Running lights are switched at the day/night boundary, never lerped. A
     // per-frame intensity ramp on an emissive is the closest thing this scene
@@ -1082,12 +1121,6 @@ export function OptimizedTruckVisual({
             scale={[0.78, 0.24, 0.76]}
             receiveShadow
           />
-          <group position={[-0.48, 1.33, 3.46]} scale={1.28}>
-            <SeatedVehicleOperator
-              name={operatorName}
-              vestColor={colour === '#9a4e35' ? '#e9a23b' : '#e6b83f'}
-            />
-          </group>
         </group>
         <mesh
           geometry={UNIT_BOX}
@@ -1119,23 +1152,20 @@ export function OptimizedTruckVisual({
           scale={[0.48, 0.28, 0.06]}
           receiveShadow
         />
-        {/* Beam volumes, not lights. Deliberately NOT a `spotLight`: this
+        {/* Ground spill, not light volumes. Deliberately NOT a `spotLight`: this
             component mounts lazily, mid-session, and taking NUM_SPOT_LIGHTS
             from 0 to 2 changes the program cache key of every material in the
-            scene, so the whole scene would recompile at that moment. Additive
-            geometry costs fill only while it is visible, and nothing at all the
-            rest of the time. */}
+            scene, so the whole scene would recompile at that moment. The
+            feathered projection reads as illuminated tarmac without putting a
+            visible solid into the air. */}
         <group ref={beamRef} visible={false}>
-          {[-0.85, 0.85].map((x) => (
-            <mesh
-              key={`beam-${x}`}
-              geometry={HEADLIGHT_BEAM}
-              material={beamMaterial}
-              position={[x, 0.86, 9.49]}
-              rotation={[-Math.PI / 2, 0, 0]}
-              renderOrder={8}
-            />
-          ))}
+          <mesh
+            geometry={HEADLIGHT_POOL}
+            material={beamMaterial}
+            position={[0, 0.045, 9.15]}
+            rotation={[-Math.PI / 2, 0, 0]}
+            renderOrder={8}
+          />
         </group>
         {/* Mirror glass, 0.06 m thick. The mirror ARMS live in `CAB_DETAILS`
             and are not gated, so the mirror silhouette survives. */}
@@ -1630,6 +1660,12 @@ export function OptimizedTruckBay({ showShipping, showReceiving }: OptimizedTruc
   const priorSchedule = useRef({ shipping: '', receiving: '' });
   const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
   const safetyHoldActive = useGameSimulationStore(selectSafetyHoldActive);
+  const outboundLoadRatio = useOperationsCampaignStore((state) =>
+    Math.min(
+      1,
+      state.execution.dispatchLoad.loadedKg / Math.max(1, state.execution.dispatchLoad.capacityKg)
+    )
+  );
   const setTruckDocked = useProductionStore((state) => state.setTruckDocked);
   const recordTruckDeparture = useProductionStore((state) => state.recordTruckDeparture);
   const updateDockStatus = useProductionStore((state) => state.updateDockStatus);
@@ -1722,7 +1758,7 @@ export function OptimizedTruckBay({ showShipping, showReceiving }: OptimizedTruc
               wheelRotationRef={shippingWheelRotation}
               company="FLOUR EXPRESS"
               plateNumber="FLR 2847"
-              operatorName="Mara"
+              loadRatio={outboundLoadRatio}
             />
           </group>
         </>
@@ -1742,7 +1778,6 @@ export function OptimizedTruckBay({ showShipping, showReceiving }: OptimizedTruc
               wheelRotationRef={receivingWheelRotation}
               company="GRAIN CO"
               plateNumber="GRN 5921"
-              operatorName="Owen"
             />
           </group>
         </>

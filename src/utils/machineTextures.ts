@@ -12,7 +12,7 @@
  *
  * Naming convention: {model}_roughness.ktx2/jpg, {model}_normal.ktx2/jpg, {model}_ao.ktx2/jpg
  *
- * Supported models: silo, roller_mill, packer, plansifter, worker, conveyor, pallet, grass, concrete, brick, water
+ * Supported models: silo, roller_mill, packer, plansifter, conveyor, pallet, grass, concrete, brick, water
  *
  * Source: ambientCG.com (CC0 Public Domain)
  */
@@ -51,7 +51,6 @@ export type ModelType =
   | 'roller_mill'
   | 'packer'
   | 'plansifter'
-  | 'worker'
   | 'conveyor'
   | 'pallet'
   // Environment textures
@@ -81,23 +80,9 @@ export interface MachineTextures {
  *
  * Verified against the three directories; keep in sync if assets are added.
  */
-const MODELS_WITHOUT_AO: ReadonlySet<ModelType> = new Set([
-  'worker',
-  'conveyor',
-  'pallet',
-  'water',
-]);
+const MODELS_WITHOUT_AO: ReadonlySet<ModelType> = new Set(['conveyor', 'pallet', 'water']);
 
-/**
- * Models whose `_color` map exists AND is safe to bind as `material.map`.
- *
- * `worker` is deliberately absent even though `worker_color` ships. The
- * authored character UV unwrap spans roughly U/V [-1.0, 1.5] with no atlas
- * intent, so an albedo map smears unrelated colour across the body - see the
- * HARD CONSTRAINT in `components/workers/SharedWorkerMaterials.ts`, the only
- * consumer of `getModelTextures('worker')`, which binds roughness/normal/ao
- * and never `.color`. Fetching it was a download nothing could ever use.
- */
+/** Models whose `_color` map exists and is safe to bind as `material.map`. */
 const MODELS_WITH_COLOR: ReadonlySet<ModelType> = new Set([
   'conveyor',
   'pallet',

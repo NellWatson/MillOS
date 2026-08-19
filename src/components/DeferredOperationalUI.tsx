@@ -1,13 +1,10 @@
 import React from 'react';
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { GameInterface } from './ui-new/GameInterface';
-import { MultiplayerChat } from './multiplayer/MultiplayerChat';
-import { AIDecisionVotingPanel } from './multiplayer/AIDecisionVoting';
 import { ProductionTargetWidget } from './ProductionTargetWidget';
 import {
   EnergyDashboard,
   MultiObjectiveDashboard,
-  ShiftHandoverSummary,
   CostEstimationOverlay,
   WeatherEffectsOverlay,
 } from './ui';
@@ -17,7 +14,7 @@ import { CameraPresetIndicator } from './CameraController';
 import { FPSCrosshair, FPSInstructions } from './FirstPersonController';
 import { MobileFPSInstructions } from './mobile/MobileFirstPersonController';
 import type { ForkliftData } from './ForkliftSystem';
-import type { MachineData, WorkerData } from '../types';
+import type { MachineData } from '../types';
 
 interface DeferredOperationalUIProps {
   productionSpeed: number;
@@ -25,7 +22,6 @@ interface DeferredOperationalUIProps {
   showZones: boolean;
   setShowZones: (show: boolean) => void;
   selectedMachine: MachineData | null;
-  selectedWorker: WorkerData | null;
   selectedForklift: ForkliftData | null;
   onCloseSelection: () => void;
   onClearForklift: () => void;
@@ -46,7 +42,7 @@ interface DeferredOperationalUIProps {
 
 /**
  * The complete DOM operations layer is intentionally loaded after the first
- * useful WebGL frame. This keeps SCADA, knowledge, multiplayer, and animation
+ * useful WebGL frame. This keeps SCADA, knowledge, and animation
  * code from delaying the visible factory while preserving the complete UI once
  * the core scene is on screen.
  */
@@ -56,7 +52,6 @@ export const DeferredOperationalUI: React.FC<DeferredOperationalUIProps> = ({
   showZones,
   setShowZones,
   selectedMachine,
-  selectedWorker,
   selectedForklift,
   onCloseSelection,
   onClearForklift,
@@ -83,7 +78,6 @@ export const DeferredOperationalUI: React.FC<DeferredOperationalUIProps> = ({
       showZones={showZones}
       setShowZones={setShowZones}
       selectedMachine={selectedMachine}
-      selectedWorker={selectedWorker}
       onCloseSelection={onCloseSelection}
       showAIPanel={showAIPanel}
       showSCADAPanel={showSCADAPanel}
@@ -120,8 +114,8 @@ export const DeferredOperationalUI: React.FC<DeferredOperationalUIProps> = ({
               <dd className="font-mono text-white">{selectedForklift.id}</dd>
             </div>
             <div className="flex justify-between gap-4">
-              <dt className="text-gray-400">Operator</dt>
-              <dd className="text-white">{selectedForklift.operatorName}</dd>
+              <dt className="text-gray-400">Control</dt>
+              <dd className="text-white">Autonomous</dd>
             </div>
             <div className="flex justify-between gap-4">
               <dt className="text-gray-400">Cargo</dt>
@@ -170,13 +164,10 @@ export const DeferredOperationalUI: React.FC<DeferredOperationalUIProps> = ({
       )}
     </AnimatePresence>
 
-    <MultiplayerChat />
-    <AIDecisionVotingPanel />
     <ProductionTargetWidget />
     <EnergyDashboard />
     <MultiObjectiveDashboard />
     <CostEstimationOverlay />
-    <ShiftHandoverSummary />
     <WeatherEffectsOverlay />
     <RotateDeviceOverlay visible={isMobile && !isLandscape} />
   </MotionConfig>

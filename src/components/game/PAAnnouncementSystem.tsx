@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Volume2, Shield, AlertTriangle, Package } from 'lucide-react';
+import { X, RadioTower, Shield, AlertTriangle, Package } from 'lucide-react';
 // Use announcementsStore directly - productionStore.announcements is a stale snapshot
 import {
   useAnnouncementsStore,
@@ -16,16 +16,13 @@ import { useAudioMuted } from '../../hooks/useAudioState';
 import { audioManager } from '../../utils/audioManager';
 import { logger } from '../../utils/logger';
 
-// Fallback timeout - dismiss after this even if TTS hasn't finished
+// Retain captions long enough to read before advancing the queue.
 const FALLBACK_TIMEOUT_MS = 10000;
-// How often to check if TTS is done
-const TTS_CHECK_INTERVAL_MS = 300;
 
 const PA_CHANNEL_RANK: Record<PAChannel, number> = {
   safety: 5,
   operational: 4,
   logistics: 3,
-  worker: 2,
   flavor: 1,
 };
 
@@ -67,9 +64,9 @@ export function selectAnnouncementForDisplay(
  * Layer 2 - RENDER GATE (this component):
  *   Check BOTH isMuted hook AND audioManager.muted directly (synchronous).
  *
- * Layer 3 - TTS GATE (this component):
- *   Speech is requested only after a user gesture has initialized and primed
- *   audio. Captions remain available without audio initialization.
+ * Layer 3 - CAPTION-ONLY DELIVERY (this component):
+ *   Announcements remain visual and screen-reader accessible. The uncrewed
+ *   runtime never enters a host voice service.
  *
  * Layer 4 - CLEANUP:
  *   Dismiss effect clears any announcements that slip through.
@@ -94,11 +91,10 @@ export const PAAnnouncementSystem: React.FC = () => {
   const safetyOverlayActive = gameSafetyStateActive || forkliftEmergencyStop;
 
   // Track which announcement is currently being displayed
-  const [currentAnnouncementId, setCurrentAnnouncementId] = useState<string | null>(null);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const ttsCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastAnnouncementIdRef = useRef<string | null>(null);
 
-  // Suppress PA announcements for first 10 seconds to let speech synthesis initialize
+  // Keep the opening view clear while the world and primary controls settle.
   const [isStartupSuppressed, setIsStartupSuppressed] = useState(true);
 
   useEffect(() => {
@@ -150,89 +146,35 @@ export const PAAnnouncementSystem: React.FC = () => {
     }
   }, [isMuted, currentAnnouncement, dismissAnnouncement]);
 
-  // Auto-dismiss: wait for accepted TTS work to finish. Without an initialized
-  // speech path, retain the visual caption for the full readable fallback.
+  // Caption-only lifecycle. No browser or operating-system speech API is used.
   useEffect(() => {
-    // Clear any existing timers
     if (fallbackTimerRef.current) {
       clearTimeout(fallbackTimerRef.current);
       fallbackTimerRef.current = null;
     }
-    if (ttsCheckIntervalRef.current) {
-      clearInterval(ttsCheckIntervalRef.current);
-      ttsCheckIntervalRef.current = null;
-    }
 
-    // Don't process when muted - dismiss effect handles cleanup, avoid wasteful TTS/timer setup
-    // Check BOTH hook AND direct property for synchronous muted detection
+    // Check both paths so direct audio changes cannot flash a stale caption.
     if (!currentAnnouncement || isStartupSuppressed || isMuted || audioManager.muted) return;
 
-    // Track current announcement and trigger TTS when it changes
-    if (currentAnnouncement.id !== currentAnnouncementId) {
-      // Final muted gate before TTS, synchronous to avoid a notification race.
-      if (audioManager.muted) return;
-
+    if (currentAnnouncement.id !== lastAnnouncementIdRef.current) {
       logger.debug(
         '[PA] New announcement:',
         currentAnnouncement.id,
         currentAnnouncement.message.substring(0, 40)
       );
-      setCurrentAnnouncementId(currentAnnouncement.id);
-
-      if (audioManager.canSpeakAnnouncements) {
-        logger.debug('[PA] Calling speakAnnouncement...');
-        audioManager.speakAnnouncement(currentAnnouncement.message, currentAnnouncement.priority);
-      } else {
-        logger.debug('[PA] Caption only: audio has not been initialized by user interaction');
-      }
+      logger.debug('[PA] Caption-only autonomous notice');
+      lastAnnouncementIdRef.current = currentAnnouncement.id;
     }
 
     const announcementId = currentAnnouncement.id;
-
-    if (audioManager.hasPendingAnnouncementSpeech) {
-      // Poll accepted TTS work until both active speech and its startup queue
-      // are empty. The former is briefly false while a voice is being loaded.
-      ttsCheckIntervalRef.current = setInterval(() => {
-        if (!audioManager.hasPendingAnnouncementSpeech) {
-          if (ttsCheckIntervalRef.current) {
-            clearInterval(ttsCheckIntervalRef.current);
-            ttsCheckIntervalRef.current = null;
-          }
-          if (fallbackTimerRef.current) {
-            clearTimeout(fallbackTimerRef.current);
-            fallbackTimerRef.current = null;
-          }
-          dismissAnnouncement(announcementId);
-        }
-      }, TTS_CHECK_INTERVAL_MS);
-    }
-
-    // Fallback: a readable caption duration when speech is unavailable, and a
-    // safety net if the platform speech service stalls.
     fallbackTimerRef.current = setTimeout(() => {
-      if (ttsCheckIntervalRef.current) {
-        clearInterval(ttsCheckIntervalRef.current);
-        ttsCheckIntervalRef.current = null;
-      }
       dismissAnnouncement(announcementId);
     }, FALLBACK_TIMEOUT_MS);
 
     return () => {
-      if (fallbackTimerRef.current) {
-        clearTimeout(fallbackTimerRef.current);
-      }
-      if (ttsCheckIntervalRef.current) {
-        clearInterval(ttsCheckIntervalRef.current);
-      }
+      if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
     };
-  }, [
-    currentAnnouncement?.id,
-    currentAnnouncement?.priority,
-    isStartupSuppressed,
-    isMuted,
-    dismissAnnouncement,
-    currentAnnouncementId,
-  ]);
+  }, [currentAnnouncement?.id, isStartupSuppressed, isMuted, dismissAnnouncement]);
 
   // Urgent announcements (emergency type or critical priority) should interrupt
   // the screen reader; routine ones are polite.
@@ -265,7 +207,7 @@ export const PAAnnouncementSystem: React.FC = () => {
   // sr-only node and defeat the live region — text present at mount is not announced).
   // Keeping a stable fiber lets text mutate in place so screen readers announce.
   if (isStartupSuppressed) return <>{liveRegion}</>;
-  // Don't show visual announcement when muted - TTS won't play anyway
+  // Do not show visual announcements when the notification layer is muted.
   // Check BOTH hook (reactive) AND direct property (synchronous) to prevent race condition flash
   if (isMuted || audioManager.muted) return <>{liveRegion}</>;
   if (!currentAnnouncement) return <>{liveRegion}</>;
@@ -298,7 +240,7 @@ export const PAAnnouncementSystem: React.FC = () => {
               className="mx-2 bg-slate-900/90 backdrop-blur-md rounded-lg border border-slate-700/50 px-3 py-1.5 flex items-center gap-2"
               onClick={() => dismissAnnouncement(currentAnnouncement.id)}
             >
-              <Volume2 className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" aria-hidden="true" />
+              <RadioTower className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" aria-hidden="true" />
               <div className="flex-1 min-w-0 overflow-hidden" aria-hidden="true">
                 {prefersReducedMotion ? (
                   <p className="text-xs text-slate-200 truncate">{currentAnnouncement.message}</p>
@@ -361,14 +303,12 @@ export const PAAnnouncementSystem: React.FC = () => {
       case 'emergency':
         return <AlertTriangle className="w-5 h-5" />;
       default: // 'info'
-        return <Volume2 className="w-5 h-5" />;
+        return <RadioTower className="w-5 h-5" />;
     }
   };
 
-  // AI Voice styling is warm/cyan with heart, PA is sardonic/blue-slate with speaker
-  // Note: Announcement type doesn't have voice field, so all are PA voice for now
-  const getVoiceStyles = (priority: number) => {
-    // PA Voice: priority-based coloring
+  // PA channel styling is priority-based blue/slate with a signal icon.
+  const getAnnouncementStyles = (priority: number) => {
     return getPriorityStyles(priority);
   };
 
@@ -397,7 +337,7 @@ export const PAAnnouncementSystem: React.FC = () => {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.9 }}
             transition={prefersReducedMotion ? { duration: 0 } : undefined}
-            className={`flex items-start gap-3.5 px-5 py-4 rounded-xl border-2 backdrop-blur-xl shadow-2xl w-full max-w-lg ${getVoiceStyles(currentAnnouncement.priority)}`}
+            className={`flex items-start gap-3.5 px-5 py-4 rounded-xl border-2 backdrop-blur-xl shadow-2xl w-full max-w-lg ${getAnnouncementStyles(currentAnnouncement.priority)}`}
           >
             <div className="flex-shrink-0 mt-0.5" aria-hidden="true">
               {getAnnouncementIcon(currentAnnouncement.type)}

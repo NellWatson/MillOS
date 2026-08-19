@@ -317,7 +317,7 @@ export class SCADAService {
   private handleAlarmUpdates(alarms: Alarm[]): void {
     // Archive closed alarms to history exactly once per cleared/archived
     // transition. handleAlarmUpdates fires on every raise/clear/ack of any tag,
-    // so a persistent RTN_UNACK alarm (clearedAt set, awaiting operator ack)
+    // so a persistent RTN_UNACK alarm (clearedAt set, awaiting controlSource ack)
     // would otherwise be re-written on every notify, accumulating duplicate
     // IndexedDB rows. Track which ids have been archived; prune ids that re-arm
     // so a recurring alarm (same deterministic id) is archived again next clear.
@@ -524,15 +524,15 @@ export class SCADAService {
   /**
    * Acknowledge an alarm
    */
-  acknowledgeAlarm(alarmId: string, operator: string, note?: string): boolean {
-    return this.alarmManager.acknowledge(alarmId, operator, note);
+  acknowledgeAlarm(alarmId: string, controlSource: string, note?: string): boolean {
+    return this.alarmManager.acknowledge(alarmId, controlSource, note);
   }
 
   /**
    * Acknowledge all alarms
    */
-  acknowledgeAllAlarms(operator: string, note?: string): number {
-    return this.alarmManager.acknowledgeAll(operator, note);
+  acknowledgeAllAlarms(controlSource: string, note?: string): number {
+    return this.alarmManager.acknowledgeAll(controlSource, note);
   }
 
   /**
@@ -551,16 +551,16 @@ export class SCADAService {
   /**
    * Suppress alarms for a tag
    */
-  suppressAlarms(tagId: string, operator: string, reason: string, durationMs?: number): void {
-    this.alarmManager.suppress(tagId, operator, reason, durationMs);
+  suppressAlarms(tagId: string, controlSource: string, reason: string, durationMs?: number): void {
+    this.alarmManager.suppress(tagId, controlSource, reason, durationMs);
   }
 
-  shelveAlarms(tagId: string, operator: string, reason: string, durationMs?: number): void {
-    this.alarmManager.shelve(tagId, operator, reason, durationMs);
+  shelveAlarms(tagId: string, controlSource: string, reason: string, durationMs?: number): void {
+    this.alarmManager.shelve(tagId, controlSource, reason, durationMs);
   }
 
-  takeAlarmsOutOfService(tagId: string, operator: string, reason: string): void {
-    this.alarmManager.takeOutOfService(tagId, operator, reason);
+  takeAlarmsOutOfService(tagId: string, controlSource: string, reason: string): void {
+    this.alarmManager.takeOutOfService(tagId, controlSource, reason);
   }
 
   /**

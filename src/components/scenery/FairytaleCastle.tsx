@@ -303,13 +303,15 @@ const GATE_TURRET_CAP = lathe(
 );
 
 const FairytaleCastlePrimitiveBody: React.FC = React.memo(() => {
-  // Neuschwanstein Palette
+  // Weathered heritage palette keeps the landmark grounded in the same
+  // overcast industrial valley as the mill instead of reading as white set
+  // dressing pasted over the mountain range.
   const colors = {
-    walls: '#e8e6e1', // Off-white limestone
-    roofs: '#2b5a75', // Deep blue slate
-    trim: '#c5a582', // Decorative sandstone trim
-    rock: '#5d5d5d', // Grey mountain rock
-    gold: '#ffd700', // Spires
+    walls: '#c6c3ba',
+    roofs: '#314c5a',
+    trim: '#9f8e76',
+    rock: '#505957',
+    gold: '#b89743',
   };
 
   return (
@@ -505,7 +507,7 @@ export const FairytaleCastle: React.FC<FairytaleCastleProps> = React.memo(
     scale = 1,
     rotation = [0, 0, 0] as [number, number, number],
   }) => (
-    <group position={position} scale={scale} rotation={rotation}>
+    <group name="heritage-castle" position={position} scale={scale} rotation={rotation}>
       <GeneratedBody asset="castle" fallback={<FairytaleCastlePrimitiveBody />} />
     </group>
   )

@@ -13,7 +13,7 @@ export interface ReplayFrame {
     status: string;
     metrics: Record<string, number>;
   }>;
-  workerPositions: Array<{
+  mobileEquipmentPositions: Array<{
     id: string;
     position: [number, number, number];
     task: string;

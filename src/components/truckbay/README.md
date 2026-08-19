@@ -48,7 +48,6 @@ src/components/truckbay/
 - Animated wheels, doors, and lights
 - Trailer articulation (fifth-wheel coupling)
 - Headlights, brake lights, turn signals, marker lights
-- Driver figure
 - Company branding
 
 ### 3. `TruckAudio.tsx` - Audio Effects
@@ -170,7 +169,7 @@ TruckBay (Main Component)
 │
 ├── Trucks
 │   ├── TruckModel (Shipping)
-│   │   ├── Cab with driver
+│   │   ├── Autonomous cab telemetry
 │   │   ├── Trailer with articulation
 │   │   ├── Wheels & lights
 │   │   └── TruckParts (dozens of details)
@@ -217,8 +216,8 @@ To complete the full refactoring, extract remaining components:
 - ConcreteBollard
 - WheelChock
 - TruckWashStation
-- DriverBreakRoom
-- EmployeeParking
+- FleetTelemetryHub
+
 - PropaneTankCage
 - DumpsterArea
 - WeightScale

@@ -112,6 +112,20 @@ Two autonomous forklifts with:
 - Dynamic collision avoidance (workers and other forklifts)
 - Visual cargo states (loaded/empty pallets)
 - Warning lights (amber = moving, red = stopped for safety)
+- Logistics interlocks that wait for released product and the correct truck state
+
+### Order to Dispatch Execution
+
+The v0.40 operations campaign connects commercial commitments to the physical mill:
+
+- Customer orders select a real grain recipe, finished product, due time, priority, and line setpoint
+- Wheat routes to flour while corn routes to semolina through the existing mills, sifters, and packers
+- Batch genealogy and mass remain conserved while quality release controls outbound availability
+- The shipping truck loads only while docked; the dispatch manifest is created only when it departs
+- Forklift pickup and drop-off actions wait for released goods and the correct dock state
+- Revenue, energy, labour, waste, maintenance, demurrage, and late penalties feed the shift result
+- Desktop and mobile operations views show the same execution stage, route, quality gate, and truck load
+- Five visible yard vessels share identities and simulated local instrumentation with SCADA
 
 ### Fire Drill Evacuation System
 
@@ -127,6 +141,7 @@ Fully functional emergency evacuation simulation:
 
 Immersive walkthrough experience with:
 - **WASD movement** with collision detection against machines
+- **Q/E vertical movement** for elevated inspection
 - **Sprint mode** (Shift key) for faster exploration
 - **Mouse look** with pointer lock controls
 - **105° FOV** for immersive factory tours
@@ -149,7 +164,7 @@ Explore the factory together with WebRTC peer-to-peer connections:
 - **Shared machine control** with locking to prevent conflicts
 - **AI decision voting** for collaborative factory management (democracy at work, literally)
 - **In-game chat** for coordination
-- **Host migration** when the original host disconnects (succession planning for the digital age)
+- **Explicit host-loss handling** that ends guest sessions cleanly when the host disconnects
 
 ### AI Partner
 
@@ -777,6 +792,7 @@ MODBUS_PORT=502
 |-------|--------|
 | **V** | Toggle first-person mode |
 | **WASD** | Move forward/left/back/right |
+| **Q / E** | Move down/up |
 | **Shift** | Sprint (3.6x speed) |
 | **Mouse** | Look around |
 | **Esc** | Exit first-person mode |
@@ -879,7 +895,7 @@ src/
 │   ├── SignalingService.ts     # Room creation & peer discovery
 │   ├── PeerConnection.ts       # WebRTC data channel wrapper
 │   ├── PlayerInterpolation.ts  # Smooth remote player movement
-│   ├── HostMigration.ts        # Failover when host disconnects
+│   ├── HostMigration.ts        # Explicit host-loss session teardown
 │   └── hooks/                  # React hooks (useMultiplayerSync)
 │
 ├── hooks/                      # Reusable React Hooks
@@ -1025,7 +1041,7 @@ MillOS implements OWASP-aligned frontend security practices:
 - [x] Dynamic weather system (clear, cloudy, rain, storm)
 - [x] Factory exterior with branded signage
 - [x] End-to-end testing with Playwright
-- [x] WebRTC peer-to-peer multiplayer with host migration
+- [x] WebRTC peer-to-peer multiplayer with explicit host-loss teardown
 - [x] Mobile touch controls with gesture support
 - [x] GPU resource management with adaptive quality
 - [x] Compressed texture support (KTX2/Basis Universal)
@@ -1120,7 +1136,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**MillOS v0.40**
+**MillOS v0.40 (Operational Consequences update)**
 
 *Exploring grain-mill operations through a digital twin, simulated industrial tooling, and bilateral AI partnership*
 

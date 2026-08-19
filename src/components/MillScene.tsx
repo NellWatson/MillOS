@@ -16,13 +16,16 @@ import { ENVIRONMENT_INTENSITY } from './environment/SceneEnvironmentIBL';
 import { CentralTickProvider, useUnifiedGameTick } from '../systems';
 import { ProductionFlowVisualization } from './ProductionFlowVisualization';
 import { useAIConfigStore } from '../stores/aiConfigStore';
-import { WorkerPersonalityLayer } from './workers/WorkerPersonalityLayer';
 import { recoverableLazy } from '../utils/recoverableLazy';
 import ErrorBoundary from './ErrorBoundary';
 import { StaticMeshBatch } from './performance/StaticMeshBatch';
 import { PunctualLightIsolation } from './performance/PunctualLightIsolation';
 import { SurfaceTreatmentIsolation } from './performance/SurfaceTreatmentIsolation';
 import { applyBatchWorldSurface } from '../utils/worldSurface';
+import {
+  DISTANT_FACTORY_INTERIOR_LOD,
+  resolveFactoryInteriorDetailVisibility,
+} from './performance/distantFactoryInteriorLod';
 
 // Lazy load heavy optional layers while preserving the complete authored world.
 // Quality changes may reduce effects and geometry density, but never swap the
@@ -53,16 +56,8 @@ const AuthoredDockOpening = recoverableLazy(() =>
 const OperationalConveyors = recoverableLazy(() =>
   import('./ConveyorSystem').then((module) => ({ default: module.ConveyorSystem }))
 );
-const OperationalPersonnel = recoverableLazy(() =>
-  import('./WorkerSystemNew').then((module) => ({ default: module.WorkerSystemNew }))
-);
 const OperationalForklifts = recoverableLazy(() =>
   import('./ForkliftSystem').then((module) => ({ default: module.ForkliftSystem }))
-);
-const OperationalRemotePlayers = recoverableLazy(() =>
-  import('./multiplayer/RemotePlayersGroup').then((module) => ({
-    default: module.RemotePlayersGroup,
-  }))
 );
 const EnhancedHolographicDisplays = recoverableLazy(() =>
   import('./HolographicDisplays').then((module) => ({
@@ -86,15 +81,47 @@ const HighDetailSpoutingSystem = recoverableLazy(() =>
 const PostProcessing = recoverableLazy(() =>
   import('./PostProcessing').then((module) => ({ default: module.PostProcessing }))
 );
-const VisibleChaos = recoverableLazy(() =>
-  import('./VisibleChaos').then((module) => ({ default: module.VisibleChaos }))
+const OperationalWorldSignals = recoverableLazy(() =>
+  import('./OperationalWorldSignals').then((module) => ({
+    default: module.OperationalWorldSignals,
+  }))
 );
-import { useMoodSimulation, useBilateralAlignmentSimulation } from './WorkerMoodOverlay';
-import { MachineData, MachineType, WorkerData } from '../types';
+
+/**
+ * Keep the unified factory mounted while omitting sub-pixel service detail
+ * behind the distant shell and glazing. Machine bodies remain visible through
+ * the windows. The hysteresis avoids visibility chatter near the boundary, and
+ * the named contract groups remain visible so this is a conventional detail
+ * LOD rather than an alternate world.
+ */
+const DistantFactoryInteriorDetail: React.FC<React.PropsWithChildren> = ({ children }) => {
+  const groupRef = useRef<THREE.Group>(null);
+  const visibleRef = useRef(true);
+  const sampleFrameRef = useRef(0);
+
+  useFrame(({ camera }) => {
+    sampleFrameRef.current =
+      (sampleFrameRef.current + 1) % DISTANT_FACTORY_INTERIOR_LOD.sampleEveryFrames;
+    if (sampleFrameRef.current !== 0) return;
+
+    const nextVisible = resolveFactoryInteriorDetailVisibility(
+      visibleRef.current,
+      camera.position.x,
+      camera.position.z
+    );
+    if (nextVisible === visibleRef.current) return;
+
+    visibleRef.current = nextVisible;
+    if (groupRef.current) groupRef.current.visible = nextVisible;
+  });
+
+  return <group ref={groupRef}>{children}</group>;
+};
+import { MachineData, MachineType } from '../types';
 import { useGraphicsStore, isPostProcessingActive } from '../stores/graphicsStore';
 import { useProductionStore } from '../stores/productionStore';
 import { useSafetyStore } from '../stores/safetyStore';
-import { useGameSimulationStore, FIRE_DRILL_EXITS } from '../stores/gameSimulationStore';
+import { useGameSimulationStore, SERVICE_EGRESS_POINTS } from '../stores/gameSimulationStore';
 import { useCameraPositionStore } from '../stores/useCameraPositionStore';
 import { positionRegistry, Obstacle } from '../utils/positionRegistry';
 import { useShallow } from 'zustand/react/shallow';
@@ -309,14 +336,14 @@ const IncidentHeatMap: React.FC = () => {
   );
 };
 
-// Fire Drill Exit Markers - glowing green markers at each exit point
+// Automated egress verification markers.
 // Memoized since it receives stable props from store selectors
-const FireDrillExitMarkers = React.memo(() => {
+const ServiceEgressMarkers = React.memo(() => {
   const emergencyDrillMode = useGameSimulationStore((state) => state.emergencyDrillMode);
   const drillMetrics = useGameSimulationStore((state) => state.drillMetrics);
   const materialRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
 
-  // Pulsing animation for exit markers
+  // Pulse during the automated verification sequence.
   useFrame((state) => {
     if (!emergencyDrillMode) return;
     const pulse = Math.sin(state.clock.elapsedTime * 4) * 0.3 + 0.7;
@@ -328,12 +355,12 @@ const FireDrillExitMarkers = React.memo(() => {
     });
   });
 
-  // Only show during active fire drill
+  // Only show during an active egress test.
   if (!emergencyDrillMode || !drillMetrics.active) return null;
 
   return (
     <group>
-      {FIRE_DRILL_EXITS.map((exit, i) => (
+      {SERVICE_EGRESS_POINTS.map((exit, i) => (
         <group
           key={exit.id}
           position={[exit.position.x, FLOOR_LAYERS.exitIndicator, exit.position.z]}
@@ -400,7 +427,6 @@ interface MillSceneProps {
   productionSpeed: number;
   showZones: boolean;
   onSelectMachine: (data: MachineData) => void;
-  onSelectWorker: (data: WorkerData) => void;
   onSelectForklift?: (data: ForkliftData) => void;
 }
 
@@ -409,7 +435,6 @@ export const MillScene: React.FC<MillSceneProps> = ({
   showZones,
   onSelectForklift,
   onSelectMachine,
-  onSelectWorker,
 }) => {
   const [authoredSiteReady, setAuthoredSiteReady] = useState(
     () => typeof document !== 'undefined' && document.documentElement.dataset.sceneReady === 'true'
@@ -438,12 +463,6 @@ export const MillScene: React.FC<MillSceneProps> = ({
       // Removed subscriptions that cause re-renders
     }))
   );
-
-  // Worker mood simulation - Theme Hospital inspired mood system
-  useMoodSimulation();
-
-  // Bilateral Alignment simulation - preference requests, safety reports, emergent cooperation
-  useBilateralAlignmentSimulation();
 
   // CENTRALIZED TICK SYSTEM - Single source of truth for all game ticks
   // Replaces scattered tickGameTime, tickMetrics, and various intervals
@@ -555,19 +574,19 @@ export const MillScene: React.FC<MillSceneProps> = ({
     return _machines;
   }, []);
 
-  // Define obstacle regions for worker pathfinding
+  // Define obstacle regions for autonomous mobile-equipment pathfinding
   const obstacles = useMemo<Obstacle[]>(() => {
     const obs: Obstacle[] = [];
-    const WORKER_PADDING = 1.0; // Extra padding around machines
+    const CLEARANCE_PADDING = 1.0;
 
     SITE_LAYOUT.machines.silos.forEach((anchor) => {
       const [x, , z] = anchor.position;
       obs.push({
         id: `${anchor.id}-obstacle`,
-        minX: x - 2.25 - WORKER_PADDING,
-        maxX: x + 2.25 + WORKER_PADDING,
-        minZ: z - 2.25 - WORKER_PADDING,
-        maxZ: z + 2.25 + WORKER_PADDING,
+        minX: x - 2.25 - CLEARANCE_PADDING,
+        maxX: x + 2.25 + CLEARANCE_PADDING,
+        minZ: z - 2.25 - CLEARANCE_PADDING,
+        maxZ: z + 2.25 + CLEARANCE_PADDING,
       });
     });
 
@@ -575,15 +594,15 @@ export const MillScene: React.FC<MillSceneProps> = ({
       const [x, , z] = anchor.position;
       obs.push({
         id: `${anchor.id}-obstacle`,
-        minX: x - 1.75 - WORKER_PADDING,
-        maxX: x + 1.75 + WORKER_PADDING,
-        minZ: z - 1.75 - WORKER_PADDING,
-        maxZ: z + 1.75 + WORKER_PADDING,
+        minX: x - 1.75 - CLEARANCE_PADDING,
+        maxX: x + 1.75 + CLEARANCE_PADDING,
+        minZ: z - 1.75 - CLEARANCE_PADDING,
+        maxZ: z + 1.75 + CLEARANCE_PADDING,
       });
     });
 
     // PLANSIFTERS (Zone 3, z=6) - elevated at y=9, but have hanging cables
-    // Workers can walk under these, but the cables at corners need small obstacles
+    // Mobile units can pass beneath these, but the cable anchors remain obstacles.
     SITE_LAYOUT.machines.sifters.forEach((anchor) => {
       const [x, , z] = anchor.position;
       // Just mark small cable anchor points at corners (not full machine footprint)
@@ -608,15 +627,15 @@ export const MillScene: React.FC<MillSceneProps> = ({
       const [x, , z] = anchor.position;
       obs.push({
         id: `${anchor.id}-obstacle`,
-        minX: x - 2 - WORKER_PADDING,
-        maxX: x + 2 + WORKER_PADDING,
-        minZ: z - 2 - WORKER_PADDING,
-        maxZ: z + 2 + WORKER_PADDING,
+        minX: x - 2 - CLEARANCE_PADDING,
+        maxX: x + 2 + CLEARANCE_PADDING,
+        minZ: z - 2 - CLEARANCE_PADDING,
+        maxZ: z + 2 + CLEARANCE_PADDING,
       });
     });
 
     // CONVEYOR SYSTEM OBSTACLES - Full belt structures
-    // Workers and forklifts must walk around the conveyors
+    // Forklifts and service rovers must route around the conveyors.
     // Main conveyor belt at z=24, length 55 (x from -27.5 to 27.5)
     obs.push({
       id: 'main-conveyor-belt',
@@ -636,8 +655,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
     });
 
     // Central longitudinal conveyor - runs from silos (z=-22) to packers (z=25)
-    // Located at x=-1.5 to 1.5 (center of factory), workers must walk around
-    // Note: Safe aisles at x=±2.5 remain clear for workers to walk beside conveyor
+    // Located at x=-1.5 to 1.5. Clear aisles at x=±2.5 remain available.
     obs.push({
       id: 'central-conveyor-belt',
       minX: -1.8, // Actual belt width (x: -1.5 to 1.5) + small buffer
@@ -666,7 +684,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
     });
 
     // AMENITY BUILDINGS - Break rooms, toilet blocks, locker rooms
-    // These are forklift-only obstacles (workers can enter/exit normally)
+    // These are forklift-only obstacles; compact service rovers may enter.
     // Moved to back wall area, away from truck paths
 
     // Left break room at [-50, 0, -20], floor 6x5
@@ -754,7 +772,6 @@ export const MillScene: React.FC<MillSceneProps> = ({
         postProcessingEnabled: isPostProcessingActive(state.graphics),
       }))
     );
-  const useEnhancedQualityLayers = graphicsQuality === 'high' || graphicsQuality === 'ultra';
   const useUltraQualityLayers = graphicsQuality === 'ultra';
   const isLowGraphics = graphicsQuality === 'low';
   // Static batching must not rebuild at the live day/night boundary. Every
@@ -861,14 +878,16 @@ export const MillScene: React.FC<MillSceneProps> = ({
         {!perfDebug?.disableMachines && (
           <MachinesContainer initialMachines={displayMachines} onSelect={onSelectMachine} />
         )}
-        {!isLowGraphics && !perfDebug?.disableMachines && (
-          <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
-            <Suspense fallback={null}>
-              <HighDetailSpoutingSystem machines={displayMachines} />
-            </Suspense>
-          </ErrorBoundary>
-        )}
-        {!isLowGraphics && <ProductionFlowVisualization />}
+        <DistantFactoryInteriorDetail>
+          {!isLowGraphics && !perfDebug?.disableMachines && (
+            <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
+              <Suspense fallback={null}>
+                <HighDetailSpoutingSystem machines={displayMachines} />
+              </Suspense>
+            </ErrorBoundary>
+          )}
+          {!isLowGraphics && <ProductionFlowVisualization />}
+        </DistantFactoryInteriorDetail>
       </group>
       <group name="world-factory-infrastructure">
         <OptimizedFactoryInfrastructure showZones={showZones} />
@@ -876,20 +895,12 @@ export const MillScene: React.FC<MillSceneProps> = ({
 
       {/* Dynamic Elements - Respect perfDebug toggles */}
       <group name="world-conveyors">
-        {authoredSiteReady && !perfDebug?.disableConveyorSystem && (
-          <OperationalConveyors productionSpeed={productionSpeed} />
-        )}
+        <DistantFactoryInteriorDetail>
+          {authoredSiteReady && !perfDebug?.disableConveyorSystem && (
+            <OperationalConveyors productionSpeed={productionSpeed} />
+          )}
+        </DistantFactoryInteriorDetail>
       </group>
-      <group name="world-personnel">
-        {authoredSiteReady && !perfDebug?.disableWorkerSystem && (
-          <OperationalPersonnel onSelectWorker={onSelectWorker} />
-        )}
-      </group>
-      {/* Worker Personality Visualization - mood auras, thoughts, relationships */}
-      {useEnhancedQualityLayers && (
-        <WorkerPersonalityLayer showAuras={true} showThoughts={true} showRelationships={false} />
-      )}
-      {/* Remote multiplayer players */}
       <group name="world-forklifts">
         {authoredSiteReady && !perfDebug?.disableForkliftSystem && (
           <OperationalForklifts showSpeedZones={showZones} onSelectForklift={onSelectForklift} />
@@ -897,7 +908,6 @@ export const MillScene: React.FC<MillSceneProps> = ({
       </group>
       {/* The authored truck bay includes the garage, service yard, docks, and trucks. */}
       <group name="world-logistics">
-        {authoredSiteReady && <OperationalRemotePlayers />}
         {authoredSiteReady && !isLowGraphics && !perfDebug?.disableTruckBay && (
           <StaticMeshBatch
             name="authored-truck-yard"
@@ -961,27 +971,22 @@ export const MillScene: React.FC<MillSceneProps> = ({
         </>
       )}
 
-      {/* Theme Hospital-inspired Mood & Chaos Systems */}
-      <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
-        <Suspense fallback={null}>
-          <VisibleChaos
-            qualityScale={
-              graphicsQuality === 'ultra'
-                ? 1
-                : graphicsQuality === 'high'
-                  ? 0.75
-                  : graphicsQuality === 'medium'
-                    ? 0.5
-                    : 0.25
-            }
-          />
-        </Suspense>
-      </ErrorBoundary>
       {/* Incident Heat Map Visualization */}
       <IncidentHeatMap />
 
+      {/* Operational campaign incidents become legible in the same authored
+          site. The marker layer adds no lights or shadows and keeps one shared
+          animation loop for all active incidents. */}
+      {authoredSiteReady && (
+        <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
+          <Suspense fallback={null}>
+            <OperationalWorldSignals />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+
       {/* Fire Drill Exit Markers - shown during active drill */}
-      <FireDrillExitMarkers />
+      <ServiceEgressMarkers />
 
       {/* AI Cascade Visualization - shows production flow stress (default OFF, toggle with 'K') */}
       {authoredSiteReady && showCascadeVisualization && <OptionalCascadeVisualization />}

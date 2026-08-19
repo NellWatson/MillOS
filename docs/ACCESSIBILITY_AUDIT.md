@@ -415,16 +415,13 @@ const shouldReduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 
 ---
 
-### 23. 3D Canvas Not Keyboard Accessible
-**Location:** `src/App.tsx:202-253`, `src/components/MillScene.tsx`
+### 23. 3D Canvas Keyboard Navigation
+**Location:** `src/components/CameraController.tsx`, `src/utils/cameraNavigation.ts`
 **WCAG:** 2.1.1 Keyboard (Level A)
 
-**Issue:**
-3D scene with OrbitControls is mouse-only. No keyboard controls for camera navigation.
+**Current State:** Remediated. WASD and the arrow keys translate the camera, Q/E move down and up, and Shift increases travel speed. Movement uses physical key codes for keyboard-layout independence, stops when browser focus is lost, and remains inactive while an interface control has focus.
 
-**Current State:** OrbitControls exist but don't support keyboard by default.
-
-**Recommendation:** Implement keyboard camera controls (arrow keys for rotation, +/- for zoom) or provide alternative 2D representations of critical data.
+**Residual Recommendation:** Continue providing the existing DOM control panels as the accessible representation of operational data that is also shown in the 3D scene.
 
 ---
 

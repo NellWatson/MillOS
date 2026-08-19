@@ -7,9 +7,19 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 
 export type TruckDock = 'receiving' | 'shipping';
+export type TruckLifecyclePhase =
+  | 'scheduled'
+  | 'approaching'
+  | 'docked'
+  | 'servicing'
+  | 'departing';
 
 export interface DockSchedule {
+  truckActive: boolean;
+  arrivalReady: boolean;
   truckDocked: boolean;
+  transferReady: boolean;
+  lifecyclePhase: TruckLifecyclePhase;
   nextArrivalMinutes: number;
   lastDepartureSimulationMinutes: number | null;
   departureCount: number;
@@ -23,6 +33,10 @@ export interface TruckScheduleState {
 export interface TruckScheduleStore {
   truckSchedule: TruckScheduleState;
   setTruckDocked: (dock: TruckDock, docked: boolean) => void;
+  setTruckTransferReady: (dock: TruckDock, ready: boolean) => void;
+  setTruckActive: (dock: TruckDock, active: boolean) => void;
+  consumeTruckArrival: (dock: TruckDock) => void;
+  setTruckLifecycle: (dock: TruckDock, phase: TruckLifecyclePhase) => void;
   updateNextArrival: (dock: TruckDock, minutes: number) => void;
   recordTruckDeparture: (dock: TruckDock, simulationMinutes: number) => void;
   isAnyTruckDocked: () => boolean;
@@ -51,13 +65,21 @@ export function getDeterministicNextArrivalMinutes(
 
 const createInitialTruckSchedule = (): TruckScheduleState => ({
   receiving: {
+    truckActive: true,
+    arrivalReady: false,
     truckDocked: false,
+    transferReady: false,
+    lifecyclePhase: 'approaching',
     nextArrivalMinutes: 15,
     lastDepartureSimulationMinutes: null,
     departureCount: 0,
   },
   shipping: {
+    truckActive: true,
+    arrivalReady: false,
     truckDocked: false,
+    transferReady: false,
+    lifecyclePhase: 'approaching',
     nextArrivalMinutes: 20,
     lastDepartureSimulationMinutes: null,
     departureCount: 0,
@@ -75,6 +97,59 @@ export const useTruckScheduleStore = create<TruckScheduleStore>()(
           [dock]: {
             ...state.truckSchedule[dock],
             truckDocked: docked,
+            transferReady: docked ? state.truckSchedule[dock].transferReady : false,
+            lifecyclePhase: docked ? 'docked' : state.truckSchedule[dock].lifecyclePhase,
+          },
+        },
+      })),
+
+    setTruckTransferReady: (dock, transferReady) =>
+      set((state) => ({
+        truckSchedule: {
+          ...state.truckSchedule,
+          [dock]: {
+            ...state.truckSchedule[dock],
+            transferReady: state.truckSchedule[dock].truckDocked && transferReady,
+          },
+        },
+      })),
+
+    setTruckActive: (dock, active) =>
+      set((state) => ({
+        truckSchedule: {
+          ...state.truckSchedule,
+          [dock]: {
+            ...state.truckSchedule[dock],
+            truckActive: active,
+            truckDocked: active ? state.truckSchedule[dock].truckDocked : false,
+            transferReady: active ? state.truckSchedule[dock].transferReady : false,
+            lifecyclePhase: active ? 'approaching' : 'scheduled',
+          },
+        },
+      })),
+
+    consumeTruckArrival: (dock) =>
+      set((state) => ({
+        truckSchedule: {
+          ...state.truckSchedule,
+          [dock]: {
+            ...state.truckSchedule[dock],
+            truckActive: true,
+            arrivalReady: false,
+            truckDocked: false,
+            transferReady: false,
+            lifecyclePhase: 'approaching',
+          },
+        },
+      })),
+
+    setTruckLifecycle: (dock, lifecyclePhase) =>
+      set((state) => ({
+        truckSchedule: {
+          ...state.truckSchedule,
+          [dock]: {
+            ...state.truckSchedule[dock],
+            lifecyclePhase,
           },
         },
       })),
@@ -101,7 +176,11 @@ export const useTruckScheduleStore = create<TruckScheduleStore>()(
             ...state.truckSchedule,
             [dock]: {
               ...state.truckSchedule[dock],
+              truckActive: false,
+              arrivalReady: false,
               truckDocked: false,
+              transferReady: false,
+              lifecyclePhase: 'scheduled',
               lastDepartureSimulationMinutes: simulationMinutes,
               departureCount,
               nextArrivalMinutes: getDeterministicNextArrivalMinutes(dock, departureCount),
@@ -125,23 +204,27 @@ export const useTruckScheduleStore = create<TruckScheduleStore>()(
         const newShipping = { ...state.truckSchedule.shipping };
 
         // Tick down arrival timers
-        if (!newReceiving.truckDocked) {
+        if (!newReceiving.truckActive) {
           newReceiving.nextArrivalMinutes = Math.max(
             0,
             newReceiving.nextArrivalMinutes - deltaMinutes
           );
           if (newReceiving.nextArrivalMinutes <= 0) {
-            newReceiving.truckDocked = true;
+            newReceiving.truckActive = true;
+            newReceiving.arrivalReady = true;
+            newReceiving.lifecyclePhase = 'approaching';
           }
         }
 
-        if (!newShipping.truckDocked) {
+        if (!newShipping.truckActive) {
           newShipping.nextArrivalMinutes = Math.max(
             0,
             newShipping.nextArrivalMinutes - deltaMinutes
           );
           if (newShipping.nextArrivalMinutes <= 0) {
-            newShipping.truckDocked = true;
+            newShipping.truckActive = true;
+            newShipping.arrivalReady = true;
+            newShipping.lifecyclePhase = 'approaching';
           }
         }
 

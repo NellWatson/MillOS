@@ -5,6 +5,4 @@
  */
 
 export * from './mockMachines';
-export * from './mockWorkers';
-export * from './mockDecisions';
 export * from './mockIncidents';

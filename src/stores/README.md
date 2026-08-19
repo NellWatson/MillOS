@@ -1,221 +1,120 @@
-# Domain-Specific Stores
+# Domain Stores
 
-This directory contains the refactored Zustand stores, split from the original monolithic `/src/store.ts` into domain-specific modules for better maintainability and code organization.
+MillOS separates its live simulation state into focused Zustand stores. New code should subscribe to the narrowest store that owns the required state. `useMillStore` remains as a compatibility facade for components that genuinely span several domains.
 
-## Store Architecture
+## Core stores
 
-The state management has been divided into 5 domain-specific stores:
+### Graphics (`graphicsStore.ts`)
 
-### 1. Graphics Store (`graphicsStore.ts`)
-**Responsibility:** Graphics quality settings and visual effects configuration
+Owns quality presets, rendering feature flags, shadow and post-processing budgets, LOD distances, and persisted display preferences.
 
-**State:**
-- `graphics` - Graphics settings object with quality presets (low/medium/high/ultra)
-- Individual effect toggles (SSAO, bloom, dust particles, shadows, etc.)
-- Performance settings (particle counts, shadow map sizes, LOD distances)
+Primary actions:
 
-**Key Actions:**
-- `setGraphicsQuality(quality)` - Apply a preset
-- `setGraphicsSetting(key, value)` - Toggle individual effects
-- `resetGraphicsToPreset(quality)` - Reset to preset
+- `setGraphicsQuality(quality)` applies a complete preset.
+- `setGraphicsSetting(key, value)` changes one graphics setting.
+- `resetGraphicsToPreset(quality)` restores the selected preset.
 
-**Persistence:** Settings saved to `millos-graphics` localStorage
+Persistence key: `millos-graphics`.
 
----
+### Game simulation (`gameSimulationStore.ts`)
 
-### 2. Game Simulation Store (`gameSimulationStore.ts`)
-**Responsibility:** Game time, environmental conditions, and simulation events
+Owns game time, simulation speed, weather, scheduled run windows, emergency state, and autonomous service-egress verification. The legacy field name `currentShift` remains for saved-state compatibility, but its value is a run window rather than a staffing schedule.
 
-**State:**
-- `gameTime` - Current hour (0-24)
-- `gameSpeed` - Time multiplier (60 = 1 real sec = 1 game min)
-- `weather` - Weather conditions (clear/cloudy/rain/storm)
-- `currentShift` - Active shift (morning/afternoon/night)
-- `emergencyActive` - Emergency state
+Primary actions:
 
-**Key Actions:**
-- `tickGameTime(deltaSeconds)` - Advance game clock
-- `setWeather(weather)` - Change weather
-- `triggerShiftChange()` - Initiate shift change
-- `triggerEmergency(machineId)` - Start emergency
+- `tickGameTime(deltaSeconds)` advances the simulation clock.
+- `setWeather(weather)` changes the environment.
+- `setShift(runWindow)` selects a run window through the compatibility API.
+- `triggerEmergency(machineId)` activates the plant emergency interlock.
+- `startEmergencyDrill()` begins automated service-egress verification.
 
-**Persistence:** Game time, speed, and weather saved to `millos-game-simulation` localStorage
+Persistence key: `millos-game-simulation`.
 
----
+### Production (`productionStore.ts`)
 
-### 3. Production Store (`productionStore.ts`)
-**Responsibility:** Machines, workers, production metrics, and AI decisions
+Owns machine state, production metrics, material-flow integration, autonomous decisions, achievements, announcements, incident replay, QC results, and truck scheduling.
 
-**State:**
-- `machines` - Array of MachineData
-- `workers` - Array of WorkerData
-- `metrics` - Production KPIs (throughput, efficiency, uptime, quality)
-- `aiDecisions` - AI decision history
-- `achievements` - Unlockable achievements
-- `productionTarget` - Daily production goals
+Primary actions:
 
-**Key Actions:**
-- `updateMachineStatus(id, status)` - Change machine state
-- `addAIDecision(decision)` - Log AI decision
-- `updateMetrics(metrics)` - Update production KPIs
-- `incrementBagsProduced(count)` - Track production
-- `unlockAchievement(id)` - Award achievement
+- `updateMachineStatus(id, status)` changes equipment state.
+- `addAIDecision(decision)` records an autonomous decision.
+- `updateMetrics(metrics)` updates production KPIs.
+- `incrementBagsProduced(count)` records packaged output.
+- `performMaintenance(machineId)` services a machine through the automated maintenance path.
 
-**Performance:** Uses indexed Maps for O(1) lookups of machines/workers by ID
+Persistence retains production progress and achievements through the compatibility settings key.
 
-**Persistence:** Total bags produced and achievements saved to `millos-settings` (legacy compatibility)
+### Safety (`safetyStore.ts`)
 
----
+Owns safety metrics, mobile-equipment conflicts, forklift telemetry, incident heat maps, speed zones, and detection thresholds.
 
-### 4. Safety Store (`safetyStore.ts`)
-**Responsibility:** Safety metrics, incidents, forklift tracking, and speed zones
+Primary actions:
 
-**State:**
-- `safetyMetrics` - Incident counters and days since incident
-- `safetyIncidents` - History of safety events
-- `forkliftMetrics` - Per-forklift efficiency tracking
-- `incidentHeatMap` - Spatial incident data
-- `safetyConfig` - Detection radii and safety parameters
-- `speedZones` - Designated slow zones
+- `recordSafetyStop()` records an emergency stop.
+- `addSafetyIncident(incident)` records a route or equipment incident.
+- `updateForkliftMetrics(id, isMoving)` updates vehicle state.
+- `addSpeedZone(zone)` defines a controlled-speed area.
 
-**Key Actions:**
-- `recordSafetyStop()` - Log emergency stop
-- `addSafetyIncident(incident)` - Record incident
-- `updateForkliftMetrics(id, isMoving)` - Track forklift state
-- `addSpeedZone(zone)` - Create safety zone
+Persistence key: `millos-safety`.
 
-**Persistence:** Safety config and speed zones saved to `millos-safety` localStorage
+### UI (`uiStore.ts`)
 
----
+Owns alerts, panel visibility, theme, first-person mode, camera selection, and interface preferences.
 
-### 5. UI Store (`uiStore.ts`)
-**Responsibility:** UI state, alerts, panel visibility, and camera management
+Primary actions:
 
-**State:**
-- `alerts` - Active alert notifications
-- `showZones` / `showAIPanel` / `showMiniMap` etc. - Panel toggles
-- `theme` - Dark/light mode
-- `fpsMode` - First-person mode toggle
-- `panelMinimized` - Panel collapse state
-- `activeCameraId` - Selected security camera
+- `addAlert(alert)` publishes a notification.
+- `dismissAlert(id)` clears a notification.
+- `toggleTheme()` switches the interface theme.
+- `setShowAIPanel(show)` controls the autonomy panel.
+- `registerCameraContainer(id, element)` registers a camera viewport.
 
-**Key Actions:**
-- `addAlert(alert)` - Show notification
-- `dismissAlert(id)` - Clear notification
-- `toggleTheme()` - Switch dark/light mode
-- `setShowAIPanel(show)` - Toggle AI panel
-- `registerCameraContainer(id, element)` - Register camera view
+Persistence key: `millos-ui`.
 
-**Persistence:** UI preferences saved to `millos-ui` localStorage
+## Focused stores
 
----
+The production domain delegates specialised state to `qcLabStore`, `achievementsStore`, `announcementsStore`, `incidentReplayStore`, `truckScheduleStore`, and `materialFlowStore`. Import these directly when a component only needs that subsystem.
 
-## Backwards Compatibility
+`operationsCampaignStore` owns customer orders, plant constraints, operational incidents, recipes, and execution reports.
 
-The original `/src/store.ts` now acts as a **compatibility layer** that re-exports all stores and offers:
+## Compatibility facade
 
-1. **Combined `useMillStore` hook** - Merges all stores into a single state object
-2. **`useMillStore.getState()`** - Access combined state imperatively
-3. **`useMillStore.subscribe()`** - Subscribe to changes across stores
-4. **SCADA Integration** - `initializeSCADASync()` for bidirectional sync
+`src/stores/index.ts` exports the individual stores and `useMillStore`. The facade combines the five core stores and uses `useSyncExternalStore` with selector result caching.
 
-### Migration Path
-
-**Old code (still works):**
 ```typescript
-import { useMillStore } from './store';
-
-const machines = useMillStore(state => state.machines);
-```
-
-**New code (recommended):**
-```typescript
+// Preferred for a focused subscription
 import { useProductionStore } from './stores';
 
-const machines = useProductionStore(state => state.machines);
+const machines = useProductionStore((state) => state.machines);
+
+// Compatibility path for a cross-domain consumer
+import { useMillStore } from './store';
+
+const snapshot = useMillStore((state) => ({
+  machines: state.machines,
+  weather: state.weather,
+}));
 ```
 
-**Benefits of new approach:**
-- Better tree-shaking (only import needed stores)
-- Clearer separation of concerns
-- Reduced re-renders (subscribe to specific stores)
-- Easier testing (mock individual stores)
+Imperative subscriptions must retain and invoke the returned cleanup function. Direct store hooks remain preferable because they minimise invalidation and manage React subscription cleanup naturally.
 
----
+## Performance and persistence
 
-## Implementation Notes
+- Production bag increments are accumulated and flushed on a bounded interval.
+- Safety heat-map events use spatial indexing and deduplication.
+- Combined-store snapshots are invalidated only when a core store changes.
+- Each core store persists only the state needed for recovery or user preferences.
+- Persistence migrations sanitise legacy UI and knowledge data without restoring removed staffed-operation state.
 
-### Index Management
-Production and Safety stores use **indexed Maps** for O(1) lookups:
-- `machinesById` - Fast machine lookup by ID
-- `workersById` - Fast worker lookup by ID
-- `heatMapIndex` - Spatial indexing for heat maps
+## Verification
 
-These indices are automatically rebuilt when arrays change.
-
-### Persistence Strategy
-Each store persists only its relevant state:
-- Graphics settings → User preferences
-- Game simulation → Session recovery
-- Production → Long-term progress (achievements, bags)
-- Safety → Configuration and zones
-- UI → Panel states and theme
-
-The old unified `millos-settings` storage key is gradually being phased out.
-
-### Performance Considerations
-- **Debouncing:** Forklift metrics updates debounced to 100ms
-- **Grid indexing:** Heat maps use grid-based deduplication
-- **Selective persistence:** Only user-relevant state is persisted
-- **Lazy evaluation:** Subscriptions only fire on actual changes
-
----
-
-## File Structure
-
-```
-src/stores/
-├── README.md                    # This file
-├── index.ts                     # Re-exports + compatibility layer
-├── graphicsStore.ts             # Graphics settings
-├── gameSimulationStore.ts       # Time, weather, shifts
-├── productionStore.ts           # Machines, workers, metrics
-├── safetyStore.ts               # Safety, forklifts, incidents
-└── uiStore.ts                   # UI state, alerts, panels
-```
-
----
-
-## Testing
-
-To verify the refactoring:
+Run the normal project gates after store changes:
 
 ```bash
-# TypeScript compilation
+npm run typecheck
+npm run lint
+npm test
 npm run build
-
-# Component render test
-npm run dev
-
-# Check localStorage keys
-# Open DevTools > Application > Local Storage
-# Should see: millos-graphics, millos-game-simulation, millos-safety, millos-ui
 ```
 
----
-
-## Future Improvements
-
-1. **Smart subscription routing** - Route `useMillStore.subscribe()` calls to specific stores based on selector
-2. **Deprecate legacy storage** - Fully migrate away from `millos-settings` key
-3. **Store composition** - Allow stores to reference each other (e.g., production store triggering UI alerts)
-4. **DevTools integration** - Add Zustand DevTools for time-travel debugging
-5. **Performance monitoring** - Track store update frequency and re-render counts
-
----
-
-## Related Files
-
-- `/src/store.ts` - Main backwards-compatibility export
-- `/src/types.ts` - Shared type definitions
-- `/src/scada/SCADAService.ts` - SCADA integration (subscribes to productionStore)
+SCADA integration lives in `src/scada/SCADAService.ts`; the backwards-compatible aggregate export lives in `src/store.ts`.

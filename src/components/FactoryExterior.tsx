@@ -7,7 +7,6 @@ import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { playCritterSound } from '../utils/critterAudio';
 import { HeartParticle } from './effects/HeartParticle';
 import { useModelTextures } from '../utils/machineTextures';
-import { useProductionStore } from '../stores/productionStore';
 import {
   EXTERIOR_LAYERS,
   FLOOR_LAYERS,
@@ -17,13 +16,17 @@ import {
   WATER_LAYERS,
 } from '../constants/renderLayers';
 import { SITE_LAYOUT } from '../constants/siteLayout';
+import { UTILITY_ASSET_DEFINITIONS } from '../constants/utilityAssets';
 import { createCelestialState, sampleAtmosphere, sampleCelestial } from '../simulation/atmosphere';
-import {
-  calculateShippingTruckState,
-  calculateReceivingTruckState,
-} from './truckbay/useTruckPhysics';
+import { positionRegistry } from '../utils/positionRegistry';
 import { PROCEDURAL_TEXTURES, TREE_MATERIALS } from '../utils/sharedMaterials';
 import { generateMachineORM } from '../textures';
+import { createCheckpointGateState, stepCheckpointGate } from './exterior/checkpointLogic';
+import {
+  EXTERIOR_LAMP_LENS_MATERIAL,
+  ExteriorLampDriver,
+  ExteriorLampPool,
+} from './exterior/ExteriorLighting';
 // OUTDOOR_MATERIALS removed - grass plane now handled by TerrainGround
 import { GasStation } from './GasStationInstanced';
 import {
@@ -60,6 +63,38 @@ const GRASS_COLORS = {
 };
 
 const PROPANE_COMPOUND_CENTRE = SITE_LAYOUT.serviceYard.propaneCompound.position;
+const UTILITY_TANK_FARM_CENTRE = SITE_LAYOUT.serviceYard.utilityTankFarm.position;
+
+const TANK_SUPPORT_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#64707a',
+  roughness: 0.68,
+  metalness: 0.08,
+});
+const TANK_FITTING_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#7c8991',
+  roughness: 0.48,
+  metalness: 0.22,
+});
+const UTILITY_CONCRETE_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#a9afb0',
+  roughness: 0.92,
+  metalness: 0,
+});
+const UTILITY_CURB_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#858d8e',
+  roughness: 0.88,
+  metalness: 0,
+});
+const UTILITY_RAIL_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#aeb8ba',
+  roughness: 0.58,
+  metalness: 0.18,
+});
+const UTILITY_SAFETY_MATERIAL = new THREE.MeshStandardMaterial({
+  color: '#e4a90c',
+  roughness: 0.58,
+  metalness: 0.04,
+});
 
 // ---------------------------------------------------------------------------
 // SHARED EXTERIOR SURFACE TEXTURES
@@ -804,11 +839,11 @@ const FenceSection: React.FC<{
 
 // Water colors
 const WATER_COLORS = {
-  deep: '#1a3a6e', // Deep blue water
-  shallow: '#2d5a8a', // Shallow blue water
-  surface: '#3d6ab0', // Blue surface reflection
-  edge: '#1e3a5a', // Water edge/shore
-  pond: '#2563eb', // Bright blue for decorative ponds
+  deep: '#173f4a', // Deep blue-green water
+  shallow: '#2d6670', // Mineral-rich shallows
+  surface: '#6d989e', // Muted sky reflection
+  edge: '#1d3c42', // Wet bank transition
+  pond: '#2b6871', // Decorative pond water
 };
 
 // The former `WATER_DEPTH_MATERIALS` pair is gone. Every consumer painted a
@@ -865,6 +900,8 @@ const WaterAnimationManager: React.FC = () => {
       const uniforms = material.uniforms;
       uniforms.uTime.value = time;
       uniforms.uWetness.value = atmosphere.wetness;
+      uniforms.uPrecipitation.value = atmosphere.precipitation;
+      uniforms.uWind.value = atmosphere.wind;
       uniforms.uDaylight.value = daylight;
       uniforms.uSkyZenith.value.copy(_waterZenith);
       uniforms.uSkyHorizon.value.copy(_waterHorizon);
@@ -937,6 +974,8 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
         uRadial: { value: radial ? 1 : 0 },
         uCrossOnly: { value: crossOnly ? 1 : 0 },
         uWetness: { value: 0 },
+        uPrecipitation: { value: 0 },
+        uWind: { value: 0.2 },
         uDaylight: { value: 1 },
         uSkyZenith: { value: WATER_ZENITH_DAY.clone() },
         uSkyHorizon: { value: WATER_HORIZON_DAY.clone() },
@@ -948,6 +987,7 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
         uniform vec2 uFlowDirection;
         uniform vec2 uCrossFlow;
         uniform float uFlowSpeed;
+        uniform float uWind;
         varying vec2 vUv;
         varying float vWave;
         varying vec3 vWorldPosition;
@@ -963,9 +1003,10 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
           vec2 waveDerivative =
             cos(along * 0.32 + uTime * uFlowSpeed) * 0.32 * uFlowDirection
             - sin(across * 0.44 - uTime * uFlowSpeed * 0.71) * 0.44 * crossFlow;
-          vec2 heightDerivative = waveDerivative * 0.0175;
+          float windAmplitude = mix(0.75, 1.45, clamp(uWind, 0.0, 1.0));
+          vec2 heightDerivative = waveDerivative * 0.0175 * windAmplitude;
           vec3 displaced = position;
-          displaced.z += vWave * 0.035;
+          displaced.z += vWave * 0.035 * windAmplitude;
           vec3 localNormal = normalize(vec3(-heightDerivative.x, -heightDerivative.y, 1.0));
           vWorldNormal = normalize(mat3(modelMatrix) * localNormal);
           vWorldPosition = (modelMatrix * vec4(displaced, 1.0)).xyz;
@@ -985,6 +1026,7 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
         uniform float uRadial;
         uniform float uCrossOnly;
         uniform float uWetness;
+        uniform float uPrecipitation;
         uniform float uDaylight;
         uniform vec3 uSkyZenith;
         uniform vec3 uSkyHorizon;
@@ -997,17 +1039,31 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
         void main() {
           vec2 centred = vUv * 2.0 - 1.0;
 
-          // Three travelling wave trains. The axes arrive pre-normalised as
-          // uniforms; keeping the raw phases lets the analytic derivatives
-          // below reuse them instead of evaluating a second set of sines.
-          float phaseA = dot(vUv, uRippleA) * 38.0 + uTime * uFlowSpeed * 1.62;
-          float phaseC = dot(vUv, uRippleC) * 23.0 + uTime * uFlowSpeed * 0.63;
+          // Three travelling wave trains in world space. UV-scaled phases
+          // forced every surface to carry the same number of waves, stretching
+          // broad white bands across long canals and compressing them on small
+          // ponds. World-space wavelengths stay physically consistent and
+          // continue seamlessly between neighbouring water meshes.
+          vec2 waterCoord = vWorldPosition.xz;
+          float phaseA = dot(waterCoord, uRippleA) * 2.05 + uTime * uFlowSpeed * 1.62;
+          float phaseC = dot(waterCoord, uRippleC) * 1.35 + uTime * uFlowSpeed * 0.63;
           float rippleA = sin(phaseA);
           float phaseB =
-            dot(vUv, uRippleB) * 59.0 - uTime * uFlowSpeed * 1.09 + rippleA * 0.72;
+            dot(waterCoord, uRippleB) * 3.10 - uTime * uFlowSpeed * 1.09 + rippleA * 0.48;
           float rippleB = sin(phaseB);
           float rippleC = cos(phaseC);
-          float ripples = rippleA * 0.56 + rippleB * 0.27 + rippleC * 0.11 + vWave * 0.06;
+          vec2 rainTile = fract(vWorldPosition.xz * 0.19) - 0.5;
+          float rainDistance = length(rainTile);
+          float rainRipple =
+            sin(rainDistance * 46.0 - uTime * 2.1) *
+            (1.0 - smoothstep(0.08, 0.5, rainDistance)) *
+            uPrecipitation;
+          float ripples =
+            rippleA * 0.54 +
+            rippleB * 0.26 +
+            rippleC * 0.10 +
+            vWave * 0.06 +
+            rainRipple * 0.08;
 
           // DEPTH IS DISTANCE FROM THE BANK, not a UV ramp. The old
           // 0.48 + vUv.y * 0.16 gradient ran across the mesh regardless of
@@ -1029,10 +1085,12 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
           // centimetre chop that makes the reflection break up. No texture
           // fetch, no second pass - purely ALU, which is the budget we have.
           vec2 slope =
-            cos(phaseA) * 38.0 * 0.0040 * uRippleA
-            + cos(phaseB) * 59.0 * 0.0016 * uRippleB
-            - sin(phaseC) * 23.0 * 0.0030 * uRippleC;
-          vec3 normal = normalize(vWorldNormal + vec3(slope.x, 0.0, slope.y));
+            cos(phaseA) * 2.05 * 0.0180 * uRippleA
+            + cos(phaseB) * 3.10 * 0.0085 * uRippleB
+            - sin(phaseC) * 1.35 * 0.0140 * uRippleC;
+          vec3 normal = normalize(
+            vWorldNormal + vec3(slope.x + rainRipple * 0.018, 0.0, slope.y - rainRipple * 0.018)
+          );
 
           vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
           float fresnel = pow(1.0 - max(dot(normal, viewDirection), 0.0), 4.0);
@@ -1056,8 +1114,8 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
           colour += uSunColour * glitter * uDaylight;
 
           float crestSignal = rippleA * 0.7 + rippleB * 0.22 + rippleC * 0.08;
-          float crest = smoothstep(0.70, 0.98, crestSignal);
-          colour = mix(colour, uReflection, crest * (0.05 + 0.06 * uDaylight));
+          float crest = smoothstep(0.78, 1.0, crestSignal);
+          colour = mix(colour, uReflection, crest * (0.025 + 0.035 * uDaylight));
 
           // Shore foam that breathes with the swell rather than a static rim,
           // with a finer lace line right on the waterline.
@@ -1094,7 +1152,7 @@ const UnifiedWaterSurfaceMaterial: React.FC<UnifiedWaterSurfaceMaterialProps> = 
     // MANUALLY VERSIONED, never derived from time or randomness - see the
     // documented `Date.now()` cache-key bug. Bump this whenever the shader
     // source above changes or a stale cached program will be reused.
-    value.customProgramCacheKey = () => 'millos-unified-water-v6';
+    value.customProgramCacheKey = () => 'millos-unified-water-v8';
     return value;
   }, [crossOnly, deep, flowSpeed, flowX, flowY, opacity, radial, reflection, shallow]);
 
@@ -1140,7 +1198,7 @@ const StillCanalWater: React.FC<{
         <UnifiedWaterSurfaceMaterial
           deep={WATER_COLORS.deep}
           shallow={WATER_COLORS.shallow}
-          reflection="#b9dce3"
+          reflection="#86aeb5"
           flowSpeed={0.12}
           opacity={0.9}
           crossOnly
@@ -1529,8 +1587,8 @@ const Lake: React.FC<{
   const safeH = Number.isFinite(size?.[1]) && size[1] > 0 ? size[1] : 20;
   const mainRadiusX = Math.max(0.1, safeW / 2 - 1);
   const mainRadiusZ = Math.max(0.1, safeH / 2 - 1);
-  const shoreRadiusX = Math.max(0.1, safeW / 2 + 2);
-  const shoreRadiusZ = Math.max(0.1, safeH / 2 + 2);
+  const shoreRadiusX = Math.max(0.1, safeW / 2 + 1.2);
+  const shoreRadiusZ = Math.max(0.1, safeH / 2 + 1.2);
   const waterGeometry = useMemo(
     () => createOrganicLakeSurfaceGeometry(mainRadiusX, mainRadiusZ),
     [mainRadiusX, mainRadiusZ]
@@ -3218,6 +3276,7 @@ const PathLamp: React.FC<{
   style?: 'modern' | 'victorian';
 }> = React.memo(({ position, style = 'modern' }) => (
   <group position={position}>
+    <ExteriorLampPool radius={style === 'victorian' ? 5.5 : 4.8} />
     {/* Pole */}
     <mesh position={[0, 2, 0]} castShadow>
       <cylinderGeometry args={[0.08, 0.1, 4, 8]} />
@@ -3234,9 +3293,8 @@ const PathLamp: React.FC<{
           <boxGeometry args={[0.4, 0.5, 0.4]} />
           <meshStandardMaterial color="#1f2937" roughness={0.5} metalness={0.3} />
         </mesh>
-        <mesh position={[0, -0.1, 0]}>
+        <mesh position={[0, -0.1, 0]} material={EXTERIOR_LAMP_LENS_MATERIAL}>
           <boxGeometry args={[0.3, 0.25, 0.3]} />
-          <meshBasicMaterial color="#fef3c7" />
         </mesh>
       </group>
     ) : (
@@ -3245,9 +3303,8 @@ const PathLamp: React.FC<{
           <cylinderGeometry args={[0.2, 0.15, 0.3, 8]} />
           <meshStandardMaterial color="#4b5563" roughness={0.5} metalness={0.4} />
         </mesh>
-        <mesh position={[0, -0.1, 0]}>
+        <mesh position={[0, -0.1, 0]} material={EXTERIOR_LAMP_LENS_MATERIAL}>
           <cylinderGeometry args={[0.12, 0.15, 0.15, 8]} />
-          <meshBasicMaterial color="#fef3c7" />
         </mesh>
       </group>
     )}
@@ -4500,124 +4557,177 @@ function vesselWarningBandGeometry(radius: number): THREE.LatheGeometry {
 
 // Industrial storage tank - horizontal cylindrical tank with legs
 export const StorageTank: React.FC<{
+  assetId?: string;
   position: [number, number, number];
   length?: number;
   radius?: number;
   rotation?: number;
   color?: string;
-}> = ({ position, length = 8, radius = 2.5, rotation = 0, color = '#e5e7eb' }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
-    {/* The vessel: shell, both dished heads and both weld seams in one lathe,
-        laid on its side. The three tanks on site are 6 m, 5 m and 6 m across
-        and sit at eye height, so this profile is the entire silhouette. It
-        replaces a barrel plus two hemispherical caps with a single mesh. Be
-        exact about the cost, because it depends on the baseline: 650 verts
-        against the 798 of the 24-segment barrel and 24 x 12 caps it directly
-        replaces, but against 438 for the 16-segment barrel and 12 x 12 caps in
-        the last commit. Either way it is two meshes and two draw calls fewer,
-        and the geometry is now shared between the two 3 x 10 tanks rather than
-        rebuilt per instance. */}
-    <mesh
-      geometry={vesselGeometry(radius, length)}
-      position={[0, radius + 1.5, 0]}
-      rotation={[0, 0, Math.PI / 2]}
-      castShadow
-      receiveShadow
+  accentColor?: string;
+  label?: string;
+}> = ({
+  assetId,
+  position,
+  length = 8,
+  radius = 2.5,
+  rotation = 0,
+  color = '#e5e7eb',
+  accentColor = '#2f6f8f',
+  label = 'UTILITY',
+}) => {
+  const centreY = radius + 1.5;
+
+  return (
+    <group
+      position={position}
+      rotation={[0, rotation, 0]}
+      name={assetId}
+      userData={{ assetId, equipmentType: 'utility-tank' }}
     >
-      {/* Painted pressure vessel, not polished steel - see the note on
-          GrainSilo about the environment probe these values assume. */}
-      <meshStandardMaterial color={color} roughness={0.55} metalness={0.18} />
-    </mesh>
-    {/* Support legs - 4 saddle supports */}
-    {[-length / 3, length / 3].map((x, i) => (
-      <group key={`legs-${i}`} position={[x, 0, 0]}>
-        {/* Left leg */}
-        <mesh position={[0, 0.75, -radius * 0.7]} castShadow>
-          <boxGeometry args={[0.4, 1.5, 0.4]} />
-          <meshStandardMaterial color="#4b5563" roughness={0.6} metalness={0.4} />
-        </mesh>
-        {/* Right leg */}
-        <mesh position={[0, 0.75, radius * 0.7]} castShadow>
-          <boxGeometry args={[0.4, 1.5, 0.4]} />
-          <meshStandardMaterial color="#4b5563" roughness={0.6} metalness={0.4} />
-        </mesh>
-        {/* Cross brace */}
-        <mesh position={[0, 0.4, 0]} castShadow>
-          <boxGeometry args={[0.3, 0.3, radius * 1.4]} />
-          <meshStandardMaterial color="#4b5563" roughness={0.6} metalness={0.4} />
-        </mesh>
-        {/* Saddle */}
-        <mesh position={[0, 1.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-          <cylinderGeometry
-            args={[radius + 0.1, radius + 0.1, 0.6, 12, 1, false, Math.PI, Math.PI]}
+      {/* Dished pressure-vessel heads, straight flanges, and recessed weld
+          seams form one cached watertight geometry. This preserves the
+          operational asset identity and calibrated paint from the campaign
+          pass while replacing the pill-like capsule silhouette. */}
+      <mesh
+        geometry={vesselGeometry(radius, length)}
+        position={[0, centreY, 0]}
+        rotation={[0, 0, Math.PI / 2]}
+        castShadow
+        receiveShadow
+      >
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={0.18}
+          roughness={0.64}
+          metalness={0.03}
+          envMapIntensity={0.72}
+        />
+      </mesh>
+      {/* Identification bands make the vessel orientation readable even in
+          overcast and night lighting without adding a light or emissive hack. */}
+      {[-length / 3, length / 3].map((x) => (
+        <mesh
+          key={`band-${x}`}
+          position={[x, centreY, 0]}
+          rotation={[0, Math.PI / 2, 0]}
+          castShadow
+        >
+          <torusGeometry args={[radius + 0.035, 0.085, 8, 24]} />
+          <meshStandardMaterial
+            color={accentColor}
+            roughness={0.64}
+            metalness={0.03}
+            envMapIntensity={0.72}
           />
-          <meshStandardMaterial color="#374151" roughness={0.5} metalness={0.5} />
-        </mesh>
-      </group>
-    ))}
-    <GroundBlob position={[0, 0]} scale={length + 3} scaleZ={radius * 3.4} />
-    {/* Pipe fittings on top */}
-    <mesh position={[0, radius * 2 + 1.5, 0]} castShadow>
-      <cylinderGeometry args={[0.3, 0.3, 0.8, 8]} />
-      <meshStandardMaterial color="#6b7280" roughness={0.4} metalness={0.6} />
-    </mesh>
-    <mesh position={[length / 4, radius * 2 + 1.5, 0]} castShadow>
-      <cylinderGeometry args={[0.2, 0.2, 0.6, 8]} />
-      <meshStandardMaterial color="#6b7280" roughness={0.4} metalness={0.6} />
-    </mesh>
-    {/* Ladder access */}
-    <group position={[0, 0, -radius - 0.2]}>
-      <mesh position={[0, radius + 1.5, 0]} castShadow>
-        <boxGeometry args={[0.08, radius * 2 + 1, 0.08]} />
-        <meshStandardMaterial color="#fbbf24" roughness={0.4} metalness={0.5} />
-      </mesh>
-      <mesh position={[0.3, radius + 1.5, 0]} castShadow>
-        <boxGeometry args={[0.08, radius * 2 + 1, 0.08]} />
-        <meshStandardMaterial color="#fbbf24" roughness={0.4} metalness={0.5} />
-      </mesh>
-      {/* Rungs */}
-      {Array.from({ length: 8 }).map((_, i) => (
-        <mesh key={`rung-${i}`} position={[0.15, 0.5 + i * 0.5, 0]} castShadow>
-          <boxGeometry args={[0.25, 0.04, 0.04]} />
-          <meshStandardMaterial color="#fbbf24" roughness={0.4} metalness={0.5} />
         </mesh>
       ))}
+      {/* Support legs - 4 saddle supports */}
+      {[-length / 3, length / 3].map((x, i) => (
+        <group key={`legs-${i}`} position={[x, 0, 0]}>
+          {/* Left leg */}
+          <mesh material={TANK_SUPPORT_MATERIAL} position={[0, 0.75, -radius * 0.7]} castShadow>
+            <boxGeometry args={[0.4, 1.5, 0.4]} />
+          </mesh>
+          {/* Right leg */}
+          <mesh material={TANK_SUPPORT_MATERIAL} position={[0, 0.75, radius * 0.7]} castShadow>
+            <boxGeometry args={[0.4, 1.5, 0.4]} />
+          </mesh>
+          {/* Cross brace */}
+          <mesh material={TANK_SUPPORT_MATERIAL} position={[0, 0.4, 0]} castShadow>
+            <boxGeometry args={[0.3, 0.3, radius * 1.4]} />
+          </mesh>
+          {/* Saddle */}
+          <mesh
+            material={TANK_SUPPORT_MATERIAL}
+            position={[0, 1.5, 0]}
+            rotation={[0, 0, Math.PI / 2]}
+            castShadow
+          >
+            <cylinderGeometry
+              args={[radius + 0.1, radius + 0.1, 0.6, 12, 1, false, Math.PI, Math.PI]}
+            />
+          </mesh>
+        </group>
+      ))}
+      <GroundBlob position={[0, 0]} scale={length + 3} scaleZ={radius * 3.4} />
+      {/* Pipe fittings on top */}
+      <mesh material={TANK_FITTING_MATERIAL} position={[0, radius * 2 + 1.62, 0]} castShadow>
+        <cylinderGeometry args={[0.3, 0.3, 0.8, 8]} />
+      </mesh>
+      <mesh
+        material={TANK_FITTING_MATERIAL}
+        position={[length / 4, radius * 2 + 1.58, 0]}
+        castShadow
+      >
+        <cylinderGeometry args={[0.2, 0.2, 0.6, 8]} />
+      </mesh>
+      {/* Ladder access */}
+      <group position={[0, 0, -radius - 0.2]}>
+        <mesh position={[0, radius + 1.5, 0]} castShadow>
+          <boxGeometry args={[0.08, radius * 2 + 1, 0.08]} />
+          <meshStandardMaterial color="#fbbf24" roughness={0.4} metalness={0.5} />
+        </mesh>
+        <mesh position={[0.3, radius + 1.5, 0]} castShadow>
+          <boxGeometry args={[0.08, radius * 2 + 1, 0.08]} />
+          <meshStandardMaterial color="#fbbf24" roughness={0.4} metalness={0.5} />
+        </mesh>
+        {/* Rungs */}
+        {Array.from({ length: 8 }).map((_, i) => (
+          <mesh key={`rung-${i}`} position={[0.15, 0.5 + i * 0.5, 0]} castShadow>
+            <boxGeometry args={[0.25, 0.04, 0.04]} />
+            <meshStandardMaterial color="#fbbf24" roughness={0.4} metalness={0.5} />
+          </mesh>
+        ))}
+      </group>
+      <Text
+        position={[0, centreY, radius + 0.08]}
+        fontSize={0.42}
+        color="#27343a"
+        anchorX="center"
+        anchorY="middle"
+        fontWeight="bold"
+      >
+        {label}
+      </Text>
     </group>
-  </group>
-);
+  );
+};
 
 // Propane tank - smaller vertical cylindrical tank
 export const PropaneTank: React.FC<{
+  assetId?: string;
   position: [number, number, number];
   height?: number;
   radius?: number;
-}> = ({ position, height = 4, radius = 1.2 }) => (
-  <group position={position}>
-    {/* The vessel: shell, both dished heads and both head-to-shell weld seams
-        in one lathe (see createVesselGeometry). The pair on the utility pad are
-        3.0 m and 2.4 m across on a glossy near-white surface - roughness 0.3 is
-        exactly the finish that shows the shape - and they used to be pills. An
-        ASME propane vessel is a straight shell with a torispherical head welded
-        on at each end, and that knuckle shoulder is what tells the eye it is a
-        pressure vessel rather than a drum.
-
-        Unlike the shell courses on a big horizontal tank, a vessel this size is
-        rolled from one course, so it gets no mid-shell girth seam - only the
-        two head welds. Note the bottom head sits below grade: it is modelled
-        for correctness, but the top head and the upper weld are what read.
-
-        This one is not a vertex saving on any baseline - 650 in one mesh
-        against the 598 across the three it directly replaces, or against 310
-        for the 12-segment version in the last commit - but it is two meshes and
-        two draw calls cheaper, and the 8-ring caps it replaces were spending
-        their budget on a shape that was wrong. */}
+  color?: string;
+  accentColor?: string;
+}> = ({
+  assetId,
+  position,
+  height = 4,
+  radius = 1.2,
+  color = '#f1f3ef',
+  accentColor = '#b83a32',
+}) => (
+  <group position={position} name={assetId} userData={{ assetId, equipmentType: 'lpg-vessel' }}>
+    {/* The same cached dished-head vessel family as the horizontal utility
+        tanks. The lower head is deliberately buried while the upper knuckle
+        and weld line remain readable above the containment pad. */}
     <mesh
       geometry={vesselGeometry(radius, height)}
       position={[0, height / 2 + 0.5, 0]}
       castShadow
       receiveShadow
     >
-      <meshStandardMaterial color="#f5f5f5" roughness={0.3} metalness={0.4} />
+      <meshStandardMaterial
+        color={color}
+        emissive={color}
+        emissiveIntensity={0.18}
+        roughness={0.64}
+        metalness={0.03}
+        envMapIntensity={0.72}
+      />
     </mesh>
     {/* Support legs - 3 legs */}
     {[0, (Math.PI * 2) / 3, (Math.PI * 4) / 3].map((angle, i) => (
@@ -4631,11 +4741,11 @@ export const PropaneTank: React.FC<{
       </mesh>
     ))}
     {/* Valve assembly on top */}
-    <mesh position={[0, height + radius + 0.3, 0]} castShadow>
+    <mesh position={[0, height + radius + 0.75, 0]} castShadow>
       <cylinderGeometry args={[0.15, 0.2, 0.4, 8]} />
       <meshStandardMaterial color="#374151" roughness={0.4} metalness={0.6} />
     </mesh>
-    <mesh position={[0, height + radius + 0.6, 0]} castShadow>
+    <mesh position={[0, height + radius + 1.05, 0]} castShadow>
       <boxGeometry args={[0.4, 0.2, 0.4]} />
       <meshStandardMaterial color="#1f2937" roughness={0.4} metalness={0.6} />
     </mesh>
@@ -4650,10 +4760,128 @@ export const PropaneTank: React.FC<{
       position={[0, height * 0.3 + 0.5, 0]}
       castShadow
     >
-      <meshStandardMaterial color="#dc2626" roughness={0.5} />
+      <meshStandardMaterial
+        color={accentColor}
+        roughness={0.64}
+        metalness={0.03}
+        envMapIntensity={0.72}
+      />
     </mesh>
   </group>
 );
+
+const UtilityTankFarm: React.FC = React.memo(() => (
+  <group position={UTILITY_TANK_FARM_CENTRE} name="utility-tank-farm">
+    {/* Raised containment pad. Its underside meets the shared exterior datum,
+        so it neither floats nor competes with TerrainGround. */}
+    <mesh position={[0, EXTERIOR_LAYERS.ground + 0.09, 0]} receiveShadow>
+      <boxGeometry args={[22, 0.18, 42]} />
+      <primitive object={UTILITY_CONCRETE_MATERIAL} attach="material" />
+    </mesh>
+    {/* Low bund walls contain a spill while keeping the vessels readable from
+        the yard camera and leaving the west-side service access unobstructed. */}
+    {[
+      { position: [0, 0.23, -21] as [number, number, number], size: [22, 0.34, 0.28] },
+      { position: [0, 0.23, 21] as [number, number, number], size: [22, 0.34, 0.28] },
+      { position: [11, 0.23, 0] as [number, number, number], size: [0.28, 0.34, 42] },
+      { position: [-11, 0.23, -12] as [number, number, number], size: [0.28, 0.34, 18] },
+      { position: [-11, 0.23, 12] as [number, number, number], size: [0.28, 0.34, 18] },
+    ].map(({ position, size }, index) => (
+      <mesh key={`tank-bund-${index}`} position={position} castShadow receiveShadow>
+        <boxGeometry args={size as [number, number, number]} />
+        <primitive object={UTILITY_CURB_MATERIAL} attach="material" />
+      </mesh>
+    ))}
+    {UTILITY_ASSET_DEFINITIONS.filter((asset) => asset.compound === 'tank_farm').map((asset) => (
+      <StorageTank
+        key={asset.id}
+        assetId={asset.id}
+        position={[...asset.relativePosition]}
+        length={asset.length}
+        radius={asset.radius}
+        color={asset.color}
+        accentColor={asset.accentColor}
+        label={asset.label}
+      />
+    ))}
+  </group>
+));
+UtilityTankFarm.displayName = 'UtilityTankFarm';
+
+const PropaneSafetyCompound: React.FC = React.memo(() => {
+  const railSegments: Array<{
+    position: [number, number, number];
+    size: [number, number, number];
+  }> = [
+    { position: [0, 1.25, -4.5], size: [12, 0.1, 0.1] },
+    { position: [0, 1.25, 4.5], size: [12, 0.1, 0.1] },
+    { position: [6, 1.25, 0], size: [0.1, 0.1, 9] },
+    { position: [-6, 1.25, -3.25], size: [0.1, 0.1, 2.5] },
+    { position: [-6, 1.25, 3.25], size: [0.1, 0.1, 2.5] },
+    { position: [0, 2.2, -4.5], size: [12, 0.1, 0.1] },
+    { position: [0, 2.2, 4.5], size: [12, 0.1, 0.1] },
+    { position: [6, 2.2, 0], size: [0.1, 0.1, 9] },
+    { position: [-6, 2.2, -3.25], size: [0.1, 0.1, 2.5] },
+    { position: [-6, 2.2, 3.25], size: [0.1, 0.1, 2.5] },
+  ];
+
+  return (
+    <group position={PROPANE_COMPOUND_CENTRE} name="propane-safety-compound">
+      <mesh position={[0, EXTERIOR_LAYERS.ground + 0.08, 0]} receiveShadow>
+        <boxGeometry args={[12, 0.16, 9]} />
+        <primitive object={UTILITY_CONCRETE_MATERIAL} attach="material" />
+      </mesh>
+      {[
+        [-6, -4.5],
+        [-6, -2],
+        [-6, 2],
+        [-6, 4.5],
+        [6, -4.5],
+        [6, 4.5],
+      ].map(([x, z], index) => (
+        <mesh key={`lpg-post-${index}`} position={[x, 1.2, z]} castShadow>
+          <boxGeometry args={[0.14, 2.4, 0.14]} />
+          <primitive object={UTILITY_RAIL_MATERIAL} attach="material" />
+        </mesh>
+      ))}
+      {railSegments.map(({ position, size }, index) => (
+        <mesh key={`lpg-rail-${index}`} position={position} castShadow>
+          <boxGeometry args={size} />
+          <primitive object={UTILITY_RAIL_MATERIAL} attach="material" />
+        </mesh>
+      ))}
+      {[-3, 0, 3].map((z) => (
+        <mesh key={`lpg-bollard-${z}`} position={[-6.6, 0.72, z]} castShadow>
+          <cylinderGeometry args={[0.13, 0.16, 1.4, 10]} />
+          <primitive object={UTILITY_SAFETY_MATERIAL} attach="material" />
+        </mesh>
+      ))}
+      {UTILITY_ASSET_DEFINITIONS.filter((asset) => asset.compound === 'propane').map((asset) => (
+        <PropaneTank
+          key={asset.id}
+          assetId={asset.id}
+          position={[...asset.relativePosition]}
+          height={asset.height}
+          radius={asset.radius}
+          color={asset.color}
+          accentColor={asset.accentColor}
+        />
+      ))}
+      <Text
+        position={[6.08, 2.95, 0]}
+        rotation={[0, Math.PI / 2, 0]}
+        fontSize={0.34}
+        color="#7f1d1d"
+        anchorX="center"
+        anchorY="middle"
+        fontWeight="bold"
+      >
+        LPG · NO IGNITION SOURCES
+      </Text>
+    </group>
+  );
+});
+PropaneSafetyCompound.displayName = 'PropaneSafetyCompound';
 
 // Optimized car component - good looks with efficient rendering
 // Uses React.memo, reduced geometry segments, consolidated meshes
@@ -5554,110 +5782,81 @@ const CheckpointBarrier: React.FC<{
   roadWidth?: number;
   checkpointType?: 'shipping' | 'receiving';
 }> = ({ position, rotation = 0, label = 'CHECKPOINT', roadWidth = 16, checkpointType }) => {
+  const checkpointRootRef = useRef<THREE.Group>(null);
   const barrierArmRef = useRef<THREE.Group>(null);
   const barrierArm2Ref = useRef<THREE.Group>(null);
   const lightRef = useRef<THREE.MeshBasicMaterial>(null);
   const light2Ref = useRef<THREE.MeshBasicMaterial>(null);
+  const openRef = useRef(false);
+  const gateStateRef = useRef(createCheckpointGateState());
+  const dock = checkpointType ?? (position[2] > 0 ? 'shipping' : 'receiving');
+  const checkpointPosition = useMemo(
+    () => ({ x: position[0], z: position[2] }),
+    [position[0], position[2]]
+  );
 
-  // Get production speed for synchronized truck timing
-  const productionSpeed = useProductionStore((s) => s.productionSpeed);
-
-  // Animate the barrier arms - raise when trucks approach
-  useFrame((state) => {
+  // Follow the same live tractor and trailer poses that are rendered in the
+  // yard. This replaces the old duplicate clock animation, which could open a
+  // barrier for an imaginary truck while the visible one remained elsewhere.
+  useFrame((state, delta) => {
     const time = state.clock.elapsedTime;
-    const adjustedTime = time * (productionSpeed * 0.25 + 0.2);
-    const CYCLE_LENGTH = 60;
+    gateStateRef.current = stepCheckpointGate(
+      gateStateRef.current,
+      checkpointPosition,
+      positionRegistry.get(`${dock}-truck-cab`),
+      positionRegistry.get(`${dock}-truck-trailer`),
+      delta
+    );
+    openRef.current = gateStateRef.current.open;
+    const targetAngle = openRef.current ? Math.PI / 2 : 0;
+    const safeDelta = Math.min(Math.max(delta, 0), 0.1);
 
-    // Calculate truck positions
-    const shippingCycle = adjustedTime % CYCLE_LENGTH;
-    const receivingCycle = (adjustedTime + CYCLE_LENGTH / 2) % CYCLE_LENGTH;
-
-    const shippingState = calculateShippingTruckState(shippingCycle, time);
-    const receivingState = calculateReceivingTruckState(receivingCycle, time);
-
-    // Checkpoint positions: shipping at z=110, receiving at z=-110
-    // Detect when trucks are within range of this checkpoint
-    const DETECTION_RANGE = 40; // Units from checkpoint to start raising
-    const checkpointZ = position[2];
-
-    // Determine if this checkpoint should respond to shipping or receiving trucks
-    const isShippingCheckpoint = checkpointType === 'shipping' || checkpointZ > 0;
-
-    let shouldRaiseInbound = false; // Barrier 1 (left side, z=+3 relative)
-    let shouldRaiseOutbound = false; // Barrier 2 (right side, z=-3 relative)
-
-    if (isShippingCheckpoint) {
-      // Shipping checkpoint at z=110
-      // Truck enters from z=200 (coming from positive z towards dock at z=53)
-      // Truck exits towards z=200 (going from dock back to road)
-      const truckZ = shippingState.z;
-
-      // Entering phases: truck coming from road towards dock
-      // 'entering' is when truck is on straight approach, 'slowing' would be deceleration
-      const isEntering = shippingState.phase === 'entering' || shippingState.phase === 'slowing';
-      // Leaving phases: truck going from dock back to road
-      // 'accelerating' is when truck actually passes checkpoint on the way out
-      const isLeaving =
-        shippingState.phase === 'turning_out' ||
-        shippingState.phase === 'accelerating' ||
-        shippingState.phase === 'leaving';
-
-      if (isEntering && truckZ > checkpointZ - 20 && truckZ < checkpointZ + DETECTION_RANGE) {
-        shouldRaiseInbound = true;
-      }
-      if (isLeaving && truckZ > checkpointZ - 20 && truckZ < checkpointZ + DETECTION_RANGE) {
-        shouldRaiseOutbound = true;
-      }
-    } else {
-      // Receiving checkpoint at z=-110
-      const truckZ = receivingState.z;
-
-      // Entering phases: truck coming from road (z=-200) towards dock (z=-53)
-      const isEntering = receivingState.phase === 'entering' || receivingState.phase === 'slowing';
-      // Leaving phases: truck going from dock back to road
-      // 'accelerating' is when truck actually passes checkpoint on the way out
-      const isLeaving =
-        receivingState.phase === 'turning_out' ||
-        receivingState.phase === 'accelerating' ||
-        receivingState.phase === 'leaving';
-
-      if (isEntering && truckZ < checkpointZ + 20 && truckZ > checkpointZ - DETECTION_RANGE) {
-        shouldRaiseInbound = true;
-      }
-      if (isLeaving && truckZ < checkpointZ + 20 && truckZ > checkpointZ - DETECTION_RANGE) {
-        shouldRaiseOutbound = true;
-      }
-    }
-
-    // Target angles: 0 = down, PI/2 = up
-    // Both booms raise together when truck approaches from either direction
-    const shouldRaiseBoth = shouldRaiseInbound || shouldRaiseOutbound;
-    const targetAngle1 = shouldRaiseBoth ? Math.PI / 2 : 0;
-    const targetAngle2 = shouldRaiseBoth ? Math.PI / 2 : 0;
-
-    // Smooth animation for barrier 1 (faster response)
     if (barrierArmRef.current) {
-      const currentAngle1 = barrierArmRef.current.rotation.z;
-      const diff1 = targetAngle1 - currentAngle1;
-      barrierArmRef.current.rotation.z += diff1 * 0.08;
+      barrierArmRef.current.rotation.z = THREE.MathUtils.damp(
+        barrierArmRef.current.rotation.z,
+        targetAngle,
+        5.2,
+        safeDelta
+      );
     }
-
-    // Smooth animation for barrier 2
     if (barrierArm2Ref.current) {
-      const currentAngle2 = barrierArm2Ref.current.rotation.z;
-      const diff2 = targetAngle2 - currentAngle2;
-      barrierArm2Ref.current.rotation.z += diff2 * 0.08;
+      barrierArm2Ref.current.rotation.z = THREE.MathUtils.damp(
+        barrierArm2Ref.current.rotation.z,
+        targetAngle,
+        5.2,
+        safeDelta
+      );
     }
 
-    // Flashing warning lights when barrier is down (truck approaching)
-    const flash = Math.sin(time * 4) > 0;
-    const isUp1 = barrierArmRef.current && barrierArmRef.current.rotation.z > Math.PI / 4;
-    const isUp2 = barrierArm2Ref.current && barrierArm2Ref.current.rotation.z > Math.PI / 4;
+    const currentAngle = barrierArmRef.current?.rotation.z ?? 0;
+    const armMoving = Math.abs(currentAngle - targetAngle) > 0.04;
+    const armRaised = currentAngle > Math.PI / 2 - 0.12;
+    const flash = Math.sin(time * 7) > 0;
+    const signalColor = armMoving
+      ? flash
+        ? 0xffb000
+        : 0x4a2600
+      : armRaised && openRef.current
+        ? 0x35d46f
+        : 0xef2929;
     if (lightRef.current) {
-      lightRef.current.color.setHex(flash && !isUp1 ? 0xff0000 : 0x440000);
+      lightRef.current.color.setHex(signalColor);
     }
     if (light2Ref.current) {
-      light2Ref.current.color.setHex(flash && !isUp2 ? 0xff0000 : 0x440000);
+      light2Ref.current.color.setHex(signalColor);
+    }
+    if (checkpointRootRef.current) {
+      checkpointRootRef.current.userData.gateOpen = openRef.current;
+      checkpointRootRef.current.userData.gatePhase = armMoving
+        ? openRef.current
+          ? 'opening'
+          : 'closing'
+        : openRef.current
+          ? 'open'
+          : 'closed';
+      checkpointRootRef.current.userData.clearanceSecondsRemaining =
+        gateStateRef.current.clearanceSecondsRemaining;
+      checkpointRootRef.current.userData.armAngle = currentAngle;
     }
   });
 
@@ -5670,7 +5869,20 @@ const CheckpointBarrier: React.FC<{
   const boothOffset = roadWidth / 2 + 2 + boothWidth / 2;
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group
+      ref={checkpointRootRef}
+      name={`${dock}-checkpoint`}
+      position={position}
+      rotation={[0, rotation, 0]}
+      userData={{
+        noStaticBatch: true,
+        dynamic: true,
+        gateOpen: false,
+        gatePhase: 'closed',
+        clearanceSecondsRemaining: 0,
+        armAngle: 0,
+      }}
+    >
       {/* ===== CHECKPOINT BOOTH (beside road on LEFT side) ===== */}
       <group position={[-boothOffset, 0, 0]}>
         {/* Booth base/platform */}
@@ -5769,7 +5981,12 @@ const CheckpointBarrier: React.FC<{
         </mesh>
 
         {/* Barrier arm pivot - swings inward across road */}
-        <group ref={barrierArmRef} position={[0, 2.9, 0]}>
+        <group
+          ref={barrierArmRef}
+          name={`${dock}-checkpoint-inbound-arm`}
+          position={[0, 2.9, 0]}
+          userData={{ noStaticBatch: true, dynamic: true }}
+        >
           <mesh position={[armLength / 2, 0, 0]} castShadow>
             <boxGeometry args={[armLength, 0.2, 0.2]} />
             <meshStandardMaterial color="#ffffff" roughness={0.5} />
@@ -5812,7 +6029,13 @@ const CheckpointBarrier: React.FC<{
         </mesh>
 
         {/* Barrier arm pivot - swings inward across road (rotated 180°) */}
-        <group ref={barrierArm2Ref} position={[0, 2.9, 0]} rotation={[0, Math.PI, 0]}>
+        <group
+          ref={barrierArm2Ref}
+          name={`${dock}-checkpoint-outbound-arm`}
+          position={[0, 2.9, 0]}
+          rotation={[0, Math.PI, 0]}
+          userData={{ noStaticBatch: true, dynamic: true }}
+        >
           <mesh position={[armLength / 2, 0, 0]} castShadow>
             <boxGeometry args={[armLength, 0.2, 0.2]} />
             <meshStandardMaterial color="#ffffff" roughness={0.5} />
@@ -5898,7 +6121,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
 
   // Exterior wall positions - these are OUTSIDE the existing factory elements
   // Factory floor extends to about x=±60, z=±80 (for truck yards)
-  // Main building is roughly x=±55, z=±45 where personnel doors are
+  // Main building is roughly x=±55, z=±45 where service egress doors are
   const buildingHalfWidth = 58; // X extent (slightly outside the x=±55 doors)
   const buildingFrontZ = 48; // Front wall Z (behind the z=42 front doors)
   const buildingBackZ = -48; // Back wall Z (behind the z=-45 back doors)
@@ -5942,6 +6165,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
 
   return (
     <group>
+      <ExteriorLampDriver />
       <WaterAnimationManager />
       {/* ========== EXTERIOR GRASS GROUND ========== */}
       {/* DISABLED: Replaced by TerrainGround unified terrain system */}
@@ -6040,8 +6264,8 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
             />
           </mesh>
 
-          {/* ========== FRONT PERSONNEL ENTRANCES - Realistic Industrial Style ========== */}
-          {/* Left main entrance at x=-45 - doors positioned 1.5 units in front of wall */}
+          {/* ========== FRONT SERVICE ENTRANCES ========== */}
+          {/* Left service entrance at x=-45, positioned 1.5 units in front of wall */}
           <group position={[-45, 0, buildingFrontZ + 1.5]}>
             {/* Concrete entrance platform/steps */}
             <mesh position={[0, 0.2, 1.5]} castShadow receiveShadow>
@@ -6152,7 +6376,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
             </mesh>
           </group>
 
-          {/* Right staff entrance at x=45 - doors positioned 1.5 units in front of wall */}
+          {/* Right service entrance at x=45, positioned 1.5 units in front of wall */}
           <group position={[45, 0, buildingFrontZ + 1.5]}>
             {/* Concrete entrance platform/steps */}
             <mesh position={[0, 0.2, 1.5]} castShadow receiveShadow>
@@ -6601,9 +6825,9 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
             </Text>
           </group>
 
-          {/* ========== LEFT SIDE WALL (X-) with personnel door ========== */}
+          {/* ========== LEFT SIDE WALL (X-) with service egress ========== */}
           {/* Side walls end INSIDE front/back walls - front/back walls wrap around corners */}
-          {/* Personnel door opening in the wall - West Exit */}
+          {/* Service egress opening in the wall, West Exit */}
           {(() => {
             const sideWallLength = Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2;
             const doorWidth = 3;
@@ -6658,7 +6882,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                     side={THREE.DoubleSide}
                   />
                 </mesh>
-                {/* West Personnel Door - exterior side */}
+                {/* West service egress, exterior side */}
                 <group
                   position={[-buildingHalfWidth - 0.3, 0, doorZ]}
                   rotation={[0, Math.PI / 2, 0]}
@@ -6722,7 +6946,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                     />
                   </mesh>
                 </group>
-                {/* West Personnel Door - interior side */}
+                {/* West service egress, interior side */}
                 <group
                   position={[-buildingHalfWidth + 0.3, 0, doorZ]}
                   rotation={[0, -Math.PI / 2, 0]}
@@ -6789,8 +7013,8 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
             />
           </mesh>
 
-          {/* ========== RIGHT SIDE WALL (X+) with personnel door ========== */}
-          {/* Personnel door opening in the wall - East Exit */}
+          {/* ========== RIGHT SIDE WALL (X+) with service egress ========== */}
+          {/* Service egress opening in the wall, East Exit */}
           {(() => {
             const sideWallLength = Math.abs(buildingFrontZ - buildingBackZ) - wallThickness * 2;
             const doorWidth = 3;
@@ -6845,7 +7069,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                     side={THREE.DoubleSide}
                   />
                 </mesh>
-                {/* East Personnel Door - exterior side */}
+                {/* East service egress, exterior side */}
                 <group
                   position={[buildingHalfWidth + 0.3, 0, doorZ]}
                   rotation={[0, -Math.PI / 2, 0]}
@@ -6909,7 +7133,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                     />
                   </mesh>
                 </group>
-                {/* East Personnel Door - interior side */}
+                {/* East service egress, interior side */}
                 <group
                   position={[buildingHalfWidth - 0.3, 0, doorZ]}
                   rotation={[0, Math.PI / 2, 0]}
@@ -7297,6 +7521,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
       ].map(([x, z], i) => (
         <group key={`lamp-${i}`} position={[x, 0, z]}>
           <GroundBlob position={[0, 0]} scale={2.4} />
+          <ExteriorLampPool radius={7} />
           {/* Pole */}
           <mesh position={[0, 3, 0]} castShadow>
             <cylinderGeometry args={[0.1, 0.15, 6, 8]} />
@@ -7308,9 +7533,8 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
             <meshStandardMaterial color="#263238" roughness={0.5} metalness={0.4} />
           </mesh>
           {/* Light bulb area */}
-          <mesh position={[0, 5.9, 0]}>
+          <mesh position={[0, 5.9, 0]} material={EXTERIOR_LAMP_LENS_MATERIAL}>
             <cylinderGeometry args={[0.25, 0.35, 0.3, 8]} />
-            <meshBasicMaterial color="#fff9c4" />
           </mesh>
         </group>
       ))}
@@ -7349,7 +7573,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
       {/* European-style bus shelter on shipping road, past checkpoint, near farm */}
       <BusStop position={[29, 0, 140]} rotation={-Math.PI / 2} />
 
-      {/* ========== EMPLOYEE PARKING LOT WITH CUTE CARS ========== */}
+      {/* ========== VISITOR PARKING LOT WITH CUTE CARS ========== */}
       {/* Parking lot positioned outside east fence (fence is at x=95) */}
       <ParkingLot position={[120, 0, 50]} rows={2} spotsPerRow={6} rotation={0} />
 
@@ -7805,23 +8029,10 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
       <ConveyorBridge start={[-70, 35, -20]} end={[-75, 25, 10]} />
       <ConveyorBridge start={[-58, 12, 0]} end={[-58, 12, -40]} />
 
-      {/* Storage tanks - east side industrial area */}
-      <StorageTank position={[75, 0, -30]} length={10} radius={3} rotation={0} color="#d1d5db" />
-      <StorageTank position={[75, 0, -15]} length={8} radius={2.5} rotation={0} color="#e5e7eb" />
-      <StorageTank position={[75, 0, 0]} length={10} radius={3} rotation={0} color="#d1d5db" />
-
-      {/* Propane tanks sit on the east utility pad, clear of the maintenance
-          garage footprint, its west-facing doors, and the truck apron. */}
-      <PropaneTank
-        position={[PROPANE_COMPOUND_CENTRE[0] - 2.5, 0, PROPANE_COMPOUND_CENTRE[2]]}
-        height={5}
-        radius={1.5}
-      />
-      <PropaneTank
-        position={[PROPANE_COMPOUND_CENTRE[0] + 2.5, 0, PROPANE_COMPOUND_CENTRE[2]]}
-        height={4}
-        radius={1.2}
-      />
+      {/* Utility compounds use the site-layout anchors as their sole placement
+          authority, including containment, access control and safety clearance. */}
+      <UtilityTankFarm />
+      <PropaneSafetyCompound />
 
       {/* Additional grain silos - outside the main building */}
       <GrainSilo position={[-85, 0, 30]} radius={6} height={35} color="#94a3b8" />

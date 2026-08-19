@@ -9,29 +9,29 @@ export interface MockIncident {
   description: string;
   location?: { x: number; z: number };
   forkliftId?: string;
-  workerId?: string;
+  conflictingVehicleId?: string;
 }
 
 export const mockIncidents: MockIncident[] = [
   {
     type: 'stop',
-    description: 'Forklift emergency stop - worker in path',
+    description: 'Forklift emergency stop, service rover in path',
     location: { x: 5, z: 10 },
     forkliftId: 'forklift-1',
-    workerId: 'w3',
+    conflictingVehicleId: 'service-rover-3',
   },
   {
     type: 'evasion',
-    description: 'Worker evasive action near conveyor',
+    description: 'Route conflict near conveyor',
     location: { x: -10, z: -6 },
-    workerId: 'w2',
+    conflictingVehicleId: 'pallet-mover-2',
   },
   {
     type: 'near_miss',
     description: 'Near miss at Zone 4 intersection',
     location: { x: 0, z: 18 },
     forkliftId: 'forklift-2',
-    workerId: 'w4',
+    conflictingVehicleId: 'service-rover-4',
   },
   {
     type: 'emergency',
@@ -65,6 +65,6 @@ export const generateBatchIncidents = (count: number): MockIncident[] => {
       z: (Math.random() - 0.5) * 60,
     },
     forkliftId: i % 2 === 0 ? `forklift-${(i % 3) + 1}` : undefined,
-    workerId: i % 3 === 0 ? `w${(i % 8) + 1}` : undefined,
+    conflictingVehicleId: i % 3 === 0 ? `service-rover-${(i % 8) + 1}` : undefined,
   }));
 };

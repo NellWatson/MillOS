@@ -1,7 +1,7 @@
 /**
  * Static physics colliders for factory machines, walls, and obstacles
  *
- * These are fixed rigid bodies that workers, forklifts, and player collide with.
+ * These fixed rigid bodies constrain autonomous forklifts and the inspection camera.
  * Extracted from MillScene.tsx obstacle definitions for physics-based collision.
  */
 
@@ -207,7 +207,7 @@ export const FactoryColliders: React.FC = () => {
   const obstacles = useMemo(() => generateObstacles(), []);
   const boundarySegments = useMemo(() => generateBoundarySegments(), []);
 
-  // Static objects (machines, floor) - collide with player, workers, forklifts
+  // Static objects collide with the inspection camera and forklifts.
   const staticCollisionGroups = useMemo(
     () =>
       createCollisionGroups(COLLISION_FILTERS.static.memberships, COLLISION_FILTERS.static.filter),

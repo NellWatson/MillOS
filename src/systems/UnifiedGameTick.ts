@@ -1,5 +1,5 @@
 /**
- * UnifiedGameTick - Zero-allocation game state updates
+ * UnifiedGameTick - Allocation-conscious game state updates
  *
  * ARCHITECTURE (per GPT 5.2 recommendations):
  * 1. REUSE OBJECTS - Module-level ctx/arrays, mutated not recreated
@@ -16,30 +16,177 @@ import type { TickContext } from './CentralTickSystem';
 import { useGameSimulationStore, getShiftForHour } from '../stores/gameSimulationStore';
 import { useProductionStore, DAILY_TARGET_BAGS } from '../stores/productionStore';
 import { getDispatchQualityStatus, useQCLabStore } from '../stores/qcLabStore';
-import { useMaterialFlowStore } from '../stores/materialFlowStore';
+import {
+  useMaterialFlowStore,
+  type MaterialFlowState,
+  type MaterialType,
+} from '../stores/materialFlowStore';
 import { useTruckScheduleStore } from '../stores/truckScheduleStore';
-import { useBreakdownStore } from '../stores/breakdownStore';
+import { useBreakdownStore, type BreakdownType } from '../stores/breakdownStore';
 import { useUIStore } from '../stores/uiStore';
-import type { MachineData } from '../types';
+import { BAG_WEIGHT_KG, type MachineData } from '../types';
+import {
+  useOperationsCampaignStore,
+  type DispatchLoadSnapshot,
+  type OperationalIncident,
+} from '../stores/operationsCampaignStore';
+import { getFacilityBaseLoad, getMachineEnergy } from '../utils/energyCalculations';
 
 // Tracks the receiving dock's docked state across ticks so a false->true
 // transition (a grain truck arriving) triggers exactly one silo delivery.
-let _lastReceivingDocked = false;
-let _lastShippingDocked = false;
+let _lastReceivingTransferReady = false;
+let _lastShippingTransferReady = false;
+let _shippingLoad: DispatchLoadSnapshot = {
+  cycleId: 'shipping-0',
+  status: 'away',
+  loadedKg: 0,
+  capacityKg: 5000,
+  materialType: 'flour',
+  blockReason: null,
+  lastDispatchKg: 0,
+};
 
 // One grain truck tops up ~15 t (silo capacity is 50 t)
 const GRAIN_DELIVERY_KG = 15000;
 // A shipping truck can load up to 5 t of finished flour or semolina.
 const FINISHED_GOODS_SHIPMENT_KG = 5000;
+const SHIPPING_LOAD_RATE_KG_PER_SECOND = 400;
+let _bagProductionCarry = 0;
 
-// Shift-change phase timer. startShiftHandover() sets phase 'leaving' (workers
-// walk to the exit at z=-50, ~3 u/s, worst case ~27 s) but nothing ever
-// completed the change — shiftChangeActive stayed true forever and the
-// handover button disabled itself permanently. This timer advances
-// leaving -> entering -> completeShiftHandover().
-let _shiftPhaseElapsed = 0;
-const SHIFT_LEAVING_DURATION_S = 30;
-const SHIFT_ENTERING_DURATION_S = 10;
+export const calculateBagsProducedForTick = (
+  deltaSeconds: number,
+  packerFlowKgPerSecond: number,
+  bagWeightKg: number = BAG_WEIGHT_KG
+): number => {
+  if (
+    !Number.isFinite(deltaSeconds) ||
+    !Number.isFinite(packerFlowKgPerSecond) ||
+    !Number.isFinite(bagWeightKg) ||
+    bagWeightKg <= 0
+  ) {
+    return 0;
+  }
+  return (Math.max(0, deltaSeconds) * Math.max(0, packerFlowKgPerSecond)) / bagWeightKg;
+};
+
+export const calculatePackerThroughputBagsPerHour = (
+  packerFlowKgPerSecond: number,
+  bagWeightKg: number = BAG_WEIGHT_KG
+): number =>
+  Number.isFinite(packerFlowKgPerSecond) && Number.isFinite(bagWeightKg) && bagWeightKg > 0
+    ? Math.round((Math.max(0, packerFlowKgPerSecond) / bagWeightKg) * 3600)
+    : 0;
+
+function sumMaterialInventory(flow: MaterialFlowState, materialType: MaterialType): number {
+  let total = 0;
+  flow.machineBuffers.forEach((buffer) => {
+    total += buffer.inputBuffer.reduce(
+      (sum, material) => sum + (material.type === materialType ? material.amount : 0),
+      0
+    );
+    total += buffer.outputBuffer.reduce(
+      (sum, material) => sum + (material.type === materialType ? material.amount : 0),
+      0
+    );
+  });
+  total += flow.network.segments.reduce(
+    (sum, segment) =>
+      sum +
+      segment.inTransit.reduce(
+        (segmentSum, material) =>
+          segmentSum + (material.type === materialType ? material.amount : 0),
+        0
+      ),
+    0
+  );
+  return total;
+}
+
+function getFinishedGoodsAvailability(
+  flow: MaterialFlowState,
+  materialType: Extract<MaterialType, 'flour' | 'semolina'>
+): { availableKg: number; releasedKg: number } {
+  return flow.productionBatches.reduce(
+    (totals, batch) => {
+      if (batch.materialType !== materialType || batch.availableKg <= 0) return totals;
+      totals.availableKg += batch.availableKg;
+      if (batch.disposition === 'released') totals.releasedKg += batch.availableKg;
+      return totals;
+    },
+    { availableKg: 0, releasedKg: 0 }
+  );
+}
+
+function applyCampaignIncidentConsequence(incident: OperationalIncident): void {
+  const production = useProductionStore.getState();
+  const flow = useMaterialFlowStore.getState();
+
+  switch (incident.kind) {
+    case 'bearing_overheat': {
+      const machine = production.machines.find(
+        (candidate) => candidate.id === incident.affectedMachineId
+      );
+      if (machine) {
+        production.updateMachineStatus(machine.id, 'critical');
+        useBreakdownStore.getState().triggerBreakdown(machine.id, machine.name, 'overheating');
+      }
+      break;
+    }
+    case 'dust_filter_pressure':
+      if (incident.affectedMachineId) {
+        production.updateMachineStatus(incident.affectedMachineId, 'warning');
+      }
+      break;
+    case 'delayed_truck': {
+      const trucks = useTruckScheduleStore.getState();
+      if (!trucks.truckSchedule.shipping.truckDocked) {
+        trucks.updateNextArrival('shipping', trucks.truckSchedule.shipping.nextArrivalMinutes + 45);
+      }
+      break;
+    }
+    case 'supplier_contamination':
+      useQCLabStore.getState().triggerContaminationAlert({
+        type: 'supplier_notification',
+        severity: 'high',
+        batchIds: flow.productionBatches
+          .filter((batch) => batch.availableKg > 0 && batch.disposition !== 'shipped')
+          .map((batch) => batch.id),
+        controlSource: 'Operations campaign controller',
+        controlNote: 'Supplier notification requires traceability review before dispatch release.',
+      });
+      break;
+    case 'severe_rain':
+      useGameSimulationStore.getState().setWeather('storm');
+      break;
+    case 'power_sag':
+    case 'packaging_shortage':
+    case 'control_network_degraded':
+      // Their continuing effects are represented by the campaign multiplier.
+      break;
+  }
+
+  useUIStore.getState().addAlert({
+    id: `campaign-${incident.id}`,
+    type: incident.severity === 'critical' ? 'critical' : 'warning',
+    title: incident.title,
+    message: `${incident.description} The operations workspace records the response and residual controls.`,
+    machineId: incident.affectedMachineId ?? undefined,
+    timestamp: new Date(),
+    acknowledged: false,
+  });
+  useOperationsCampaignStore.getState().markIncidentEffectApplied(incident.id);
+}
+
+function getStorageUtilization(): number {
+  let occupiedKg = 0;
+  let capacityKg = 0;
+  useMaterialFlowStore.getState().machineBuffers.forEach((buffer) => {
+    occupiedKg += buffer.inputBuffer.reduce((sum, material) => sum + material.amount, 0);
+    occupiedKg += buffer.outputBuffer.reduce((sum, material) => sum + material.amount, 0);
+    capacityKg += buffer.inputCapacity + buffer.outputCapacity;
+  });
+  return capacityKg > 0 ? occupiedKg / capacityKg : 0;
+}
 
 // Machine status type (matches MachineData.status)
 type MachineStatus = 'running' | 'idle' | 'warning' | 'critical';
@@ -57,7 +204,12 @@ let _milestonesReachedMask = 0;
 // ============================================================
 
 // Reusable breakdowns array - cleared with .length = 0, never reallocated
-const _breakdowns: Array<{ id: string; name: string; type: string }> = [];
+const _breakdowns: Array<{
+  id: string;
+  name: string;
+  machineType: string;
+  breakdownType: BreakdownType;
+}> = [];
 
 // Reusable metrics object - mutated in place
 const _metricsUpdate = {
@@ -109,6 +261,13 @@ function calculateEfficiency(wear: number, machineType: string): number {
   const wearInRange = wear - config.warningThreshold * 0.5;
   const degradation = Math.min(1, wearInRange / degradationRange);
   return Math.round((1 - degradation * 0.4) * 100);
+}
+
+function inferBreakdownType(machine: MachineData): BreakdownType {
+  if (machine.metrics.temperature >= 80) return 'overheating';
+  if (machine.type === 'PLANSIFTER') return 'vibration_failure';
+  if (machine.type === 'SILO') return 'electrical';
+  return 'mechanical';
 }
 
 // ============================================================
@@ -252,7 +411,33 @@ function unifiedGameTick(ctx: TickContext): void {
   }
 
   // 2. Update machine TRUTH (not cosmetics)
-  const prodStore = useProductionStore.getState();
+  let prodStore = useProductionStore.getState();
+  const campaign = useOperationsCampaignStore.getState();
+  campaign.initializeCampaign();
+  useOperationsCampaignStore
+    .getState()
+    .incidents.filter((incident) => incident.phase !== 'resolved' && !incident.effectApplied)
+    .forEach(applyCampaignIncidentConsequence);
+  prodStore = useProductionStore.getState();
+  const maintenanceStore = useBreakdownStore.getState();
+  maintenanceStore.tickDowntime(deltaSeconds);
+
+  // A restart request is the final far-side contract in the maintenance loop.
+  // The production store resets machine wear/status first; only then does the
+  // work order close and release the lockout.
+  let maintenanceRestarted = false;
+  for (const workOrder of maintenanceStore.workOrders) {
+    if (workOrder.phase === 'restart_requested') {
+      const result = useProductionStore.getState().performMaintenance(workOrder.machineId);
+      if (result.success) {
+        useBreakdownStore.getState().confirmMachineRestart(workOrder.breakdownId);
+        maintenanceRestarted = true;
+      }
+    }
+  }
+  if (maintenanceRestarted) {
+    prodStore = useProductionStore.getState();
+  }
   const machines = prodStore.machines;
 
   let anyMachineChanged = false;
@@ -278,7 +463,12 @@ function unifiedGameTick(ctx: TickContext): void {
     const result = updateMachineTruth(machine, deltaSeconds);
 
     if (result.breakdown) {
-      _breakdowns.push({ id: machine.id, name: machine.name, type: machine.type });
+      _breakdowns.push({
+        id: machine.id,
+        name: machine.name,
+        machineType: machine.type,
+        breakdownType: inferBreakdownType(machine),
+      });
     }
 
     if (result.changed) {
@@ -305,6 +495,10 @@ function unifiedGameTick(ctx: TickContext): void {
   // 4. Calculate metrics (always, not just when machines change)
   const totalMachines = machines.length || 1;
   const { productionSpeed } = prodStore;
+  const campaignStore = useOperationsCampaignStore.getState();
+  const campaignMultiplier = campaignStore.getProductionMultiplier();
+  const activeProductionPlan = campaignStore.getActiveProductionPlan();
+  const effectiveProductionSpeed = productionSpeed * campaignMultiplier;
 
   // Efficiency: percentage of machines running
   _metricsUpdate.efficiency = Math.round((runningCount / totalMachines) * 100 * 10) / 10;
@@ -322,6 +516,11 @@ function unifiedGameTick(ctx: TickContext): void {
     _metricsUpdate.quality =
       Math.round(Math.max(0, Math.min(99.5, 99.5 * (avgMachineEfficiency / 100))) * 10) / 10;
   }
+  _metricsUpdate.quality = Math.max(
+    0,
+    _metricsUpdate.quality -
+      useOperationsCampaignStore.getState().getIncidentEffect().qualityPenalty
+  );
 
   // Update tracking
   _metricTrackingUpdate.totalRunningSeconds =
@@ -340,22 +539,12 @@ function unifiedGameTick(ctx: TickContext): void {
         ) / 10
       : 100;
 
-  // Throughput: actual production rate in bags per game-hour
-  // Based on App.tsx production formula: 12 bags/sec base × productionSpeed × gameSpeedFactor × packerScale
-  // Converted to bags per game-hour for display
-  const BAGS_PER_SECOND_BASE = 12;
-  const gameSpeedFactor = safeGameSpeed / 60;
-  const packerScale = runningPackerCount / 3; // 3 packers at full capacity
-
-  // Production per real second
-  const bagsPerRealSecond = BAGS_PER_SECOND_BASE * productionSpeed * gameSpeedFactor * packerScale;
-
-  // Convert to bags per game-hour: realSeconds per gameHour = 3600 / safeGameSpeed
-  // Guard against division by zero (paused state handled above, but be safe)
-  const realSecondsPerGameHour = safeGameSpeed > 0 ? 3600 / safeGameSpeed : 0;
-  const bagsPerGameHour = bagsPerRealSecond * realSecondsPerGameHour;
-
-  _metricsUpdate.throughput = Math.round(bagsPerGameHour);
+  // The operator KPI follows the same final-stage mass flow used by SCADA.
+  // This value is from the preceding material tick, so it is one 500 ms sample
+  // behind the scene while remaining stable and free of an extra store write.
+  _metricsUpdate.throughput = calculatePackerThroughputBagsPerHour(
+    useMaterialFlowStore.getState().currentPackerFlowRate
+  );
 
   // 5. Update store - machines only if changed, metrics always
   if (anyMachineChanged) {
@@ -442,79 +631,213 @@ function unifiedGameTick(ctx: TickContext): void {
   flowStore.syncMachineProcessing(
     anyMachineChanged ? useProductionStore.getState().machines : machines
   );
-  flowStore.tickMaterialFlow(deltaSeconds, productionSpeed);
+  flowStore.tickMaterialFlow(
+    deltaSeconds,
+    effectiveProductionSpeed,
+    activeProductionPlan
+      ? {
+          sourceMaterial: activeProductionPlan.sourceMaterial,
+          finishedMaterial: activeProductionPlan.finishedMaterial,
+        }
+      : undefined
+  );
 
-  // 4c. Grain deliveries: when a receiving truck docks, it refills the
+  // 4c. Convert the exact final-stage mass flow into completed 25 kg bags on
+  // the same central cadence. Fractional carry preserves mass across ticks.
+  // The HUD, SCADA packer-flow tag, finished inventory and bag counter now all
+  // describe the same packer output rather than parallel rate estimates.
+  if (runningPackerCount > 0) {
+    const liveFlow = useMaterialFlowStore.getState();
+    const flowRate = liveFlow.currentPackerFlowRate;
+    _bagProductionCarry += calculateBagsProducedForTick(deltaSeconds, flowRate);
+    const completedBags = Math.floor(_bagProductionCarry);
+    if (completedBags > 0) {
+      _bagProductionCarry -= completedBags;
+      useProductionStore.getState().incrementBagsProduced(completedBags);
+    }
+  }
+
+  // 4d. Grain deliveries: when a receiving truck docks, it refills the
   // emptiest silo — without this the silos drain dry in under an hour of
   // simulation and the flow network starves permanently.
-  const receivingDocked = useTruckScheduleStore.getState().truckSchedule.receiving.truckDocked;
-  if (receivingDocked && !_lastReceivingDocked) {
+  const receivingTransferReady =
+    useTruckScheduleStore.getState().truckSchedule.receiving.transferReady;
+  if (receivingTransferReady && !_lastReceivingTransferReady) {
     flowStore.receiveGrainDelivery(GRAIN_DELIVERY_KG);
     // The same truck also carries a spare-parts resupply, closing the
     // maintenance loop: consume parts to repair, trucks bring them back.
     useBreakdownStore.getState().restockDelivery();
   }
-  _lastReceivingDocked = receivingDocked;
+  _lastReceivingTransferReady = receivingTransferReady;
 
-  // 4d. Finished goods leave through the shipping dock. The material store
-  // records the actual loaded mass and manifest, so an under-filled truck does
-  // not make product appear or disappear.
-  const shippingDocked = useTruckScheduleStore.getState().truckSchedule.shipping.truckDocked;
-  if (shippingDocked && !_lastShippingDocked) {
-    const qualityStatus = getDispatchQualityStatus(useQCLabStore.getState().qcLab);
-    if (qualityStatus.released) {
-      flowStore.shipFinishedGoods(FINISHED_GOODS_SHIPMENT_KG);
+  // 4e. Loading is a docked operation. Product remains conserved in finished
+  // goods until the vehicle actually departs, when the material store creates
+  // the authoritative dispatch manifest. The load snapshot is operational
+  // intent only, never a second inventory ledger.
+  const shippingSchedule = useTruckScheduleStore.getState().truckSchedule.shipping;
+  const shippingTransferReady = shippingSchedule.transferReady;
+  const dockFlow = useMaterialFlowStore.getState();
+  const reasonByCode = {
+    certification_expired: 'Quality certification is expired.',
+    unresolved_contamination: 'A contamination alert remains unresolved.',
+    failed_quality_test: 'The latest laboratory result failed.',
+    batch_quality_hold: 'Available production batches remain on quality hold.',
+    batch_recalled: 'Recalled production remains isolated from dispatch.',
+  } as const;
+  if (shippingTransferReady && !_lastShippingTransferReady) {
+    _shippingLoad = {
+      cycleId: `shipping-${shippingSchedule.departureCount + 1}`,
+      status: 'loading',
+      loadedKg: 0,
+      capacityKg: FINISHED_GOODS_SHIPMENT_KG,
+      materialType: activeProductionPlan?.finishedMaterial ?? 'flour',
+      blockReason: null,
+      lastDispatchKg: 0,
+    };
+  }
+
+  if (shippingTransferReady) {
+    const qualityStatus = getDispatchQualityStatus(
+      useQCLabStore.getState().qcLab,
+      dockFlow.productionBatches
+    );
+    const incidentDispatchBlocked = useOperationsCampaignStore
+      .getState()
+      .getIncidentEffect().dispatchBlocked;
+    const qualityBlockReason = incidentDispatchBlocked
+      ? 'An active operational incident requires dispatch isolation.'
+      : qualityStatus.reason
+        ? reasonByCode[qualityStatus.reason]
+        : !qualityStatus.released
+          ? 'The quality interlock is not released.'
+          : null;
+    const releasedKg = getFinishedGoodsAvailability(
+      dockFlow,
+      _shippingLoad.materialType
+    ).releasedKg;
+    const activeOrder = useOperationsCampaignStore
+      .getState()
+      .orders.find((order) => order.id === activeProductionPlan?.orderId);
+    const orderRemainingKg = activeOrder
+      ? Math.max(0, activeOrder.requiredKg - activeOrder.shippedKg)
+      : FINISHED_GOODS_SHIPMENT_KG;
+    const loadTargetKg = Math.min(
+      _shippingLoad.capacityKg,
+      orderRemainingKg,
+      Math.max(_shippingLoad.loadedKg, releasedKg)
+    );
+    const previousStatus = _shippingLoad.status;
+
+    if (qualityBlockReason) {
+      _shippingLoad = { ..._shippingLoad, status: 'held', blockReason: qualityBlockReason };
+    } else if (releasedKg <= _shippingLoad.loadedKg + 1e-6) {
+      _shippingLoad = {
+        ..._shippingLoad,
+        status: _shippingLoad.loadedKg > 0 ? 'ready' : 'held',
+        blockReason:
+          _shippingLoad.loadedKg > 0
+            ? null
+            : `Waiting for released ${_shippingLoad.materialType} at the packers.`,
+      };
     } else {
-      const reason =
-        qualityStatus.reason === 'certification_expired'
-          ? 'quality certification is expired'
-          : qualityStatus.reason === 'unresolved_contamination'
-            ? 'a contamination alert is unresolved'
-            : 'the latest laboratory result failed';
+      const loadedKg = Math.min(
+        loadTargetKg,
+        _shippingLoad.loadedKg + SHIPPING_LOAD_RATE_KG_PER_SECOND * deltaSeconds
+      );
+      _shippingLoad = {
+        ..._shippingLoad,
+        loadedKg,
+        status:
+          loadedKg >= _shippingLoad.capacityKg - 1e-6 || loadedKg >= orderRemainingKg - 1e-6
+            ? 'ready'
+            : 'loading',
+        blockReason: null,
+      };
+    }
+
+    if (_shippingLoad.status === 'held' && previousStatus !== 'held') {
       useUIStore.getState().addAlert({
-        id: `dispatch-quality-hold-${Date.now()}`,
+        id: `dispatch-quality-hold-${_shippingLoad.cycleId}`,
         type: 'warning',
         title: 'Dispatch Quality Hold',
-        message: `Shipping truck held at the dock because ${reason}. Clear the quality condition before release.`,
+        message: `${_shippingLoad.blockReason ?? 'Loading is held.'} Clear the condition before release.`,
         timestamp: new Date(),
         acknowledged: false,
       });
     }
+  } else if (_lastShippingTransferReady) {
+    const actualKg = dockFlow.shipFinishedGoods(_shippingLoad.loadedKg, _shippingLoad.materialType);
+    _shippingLoad = {
+      ..._shippingLoad,
+      status: 'departed',
+      loadedKg: actualKg,
+      lastDispatchKg: actualKg,
+      blockReason:
+        actualKg > 0
+          ? null
+          : (_shippingLoad.blockReason ?? 'Truck departed without a released load.'),
+    };
+  } else if (shippingSchedule.departureCount === 0 && _shippingLoad.status !== 'away') {
+    _shippingLoad = {
+      ..._shippingLoad,
+      cycleId: 'shipping-0',
+      status: 'away',
+      loadedKg: 0,
+      lastDispatchKg: 0,
+      blockReason: null,
+    };
   }
-  _lastShippingDocked = shippingDocked;
+  _lastShippingTransferReady = shippingTransferReady;
 
-  // 4e. Shift-change completion (see _shiftPhaseElapsed above)
-  const simStore = useGameSimulationStore.getState();
-  if (simStore.shiftChangeActive) {
-    _shiftPhaseElapsed += deltaSeconds;
-    if (simStore.shiftChangePhase === 'leaving' && _shiftPhaseElapsed >= SHIFT_LEAVING_DURATION_S) {
-      // Old crew is out — new crew walks back in (normal worker behavior resumes)
-      useGameSimulationStore.setState({ shiftChangePhase: 'entering' });
-      _shiftPhaseElapsed = 0;
-    } else if (
-      simStore.shiftChangePhase === 'entering' &&
-      _shiftPhaseElapsed >= SHIFT_ENTERING_DURATION_S
-    ) {
-      // completeShiftHandover (not the plain completeShiftChange): also
-      // archives shift notes/production, resets incidents and clock-ins,
-      // and rolls the supervisor handoff for the incoming shift.
-      simStore.completeShiftHandover();
-      _shiftPhaseElapsed = 0;
-    }
-  } else {
-    _shiftPhaseElapsed = 0;
-  }
+  const latestProduction = useProductionStore.getState();
+  const latestFlow = useMaterialFlowStore.getState();
+  const latestGame = useGameSimulationStore.getState();
+  const latestTrucks = useTruckScheduleStore.getState().truckSchedule;
+  const dispatchStatus = getDispatchQualityStatus(
+    useQCLabStore.getState().qcLab,
+    latestFlow.productionBatches
+  );
+  const totalEnergyKw =
+    latestProduction.machines.reduce((sum, machine) => sum + getMachineEnergy(machine), 0) +
+    getFacilityBaseLoad(latestGame.gameTime).total;
+  const executionPlan = useOperationsCampaignStore.getState().getActiveProductionPlan();
+  const executionMaterial = executionPlan?.finishedMaterial ?? _shippingLoad.materialType;
+  const finishedAvailability = getFinishedGoodsAvailability(latestFlow, executionMaterial);
+  useOperationsCampaignStore.getState().tickCampaign(deltaSeconds * safeGameSpeed, {
+    shiftKey: `day-${latestGame.gameDay}-${latestGame.currentShift}`,
+    shiftLabel: `${latestGame.currentShift[0].toUpperCase()}${latestGame.currentShift.slice(1)}`,
+    manifests: latestFlow.manifests,
+    productionBatches: latestFlow.productionBatches,
+    totalEnergyKw,
+    averageQuality: latestProduction.metrics.quality,
+    wasteKg: latestFlow.wasteKg,
+    storageUtilization: getStorageUtilization(),
+    shippingDocked: latestTrucks.shipping.truckDocked,
+    receivingDocked: latestTrucks.receiving.truckDocked,
+    dispatchReleased: dispatchStatus.released,
+    sourceInventoryKg: executionPlan
+      ? sumMaterialInventory(latestFlow, executionPlan.sourceMaterial)
+      : 0,
+    finishedAvailableKg: finishedAvailability.availableKg,
+    releasedFinishedKg: finishedAvailability.releasedKg,
+    dispatchLoad: { ..._shippingLoad },
+    openWorkOrders: useBreakdownStore
+      .getState()
+      .workOrders.filter((workOrder) => workOrder.phase !== 'returned_to_service').length,
+  });
 
   // 5. Handle breakdowns (async, outside main path)
   if (_breakdowns.length > 0) {
     // Copy breakdowns before async (since we reuse the array)
     const breakdownsCopy = _breakdowns.map((b) => ({ ...b }));
-    breakdownsCopy.forEach(({ id, name, type }) => {
+    breakdownsCopy.forEach(({ id, name, machineType, breakdownType }) => {
+      const breakdown = useBreakdownStore.getState().triggerBreakdown(id, name, breakdownType);
+      if (!breakdown) return;
       useUIStore.getState().addAlert({
         id: `breakdown-${id}-${Date.now()}`,
         type: 'critical',
         title: 'Machine Breakdown',
-        message: `${name} (${type}) has broken down due to excessive wear. Maintenance required.`,
+        message: `${name} (${machineType}) has broken down due to excessive wear. Work order ${breakdown.workOrderId} requires repair, verification, and controlled restart.`,
         machineId: id,
         timestamp: new Date(),
         acknowledged: false,

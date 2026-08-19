@@ -30,7 +30,7 @@ describe('camera collision', () => {
     expect(result.collidedWith).toBe('shipping-wall');
   });
 
-  it('permits a low camera through a personnel portal', () => {
+  it('permits a low camera through a service portal', () => {
     const result = resolveCameraCollision([55, 2, -20], [65, 2, -20], 0.4);
 
     expect(result.collidedWith).toBeNull();

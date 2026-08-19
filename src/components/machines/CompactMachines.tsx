@@ -747,6 +747,7 @@ function CompactMachineSet({
   const tintAmount = useGraphicsStore((state) =>
     state.graphics.enableMachineColorVariation ? 1 : 0
   );
+  const enableMachineDetail = useGraphicsStore((state) => state.graphics.enableMachineDetail);
   const composerActive = useGraphicsStore((state) => isPostProcessingActive(state.graphics));
 
   useEffect(() => {
@@ -1055,17 +1056,19 @@ function CompactMachineSet({
       if (ref.current?.instanceColor) ref.current.instanceColor.needsUpdate = true;
     });
 
-    // Placards. One instanced mesh for every machine class, so the whole
-    // readability layer costs a single draw call.
-    writeDecalUvRects(MACHINE_DECAL_GEOMETRY, decals);
-    decals.forEach((decal, index) => {
-      setInstanceMatrix(decalRef.current, index, object, decal.position, [
-        decal.size[0],
-        decal.size[1],
-        1,
-      ]);
-    });
-    finishMatrixUpdate(decalRef.current, true);
+    if (enableMachineDetail) {
+      // Placards. One instanced mesh for every machine class, so the whole
+      // readability layer costs a single draw call.
+      writeDecalUvRects(MACHINE_DECAL_GEOMETRY, decals);
+      decals.forEach((decal, index) => {
+        setInstanceMatrix(decalRef.current, index, object, decal.position, [
+          decal.size[0],
+          decal.size[1],
+          1,
+        ]);
+      });
+      finishMatrixUpdate(decalRef.current, true);
+    }
 
     [
       siloBodyRef,
@@ -1110,7 +1113,7 @@ function CompactMachineSet({
       bagRef,
       beaconRef,
     ].forEach((ref) => finishMatrixUpdate(ref.current, true));
-  }, [subsets, decals, tintAmount]);
+  }, [subsets, decals, enableMachineDetail, tintAmount]);
 
   useFrame(() => {
     if (!isTabVisible) return;
@@ -1496,7 +1499,7 @@ function CompactMachineSet({
         opaque pass; no shadow role, because a 3 mm quad casting a shadow onto
         the plate it is glued to is pure acne.
       */}
-      {decals.length > 0 && (
+      {enableMachineDetail && decals.length > 0 && (
         <instancedMesh
           ref={decalRef}
           args={[MACHINE_DECAL_GEOMETRY, MACHINE_DECAL_MATERIAL, decals.length]}

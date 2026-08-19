@@ -1,322 +1,122 @@
-# MillOS Performance Test Report
-**Date:** 2025-12-05
-**Test Duration:** 10 seconds sampling after 15s warmup
-**Testing Tool:** Puppeteer automated performance testing
+# MillOS v0.40 Performance Report
 
----
+**Candidate:** v0.40.0 coherence and fidelity pass
 
-## Executive Summary
+**Measured:** 2026-08-11
 
-**Performance Grade:** POOR (34 FPS average)
-**Status:** Optimization Required
-**Gap to Target:** 26 FPS improvement needed to reach 60 FPS
+**Status:** Green. Source, delivery, motion, world, uncrewed, and strict five
+view frame pacing gates pass on the current v0.40 candidate.
 
----
+## Acceptance budgets
 
-## Performance Metrics
+| Gate | Budget |
+|---|---:|
+| Native first useful frame | 350 ms or less |
+| Representative Fast 3G first useful frame | 3,200 ms or less |
+| Average frame rate | 60 FPS or more |
+| One percent low | 45 FPS or more |
+| p95 frame time | 16.7 ms or less |
+| p99 frame time | 25 ms or less |
+| Frames over 50 ms | 0 |
+| Effective DPR error | 0.03 or less |
 
-| Metric | Value | Target | Status |
-|--------|-------|--------|--------|
-| Average FPS | **34** | 60 | 🔴 POOR |
-| Min FPS | 30 | 60 | 🔴 |
-| Max FPS | 51 | 60 | 🟡 |
-| FPS Variance | 21 | <10 | ⚠️ High |
-| Avg Memory | 130 MB | <200 MB | ✅ OK |
-| Total Frames | 342 | 600 | 🔴 |
-| Console Errors | 4 | 0 | ❌ |
+The benchmark now reports the one percent low, p95, p99, standard deviation,
+16.7 ms and 25 ms spike counts, long tasks, effective DPR, renderer calls,
+world continuity, uncrewed state, checkpoint state, and vehicle motion. Motion
+acceptance rejects position plateaus, unbounded steps, missing wheel travel,
+missing steering or articulation, and checkpoint interlock failures.
 
----
+## Accepted local health evidence
 
-## Critical Issues
+| View | Average FPS | One percent low | p95 | p99 | Draw calls | Effective DPR | Result |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Overview | 88.84 | 56.93 | 13.2 ms | 14.0 ms | 1,312 | 1.20 | Pass |
+| Interior | 117.94 | 76.34 | 9.6 ms | 10.6 ms | 851 | 1.20 | Pass |
+| Shipping | 99.47 | 65.30 | 12.1 ms | 12.9 ms | 1,121 | 1.20 | Pass |
+| Receiving | 100.53 | 65.24 | 11.7 ms | 12.3 ms | 1,082 | 1.20 | Pass |
+| Water | 85.67 | 59.35 | 13.0 ms | 14.2 ms | 1,346 | 1.20 | Pass |
 
-### 1. WebGL Context Errors (CRITICAL)
-```
-THREE.WebGLRenderer: A WebGL context could not be created.
-Reason: VENDOR = 0xffff, DEVICE = 0xffff, GL_VENDOR = Disabled, GL_RENDERER = Disabled
-```
+Each view used six measured seconds after a two second warmup, with
+deterministic truck and forklift motion enabled. All five recorded zero frames
+over 50 ms, valid fleet motion, valid checkpoint behavior, continuous world
+composition, and no human content. Native first useful frame ranged from 234.1
+to 299.9 ms, within the 350 ms budget.
 
-**Impact:** 4 WebGL errors detected
-**Cause:** Puppeteer headless browser has limited GPU/WebGL support
-**Note:** These errors are test environment artifacts. Real browser performance will differ.
+This is a health measurement for the current coherence pass. It is not an
+improvement claim because no hash matched baseline from before this pass was
+captured with the corrected benchmark semantics.
 
-### 2. Low Frame Rate (34 FPS Average)
-**Impact:** 43% below target (26 FPS gap)
-**Severity:** POOR - Immediate optimization required
+## Retained host saturation evidence
 
-### 3. High FPS Variance (21 FPS)
-**Impact:** Inconsistent performance (30-51 FPS range)
-**Indicates:**
-- Periodic heavy operations (likely garbage collection)
-- Components re-rendering on every frame
-- Possible render storms
+The strict five view run remained useful diagnostically. Every view passed
+world continuity, uncrewed content, checkpoint, motion, effective DPR, long
+task, p99, and 50 ms spike gates. Frame pacing missed acceptance while the host
+load averages exceeded 60 and multiple unrelated render and test jobs were
+active.
 
----
+| View | Average FPS | One percent low | p95 | p99 | Draw calls | Functional gates |
+|---|---:|---:|---:|---:|---:|---|
+| Overview | 61.81 | 33.42 | 20.1 ms | 22.7 ms | 1,328 | Pass |
+| Interior | 76.89 | 40.62 | 16.1 ms | 18.0 ms | 846 | Pass |
+| Shipping | 62.03 | 36.10 | 19.5 ms | 22.6 ms | 1,126 | Pass |
+| Receiving | 61.50 | 38.52 | 19.0 ms | 20.2 ms | 1,083 | Pass |
+| Water | 55.78 | 32.79 | 20.7 ms | 22.7 ms | 1,350 | Pass |
 
-## Suspected Bottlenecks
+These values are a stressed lower bound. They remain in
+`test-results/runtime-final-v040/benchmark.json` so a failed performance run is
+not erased after diagnosis.
 
-Based on codebase analysis, these are the most likely performance culprits:
+## Startup
 
-### Primary Suspects (High Impact)
+| Network profile | Overview first useful frame | Five view range | Result |
+|---|---:|---:|---|
+| Native | 295.5 ms | 234.1 to 299.9 ms | Pass |
+| Representative Fast 3G | 3,065.0 ms | 3,058.2 to 3,069.3 ms | Pass |
 
-1. **TruckBay Component**
-   - **useFrame hooks:** 28+ per component
-   - **Impact:** VERY HIGH
-   - **File:** `/Users/nellwatson/Documents/GitHub/Experiments/src/components/TruckBay.tsx`
-   - **Why:** Multiple useFrame hooks running every frame is extremely expensive
+These accepted measurements use the versioned Vite preview path. A bare Python
+static server is not a representative serving baseline because it does not
+reproduce Vite or deployment compression and routing.
 
-2. **WorkerSystem Component**
-   - **useFrame hooks:** 3+ per worker (15+ total with 5 workers)
-   - **Impact:** HIGH
-   - **File:** `/Users/nellwatson/Documents/GitHub/Experiments/src/components/WorkerSystem.tsx`
-   - **Why:** Each worker has multiple animation/update hooks
+The native row is from the current candidate. The Fast 3G row retains the last
+accepted v0.40 delivery baseline and is labelled separately from the current
+hash exact native receipt.
 
-3. **Machines Component**
-   - **useFrame hooks:** 9 hooks
-   - **Impact:** MEDIUM-HIGH
-   - **File:** `/Users/nellwatson/Documents/GitHub/Experiments/src/components/Machines.tsx`
-   - **Why:** Machine animations and vibrations
+## Delivery
 
-### Secondary Suspects (Medium Impact)
+* Initial JavaScript is 0.42 MiB gzip across five files.
+* The production build transforms 3,592 modules.
+* The current build is 95.79 MiB without duplicating the immutable historical
+  release archives into the v0.40 output.
+* Physics, WebGPU, SCADA, charts, and post processing remain deferred chunks.
+* The service worker isolates caches by deployment scope and build identity.
+* v0.10, v0.20, and v0.30 remain genuine immutable archives. v0.40 is the
+  default selection.
 
-4. **ConveyorSystem Component**
-   - Multiple animated conveyor belts
-   - **File:** `/Users/nellwatson/Documents/GitHub/Experiments/src/components/ConveyorSystem.tsx`
+## Current optimization priorities
 
-5. **ForkliftSystem Component**
-   - Pathfinding + animations
-   - **File:** `/Users/nellwatson/Documents/GitHub/Experiments/src/components/ForkliftSystem.tsx`
+1. Keep the five view gate repeatable in quiet host windows, while retaining
+   contended misses as diagnostic evidence rather than weakening budgets.
+2. Preserve the 60 FPS, 45 FPS one percent low, 16.7 ms p95, and 25 ms p99
+   budgets while integrating visible geometry.
+3. Keep native first useful frame at or below 350 ms and representative Fast
+   3G at or below 3.2 seconds.
+4. Reject shader cache keys containing time, randomness, or other per frame
+   values.
+5. Retain failed benchmark receipts and identify host contention separately
+   from candidate defects.
 
----
+## Required commands
 
-## Immediate Action Items
-
-### 1. Profile with React DevTools (DO THIS FIRST)
-**Priority:** CRITICAL
-**Time:** 5 minutes
-
-**Steps:**
-1. Open the Puppeteer browser window (should still be open)
-2. Install React DevTools extension if not present
-3. Open React DevTools → Profiler tab
-4. Click "Record" → Wait 5 seconds → Stop
-5. Switch to "Ranked" view
-6. Look for:
-   - Components rendering >10 times in 5 seconds
-   - Components with >50ms render time
-   - Any "render storms" (red/orange bars)
-
-**What to look for:**
-- TruckBay, WorkerSystem, Machines rendering every frame
-- Missing React.memo() on pure components
-- Unnecessary prop changes causing re-renders
-
----
-
-### 2. Fix Console Errors
-**Priority:** HIGH
-**Time:** 15 minutes
-
-Fix the 4 console errors before optimizing further. Errors can cause cascading performance issues.
-
----
-
-### 3. Optimize useFrame Hooks
-**Priority:** CRITICAL
-**Time:** 1-2 hours
-
-**Target components:**
-- TruckBay.tsx (28+ hooks)
-- WorkerSystem.tsx (15+ hooks)
-- Machines.tsx (9 hooks)
-
-**Optimization strategies:**
-1. **Consolidate hooks:** Combine multiple useFrame hooks into one
-2. **Add throttling:** Not every hook needs to run every frame
-3. **Use React.memo():** Prevent unnecessary re-renders
-4. **Skip when off-screen:** Don't update objects outside camera frustum
-
-**Example optimization:**
-```typescript
-// BEFORE (3 separate useFrame hooks)
-useFrame(() => { updatePosition(); });
-useFrame(() => { updateRotation(); });
-useFrame(() => { updateAnimation(); });
-
-// AFTER (1 consolidated hook)
-useFrame(() => {
-  updatePosition();
-  updateRotation();
-  updateAnimation();
-});
+```bash
+VERSION=v0.40 npm run build
+npm run validate:bundle
+npm run validate:depth
+npm run validate:shaders
+npm run validate:uncrewed
+npm run validate:releases
+node scripts/run-performance-benchmark.mjs --motion
+npm run capture:art
 ```
 
----
-
-### 4. Implement Performance Debug Mode
-**Priority:** MEDIUM
-**Time:** 30 minutes
-
-The app already has `perfDebug` toggles in graphicsStore:
-- `disableWorkerSystem`
-- `disableTruckBay`
-- `disableMachines`
-- `disableConveyorSystem`
-- `disableForkliftSystem`
-- `disableEnvironment`
-
-**Action:** Add UI controls to Graphics Settings panel to toggle these on/off for A/B testing.
-
----
-
-### 5. Add React.memo() to Pure Components
-**Priority:** HIGH
-**Time:** 30 minutes
-
-**Components to wrap:**
-- WorkerModel
-- ForkliftModel
-- All UI overlay components
-- Any component that doesn't need to re-render on every parent update
-
-**Example:**
-```typescript
-export const WorkerModel = React.memo(({ position, rotation }) => {
-  // ... component code
-});
-```
-
----
-
-## Testing Strategy
-
-### Phase 1: Isolate Bottleneck (15 minutes)
-1. Open app in browser
-2. Open Graphics Settings
-3. Disable TruckBay → Note FPS change
-4. Re-enable, disable WorkerSystem → Note FPS change
-5. Re-enable, disable Machines → Note FPS change
-6. Identify which system has largest FPS impact
-
-### Phase 2: Profile Bottleneck (15 minutes)
-1. Use React DevTools Profiler on the identified bottleneck
-2. Record 5 seconds of rendering
-3. Identify specific render storms
-4. Find components without React.memo()
-
-### Phase 3: Optimize (1-2 hours)
-1. Add React.memo() to identified components
-2. Consolidate useFrame hooks
-3. Add frame skipping for expensive operations
-4. Test FPS improvement
-
-### Phase 4: Validate (15 minutes)
-1. Re-run performance test: `node perf-test.cjs`
-2. Verify FPS improvement
-3. Ensure no new errors
-4. Test on real devices (not just Puppeteer)
-
----
-
-## Expected Outcomes
-
-### After TruckBay Optimization
-**Expected FPS gain:** +10-15 FPS
-**New FPS:** 44-49 FPS
-**Effort:** 1 hour
-
-### After WorkerSystem Optimization
-**Expected FPS gain:** +5-8 FPS
-**New FPS:** 39-42 FPS
-**Effort:** 30 minutes
-
-### After Machines Optimization
-**Expected FPS gain:** +3-5 FPS
-**New FPS:** 37-39 FPS
-**Effort:** 30 minutes
-
-### Combined Optimization
-**Expected FPS:** 55-60 FPS
-**Total Effort:** 2-3 hours
-**Success Criteria:** Reach 60 FPS average with <10 FPS variance
-
----
-
-## Performance Budget (Recommended)
-
-| System | Current useFrame Hooks | Budget | Action |
-|--------|----------------------|--------|--------|
-| TruckBay | 28+ | 3-5 | Consolidate 80% |
-| WorkerSystem | 15+ | 5-7 | Consolidate 50% |
-| Machines | 9 | 3-4 | Consolidate 60% |
-| ConveyorSystem | ~5 | 3-4 | Optimize 20% |
-| ForkliftSystem | ~5 | 3-4 | Optimize 20% |
-| **TOTAL** | **60+** | **20-25** | **Reduce by 60%** |
-
----
-
-## Long-term Optimizations
-
-### 1. Instanced Rendering
-Render multiple copies of same geometry with one draw call.
-**Use for:** Workers, forklifts, conveyor segments
-**Expected gain:** +5-10 FPS
-
-### 2. Level of Detail (LOD)
-Switch to low-poly models when objects are far from camera.
-**Use for:** Workers, machines, detailed props
-**Expected gain:** +3-5 FPS
-
-### 3. Object Pooling
-Reuse objects instead of creating/destroying them.
-**Use for:** Particles, temporary effects
-**Expected gain:** +2-3 FPS, smoother frame times
-
-### 4. Frustum Culling
-Skip updates for objects outside camera view.
-**Use for:** All systems
-**Expected gain:** +5-8 FPS (depending on camera angle)
-
----
-
-## Monitoring & Regression Prevention
-
-### 1. Add FPS Tracking
-Already implemented via `FPSMonitor.tsx` - good!
-
-### 2. Add Performance Tests to CI
-Run `node perf-test.cjs` in CI pipeline.
-Alert if FPS drops below threshold.
-
-### 3. useFrame Hook Linting
-Add ESLint rule to warn about multiple useFrame hooks in one component.
-
-### 4. Bundle Size Monitoring
-Track bundle size changes in PRs to catch bloat early.
-
----
-
-## Files to Review
-
-Priority order for performance optimization:
-
-1. `/Users/nellwatson/Documents/GitHub/Experiments/src/components/TruckBay.tsx` (CRITICAL)
-2. `/Users/nellwatson/Documents/GitHub/Experiments/src/components/WorkerSystem.tsx` (HIGH)
-3. `/Users/nellwatson/Documents/GitHub/Experiments/src/components/Machines.tsx` (HIGH)
-4. `/Users/nellwatson/Documents/GitHub/Experiments/src/components/ConveyorSystem.tsx` (MEDIUM)
-5. `/Users/nellwatson/Documents/GitHub/Experiments/src/components/ForkliftSystem.tsx` (MEDIUM)
-
----
-
-## Conclusion
-
-The MillOS app is running at **34 FPS** - significantly below the 60 FPS target. The primary bottleneck is **excessive useFrame hooks** (60+ total) causing unnecessary per-frame computations.
-
-**Immediate priority:** Reduce useFrame hooks by 60% through consolidation and React.memo() optimization.
-
-**Expected outcome:** 55-60 FPS after 2-3 hours of focused optimization.
-
-**Risk:** LOW - Optimizations are non-breaking and can be tested incrementally.
-
----
-
-**Next Step:** Run React DevTools Profiler (instructions above) to confirm which components are the worst offenders, then start with TruckBay optimization.
+A build proves compilation and packaging. Runtime, visual, deployment, and
+final aesthetic acceptance remain separate gates.

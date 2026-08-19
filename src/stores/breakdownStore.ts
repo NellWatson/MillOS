@@ -2,26 +2,55 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 
 // =========================================================================
-// EQUIPMENT BREAKDOWN SYSTEM
-// Handles machine failures, predictive maintenance, and parts inventory
+// EQUIPMENT BREAKDOWN AND MAINTENANCE CAUSALITY
 // =========================================================================
 
-// Breakdown event types
 export type BreakdownType = 'mechanical' | 'electrical' | 'overheating' | 'vibration_failure';
+export type WorkOrderPhase =
+  | 'diagnosed'
+  | 'awaiting_parts'
+  | 'repairing'
+  | 'verification'
+  | 'ready_to_restart'
+  | 'restart_requested'
+  | 'returned_to_service';
+
+export interface MaintenanceAuditEntry {
+  phase: WorkOrderPhase;
+  timestamp: number;
+  note: string;
+}
 
 export interface BreakdownEvent {
   id: string;
+  workOrderId: string;
   machineId: string;
   machineName: string;
   type: BreakdownType;
   startTime: number;
-  estimatedRepairTime: number; // game seconds (30-60)
-  severity: 'minor' | 'moderate'; // Never critical - visual only, production continues
-  assignedWorkerId?: string;
-  assignedWorkerName?: string;
-  repairProgress: number; // 0-100
+  estimatedRepairTime: number;
+  severity: 'minor' | 'moderate';
+  repairProgress: number;
   resolved: boolean;
   description: string;
+  downtimeSeconds: number;
+}
+
+export interface MaintenanceWorkOrder {
+  id: string;
+  breakdownId: string;
+  machineId: string;
+  machineName: string;
+  cause: BreakdownType;
+  requiredParts: (keyof PartsInventory)[];
+  consumedParts: (keyof PartsInventory)[];
+  phase: WorkOrderPhase;
+  openedAt: number;
+  repairStartedAt?: number;
+  verificationCompletedAt?: number;
+  restartedAt?: number;
+  downtimeSeconds: number;
+  audit: MaintenanceAuditEntry[];
 }
 
 export interface PredictiveAlert {
@@ -29,13 +58,9 @@ export interface PredictiveAlert {
   machineId: string;
   machineName: string;
   predictedFailureType: BreakdownType;
-  confidence: number; // 0-100
-  predictedTimeToFailure: number; // game minutes
-  basedOnMetrics: {
-    vibration: number;
-    temperature: number;
-    load: number;
-  };
+  confidence: number;
+  predictedTimeToFailure: number;
+  basedOnMetrics: { vibration: number; temperature: number; load: number };
   acknowledged: boolean;
   createdAt: number;
 }
@@ -52,14 +77,13 @@ export interface MaintenanceScheduleItem {
   id: string;
   machineId: string;
   machineName: string;
-  scheduledTime: number; // game time (0-24)
+  scheduledTime: number;
   type: 'preventive' | 'predictive';
   priority: 'low' | 'medium' | 'high';
   partsNeeded: (keyof PartsInventory)[];
   completed: boolean;
 }
 
-// Breakdown descriptions by type
 const BREAKDOWN_DESCRIPTIONS: Record<BreakdownType, string[]> = {
   mechanical: [
     'Bearing wear detected',
@@ -87,7 +111,6 @@ const BREAKDOWN_DESCRIPTIONS: Record<BreakdownType, string[]> = {
   ],
 };
 
-// Parts needed for each breakdown type
 const PARTS_FOR_BREAKDOWN: Record<BreakdownType, (keyof PartsInventory)[]> = {
   mechanical: ['bearings', 'belts'],
   electrical: ['sensors', 'motors'],
@@ -95,72 +118,6 @@ const PARTS_FOR_BREAKDOWN: Record<BreakdownType, (keyof PartsInventory)[]> = {
   vibration_failure: ['bearings', 'belts'],
 };
 
-interface BreakdownStore {
-  // Active breakdowns
-  activeBreakdowns: BreakdownEvent[];
-  breakdownHistory: BreakdownEvent[];
-
-  // Predictive alerts
-  predictiveAlerts: PredictiveAlert[];
-
-  // Parts inventory
-  partsInventory: PartsInventory;
-
-  // Maintenance schedule
-  maintenanceSchedule: MaintenanceScheduleItem[];
-
-  // Last breakdown time for rate limiting
-  lastBreakdownTime: number;
-
-  // Actions
-  triggerBreakdown: (
-    machineId: string,
-    machineName: string,
-    type?: BreakdownType
-  ) => BreakdownEvent | null;
-  triggerRandomBreakdown: (
-    machines: Array<{ id: string; name: string; status: string }>
-  ) => BreakdownEvent | null;
-  assignRepairWorker: (breakdownId: string, workerId: string, workerName: string) => void;
-  updateRepairProgress: (breakdownId: string, progressDelta: number) => void;
-  resolveBreakdown: (breakdownId: string) => void;
-
-  // Predictive maintenance
-  addPredictiveAlert: (
-    machineId: string,
-    machineName: string,
-    metrics: { vibration: number; temperature: number; load: number }
-  ) => void;
-  acknowledgePredictiveAlert: (alertId: string) => void;
-  clearOldPredictiveAlerts: () => void;
-
-  // Parts inventory
-  consumePart: (partType: keyof PartsInventory) => boolean;
-  restockPart: (partType: keyof PartsInventory, quantity: number) => void;
-  restockDelivery: () => void;
-  getPartsForBreakdown: (type: BreakdownType) => (keyof PartsInventory)[];
-
-  // Maintenance scheduling
-  scheduleMaintenanceTask: (task: Omit<MaintenanceScheduleItem, 'id' | 'completed'>) => void;
-  completeMaintenanceTask: (taskId: string) => void;
-
-  // Simulation tick
-  tickBreakdownSimulation: (
-    gameTime: number,
-    machines: Array<{ id: string; name: string; status: string }>
-  ) => void;
-
-  // Getters
-  getBreakdownForMachine: (machineId: string) => BreakdownEvent | undefined;
-  getAlertsForMachine: (machineId: string) => PredictiveAlert[];
-  hasLowInventory: () => boolean;
-}
-
-// Helper to generate unique IDs
-const generateId = (prefix: string) =>
-  `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-
-// Default parts inventory
 const DEFAULT_PARTS_INVENTORY: PartsInventory = {
   bearings: 10,
   belts: 8,
@@ -169,61 +126,166 @@ const DEFAULT_PARTS_INVENTORY: PartsInventory = {
   sensors: 12,
 };
 
+const makeId = (prefix: string, sequence: number): string =>
+  `${prefix}-${sequence.toString().padStart(5, '0')}`;
+
+const countParts = (
+  parts: (keyof PartsInventory)[]
+): Partial<Record<keyof PartsInventory, number>> =>
+  parts.reduce<Partial<Record<keyof PartsInventory, number>>>((counts, part) => {
+    counts[part] = (counts[part] ?? 0) + 1;
+    return counts;
+  }, {});
+
+const missingParts = (
+  inventory: PartsInventory,
+  required: (keyof PartsInventory)[]
+): (keyof PartsInventory)[] => {
+  const counts = countParts(required);
+  return (Object.entries(counts) as [keyof PartsInventory, number][])
+    .filter(([part, count]) => inventory[part] < count)
+    .map(([part]) => part);
+};
+
+export interface StartRepairResult {
+  started: boolean;
+  reason?: 'unknown_breakdown' | 'invalid_phase' | 'missing_parts';
+  missingParts: (keyof PartsInventory)[];
+}
+
+export interface BreakdownStore {
+  activeBreakdowns: BreakdownEvent[];
+  breakdownHistory: BreakdownEvent[];
+  workOrders: MaintenanceWorkOrder[];
+  predictiveAlerts: PredictiveAlert[];
+  partsInventory: PartsInventory;
+  maintenanceSchedule: MaintenanceScheduleItem[];
+  lastBreakdownTime: number;
+  idSequence: number;
+
+  triggerBreakdown: (
+    machineId: string,
+    machineName: string,
+    type?: BreakdownType
+  ) => BreakdownEvent | null;
+  triggerRandomBreakdown: (
+    machines: Array<{ id: string; name: string; status: string }>
+  ) => BreakdownEvent | null;
+  startRepair: (breakdownId: string) => StartRepairResult;
+  updateRepairProgress: (breakdownId: string, progressDelta: number) => void;
+  verifyRepair: (breakdownId: string, note?: string) => boolean;
+  requestMachineRestart: (breakdownId: string) => boolean;
+  confirmMachineRestart: (breakdownId: string) => boolean;
+  resolveBreakdown: (breakdownId: string) => void;
+  tickDowntime: (deltaSeconds: number) => void;
+
+  addPredictiveAlert: (
+    machineId: string,
+    machineName: string,
+    metrics: { vibration: number; temperature: number; load: number }
+  ) => void;
+  acknowledgePredictiveAlert: (alertId: string) => void;
+  clearOldPredictiveAlerts: () => void;
+
+  consumePart: (partType: keyof PartsInventory) => boolean;
+  restockPart: (partType: keyof PartsInventory, quantity: number) => void;
+  restockDelivery: () => void;
+  getPartsForBreakdown: (type: BreakdownType) => (keyof PartsInventory)[];
+
+  scheduleMaintenanceTask: (task: Omit<MaintenanceScheduleItem, 'id' | 'completed'>) => void;
+  completeMaintenanceTask: (taskId: string) => void;
+  tickBreakdownSimulation: (
+    gameTime: number,
+    machines: Array<{ id: string; name: string; status: string }>
+  ) => BreakdownEvent | null;
+
+  getBreakdownForMachine: (machineId: string) => BreakdownEvent | undefined;
+  getWorkOrderForBreakdown: (breakdownId: string) => MaintenanceWorkOrder | undefined;
+  getAlertsForMachine: (machineId: string) => PredictiveAlert[];
+  hasLowInventory: () => boolean;
+  resetBreakdownStore: () => void;
+}
+
+const initialState = () => ({
+  activeBreakdowns: [] as BreakdownEvent[],
+  breakdownHistory: [] as BreakdownEvent[],
+  workOrders: [] as MaintenanceWorkOrder[],
+  predictiveAlerts: [] as PredictiveAlert[],
+  partsInventory: { ...DEFAULT_PARTS_INVENTORY },
+  maintenanceSchedule: [] as MaintenanceScheduleItem[],
+  lastBreakdownTime: 0,
+  idSequence: 0,
+});
+
 export const useBreakdownStore = create<BreakdownStore>()(
   subscribeWithSelector((set, get) => ({
-    activeBreakdowns: [],
-    breakdownHistory: [],
-    predictiveAlerts: [],
-    partsInventory: { ...DEFAULT_PARTS_INVENTORY },
-    maintenanceSchedule: [],
-    lastBreakdownTime: 0,
+    ...initialState(),
 
     triggerBreakdown: (machineId, machineName, type) => {
-      // Atomic check-and-create: verify no existing breakdown inside set()
-      // This prevents race conditions where two calls could both pass the check
       let createdBreakdown: BreakdownEvent | null = null;
-
-      // Random type if not specified
       const breakdownType =
-        type ||
+        type ??
         (['mechanical', 'electrical', 'overheating', 'vibration_failure'] as BreakdownType[])[
           Math.floor(Math.random() * 4)
         ];
-
-      // Random description for the type
       const descriptions = BREAKDOWN_DESCRIPTIONS[breakdownType];
-      const description = descriptions[Math.floor(Math.random() * descriptions.length)];
-
-      // Random severity (mostly minor for visual-only breakdowns)
-      const severity = Math.random() < 0.7 ? 'minor' : 'moderate';
-
-      // Repair time: 30-60 game seconds (10-20 real seconds at 3x game speed)
-      const estimatedRepairTime = 30 + Math.floor(Math.random() * 30);
+      const now = Date.now();
 
       set((state) => {
-        // Check if machine already has an active breakdown (inside set for atomicity)
-        if (state.activeBreakdowns.some((b) => b.machineId === machineId)) {
-          createdBreakdown = null;
+        if (state.activeBreakdowns.some((breakdown) => breakdown.machineId === machineId)) {
           return {};
         }
 
+        const nextSequence = state.idSequence + 1;
+        const breakdownId = makeId('breakdown', nextSequence);
+        const workOrderId = makeId('wo', nextSequence);
+        const requiredParts = [...PARTS_FOR_BREAKDOWN[breakdownType]];
+        const description = descriptions[nextSequence % descriptions.length];
+        const severity = nextSequence % 3 === 0 ? 'moderate' : 'minor';
+        const estimatedRepairTime = 30 + ((nextSequence * 7) % 30);
         const breakdown: BreakdownEvent = {
-          id: generateId('breakdown'),
+          id: breakdownId,
+          workOrderId,
           machineId,
           machineName,
           type: breakdownType,
-          startTime: Date.now(),
+          startTime: now,
           estimatedRepairTime,
           severity,
           repairProgress: 0,
           resolved: false,
           description,
+          downtimeSeconds: 0,
+        };
+        const workOrder: MaintenanceWorkOrder = {
+          id: workOrderId,
+          breakdownId,
+          machineId,
+          machineName,
+          cause: breakdownType,
+          requiredParts,
+          consumedParts: [],
+          phase:
+            missingParts(state.partsInventory, requiredParts).length > 0
+              ? 'awaiting_parts'
+              : 'diagnosed',
+          openedAt: now,
+          downtimeSeconds: 0,
+          audit: [
+            {
+              phase: 'diagnosed',
+              timestamp: now,
+              note: `${description}. Work order opened with causal machine lockout.`,
+            },
+          ],
         };
 
         createdBreakdown = breakdown;
         return {
+          idSequence: nextSequence,
           activeBreakdowns: [...state.activeBreakdowns, breakdown],
-          lastBreakdownTime: Date.now(),
+          workOrders: [...state.workOrders, workOrder],
+          lastBreakdownTime: now,
         };
       });
 
@@ -232,150 +294,312 @@ export const useBreakdownStore = create<BreakdownStore>()(
 
     triggerRandomBreakdown: (machines) => {
       const state = get();
-
-      // Rate limiting: at least 2 real minutes between breakdowns
-      // This gives roughly 1-2 breakdowns per 8-minute game day
-      const timeSinceLastBreakdown = Date.now() - state.lastBreakdownTime;
-      if (timeSinceLastBreakdown < 120000) {
-        // 2 minutes real time
-        return null;
-      }
-
-      // Only consider running machines
-      const runningMachines = machines.filter((m) => m.status === 'running');
-      if (runningMachines.length === 0) return null;
-
-      // Exclude machines that already have breakdowns
-      const eligibleMachines = runningMachines.filter(
-        (m) => !state.activeBreakdowns.some((b) => b.machineId === m.id)
+      if (Date.now() - state.lastBreakdownTime < 120000) return null;
+      const eligibleMachines = machines.filter(
+        (machine) =>
+          machine.status === 'running' &&
+          !state.activeBreakdowns.some((breakdown) => breakdown.machineId === machine.id)
       );
-      if (eligibleMachines.length === 0) return null;
-
-      // Random chance: ~0.3% per tick (called every few seconds)
-      // This gives roughly 1-2 breakdowns per game day
-      if (Math.random() > 0.003) return null;
-
-      // Select random machine
+      if (eligibleMachines.length === 0 || Math.random() > 0.003) return null;
       const machine = eligibleMachines[Math.floor(Math.random() * eligibleMachines.length)];
-
       return get().triggerBreakdown(machine.id, machine.name);
     },
 
-    assignRepairWorker: (breakdownId, workerId, workerName) =>
-      set((state) => ({
-        activeBreakdowns: state.activeBreakdowns.map((b) =>
-          b.id === breakdownId
-            ? { ...b, assignedWorkerId: workerId, assignedWorkerName: workerName }
-            : b
-        ),
-      })),
-
-    updateRepairProgress: (breakdownId, progressDelta) =>
+    startRepair: (breakdownId) => {
+      let result: StartRepairResult = {
+        started: false,
+        reason: 'unknown_breakdown',
+        missingParts: [],
+      };
       set((state) => {
-        const breakdown = state.activeBreakdowns.find((b) => b.id === breakdownId);
-        if (!breakdown) return {};
+        const breakdown = state.activeBreakdowns.find((candidate) => candidate.id === breakdownId);
+        const workOrder = state.workOrders.find(
+          (candidate) => candidate.breakdownId === breakdownId
+        );
+        if (!breakdown || !workOrder) return {};
+        if (workOrder.phase !== 'diagnosed' && workOrder.phase !== 'awaiting_parts') {
+          result = { started: false, reason: 'invalid_phase', missingParts: [] };
+          return {};
+        }
 
-        const newProgress = Math.min(100, breakdown.repairProgress + progressDelta);
-
-        // Auto-resolve when progress hits 100
-        if (newProgress >= 100) {
+        const unavailable = missingParts(state.partsInventory, workOrder.requiredParts);
+        if (unavailable.length > 0) {
+          result = { started: false, reason: 'missing_parts', missingParts: unavailable };
           return {
-            activeBreakdowns: state.activeBreakdowns.filter((b) => b.id !== breakdownId),
-            breakdownHistory: [
-              { ...breakdown, repairProgress: 100, resolved: true },
-              ...state.breakdownHistory,
-            ].slice(0, 20), // Keep last 20
+            workOrders: state.workOrders.map((candidate) =>
+              candidate.id === workOrder.id
+                ? {
+                    ...candidate,
+                    phase: 'awaiting_parts',
+                    audit: [
+                      ...candidate.audit,
+                      {
+                        phase: 'awaiting_parts',
+                        timestamp: Date.now(),
+                        note: `Repair blocked pending ${unavailable.join(', ')}.`,
+                      },
+                    ],
+                  }
+                : candidate
+            ),
           };
         }
 
+        const counts = countParts(workOrder.requiredParts);
+        const partsInventory = { ...state.partsInventory };
+        (Object.entries(counts) as [keyof PartsInventory, number][]).forEach(([part, count]) => {
+          partsInventory[part] -= count;
+        });
+        const now = Date.now();
+        result = { started: true, missingParts: [] };
         return {
-          activeBreakdowns: state.activeBreakdowns.map((b) =>
-            b.id === breakdownId ? { ...b, repairProgress: newProgress } : b
+          partsInventory,
+          workOrders: state.workOrders.map((candidate) =>
+            candidate.id === workOrder.id
+              ? {
+                  ...candidate,
+                  phase: 'repairing',
+                  repairStartedAt: now,
+                  consumedParts: [...candidate.requiredParts],
+                  audit: [
+                    ...candidate.audit,
+                    {
+                      phase: 'repairing',
+                      timestamp: now,
+                      note: `Repair started. Consumed ${candidate.requiredParts.join(', ')}.`,
+                    },
+                  ],
+                }
+              : candidate
           ),
         };
-      }),
+      });
+      return result;
+    },
 
-    resolveBreakdown: (breakdownId) =>
+    updateRepairProgress: (breakdownId, progressDelta) =>
       set((state) => {
-        const breakdown = state.activeBreakdowns.find((b) => b.id === breakdownId);
-        if (!breakdown) return {};
-
+        const workOrder = state.workOrders.find(
+          (candidate) => candidate.breakdownId === breakdownId
+        );
+        const breakdown = state.activeBreakdowns.find((candidate) => candidate.id === breakdownId);
+        if (!workOrder || !breakdown || workOrder.phase !== 'repairing') return {};
+        const repairProgress = Math.min(100, Math.max(0, breakdown.repairProgress + progressDelta));
+        const completed = repairProgress >= 100;
+        const now = Date.now();
         return {
-          activeBreakdowns: state.activeBreakdowns.filter((b) => b.id !== breakdownId),
-          breakdownHistory: [{ ...breakdown, resolved: true }, ...state.breakdownHistory].slice(
-            0,
-            20
+          activeBreakdowns: state.activeBreakdowns.map((candidate) =>
+            candidate.id === breakdownId ? { ...candidate, repairProgress } : candidate
+          ),
+          workOrders: state.workOrders.map((candidate) =>
+            candidate.id === workOrder.id
+              ? {
+                  ...candidate,
+                  phase: completed ? 'verification' : candidate.phase,
+                  audit: completed
+                    ? [
+                        ...candidate.audit,
+                        {
+                          phase: 'verification',
+                          timestamp: now,
+                          note: 'Physical repair complete. Independent verification required.',
+                        },
+                      ]
+                    : candidate.audit,
+                }
+              : candidate
           ),
         };
       }),
+
+    verifyRepair: (breakdownId, note = 'Functional checks passed. Restart may be requested.') => {
+      let verified = false;
+      set((state) => {
+        const workOrder = state.workOrders.find(
+          (candidate) => candidate.breakdownId === breakdownId
+        );
+        const breakdown = state.activeBreakdowns.find((candidate) => candidate.id === breakdownId);
+        if (!workOrder || !breakdown || workOrder.phase !== 'verification') return {};
+        if (breakdown.repairProgress < 100) return {};
+        verified = true;
+        const now = Date.now();
+        return {
+          workOrders: state.workOrders.map((candidate) =>
+            candidate.id === workOrder.id
+              ? {
+                  ...candidate,
+                  phase: 'ready_to_restart',
+                  verificationCompletedAt: now,
+                  audit: [...candidate.audit, { phase: 'ready_to_restart', timestamp: now, note }],
+                }
+              : candidate
+          ),
+        };
+      });
+      return verified;
+    },
+
+    requestMachineRestart: (breakdownId) => {
+      let requested = false;
+      set((state) => {
+        const workOrder = state.workOrders.find(
+          (candidate) => candidate.breakdownId === breakdownId
+        );
+        if (!workOrder || workOrder.phase !== 'ready_to_restart') return {};
+        requested = true;
+        const now = Date.now();
+        return {
+          workOrders: state.workOrders.map((candidate) =>
+            candidate.id === workOrder.id
+              ? {
+                  ...candidate,
+                  phase: 'restart_requested',
+                  audit: [
+                    ...candidate.audit,
+                    {
+                      phase: 'restart_requested',
+                      timestamp: now,
+                      note: 'Operator requested controlled restart.',
+                    },
+                  ],
+                }
+              : candidate
+          ),
+        };
+      });
+      return requested;
+    },
+
+    confirmMachineRestart: (breakdownId) => {
+      let confirmed = false;
+      set((state) => {
+        const workOrder = state.workOrders.find(
+          (candidate) => candidate.breakdownId === breakdownId
+        );
+        const breakdown = state.activeBreakdowns.find((candidate) => candidate.id === breakdownId);
+        if (!workOrder || !breakdown || workOrder.phase !== 'restart_requested') return {};
+        confirmed = true;
+        const now = Date.now();
+        const resolvedBreakdown: BreakdownEvent = {
+          ...breakdown,
+          resolved: true,
+          repairProgress: 100,
+          downtimeSeconds: workOrder.downtimeSeconds,
+        };
+        return {
+          activeBreakdowns: state.activeBreakdowns.filter(
+            (candidate) => candidate.id !== breakdownId
+          ),
+          breakdownHistory: [resolvedBreakdown, ...state.breakdownHistory].slice(0, 20),
+          workOrders: state.workOrders.map((candidate) =>
+            candidate.id === workOrder.id
+              ? {
+                  ...candidate,
+                  phase: 'returned_to_service',
+                  restartedAt: now,
+                  audit: [
+                    ...candidate.audit,
+                    {
+                      phase: 'returned_to_service',
+                      timestamp: now,
+                      note: 'Machine returned to service after production state reset.',
+                    },
+                  ],
+                }
+              : candidate
+          ),
+        };
+      });
+      return confirmed;
+    },
+
+    // Compatibility alias. A direct resolve can only verify a fully completed
+    // repair; it cannot bypass parts, repair work, or the explicit restart.
+    resolveBreakdown: (breakdownId) => {
+      get().verifyRepair(breakdownId, 'Repair verified through compatibility action.');
+    },
+
+    tickDowntime: (deltaSeconds) => {
+      if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return;
+      const current = get();
+      if (
+        current.activeBreakdowns.length === 0 &&
+        !current.workOrders.some((workOrder) => workOrder.phase !== 'returned_to_service')
+      ) {
+        return;
+      }
+      set((state) => ({
+        activeBreakdowns: state.activeBreakdowns.map((breakdown) => ({
+          ...breakdown,
+          downtimeSeconds: breakdown.downtimeSeconds + deltaSeconds,
+        })),
+        workOrders: state.workOrders.map((workOrder) =>
+          workOrder.phase === 'returned_to_service'
+            ? workOrder
+            : { ...workOrder, downtimeSeconds: workOrder.downtimeSeconds + deltaSeconds }
+        ),
+      }));
+    },
 
     addPredictiveAlert: (machineId, machineName, metrics) => {
       const state = get();
-
-      // Don't duplicate alerts for same machine
-      if (state.predictiveAlerts.some((a) => a.machineId === machineId && !a.acknowledged)) {
+      if (
+        state.predictiveAlerts.some((alert) => alert.machineId === machineId && !alert.acknowledged)
+      ) {
         return;
       }
-
-      // Determine failure type based on which metric is worst
-      let predictedType: BreakdownType;
+      let predictedFailureType: BreakdownType;
       let confidence: number;
-
-      if (metrics.vibration > 4.0) {
-        predictedType = 'vibration_failure';
+      if (metrics.vibration > 4) {
+        predictedFailureType = 'vibration_failure';
         confidence = Math.min(95, 60 + metrics.vibration * 8);
       } else if (metrics.temperature > 65) {
-        predictedType = 'overheating';
+        predictedFailureType = 'overheating';
         confidence = Math.min(95, 50 + (metrics.temperature - 50) * 3);
       } else if (metrics.load > 95) {
-        predictedType = 'mechanical';
+        predictedFailureType = 'mechanical';
         confidence = Math.min(90, 55 + (metrics.load - 80) * 2);
       } else {
-        predictedType = 'electrical';
+        predictedFailureType = 'electrical';
         confidence = 55;
       }
-
-      // Time to failure based on severity (game minutes)
-      const predictedTimeToFailure = Math.max(5, 30 - Math.floor(confidence / 5));
-
+      const nextSequence = state.idSequence + 1;
       const alert: PredictiveAlert = {
-        id: generateId('alert'),
+        id: makeId('alert', nextSequence),
         machineId,
         machineName,
-        predictedFailureType: predictedType,
+        predictedFailureType,
         confidence: Math.round(confidence),
-        predictedTimeToFailure,
+        predictedTimeToFailure: Math.max(5, 30 - Math.floor(confidence / 5)),
         basedOnMetrics: metrics,
         acknowledged: false,
         createdAt: Date.now(),
       };
-
-      set((state) => ({
-        predictiveAlerts: [alert, ...state.predictiveAlerts].slice(0, 10),
+      set((current) => ({
+        idSequence: nextSequence,
+        predictiveAlerts: [alert, ...current.predictiveAlerts].slice(0, 10),
       }));
     },
 
     acknowledgePredictiveAlert: (alertId) =>
       set((state) => ({
-        predictiveAlerts: state.predictiveAlerts.map((a) =>
-          a.id === alertId ? { ...a, acknowledged: true } : a
+        predictiveAlerts: state.predictiveAlerts.map((alert) =>
+          alert.id === alertId ? { ...alert, acknowledged: true } : alert
         ),
       })),
 
     clearOldPredictiveAlerts: () =>
       set((state) => {
-        const cutoff = Date.now() - 5 * 60 * 1000; // 5 minutes ago
+        const cutoff = Date.now() - 5 * 60 * 1000;
         return {
           predictiveAlerts: state.predictiveAlerts.filter(
-            (a) => a.createdAt > cutoff || !a.acknowledged
+            (alert) => alert.createdAt > cutoff || !alert.acknowledged
           ),
         };
       }),
 
     consumePart: (partType) => {
-      const state = get();
-      if (state.partsInventory[partType] <= 0) return false;
-
+      if (get().partsInventory[partType] <= 0) return false;
       set((state) => ({
         partsInventory: {
           ...state.partsInventory,
@@ -389,34 +613,36 @@ export const useBreakdownStore = create<BreakdownStore>()(
       set((state) => ({
         partsInventory: {
           ...state.partsInventory,
-          [partType]: state.partsInventory[partType] + quantity,
+          [partType]: Math.max(0, state.partsInventory[partType] + Math.max(0, quantity)),
         },
       })),
 
-    // Each receiving truck carries a small maintenance resupply alongside the
-    // grain: every part type is topped up by 2, never beyond its default stock
-    // level, so inventory recovers from maintenance without growing unbounded.
     restockDelivery: () =>
       set((state) => {
-        const next = { ...state.partsInventory };
+        const partsInventory = { ...state.partsInventory };
         (Object.keys(DEFAULT_PARTS_INVENTORY) as (keyof PartsInventory)[]).forEach((part) => {
-          next[part] = Math.min(DEFAULT_PARTS_INVENTORY[part], next[part] + 2);
+          partsInventory[part] = Math.min(DEFAULT_PARTS_INVENTORY[part], partsInventory[part] + 2);
         });
-        return { partsInventory: next };
+        return { partsInventory };
       }),
 
     getPartsForBreakdown: (type) => PARTS_FOR_BREAKDOWN[type],
 
     scheduleMaintenanceTask: (task) =>
       set((state) => {
-        const alreadyScheduled = state.maintenanceSchedule.some(
-          (candidate) => candidate.machineId === task.machineId && !candidate.completed
-        );
-        if (alreadyScheduled) return {};
+        if (
+          state.maintenanceSchedule.some(
+            (candidate) => candidate.machineId === task.machineId && !candidate.completed
+          )
+        ) {
+          return {};
+        }
+        const nextSequence = state.idSequence + 1;
         return {
+          idSequence: nextSequence,
           maintenanceSchedule: [
             ...state.maintenanceSchedule,
-            { ...task, id: generateId('maint'), completed: false },
+            { ...task, id: makeId('maint', nextSequence), completed: false },
           ],
         };
       }),
@@ -424,25 +650,18 @@ export const useBreakdownStore = create<BreakdownStore>()(
     completeMaintenanceTask: (taskId) =>
       set((state) => {
         const task = state.maintenanceSchedule.find((candidate) => candidate.id === taskId);
-        if (!task || task.completed) return {};
-
-        const requiredParts = task.partsNeeded.reduce<
-          Partial<Record<keyof PartsInventory, number>>
-        >((counts, part) => {
-          counts[part] = (counts[part] ?? 0) + 1;
-          return counts;
-        }, {});
-        const hasAllParts = (
-          Object.entries(requiredParts) as [keyof PartsInventory, number][]
-        ).every(([part, count]) => state.partsInventory[part] >= count);
-        if (!hasAllParts) return {};
-
+        if (
+          !task ||
+          task.completed ||
+          missingParts(state.partsInventory, task.partsNeeded).length > 0
+        ) {
+          return {};
+        }
+        const counts = countParts(task.partsNeeded);
         const partsInventory = { ...state.partsInventory };
-        (Object.entries(requiredParts) as [keyof PartsInventory, number][]).forEach(
-          ([part, count]) => {
-            partsInventory[part] -= count;
-          }
-        );
+        (Object.entries(counts) as [keyof PartsInventory, number][]).forEach(([part, count]) => {
+          partsInventory[part] -= count;
+        });
         return {
           partsInventory,
           maintenanceSchedule: state.maintenanceSchedule.map((candidate) =>
@@ -452,30 +671,18 @@ export const useBreakdownStore = create<BreakdownStore>()(
       }),
 
     tickBreakdownSimulation: (_gameTime, machines) => {
-      const state = get();
-
-      // Try to trigger a random breakdown
-      state.triggerRandomBreakdown(machines);
-
-      // Clear old acknowledged alerts
-      state.clearOldPredictiveAlerts();
-
-      // Note: gameTime available for future time-based breakdown scheduling
+      const breakdown = get().triggerRandomBreakdown(machines);
+      get().clearOldPredictiveAlerts();
+      return breakdown;
     },
 
-    getBreakdownForMachine: (machineId) => {
-      const state = get();
-      return state.activeBreakdowns.find((b) => b.machineId === machineId);
-    },
-
-    getAlertsForMachine: (machineId) => {
-      const state = get();
-      return state.predictiveAlerts.filter((a) => a.machineId === machineId);
-    },
-
-    hasLowInventory: () => {
-      const state = get();
-      return Object.values(state.partsInventory).some((count) => count < 3);
-    },
+    getBreakdownForMachine: (machineId) =>
+      get().activeBreakdowns.find((breakdown) => breakdown.machineId === machineId),
+    getWorkOrderForBreakdown: (breakdownId) =>
+      get().workOrders.find((workOrder) => workOrder.breakdownId === breakdownId),
+    getAlertsForMachine: (machineId) =>
+      get().predictiveAlerts.filter((alert) => alert.machineId === machineId),
+    hasLowInventory: () => Object.values(get().partsInventory).some((count) => count < 3),
+    resetBreakdownStore: () => set(initialState()),
   }))
 );

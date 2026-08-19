@@ -3,8 +3,6 @@ import {
   Factory,
   Brain,
   Activity,
-  Users,
-  HardHat,
   Shield,
   Settings,
   Eye,
@@ -16,30 +14,20 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useUIStore } from '../../../stores/uiStore';
-import { useIsMultiplayerActive } from '../../../stores/multiplayerStore';
 import { useMobileDetection } from '../../../hooks/useMobileDetection';
 import { useMobileControlStore } from '../../../stores/mobileControlStore';
 
-export type DockMode =
-  | 'overview'
-  | 'ai'
-  | 'scada'
-  | 'workforce'
-  | 'management'
-  | 'safety'
-  | 'settings'
-  | 'multiplayer';
+export type DockMode = 'overview' | 'ai' | 'scada' | 'management' | 'safety' | 'settings';
 
 interface DockProps {
   activeMode: DockMode;
-  onModeChange: (mode: DockMode) => void;
+  onModeChange: (mode: DockMode, trigger?: HTMLElement) => void;
   onDatalinksOpen?: () => void;
 }
 
 export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalinksOpen }) => {
   const fpsMode = useUIStore((state) => state.fpsMode);
   const toggleFpsMode = useUIStore((state) => state.toggleFpsMode);
-  const isMultiplayerActive = useIsMultiplayerActive();
   const { isMobile, isCompactLayout } = useMobileDetection();
   const openMobilePanel = useMobileControlStore((state) => state.openMobilePanel);
 
@@ -116,17 +104,17 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
   }, []);
 
   // On mobile, clicking a dock item opens the mobile panel instead of sidebar
-  const handleModeChange = (mode: DockMode) => {
+  const handleModeChange = (mode: DockMode, trigger?: HTMLElement) => {
     if (isCompactLayout) {
       openMobilePanel(mode);
     } else {
-      onModeChange(mode);
+      onModeChange(mode, trigger);
     }
   };
 
   const handleMoreModeChange = (mode: DockMode) => {
     moreMenuTriggerRef.current?.focus();
-    handleModeChange(mode);
+    handleModeChange(mode, moreMenuTriggerRef.current ?? undefined);
     setMoreOpen(false);
   };
 
@@ -153,7 +141,7 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
         icon={<Factory size={24} />}
         label="Mill Overview"
         isActive={activeMode === 'overview'}
-        onClick={() => handleModeChange('overview')}
+        onClick={(trigger) => handleModeChange('overview', trigger)}
         isMobile={isCompactLayout}
       />
       <DockItem
@@ -161,7 +149,7 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
         icon={<Brain size={24} />}
         label="AI Partner"
         isActive={activeMode === 'ai'}
-        onClick={() => handleModeChange('ai')}
+        onClick={(trigger) => handleModeChange('ai', trigger)}
         isMobile={isCompactLayout}
       />
       <DockItem
@@ -169,26 +157,16 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
         icon={<Activity size={24} />}
         label="Simulated SCADA"
         isActive={activeMode === 'scada'}
-        onClick={() => handleModeChange('scada')}
+        onClick={(trigger) => handleModeChange('scada', trigger)}
         isMobile={isCompactLayout}
       />
-      {!isCompactLayout && (
-        <DockItem
-          mode="workforce"
-          icon={<HardHat size={24} />}
-          label="Workforce"
-          isActive={activeMode === 'workforce'}
-          onClick={() => handleModeChange('workforce')}
-          isMobile={isCompactLayout}
-        />
-      )}
       {!isCompactLayout && (
         <DockItem
           mode="management"
           icon={<Heart size={24} />}
           label="Bilateral Autonomy System (BAS)"
           isActive={activeMode === 'management'}
-          onClick={() => handleModeChange('management')}
+          onClick={(trigger) => handleModeChange('management', trigger)}
           isMobile={isCompactLayout}
         />
       )}
@@ -197,7 +175,7 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
         icon={<Shield size={24} />}
         label="Safety & Emergency"
         isActive={activeMode === 'safety'}
-        onClick={() => handleModeChange('safety')}
+        onClick={(trigger) => handleModeChange('safety', trigger)}
         isMobile={isCompactLayout}
       />
       <DockItem
@@ -205,7 +183,7 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
         icon={<Settings size={24} />}
         label="Settings"
         isActive={activeMode === 'settings'}
-        onClick={() => handleModeChange('settings')}
+        onClick={(trigger) => handleModeChange('settings', trigger)}
         isMobile={isCompactLayout}
       />
 
@@ -218,16 +196,10 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
           aria-haspopup="menu"
           aria-expanded={moreOpen}
           className={`relative min-h-[44px] min-w-[44px] rounded-xl p-2 text-slate-300 transition-colors hover:bg-white/5 hover:text-white ${
-            activeMode === 'multiplayer' || fpsMode ? 'bg-white/10 text-cyan-300' : ''
+            fpsMode ? 'bg-white/10 text-cyan-300' : ''
           }`}
         >
           <MoreHorizontal size={24} aria-hidden="true" />
-          {isMultiplayerActive && (
-            <span
-              className="absolute right-1 top-1 h-2 w-2 rounded-full bg-green-500"
-              aria-hidden="true"
-            />
-          )}
         </button>
         {moreOpen && (
           <div
@@ -240,15 +212,6 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
                 <button
                   role="menuitem"
                   type="button"
-                  onClick={() => handleMoreModeChange('workforce')}
-                  className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/10"
-                >
-                  <HardHat size={18} aria-hidden="true" />
-                  Workforce
-                </button>
-                <button
-                  role="menuitem"
-                  type="button"
                   onClick={() => handleMoreModeChange('management')}
                   className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/10"
                 >
@@ -257,18 +220,6 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
                 </button>
               </>
             )}
-            <button
-              role="menuitem"
-              type="button"
-              onClick={() => handleMoreModeChange('multiplayer')}
-              className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-200 transition-colors hover:bg-white/10"
-            >
-              <Users size={18} aria-hidden="true" />
-              Multiplayer
-              {isMultiplayerActive && (
-                <span className="ml-auto text-[10px] font-semibold text-green-300">ACTIVE</span>
-              )}
-            </button>
             {onDatalinksOpen && (
               <button
                 role="menuitem"
@@ -328,13 +279,13 @@ const DockItem: React.FC<{
   icon: React.ReactNode;
   label: string;
   isActive: boolean;
-  onClick: () => void;
+  onClick: (trigger: HTMLButtonElement) => void;
   badge?: boolean;
   isMobile?: boolean;
 }> = ({ mode, icon, label, isActive, onClick, badge, isMobile }) => {
   return (
     <button
-      onClick={onClick}
+      onClick={(event) => onClick(event.currentTarget)}
       data-dock-mode={mode}
       aria-label={label}
       aria-pressed={isActive}

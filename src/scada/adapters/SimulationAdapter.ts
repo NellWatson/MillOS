@@ -20,6 +20,11 @@ import {
   FaultType,
   FaultInjection,
 } from '../types';
+import {
+  deterministicValue,
+  deterministicVariance,
+  idToSeed,
+} from '../../systems/CentralTickSystem';
 
 /** Machine state from Zustand store */
 interface MachineState {
@@ -48,6 +53,7 @@ export class SimulationAdapter implements IProtocolAdapter {
   private machineStates: Map<string, MachineState> = new Map();
   private activeFaults: Map<string, ActiveFault> = new Map();
   private operationalValues: Map<string, number> = new Map();
+  private sampleIndex = 0;
 
   // Statistics
   private stats = {
@@ -58,7 +64,14 @@ export class SimulationAdapter implements IProtocolAdapter {
   };
 
   constructor(tagDefinitions: TagDefinition[]) {
-    tagDefinitions.forEach((tag) => this.tags.set(tag.id, tag));
+    // Own the mutable simulation definition. A setpoint write must not mutate
+    // the caller's tag catalogue or leak into another adapter instance.
+    tagDefinitions.forEach((tag) =>
+      this.tags.set(tag.id, {
+        ...tag,
+        simulation: tag.simulation ? { ...tag.simulation } : undefined,
+      })
+    );
 
     // Initialize default machine states to 'running'
     // This prevents LOLO alarms during startup before store syncs
@@ -88,6 +101,8 @@ export class SimulationAdapter implements IProtocolAdapter {
 
   async connect(): Promise<void> {
     if (this.connected) return;
+
+    this.sampleIndex = 0;
 
     // Initialize all tag values with base values
     this.tags.forEach((tag, id) => {
@@ -274,7 +289,7 @@ export class SimulationAdapter implements IProtocolAdapter {
       }
     });
     // The adapter's 1 Hz sampler publishes the latest snapshot. Running a
-    // complete 87-tag tick for every material-flow update would move simulation
+    // complete tag tick for every material-flow update would move simulation
     // work onto the render-critical path and oversample historian data.
   }
 
@@ -349,6 +364,7 @@ export class SimulationAdapter implements IProtocolAdapter {
 
   private tick(): void {
     const now = Date.now();
+    this.sampleIndex += 1;
     const changedTags: TagValue[] = [];
 
     // Check for expired faults
@@ -418,7 +434,7 @@ export class SimulationAdapter implements IProtocolAdapter {
 
         // 2. Apply noise (additive, not compounding)
         if (sim.noiseAmplitude > 0) {
-          newValue += (Math.random() - 0.5) * 2 * sim.noiseAmplitude;
+          newValue += deterministicVariance(idToSeed(id), this.sampleIndex, sim.noiseAmplitude);
         }
 
         // 3. Apply drift (accumulates in baseValue over long periods - disabled for now)
@@ -432,8 +448,8 @@ export class SimulationAdapter implements IProtocolAdapter {
         // 5. Clamp to engineering range
         newValue = Math.max(tag.engLow, Math.min(tag.engHigh, newValue));
 
-        // 6. Random sensor failure (0.005% chance per tick)
-        if (Math.random() < 0.00005) {
+        // 6. Reproducible sensor failure sequence (0.005% chance per sample)
+        if (deterministicValue(idToSeed(`${id}:quality`), this.sampleIndex) < 0.00005) {
           quality = 'BAD';
           newValue = tag.engLow;
         }
@@ -493,7 +509,9 @@ export class SimulationAdapter implements IProtocolAdapter {
         // Increased noise
         const noiseAmount = (tag.engHigh - tag.engLow) * 0.05 * fault.severity;
         return {
-          value: currentValue + (Math.random() - 0.5) * 2 * noiseAmount,
+          value:
+            currentValue +
+            deterministicVariance(idToSeed(`${fault.tagId}:fault`), this.sampleIndex, noiseAmount),
           quality: 'GOOD',
         };
       }

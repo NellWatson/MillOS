@@ -6,7 +6,6 @@ export const CONTINUOUS_WORLD_LAYER_IDS = [
   'world-factory-process',
   'world-factory-infrastructure',
   'world-conveyors',
-  'world-personnel',
   'world-forklifts',
   'world-logistics',
   'world-terrain',
@@ -20,6 +19,7 @@ export const CONTINUOUS_WORLD_LAYER_IDS = [
 export const PRESENT_WORLD_LAYER_IDS = [
   'optimized-sky-system',
   'optimized-horizon-backdrop',
+  'near-horizon-city',
   'sun-visual',
   'moon-visual',
 ] as const;

@@ -77,7 +77,6 @@ describe('GraphicsStore', () => {
       expect(graphics.enableDustParticles).toBe(false);
       expect(graphics.dustParticleCount).toBe(0);
       expect(graphics.shadowMapSize).toBe(1024);
-      expect(graphics.workerLodDistance).toBe(15);
       // Low is the only tier without a composer.
       expect(isPostProcessingActive(graphics)).toBe(false);
     });
@@ -141,7 +140,6 @@ describe('GraphicsStore', () => {
       // jump to aoSamples 64 and will not hold p95 <= 25 ms.
       expect(graphics.aoQuality).toBe(AO_QUALITY_LEVELS.length - 1);
       expect(aoQualityLevel(graphics.aoQuality)).toBe('medium');
-      expect(graphics.workerLodDistance).toBe(100);
     });
   });
 
@@ -218,13 +216,6 @@ describe('GraphicsStore', () => {
       expect(useGraphicsStore.getState().graphics.shadowMapSize).toBe(4096);
     });
 
-    it('should set worker LOD distance', () => {
-      const { setGraphicsSetting } = useGraphicsStore.getState();
-
-      setGraphicsSetting('workerLodDistance', 50);
-      expect(useGraphicsStore.getState().graphics.workerLodDistance).toBe(50);
-    });
-
     it('should preserve other settings when changing one', () => {
       const { setGraphicsSetting } = useGraphicsStore.getState();
       const originalQuality = useGraphicsStore.getState().graphics.quality;
@@ -287,9 +278,7 @@ describe('GraphicsStore', () => {
   describe('Performance Debug Settings', () => {
     it('should have all systems enabled by default', () => {
       const { graphics } = useGraphicsStore.getState();
-      expect(graphics.perfDebug.disableWorkerMoods).toBe(false);
       expect(graphics.perfDebug.disableTruckBay).toBe(false);
-      expect(graphics.perfDebug.disableWorkerSystem).toBe(false);
       expect(graphics.perfDebug.disableForkliftSystem).toBe(false);
       expect(graphics.perfDebug.disableConveyorSystem).toBe(false);
       expect(graphics.perfDebug.disableMachines).toBe(false);
@@ -301,11 +290,11 @@ describe('GraphicsStore', () => {
     it('should set individual perf debug setting', () => {
       const { setPerfDebug } = useGraphicsStore.getState();
 
-      setPerfDebug('disableWorkerMoods', true);
-      expect(useGraphicsStore.getState().graphics.perfDebug.disableWorkerMoods).toBe(true);
+      setPerfDebug('disableTruckBay', true);
+      expect(useGraphicsStore.getState().graphics.perfDebug.disableTruckBay).toBe(true);
 
-      setPerfDebug('disableWorkerMoods', false);
-      expect(useGraphicsStore.getState().graphics.perfDebug.disableWorkerMoods).toBe(false);
+      setPerfDebug('disableTruckBay', false);
+      expect(useGraphicsStore.getState().graphics.perfDebug.disableTruckBay).toBe(false);
     });
 
     it('should toggle perf overlay', () => {
@@ -326,7 +315,6 @@ describe('GraphicsStore', () => {
       const { setPerfDebug, resetPerfDebug } = useGraphicsStore.getState();
 
       // Modify some settings
-      setPerfDebug('disableWorkerMoods', true);
       setPerfDebug('disableTruckBay', true);
       setPerfDebug('showPerfOverlay', true);
 
@@ -414,7 +402,6 @@ describe('GraphicsStore', () => {
         'dustParticleCount',
         'shadowMapSize',
         'aoQuality',
-        'workerLodDistance',
         'enableGrainFlow',
         'enableMachineDetail',
       ];
@@ -430,12 +417,8 @@ describe('GraphicsStore', () => {
       // `enableMachineDetail` is separate from `enableMachineColorVariation`,
       // which is per-instance tint only. Low draws the bare silhouette.
       //
-      // UNCONSUMED AS OF THIS CHANGE. The key was added ahead of the reader in
-      // `machines/CompactMachines.tsx`, which currently tiers its decal and
-      // wear layers off `enableMachineColorVariation` instead. This assertion
-      // exists to hold that contract, NOT to certify a live flag - if
-      // CompactMachines never reads it, delete the key and this test together
-      // rather than letting it join the DEAD SETTINGS list in graphicsStore.ts.
+      // The live `CompactMachines.tsx` path reads this independently from
+      // per-instance colour variation and gates the placard draw call.
       expect(GRAPHICS_PRESETS.low.enableMachineDetail).toBe(false);
       expect(GRAPHICS_PRESETS.medium.enableMachineDetail).toBe(true);
       expect(GRAPHICS_PRESETS.high.enableMachineDetail).toBe(true);
@@ -443,11 +426,11 @@ describe('GraphicsStore', () => {
     });
 
     it('holds external PBR machine textures off at every tier', () => {
-      // Not an oversight. `machineTextures.ts` -> `loadJpgTexture` still binds
-      // NearestFilter with `generateMipmaps = false` on the synchronous
-      // placeholder path, declares no colour space on `_color` maps, and the
-      // flag OVERRIDES rather than layers onto the authored materials. See the
-      // three preconditions recorded on the `low` preset.
+      // Not an oversight. Sampling and colour-space preconditions are fixed,
+      // but this flag still OVERRIDES rather than layers onto the authored
+      // materials. It remains off until blind A/B art review and the five-view
+      // performance benchmark accept that replacement. See the hold recorded
+      // on the `low` preset.
       Object.values(GRAPHICS_PRESETS).forEach((preset) => {
         expect(preset.enableMachineTextures).toBe(false);
       });
@@ -578,7 +561,7 @@ describe('GraphicsStore', () => {
     });
   });
 
-  describe('Persisted Migration (v2 -> v3 -> v4)', () => {
+  describe('Persisted Migration (v2 -> v3 -> v4 -> v5)', () => {
     // The rebuilt pipeline changes what the post-processing keys mean. Without
     // a migration, `merge` -> sanitizeGraphicsSettings and then
     // onRehydrateStorage both carry the old values forward on top of the new
@@ -590,8 +573,8 @@ describe('GraphicsStore', () => {
         graphics: Record<string, unknown>;
       };
 
-    it('is versioned past 3', () => {
-      expect(persistOptions.version).toBe(4);
+    it('is versioned past 4', () => {
+      expect(persistOptions.version).toBe(5);
     });
 
     it('resets post-processing keys to the preset and drops the retired ones', () => {
@@ -605,7 +588,6 @@ describe('GraphicsStore', () => {
             enableVignette: false,
             enableDepthOfField: true,
             dustParticleCount: 42,
-            workerLodDistance: 999,
           },
         },
         2
@@ -626,7 +608,6 @@ describe('GraphicsStore', () => {
 
       // Non-pipeline choices the user may have tuned are left alone.
       expect(migrated.graphics.dustParticleCount).toBe(42);
-      expect(migrated.graphics.workerLodDistance).toBe(999);
     });
 
     it('survives sanitisation, which is what actually reaches the store', () => {
@@ -666,7 +647,7 @@ describe('GraphicsStore', () => {
       const quality: GraphicsQuality = 'ultra';
       const migrated = runMigrate(
         { graphics: { quality, enableVignette: false, enableColorGrade: false } },
-        4
+        5
       );
       expect(migrated.graphics.enableVignette).toBe(false);
       expect(migrated.graphics.enableColorGrade).toBe(false);
@@ -712,6 +693,23 @@ describe('GraphicsStore', () => {
       );
       expect(migrated.graphics.enableGrainFlow).toBe(false);
       expect(migrated.graphics.dustParticleCount).toBe(24);
+    });
+
+    it('retires zero-reader graphics keys without disturbing real settings', () => {
+      const migrated = runMigrate(
+        {
+          graphics: {
+            quality: 'high',
+            enableMachineLOD: false,
+            enableTextureFiltering: false,
+            anisotropyLevel: 16,
+          },
+        },
+        4
+      );
+      expect(migrated.graphics).not.toHaveProperty('enableMachineLOD');
+      expect(migrated.graphics).not.toHaveProperty('enableTextureFiltering');
+      expect(migrated.graphics.anisotropyLevel).toBe(16);
     });
 
     it('carries the v4 repair through sanitisation, which is what reaches the store', () => {

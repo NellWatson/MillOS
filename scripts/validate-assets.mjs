@@ -109,6 +109,7 @@ async function validateAsset(io, definition) {
   const materialNames = root.listMaterials().map((material) => material.getName());
   const nodeNames = new Set(root.listNodes().map((node) => node.getName()));
   const animationNames = new Set(root.listAnimations().map((animation) => animation.getName()));
+  const extensionsUsed = root.listExtensionsUsed().map((extension) => extension.extensionName);
   const renderVertices = getSceneRenderVertexCount(scene);
   const textureBytes = root
     .listTextures()
@@ -211,6 +212,35 @@ async function validateAsset(io, definition) {
       animationNames.has(requiredAnimation) ? 'present' : 'missing'
     );
   }
+  if (definition.requiredSkinCount !== undefined) {
+    addCheck(
+      checks,
+      errors,
+      'skin-count',
+      root.listSkins().length === definition.requiredSkinCount,
+      `${root.listSkins().length} === ${definition.requiredSkinCount}`
+    );
+  }
+  if (definition.requiredJointCount !== undefined) {
+    root.listSkins().forEach((skin, index) => {
+      addCheck(
+        checks,
+        errors,
+        `skin:${index}:joint-count`,
+        skin.listJoints().length === definition.requiredJointCount,
+        `${skin.listJoints().length} === ${definition.requiredJointCount}`
+      );
+    });
+  }
+  for (const requiredExtension of definition.requiredExtensions ?? []) {
+    addCheck(
+      checks,
+      errors,
+      `extension:${requiredExtension}`,
+      extensionsUsed.includes(requiredExtension),
+      extensionsUsed.includes(requiredExtension) ? 'present' : 'missing'
+    );
+  }
 
   return {
     id: definition.id,
@@ -233,7 +263,7 @@ async function validateAsset(io, definition) {
       meshes: root.listMeshes().length,
       animations: root.listAnimations().length,
     },
-    extensions: root.listExtensionsUsed().map((extension) => extension.extensionName),
+    extensions: extensionsUsed,
     checks,
     passed: errors.length === 0,
     errors,

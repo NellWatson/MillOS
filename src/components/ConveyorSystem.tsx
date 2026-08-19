@@ -1,7 +1,6 @@
-import React, { useRef, useMemo, useEffect, useState } from 'react';
+import React, { useRef, useMemo, useEffect, useLayoutEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
-import { SceneText as Text } from './shared/SceneText';
 import * as THREE from 'three';
 import { useShallow } from 'zustand/react/shallow';
 import { audioManager } from '../utils/audioManager';
@@ -61,31 +60,6 @@ export const registerConveyorAudio = (id: string, position: THREE.Vector3, isRun
 
 export const unregisterConveyorAudio = (id: string) => {
   conveyorAudioRegistry.delete(id);
-};
-
-// Module-level registry for centralized bag animations (15-60 bags → 1 useFrame)
-interface BagAnimationState {
-  ref: THREE.Group;
-  speed: number;
-  currentX: number;
-  crossedBoundary: boolean;
-}
-const bagAnimationRegistry = new Map<string, BagAnimationState>();
-
-export const registerBagAnimation = (id: string, state: BagAnimationState) => {
-  bagAnimationRegistry.set(id, state);
-};
-
-export const unregisterBagAnimation = (id: string) => {
-  bagAnimationRegistry.delete(id);
-};
-
-export const updateBagPosition = (id: string, x: number, crossedBoundary: boolean) => {
-  const state = bagAnimationRegistry.get(id);
-  if (state) {
-    state.currentX = x;
-    state.crossedBoundary = crossedBoundary;
-  }
 };
 
 // Generate batch number in format: YYYYMMDD-XXX
@@ -411,47 +385,6 @@ const ConveyorAudioManager: React.FC<{ productionSpeed: number }> = ({ productio
   return null;
 };
 
-// Centralized bag animation manager - updates all bags in ONE useFrame (15-60 bags → 1 call)
-// NOTE: This is purely visual animation - production counting is handled by App.tsx
-// interval-based system which scales with gameSpeed for proper game-time production
-const BagAnimationManager: React.FC<{
-  productionSpeed: number;
-}> = ({ productionSpeed }) => {
-  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
-
-  useFrame((_, delta) => {
-    // PERFORMANCE: Skip when tab hidden or production stopped
-    if (!isTabVisible || productionSpeed === 0) return;
-    // Skip if no bags registered
-    if (bagAnimationRegistry.size === 0) return;
-
-    // Deliberately NOT throttled. This loop is <= 60 iterations of two float
-    // ops; at a 3-frame throttle bags advanced 0.25 world units per step, which
-    // is visible stepping against a belt surface that now scrolls at 60 Hz.
-    // Cap delta to prevent huge jumps when tab regains focus (max 100ms).
-    const cappedDelta = Math.min(delta, 0.1);
-
-    // Update all bags in a single pass (visual only - no production counting)
-    bagAnimationRegistry.forEach((state) => {
-      if (!state.ref) return;
-
-      state.currentX += state.speed * productionSpeed * cappedDelta;
-
-      // Wrap bag when it crosses the boundary (visual continuity)
-      if (state.currentX > BAG_BOUNDARY) {
-        // Preserve overflow to prevent stuttering/bunching
-        const overflow = state.currentX - BAG_BOUNDARY;
-        state.currentX = -BAG_BOUNDARY + overflow;
-      }
-
-      // Apply position to mesh
-      state.ref.position.x = state.currentX;
-    });
-  });
-
-  return null;
-};
-
 interface ConveyorSystemProps {
   productionSpeed: number;
 }
@@ -514,9 +447,6 @@ export const ConveyorSystem = React.memo<ConveyorSystemProps>(({ productionSpeed
       {/* Centralized audio manager - updates all conveyors in one pass */}
       <ConveyorAudioManager productionSpeed={productionSpeed} />
 
-      {/* Centralized bag animation manager - updates all bags in ONE useFrame */}
-      <BagAnimationManager productionSpeed={productionSpeed} />
-
       {/* Ambient contact darkening on the floor beneath every belt run. One
           triangle pair + one texture fetch each; works at EVERY tier including
           `low`, where there is no shadow-casting light at all.
@@ -542,10 +472,8 @@ export const ConveyorSystem = React.memo<ConveyorSystemProps>(({ productionSpeed
         <SupportLeg key={i} position={[x, 0, 24]} />
       ))}
 
-      {/* Flour bags */}
-      {bags.map((bag) => (
-        <FlourBagMesh key={bag.id} data={bag} />
-      ))}
+      {/* Flour bags: two animated instanced draws, one body and one quality stripe. */}
+      <InstancedFlourBags bags={bags} productionSpeed={productionSpeed} />
 
       {/* Roller conveyor to packing with enhanced details - moved to z=21 */}
       <RollerConveyor position={[0, 0.5, 21]} productionSpeed={productionSpeed} />
@@ -1324,19 +1252,13 @@ const getFlourSackGeometry = (): THREE.BufferGeometry => {
 };
 
 /**
- * Two shared sack materials (idle + hovered) instead of 60 inline ones.
- *
- * `color` is WHITE on purpose. The grain generator's bytes are now correctly
- * tagged sRGB, so the albedo map already carries the cloth hue; the old
- * `#fef3c7` was compensating for the map not being bound at all and would now
- * multiply the same cream in twice.
+ * One shared sack material for every instance. `color` is white because the
+ * correctly tagged sRGB albedo map already carries the cloth hue. Per-instance
+ * colour supplies the restrained hover highlight without another draw call.
  */
-let flourSackMaterialCache: {
-  base: THREE.MeshStandardMaterial;
-  hovered: THREE.MeshStandardMaterial;
-} | null = null;
+let flourSackMaterialCache: THREE.MeshStandardMaterial | null = null;
 
-const getFlourSackMaterials = () => {
+const getFlourSackMaterial = (): THREE.MeshStandardMaterial => {
   if (flourSackMaterialCache) return flourSackMaterialCache;
 
   const source = getFlourSackMaps();
@@ -1349,7 +1271,7 @@ const getFlourSackMaterials = () => {
     return clone;
   };
 
-  const base = new THREE.MeshStandardMaterial({
+  flourSackMaterialCache = new THREE.MeshStandardMaterial({
     color: '#ffffff',
     map: tile(source.map),
     normalMap: tile(source.normal),
@@ -1360,160 +1282,185 @@ const getFlourSackMaterials = () => {
     envMapIntensity: 0.7,
   });
 
-  const hovered = base.clone();
-  hovered.emissive = new THREE.Color('#fbbf24');
-  // Stays under 1.0 linear, so this is safe on `low` where there is no composer
-  // and `toneMapped` clamping would flatten a brighter value to white.
-  hovered.emissiveIntensity = 0.12;
-
-  // CLONE FIRST, INJECT SECOND. `THREE.Material.copy()` runs userData through
-  // `JSON.parse(JSON.stringify(...))` and does NOT copy `onBeforeCompile`, so
-  // cloning a material that already carries the treatment produces a JSON ghost
-  // - the bookkeeping without the shader, and permanently deaf to the A/B
-  // toggle. Treating both clones separately is the only safe order.
-  //
   // `fabric` in OBJECT rest space: these sacks travel the length of the belt,
   // and a world-space field would make the weave swim across a bag as it moves
-  // through it. The profile's 0.055 m meso period is authored for a garment at
-  // the `personnel-close` camera and reads correctly on a 0.5 m sack.
-  applyWorldSurface(base, 'fabric');
-  applyWorldSurface(hovered, 'fabric');
-
-  flourSackMaterialCache = { base, hovered };
+  // through it.
+  //
+  // Treated in place rather than on a clone. `THREE.Material.copy()` runs
+  // userData through `JSON.parse(JSON.stringify(...))` and does NOT copy
+  // `onBeforeCompile`, so cloning a material that already carries the treatment
+  // produces a JSON ghost - the bookkeeping without the shader, and permanently
+  // deaf to the A/B toggle.
+  applyWorldSurface(flourSackMaterialCache, 'fabric');
   return flourSackMaterialCache;
 };
 
-// FlourBagMesh - now uses centralized animation via BagAnimationManager (15-60 bags → 1 useFrame)
-const FlourBagMesh: React.FC<{ data: FlourBag }> = React.memo(({ data }) => {
-  const ref = useRef<THREE.Group>(null);
-  const [hovered, setHovered] = useState(false);
-  const enableProceduralTextures = useGraphicsStore(
-    useShallow((state) => state.graphics.enableProceduralTextures)
+const FLOUR_STRIPE_GEOMETRY = new THREE.PlaneGeometry(0.5, 0.3);
+const FLOUR_STRIPE_MATERIAL = new THREE.MeshBasicMaterial({
+  color: '#ffffff',
+  depthWrite: false,
+  polygonOffset: true,
+  polygonOffsetFactor: POLYGON_OFFSET.standard.factor,
+  polygonOffsetUnits: POLYGON_OFFSET.standard.units,
+});
+const BAG_BODY_OFFSET = new THREE.Matrix4().makeTranslation(0, 0.25, 0);
+const BAG_STRIPE_OFFSET = new THREE.Matrix4().makeTranslation(0, 0.25, 0.48);
+const BAG_SCALE = new THREE.Vector3(1, 1, 1);
+const BAG_UP = new THREE.Vector3(0, 1, 0);
+const BAG_IDLE_COLOR = new THREE.Color('#ffffff');
+const BAG_HOVER_COLOR = new THREE.Color('#ffd99a');
+
+export function advanceBagPosition(
+  currentX: number,
+  speed: number,
+  productionSpeed: number,
+  delta: number
+): number {
+  const cappedDelta = Math.min(Math.max(delta, 0), 0.1);
+  const next = currentX + speed * Math.max(0, productionSpeed) * cappedDelta;
+  if (next <= BAG_BOUNDARY) return next;
+  return -BAG_BOUNDARY + ((next - BAG_BOUNDARY) % (BAG_BOUNDARY * 2));
+}
+
+/**
+ * Medium previously rendered 30 sacks as 60 individual draws. The body and
+ * quality stripe now remain independently shaded, animated and pickable in two
+ * instanced draws. One tooltip follows the selected instance.
+ */
+const InstancedFlourBags: React.FC<{
+  bags: FlourBag[];
+  productionSpeed: number;
+}> = React.memo(({ bags, productionSpeed }) => {
+  const bodiesRef = useRef<THREE.InstancedMesh>(null);
+  const stripesRef = useRef<THREE.InstancedMesh>(null);
+  const tooltipRef = useRef<THREE.Group>(null);
+  const positionsRef = useRef<number[]>(bags.map((bag) => bag.position[0]));
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const isTabVisible = useGameSimulationStore((state) => state.isTabVisible);
+  const groupPosition = useMemo(() => new THREE.Vector3(), []);
+  const groupRotation = useMemo(() => new THREE.Quaternion(), []);
+  const groupMatrix = useMemo(() => new THREE.Matrix4(), []);
+  const instanceMatrix = useMemo(() => new THREE.Matrix4(), []);
+  const qualityColours = useMemo(
+    () => bags.map((bag) => new THREE.Color(QUALITY_COLORS[bag.quality])),
+    [bags]
   );
 
-  // Register with centralized bag animation manager on mount
+  const writeMatrices = (): void => {
+    const bodies = bodiesRef.current;
+    const stripes = stripesRef.current;
+    if (!bodies || !stripes) return;
+
+    for (let index = 0; index < bags.length; index += 1) {
+      const bag = bags[index];
+      groupPosition.set(positionsRef.current[index], bag.position[1], bag.position[2]);
+      groupRotation.setFromAxisAngle(BAG_UP, bag.rotation);
+      groupMatrix.compose(groupPosition, groupRotation, BAG_SCALE);
+
+      instanceMatrix.multiplyMatrices(groupMatrix, BAG_BODY_OFFSET);
+      bodies.setMatrixAt(index, instanceMatrix);
+      instanceMatrix.multiplyMatrices(groupMatrix, BAG_STRIPE_OFFSET);
+      stripes.setMatrixAt(index, instanceMatrix);
+    }
+
+    bodies.instanceMatrix.needsUpdate = true;
+    stripes.instanceMatrix.needsUpdate = true;
+  };
+
+  useLayoutEffect(() => {
+    const bodies = bodiesRef.current;
+    const stripes = stripesRef.current;
+    if (!bodies || !stripes) return;
+
+    positionsRef.current = bags.map((bag) => bag.position[0]);
+    bodies.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    stripes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    for (let index = 0; index < bags.length; index += 1) {
+      bodies.setColorAt(index, BAG_IDLE_COLOR);
+      stripes.setColorAt(index, qualityColours[index]);
+    }
+    if (bodies.instanceColor) bodies.instanceColor.needsUpdate = true;
+    if (stripes.instanceColor) stripes.instanceColor.needsUpdate = true;
+    writeMatrices();
+    bodies.computeBoundingSphere();
+    stripes.computeBoundingSphere();
+    setHoveredIndex(null);
+  }, [bags, qualityColours]);
+
   useEffect(() => {
-    if (!ref.current) return;
+    const bodies = bodiesRef.current;
+    if (!bodies) return;
+    for (let index = 0; index < bags.length; index += 1) {
+      bodies.setColorAt(index, index === hoveredIndex ? BAG_HOVER_COLOR : BAG_IDLE_COLOR);
+    }
+    if (bodies.instanceColor) bodies.instanceColor.needsUpdate = true;
+  }, [bags.length, hoveredIndex]);
 
-    // Register bag state with centralized manager
-    registerBagAnimation(data.id, {
-      ref: ref.current,
-      speed: data.speed,
-      currentX: data.position[0],
-      crossedBoundary: false,
-    });
+  useFrame((_, delta) => {
+    if (isTabVisible && productionSpeed > 0) {
+      for (let index = 0; index < bags.length; index += 1) {
+        positionsRef.current[index] = advanceBagPosition(
+          positionsRef.current[index],
+          bags[index].speed,
+          productionSpeed,
+          delta
+        );
+      }
+      writeMatrices();
+    }
 
-    return () => {
-      unregisterBagAnimation(data.id);
-    };
-  }, [data.id, data.speed, data.position]);
+    if (hoveredIndex !== null && tooltipRef.current) {
+      const bag = bags[hoveredIndex];
+      tooltipRef.current.position.set(
+        positionsRef.current[hoveredIndex],
+        bag.position[1] + 0.8,
+        bag.position[2]
+      );
+    }
+  });
 
-  // The troika <Text> labels below stay gated on `enableProceduralTextures`
-  // (false on every tier). Each label is a separate draw call with its own SDF
-  // atlas upload; 60 bags x 2 labels is 120 calls against a ~1200-call scene.
-  const showDetails = enableProceduralTextures;
-  const qualityColor = QUALITY_COLORS[data.quality];
-  const sackMaterials = getFlourSackMaterials();
-
-  // Extract position values for stable initial position (animated via ref after mount)
-  const initPosX = data.position[0];
-  const initPosY = data.position[1];
-  const initPosZ = data.position[2];
-  const initialPosition = useMemo<[number, number, number]>(
-    () => [initPosX, initPosY, initPosZ],
-    [initPosX, initPosY, initPosZ]
-  );
+  const hoveredBag = hoveredIndex === null ? null : bags[hoveredIndex];
 
   return (
-    <group
-      ref={ref}
-      position={initialPosition}
-      rotation={[0, data.rotation, 0]}
-      onPointerOver={() => setHovered(true)}
-      onPointerOut={() => setHovered(false)}
-    >
-      {/* Bag body - main object keeps shadow */}
-      <mesh
+    <group dispose={null}>
+      <instancedMesh
+        ref={bodiesRef}
+        args={[getFlourSackGeometry(), getFlourSackMaterial(), bags.length]}
         castShadow
-        position={[0, 0.25, 0]}
-        geometry={getFlourSackGeometry()}
-        material={hovered ? sackMaterials.hovered : sackMaterials.base}
+        onPointerOver={(event) => {
+          event.stopPropagation();
+          if (event.instanceId !== undefined) setHoveredIndex(event.instanceId);
+        }}
+        onPointerOut={() => setHoveredIndex(null)}
+      />
+      <instancedMesh
+        ref={stripesRef}
+        args={[FLOUR_STRIPE_GEOMETRY, FLOUR_STRIPE_MATERIAL, bags.length]}
       />
 
-      {/* Quality-colored label stripe - z offset increased to 0.48 to prevent z-fighting with bag front face at z=0.45 */}
-      <mesh position={[0, 0.25, 0.48]}>
-        <planeGeometry args={[0.5, 0.3]} />
-        <meshBasicMaterial
-          color={qualityColor}
-          depthWrite={false}
-          polygonOffset
-          polygonOffsetFactor={POLYGON_OFFSET.standard.factor}
-          polygonOffsetUnits={POLYGON_OFFSET.standard.units}
-        />
-      </mesh>
-
-      {/* Batch number text on bag (3D text) */}
-      {showDetails && (
-        <Text
-          position={[0, 0.25, 0.49]}
-          fontSize={0.06}
-          color="white"
-          anchorX="center"
-          anchorY="middle"
-          font={undefined}
-        >
-          {data.batchNumber}
-        </Text>
-      )}
-
-      {/* Weight indicator */}
-      {showDetails && (
-        <Text
-          position={[0, 0.15, 0.49]}
-          fontSize={0.04}
-          color="white"
-          anchorX="center"
-          anchorY="middle"
-          font={undefined}
-        >
-          {data.weight}kg
-        </Text>
-      )}
-
-      {/* Bag stitching detail - NO SHADOWS for small details */}
-      {showDetails && (
-        <>
-          <mesh position={[0, 0.51, 0]}>
-            <boxGeometry args={[0.58, 0.02, 0.88]} />
-            <meshStandardMaterial color="#d4c4a8" roughness={1} />
-          </mesh>
-          {/* Top fold */}
-          <mesh position={[0, 0.52, 0.2]} rotation={[0.2, 0, 0]}>
-            <boxGeometry args={[0.5, 0.01, 0.2]} />
-            <meshStandardMaterial color="#f5f0e6" roughness={0.95} />
-          </mesh>
-        </>
-      )}
-
-      {/* Hover tooltip with full batch info */}
-      {hovered && (
-        <Html position={[0, 0.8, 0]} center distanceFactor={10}>
-          <div className="bg-slate-900/95 backdrop-blur px-3 py-2 rounded-lg border border-slate-700 shadow-xl pointer-events-none min-w-[120px]">
-            <div className="text-xs font-mono text-white font-bold">{data.batchNumber}</div>
-            <div className="text-[10px] text-slate-400 mt-1">
-              <div className="flex justify-between">
-                <span>Quality:</span>
-                <span style={{ color: qualityColor }} className="font-medium capitalize">
-                  {data.quality}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Weight:</span>
-                <span className="text-white">{data.weight} kg</span>
+      {hoveredBag && (
+        <group ref={tooltipRef}>
+          <Html center distanceFactor={10}>
+            <div className="pointer-events-none min-w-[120px] rounded-lg border border-slate-700 bg-slate-900/95 px-3 py-2 shadow-xl backdrop-blur">
+              <div className="text-xs font-mono font-bold text-white">{hoveredBag.batchNumber}</div>
+              <div className="mt-1 text-[10px] text-slate-400">
+                <div className="flex justify-between">
+                  <span>Quality:</span>
+                  <span
+                    style={{ color: QUALITY_COLORS[hoveredBag.quality] }}
+                    className="font-medium capitalize"
+                  >
+                    {hoveredBag.quality}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Weight:</span>
+                  <span className="text-white">{hoveredBag.weight} kg</span>
+                </div>
               </div>
             </div>
-          </div>
-        </Html>
+          </Html>
+        </group>
       )}
     </group>
   );

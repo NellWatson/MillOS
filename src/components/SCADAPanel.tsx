@@ -43,6 +43,9 @@ import {
   Factory,
   MapPin,
   ListChecks,
+  BookOpenText,
+  BriefcaseBusiness,
+  Gauge,
 } from 'lucide-react';
 import {
   LineChart,
@@ -68,7 +71,13 @@ import type {
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { processTrendHistory, TREND_QUALITY_SUFFIX, type TrendRow } from '../scada/trendProcessing';
-import { OPERATION_TAG_IDS } from '../scada/tagDatabase';
+import { OPERATION_TAG_IDS, UTILITY_ASSET_TAG_IDS } from '../scada/tagDatabase';
+import { useMaterialFlowStore } from '../stores/materialFlowStore';
+import { useBreakdownStore } from '../stores/breakdownStore';
+import { useQCLabStore } from '../stores/qcLabStore';
+import { useShallow } from 'zustand/react/shallow';
+import { useOperationsCampaignStore } from '../stores/operationsCampaignStore';
+import { useHistoricalPlaybackStore } from '../stores/historicalPlaybackStore';
 
 interface SCADAPanelProps {
   isOpen: boolean;
@@ -133,8 +142,50 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
   selectedMachineId,
   onFocusMachine,
 }) => {
+  const materialProvenance = useMaterialFlowStore(
+    useShallow((state) => {
+      let latestLot = null as
+        | (typeof state.sourceLots extends Map<string, infer T> ? T : never)
+        | null;
+      state.sourceLots.forEach((lot) => {
+        if (!latestLot || lot.simulationTime >= latestLot.simulationTime) latestLot = lot;
+      });
+      return {
+        latestBatch: state.productionBatches.at(-1) ?? null,
+        latestManifest: state.manifests.at(-1) ?? null,
+        latestLot,
+      };
+    })
+  );
+  const latestOpenWorkOrder = useBreakdownStore(
+    (state) =>
+      state.workOrders.find((workOrder) => workOrder.phase !== 'returned_to_service') ?? null
+  );
+  const latestQualityRecord = useQCLabStore(
+    (state) => state.qcLab.dispositionHistory.at(-1) ?? null
+  );
   const activeSafetyEvent = useGameSimulationStore((state) =>
     state.safetyEvents.find((event) => event.id === state.activeSafetyEventId)
+  );
+  const campaign = useOperationsCampaignStore(
+    useShallow((state) => ({
+      elapsedMinutes: state.elapsedMinutes,
+      orders: state.orders,
+      activeOrderId: state.activeOrderId,
+      incidents: state.incidents,
+      constraints: state.constraints,
+      execution: state.execution,
+      utilityAssets: state.utilityAssets,
+      logbook: state.logbook,
+      addLogEntry: state.addLogEntry,
+    }))
+  );
+  const historicalPlayback = useHistoricalPlaybackStore(
+    useShallow((state) => ({
+      isReplaying: state.isReplaying,
+      enterReplayMode: state.enterReplayMode,
+      exitReplayMode: state.exitReplayMode,
+    }))
   );
   const {
     isConnected,
@@ -182,8 +233,9 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
   const [trendTagSearch, setTrendTagSearch] = useState('');
   const [eventHistory, setEventHistory] = useState<Alarm[]>([]);
   const [eventHistoryLoading, setEventHistoryLoading] = useState(false);
-  const [alarmOperator, setAlarmOperator] = useState('Simulation operator');
+  const [controlIdentity, setControlIdentity] = useState('Autonomous control layer');
   const [alarmNote, setAlarmNote] = useState('');
+  const [operationsLogMessage, setOperationsLogMessage] = useState('');
 
   // Connection settings state
   // SECURITY NOTE: Default URLs use HTTP/WS for localhost development convenience.
@@ -297,6 +349,14 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
           description: 'Finished product dispatch',
           machineIds: Array.from(tagsByMachine.keys()).filter((id) => id.startsWith('packer-')),
         },
+        {
+          id: 'logistics',
+          label: 'Autonomous logistics',
+          description: 'Forklift and truck motion interlocks',
+          machineIds: Array.from(tagsByMachine.keys()).filter(
+            (id) => id.startsWith('forklift-') || id.endsWith('-truck')
+          ),
+        },
       ] as const,
     [tagsByMachine]
   );
@@ -316,8 +376,33 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
       lastShipping: read(OPERATION_TAG_IDS.lastShipping),
       partsStock: read(OPERATION_TAG_IDS.partsStock),
       shippingReleased: read(OPERATION_TAG_IDS.shippingReleased) >= 0.5,
+      activeQualityHolds: read(OPERATION_TAG_IDS.activeQualityHolds),
+      recalledBatches: read(OPERATION_TAG_IDS.recalledBatches),
+      openWorkOrders: read(OPERATION_TAG_IDS.openWorkOrders),
+      maintenanceDowntime: read(OPERATION_TAG_IDS.maintenanceDowntime),
     };
   }, [values]);
+
+  const utilityTelemetry = useMemo(
+    () =>
+      campaign.utilityAssets.map((asset) => {
+        const tagIds = UTILITY_ASSET_TAG_IDS[asset.id];
+        const read = (tagId: string | undefined, fallback: number): number => {
+          const value = tagId ? values.get(tagId)?.value : undefined;
+          return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+        };
+        const levelPercent = read(tagIds?.level, asset.levelPercent);
+        return {
+          ...asset,
+          levelPercent,
+          temperatureC: read(tagIds?.temperature, asset.temperatureC),
+          pressureBar: read(tagIds?.pressure, asset.pressureBar),
+          status: levelPercent <= 10 ? 'critical' : levelPercent <= 20 ? 'low' : 'normal',
+          quality: tagIds ? (values.get(tagIds.level)?.quality ?? 'STALE') : 'STALE',
+        };
+      }),
+    [campaign.utilityAssets, values]
+  );
 
   const eventTimeline = useMemo(
     () =>
@@ -1114,6 +1199,227 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                     Dispatch quality: {operationalTelemetry.shippingReleased ? 'released' : 'hold'}
                   </div>
                 </div>
+                <div className="mt-2 grid gap-2 text-xs text-slate-300 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded border border-slate-700/50 px-2.5 py-2">
+                    Quality holds: {Math.round(operationalTelemetry.activeQualityHolds)} batches
+                  </div>
+                  <div className="rounded border border-slate-700/50 px-2.5 py-2">
+                    Recalled: {Math.round(operationalTelemetry.recalledBatches)} batches
+                  </div>
+                  <div className="rounded border border-slate-700/50 px-2.5 py-2">
+                    Open work orders: {Math.round(operationalTelemetry.openWorkOrders)}
+                  </div>
+                  <div className="rounded border border-slate-700/50 px-2.5 py-2">
+                    Maintenance downtime: {Math.round(operationalTelemetry.maintenanceDowntime)} s
+                  </div>
+                </div>
+                <div className="mt-2 grid gap-2 text-[10px] text-slate-400 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded border border-cyan-500/20 bg-cyan-950/10 px-2.5 py-2">
+                    <div className="uppercase tracking-wide">Latest batch</div>
+                    <div className="mt-1 font-mono text-cyan-200">
+                      {materialProvenance.latestBatch?.id ?? 'awaiting production'}
+                    </div>
+                    {materialProvenance.latestBatch && (
+                      <div className="mt-0.5 capitalize">
+                        {materialProvenance.latestBatch.disposition},{' '}
+                        {materialProvenance.latestBatch.availableKg.toFixed(1)} kg
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded border border-cyan-500/20 bg-cyan-950/10 px-2.5 py-2">
+                    <div className="uppercase tracking-wide">Latest source lot</div>
+                    <div className="mt-1 font-mono text-cyan-200">
+                      {materialProvenance.latestLot?.id ?? 'opening inventory'}
+                    </div>
+                    <div className="mt-0.5">
+                      {materialProvenance.latestManifest?.id ?? 'no dock manifest'}
+                    </div>
+                  </div>
+                  <div className="rounded border border-orange-500/20 bg-orange-950/10 px-2.5 py-2">
+                    <div className="uppercase tracking-wide">Maintenance provenance</div>
+                    <div className="mt-1 font-mono text-orange-200">
+                      {latestOpenWorkOrder?.id ?? 'no open work order'}
+                    </div>
+                    {latestOpenWorkOrder && (
+                      <div className="mt-0.5 capitalize">
+                        {latestOpenWorkOrder.phase.replaceAll('_', ' ')}, autonomous service
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded border border-violet-500/20 bg-violet-950/10 px-2.5 py-2">
+                    <div className="uppercase tracking-wide">Quality provenance</div>
+                    <div className="mt-1 font-mono text-violet-200">
+                      {latestQualityRecord?.id ?? 'no disposition action'}
+                    </div>
+                    {latestQualityRecord && (
+                      <div className="mt-0.5 capitalize">
+                        {latestQualityRecord.action}, {latestQualityRecord.referenceId}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              <section className="mb-3 rounded-lg border border-cyan-500/25 bg-cyan-950/10 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
+                      <BriefcaseBusiness className="h-4 w-4 text-cyan-300" aria-hidden="true" />
+                      Operations commitments
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Customer promise, incident, and constraint context alongside process truth.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('events')}
+                    className="min-h-11 rounded border border-cyan-500/30 px-3 text-xs text-cyan-200 hover:bg-cyan-500/10"
+                  >
+                    Open logbook
+                  </button>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {(() => {
+                    const activeOrder =
+                      campaign.orders.find((order) => order.id === campaign.activeOrderId) ??
+                      campaign.orders.find((order) => order.status !== 'fulfilled');
+                    const activeIncidents = campaign.incidents.filter(
+                      (incident) => incident.phase !== 'resolved'
+                    );
+                    const progress = activeOrder
+                      ? Math.min(
+                          100,
+                          (activeOrder.shippedKg / Math.max(1, activeOrder.requiredKg)) * 100
+                        )
+                      : 100;
+                    return (
+                      <>
+                        <div className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5">
+                          <div className="text-[10px] uppercase text-slate-400">Active order</div>
+                          <div className="mt-1 truncate text-xs font-semibold text-cyan-200">
+                            {activeOrder?.customer ?? 'All commitments complete'}
+                          </div>
+                          <div className="mt-1 font-mono text-[10px] text-slate-400">
+                            {progress.toFixed(0)}% dispatched
+                          </div>
+                        </div>
+                        <div className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5">
+                          <div className="text-[10px] uppercase text-slate-400">
+                            Execution state
+                          </div>
+                          <div className="mt-1 font-mono text-xs text-slate-200">
+                            {campaign.execution.lineSetpointPercent.toFixed(0)}% setpoint
+                          </div>
+                          <div className="mt-1 text-[10px] capitalize text-slate-400">
+                            {campaign.execution.stage.replaceAll('_', ' ')}
+                          </div>
+                        </div>
+                        <div className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5">
+                          <div className="text-[10px] uppercase text-slate-400">
+                            Active incidents
+                          </div>
+                          <div
+                            className={`mt-1 font-mono text-xs ${activeIncidents.length ? 'text-amber-200' : 'text-emerald-200'}`}
+                          >
+                            {activeIncidents.length}
+                          </div>
+                          <div className="mt-1 truncate text-[10px] text-slate-400">
+                            {activeIncidents[0]?.title ?? 'No campaign incident'}
+                          </div>
+                        </div>
+                        <div className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5">
+                          <div className="text-[10px] uppercase text-slate-400">Top constraint</div>
+                          <div className="mt-1 truncate text-xs text-amber-100">
+                            {campaign.constraints[0]?.label ?? 'No active constraint'}
+                          </div>
+                          <div className="mt-1 truncate text-[10px] text-slate-400">
+                            {campaign.constraints[0]?.detail ?? 'Plan is unconstrained'}
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  <div className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5">
+                    <div className="text-[10px] uppercase text-slate-400">Recipe route</div>
+                    <div className="mt-1 text-xs font-semibold text-cyan-200">
+                      {campaign.execution.sourceMaterial?.replaceAll('_', ' ') ?? 'no source'}
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      to {campaign.execution.finishedMaterial?.replaceAll('_', ' ') ?? 'no product'}
+                    </div>
+                  </div>
+                  <div className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5">
+                    <div className="text-[10px] uppercase text-slate-400">Quality gate</div>
+                    <div
+                      className={`mt-1 text-xs font-semibold ${campaign.execution.qualityReleased ? 'text-emerald-200' : 'text-amber-200'}`}
+                    >
+                      {campaign.execution.qualityReleased ? 'Released' : 'Held'}
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      {campaign.execution.releasedFinishedKg.toFixed(0)} kg dispatchable
+                    </div>
+                  </div>
+                  <div className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5">
+                    <div className="text-[10px] uppercase text-slate-400">Truck load</div>
+                    <div className="mt-1 font-mono text-xs font-semibold text-cyan-200">
+                      {campaign.execution.dispatchLoad.loadedKg.toFixed(0)} /{' '}
+                      {campaign.execution.dispatchLoad.capacityKg.toFixed(0)} kg
+                    </div>
+                    <div className="mt-1 truncate text-[10px] capitalize text-slate-400">
+                      {campaign.execution.dispatchLoad.blockReason ??
+                        campaign.execution.dispatchLoad.status}
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-950/10 p-3">
+                <div>
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
+                    <Gauge className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+                    Utility vessel telemetry
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Historian-linked instruments for the visible tank farm and LPG compound.
+                  </p>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                  {utilityTelemetry.map((asset) => (
+                    <article
+                      key={asset.id}
+                      className="rounded border border-slate-700/60 bg-slate-950/35 p-2.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="truncate text-[10px] font-semibold text-slate-200">
+                          {asset.label}
+                        </div>
+                        <span
+                          className={`h-2 w-2 shrink-0 rounded-full ${
+                            asset.status === 'critical'
+                              ? 'bg-rose-400'
+                              : asset.status === 'low'
+                                ? 'bg-amber-400'
+                                : 'bg-emerald-400'
+                          }`}
+                          aria-label={`${asset.status} level, ${asset.quality.toLowerCase()} signal`}
+                          title={`${asset.quality} signal`}
+                        />
+                      </div>
+                      <div className="mt-1 font-mono text-sm font-semibold text-white">
+                        {asset.levelPercent.toFixed(1)}%
+                      </div>
+                      <div className="mt-1 font-mono text-[10px] text-slate-400">
+                        {asset.temperatureC.toFixed(1)} °C · {asset.pressureBar.toFixed(2)} bar
+                      </div>
+                      <div className="mt-1 truncate text-[9px] text-slate-500">
+                        {asset.contents}
+                      </div>
+                    </article>
+                  ))}
+                </div>
               </section>
 
               <div className="mb-2 flex items-center justify-between">
@@ -1128,7 +1434,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                 </div>
               </div>
 
-              <div className="grid gap-3 lg:grid-cols-4">
+              <div className="grid gap-3 lg:grid-cols-5">
                 {processStages.map((stage, stageIndex) => {
                   const stageAlarms = alarms.filter(
                     (alarm) => alarm.machineId && stage.machineIds.includes(alarm.machineId)
@@ -1445,21 +1751,21 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                 <div className="mt-3 grid gap-2 md:grid-cols-2">
                   <div>
                     <label
-                      htmlFor="scada-alarm-operator"
+                      htmlFor="scada-alarm-source"
                       className="mb-1 block text-xs text-slate-300"
                     >
-                      Simulated operator
+                      Control identity
                     </label>
                     <input
-                      id="scada-alarm-operator"
-                      value={alarmOperator}
-                      onChange={(event) => setAlarmOperator(event.target.value)}
+                      id="scada-alarm-source"
+                      value={controlIdentity}
+                      onChange={(event) => setControlIdentity(event.target.value)}
                       className="min-h-11 w-full rounded border border-slate-700 bg-slate-900/70 px-3 text-sm text-white focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/30"
                     />
                   </div>
                   <div>
                     <label htmlFor="scada-alarm-note" className="mb-1 block text-xs text-slate-300">
-                      Operator note or disposition reason
+                      Control note or disposition reason
                     </label>
                     <input
                       id="scada-alarm-note"
@@ -1512,7 +1818,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                               onClick={() =>
                                 acknowledge(
                                   alarm.id,
-                                  alarmOperator.trim() || 'Simulation operator',
+                                  controlIdentity.trim() || 'Autonomous control layer',
                                   alarmNote
                                 )
                               }
@@ -1528,7 +1834,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                             onClick={() =>
                               shelve(
                                 alarm.tagId,
-                                alarmOperator.trim() || 'Simulation operator',
+                                controlIdentity.trim() || 'Autonomous control layer',
                                 alarmNote.trim(),
                                 15 * 60 * 1000
                               )
@@ -1543,7 +1849,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                             onClick={() =>
                               suppress(
                                 alarm.tagId,
-                                alarmOperator.trim() || 'Simulation operator',
+                                controlIdentity.trim() || 'Autonomous control layer',
                                 alarmNote.trim(),
                                 15 * 60 * 1000
                               )
@@ -1558,7 +1864,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                             onClick={() =>
                               takeOutOfService(
                                 alarm.tagId,
-                                alarmOperator.trim() || 'Simulation operator',
+                                controlIdentity.trim() || 'Autonomous control layer',
                                 alarmNote.trim()
                               )
                             }
@@ -1641,7 +1947,10 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                 <div className="p-3 border-t border-slate-700/50">
                   <button
                     onClick={() =>
-                      acknowledgeAll(alarmOperator.trim() || 'Simulation operator', alarmNote)
+                      acknowledgeAll(
+                        controlIdentity.trim() || 'Autonomous control layer',
+                        alarmNote
+                      )
                     }
                     className="min-h-11 w-full rounded bg-cyan-500/20 px-4 text-sm text-cyan-400 hover:bg-cyan-500/30"
                   >
@@ -1661,6 +1970,32 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
               aria-labelledby="scada-tab-button-trends"
               tabIndex={0}
             >
+              {campaign.incidents.some((incident) => incident.phase !== 'resolved') && (
+                <div
+                  className="border-b border-amber-500/25 bg-amber-950/20 px-3 py-2"
+                  aria-label="Operational trend annotations"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-amber-200">
+                      Active annotations
+                    </span>
+                    {campaign.incidents
+                      .filter((incident) => incident.phase !== 'resolved')
+                      .slice(-4)
+                      .map((incident) => (
+                        <button
+                          key={incident.id}
+                          type="button"
+                          onClick={() => setActiveTab('events')}
+                          className="min-h-8 rounded border border-amber-500/30 px-2 text-[10px] text-amber-100 hover:bg-amber-500/10"
+                          title={`${incident.phase}: ${incident.description}`}
+                        >
+                          T+{Math.round(incident.startedAtMinute)}m {incident.title}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
               {/* Trend Controls */}
               <div className="p-3 border-b border-slate-700/50 space-y-3">
                 {/* Duration selector */}
@@ -2024,6 +2359,90 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto p-3">
+                <section
+                  className="mb-3 rounded-lg border border-indigo-500/25 bg-indigo-950/15 p-3"
+                  aria-labelledby="scada-operations-logbook-heading"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <h3
+                        id="scada-operations-logbook-heading"
+                        className="flex items-center gap-2 text-sm font-medium text-white"
+                      >
+                        <BookOpenText className="h-4 w-4 text-indigo-300" aria-hidden="true" />
+                        Operations logbook
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        Control decisions, campaign incidents, manifests, and dispatch records.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (historicalPlayback.isReplaying) {
+                          historicalPlayback.exitReplayMode();
+                        } else {
+                          historicalPlayback.enterReplayMode();
+                        }
+                      }}
+                      className={`min-h-11 rounded px-3 text-xs font-semibold ${
+                        historicalPlayback.isReplaying
+                          ? 'bg-rose-700 text-white'
+                          : 'bg-indigo-700 text-white hover:bg-indigo-600'
+                      }`}
+                    >
+                      {historicalPlayback.isReplaying ? 'Return to live' : 'Open recent replay'}
+                    </button>
+                  </div>
+                  <form
+                    className="mt-3 flex gap-2"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      campaign.addLogEntry(
+                        controlIdentity.trim() || 'Autonomous control layer',
+                        'operation',
+                        operationsLogMessage
+                      );
+                      setOperationsLogMessage('');
+                    }}
+                  >
+                    <label htmlFor="scada-operations-log-message" className="sr-only">
+                      Operations log message
+                    </label>
+                    <input
+                      id="scada-operations-log-message"
+                      value={operationsLogMessage}
+                      onChange={(event) => setOperationsLogMessage(event.target.value)}
+                      maxLength={500}
+                      placeholder="Record an autonomous decision or system observation"
+                      className="min-h-11 min-w-0 flex-1 rounded border border-slate-600 bg-slate-900/60 px-3 text-xs text-white placeholder:text-slate-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!operationsLogMessage.trim()}
+                      className="min-h-11 rounded bg-indigo-700 px-4 text-xs font-semibold text-white disabled:opacity-40"
+                    >
+                      Record
+                    </button>
+                  </form>
+                  <ol className="mt-3 space-y-1.5" aria-label="Operations logbook timeline">
+                    {campaign.logbook
+                      .slice(-6)
+                      .reverse()
+                      .map((entry) => (
+                        <li
+                          key={entry.id}
+                          className="rounded border border-slate-700/50 bg-slate-900/30 px-2.5 py-2 text-xs text-slate-300"
+                        >
+                          <span className="font-mono text-[10px] text-slate-500">
+                            T+{Math.round(entry.simulationMinute)}m
+                          </span>{' '}
+                          <span className="font-semibold text-slate-100">{entry.source}:</span>{' '}
+                          {entry.message}
+                        </li>
+                      ))}
+                  </ol>
+                </section>
                 {eventHistoryLoading && eventHistory.length === 0 ? (
                   <div className="flex h-full items-center justify-center text-sm text-slate-400">
                     Loading event history

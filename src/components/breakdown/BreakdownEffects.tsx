@@ -266,14 +266,9 @@ const BreakdownOverlay: React.FC<{
         >
           <div className="text-red-400 font-bold text-sm mb-1">FAULT</div>
           <div className="text-white text-xs mb-2">{breakdown.description}</div>
-          {breakdown.assignedWorkerName ? (
-            <div className="text-xs">
-              <span className="text-gray-400">Repair by: </span>
-              <span className="text-amber-400">{breakdown.assignedWorkerName}</span>
-            </div>
-          ) : (
-            <div className="text-amber-400 text-xs animate-pulse">Awaiting repair...</div>
-          )}
+          <div className="text-amber-400 text-xs">
+            {breakdown.repairProgress > 0 ? 'Service unit active' : 'Diagnostic lockout active'}
+          </div>
           {/* Progress bar */}
           {breakdown.repairProgress > 0 && (
             <div
