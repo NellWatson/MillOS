@@ -269,48 +269,6 @@ function createWindmillHubGeometry(): THREE.LatheGeometry {
 }
 
 /**
- * Scarecrow's straw hat - replaces `ConeGeometry(0.6, 0.4, 8)`.
- *
- * A cone is a party hat. This is a brimmed sun hat: a drooping brim that dips
- * to its lowest at the rim, a crease where the brim breaks upward, a hat band,
- * and a domed crown. 1.2 m across at head height on a scarecrow you walk past,
- * so the brim break and the crown dome both carry.
- *
- * Envelope unchanged: max radius 0.6, y in [-0.2, +0.2]. Two things sit against
- * it and both were probed: the pumpkin head (sphere r 0.35 at hat-local -0.25)
- * stays fully inside the crown at every height, and the crow perches at radius
- * 0.2, where this crown's surface is at local y 0.168 rather than the cone's
- * 0.067 - see the re-seat at the Crow call site.
- *
- * 17 points at 16 segments (the cone had 8 - see the note at the `strawHat`
- * declaration for why the brim needs the extra ring) - 289 vertices, drawn once.
- */
-function createStrawHatGeometry(): THREE.LatheGeometry {
-  return lathe(
-    [
-      [0.0, -0.148], // underside centre - a shallow dome under the crown
-      [0.21, -0.156],
-      [0.39, -0.176],
-      [0.522, -0.192],
-      [0.6, -0.2], // brim edge - envelope max radius and min y
-      [0.545, -0.163], // brim upper face sweeps back up
-      [0.438, -0.122],
-      [0.356, -0.084],
-      [0.326, -0.058], // brim break into the crown
-      [0.322, 0.006], // hat band
-      [0.31, 0.058],
-      [0.292, 0.098], // crown shoulder rounds over
-      [0.252, 0.14],
-      [0.192, 0.172],
-      [0.116, 0.193],
-      [0.052, 0.2],
-      [0.0, 0.2], // crown top - envelope max y
-    ],
-    16
-  );
-}
-
-/**
  * Round hay bale - replaces `CylinderGeometry(0.5, 0.5, 0.8, 16)`.
  *
  * The smallest of these redesigns and the one closest to being left alone: the
@@ -467,18 +425,6 @@ const SG = {
   // Grain Field
   cornStalk: new THREE.CylinderGeometry(0.05, 0.08, 1.8, 4),
   cornLeaf: new THREE.ConeGeometry(0.1, 0.8, 3),
-  // Scarecrow
-  scarecrowPole: new THREE.CylinderGeometry(0.08, 0.08, 2.5, 5),
-  scarecrowArm: new THREE.CylinderGeometry(0.06, 0.06, 1.8, 5),
-  pumpkinHead: new THREE.SphereGeometry(0.35, 10, 10),
-  // 1.2 m brim - the only part of the scarecrow big enough for its shape to
-  // read, and a woven hat is a made round thing rather than foliage, so it gets
-  // the windmill's treatment and not the tree's. The cone became a brimmed hat
-  // (see `createStrawHatGeometry`); segments went 8 -> 16 with it, because at 8
-  // the brim's facet chord is 0.46 m on a 1.2 m disc and the rim reads as an
-  // octagonal plate from above. The windmill's counts are genuinely unchanged -
-  // this one is not, and 289 verts on a singleton is what it costs.
-  strawHat: createStrawHatGeometry(),
   crowBody: new THREE.ConeGeometry(0.1, 0.3, 4),
   crowHead: new THREE.SphereGeometry(0.08, 4, 4),
 };
@@ -628,10 +574,6 @@ const SM = {
     roughness: 0.9,
     side: THREE.DoubleSide,
   }),
-  pumpkinOrange: new THREE.MeshStandardMaterial({ color: '#ff6f00', roughness: 0.8 }),
-  strawHat: new THREE.MeshStandardMaterial({ color: '#e6c229', roughness: 1 }),
-  denimBlue: new THREE.MeshStandardMaterial({ color: '#1565c0', roughness: 0.9 }),
-  plaidRed: new THREE.MeshStandardMaterial({ color: '#b71c1c', roughness: 0.9 }),
   crowBlack: new THREE.MeshStandardMaterial({ color: '#212121', roughness: 0.6 }),
 };
 
@@ -1837,7 +1779,7 @@ const Crow = React.memo<{ position: [number, number, number]; rotation?: number 
     const rigRef = useRef<CreatureRigHandle>(null);
     const shakenRef = useRef(false);
     // Perch phase, seeded off the crow's own position so two birds on two
-    // scarecrows would not stab in lockstep. Deterministic, unlike Math.random,
+    // perches would not stab in lockstep. Deterministic, unlike Math.random,
     // which re-rolls on every remount.
     const phase = useMemo(() => position[0] * 1.7 + position[2] * 0.9, [position]);
 
@@ -1900,96 +1842,6 @@ const Crow = React.memo<{ position: [number, number, number]; rotation?: number 
   }
 );
 Crow.displayName = 'Crow';
-
-const ScarecrowPrimitiveBody = React.memo(() => (
-  <group>
-    {/* Pole */}
-    <mesh position={[0, 1.25, 0]} castShadow>
-      <primitive object={SG.scarecrowPole} attach="geometry" />
-      <primitive object={SM.woodBrown} attach="material" />
-    </mesh>
-    {/* Arms */}
-    <mesh position={[0, 1.8, 0]} rotation={[0, 0, 1.57]} castShadow>
-      <primitive object={SG.scarecrowArm} attach="geometry" />
-      <primitive object={SM.woodBrown} attach="material" />
-    </mesh>
-    {/* Shirt */}
-    <mesh position={[0, 1.8, 0]} castShadow>
-      <boxGeometry args={[0.55, 0.9, 0.3]} />
-      <primitive object={SM.plaidRed} attach="material" />
-    </mesh>
-    {/* Straw hands */}
-    <mesh position={[0.9, 1.8, 0]}>
-      <sphereGeometry args={[0.15, 8, 8]} />
-      <primitive object={SM.hay} attach="material" />
-    </mesh>
-    <mesh position={[-0.9, 1.8, 0]}>
-      <sphereGeometry args={[0.15, 8, 8]} />
-      <primitive object={SM.hay} attach="material" />
-    </mesh>
-    {/* Jeans */}
-    <group position={[0, 1.0, 0]}>
-      <mesh position={[-0.15, 0, 0]}>
-        <boxGeometry args={[0.18, 0.9, 0.22]} />
-        <primitive object={SM.denimBlue} attach="material" />
-      </mesh>
-      <mesh position={[0.15, 0, 0]}>
-        <boxGeometry args={[0.18, 0.9, 0.22]} />
-        <primitive object={SM.denimBlue} attach="material" />
-      </mesh>
-    </group>
-    {/* Scarf */}
-    <mesh position={[0, 2.25, 0]} rotation={[0.2, 0, 0]}>
-      <torusGeometry args={[0.2, 0.08, 8, 16]} />
-      <meshStandardMaterial color="#d32f2f" />
-    </mesh>
-    {/* Head */}
-    <mesh position={[0, 2.5, 0]} castShadow>
-      <primitive object={SG.pumpkinHead} attach="geometry" />
-      <primitive object={SM.pumpkinOrange} attach="material" />
-    </mesh>
-    {/* Eyes/Mouth */}
-    <mesh position={[0.12, 2.55, 0.28]} rotation={[0.2, 0.2, 0]}>
-      <coneGeometry args={[0.06, 0.05, 3]} />
-      <meshStandardMaterial color="#3e2723" />
-    </mesh>
-    <mesh position={[-0.12, 2.55, 0.28]} rotation={[0.2, -0.2, 0]}>
-      <coneGeometry args={[0.06, 0.05, 3]} />
-      <meshStandardMaterial color="#3e2723" />
-    </mesh>
-    <mesh position={[0, 2.45, 0.3]} rotation={[0, 0, 0]}>
-      <torusGeometry args={[0.08, 0.02, 3, 8, 3]} /> {/* Smile */}
-      <meshStandardMaterial color="#3e2723" />
-    </mesh>
-    {/* Hat */}
-    <mesh position={[0, 2.85, 0]} castShadow>
-      <primitive object={SG.strawHat} attach="geometry" />
-      <primitive object={SM.strawHat} attach="material" />
-    </mesh>
-  </group>
-));
-ScarecrowPrimitiveBody.displayName = 'ScarecrowPrimitiveBody';
-
-const Scarecrow = React.memo<{ position: [number, number, number]; rotation?: number }>(
-  ({ position, rotation = 0 }) => (
-    <group position={position} rotation={[0, rotation, 0]}>
-      <CreatureBody creature="scarecrow" fallback={<ScarecrowPrimitiveBody />} />
-      {/* Hoisted out of the primitive body, where it rendered only on the
-          fallback path - so `farm/crow.glb` was declared, validated, shipped
-          and never drawn once the generated scarecrow arrived. This is the only
-          place a crow appears in the scene.
-
-          Re-seated on the generated scarecrow, which is 1.90 m tall and wears a
-          carved pumpkin rather than the primitive's straw hat: the crown's
-          up-facing surface is at y 1.805 (0.021 m2, centroid within 20 mm of
-          the axis), so 1.80 puts the bird's feet on the pumpkin. The primitive
-          hat sat at 3.018, and as with the cottage's smoke the hoisted prop is
-          seated on the body that actually ships. */}
-      <Crow position={[0.1, 1.8, 0]} rotation={0.5} />
-    </group>
-  )
-);
-Scarecrow.displayName = 'Scarecrow';
 
 const InstancedGrainField = React.memo(() => {
   const stalksRef = useRef<THREE.InstancedMesh>(null);
@@ -2675,6 +2527,14 @@ export const FarmArea: React.FC = () => {
         />
       ))}
       <group position={[-12, 0, -5]}>
+        {/* The crow's only mount was the straw effigy the uncrewed contract
+            removes (`config/humanPresencePolicy.test.ts`). Re-seated on the
+            pen's corner post rather than deleted: `farm/crow.glb` is a rigged
+            asset that was already declared, validated and bundled, and an
+            unmounted one is exactly the silent loss
+            `__tests__/primitiveBodyLeaves.test.ts` exists to catch. The post is
+            a 1 m cylinder centred at y 0.5, so its cap is at 1.0. */}
+        <Crow position={[3, 1, -3]} rotation={-0.6} />
         <FenceSection position={[0, 0, -3]} length={6} />
         <FenceSection position={[0, 0, 3]} length={6} />
         <FenceSection position={[-3, 0, 0]} rotation={Math.PI / 2} length={6} />

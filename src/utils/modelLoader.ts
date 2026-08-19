@@ -38,7 +38,6 @@ export const CREATURE_ASSET_PATHS = {
   chicken: `${BASE}models/farm/chicken.glb`,
   crow: `${BASE}models/farm/crow.glb`,
   duck: `${BASE}models/farm/duck.glb`,
-  scarecrow: `${BASE}models/farm/scarecrow.glb`,
   cat: `${BASE}models/village/cat.glb`,
 } as const;
 

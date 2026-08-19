@@ -75,9 +75,16 @@ describe('v0.40 uncrewed-site contract', () => {
     const manifest = JSON.parse(source('public/models/asset-manifest.json')) as {
       assets: Array<{ id: string; file: string; role: string }>;
     };
-    expect(manifest.assets).toHaveLength(1);
-    expect(manifest.assets[0]?.id).toBe('forklift');
-    expect(JSON.stringify(manifest.assets)).not.toMatch(/worker|personnel|character|human/i);
+    // The contract is that no SHIPPED model is a person, not that the site
+    // ships exactly one model. `toHaveLength(1)` was a proxy for the former,
+    // written when the forklift was the only GLB in the repo; the farm and
+    // village asset set makes it a false negative for livestock and buildings.
+    // The identity check below is the contract itself, and it is stricter than
+    // the pin it replaces because it names the effigy case explicitly.
+    expect(manifest.assets.map(({ id }) => id)).toContain('forklift');
+    expect(JSON.stringify(manifest.assets)).not.toMatch(
+      /worker|personnel|character|human|portrait|avatar|scarecrow|operator|driver/i
+    );
 
     const productionAudioSources = [
       source('src/utils/audioManager.ts'),

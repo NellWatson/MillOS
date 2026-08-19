@@ -376,7 +376,7 @@ async function normalizeForklift(io, source, output) {
  * survive. `axis` says which dimension the target refers to - `max` is the
  * larger of the two horizontal extents, and is right for anything whose
  * footprint has to keep fitting its plot; `y` is for subjects read by height
- * (a scarecrow on a post, a pillar box); `x`/`z` pin a specific axis where the
+ * (a pillar box, a fence panel); `x`/`z` pin a specific axis where the
  * shipped component's own dimension is the constraint.
  *
  * Targets come from the shipped components, measured two ways. Buildings use
@@ -422,8 +422,6 @@ export const GENERATED_ASSETS = [
   { id: 'farm-chicken', slug: 'chicken', area: 'farm', target: 0.42, axis: 'max', rigged: true },
   { id: 'farm-crow', slug: 'crow', area: 'farm', target: 0.42, axis: 'max', rigged: true },
   { id: 'farm-duck', slug: 'duck', area: 'farm', target: 0.5, axis: 'max', rigged: true },
-  // A scarecrow is lashed to a post: height is the dimension that reads.
-  { id: 'farm-scarecrow', slug: 'scarecrow', area: 'farm', target: 1.9, axis: 'y', rigged: true },
   { id: 'village-cat', slug: 'cat', area: 'village', target: 0.5, axis: 'y', rigged: true },
 
   // Farm structures and props.
@@ -579,7 +577,7 @@ async function normalizeGeneratedAsset(io, spec) {
       );
     }
     // Face +Z, derived from the skeleton. A 180-degree flip is not enough: the
-    // generator laid the cow, horse, crow, duck and scarecrow along Z but the
+    // generator laid the cow, horse, crow and duck along Z but the
     // sheep, pig and chicken along X, so a front/back test alone leaves three of
     // the eight standing broadside. The Head-minus-Hip vector gives the heading
     // directly, and its horizontal angle from +Z is the rotation to undo.

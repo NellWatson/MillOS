@@ -30,7 +30,7 @@
  * `farmhouse-surface`, `coop-surface`, `fountain-surface`, ...) reads SHADED
  * because the batcher finishes even the candidates it declines to merge, and
  * every generated CREATURE (`cow-surface`, `sheep-surface`, `pig-surface`,
- * `chicken-surface`, `duck-surface`, `horse-surface`, `scarecrow-surface`,
+ * `chicken-surface`, `duck-surface`, `horse-surface`,
  * `cat-surface`, `crow-surface`) reads flat.
  *
  * They stay flat, on measured grounds rather than on the cost of doing it:
@@ -126,10 +126,8 @@ const CREATURE_SPECS: Record<CreatureId, CreatureSpec> = {
   chicken: { bend: 2.5, counter: 0.4, stride: 0.25, reached: 0.059 },
   crow: { bend: 2.0, counter: 0.4, stride: 0, reached: 0.042 },
   duck: { bend: 2.6, counter: 0.6, stride: 0.2, reached: 0.095 },
-  // A scarecrow is lashed to a post and a sleeping cat does not graze. Both
-  // still carry a rig, so both keep the handle; their drivers simply never ask
-  // for a bend.
-  scarecrow: { bend: 0, counter: 0, stride: 0, reached: 0 },
+  // A sleeping cat does not graze, but it still carries a rig, so it keeps the
+  // handle; its driver simply never asks for a bend.
   cat: { bend: 0, counter: 0, stride: 0, reached: 0 },
 };
 

@@ -332,46 +332,6 @@
       "requiredAnimations": []
     },
     {
-      "id": "farm-scarecrow",
-      "file": "farm/scarecrow.glb",
-      "role": "generated-creature",
-      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123, then animate_rig)",
-      "license": "Tripo3D API-plan output",
-      "attribution": "Generated with Tripo3D for MillOS under an API plan",
-      "selfContained": true,
-      "maxFileBytes": 431000,
-      "maxMaterials": 1,
-      "maxTextures": 3,
-      "maxRenderVertices": 18900,
-      "bounds": {
-        "width": [
-          1.645,
-          1.665
-        ],
-        "height": [
-          1.89,
-          1.91
-        ],
-        "length": [
-          0.516,
-          0.536
-        ],
-        "groundTolerance": 0.005,
-        "centreTolerance": 0.01
-      },
-      "requiredNodes": [
-        "ScarecrowBody",
-        "Root",
-        "Hip",
-        "Spine01",
-        "Spine02",
-        "NeckTwist01",
-        "NeckTwist02",
-        "Head"
-      ],
-      "requiredAnimations": []
-    },
-    {
       "id": "village-cat",
       "file": "village/cat.glb",
       "role": "generated-creature",

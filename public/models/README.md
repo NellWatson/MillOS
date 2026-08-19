@@ -13,7 +13,7 @@ models/
 │   ├── barn.glb  coop.glb  farmhouse.glb  windmill.glb
 │   ├── haybale.glb  watertrough.glb  gardenbed.glb  fence.glb
 │   └── cow.glb  sheep.glb  pig.glb  horse.glb  chicken.glb
-│       crow.glb  duck.glb  scarecrow.glb
+│       crow.glb  duck.glb
 ├── village/                  14 generated assets
 │   ├── cottage.glb  shop.glb  church.glb  townhall.glb  pub.glb
 │   │   school.glb  forge.glb  castle.glb
@@ -98,7 +98,7 @@ Three rules that table encodes, each paid for by a wrong render:
 
 - **Facing comes from the whole heading vector, snapped to 90 degrees.** A
   `Head.z < Hip.z` test only flips 180 degrees, and the generator laid the cow,
-  horse, crow, duck and scarecrow along Z but the sheep, pig and chicken along
+  horse, crow and duck along Z but the sheep, pig and chicken along
   **X**. The raw `-atan2(headX - hipX, headZ - hipZ)` angle carries head-turn
   noise, which left the horse standing 14 degrees askew; the snap discards it.
 - **Size by the dimension that constrains the prop, not always the footprint.**
