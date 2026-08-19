@@ -12,7 +12,11 @@ export default defineConfig({
     pool: 'forks',
     fileParallelism: false,
     maxWorkers: 1,
-    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // The capture/benchmark harness under scripts/ enforces gates of its own
+    // (see scripts/lib/diagnostics.mjs). A gate that has never been observed to
+    // fail is not known to be a gate, so its logic is unit-tested alongside the
+    // app rather than trusted because it reads correctly.
+    include: ['src/**/*.{test,spec}.{ts,tsx}', 'scripts/**/*.{test,spec}.mjs'],
     exclude: [
       'node_modules',
       'dist',

@@ -47,6 +47,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { chromium } from '@playwright/test';
+import { acquireCaptureLock } from './lib/capture-lock.mjs';
 
 const ROOT = process.cwd();
 const RUNTIME_MODE_SOURCE = path.join(ROOT, 'src', 'runtime', 'runtimeMode.ts');
@@ -77,6 +78,13 @@ const SCENE_SETS = {
   ],
   quick: ['overview', 'interior', 'milling', 'village'],
   exterior: ['overview', 'silos', 'yard', 'shipping', 'water', 'village', 'farm', 'sun', 'moon'],
+  /**
+   * The generated farm and village assets, at a distance that resolves them.
+   * `village` and `farm` frame whole sites; `paddock` and `square` are the
+   * close cameras added for this set, because a review that cannot see the
+   * subject grades something else.
+   */
+  generated: ['farm', 'paddock', 'village', 'square'],
   interior: ['interior', 'milling', 'sifting', 'packing', 'personnel-close', 'garage'],
   full: null, // resolved to every valid scene after parsing the source
 };
@@ -135,6 +143,8 @@ async function validSceneNames() {
   if (names.length === 0) throw new Error('BENCHMARK_SCENES parsed as empty.');
   return names;
 }
+
+let captureLock = null;
 
 function run(command, args, label) {
   return new Promise((resolve, reject) => {
@@ -218,7 +228,12 @@ async function buildContactSheet(directory, scenes, headed) {
   const sheetImage = path.join(directory, 'contact-sheet.png');
   await writeFile(sheetSource, html);
 
-  const browser = await chromium.launch({ headless: !headed });
+  // `channel: 'chrome'` for the same reason every other renderer in this repo
+  // uses it: the bundled `chrome-headless-shell` is not installed here, so a
+  // bare launch throws AFTER all twelve frames are on disk - the capture looks
+  // like it failed when only the contact sheet did. Installed Chrome is also
+  // what the frames themselves were rendered with, so the sheet matches them.
+  const browser = await chromium.launch({ headless: !headed, channel: 'chrome' });
   try {
     const page = await browser.newPage({ viewport: { width: 640 * columns, height: 720 } });
     await page.goto(`file://${sheetSource}`, { waitUntil: 'load' });
@@ -283,6 +298,12 @@ async function main() {
 
   const outputDirectory = path.join(OUTPUT_ROOT, label);
   await mkdir(outputDirectory, { recursive: true });
+
+  // Held across the build as well as the capture, deliberately. Two concurrent
+  // renders make each other's frame timings meaningless, and two concurrent
+  // builds write the same shared dist/, so a capture could otherwise photograph
+  // a bundle another agent was midway through replacing.
+  captureLock = await acquireCaptureLock(`art-review:${label}`, { root: ROOT });
 
   if (!options.skipBuild) {
     console.log('Building (dist/ must match the tree under review)...');
@@ -355,11 +376,20 @@ async function main() {
     .then(JSON.parse)
     .catch(() => null);
 
+  // The art pass runs --report-only, so a page that threw during capture cannot
+  // fail it on frame pacing. Surface the page's own complaints as a caveat
+  // instead: a subsystem that never constructed still produces a frame, and
+  // that frame looks like evidence.
+  const artDiagnostics = (artReport?.results ?? []).flatMap((entry) =>
+    (entry.budget?.diagnosticTriage?.actionable ?? []).map((text) => `${entry.scene}: ${text}`)
+  );
+
   const manifest = {
     label,
     capturedAt: new Date().toISOString(),
     git: provenance,
     options,
+    diagnostics: artDiagnostics,
     scenes: scenes.map((scene) => ({
       scene,
       image: `${scene}.png`,
@@ -369,6 +399,14 @@ async function main() {
     contactSheet: contactSheet ? path.basename(contactSheet.path) : null,
     perfGate,
     caveats: [
+      ...(artDiagnostics.length > 0
+        ? [
+            `The page reported ${artDiagnostics.length} error(s) during capture. A thrown ` +
+              'error can leave a subsystem unconstructed while the frame still renders, so ' +
+              'these frames may be missing content rather than showing a design decision. ' +
+              'See "diagnostics" in this manifest.',
+          ]
+        : []),
       ...(provenance.dirty
         ? [
             `Working tree was dirty (${provenance.dirtyFileCount} files). These frames show ` +
@@ -395,7 +433,11 @@ async function main() {
   for (const caveat of manifest.caveats) console.warn(`CAVEAT: ${caveat}`);
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.stack : String(error));
-  process.exitCode = 1;
-});
+main()
+  .catch((error) => {
+    console.error(error instanceof Error ? error.stack : String(error));
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await captureLock?.release();
+  });

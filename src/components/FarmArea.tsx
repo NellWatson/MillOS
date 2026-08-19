@@ -5,7 +5,17 @@ import * as THREE from 'three';
 import Fireflies from './effects/Fireflies';
 import { HeartParticle } from './effects/HeartParticle';
 import { playCritterSound } from '../utils/critterAudio';
+import { shouldRunThisFrame } from '../utils/frameThrottle';
 import { Cat } from './scenery/Cat';
+import { CreatureBody, type CreatureRigHandle } from './models/RiggedCreatureModel';
+import {
+  GeneratedBody,
+  GeneratedBoundary,
+  GeneratedModel,
+  instanceScale,
+  instanceYaw,
+} from './models/GeneratedModel';
+import { GeneratedWindmillBody } from './models/GeneratedWindmill';
 import {
   InstancedTreeField,
   InstancedGrassClutter,
@@ -15,9 +25,10 @@ import {
   type ClutterSpec,
 } from './scenery/InstancedFoliage';
 import { WindDriver, applyWindShader } from './scenery/WindDriver';
+import { composeWorldSurface } from '../utils/worldSurface';
 import { DrainageCulvert } from './scenery/Tunnel';
 import { PROCEDURAL_TEXTURES, OUTDOOR_MATERIALS } from '../utils/sharedMaterials';
-import { RENDER_ORDER } from '../constants/renderLayers';
+import { EXTERIOR_LAYERS, RENDER_ORDER } from '../constants/renderLayers';
 import { SITE_LAYOUT } from '../constants/siteLayout';
 import { generateCobblestoneRoughness } from '../textures';
 
@@ -625,6 +636,16 @@ applyWindShader(SM.cornGreen, {
   strengthScale: 1.4,
   cacheKey: 'millos_corn_v1',
 });
+// ...and then carries the vegetation finish on top of the sway. Composed, not
+// applied: the wind injection owns the material's single `onBeforeCompile`
+// slot, so `applyWorldSurface` declines it outright. `worldRest` samples the
+// field at the rest vertex, because a 1.8 m stalk swaying 0.22 m at the tip
+// travels most of a 0.3 m noise cell and the break-up would crawl up the crop
+// on every gust. See `utils/worldSurface.composeWorldSurface`.
+composeWorldSurface(SM.cornGreen, 'vegetation', {
+  cacheKey: 'millos_corn_v1',
+  worldRest: true,
+});
 
 /** Matching depth material so the crop's shadow sways with the crop. */
 const cornDepthMaterial = new THREE.MeshDepthMaterial({
@@ -743,8 +764,8 @@ const InstancedAnimalParts = React.memo<{
 InstancedAnimalParts.displayName = 'InstancedAnimalParts';
 
 // Static components with React.memo
-export const Barn = React.memo<{ position: [number, number, number] }>(({ position }) => (
-  <group position={position}>
+const BarnPrimitiveBody = React.memo(() => (
+  <group>
     <mesh position={[0, 3, 0]} castShadow receiveShadow>
       <boxGeometry args={[10, 6, 8]} />
       <primitive object={SM.barnRed} attach="material" />
@@ -803,10 +824,17 @@ export const Barn = React.memo<{ position: [number, number, number] }>(({ positi
     </mesh>
   </group>
 ));
+BarnPrimitiveBody.displayName = 'BarnPrimitiveBody';
+
+export const Barn = React.memo<{ position: [number, number, number] }>(({ position }) => (
+  <group position={position}>
+    <GeneratedBody asset="barn" fallback={<BarnPrimitiveBody />} />
+  </group>
+));
 Barn.displayName = 'Barn';
 
-const ChickenCoop = React.memo<{ position: [number, number, number] }>(({ position }) => (
-  <group position={position}>
+const ChickenCoopPrimitiveBody = React.memo(() => (
+  <group>
     <mesh position={[0, 0.8, 0]} castShadow receiveShadow>
       <boxGeometry args={[3, 1.6, 2.5]} />
       <primitive object={SM.coopBrown} attach="material" />
@@ -836,19 +864,22 @@ const ChickenCoop = React.memo<{ position: [number, number, number] }>(({ positi
     </mesh>
   </group>
 ));
+ChickenCoopPrimitiveBody.displayName = 'ChickenCoopPrimitiveBody';
+
+const ChickenCoop = React.memo<{ position: [number, number, number] }>(({ position }) => (
+  <group position={position}>
+    <GeneratedBody asset="coop" fallback={<ChickenCoopPrimitiveBody />} />
+  </group>
+));
 ChickenCoop.displayName = 'ChickenCoop';
 
-const FenceSection = React.memo<{
-  position: [number, number, number];
-  rotation?: number;
-  length?: number;
-}>(({ position, rotation = 0, length = 4 }) => {
+const FenceSectionPrimitiveBody = React.memo<{ length: number }>(({ length }) => {
   const railGeom = useMemo(() => new THREE.BoxGeometry(length, 0.08, 0.06), [length]);
   // Dispose the per-instance rail geometry on unmount / length change
   // (matches the Machines.tsx convention; previously leaked on remount).
   useEffect(() => () => railGeom.dispose(), [railGeom]);
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group>
       <mesh position={[-length / 2, 0.5, 0]} castShadow>
         <primitive object={SG.fencePost} attach="geometry" />
         <primitive object={SM.woodBrown} attach="material" />
@@ -868,48 +899,107 @@ const FenceSection = React.memo<{
     </group>
   );
 });
+FenceSectionPrimitiveBody.displayName = 'FenceSectionPrimitiveBody';
+
+/**
+ * A run of fence, tiled from one generated panel.
+ *
+ * The asset is a single 1.636 m panel sized by HEIGHT rather than width: at a
+ * 3 m width the generated panel would stand 1.9 m tall, a stockade against the
+ * 1.05 m post-and-rail it replaces.
+ *
+ * Panel count is the nearest whole number of panels to the requested run, and
+ * the remainder is taken up by stretching each panel along its own length. That
+ * stretch reaches about 22% in the worst case here (a 4 m run becomes two 2 m
+ * panels), which reads on the posts at walk-up distance but keeps the run
+ * continuous and exactly the length the caller asked for - fences here form
+ * closed enclosures, so a run that is short by a panel leaves a corner open.
+ */
+const FENCE_PANEL_LENGTH = 1.6359;
+
+const FenceSection = React.memo<{
+  position: [number, number, number];
+  rotation?: number;
+  length?: number;
+}>(({ position, rotation = 0, length = 4 }) => {
+  const panels = Math.max(1, Math.round(length / FENCE_PANEL_LENGTH));
+  const step = length / panels;
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <GeneratedBoundary fallback={<FenceSectionPrimitiveBody length={length} />}>
+        {Array.from({ length: panels }, (_, index) => (
+          <group
+            key={`panel-${index}`}
+            position={[-length / 2 + step * (index + 0.5), 0, 0]}
+            scale={[step / FENCE_PANEL_LENGTH, 1, 1]}
+          >
+            <GeneratedModel asset="fence" />
+          </group>
+        ))}
+      </GeneratedBoundary>
+    </group>
+  );
+});
 FenceSection.displayName = 'FenceSection';
+
+const HayBalePrimitiveBody = React.memo(() => (
+  <group>
+    <mesh position={[0, 0.4, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+      <primitive object={SG.hayBale} attach="geometry" />
+      <primitive object={SM.hay} attach="material" />
+    </mesh>
+    <mesh position={[0, 0.4, 0.41]}>
+      <primitive object={SG.hayRing} attach="geometry" />
+      <primitive object={SM.hayDark} attach="material" />
+    </mesh>
+  </group>
+));
+HayBalePrimitiveBody.displayName = 'HayBalePrimitiveBody';
 
 const HayBale = React.memo<{ position: [number, number, number]; rotation?: number }>(
   ({ position, rotation = 0 }) => (
-    <group position={position} rotation={[0, rotation, 0]}>
-      <mesh position={[0, 0.4, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-        <primitive object={SG.hayBale} attach="geometry" />
-        <primitive object={SM.hay} attach="material" />
-      </mesh>
-      <mesh position={[0, 0.4, 0.41]}>
-        <primitive object={SG.hayRing} attach="geometry" />
-        <primitive object={SM.hayDark} attach="material" />
-      </mesh>
+    <group
+      position={position}
+      rotation={[0, rotation + instanceYaw(position), 0]}
+      scale={instanceScale(position)}
+    >
+      <GeneratedBody asset="haybale" fallback={<HayBalePrimitiveBody />} />
     </group>
   )
 );
 HayBale.displayName = 'HayBale';
 
+const WaterTroughPrimitiveBody = React.memo(() => (
+  <group>
+    <mesh position={[0, 0.3, 0]} castShadow>
+      <primitive object={SG.troughBody} attach="geometry" />
+      <primitive object={SM.woodBrown} attach="material" />
+    </mesh>
+    <mesh position={[0, 0.5, 0]}>
+      <primitive object={SG.troughWater} attach="geometry" />
+      <primitive object={SM.water} attach="material" />
+    </mesh>
+    {[-0.6, 0.6].map((x, i) => (
+      <mesh key={i} position={[x, 0.1, 0]} castShadow>
+        <primitive object={SG.troughLeg} attach="geometry" />
+        <primitive object={SM.woodBrown} attach="material" />
+      </mesh>
+    ))}
+  </group>
+));
+WaterTroughPrimitiveBody.displayName = 'WaterTroughPrimitiveBody';
+
 const WaterTrough = React.memo<{ position: [number, number, number]; rotation?: number }>(
   ({ position, rotation = 0 }) => (
     <group position={position} rotation={[0, rotation, 0]}>
-      <mesh position={[0, 0.3, 0]} castShadow>
-        <primitive object={SG.troughBody} attach="geometry" />
-        <primitive object={SM.woodBrown} attach="material" />
-      </mesh>
-      <mesh position={[0, 0.5, 0]}>
-        <primitive object={SG.troughWater} attach="geometry" />
-        <primitive object={SM.water} attach="material" />
-      </mesh>
-      {[-0.6, 0.6].map((x, i) => (
-        <mesh key={i} position={[x, 0.1, 0]} castShadow>
-          <primitive object={SG.troughLeg} attach="geometry" />
-          <primitive object={SM.woodBrown} attach="material" />
-        </mesh>
-      ))}
+      <GeneratedBody asset="watertrough" fallback={<WaterTroughPrimitiveBody />} />
     </group>
   )
 );
 WaterTrough.displayName = 'WaterTrough';
 
-const GardenBed = React.memo<{ position: [number, number, number] }>(({ position }) => (
-  <group position={position}>
+const GardenBedPrimitiveBody = React.memo(() => (
+  <group>
     <mesh position={[0, 0.15, 0]} receiveShadow>
       <primitive object={SG.gardenFrame} attach="geometry" />
       <primitive object={SM.woodBrown} attach="material" />
@@ -938,10 +1028,17 @@ const GardenBed = React.memo<{ position: [number, number, number] }>(({ position
     ))}
   </group>
 ));
+GardenBedPrimitiveBody.displayName = 'GardenBedPrimitiveBody';
+
+const GardenBed = React.memo<{ position: [number, number, number] }>(({ position }) => (
+  <group position={position}>
+    <GeneratedBody asset="gardenbed" fallback={<GardenBedPrimitiveBody />} />
+  </group>
+));
 GardenBed.displayName = 'GardenBed';
 
-export const Farmhouse = React.memo<{ position: [number, number, number] }>(({ position }) => (
-  <group position={position}>
+const FarmhousePrimitiveBody = React.memo(() => (
+  <group>
     <mesh position={[0, 2, 0]} castShadow receiveShadow>
       <boxGeometry args={[6, 4, 5]} />
       <primitive object={SM.houseWall} attach="material" />
@@ -999,25 +1096,23 @@ export const Farmhouse = React.memo<{ position: [number, number, number] }>(({ p
     </mesh>
   </group>
 ));
+FarmhousePrimitiveBody.displayName = 'FarmhousePrimitiveBody';
+
+export const Farmhouse = React.memo<{ position: [number, number, number] }>(({ position }) => (
+  <group position={position}>
+    <GeneratedBody asset="farmhouse" fallback={<FarmhousePrimitiveBody />} />
+  </group>
+));
 Farmhouse.displayName = 'Farmhouse';
 
-const Sheep = React.memo<{
-  position: [number, number, number];
-  rotation?: number;
-  onClick?: (e: ThreeEvent<MouseEvent>) => void;
-  groupRef?: React.RefObject<THREE.Group | null>;
-}>(({ position, rotation = 0, onClick, groupRef }) => (
-  <group
-    ref={groupRef}
-    position={position}
-    rotation={[0, rotation, 0]}
-    onClick={(e) => {
-      if (onClick) {
-        e.stopPropagation();
-        onClick(e);
-      }
-    }}
-  >
+/**
+ * Quarter turn, for the reason spelled out on `CowPrimitiveBody`: every part
+ * below is authored facing local +X, the generated sheep faces +Z like the rest
+ * of the roster, and the two bodies have to be interchangeable or the fallback
+ * points a sheep 90 degrees away from where the shipped one points.
+ */
+const SheepPrimitiveBody = React.memo(() => (
+  <group rotation={[0, -Math.PI / 2, 0]}>
     <mesh position={[0, 0.5, 0]} castShadow>
       <primitive object={SG.sheepBody} attach="geometry" />
       <primitive object={SM.sheepWool} attach="material" />
@@ -1051,6 +1146,33 @@ const Sheep = React.memo<{
     />
   </group>
 ));
+SheepPrimitiveBody.displayName = 'SheepPrimitiveBody';
+
+const Sheep = React.memo<{
+  position: [number, number, number];
+  rotation?: number;
+  onClick?: (e: ThreeEvent<MouseEvent>) => void;
+  groupRef?: React.RefObject<THREE.Group | null>;
+  rigRef?: React.RefObject<CreatureRigHandle | null>;
+}>(({ position, rotation = 0, onClick, groupRef, rigRef }) => (
+  // Four sheep of one model, standing still. Scale variation reads as age
+  // rather than as a stamped-out copy, and unlike the wandering animals the
+  // sheep keep their authored yaw, so the jitter survives.
+  <group
+    ref={groupRef}
+    position={position}
+    rotation={[0, rotation + instanceYaw(position), 0]}
+    scale={instanceScale(position)}
+    onClick={(e) => {
+      if (onClick) {
+        e.stopPropagation();
+        onClick(e);
+      }
+    }}
+  >
+    <CreatureBody creature="sheep" ref={rigRef} fallback={<SheepPrimitiveBody />} />
+  </group>
+));
 Sheep.displayName = 'Sheep';
 
 // Animated components with refs for centralized animation
@@ -1061,24 +1183,22 @@ interface AnimalState {
   idleTime: number;
 }
 
-const Chicken: React.FC<{
-  position: [number, number, number];
-  rotation?: number;
-  groupRef: React.RefObject<THREE.Group | null>;
+/**
+ * Quarter turn, same as `CowPrimitiveBody` and for the same measured reason:
+ * the parts are authored facing +X while `updateAnimalMovement` steers by
+ * `atan2(direction.x, direction.z)`, which aligns local +Z to the heading. An
+ * unrotated primitive bird walks broadside to wherever it is going - the sidle
+ * recorded against this component - and points 90 degrees off the generated
+ * bird it stands in for.
+ *
+ * The turn is on the OUTER group, outside `animRef`, so the peck driver's
+ * `rotation.z` write still tips the bird beak-down in the frame it was
+ * calibrated in rather than rolling it sideways.
+ */
+const ChickenPrimitiveBody: React.FC<{
   animRef: React.RefObject<THREE.Group | null>;
-  onClick?: (e: ThreeEvent<MouseEvent>) => void;
-}> = ({ position, rotation = 0, groupRef, animRef, onClick }) => (
-  <group
-    ref={groupRef}
-    position={position}
-    rotation={[0, rotation, 0]}
-    onClick={(e) => {
-      if (onClick) {
-        e.stopPropagation();
-        onClick(e);
-      }
-    }}
-  >
+}> = ({ animRef }) => (
+  <group rotation={[0, -Math.PI / 2, 0]}>
     <group ref={animRef}>
       <mesh position={[0, 0.25, 0]} castShadow>
         <primitive object={SG.chickenBody} attach="geometry" />
@@ -1114,13 +1234,14 @@ const Chicken: React.FC<{
   </group>
 );
 
-const Pig: React.FC<{
+const Chicken: React.FC<{
   position: [number, number, number];
   rotation?: number;
   groupRef: React.RefObject<THREE.Group | null>;
-  tailRef: React.RefObject<THREE.Mesh | null>;
+  animRef: React.RefObject<THREE.Group | null>;
+  rigRef: React.RefObject<CreatureRigHandle | null>;
   onClick?: (e: ThreeEvent<MouseEvent>) => void;
-}> = ({ position, rotation = 0, groupRef, tailRef, onClick }) => (
+}> = ({ position, rotation = 0, groupRef, animRef, rigRef, onClick }) => (
   <group
     ref={groupRef}
     position={position}
@@ -1132,6 +1253,23 @@ const Pig: React.FC<{
       }
     }}
   >
+    <CreatureBody
+      creature="chicken"
+      ref={rigRef}
+      fallback={<ChickenPrimitiveBody animRef={animRef} />}
+    />
+  </group>
+);
+
+/**
+ * Quarter turn, for the same reason as the chicken above: authored facing +X,
+ * steered as though it faced +Z. The tail wag is written on `tailRef`, which is
+ * inside this group, so its axis is unchanged by the turn.
+ */
+const PigPrimitiveBody: React.FC<{
+  tailRef: React.RefObject<THREE.Mesh | null>;
+}> = ({ tailRef }) => (
+  <group rotation={[0, -Math.PI / 2, 0]}>
     <mesh position={[0, 0.35, 0]} castShadow>
       <primitive object={SG.pigBody} attach="geometry" />
       <primitive object={SM.pigPink} attach="material" />
@@ -1169,17 +1307,31 @@ const Pig: React.FC<{
   </group>
 );
 
-const Cow: React.FC<{
+/**
+ * The generated pig rig stops at `Head`, so it has no tail joint and the
+ * primitive's tail wag has no counterpart on it. `tailRef` therefore stays
+ * wired to the fallback body, where it still animates if the GLB is missing;
+ * `primitiveBodyLeaves.test.ts` records that as a deliberate exception rather
+ * than letting it pass silently, because a ref threaded into a fallback is the
+ * same defect class as a component nested in one.
+ *
+ * `rigRef` is the channel that survives the swap: rooting and leg swing on the
+ * generated body, driven from the same wander state the tail wag reads.
+ */
+const Pig: React.FC<{
   position: [number, number, number];
   rotation?: number;
   groupRef: React.RefObject<THREE.Group | null>;
-  headRef: React.RefObject<THREE.Group | null>;
+  tailRef: React.RefObject<THREE.Mesh | null>;
+  rigRef: React.RefObject<CreatureRigHandle | null>;
   onClick?: (e: ThreeEvent<MouseEvent>) => void;
-}> = ({ position, rotation = 0, groupRef, headRef, onClick }) => (
+}> = ({ position, rotation = 0, groupRef, tailRef, rigRef, onClick }) => (
+  // Scale only, for the same reason as the cow: the wander driver owns yaw.
   <group
     ref={groupRef}
     position={position}
     rotation={[0, rotation, 0]}
+    scale={instanceScale(position)}
     onClick={(e) => {
       if (onClick) {
         e.stopPropagation();
@@ -1187,6 +1339,40 @@ const Cow: React.FC<{
       }
     }}
   >
+    <CreatureBody creature="pig" ref={rigRef} fallback={<PigPrimitiveBody tailRef={tailRef} />} />
+  </group>
+);
+
+/**
+ * Primitive cow, kept as the Suspense fallback for the rigged GLB.
+ *
+ * The quarter turn is not decoration. Every part below is authored facing local
+ * +X, but `updateAnimalMovement` steers with `Math.atan2(direction.x,
+ * direction.z)`, which aligns local **+Z** to the heading - so an unrotated cow
+ * walks broadside to wherever it is going. The generated asset faces +Z per
+ * `public/models/README.md`, and this turn puts the primitive in the same frame
+ * so the fallback and the real asset are interchangeable.
+ */
+/** Wander speed (0.5 m/s) over a ~0.9 m stride, in radians per second. */
+const COW_STRIDE_RATE = 3.5;
+/**
+ * Chicken leg swing. A bird's real cadence at 1.5 m/s is roughly 38 rad/s,
+ * which aliases into nonsense against the 15 Hz throttle this driver runs on;
+ * 12 rad/s keeps about eight samples per stride and reads as a walk.
+ */
+const CHICKEN_STRIDE_RATE = 12;
+/**
+ * Pig leg swing. Same derivation as the cow's - `2 * PI * speed / stride` - at
+ * the 0.8 m/s wander speed this driver uses and a roughly 0.5 m stride for an
+ * animal a third of a cow's length. At the 15 Hz throttle that is nine samples
+ * per cycle, above the cow's and below the chicken's.
+ */
+const PIG_STRIDE_RATE = 10;
+
+const CowPrimitiveBody: React.FC<{
+  headRef: React.RefObject<THREE.Group | null>;
+}> = ({ headRef }) => (
+  <group rotation={[0, -Math.PI / 2, 0]}>
     <mesh position={[0, 0.6, 0]} scale={[1.3, 1, 1]} castShadow>
       <primitive object={SG.cowBody} attach="geometry" />
       <primitive object={SM.cowWhite} attach="material" />
@@ -1237,23 +1423,63 @@ const Cow: React.FC<{
       <primitive object={SG.cowUdder} attach="geometry" />
       <primitive object={SM.cowMuzzle} attach="material" />
     </mesh>
-    <mesh position={[-0.65, 0.7, 0]} rotation={[0, 0, 0.8]} castShadow>
+    {/* The tail hangs down and back off the rump. It used to be rotated +0.8,
+        which swung it up and forward and left the tuft as a black sphere
+        floating 20 cm clear of the tip; the taper is the tell, since
+        `cowTail`'s thin end (0.015 against 0.02) is its -Y end and pointed into
+        the body. The tuft now sits just past that tip. */}
+    <mesh position={[-0.65, 0.7, 0]} rotation={[0, 0, -0.7]} castShadow>
       <primitive object={SG.cowTail} attach="geometry" />
       <primitive object={SM.cowWhite} attach="material" />
     </mesh>
-    <mesh position={[-0.85, 0.45, 0]} castShadow>
+    <mesh position={[-0.83, 0.49, 0]} castShadow>
       <primitive object={SG.cowTailTuft} attach="geometry" />
       <primitive object={SM.cowBlack} attach="material" />
     </mesh>
   </group>
 );
 
-export const WindmillComp: React.FC<{
+/**
+ * One paddock cow: the wandering group, with the rigged GLB inside it and the
+ * primitive as the Suspense fallback.
+ *
+ * The group stays owned here rather than inside either body, so
+ * `updateAnimalMovement` keeps writing one transform whichever body is mounted,
+ * and a deployment without `public/models/farm/cow.glb` degrades to the
+ * primitive rather than to an empty paddock.
+ */
+const PaddockCow: React.FC<{
   position: [number, number, number];
-  scale?: number;
+  rotation?: number;
+  groupRef: React.RefObject<THREE.Group | null>;
+  headRef: React.RefObject<THREE.Group | null>;
+  rigRef: React.RefObject<CreatureRigHandle | null>;
+  onClick?: (e: ThreeEvent<MouseEvent>) => void;
+}> = ({ position, rotation = 0, groupRef, headRef, rigRef, onClick }) => (
+  // Scale only, no yaw jitter: `updateAnimalMovement` writes `rotation.y` on
+  // this group every other frame, so a jittered yaw would be overwritten within
+  // one frame of the herd starting to wander. Three identical Holsteins were
+  // named by both reviewers; size is the channel that survives the driver.
+  <group
+    ref={groupRef}
+    position={position}
+    rotation={[0, rotation, 0]}
+    scale={instanceScale(position)}
+    onClick={(e) => {
+      if (onClick) {
+        e.stopPropagation();
+        onClick(e);
+      }
+    }}
+  >
+    <CreatureBody creature="cow" ref={rigRef} fallback={<CowPrimitiveBody headRef={headRef} />} />
+  </group>
+);
+
+const WindmillPrimitiveBody: React.FC<{
   bladesRef: React.RefObject<THREE.Group | null>;
-}> = ({ position, scale = 1, bladesRef }) => (
-  <group position={position} scale={scale}>
+}> = ({ bladesRef }) => (
+  <group>
     <mesh position={[0, 3, 0]} castShadow>
       <primitive object={SG.windmillTower} attach="geometry" />
       <primitive object={SM.stone} attach="material" />
@@ -1294,19 +1520,226 @@ export const WindmillComp: React.FC<{
     </mesh>
   </group>
 );
+WindmillPrimitiveBody.displayName = 'WindmillPrimitiveBody';
+
+/**
+ * The mill, turning on both paths.
+ *
+ * The swap cost this animation and has now given it back. The generated asset
+ * is a single mesh whose sails are modelled continuous with the cap - welded by
+ * position it is one connected shell, so there is nothing to lift out and put
+ * a `ref` on - and `GeneratedWindmillBody` therefore turns the sails in the
+ * vertex shader against a weight baked from the rest pose. See that file for
+ * the measurements that place the hub axis and the two bands.
+ *
+ * `bladesRef` stays wired to the primitive, which is the only body whose blades
+ * are a group the scene driver can write to. It is null whenever the GLB has
+ * loaded, so the driver's write is already skipped on the shipping path.
+ */
+export const WindmillComp: React.FC<{
+  position: [number, number, number];
+  scale?: number;
+  bladesRef: React.RefObject<THREE.Group | null>;
+}> = ({ position, scale = 1, bladesRef }) => (
+  <group position={position} scale={scale}>
+    <GeneratedWindmillBody fallback={<WindmillPrimitiveBody bladesRef={bladesRef} />} />
+  </group>
+);
 
 // ===== HORSE (Adapted from VillageArea) =====
+const HorsePrimitiveBody = React.memo<{ color?: string; isPaint?: boolean }>(
+  ({ color = '#8d6e63', isPaint = false }) => (
+    <group scale={0.6}>
+      {/* Main Body Group */}
+      <group position={[0, 1.4, 0]}>
+        {/* Torso */}
+        <mesh castShadow rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.55, 0.6, 1.2, 12]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        {/* Shoulders */}
+        <mesh position={[0, 0.1, 0.7]} castShadow>
+          <sphereGeometry args={[0.62, 12, 12]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        {/* Hindquarters */}
+        <mesh position={[0, 0.15, -0.7]} castShadow>
+          <sphereGeometry args={[0.65, 12, 12]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+
+        {/* Paint Spots (if isPaint is true) */}
+        {isPaint && (
+          <>
+            <mesh position={[0.4, 0.2, 0.3]} rotation={[0, 1, 0]}>
+              <sphereGeometry args={[0.3, 8, 8]} />
+              <meshStandardMaterial color="#f5f5f5" />
+            </mesh>
+            <mesh position={[-0.4, 0.1, -0.4]} rotation={[0, -1, 0]}>
+              <sphereGeometry args={[0.35, 8, 8]} />
+              <meshStandardMaterial color="#f5f5f5" />
+            </mesh>
+            <mesh position={[0, 0.5, 0]}>
+              <sphereGeometry args={[0.4, 8, 8]} />
+              <meshStandardMaterial color="#f5f5f5" />
+            </mesh>
+          </>
+        )}
+      </group>
+
+      {/* Neck - Max upright/proud */}
+      <group position={[0, 2.1, 0.9]} rotation={[0.4, 0, 0]}>
+        <mesh position={[0, 0.5, 0]} castShadow>
+          <cylinderGeometry args={[0.25, 0.45, 1.2, 12]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        {/* Paint Spot on Neck */}
+        {isPaint && (
+          <mesh position={[0.15, 0.6, 0.1]} rotation={[0, 0, -0.2]}>
+            <sphereGeometry args={[0.2, 8, 8]} />
+            <meshStandardMaterial color="#f5f5f5" />
+          </mesh>
+        )}
+        {/* Mane */}
+        <mesh position={[0, 0.4, -0.3]} rotation={[0, 0, 0]}>
+          <boxGeometry args={[0.1, 1.3, 0.2]} />
+          <meshStandardMaterial color="#3e2723" />
+        </mesh>
+      </group>
+
+      {/* Head */}
+      <group position={[0, 3.1, 1.6]} rotation={[0.3, 0, 0]}>
+        <mesh castShadow>
+          <boxGeometry args={[0.35, 0.35, 0.7]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[0, -0.05, 0.35]} castShadow>
+          <boxGeometry args={[0.25, 0.25, 0.4]} />
+          <meshStandardMaterial color="#5d4037" />
+        </mesh>
+        {/* Face Blaze (if paint) */}
+        {isPaint && (
+          <mesh position={[0, 0.18, 0.2]} rotation={[0.1, 0, 0]}>
+            <boxGeometry args={[0.15, 0.02, 0.4]} />
+            <meshStandardMaterial color="#f5f5f5" />
+          </mesh>
+        )}
+        {/* Ears - Larger and more prominent */}
+        {[-0.12, 0.12].map((x, i) => (
+          <mesh key={i} position={[x, 0.35, -0.2]} rotation={[0.2, 0, x > 0 ? -0.3 : 0.3]}>
+            <coneGeometry args={[0.08, 0.2, 4]} />
+            <meshStandardMaterial color={color} />
+          </mesh>
+        ))}
+        {/* Eyes - Moved to side of head */}
+        {[-0.16, 0.16].map((x, i) => (
+          <mesh key={i} position={[x, 0.1, 0.1]}>
+            <sphereGeometry args={[0.065, 8, 8]} />
+            <meshStandardMaterial color="black" />
+          </mesh>
+        ))}
+        {/* Forelock */}
+        <mesh position={[0, 0.2, 0.2]} rotation={[0.2, 0, 0]}>
+          <boxGeometry args={[0.05, 0.2, 0.3]} />
+          <meshStandardMaterial color="#3e2723" />
+        </mesh>
+      </group>
+
+      {/* Legs */}
+      {/* Front Left */}
+      <group position={[-0.35, 1.4, 0.7]}>
+        <mesh position={[0, -0.4, 0]}>
+          <cylinderGeometry args={[0.12, 0.15, 0.8, 8]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[0, -1.1, 0]}>
+          <cylinderGeometry args={[0.1, 0.11, 0.7, 8]} />
+          <meshStandardMaterial color={isPaint ? '#f5f5f5' : color} />
+        </mesh>{' '}
+        {/* White sock */}
+        <mesh position={[0, -1.5, 0]}>
+          <cylinderGeometry args={[0.12, 0.15, 0.15, 8]} />
+          <meshStandardMaterial color="#1a1110" />
+        </mesh>
+      </group>
+      {/* Front Right */}
+      <group position={[0.35, 1.4, 0.7]}>
+        <mesh position={[0, -0.4, 0]}>
+          <cylinderGeometry args={[0.12, 0.15, 0.8, 8]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[0, -1.1, 0]}>
+          <cylinderGeometry args={[0.1, 0.11, 0.7, 8]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[0, -1.5, 0]}>
+          <cylinderGeometry args={[0.12, 0.15, 0.15, 8]} />
+          <meshStandardMaterial color="#1a1110" />
+        </mesh>
+      </group>
+      {/* Back Left */}
+      <group position={[-0.35, 1.4, -0.7]}>
+        <mesh position={[0, -0.3, 0]}>
+          <cylinderGeometry args={[0.14, 0.18, 0.8, 8]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[0, -1.0, 0]}>
+          <cylinderGeometry args={[0.1, 0.12, 0.8, 8]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[0, -1.5, 0]}>
+          <cylinderGeometry args={[0.12, 0.15, 0.15, 8]} />
+          <meshStandardMaterial color="#1a1110" />
+        </mesh>
+      </group>
+      {/* Back Right */}
+      <group position={[0.35, 1.4, -0.7]}>
+        <mesh position={[0, -0.3, 0]}>
+          <cylinderGeometry args={[0.14, 0.18, 0.8, 8]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[0, -1.0, 0]}>
+          <cylinderGeometry args={[0.1, 0.12, 0.8, 8]} />
+          <meshStandardMaterial color={isPaint ? '#f5f5f5' : color} />
+        </mesh>{' '}
+        {/* White sock */}
+        <mesh position={[0, -1.5, 0]}>
+          <cylinderGeometry args={[0.12, 0.15, 0.15, 8]} />
+          <meshStandardMaterial color="#1a1110" />
+        </mesh>
+      </group>
+
+      {/* Tail */}
+      <group position={[0, 1.7, -1.0]} rotation={[0.2, 0, 0]}>
+        <mesh position={[0, -0.4, -0.2]} rotation={[-0.2, 0, 0]}>
+          <cylinderGeometry args={[0.08, 0.15, 1.2, 8]} />
+          <meshStandardMaterial color={isPaint ? '#f5f5f5' : '#3e2723'} />{' '}
+          {/* White tail tip option or mixed */}
+        </mesh>
+      </group>
+    </group>
+  )
+);
+HorsePrimitiveBody.displayName = 'HorsePrimitiveBody';
+
+/**
+ * The generated horse is one paint horse, so the `color` and `isPaint` props no
+ * longer select a coat - they are kept because the primitive fallback still
+ * honours them, and because the call sites read better naming the animal they
+ * asked for. A second coat is a second generation, not a tint: colouring a
+ * material that carries a baked albedo washes the whole hide.
+ */
 const Horse = React.memo<{
   position: [number, number, number];
   rotation?: number;
   color?: string;
   isPaint?: boolean;
+  rigRef?: React.RefObject<CreatureRigHandle | null>;
   onClick?: (e: ThreeEvent<MouseEvent>) => void;
-}>(({ position, rotation = 0, color = '#8d6e63', isPaint = false, onClick }) => (
+}>(({ position, rotation = 0, color = '#8d6e63', isPaint = false, rigRef, onClick }) => (
   <group
     position={position}
     rotation={[0, rotation, 0]}
-    scale={0.6}
     onClick={(e) => {
       if (onClick) {
         e.stopPropagation();
@@ -1314,182 +1747,98 @@ const Horse = React.memo<{
       }
     }}
   >
-    {/* Main Body Group */}
-    <group position={[0, 1.4, 0]}>
-      {/* Torso */}
-      <mesh castShadow rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[0.55, 0.6, 1.2, 12]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      {/* Shoulders */}
-      <mesh position={[0, 0.1, 0.7]} castShadow>
-        <sphereGeometry args={[0.62, 12, 12]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      {/* Hindquarters */}
-      <mesh position={[0, 0.15, -0.7]} castShadow>
-        <sphereGeometry args={[0.65, 12, 12]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-
-      {/* Paint Spots (if isPaint is true) */}
-      {isPaint && (
-        <>
-          <mesh position={[0.4, 0.2, 0.3]} rotation={[0, 1, 0]}>
-            <sphereGeometry args={[0.3, 8, 8]} />
-            <meshStandardMaterial color="#f5f5f5" />
-          </mesh>
-          <mesh position={[-0.4, 0.1, -0.4]} rotation={[0, -1, 0]}>
-            <sphereGeometry args={[0.35, 8, 8]} />
-            <meshStandardMaterial color="#f5f5f5" />
-          </mesh>
-          <mesh position={[0, 0.5, 0]}>
-            <sphereGeometry args={[0.4, 8, 8]} />
-            <meshStandardMaterial color="#f5f5f5" />
-          </mesh>
-        </>
-      )}
-    </group>
-
-    {/* Neck - Max upright/proud */}
-    <group position={[0, 2.1, 0.9]} rotation={[0.4, 0, 0]}>
-      <mesh position={[0, 0.5, 0]} castShadow>
-        <cylinderGeometry args={[0.25, 0.45, 1.2, 12]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      {/* Paint Spot on Neck */}
-      {isPaint && (
-        <mesh position={[0.15, 0.6, 0.1]} rotation={[0, 0, -0.2]}>
-          <sphereGeometry args={[0.2, 8, 8]} />
-          <meshStandardMaterial color="#f5f5f5" />
-        </mesh>
-      )}
-      {/* Mane */}
-      <mesh position={[0, 0.4, -0.3]} rotation={[0, 0, 0]}>
-        <boxGeometry args={[0.1, 1.3, 0.2]} />
-        <meshStandardMaterial color="#3e2723" />
-      </mesh>
-    </group>
-
-    {/* Head */}
-    <group position={[0, 3.1, 1.6]} rotation={[0.3, 0, 0]}>
-      <mesh castShadow>
-        <boxGeometry args={[0.35, 0.35, 0.7]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      <mesh position={[0, -0.05, 0.35]} castShadow>
-        <boxGeometry args={[0.25, 0.25, 0.4]} />
-        <meshStandardMaterial color="#5d4037" />
-      </mesh>
-      {/* Face Blaze (if paint) */}
-      {isPaint && (
-        <mesh position={[0, 0.18, 0.2]} rotation={[0.1, 0, 0]}>
-          <boxGeometry args={[0.15, 0.02, 0.4]} />
-          <meshStandardMaterial color="#f5f5f5" />
-        </mesh>
-      )}
-      {/* Ears - Larger and more prominent */}
-      {[-0.12, 0.12].map((x, i) => (
-        <mesh key={i} position={[x, 0.35, -0.2]} rotation={[0.2, 0, x > 0 ? -0.3 : 0.3]}>
-          <coneGeometry args={[0.08, 0.2, 4]} />
-          <meshStandardMaterial color={color} />
-        </mesh>
-      ))}
-      {/* Eyes - Moved to side of head */}
-      {[-0.16, 0.16].map((x, i) => (
-        <mesh key={i} position={[x, 0.1, 0.1]}>
-          <sphereGeometry args={[0.065, 8, 8]} />
-          <meshStandardMaterial color="black" />
-        </mesh>
-      ))}
-      {/* Forelock */}
-      <mesh position={[0, 0.2, 0.2]} rotation={[0.2, 0, 0]}>
-        <boxGeometry args={[0.05, 0.2, 0.3]} />
-        <meshStandardMaterial color="#3e2723" />
-      </mesh>
-    </group>
-
-    {/* Legs */}
-    {/* Front Left */}
-    <group position={[-0.35, 1.4, 0.7]}>
-      <mesh position={[0, -0.4, 0]}>
-        <cylinderGeometry args={[0.12, 0.15, 0.8, 8]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      <mesh position={[0, -1.1, 0]}>
-        <cylinderGeometry args={[0.1, 0.11, 0.7, 8]} />
-        <meshStandardMaterial color={isPaint ? '#f5f5f5' : color} />
-      </mesh>{' '}
-      {/* White sock */}
-      <mesh position={[0, -1.5, 0]}>
-        <cylinderGeometry args={[0.12, 0.15, 0.15, 8]} />
-        <meshStandardMaterial color="#1a1110" />
-      </mesh>
-    </group>
-    {/* Front Right */}
-    <group position={[0.35, 1.4, 0.7]}>
-      <mesh position={[0, -0.4, 0]}>
-        <cylinderGeometry args={[0.12, 0.15, 0.8, 8]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      <mesh position={[0, -1.1, 0]}>
-        <cylinderGeometry args={[0.1, 0.11, 0.7, 8]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      <mesh position={[0, -1.5, 0]}>
-        <cylinderGeometry args={[0.12, 0.15, 0.15, 8]} />
-        <meshStandardMaterial color="#1a1110" />
-      </mesh>
-    </group>
-    {/* Back Left */}
-    <group position={[-0.35, 1.4, -0.7]}>
-      <mesh position={[0, -0.3, 0]}>
-        <cylinderGeometry args={[0.14, 0.18, 0.8, 8]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      <mesh position={[0, -1.0, 0]}>
-        <cylinderGeometry args={[0.1, 0.12, 0.8, 8]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      <mesh position={[0, -1.5, 0]}>
-        <cylinderGeometry args={[0.12, 0.15, 0.15, 8]} />
-        <meshStandardMaterial color="#1a1110" />
-      </mesh>
-    </group>
-    {/* Back Right */}
-    <group position={[0.35, 1.4, -0.7]}>
-      <mesh position={[0, -0.3, 0]}>
-        <cylinderGeometry args={[0.14, 0.18, 0.8, 8]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      <mesh position={[0, -1.0, 0]}>
-        <cylinderGeometry args={[0.1, 0.12, 0.8, 8]} />
-        <meshStandardMaterial color={isPaint ? '#f5f5f5' : color} />
-      </mesh>{' '}
-      {/* White sock */}
-      <mesh position={[0, -1.5, 0]}>
-        <cylinderGeometry args={[0.12, 0.15, 0.15, 8]} />
-        <meshStandardMaterial color="#1a1110" />
-      </mesh>
-    </group>
-
-    {/* Tail */}
-    <group position={[0, 1.7, -1.0]} rotation={[0.2, 0, 0]}>
-      <mesh position={[0, -0.4, -0.2]} rotation={[-0.2, 0, 0]}>
-        <cylinderGeometry args={[0.08, 0.15, 1.2, 8]} />
-        <meshStandardMaterial color={isPaint ? '#f5f5f5' : '#3e2723'} />{' '}
-        {/* White tail tip option or mixed */}
-      </mesh>
-    </group>
+    <CreatureBody
+      creature="horse"
+      ref={rigRef}
+      fallback={<HorsePrimitiveBody color={color} isPaint={isPaint} />}
+    />
   </group>
 ));
 Horse.displayName = 'Horse';
+
+const CrowPrimitiveBody = React.memo(() => (
+  <group scale={0.6}>
+    <mesh position={[0, 0.15, 0]}>
+      <primitive object={SG.crowBody} attach="geometry" />
+      <primitive object={SM.crowBlack} attach="material" />
+    </mesh>
+    <mesh position={[0, 0.35, 0.1]}>
+      <primitive object={SG.crowHead} attach="geometry" />
+      <primitive object={SM.crowBlack} attach="material" />
+    </mesh>
+    {/* Beak */}
+    <mesh position={[0, 0.35, 0.18]} rotation={[1.5, 0, 0]}>
+      <coneGeometry args={[0.03, 0.1, 4]} />
+      <meshStandardMaterial color="#fb8c00" />
+    </mesh>
+    {/* Wings */}
+    <mesh position={[0.12, 0.2, 0]} rotation={[0, 0, -0.5]}>
+      <boxGeometry args={[0.05, 0.25, 0.15]} />
+      <primitive object={SM.crowBlack} attach="material" />
+    </mesh>
+    <mesh position={[-0.12, 0.2, 0]} rotation={[0, 0, 0.5]}>
+      <boxGeometry args={[0.05, 0.25, 0.15]} />
+      <primitive object={SM.crowBlack} attach="material" />
+    </mesh>
+    {/* Tail */}
+    <mesh position={[0, 0.1, -0.15]} rotation={[-0.5, 0, 0]}>
+      <boxGeometry args={[0.1, 0.2, 0.02]} />
+      <primitive object={SM.crowBlack} attach="material" />
+    </mesh>
+  </group>
+));
+CrowPrimitiveBody.displayName = 'CrowPrimitiveBody';
+
+/**
+ * Crow stab rate. A corvid's investigative peck is a fast, repeated stab rather
+ * than a held graze, so this runs well above the cow's 0.5 rad/s bob; at the
+ * 15 Hz throttle 4.2 rad/s still leaves nine samples per dip.
+ */
+const CROW_PECK_RATE = 4.2;
+/**
+ * Fraction of the cycle the bird spends with its head down. `smoothstep` over
+ * the peak of a sine keeps it up and alert most of the time, which is what
+ * separates a crow from a grazer.
+ */
+const CROW_PECK_DUTY = 0.62;
 
 const Crow = React.memo<{ position: [number, number, number]; rotation?: number }>(
   ({ position, rotation = 0 }) => {
     const [isExcited, setIsExcited] = useState(false);
     const [hearts, setHearts] = useState<{ id: number; pos: [number, number, number] }[]>([]);
     const nextHeartId = useRef(0);
+    const rigRef = useRef<CreatureRigHandle>(null);
+    const shakenRef = useRef(false);
+    // Perch phase, seeded off the crow's own position so two birds on two
+    // scarecrows would not stab in lockstep. Deterministic, unlike Math.random,
+    // which re-rolls on every remount.
+    const phase = useMemo(() => position[0] * 1.7 + position[2] * 0.9, [position]);
+
+    // `stride: 0` for this species - a perched bird has nothing to swing - so
+    // the whole of its rig motion is the neck. Runs on the shared 1-in-4
+    // throttle; the pet response takes the head off the peck and into a shake
+    // for as long as it lasts, rather than adding the two into a scribble.
+    useFrame((state) => {
+      const rig = rigRef.current;
+      if (!rig) return;
+      if (!shouldRunThisFrame(4)) return;
+      const time = state.clock.elapsedTime;
+      if (isExcited) {
+        rig.setHeadShake(Math.sin(time * 18) * 0.35);
+        shakenRef.current = true;
+        rig.setGraze(0);
+        return;
+      }
+      // Cleared once rather than every sample: each setter rebuilds the whole
+      // pose and calls `updateMatrixWorld`, so an unconditional write here
+      // would double the bird's rig cost for a value that has not changed.
+      if (shakenRef.current) {
+        rig.setHeadShake(0);
+        shakenRef.current = false;
+      }
+      const wave = Math.sin(time * CROW_PECK_RATE + phase);
+      rig.setGraze(THREE.MathUtils.smoothstep(wave, CROW_PECK_DUTY, 1));
+    });
 
     const handlePet = (e: ThreeEvent<MouseEvent>) => {
       e.stopPropagation();
@@ -1511,36 +1860,11 @@ const Crow = React.memo<{ position: [number, number, number]; rotation?: number 
     }, [isExcited]);
 
     return (
-      <group position={position} rotation={[0, rotation, 0]} scale={0.6} onClick={handlePet}>
+      <group position={position} rotation={[0, rotation, 0]} onClick={handlePet}>
         <group rotation={[isExcited ? 0.5 : 0, 0, 0]} position={[0, isExcited ? 0.2 : 0, 0]}>
-          <mesh position={[0, 0.15, 0]}>
-            <primitive object={SG.crowBody} attach="geometry" />
-            <primitive object={SM.crowBlack} attach="material" />
-          </mesh>
-          <mesh position={[0, 0.35, 0.1]}>
-            <primitive object={SG.crowHead} attach="geometry" />
-            <primitive object={SM.crowBlack} attach="material" />
-          </mesh>
-          {/* Beak */}
-          <mesh position={[0, 0.35, 0.18]} rotation={[1.5, 0, 0]}>
-            <coneGeometry args={[0.03, 0.1, 4]} />
-            <meshStandardMaterial color="#fb8c00" />
-          </mesh>
-          {/* Wings */}
-          <mesh position={[0.12, 0.2, 0]} rotation={[0, 0, -0.5]}>
-            <boxGeometry args={[0.05, 0.25, 0.15]} />
-            <primitive object={SM.crowBlack} attach="material" />
-          </mesh>
-          <mesh position={[-0.12, 0.2, 0]} rotation={[0, 0, 0.5]}>
-            <boxGeometry args={[0.05, 0.25, 0.15]} />
-            <primitive object={SM.crowBlack} attach="material" />
-          </mesh>
-          {/* Tail */}
-          <mesh position={[0, 0.1, -0.15]} rotation={[-0.5, 0, 0]}>
-            <boxGeometry args={[0.1, 0.2, 0.02]} />
-            <primitive object={SM.crowBlack} attach="material" />
-          </mesh>
+          <CreatureBody creature="crow" ref={rigRef} fallback={<CrowPrimitiveBody />} />
         </group>
+
         {hearts.map((h) => (
           <HeartParticle key={h.id} position={h.pos} onComplete={() => removeHeart(h.id)} />
         ))}
@@ -1550,77 +1874,91 @@ const Crow = React.memo<{ position: [number, number, number]; rotation?: number 
 );
 Crow.displayName = 'Crow';
 
+const ScarecrowPrimitiveBody = React.memo(() => (
+  <group>
+    {/* Pole */}
+    <mesh position={[0, 1.25, 0]} castShadow>
+      <primitive object={SG.scarecrowPole} attach="geometry" />
+      <primitive object={SM.woodBrown} attach="material" />
+    </mesh>
+    {/* Arms */}
+    <mesh position={[0, 1.8, 0]} rotation={[0, 0, 1.57]} castShadow>
+      <primitive object={SG.scarecrowArm} attach="geometry" />
+      <primitive object={SM.woodBrown} attach="material" />
+    </mesh>
+    {/* Shirt */}
+    <mesh position={[0, 1.8, 0]} castShadow>
+      <boxGeometry args={[0.55, 0.9, 0.3]} />
+      <primitive object={SM.plaidRed} attach="material" />
+    </mesh>
+    {/* Straw hands */}
+    <mesh position={[0.9, 1.8, 0]}>
+      <sphereGeometry args={[0.15, 8, 8]} />
+      <primitive object={SM.hay} attach="material" />
+    </mesh>
+    <mesh position={[-0.9, 1.8, 0]}>
+      <sphereGeometry args={[0.15, 8, 8]} />
+      <primitive object={SM.hay} attach="material" />
+    </mesh>
+    {/* Jeans */}
+    <group position={[0, 1.0, 0]}>
+      <mesh position={[-0.15, 0, 0]}>
+        <boxGeometry args={[0.18, 0.9, 0.22]} />
+        <primitive object={SM.denimBlue} attach="material" />
+      </mesh>
+      <mesh position={[0.15, 0, 0]}>
+        <boxGeometry args={[0.18, 0.9, 0.22]} />
+        <primitive object={SM.denimBlue} attach="material" />
+      </mesh>
+    </group>
+    {/* Scarf */}
+    <mesh position={[0, 2.25, 0]} rotation={[0.2, 0, 0]}>
+      <torusGeometry args={[0.2, 0.08, 8, 16]} />
+      <meshStandardMaterial color="#d32f2f" />
+    </mesh>
+    {/* Head */}
+    <mesh position={[0, 2.5, 0]} castShadow>
+      <primitive object={SG.pumpkinHead} attach="geometry" />
+      <primitive object={SM.pumpkinOrange} attach="material" />
+    </mesh>
+    {/* Eyes/Mouth */}
+    <mesh position={[0.12, 2.55, 0.28]} rotation={[0.2, 0.2, 0]}>
+      <coneGeometry args={[0.06, 0.05, 3]} />
+      <meshStandardMaterial color="#3e2723" />
+    </mesh>
+    <mesh position={[-0.12, 2.55, 0.28]} rotation={[0.2, -0.2, 0]}>
+      <coneGeometry args={[0.06, 0.05, 3]} />
+      <meshStandardMaterial color="#3e2723" />
+    </mesh>
+    <mesh position={[0, 2.45, 0.3]} rotation={[0, 0, 0]}>
+      <torusGeometry args={[0.08, 0.02, 3, 8, 3]} /> {/* Smile */}
+      <meshStandardMaterial color="#3e2723" />
+    </mesh>
+    {/* Hat */}
+    <mesh position={[0, 2.85, 0]} castShadow>
+      <primitive object={SG.strawHat} attach="geometry" />
+      <primitive object={SM.strawHat} attach="material" />
+    </mesh>
+  </group>
+));
+ScarecrowPrimitiveBody.displayName = 'ScarecrowPrimitiveBody';
+
 const Scarecrow = React.memo<{ position: [number, number, number]; rotation?: number }>(
   ({ position, rotation = 0 }) => (
     <group position={position} rotation={[0, rotation, 0]}>
-      {/* Pole */}
-      <mesh position={[0, 1.25, 0]} castShadow>
-        <primitive object={SG.scarecrowPole} attach="geometry" />
-        <primitive object={SM.woodBrown} attach="material" />
-      </mesh>
-      {/* Arms */}
-      <mesh position={[0, 1.8, 0]} rotation={[0, 0, 1.57]} castShadow>
-        <primitive object={SG.scarecrowArm} attach="geometry" />
-        <primitive object={SM.woodBrown} attach="material" />
-      </mesh>
-      {/* Shirt */}
-      <mesh position={[0, 1.8, 0]} castShadow>
-        <boxGeometry args={[0.55, 0.9, 0.3]} />
-        <primitive object={SM.plaidRed} attach="material" />
-      </mesh>
-      {/* Straw hands */}
-      <mesh position={[0.9, 1.8, 0]}>
-        <sphereGeometry args={[0.15, 8, 8]} />
-        <primitive object={SM.hay} attach="material" />
-      </mesh>
-      <mesh position={[-0.9, 1.8, 0]}>
-        <sphereGeometry args={[0.15, 8, 8]} />
-        <primitive object={SM.hay} attach="material" />
-      </mesh>
-      {/* Jeans */}
-      <group position={[0, 1.0, 0]}>
-        <mesh position={[-0.15, 0, 0]}>
-          <boxGeometry args={[0.18, 0.9, 0.22]} />
-          <primitive object={SM.denimBlue} attach="material" />
-        </mesh>
-        <mesh position={[0.15, 0, 0]}>
-          <boxGeometry args={[0.18, 0.9, 0.22]} />
-          <primitive object={SM.denimBlue} attach="material" />
-        </mesh>
-      </group>
-      {/* Scarf */}
-      <mesh position={[0, 2.25, 0]} rotation={[0.2, 0, 0]}>
-        <torusGeometry args={[0.2, 0.08, 8, 16]} />
-        <meshStandardMaterial color="#d32f2f" />
-      </mesh>
-      {/* Head */}
-      <mesh position={[0, 2.5, 0]} castShadow>
-        <primitive object={SG.pumpkinHead} attach="geometry" />
-        <primitive object={SM.pumpkinOrange} attach="material" />
-      </mesh>
-      {/* Eyes/Mouth */}
-      <mesh position={[0.12, 2.55, 0.28]} rotation={[0.2, 0.2, 0]}>
-        <coneGeometry args={[0.06, 0.05, 3]} />
-        <meshStandardMaterial color="#3e2723" />
-      </mesh>
-      <mesh position={[-0.12, 2.55, 0.28]} rotation={[0.2, -0.2, 0]}>
-        <coneGeometry args={[0.06, 0.05, 3]} />
-        <meshStandardMaterial color="#3e2723" />
-      </mesh>
-      <mesh position={[0, 2.45, 0.3]} rotation={[0, 0, 0]}>
-        <torusGeometry args={[0.08, 0.02, 3, 8, 3]} /> {/* Smile */}
-        <meshStandardMaterial color="#3e2723" />
-      </mesh>
-      {/* Hat */}
-      <mesh position={[0, 2.85, 0]} castShadow>
-        <primitive object={SG.strawHat} attach="geometry" />
-        <primitive object={SM.strawHat} attach="material" />
-      </mesh>
-      {/* Crow on Hat. Seated on the crown at radius 0.2, where the new profile's
-          surface sits at hat-local y 0.168. It was at 3.05, the cone's apex
-          height, and so had been perching 0.13 m above the cone's actual
-          surface at that radius. */}
-      <Crow position={[0.2, 3.018, 0]} rotation={0.5} />
+      <CreatureBody creature="scarecrow" fallback={<ScarecrowPrimitiveBody />} />
+      {/* Hoisted out of the primitive body, where it rendered only on the
+          fallback path - so `farm/crow.glb` was declared, validated, shipped
+          and never drawn once the generated scarecrow arrived. This is the only
+          place a crow appears in the scene.
+
+          Re-seated on the generated scarecrow, which is 1.90 m tall and wears a
+          carved pumpkin rather than the primitive's straw hat: the crown's
+          up-facing surface is at y 1.805 (0.021 m2, centroid within 20 mm of
+          the axis), so 1.80 puts the bird's feet on the pumpkin. The primitive
+          hat sat at 3.018, and as with the cottage's smoke the hoisted prop is
+          seated on the body that actually ships. */}
+      <Crow position={[0.1, 1.8, 0]} rotation={0.5} />
     </group>
   )
 );
@@ -1867,6 +2205,14 @@ export const FarmArea: React.FC = () => {
     () => Array.from({ length: 3 }, () => React.createRef<THREE.Mesh>()),
     []
   );
+  const pigRigRefs = useMemo(
+    () => Array.from({ length: 3 }, () => React.createRef<CreatureRigHandle>()),
+    []
+  );
+  // Root depth and leg-swing blend per pig, held here for the same reason the
+  // cow's are: the driver owns the amount and each body owns the pose.
+  const pigRoot = useRef<number[]>(new Array(3).fill(0));
+  const pigStride = useRef<number[]>(new Array(3).fill(0));
   const pigStates = useRef<AnimalState[]>(
     Array.from({ length: 3 }, () => ({
       target: new THREE.Vector3(-12 + (Math.random() - 0.5) * 4, 0, -5 + (Math.random() - 0.5) * 4),
@@ -1880,10 +2226,33 @@ export const FarmArea: React.FC = () => {
     () => Array.from({ length: 3 }, () => React.createRef<THREE.Group>()),
     []
   );
+  // Head group of the primitive fallback. Null once the rigged GLB has
+  // streamed in - `cowRigRefs` is the live channel from that point on.
   const cowHeadRefs = useMemo(
     () => Array.from({ length: 3 }, () => React.createRef<THREE.Group>()),
     []
   );
+  const chickenRigRefs = useMemo(
+    () => Array.from({ length: 5 }, () => React.createRef<CreatureRigHandle>()),
+    []
+  );
+  // Peck depth and leg-swing blend per bird, held here for the same reason the
+  // cow's are: the rigged body and the primitive fallback express them
+  // differently, so the driver owns the amount and each body owns the pose.
+  const chickenPeck = useRef<number[]>(new Array(5).fill(0));
+  const chickenStride = useRef<number[]>(new Array(5).fill(0));
+
+  const cowRigRefs = useMemo(
+    () => Array.from({ length: 3 }, () => React.createRef<CreatureRigHandle>()),
+    []
+  );
+  // Graze amount per cow, 0 (head up) to 1 (muzzle in the sward). Held here
+  // rather than read back off a transform because the two bodies express it
+  // differently - a neck chain on the rig, one group rotation on the primitive.
+  const cowGraze = useRef<number[]>(new Array(3).fill(0));
+  // Leg-swing blend, the complement of grazing. Only the rigged body has legs
+  // that can swing; the primitive fallback has four fixed cylinders.
+  const cowStride = useRef<number[]>(new Array(3).fill(0));
   const cowStates = useRef<AnimalState[]>(
     Array.from({ length: 3 }, () => ({
       target: new THREE.Vector3(5 + (Math.random() - 0.5) * 15, 0, 15 + (Math.random() - 0.5) * 8),
@@ -1896,6 +2265,20 @@ export const FarmArea: React.FC = () => {
     () => Array.from({ length: 4 }, () => React.createRef<THREE.Group>()),
     []
   );
+  const sheepRigRefs = useMemo(
+    () => Array.from({ length: 4 }, () => React.createRef<CreatureRigHandle>()),
+    []
+  );
+  // Graze amount per sheep. Unlike the cow there is no stride channel: these
+  // four are placed around the barnyard rather than inside a paddock and have
+  // no wander state, so a leg swing would be marching on the spot.
+  const sheepGraze = useRef<number[]>(new Array(4).fill(0));
+
+  // The horse is a single static animal, so it carries one handle rather than
+  // an array, and grazes without a stride for the same reason the sheep do.
+  const horseRigRef = useRef<CreatureRigHandle>(null);
+  const horseGraze = useRef(0);
+  const horseShakeState = useRef(0);
 
   const windmillBladesRef = useRef<THREE.Group>(null);
   const frameCountRef = useRef(0);
@@ -1934,6 +2317,9 @@ export const FarmArea: React.FC = () => {
       // Cows are too heavy to jump, maybe just wiggle?
       if (type === 'cow') cowJumpStates.current[index] = 1.0;
       if (type === 'sheep') sheepJumpStates.current[index] = 1.0;
+      // The horse answers on its rig rather than on a group transform; see the
+      // shake driver in `useFrame`.
+      if (type === 'horse') horseShakeState.current = 1.0;
 
       playCritterSound(type);
     },
@@ -1948,6 +2334,10 @@ export const FarmArea: React.FC = () => {
   const chickenOffsets = useMemo(() => [0, 1.2, 2.4, 3.6, 4.8], []);
   const pigOffsets = useMemo(() => [0, 1.5, 3], []);
   const cowOffsets = useMemo(() => [0, 2, 4], []);
+  // Spread across a full period rather than the 0-4 the older lists use: four
+  // sheep standing in one barnyard with nothing else to distinguish them read
+  // as a single animal duplicated if their heads rise and fall together.
+  const sheepOffsets = useMemo(() => [0, 1.6, 3.1, 4.7], []);
 
   // Movement Helpers
   const updateAnimalMovement = (
@@ -2063,13 +2453,27 @@ export const FarmArea: React.FC = () => {
         }
       });
 
-      // Cows just shake head vigorously?
+      // The horse has no jump state of its own - it is a single static animal
+      // with no wander group to bounce - so the pet response lives entirely on
+      // its rig, as a lateral head sweep. Same decay rate as the cow's.
+      if (horseShakeState.current > 0) {
+        const angle = Math.sin(horseShakeState.current * 15) * 0.25;
+        horseShakeState.current = Math.max(0, horseShakeState.current - cappedDelta * 2);
+        horseRigRef.current?.setHeadShake(horseShakeState.current === 0 ? 0 : angle);
+      }
+
+      // Cows shake their heads. A shake is a lateral sweep, so it belongs on
+      // the vertical axis; the old `rotation.z` write was the nod axis, which
+      // made the pet response a vertical bob and left grazing (on `rotation.x`)
+      // as a sideways roll of the whole head.
       cowJumpStates.current.forEach((val, i) => {
-        if (val > 0 && cowHeadRefs[i].current) {
-          cowHeadRefs[i].current.rotation.z = Math.sin(val * 15) * 0.2;
-          cowJumpStates.current[i] = Math.max(0, val - cappedDelta * 2);
-          if (cowJumpStates.current[i] === 0) cowHeadRefs[i].current.rotation.z = 0;
-        }
+        if (val <= 0) return;
+        const angle = Math.sin(val * 15) * 0.2;
+        cowJumpStates.current[i] = Math.max(0, val - cappedDelta * 2);
+        const settled = cowJumpStates.current[i] === 0 ? 0 : angle;
+        const rig = cowRigRefs[i].current;
+        if (rig) rig.setHeadShake(settled);
+        else if (cowHeadRefs[i].current) cowHeadRefs[i].current.rotation.y = settled;
       });
 
       // Sheep Jump
@@ -2086,13 +2490,25 @@ export const FarmArea: React.FC = () => {
     // Throttle to every 4th frame (15 FPS)
     if (frameCountRef.current % 4 !== 0) return;
 
+    // Pecking, only when idle. Peckers dip repeatedly where a grazer holds the
+    // pose, so this oscillates the whole 0-1 range rather than sitting near the
+    // top of it the way the cow's graze does.
     chickenAnimRefs.forEach((ref, i) => {
-      // Pecking motion only when idle
-      if (ref.current && chickenStates.current[i].isIdle) {
-        ref.current.rotation.x = Math.sin(time * 10 + chickenOffsets[i]) * 0.2 + 0.2;
+      const idle = chickenStates.current[i].isIdle;
+      const target = idle ? 0.5 + Math.sin(time * 3 + chickenOffsets[i]) * 0.5 : 0;
+      chickenPeck.current[i] = THREE.MathUtils.lerp(chickenPeck.current[i], target, 0.25);
+      chickenStride.current[i] = THREE.MathUtils.lerp(chickenStride.current[i], idle ? 0 : 1, 0.15);
+      const rig = chickenRigRefs[i].current;
+      if (rig) {
+        rig.setGraze(chickenPeck.current[i]);
+        rig.setStride(time * CHICKEN_STRIDE_RATE + chickenOffsets[i], chickenStride.current[i]);
       } else if (ref.current) {
-        // Reset when moving
-        ref.current.rotation.x = THREE.MathUtils.lerp(ref.current.rotation.x, 0, 0.1);
+        // Local Z, negative, because the primitive bird is authored facing +X:
+        // `rotation.x` rolled the whole body sideways about its own length
+        // instead of tipping it beak-down, the same transposition the cow's
+        // graze carried. `animRef` wraps the body but not the legs, so the bird
+        // tips over its feet rather than the feet leaving the ground.
+        ref.current.rotation.z = -chickenPeck.current[i] * 0.4;
       }
     });
 
@@ -2100,12 +2516,65 @@ export const FarmArea: React.FC = () => {
       if (ref.current) ref.current.rotation.z = Math.sin(time * 5 + pigOffsets[i]) * 0.3;
     });
 
+    // Rooting rather than grazing: a pig works the ground in short shoves, so
+    // this drives the full depth when idle and eases out of it when walking,
+    // the same shape as the cow's graze on a faster clock. `bend: 1.2` is the
+    // shallowest in the roster because the solved pose already puts the snout
+    // at 0.062 m - any more and it goes through the ground.
+    pigRigRefs.forEach((rigRef, i) => {
+      const rig = rigRef.current;
+      if (!rig) return;
+      const idle = pigStates.current[i].isIdle;
+      const target = idle ? 0.75 + Math.sin(time * 1.6 + pigOffsets[i]) * 0.25 : 0;
+      pigRoot.current[i] = THREE.MathUtils.lerp(pigRoot.current[i], target, 0.15);
+      pigStride.current[i] = THREE.MathUtils.lerp(pigStride.current[i], idle ? 0 : 1, 0.15);
+      rig.setGraze(pigRoot.current[i]);
+      rig.setStride(time * PIG_STRIDE_RATE + pigOffsets[i], pigStride.current[i]);
+    });
+
+    // Sheep and the horse have no wander state, so their graze is not gated on
+    // idleness - it is a slow, continuous crop with the head coming up between
+    // mouthfuls. The floor of the sine is what stops four sheep and a horse
+    // from standing nose-down for the whole session.
+    sheepRigRefs.forEach((rigRef, i) => {
+      const rig = rigRef.current;
+      if (!rig) return;
+      const target = 0.6 + Math.sin(time * 0.35 + sheepOffsets[i]) * 0.4;
+      sheepGraze.current[i] = THREE.MathUtils.lerp(sheepGraze.current[i], target, 0.08);
+      rig.setGraze(sheepGraze.current[i]);
+    });
+
+    if (horseRigRef.current) {
+      // Slower and shallower than the sheep. `reached: 0.44` is a rig limit -
+      // that neck curls rather than extends - so driving it to a hard 1.0 buys
+      // no more reach and only holds the pose longer.
+      const target = 0.55 + Math.sin(time * 0.28) * 0.35;
+      horseGraze.current = THREE.MathUtils.lerp(horseGraze.current, target, 0.06);
+      horseRigRef.current.setGraze(horseGraze.current);
+    }
+
+    // Grazing, expressed as an amount rather than an angle so the same driver
+    // serves the rigged neck chain and the primitive fallback's head group.
+    // Easing both ways rather than snapping to the idle value: a deforming neck
+    // shows the step that a rigid box head hid.
     cowHeadRefs.forEach((ref, i) => {
-      // Grazing motion only when idle
-      if (ref.current && cowStates.current[i].isIdle) {
-        ref.current.rotation.x = Math.sin(time * 0.5 + cowOffsets[i]) * 0.15 + 0.3; // Head down
+      const idle = cowStates.current[i].isIdle;
+      const target = idle ? 0.85 + Math.sin(time * 0.5 + cowOffsets[i]) * 0.15 : 0;
+      cowGraze.current[i] = THREE.MathUtils.lerp(cowGraze.current[i], target, 0.1);
+      cowStride.current[i] = THREE.MathUtils.lerp(cowStride.current[i], idle ? 0 : 1, 0.12);
+      const rig = cowRigRefs[i].current;
+      if (rig) {
+        rig.setGraze(cowGraze.current[i]);
+        // Phase is free-running rather than integrated, so it cannot drift out
+        // of step with the clock when frames are dropped. COW_STRIDE_RATE is
+        // the 0.5 m/s wander speed over a roughly 0.9 m stride.
+        rig.setStride(time * COW_STRIDE_RATE + cowOffsets[i], cowStride.current[i]);
       } else if (ref.current) {
-        ref.current.rotation.x = THREE.MathUtils.lerp(ref.current.rotation.x, 0, 0.1); // Head up
+        // Nose down is a negative rotation about the primitive's local Z, its
+        // pitch axis. The previous `rotation.x` write rolled the head sideways
+        // about the cow's own length instead - visible as a head cocked 30 cm
+        // off the body's midline rather than as a nod.
+        ref.current.rotation.z = -cowGraze.current[i] * 0.45;
       }
     });
   });
@@ -2181,6 +2650,7 @@ export const FarmArea: React.FC = () => {
           rotation={c.rot}
           groupRef={chickenRefs[i]}
           animRef={chickenAnimRefs[i]}
+          rigRef={chickenRigRefs[i]}
           onClick={() => handlePet(c.pos, 'chicken', i)}
         />
       ))}
@@ -2189,9 +2659,14 @@ export const FarmArea: React.FC = () => {
         <FenceSection position={[0, 0, 3]} length={6} />
         <FenceSection position={[-3, 0, 0]} rotation={Math.PI / 2} length={6} />
         <FenceSection position={[3, 0, 0]} rotation={Math.PI / 2} length={6} />
-        {/* Mud puddle - raised above TerrainGround (y=0.05) to prevent z-fighting */}
+        {/* Mud puddle. Was lifted to 0.08 to clear `TerrainGround`'s old 0.05
+            default; that default is now the site's declared ground datum
+            (-0.02), so 0.08 would hang this decal 10 cm in the air - visible at
+            the 4 m `paddock` review camera. `groundOverlay` is the layer
+            CLAUDE.md's decision tree names for a marking on exterior ground,
+            and the polygonOffset below is what actually keeps it clear. */}
         <mesh
-          position={[0, 0.08, 0]}
+          position={[0, EXTERIOR_LAYERS.groundOverlay, 0]}
           rotation={[-Math.PI / 2, 0, 0]}
           renderOrder={RENDER_ORDER.floorEffects}
         >
@@ -2224,6 +2699,7 @@ export const FarmArea: React.FC = () => {
           rotation={p.rot}
           groupRef={pigRefs[i]}
           tailRef={pigTailRefs[i]}
+          rigRef={pigRigRefs[i]}
           onClick={() => handlePet(p.pos, 'pig', i)}
         />
       ))}
@@ -2235,48 +2711,89 @@ export const FarmArea: React.FC = () => {
             <FenceSection position={[x, 0, 6]} length={5} />
           </React.Fragment>
         ))}
-        <FenceSection position={[-10, 0, 0]} rotation={Math.PI / 2} length={5} />
-        <FenceSection position={[-10, 0, -4]} rotation={Math.PI / 2} length={5} />
-        <FenceSection position={[10, 0, 0]} rotation={Math.PI / 2} length={5} />
-        <FenceSection position={[10, 0, -4]} rotation={Math.PI / 2} length={5} />
+        {/* Side runs, 4 m rather than 5. Two 5 m runs centred 4 m apart span
+            z -6.5..-1.5 and -2.5..2.5, so they OVERLAP by a full metre - a
+            doubled panel and a doubled post on both sides of the paddock,
+            measured at 40% AABB intersection in the assembled scene. At 4 m
+            they abut exactly at z = -2 and cover the same z -6..2 the run at
+            z = -6 needs. The primitive fence hid this because it was two thin
+            rails; a solid generated panel does not. */}
+        <FenceSection position={[-10, 0, 0]} rotation={Math.PI / 2} length={4} />
+        <FenceSection position={[-10, 0, -4]} rotation={Math.PI / 2} length={4} />
+        <FenceSection position={[10, 0, 0]} rotation={Math.PI / 2} length={4} />
+        <FenceSection position={[10, 0, -4]} rotation={Math.PI / 2} length={4} />
       </group>
       {cowData.map((c, i) => (
-        <Cow
+        <PaddockCow
           key={`cow-${i}`}
           position={c.pos}
           rotation={c.rot}
           groupRef={cowRefs[i]}
           headRef={cowHeadRefs[i]}
+          rigRef={cowRigRefs[i]}
           onClick={() => handlePet(c.pos, 'cow', i)}
         />
       ))}
 
       <WindmillComp position={[15, 0, -15]} scale={1.5} bladesRef={windmillBladesRef} />
+      {/* Moved off [6, 0, -2], which is the exact coordinate of the first
+          HayBale below - the two interpenetrated, and a camera aimed at the
+          bale returned a close-up of a sheep. The bale is the one that cannot
+          move: the third bale at [6.2, 0.8, -1] is stacked on this pair and the
+          cat sleeps between them. Clear of the barn (x -5..5), the coop
+          ([12, 0, -5]) and the horse ([8, 0, -1]). */}
       <Sheep
-        position={[6, 0, -2]}
+        position={[9, 0, -4]}
         rotation={0.6}
         groupRef={sheepRefs[0]}
-        onClick={() => handlePet([6, 0, -2], 'sheep', 0)}
+        rigRef={sheepRigRefs[0]}
+        onClick={() => handlePet([9, 0, -4], 'sheep', 0)}
       />
+      {/* Moved off [7, 0, 1], 1.12 m from the hay bale at [6.5, 0, 0]: measured
+          in the assembled scene the two boxes overlapped by 0.74 m in x, 22% of
+          the smaller body, so this sheep stood partly inside a bale. Same defect
+          class as the water trough the barn swallowed - a neighbour that was
+          fine against a thin primitive and is not against a solid generated one.
+          [7, 0, 2.5] clears the bale by 2.55 m and the sheep at [8, 0, 5] by
+          2.69 m, which still reads as a flock, and stays clear of the barn
+          (x -5..5, z -5..5), the horse at [8, 0, -1] and the paddock fence run
+          at z = 9. */}
       <Sheep
-        position={[7, 0, 1]}
+        position={[7, 0, 2.5]}
         rotation={-0.4}
         groupRef={sheepRefs[1]}
-        onClick={() => handlePet([7, 0, 1], 'sheep', 1)}
+        rigRef={sheepRigRefs[1]}
+        onClick={() => handlePet([7, 0, 2.5], 'sheep', 1)}
       />
       <Sheep
         position={[8, 0, 5]}
         rotation={1.8}
         groupRef={sheepRefs[2]}
+        rigRef={sheepRigRefs[2]}
         onClick={() => handlePet([8, 0, 5], 'sheep', 2)}
       />
       <Sheep
         position={[-8, 0, 5]}
         rotation={2.5}
         groupRef={sheepRefs[3]}
+        rigRef={sheepRigRefs[3]}
         onClick={() => handlePet([-8, 0, 5], 'sheep', 3)}
       />
-      <WaterTrough position={[0, 0, -4]} />
+      {/* Moved off [0, 0, -4], which the generated barn swallowed: the primitive
+          barn's box is [10, 6, 8] and spans z -4..4, so the trough sat exactly
+          against its rear wall, but the generated barn is 10 m DEEP and spans
+          z -5..5. Measured in the assembled scene, 80% of the trough's volume
+          was inside the barn's box (`placement-audit.mjs`). This is the defect
+          class the swap creates - the envelope changed and the neighbour did
+          not move - so any prop tucked against a replaced building is suspect.
+          [-6.5, ., -2] clears the barn's x extent (-4.68..4.68) and puts the
+          trough on the barnyard flank where the animals are, rather than hidden
+          behind the building.
+          y = 0.08 rather than 0 because the barnyard cobble sheet is at 0.08:
+          at 0 the trough was buried by 15% of its own 0.54 m height, which for
+          a trough is the difference between standing on the yard and sunk into
+          it. Taller neighbours bury the same 80 mm invisibly and are left alone. */}
+      <WaterTrough position={[-6.5, 0.08, -2]} />
       <HayBale position={[6, 0, -2]} rotation={0.3} />
       <HayBale position={[6.5, 0, 0]} rotation={-0.2} />
       <HayBale position={[6.2, 0.8, -1]} rotation={0.5} />
@@ -2312,6 +2829,7 @@ export const FarmArea: React.FC = () => {
         rotation={-Math.PI / 2}
         color="#8d6e63"
         isPaint={true}
+        rigRef={horseRigRef}
         onClick={() => handlePet([8, 0, -1], 'horse', 0)}
       />
 

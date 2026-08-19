@@ -20,9 +20,18 @@
       "maxTextures": 0,
       "maxRenderVertices": 135000,
       "bounds": {
-        "width": [0.9, 1.0],
-        "height": [1.75, 1.85],
-        "length": [2.45, 2.6],
+        "width": [
+          0.9,
+          1
+        ],
+        "height": [
+          1.75,
+          1.85
+        ],
+        "length": [
+          2.45,
+          2.6
+        ],
         "groundTolerance": 0.005,
         "centreTolerance": 0.01
       },
@@ -55,14 +64,31 @@
       "maxTextures": 0,
       "maxRenderVertices": 20000,
       "bounds": {
-        "width": [1.64, 1.67],
-        "height": [1.7, 1.73],
-        "length": [0.47, 0.49],
+        "width": [
+          1.64,
+          1.67
+        ],
+        "height": [
+          1.7,
+          1.73
+        ],
+        "length": [
+          0.47,
+          0.49
+        ],
         "groundTolerance": 0.005,
         "centreTolerance": 0.01
       },
-      "requiredNodes": ["Root", "Hips", "Head", "characterMedium"],
-      "requiredAnimations": ["worker-idle", "worker-run"]
+      "requiredNodes": [
+        "Root",
+        "Hips",
+        "Head",
+        "characterMedium"
+      ],
+      "requiredAnimations": [
+        "worker-idle",
+        "worker-run"
+      ]
     },
     {
       "id": "worker-masculine",
@@ -77,13 +103,29 @@
       "maxTextures": 0,
       "maxRenderVertices": 16000,
       "bounds": {
-        "width": [1.53, 1.56],
-        "height": [1.71, 1.73],
-        "length": [0.35, 0.37],
+        "width": [
+          1.53,
+          1.56
+        ],
+        "height": [
+          1.71,
+          1.73
+        ],
+        "length": [
+          0.35,
+          0.37
+        ],
         "groundTolerance": 0.005,
         "centreTolerance": 0.01
       },
-      "requiredNodes": ["Root", "Hips", "Chest", "Head", "Wrist.L", "Wrist.R"],
+      "requiredNodes": [
+        "Root",
+        "Hips",
+        "Chest",
+        "Head",
+        "Wrist.L",
+        "Wrist.R"
+      ],
       "requiredAnimations": [
         "worker-idle",
         "worker-walk",
@@ -109,13 +151,29 @@
       "maxTextures": 0,
       "maxRenderVertices": 19000,
       "bounds": {
-        "width": [1.51, 1.54],
-        "height": [1.71, 1.73],
-        "length": [0.32, 0.35],
+        "width": [
+          1.51,
+          1.54
+        ],
+        "height": [
+          1.71,
+          1.73
+        ],
+        "length": [
+          0.32,
+          0.35
+        ],
         "groundTolerance": 0.005,
         "centreTolerance": 0.01
       },
-      "requiredNodes": ["Root", "Hips", "Chest", "Head", "Wrist.L", "Wrist.R"],
+      "requiredNodes": [
+        "Root",
+        "Hips",
+        "Chest",
+        "Head",
+        "Wrist.L",
+        "Wrist.R"
+      ],
       "requiredAnimations": [
         "worker-idle",
         "worker-walk",
@@ -127,6 +185,1059 @@
         "worker-radio",
         "worker-sample"
       ]
+    },
+    {
+      "id": "farm-cow",
+      "file": "farm/cow.glb",
+      "role": "generated-creature",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123, then animate_rig)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 366000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 18900,
+      "bounds": {
+        "width": [
+          0.626,
+          0.646
+        ],
+        "height": [
+          1.276,
+          1.296
+        ],
+        "length": [
+          1.795,
+          1.815
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "CowBody",
+        "Root",
+        "Hip",
+        "Spine01",
+        "Spine02",
+        "NeckTwist01",
+        "NeckTwist02",
+        "Head"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-sheep",
+      "file": "farm/sheep.glb",
+      "role": "generated-creature",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123, then animate_rig)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 339000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 18900,
+      "bounds": {
+        "width": [
+          0.622,
+          0.642
+        ],
+        "height": [
+          0.943,
+          0.963
+        ],
+        "length": [
+          1.14,
+          1.16
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "SheepBody",
+        "Root",
+        "Hip",
+        "Spine01",
+        "Spine02",
+        "NeckTwist01",
+        "NeckTwist02",
+        "Head"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-pig",
+      "file": "farm/pig.glb",
+      "role": "generated-creature",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123, then animate_rig)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 330000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 18900,
+      "bounds": {
+        "width": [
+          0.616,
+          0.636
+        ],
+        "height": [
+          0.739,
+          0.759
+        ],
+        "length": [
+          1.24,
+          1.26
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "PigBody",
+        "Root",
+        "Hip",
+        "Spine01",
+        "Spine02",
+        "NeckTwist01",
+        "NeckTwist02",
+        "Head"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-horse",
+      "file": "farm/horse.glb",
+      "role": "generated-creature",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123, then animate_rig)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 360000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 18900,
+      "bounds": {
+        "width": [
+          0.627,
+          0.647
+        ],
+        "height": [
+          1.741,
+          1.761
+        ],
+        "length": [
+          2.338,
+          2.362
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "HorseBody",
+        "Root",
+        "Hip",
+        "Spine01",
+        "Spine02",
+        "NeckTwist01",
+        "NeckTwist02",
+        "Head"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-chicken",
+      "file": "farm/chicken.glb",
+      "role": "generated-creature",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123, then animate_rig)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 416000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 18700,
+      "bounds": {
+        "width": [
+          0.233,
+          0.253
+        ],
+        "height": [
+          0.407,
+          0.427
+        ],
+        "length": [
+          0.41,
+          0.43
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "ChickenBody",
+        "Root",
+        "Hip",
+        "Spine01",
+        "Spine02",
+        "NeckTwist01",
+        "NeckTwist02",
+        "Head"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-crow",
+      "file": "farm/crow.glb",
+      "role": "generated-creature",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123, then animate_rig)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 392000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 18900,
+      "bounds": {
+        "width": [
+          0.148,
+          0.168
+        ],
+        "height": [
+          0.26,
+          0.28
+        ],
+        "length": [
+          0.41,
+          0.43
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "CrowBody",
+        "Root",
+        "Hip",
+        "Spine01",
+        "Spine02",
+        "NeckTwist01",
+        "NeckTwist02",
+        "Head"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-duck",
+      "file": "farm/duck.glb",
+      "role": "generated-creature",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123, then animate_rig)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 322000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 18900,
+      "bounds": {
+        "width": [
+          0.316,
+          0.336
+        ],
+        "height": [
+          0.444,
+          0.464
+        ],
+        "length": [
+          0.49,
+          0.51
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "DuckBody",
+        "Root",
+        "Hip",
+        "Spine01",
+        "Spine02",
+        "NeckTwist01",
+        "NeckTwist02",
+        "Head"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-scarecrow",
+      "file": "farm/scarecrow.glb",
+      "role": "generated-creature",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123, then animate_rig)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 431000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 18900,
+      "bounds": {
+        "width": [
+          1.645,
+          1.665
+        ],
+        "height": [
+          1.89,
+          1.91
+        ],
+        "length": [
+          0.516,
+          0.536
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "ScarecrowBody",
+        "Root",
+        "Hip",
+        "Spine01",
+        "Spine02",
+        "NeckTwist01",
+        "NeckTwist02",
+        "Head"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "village-cat",
+      "file": "village/cat.glb",
+      "role": "generated-creature",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123, then animate_rig)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 323000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 18900,
+      "bounds": {
+        "width": [
+          0.385,
+          0.405
+        ],
+        "height": [
+          0.49,
+          0.51
+        ],
+        "length": [
+          0.338,
+          0.358
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "CatBody",
+        "Root",
+        "Hip",
+        "Spine01",
+        "Spine02",
+        "NeckTwist01",
+        "NeckTwist02",
+        "Head"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-barn",
+      "file": "farm/barn.glb",
+      "role": "generated-structure",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 671000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25100,
+      "bounds": {
+        "width": [
+          9.303,
+          9.397
+        ],
+        "height": [
+          9.949,
+          10.049
+        ],
+        "length": [
+          9.95,
+          10.05
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "BarnBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-coop",
+      "file": "farm/coop.glb",
+      "role": "generated-structure",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 437000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          2.985,
+          3.015
+        ],
+        "height": [
+          2.601,
+          2.627
+        ],
+        "length": [
+          2.111,
+          2.132
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "CoopBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-farmhouse",
+      "file": "farm/farmhouse.glb",
+      "role": "generated-structure",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 540000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          5.97,
+          6.03
+        ],
+        "height": [
+          5.206,
+          5.258
+        ],
+        "length": [
+          5.808,
+          5.866
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "FarmhouseBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-windmill",
+      "file": "farm/windmill.glb",
+      "role": "generated-structure",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 393000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          3.96,
+          3.999
+        ],
+        "height": [
+          6.763,
+          6.831
+        ],
+        "length": [
+          5.811,
+          5.869
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "WindmillBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-haybale",
+      "file": "farm/haybale.glb",
+      "role": "generated-prop",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 433000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 24800,
+      "bounds": {
+        "width": [
+          1.336,
+          1.356
+        ],
+        "height": [
+          1.301,
+          1.321
+        ],
+        "length": [
+          1.49,
+          1.51
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "HaybaleBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-watertrough",
+      "file": "farm/watertrough.glb",
+      "role": "generated-prop",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 483000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          1.49,
+          1.51
+        ],
+        "height": [
+          0.532,
+          0.552
+        ],
+        "length": [
+          0.538,
+          0.558
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "WatertroughBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-gardenbed",
+      "file": "farm/gardenbed.glb",
+      "role": "generated-prop",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 428000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          2.985,
+          3.015
+        ],
+        "height": [
+          1.223,
+          1.243
+        ],
+        "length": [
+          2.166,
+          2.188
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "GardenbedBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "farm-fence",
+      "file": "farm/fence.glb",
+      "role": "generated-prop",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 416000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          1.626,
+          1.646
+        ],
+        "height": [
+          1.04,
+          1.06
+        ],
+        "length": [
+          0.186,
+          0.206
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "FenceBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "village-cottage",
+      "file": "village/cottage.glb",
+      "role": "generated-structure",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 469000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25100,
+      "bounds": {
+        "width": [
+          4.596,
+          4.642
+        ],
+        "height": [
+          4.311,
+          4.354
+        ],
+        "length": [
+          4.975,
+          5.025
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "CottageBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "village-shop",
+      "file": "village/shop.glb",
+      "role": "generated-structure",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 427000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          5.97,
+          6.03
+        ],
+        "height": [
+          5.845,
+          5.903
+        ],
+        "length": [
+          5.38,
+          5.434
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "ShopBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "village-church",
+      "file": "village/church.glb",
+      "role": "generated-structure",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 414000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          11.94,
+          12.06
+        ],
+        "height": [
+          12.925,
+          13.055
+        ],
+        "length": [
+          7.468,
+          7.543
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "ChurchBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "village-townhall",
+      "file": "village/townhall.glb",
+      "role": "generated-structure",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 608000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          7.754,
+          7.832
+        ],
+        "height": [
+          13.896,
+          14.036
+        ],
+        "length": [
+          11.94,
+          12.06
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "TownhallBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "village-pub",
+      "file": "village/pub.glb",
+      "role": "generated-structure",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 524000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 24900,
+      "bounds": {
+        "width": [
+          7.96,
+          8.04
+        ],
+        "height": [
+          5.529,
+          5.585
+        ],
+        "length": [
+          4.383,
+          4.427
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "PubBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "village-school",
+      "file": "village/school.glb",
+      "role": "generated-structure",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 459000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          9.95,
+          10.05
+        ],
+        "height": [
+          9.254,
+          9.347
+        ],
+        "length": [
+          9.289,
+          9.382
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "SchoolBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "village-forge",
+      "file": "village/forge.glb",
+      "role": "generated-structure",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 417000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          4.691,
+          4.738
+        ],
+        "height": [
+          5.65,
+          5.707
+        ],
+        "length": [
+          6.965,
+          7.035
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "ForgeBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "village-wishingwell",
+      "file": "village/wishingwell.glb",
+      "role": "generated-prop",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 444000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25000,
+      "bounds": {
+        "width": [
+          2.197,
+          2.22
+        ],
+        "height": [
+          2.919,
+          2.949
+        ],
+        "length": [
+          2.388,
+          2.412
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "WishingwellBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "village-marketstall",
+      "file": "village/marketstall.glb",
+      "role": "generated-prop",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 618000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          1.55,
+          1.57
+        ],
+        "height": [
+          2.238,
+          2.26
+        ],
+        "length": [
+          2.786,
+          2.814
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "MarketstallBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "village-postbox",
+      "file": "village/postbox.glb",
+      "role": "generated-prop",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 343000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          0.702,
+          0.722
+        ],
+        "height": [
+          1.49,
+          1.51
+        ],
+        "length": [
+          0.698,
+          0.718
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "PostboxBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "village-fountain",
+      "file": "village/fountain.glb",
+      "role": "generated-prop",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 341000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          3.129,
+          3.161
+        ],
+        "height": [
+          3.303,
+          3.337
+        ],
+        "length": [
+          3.164,
+          3.196
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "FountainBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "village-duckpond",
+      "file": "village/duckpond.glb",
+      "role": "generated-prop",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 583000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25100,
+      "bounds": {
+        "width": [
+          10.945,
+          11.055
+        ],
+        "height": [
+          2.184,
+          2.206
+        ],
+        "length": [
+          10.901,
+          11.011
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "DuckpondBody"
+      ],
+      "requiredAnimations": []
+    },
+    {
+      "id": "village-castle",
+      "file": "village/castle.glb",
+      "role": "generated-structure",
+      "source": "https://platform.tripo3d.ai (text_to_model v2.5-20250123)",
+      "license": "Tripo3D API-plan output",
+      "attribution": "Generated with Tripo3D for MillOS under an API plan",
+      "selfContained": true,
+      "maxFileBytes": 621000,
+      "maxMaterials": 1,
+      "maxTextures": 3,
+      "maxRenderVertices": 25200,
+      "bounds": {
+        "width": [
+          38.507,
+          38.894
+        ],
+        "height": [
+          41.687,
+          42.106
+        ],
+        "length": [
+          38.156,
+          38.54
+        ],
+        "groundTolerance": 0.005,
+        "centreTolerance": 0.01
+      },
+      "requiredNodes": [
+        "CastleBody"
+      ],
+      "requiredAnimations": []
     }
   ],
   "quarantined": [

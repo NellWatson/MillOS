@@ -29,6 +29,7 @@ import {
   generateTerrainMacro,
 } from './terrainTextures';
 import { PROCEDURAL_TEXTURES } from '../../utils/sharedMaterials';
+import { SITE_LAYOUT } from '../../constants/siteLayout';
 import { useGraphicsStore } from '../../stores/graphicsStore';
 
 interface TerrainGroundProps {
@@ -129,7 +130,30 @@ function createDisplacedGeometry(
  */
 export const TerrainGround = React.memo(function TerrainGround({
   debug = false,
-  yPosition = 0.05,
+  /**
+   * THE SITE'S DECLARED GROUND DATUM, not a number of its own.
+   *
+   * This was 0.05, which put the bottom-most surface on the site 7 cm ABOVE
+   * every authored plane it is supposed to sit under (`EXTERIOR_LAYERS.ground`
+   * = `SITE_LAYOUT.datum.terrain` = -0.02) and 5 cm above the interior factory
+   * slab at y = 0. Nothing looked wrong at review distance because this
+   * material carries `POLYGON_OFFSET.exteriorBase`, and a factor-4 depth bias
+   * is large enough to hide 7 cm of wrong-side geometry at 30 m.
+   *
+   * It is not large enough at 2 m, where the depth buffer resolves finely, so
+   * the terrain punched through the floor as a speckled band. MEASURED: it
+   * filled the lower third of `personnel-feminine` and the lower right of
+   * `personnel-close`, `shipping` and `receiving` - four of the twelve
+   * art-review scenes - and vanished under
+   * `setPerfDebug({ disableTerrain: true })`, which is what identified it.
+   *
+   * On the datum, the whole documented stack in CLAUDE.md's "Exterior Ground
+   * Z-Fighting Prevention" works as written: terrain and the authored planes
+   * share one Y and separate by `polygonOffset` alone (base 4 behind, mid 2,
+   * top 0, overlay -2), and the interior slab at y = 0 is now genuinely above
+   * the terrain rather than winning a bias fight it should never have been in.
+   */
+  yPosition = SITE_LAYOUT.datum.terrain,
   resolution = 1024,
   regions = MILLOS_TERRAIN_REGIONS,
   receiveShadow = true,

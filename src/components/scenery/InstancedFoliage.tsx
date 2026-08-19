@@ -48,6 +48,7 @@ import {
   type FoliageKind,
 } from '../../textures/foliage';
 import { applyWindShader } from './WindDriver';
+import { composeWorldSurface } from '../../utils/worldSurface';
 
 export type TreeSpecies = 'oak' | 'pine' | 'birch';
 
@@ -450,6 +451,27 @@ export const createFoliageMaterial = (
     strengthScale: 1.0,
     cacheKey: `millos_foliage_${kind}_v1`,
   });
+  // COMPOSED, not applied. `applyWorldSurface` declines any material that
+  // already owns an `onBeforeCompile`, which is every swaying material in this
+  // repo - so `WORLD_SURFACE_PROFILES.vegetation` was authored and reached
+  // nothing until this call. `composeWorldSurface` calls the wind injection
+  // first and adds the surface terms after it, under a NEW cache key: three
+  // keys its program cache on that literal, so reusing the wind key would have
+  // served the program compiled without these terms.
+  //
+  // `worldRest` is the load-bearing option. The canopy is one shared card cage
+  // drawn as an `InstancedMesh`, so the tonal drift has to come from a WORLD
+  // field - that is exactly what stops a stand of trees reading as one tree
+  // stamped forty times, and it is why `vegetation` ships `objectSpace: 0`.
+  // But the wind has already moved `transformed` by the time this anchor runs,
+  // and the tip travel (0.16 m of sway against a 0.3 m meso period) is most of
+  // a noise cell: sampled at the swayed vertex the break-up would crawl over
+  // the leaves every gust. Sampling at the REST vertex keeps the field
+  // per-instance distinct AND welded to the plant.
+  composeWorldSurface(material, 'vegetation', {
+    cacheKey: `millos_foliage_${kind}_v1`,
+    worldRest: true,
+  });
   return material;
 };
 
@@ -497,6 +519,15 @@ applyWindShader(CLUTTER_MATERIAL, {
   heightRef: 0.5,
   strengthScale: 0.9,
   cacheKey: 'millos_clutter_v1',
+});
+// See `createFoliageMaterial` for why this is composed rather than applied, and
+// why the field is sampled at the rest vertex. The tufts are 0.42 m across and
+// the macro period is 6 m, so the drift plays out across a whole verge rather
+// than within one tuft - which is the term that keeps a Halton-scattered field
+// of one geometry from reading as a stamped pattern.
+composeWorldSurface(CLUTTER_MATERIAL, 'vegetation', {
+  cacheKey: 'millos_clutter_v1',
+  worldRest: true,
 });
 
 // Lit, not basic: an unlit decal would still read as daylight dirt at night

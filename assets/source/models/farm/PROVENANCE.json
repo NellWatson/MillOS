@@ -1,0 +1,631 @@
+{
+  "schemaVersion": 3,
+  "retrievedAt": "2026-08-15",
+  "area": "farm",
+  "publisher": "Tripo3D",
+  "license": "Tripo3D API-plan output",
+  "licenceNote": "Generated on a Tripo3D API plan. The free tier releases outputs CC BY 4.0, public and non-commercial; commercial rights attach to paid and API plans. Confirmed by the account owner before any output entered public/models/.",
+  "transformation": {
+    "script": "scripts/normalize-model-assets.mjs",
+    "table": "GENERATED_ASSETS",
+    "description": "Per asset: derive facing from the whole Head-to-Hip heading vector and snap to the nearest quarter turn (rigged only), apply any authored yaw, scale uniformly to the stated target along the stated axis, re-origin to bottom centre through a Pivot node so a skin binding survives, resample the three 4096-square maps to 512 JPEG, force the metallic factor to zero, and rename material, mesh and textures semantically.",
+    "generatedBy": "scripts/write-model-provenance.mjs"
+  },
+  "sourcePacks": [
+    {
+      "name": "cow",
+      "id": "farm-cow",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true",
+        "animate_prerigcheck (0 credits)",
+        "animate_rig"
+      ],
+      "preservedAs": "cow-tripo-original.glb",
+      "sha256": "fa0bca3ad45676edccd2154cf8e8550fcda5d67bf43bb7fe96a7ab3a158a113a",
+      "runtimeDerivative": {
+        "file": "public/models/farm/cow.glb",
+        "sha256": "10fe95fbdff201e52a986e4d1570acb8d2d0e74643a0470969765e9d30e3daf8",
+        "bytes": 338644
+      },
+      "normalization": {
+        "sizedBy": "length",
+        "targetMetres": 1.805,
+        "scaleFactor": 1.80682,
+        "facingYawRadians": 0,
+        "authoredYawRadians": 0,
+        "bounds": {
+          "width": 0.6356,
+          "height": 1.2862,
+          "length": 1.805,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "CowBody",
+        "joints": 41,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 75900,
+        "renderVertices": 17958
+      }
+    },
+    {
+      "name": "sheep",
+      "id": "farm-sheep",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true",
+        "animate_prerigcheck (0 credits)",
+        "animate_rig"
+      ],
+      "preservedAs": "sheep-tripo-original.glb",
+      "sha256": "817f93545bf0e55bf51a96d8494dd750072ba9e36630114a61b23d53c70c986e",
+      "runtimeDerivative": {
+        "file": "public/models/farm/sheep.glb",
+        "sha256": "939dd8dbc3e136a9bac160008257714a1f5ace4cfee86625f68bb4ec16cc95d7",
+        "bytes": 313572
+      },
+      "normalization": {
+        "sizedBy": "longest axis",
+        "targetMetres": 1.15,
+        "scaleFactor": 1.14803,
+        "facingYawRadians": -1.5708,
+        "authoredYawRadians": 0,
+        "bounds": {
+          "width": 0.6316,
+          "height": 0.9534,
+          "length": 1.15,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "SheepBody",
+        "joints": 41,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 57304,
+        "renderVertices": 17982
+      }
+    },
+    {
+      "name": "pig",
+      "id": "farm-pig",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true",
+        "animate_prerigcheck (0 credits)",
+        "animate_rig"
+      ],
+      "preservedAs": "pig-tripo-original.glb",
+      "sha256": "368451504b298b089ef33b842f5685063b5d6930c2d4222a2ecdad31df6db733",
+      "runtimeDerivative": {
+        "file": "public/models/farm/pig.glb",
+        "sha256": "e04aced3346b045d4b097a50071e30ec0beac65f9312044eac035968a3f3037b",
+        "bytes": 305512
+      },
+      "normalization": {
+        "sizedBy": "longest axis",
+        "targetMetres": 1.25,
+        "scaleFactor": 1.25075,
+        "facingYawRadians": -1.5708,
+        "authoredYawRadians": 0,
+        "bounds": {
+          "width": 0.626,
+          "height": 0.7485,
+          "length": 1.25,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "PigBody",
+        "joints": 41,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 49776,
+        "renderVertices": 18000
+      }
+    },
+    {
+      "name": "horse",
+      "id": "farm-horse",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true",
+        "animate_prerigcheck (0 credits)",
+        "animate_rig"
+      ],
+      "preservedAs": "horse-tripo-original.glb",
+      "sha256": "d66efc8e6b06c541ab74612628fbe4a08a6df84c0c967693b2008e2430f25b5b",
+      "runtimeDerivative": {
+        "file": "public/models/farm/horse.glb",
+        "sha256": "7b763552ed08c7ae87d45a821f202abf676d01ca6e5d24ff8b52bfc38c662e3c",
+        "bytes": 332940
+      },
+      "normalization": {
+        "sizedBy": "longest axis",
+        "targetMetres": 2.35,
+        "scaleFactor": 2.34993,
+        "facingYawRadians": -3.1416,
+        "authoredYawRadians": 0,
+        "bounds": {
+          "width": 0.6375,
+          "height": 1.7508,
+          "length": 2.35,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "HorseBody",
+        "joints": 41,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 65651,
+        "renderVertices": 17988
+      }
+    },
+    {
+      "name": "chicken",
+      "id": "farm-chicken",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true",
+        "animate_prerigcheck (0 credits)",
+        "animate_rig"
+      ],
+      "preservedAs": "chicken-tripo-original.glb",
+      "sha256": "98215ab26519af627d179e93662f23e61cd4d0442e22cbd92a1708844465a0a9",
+      "runtimeDerivative": {
+        "file": "public/models/farm/chicken.glb",
+        "sha256": "826689f674872460a49e941872f7d17b82c14ae1bf1edf0fb1e69f69623ddfb7",
+        "bytes": 385008
+      },
+      "normalization": {
+        "sizedBy": "longest axis",
+        "targetMetres": 0.42,
+        "scaleFactor": 0.41905,
+        "facingYawRadians": -1.5708,
+        "authoredYawRadians": 0,
+        "bounds": {
+          "width": 0.2426,
+          "height": 0.4169,
+          "length": 0.42,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "ChickenBody",
+        "joints": 41,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 65793,
+        "renderVertices": 17787
+      }
+    },
+    {
+      "name": "crow",
+      "id": "farm-crow",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true",
+        "animate_prerigcheck (0 credits)",
+        "animate_rig"
+      ],
+      "preservedAs": "crow-tripo-original.glb",
+      "sha256": "2becaea68c1515884e45784da4962c1d06070c7cd3ed7843d38cc7e10040dd8a",
+      "runtimeDerivative": {
+        "file": "public/models/farm/crow.glb",
+        "sha256": "39edadc090bfbfdf14dacf28f322103545d187aed6c7d99fafd0fa6eda9f8036",
+        "bytes": 362500
+      },
+      "normalization": {
+        "sizedBy": "longest axis",
+        "targetMetres": 0.42,
+        "scaleFactor": 0.41859,
+        "facingYawRadians": 0,
+        "authoredYawRadians": 0,
+        "bounds": {
+          "width": 0.1577,
+          "height": 0.2696,
+          "length": 0.42,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "CrowBody",
+        "joints": 41,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 67455,
+        "renderVertices": 17934
+      }
+    },
+    {
+      "name": "duck",
+      "id": "farm-duck",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true",
+        "animate_prerigcheck (0 credits)",
+        "animate_rig"
+      ],
+      "preservedAs": "duck-tripo-original.glb",
+      "sha256": "01b9793bf6d9af2d8d771ba89192b21d29aba5eb1431f10e34bc262f4207f16f",
+      "runtimeDerivative": {
+        "file": "public/models/farm/duck.glb",
+        "sha256": "0d60d7acde0c3b94dd2a6e9cad0c337dd5b55b3ed39b75cdb91a90fa13830e07",
+        "bytes": 298000
+      },
+      "normalization": {
+        "sizedBy": "longest axis",
+        "targetMetres": 0.5,
+        "scaleFactor": 0.49962,
+        "facingYawRadians": 0,
+        "authoredYawRadians": 0,
+        "bounds": {
+          "width": 0.3263,
+          "height": 0.4537,
+          "length": 0.5,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "DuckBody",
+        "joints": 41,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 47830,
+        "renderVertices": 18000
+      }
+    },
+    {
+      "name": "scarecrow",
+      "id": "farm-scarecrow",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true",
+        "animate_prerigcheck (0 credits)",
+        "animate_rig"
+      ],
+      "preservedAs": "scarecrow-tripo-original.glb",
+      "sha256": "42d2e6c1f72b8ce692e87e6b5a81fa50d5d70a1a11942337b1f5529e3a6f6a92",
+      "runtimeDerivative": {
+        "file": "public/models/farm/scarecrow.glb",
+        "sha256": "e998cd3d3cecf93882c91226106302b7f1f912c132000cde1d626d68c18f9be1",
+        "bytes": 398732
+      },
+      "normalization": {
+        "sizedBy": "height",
+        "targetMetres": 1.9,
+        "scaleFactor": 1.90009,
+        "facingYawRadians": 1.5708,
+        "authoredYawRadians": 0,
+        "bounds": {
+          "width": 1.6549,
+          "height": 1.9,
+          "length": 0.5259,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "ScarecrowBody",
+        "joints": 41,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 108655,
+        "renderVertices": 17976
+      }
+    },
+    {
+      "name": "barn",
+      "id": "farm-barn",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true"
+      ],
+      "preservedAs": "barn-tripo-original.glb",
+      "sha256": "a0849ef2ea5e3b347d52843534781290fda2e79c8bd3a369a1d5b301e0327b4c",
+      "runtimeDerivative": {
+        "file": "public/models/farm/barn.glb",
+        "sha256": "b484ae7802f2c844764cf56cd099fcb750ce077d1f11692d1bb8bd5195fe8b91",
+        "bytes": 620916
+      },
+      "normalization": {
+        "sizedBy": "longest axis",
+        "targetMetres": 10,
+        "scaleFactor": 10.00763,
+        "facingYawRadians": 0,
+        "authoredYawRadians": 0,
+        "bounds": {
+          "width": 9.3502,
+          "height": 9.9988,
+          "length": 10,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "BarnBody",
+        "joints": 0,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 267674,
+        "renderVertices": 23895
+      }
+    },
+    {
+      "name": "coop",
+      "id": "farm-coop",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true"
+      ],
+      "preservedAs": "coop-tripo-original.glb",
+      "sha256": "c1c59659ffda9b0078b2f823289b0757abaf035e3df09526611af3fea55ee0b1",
+      "runtimeDerivative": {
+        "file": "public/models/farm/coop.glb",
+        "sha256": "662cecd433c8777dc17876f6b219170e5d6bfbb76e9ee1f521fed55f8cff51ce",
+        "bytes": 403912
+      },
+      "normalization": {
+        "sizedBy": "longest axis",
+        "targetMetres": 3,
+        "scaleFactor": 2.99982,
+        "facingYawRadians": 0,
+        "authoredYawRadians": 0,
+        "bounds": {
+          "width": 3,
+          "height": 2.6138,
+          "length": 2.1212,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "CoopBody",
+        "joints": 0,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 69769,
+        "renderVertices": 23958
+      }
+    },
+    {
+      "name": "farmhouse",
+      "id": "farm-farmhouse",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true"
+      ],
+      "preservedAs": "farmhouse-tripo-original.glb",
+      "sha256": "ebc862d40b2bc9df64c56e362be259f680a9241e4f1fa7893b8df56931306ba7",
+      "runtimeDerivative": {
+        "file": "public/models/farm/farmhouse.glb",
+        "sha256": "81d0b12bd01c2b8eca6858b0f9032b9c29713638014099dbc6280e9f8c9f5ecc",
+        "bytes": 499512
+      },
+      "normalization": {
+        "sizedBy": "longest axis",
+        "targetMetres": 6,
+        "scaleFactor": 6.00116,
+        "facingYawRadians": 0,
+        "authoredYawRadians": 0,
+        "bounds": {
+          "width": 6,
+          "height": 5.2318,
+          "length": 5.8369,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "FarmhouseBody",
+        "joints": 0,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 201208,
+        "renderVertices": 23976
+      }
+    },
+    {
+      "name": "windmill",
+      "id": "farm-windmill",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true"
+      ],
+      "preservedAs": "windmill-tripo-original.glb",
+      "sha256": "5ef615dce20d2b3fe6fe853d6068b3560bf81439b0b5044d58e8d20605474226",
+      "runtimeDerivative": {
+        "file": "public/models/farm/windmill.glb",
+        "sha256": "a20826bbceab4027faa7d8fae4f01d78f14ea6d238c72c15ba894d552e89014f",
+        "bytes": 363464
+      },
+      "normalization": {
+        "sizedBy": "longest axis",
+        "targetMetres": 5.84,
+        "scaleFactor": 6.79571,
+        "facingYawRadians": 0,
+        "authoredYawRadians": 0,
+        "bounds": {
+          "width": 3.9794,
+          "height": 6.7969,
+          "length": 5.84,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "WindmillBody",
+        "joints": 0,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 67093,
+        "renderVertices": 24000
+      }
+    },
+    {
+      "name": "haybale",
+      "id": "farm-haybale",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true"
+      ],
+      "preservedAs": "haybale-tripo-original.glb",
+      "sha256": "bfde41964609e2d7b7f8d40c35060d780f32d3b5b2329795eb0007bb1c676ccf",
+      "runtimeDerivative": {
+        "file": "public/models/farm/haybale.glb",
+        "sha256": "b3781326279d7887705e17e39a6eeaeae87664ab6e15728dee728f5b8845231e",
+        "bytes": 400104
+      },
+      "normalization": {
+        "sizedBy": "longest axis",
+        "targetMetres": 1.5,
+        "scaleFactor": 1.5139,
+        "facingYawRadians": 0,
+        "authoredYawRadians": 0,
+        "bounds": {
+          "width": 1.3462,
+          "height": 1.3114,
+          "length": 1.5,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "HaybaleBody",
+        "joints": 0,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 80182,
+        "renderVertices": 23550
+      }
+    },
+    {
+      "name": "watertrough",
+      "id": "farm-watertrough",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true"
+      ],
+      "preservedAs": "watertrough-tripo-original.glb",
+      "sha256": "2ed4fd775e2e7ce2fbcb1f46bcc6091f9d55e12040b83be9209d412010f6531f",
+      "runtimeDerivative": {
+        "file": "public/models/farm/watertrough.glb",
+        "sha256": "2fcaff74a39b78ee68bfc11c0fdb6bb83991152b5a5b988b4635fd344fced79c",
+        "bytes": 447204
+      },
+      "normalization": {
+        "sizedBy": "longest axis",
+        "targetMetres": 1.5,
+        "scaleFactor": 1.49997,
+        "facingYawRadians": 0,
+        "authoredYawRadians": 1.5707963267948966,
+        "bounds": {
+          "width": 1.5,
+          "height": 0.5417,
+          "length": 0.5481,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "WatertroughBody",
+        "joints": 0,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 84539,
+        "renderVertices": 23976
+      }
+    },
+    {
+      "name": "gardenbed",
+      "id": "farm-gardenbed",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true"
+      ],
+      "preservedAs": "gardenbed-tripo-original.glb",
+      "sha256": "b2004fc325df0ee4d60bd033510dada4eef0b7396b1213a8905678675449e17b",
+      "runtimeDerivative": {
+        "file": "public/models/farm/gardenbed.glb",
+        "sha256": "63166a5ffe79d37ba2cc8fc6a369858c7b34d9cd55ad86a5e1700b7d707e4a3a",
+        "bytes": 396176
+      },
+      "normalization": {
+        "sizedBy": "longest axis",
+        "targetMetres": 3,
+        "scaleFactor": 3.00007,
+        "facingYawRadians": 0,
+        "authoredYawRadians": 1.5707963267948966,
+        "bounds": {
+          "width": 3,
+          "height": 1.2334,
+          "length": 2.1767,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "GardenbedBody",
+        "joints": 0,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 81923,
+        "renderVertices": 23916
+      }
+    },
+    {
+      "name": "fence",
+      "id": "farm-fence",
+      "sourcePage": "https://platform.tripo3d.ai",
+      "pipeline": [
+        "text_to_model v2.5-20250123, texture:true, pbr:true"
+      ],
+      "preservedAs": "fence-tripo-original.glb",
+      "sha256": "de6995fc65d23a577964d7dc98737f02f7623ce7aa6b2c2343dbbb6473bee049",
+      "runtimeDerivative": {
+        "file": "public/models/farm/fence.glb",
+        "sha256": "193188b4c3306e1b9496f3d3570aec9c50544aca237d89f5a90e43c21ce843cc",
+        "bytes": 384520
+      },
+      "normalization": {
+        "sizedBy": "height",
+        "targetMetres": 1.05,
+        "scaleFactor": 1.63555,
+        "facingYawRadians": 0,
+        "authoredYawRadians": 0,
+        "bounds": {
+          "width": 1.6359,
+          "height": 1.05,
+          "length": 0.1957,
+          "minY": 0,
+          "centreX": 0,
+          "centreZ": 0
+        },
+        "bodyNode": "FenceBody",
+        "joints": 0,
+        "clips": [],
+        "materials": 1,
+        "textures": 3,
+        "textureBytes": 97486,
+        "renderVertices": 23988
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "file": "test-results/tripo-probe-20260815/models/tripo_cow_idle_REJECTED.glb",
+      "step": "animate_retarget preset:idle",
+      "reason": "The preset library is humanoid and the quadruped rig names the front legs Clavicle/Upperarm/Hand, so a biped idle maps onto it and rears the animal onto its hind legs for the whole clip. Applies to every quadruped and avian rig in this set, not only the cow: all of them carry the identical 41-joint skeleton with identical bone names. Kept outside the repo as reproducible evidence; never promoted."
+    }
+  ]
+}

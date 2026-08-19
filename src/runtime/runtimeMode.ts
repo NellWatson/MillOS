@@ -17,7 +17,13 @@ export type BenchmarkScene =
   | 'water'
   | 'village'
   | 'farm'
+  | 'paddock'
+  | 'square'
   | 'garage'
+  | 'markings'
+  | 'forecourt'
+  | 'carpark'
+  | 'river'
   | 'sun'
   | 'moon';
 
@@ -67,7 +73,23 @@ const BENCHMARK_SCENES: ReadonlySet<string> = new Set<BenchmarkScene>([
   'water',
   'village',
   'farm',
+  // Close cameras on the generated farm and village assets; `village` and
+  // `farm` frame the whole site and resolve them at a few pixels.
+  'paddock',
+  'square',
   'garage',
+  // The ground safety markings. `test-results/pass6/painted-labels.mjs` puts the
+  // six LIT ground labels at 38-197 m from the nearest camera that contains
+  // them, and `pass6/label-contrast.mjs` found KEEP CLEAR parked behind a truck
+  // in the one frame that does - so a marking whose whole job is to be legible
+  // had never been looked at. Frustum containment is not visibility.
+  'markings',
+  // Review cameras for reported visual defects. A defect Nell can see and no
+  // camera frames cannot be re-verified after the next edit, which is how the
+  // same fault gets reported three times.
+  'forecourt',
+  'carpark',
+  'river',
   'sun',
   'moon',
 ]);

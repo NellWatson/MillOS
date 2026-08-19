@@ -239,7 +239,30 @@ export const SITE_LAYOUT = {
     milling: { position: [34, 13, -7], target: [0, 3, -6] },
     sifting: { position: [34, 20, 18], target: [0, 9, 6] },
     packing: { position: [-34, 14, 34], target: [0, 3, 25] },
-    personnel: { position: [22, 5.5, -14], target: [0, 1.15, -14] },
+    /**
+     * The three personnel poses.
+     *
+     * THESE ARE ANCHORS, NOT FINAL FRAMING. `RuntimeController.PERSONNEL_FOLLOW`
+     * re-resolves all three from the subject's actual transform every frame,
+     * because each `target` below is a SPAWN coordinate out of
+     * `createInitialWorkers` and an art capture runs the game clock, so the
+     * roster has patrolled several metres away by the time the shutter opens.
+     * What survives here is (a) the fallback pose if no roster member of the
+     * required body type is in the graph at all, and (b) the target that picks
+     * WHICH roster member each scene locks onto - nearest wins.
+     *
+     * Each pose here is exactly the follow pose evaluated at its subject's
+     * spawn mark and spawn heading, which `RuntimeController.test.ts` asserts -
+     * so a paused world (any benchmark run without `motion=on`, where
+     * `gameSpeed` is 0 and the roster never leaves its marks) and a running one
+     * compose identically, and a sign error in the follow arithmetic fails a
+     * test instead of quietly framing the back of someone's head.
+     *
+     * `personnel` used to look across the hall from [22, 5.5, -14] and put a
+     * silo support leg down the centre of the frame. It now looks back along
+     * the +x side aisle, which is where the roster actually walks.
+     */
+    personnel: { position: [8.2, 2.4, -12], target: [10, 1.15, -18] },
     personnelClose: { position: [8.6, 1.72, -16.55], target: [10, 1.25, -18], fov: 42 },
     personnelFeminine: {
       position: [-8.6, 1.72, -15.7],
@@ -253,7 +276,58 @@ export const SITE_LAYOUT = {
     water: { position: [158, 23, 154], target: [118, 0.08, 116] },
     village: { position: [-142, 28, 64], target: [-190, 5, 0] },
     farm: { position: [128, 26, 174], target: [75, 4, 120] },
+    /**
+     * Two close cameras for the generated farm and village assets.
+     *
+     * `village` and `farm` above frame the whole site, so a 1.3 m cow and a
+     * 2.8 m market stall are a handful of pixels in them - the graded art
+     * surface could not see the thirty-asset swap at all, which is exactly the
+     * hole `cow-integration/REPORT.md` §6 recorded. These two sit at
+     * conversational distance instead.
+     *
+     * Both are stated in world coordinates, so the landmark transform is
+     * applied here rather than trusted to memory. That transform cost a full
+     * debugging cycle once already (`FINDINGS.md`, "the farm sits at
+     * SITE_LAYOUT.landmarks.farm with rotation [0, PI, 0]"):
+     *   farm    local (x, z) -> world (75 - x, 120 - z)
+     *   village local (x, z) -> world (x - 190, z)
+     */
+    // Paddock: the three rigged cows at farm-local (0,15) (5,18) (8,13), their
+    // fence, the sheep and the hay bales, with the barn behind. Camera at
+    // local (16.5, 4.0, 23.5), target the paddock centre at local (3.5, 1.2, 15).
+    // The first framing sat 2.5 m further left and put a foreground trunk
+    // across the left eighth of the frame, which a grading camera should not
+    // spend pixels on.
+    paddock: { position: [58.5, 4, 96.5], target: [71.5, 1.2, 105] },
+    // Market square: fountain at village-local (0,6), the four stalls at
+    // (+/-8, 2) and (+/-8, 10), wishing well at (-10,-5), town hall behind at
+    // (0,20). Camera at local (12, 3.6, -4), target the fountain at
+    // local (0, 2.0, 8). Near eye height and aimed slightly up: the first
+    // framing stood at 5.5 m and gave half a frame of bare cobbles.
+    square: { position: [-178, 3.6, -4], target: [-190, 2, 8] },
     garage: { position: [69, 6.5, 30], target: [85, 3, 30] },
+    // Ground safety markings at the receiving apron. KEEP CLEAR sits at
+    // (0, 0.09, -59) on its red zone plane and STAGING AREA at (-12, 0.02,
+    // -57.5); both are inside `receiving`'s frustum and neither is legible from
+    // it - 57 m away, and a parked truck stands in front of the first. This
+    // camera looks DOWN on the apron, which is the framing a ground marking
+    // needs. Two placements were discarded on the evidence: eye height at
+    // (10, 4, -50) read the same paint at a grazing angle through the same
+    // parked truck, and (2, 13, -44) put the dock's steel column and its
+    // glazing straight down the middle of the frame. This one sits off the
+    // dock centreline. At ~22 m a 0.4 m glyph is roughly 15 px tall.
+    markings: { position: [-9, 12, -42], target: [-7, 0.1, -60] },
+    // Gas station forecourt at (-85, 0, 140): the Dead Dino pylon sign, the
+    // pumps, and the three CuteCars parked at x -75..-65, z 125.
+    forecourt: { position: [-64, 9, 116], target: [-84, 4, 136] },
+    // Employee parking lot at (120, 0, 50), two rows of six.
+    // Near-plan view, deliberately. An oblique camera on a car park cannot
+    // answer "is this car inside its bay" - the cars' own length foreshortens
+    // and adjacent bays stack behind each other. Straight down does.
+    carpark: { position: [120, 30, 51], target: [120, 0, 50] },
+    // The river channel: centreline (0, -145), 280 m long, 20 m wide, cut 12 m
+    // into the terrain with 25 m sloped banks.
+    river: { position: [34, 16, -118], target: [0, -2, -145] },
     celestial: { position: [90, 12, 72], target: [0, 12, 0] },
   },
   renderCells: {

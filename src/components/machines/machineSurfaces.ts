@@ -72,6 +72,7 @@
 
 import * as THREE from 'three';
 import { generateMachineORM, generateMachinePanelNormal } from '../../textures';
+import { applyWorldSurface } from '../../utils/worldSurface';
 
 // ===========================================================================
 // SOURCE TEXTURES
@@ -435,13 +436,24 @@ export const MACHINE_MATERIALS = {
     { grime: 0.42, dust: 0.08, edge: 0.16, grimeHeight: 1.6 }
   ),
 
-  /** Stored grain. Never metal, never wear-shaded - it is a product, not a surface. */
-  grain: new THREE.MeshStandardMaterial({
-    name: 'machine-grain',
-    color: '#bf8b36',
-    roughness: 0.92,
-    metalness: 0,
-  }),
+  /**
+   * Stored grain. Never metal, never WEAR-shaded - it is a product, not a
+   * surface, and a grime gradient climbing a heap of wheat is a mistake.
+   *
+   * It does take the analytic `vegetation` finish, which is the profile for
+   * crop: no grime, no dust, the whole budget in macro tonal drift. 26.6 m over
+   * five draws, and a heap of grain that is one flat gold is the one thing in
+   * the mill that should obviously not be.
+   */
+  grain: applyWorldSurface(
+    new THREE.MeshStandardMaterial({
+      name: 'machine-grain',
+      color: '#bf8b36',
+      roughness: 0.92,
+      metalness: 0,
+    }),
+    'vegetation'
+  ),
 
   /** Painted mill housing. Final 0.35-0.85. */
   mill: withWear(
@@ -600,13 +612,25 @@ export const MACHINE_MATERIALS = {
     { grime: 0.34, dust: 0.18, edge: 0.2, grimeHeight: 1.2 }
   ),
 
-  /** Paper sack. Dielectric, no maps - it is 1.25 x 1.45 m of woven paper. */
-  bag: new THREE.MeshStandardMaterial({
-    name: 'machine-bag',
-    color: '#ded0aa',
-    roughness: 0.92,
-    metalness: 0,
-  }),
+  /**
+   * Paper sack. Dielectric, no maps - it is 1.25 x 1.45 m of woven paper.
+   *
+   * No map, but a `fabric` finish: that profile exists for exactly this, and a
+   * 1.25 m sack is comfortably above the aliasing floor at the packing camera.
+   * WORLD space rather than the profile's authored object space, because these
+   * sacks do not move and the point is that a stack of them stops reading as
+   * one sack drawn six times.
+   */
+  bag: applyWorldSurface(
+    new THREE.MeshStandardMaterial({
+      name: 'machine-bag',
+      color: '#ded0aa',
+      roughness: 0.92,
+      metalness: 0,
+    }),
+    'fabric',
+    { objectSpace: 0 }
+  ),
 
   /** Painted drive motors. Final 0.33-0.81. */
   motor: withWear(
@@ -628,13 +652,37 @@ export const MACHINE_MATERIALS = {
    * sits in a plausible band for weathered galvanising. NO detail maps: every
    * member here is under 0.25 m across, and a tiled grid on a 0.075 m rail is
    * sub-pixel noise that mips to a flat constant.
+   *
+   * THE "NO MAPS" ARGUMENT IS ABOUT TEXTURES AND DOES NOT REACH THIS ONE.
+   * At 195.2 m over 88 instances this is the single largest untreated surface
+   * left in the scene - `test-results/pass7/unfinished-models.mjs` measures it,
+   * and four work orders read past it because the standing closure ("sub-0.25 m
+   * members, a grid on a 0.075 m rail mips to a flat constant") is entirely
+   * correct AND entirely about a UV-tiled map. `utils/worldSurface` has no UVs,
+   * no texture unit and no tiling: it samples an analytic field in METRES, so a
+   * 0.075 m rail and a 120 m batten cut from the same box both get
+   * metre-correct detail. That is the same ground on which the module's own
+   * header reopened `world-factory-infrastructure` and `authored-village`.
+   *
+   * `metal`, and the term that pays for it is `edge` rather than `meso`. A thin
+   * member is near-grazing over most of its visible area, so the fresnel wear
+   * toward bare steel is what gives a ladder rail a silhouette at 20 m; the
+   * 0.4 m meso period is longer than any single fitting, which means it varies
+   * fitting-to-fitting rather than within one - exactly the read this row
+   * needed and could not get from a tiled map.
    */
-  hardware: new THREE.MeshStandardMaterial({
-    name: 'machine-hardware',
-    color: '#a8b2b4',
-    roughness: 0.55,
-    metalness: 1,
-  }),
+  hardware: applyWorldSurface(
+    new THREE.MeshStandardMaterial({
+      name: 'machine-hardware',
+      color: '#a8b2b4',
+      roughness: 0.55,
+      metalness: 1,
+    }),
+    'metal',
+    // The mill deck, not world zero - the same datum every other surface in
+    // this module measures from, and the reason `uMachineDeck` exists.
+    { datum: 0 }
+  ),
 
   /**
    * HMI screen. Was a `MeshBasicMaterial` with `toneMapped: false`, which made
@@ -667,8 +715,19 @@ export const MACHINE_MATERIALS = {
     { grime: 0.2, dust: 0.18, edge: 0.26, grimeHeight: 1.2 }
   ),
 
-  /** Status beacon. Per-instance colour, unlit by design. */
-  beacon: new THREE.MeshBasicMaterial({ name: 'machine-beacon', vertexColors: true }),
+  /**
+   * Status beacon. Per-instance colour, unlit by design.
+   *
+   * NOT `vertexColors: true`. This is drawn by the `<instancedMesh>` in
+   * `CompactMachines.tsx`, which tints through `setColorAt` - and three defines
+   * `USE_INSTANCING_COLOR` from `instanceColor` alone, which is all a per-
+   * instance tint needs. `vertexColors` additionally makes the VERTEX shader
+   * multiply by a `color` attribute that `BEACON` does not carry; an unbound
+   * attribute reads as the WebGL generic default `(0, 0, 0, 1)`, so every
+   * beacon rendered black rather than in its status colour. Same defect, and
+   * the same fix, as the instanced path in `StaticMeshBatch.tsx`.
+   */
+  beacon: new THREE.MeshBasicMaterial({ name: 'machine-beacon' }),
 } as const;
 
 /**

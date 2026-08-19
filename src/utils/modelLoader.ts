@@ -47,6 +47,63 @@ export const WORKER_ASSET_PATHS = {
   skin: `${BASE}models/worker/worker-skin.png`,
 } as const;
 
+/**
+ * Generated farm and village assets: nine rigged creatures and twenty-one
+ * static structures and props, all validated against
+ * `public/models/asset-manifest.json` before delivery.
+ *
+ * Kept out of `MODEL_PATHS` for the same reason the two authored worker bodies
+ * are: `ModelType` drives the availability probe and the disabled list, and
+ * these are delivery-validated bundled assets that need neither.
+ *
+ * None of them is **preloaded**. `preloadAvailableModels` still has no caller,
+ * and unlike the worker bodies every one of these has a real fallback to stream
+ * in behind: each call site keeps the primitive it replaced, rendered under both
+ * a Suspense boundary and an error boundary, so a slow download shows the old
+ * geometry for a moment and a missing file shows it permanently - rather than
+ * an empty paddock or a torn-down subtree. If the preloader is ever wired to
+ * app init, these belong beside the two worker paths.
+ */
+export const CREATURE_ASSET_PATHS = {
+  cow: `${BASE}models/farm/cow.glb`,
+  sheep: `${BASE}models/farm/sheep.glb`,
+  pig: `${BASE}models/farm/pig.glb`,
+  horse: `${BASE}models/farm/horse.glb`,
+  chicken: `${BASE}models/farm/chicken.glb`,
+  crow: `${BASE}models/farm/crow.glb`,
+  duck: `${BASE}models/farm/duck.glb`,
+  scarecrow: `${BASE}models/farm/scarecrow.glb`,
+  cat: `${BASE}models/village/cat.glb`,
+} as const;
+
+export type CreatureId = keyof typeof CREATURE_ASSET_PATHS;
+
+export const GENERATED_ASSET_PATHS = {
+  barn: `${BASE}models/farm/barn.glb`,
+  coop: `${BASE}models/farm/coop.glb`,
+  farmhouse: `${BASE}models/farm/farmhouse.glb`,
+  windmill: `${BASE}models/farm/windmill.glb`,
+  haybale: `${BASE}models/farm/haybale.glb`,
+  watertrough: `${BASE}models/farm/watertrough.glb`,
+  gardenbed: `${BASE}models/farm/gardenbed.glb`,
+  fence: `${BASE}models/farm/fence.glb`,
+  cottage: `${BASE}models/village/cottage.glb`,
+  shop: `${BASE}models/village/shop.glb`,
+  church: `${BASE}models/village/church.glb`,
+  townhall: `${BASE}models/village/townhall.glb`,
+  pub: `${BASE}models/village/pub.glb`,
+  school: `${BASE}models/village/school.glb`,
+  forge: `${BASE}models/village/forge.glb`,
+  wishingwell: `${BASE}models/village/wishingwell.glb`,
+  marketstall: `${BASE}models/village/marketstall.glb`,
+  postbox: `${BASE}models/village/postbox.glb`,
+  fountain: `${BASE}models/village/fountain.glb`,
+  duckpond: `${BASE}models/village/duckpond.glb`,
+  castle: `${BASE}models/village/castle.glb`,
+} as const;
+
+export type GeneratedAssetId = keyof typeof GENERATED_ASSET_PATHS;
+
 export const MODEL_PATHS = {
   forklift: `${BASE}models/forklift/forklift.glb`,
   worker: WORKER_ASSET_PATHS.compatibility,

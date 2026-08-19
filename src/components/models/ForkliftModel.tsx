@@ -39,6 +39,8 @@ import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { useGraphicsStore } from '../../stores/graphicsStore';
 import { useProductionStore } from '../../stores/productionStore';
 import { applyVehicleSurface } from '../../utils/vehicleSurface';
+import { applyWorldSurface } from '../../utils/worldSurface';
+import { PROCEDURAL_TEXTURES } from '../../utils/sharedMaterials';
 import { RENDER_ORDER } from '../../constants/renderLayers';
 import { SeatedVehicleOperator } from './VehicleOperator';
 
@@ -99,11 +101,32 @@ const createAuthoredForkliftMaterials = (grime: number): AuthoredForkliftMateria
     }),
     { grime: grime * 0.8, grimeCeiling: 0.95 }
   );
+  /**
+   * Tyres and bump strips.
+   *
+   * The one surface class on this vehicle with neither a map nor a shader
+   * injection: paint, structure and steel all go through `applyVehicleSurface`,
+   * so this was the whole of the forklift's contribution to
+   * `audit-scene-models.mjs`'s flat column, and a perfectly smooth tyre next to
+   * a grimed, rib-shaded trailer is exactly the kind of gap the eye reads as
+   * "one of these is unfinished".
+   *
+   * A TILED DETAIL NORMAL, NOT A TREAD PATTERN. The truck wheels are
+   * `CylinderGeometry`, so `OptimizedTruckBay`'s tread map can rely on U running
+   * around the circumference and V across the width. These wheels come out of
+   * the GLB with its own unwrap, and a directional tread tiled onto an
+   * arbitrary unwrap smears lug blocks sideways across the sidewall - the same
+   * hazard `SharedWorkerMaterials` records for `worker_color.ktx2`. The
+   * unstructured rubber grain is unwrap-agnostic and reads correctly either
+   * way. Normal only: this is relief, and it must not multiply the albedo.
+   */
   const rubber = new THREE.MeshStandardMaterial({
     name: 'industrial-rubber',
     color: linearColor(0.0056054, 0.0080232, 0.0097212),
     roughness: 0.96,
     metalness: 0,
+    normalMap: PROCEDURAL_TEXTURES.rubberNormal,
+    normalScale: new THREE.Vector2(0.6, 0.6),
   });
   const steel = applyVehicleSurface(
     new THREE.MeshStandardMaterial({
@@ -117,15 +140,18 @@ const createAuthoredForkliftMaterials = (grime: number): AuthoredForkliftMateria
     }),
     { grime, grimeCeiling: 1.05 }
   );
-  const seat = new THREE.MeshPhysicalMaterial({
-    name: 'operator-seat',
-    color: linearColor(0.0295568, 0.0395462, 0.043735),
-    roughness: 0.85,
-    metalness: 0,
-    sheen: 0.3,
-    sheenRoughness: 0.6,
-    sheenColor: new THREE.Color('#2a3238'),
-  });
+  const seat = applyWorldSurface(
+    new THREE.MeshPhysicalMaterial({
+      name: 'operator-seat',
+      color: linearColor(0.0295568, 0.0395462, 0.043735),
+      roughness: 0.85,
+      metalness: 0,
+      sheen: 0.3,
+      sheenRoughness: 0.6,
+      sheenColor: new THREE.Color('#2a3238'),
+    }),
+    'vehicle'
+  );
   // Warm, not cyan: the authored `emissiveFactor` of [0.35, 0.55, 0.62] makes
   // the work lamps glow like an aquarium. Driven from `isMoving` below.
   const lampGlass = new THREE.MeshStandardMaterial({
@@ -142,12 +168,18 @@ const createAuthoredForkliftMaterials = (grime: number): AuthoredForkliftMateria
   });
   // Chromed hydraulic rod. The roughness contrast against the 0.30 structural
   // steel is a strong "this is machinery" cue and costs nothing.
-  const ram = new THREE.MeshStandardMaterial({
-    name: 'hydraulic-rod',
-    color: '#e9eef0',
-    roughness: 0.17,
-    metalness: 1,
-  });
+  // A chromed rod picks up nothing from a grime tint - metalness 1 has no
+  // diffuse - so `metal` is doing its work through roughness and the edge term,
+  // which is what the profile is shaped for.
+  const ram = applyWorldSurface(
+    new THREE.MeshStandardMaterial({
+      name: 'hydraulic-rod',
+      color: '#e9eef0',
+      roughness: 0.17,
+      metalness: 1,
+    }),
+    'metal'
+  );
   const byName: Record<string, THREE.Material> = {
     'painted-safety-amber': paint,
     'structural-graphite': graphite,
@@ -340,33 +372,61 @@ const compactForkliftGeometry = {
  * Metalness follows the same dielectric/metal split as the authored model:
  * paint is 0 with a clearcoat, steel is 1.
  */
+/**
+ * SURFACE FINISH. Every opaque, non-emissive material below carries the
+ * `vehicle` world-surface profile, sampled in OBJECT space so the detail is
+ * welded to the truck instead of swimming through a world-space field as it
+ * drives. This variant is what the wide cameras render, and it was the whole of
+ * `world-forklifts` reading 100% flat at `overview` for four passes.
+ *
+ * The clearcoat on the two paints is the reason this needed a profile rather
+ * than a tint: a grime term that only reaches `diffuseColor` sits UNDER the
+ * coat's specular and is invisible, which is why `worldSurface` reaches into
+ * `material.clearcoat` after `<lights_physical_fragment>` - the same fix
+ * `vehicleSurface` made for the trailers.
+ */
 const compactForkliftMaterial = {
-  yellow: new THREE.MeshPhysicalMaterial({
-    color: '#f6a800',
-    roughness: 0.4,
-    metalness: 0,
-    clearcoat: 0.85,
-    clearcoatRoughness: 0.1,
-  }),
-  orange: new THREE.MeshPhysicalMaterial({
-    color: '#d97706',
-    roughness: 0.44,
-    metalness: 0,
-    clearcoat: 0.8,
-    clearcoatRoughness: 0.12,
-  }),
+  yellow: applyWorldSurface(
+    new THREE.MeshPhysicalMaterial({
+      color: '#f6a800',
+      roughness: 0.4,
+      metalness: 0,
+      clearcoat: 0.85,
+      clearcoatRoughness: 0.1,
+    }),
+    'vehicle'
+  ),
+  orange: applyWorldSurface(
+    new THREE.MeshPhysicalMaterial({
+      color: '#d97706',
+      roughness: 0.44,
+      metalness: 0,
+      clearcoat: 0.8,
+      clearcoatRoughness: 0.12,
+    }),
+    'vehicle'
+  ),
   // Painted dark trim: a dielectric, despite looking like metal.
-  dark: new THREE.MeshStandardMaterial({
-    color: '#262f38',
-    roughness: 0.55,
-    metalness: 0,
-  }),
-  steel: new THREE.MeshStandardMaterial({
-    color: '#a4b0ba',
-    roughness: 0.32,
-    metalness: 1,
-  }),
-  tyre: new THREE.MeshStandardMaterial({ color: '#0f1216', roughness: 0.95, metalness: 0 }),
+  dark: applyWorldSurface(
+    new THREE.MeshStandardMaterial({
+      color: '#262f38',
+      roughness: 0.55,
+      metalness: 0,
+    }),
+    'vehicle'
+  ),
+  steel: applyWorldSurface(
+    new THREE.MeshStandardMaterial({
+      color: '#a4b0ba',
+      roughness: 0.32,
+      metalness: 1,
+    }),
+    'metal'
+  ),
+  tyre: applyWorldSurface(
+    new THREE.MeshStandardMaterial({ color: '#0f1216', roughness: 0.95, metalness: 0 }),
+    'vehicle'
+  ),
   // `depthWrite` was left at its default `true` on a transparent material,
   // which lets the glass occlude whatever is meant to show through it.
   glass: new THREE.MeshPhysicalMaterial({
@@ -378,8 +438,16 @@ const compactForkliftMaterial = {
     opacity: 0.5,
     depthWrite: false,
   }),
-  pallet: new THREE.MeshStandardMaterial({ color: '#8a6337', roughness: 0.9, metalness: 0 }),
-  load: new THREE.MeshStandardMaterial({ color: '#e8d6ad', roughness: 0.75, metalness: 0 }),
+  // Timber and sacking, carried by the truck: object space for the same reason
+  // the bodywork uses it.
+  pallet: applyWorldSurface(
+    new THREE.MeshStandardMaterial({ color: '#8a6337', roughness: 0.9, metalness: 0 }),
+    'vehicle'
+  ),
+  load: applyWorldSurface(
+    new THREE.MeshStandardMaterial({ color: '#e8d6ad', roughness: 0.75, metalness: 0 }),
+    'fabric'
+  ),
   beaconMoving: new THREE.MeshStandardMaterial({
     color: '#4a3200',
     emissive: '#ff8c00',
@@ -1058,11 +1126,27 @@ const GLTFForklift: React.FC<ForkliftModelProps> = ({
           position={[0, 0.34, 1.02]}
           visible={hasCargo || cargoOpacityRef.current > 0.01}
         >
+          {/* The carried load: 40 m of `#fef3c7` over 22 instances, and the
+              largest genuinely flat row left in `world-forklifts`.
+
+              Treated through the existing ref rather than at a module-level
+              material because these two carry a PER-FORKLIFT animated opacity -
+              they are the cargo fade. `applyWorldSurface` is idempotent (it
+              guards on object identity), so a ref callback that fires on every
+              remount is the right place for it.
+
+              Both take OBJECT rest space: a forklift drives across the yard, and
+              a world-space field would slide the weave over the sacks it is
+              carrying. `vehicle` for the timber pallet and `fabric` for the
+              sacking, matching the compact forklift's own table above. */}
           <mesh castShadow receiveShadow>
             <boxGeometry args={[0.9, 0.12, 0.8]} />
             <meshStandardMaterial
               ref={(mat) => {
-                if (mat) cargoMaterialsRef.current[0] = mat;
+                if (mat) {
+                  cargoMaterialsRef.current[0] = mat;
+                  applyWorldSurface(mat, 'vehicle');
+                }
               }}
               color="#a16207"
               transparent
@@ -1073,7 +1157,10 @@ const GLTFForklift: React.FC<ForkliftModelProps> = ({
             <boxGeometry args={[0.82, 0.56, 0.72]} />
             <meshStandardMaterial
               ref={(mat) => {
-                if (mat) cargoMaterialsRef.current[1] = mat;
+                if (mat) {
+                  cargoMaterialsRef.current[1] = mat;
+                  applyWorldSurface(mat, 'fabric');
+                }
               }}
               color="#fef3c7"
               transparent
@@ -1452,7 +1539,10 @@ const ProceduralForklift: React.FC<ForkliftModelProps> = ({
             <boxGeometry args={[0.85, 0.5, 0.85]} />
             <meshStandardMaterial
               ref={(mat) => {
-                if (mat) cargoMaterialsRef.current[4] = mat;
+                if (mat) {
+                  cargoMaterialsRef.current[4] = mat;
+                  applyWorldSurface(mat, 'fabric');
+                }
               }}
               color="#fef3c7"
               roughness={0.7}

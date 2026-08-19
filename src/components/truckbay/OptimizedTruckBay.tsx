@@ -15,6 +15,7 @@ import { toSimulationMinutes } from '../../simulation/simulationClock';
 import { getRuntimeMode } from '../../runtime/runtimeMode';
 import { createLinearDataTexture } from '../../utils/textureGenerator';
 import { applyVehicleSurface } from '../../utils/vehicleSurface';
+import { applyWorldSurface } from '../../utils/worldSurface';
 import { SeatedVehicleOperator } from '../models/VehicleOperator';
 import {
   TRUCK_CYCLE_SECONDS,
@@ -192,6 +193,45 @@ const MATERIALS = {
     polygonOffsetUnits: POLYGON_OFFSET.exteriorOverlay.units,
   }),
 } as const;
+
+/**
+ * The analytic finish on the trim, semantic by semantic.
+ *
+ * `applyVehicleSurface` below already carries the bodywork - cab, trailer skin,
+ * gravity grime, panel ribs. What it never reached is the TRIM, and
+ * `test-results/pass7/unfinished-models.mjs` names it: 16.4 m of conspicuity
+ * tape on every trailer, which is the largest single untreated row on either
+ * vehicle, plus the chrome, hubs, grille, cab interior and mudflaps.
+ *
+ * WORLD SPACE would be wrong for all of it and none of these profiles use it -
+ * `vehicle`, `metal` and `signage` are read here through `resolveSurfaceProfile`
+ * only where the material's own description already implies the right family;
+ * everything else is stated, because a truck's chrome and its mudflaps are both
+ * "dark, smooth, metalness-ish" to a resolver and are not the same surface.
+ *
+ * DELIBERATELY ABSENT, each on an existing rule:
+ *   glass                       transparent at 0.55 - declined by construction
+ *   signal, safety              `MeshBasicMaterial`; unlit on purpose
+ *   amber / red side markers    emissive at 0.35; `isOutOfSurfaceScope` declines
+ *                               emitters, and a marker lamp represents EMITTED
+ *                               light rather than a reflecting surface
+ *   tyre                        already carries a tread normal map
+ */
+applyWorldSurface(MATERIALS.rubber, 'vehicle');
+applyWorldSurface(MATERIALS.hub, 'metal');
+applyWorldSurface(MATERIALS.chrome, 'metal');
+applyWorldSurface(MATERIALS.grille, 'metal');
+applyWorldSurface(MATERIALS.interior, 'fabric');
+// Retroreflective tape, and `signage` is the profile authored for exactly this
+// class: the lightest in the set, because a conspicuity stripe weathered into
+// the background has been broken rather than finished. Per-strip colour rides
+// `instanceColor`, which `<color_fragment>` applies before this modulates it.
+applyWorldSurface(MATERIALS.conspicuityTape, 'signage');
+applyWorldSurface(MATERIALS.trailerTrim, 'metal');
+applyWorldSurface(MATERIALS.dock, 'masonry');
+applyWorldSurface(MATERIALS.dockDark, 'masonry');
+applyWorldSurface(MATERIALS.canopy, 'metal');
+applyWorldSurface(MATERIALS.door, 'painted');
 
 /**
  * Draw order for vehicle glazing.
@@ -627,30 +667,62 @@ export function OptimizedTruckVisual({
   // physically is. `metalness: 0.32` sat in the band where the BRDF has neither
   // a full diffuse albedo nor a real specular. No `map:`, so `color` is the
   // genuine albedo and stays.
+  //
+  // THE CAB WEARS TOO. The trailer and the chassis below have carried
+  // `applyVehicleSurface` since it was written; the cab did not, and the audit
+  // read the result exactly as it was - `MeshPhysicalMaterial #2e87ac` and
+  // `#c65d35`, 19 m each over three meshes, two of the largest flat rows left in
+  // `world-logistics`. A spotless cab towing a weathered trailer is the
+  // inconsistency a viewer notices without being able to name it.
+  //
+  // Grime is scaled DOWN from the trailer's: a cab is washed and a trailer is
+  // not, and the clearcoat is what the dirt actually kills first (the surface
+  // module reaches `material.clearcoat` for that reason). `ribPitch` stays 0 -
+  // a cab has no ribs, and a rib term on a smooth panel is a corrugation that
+  // is not there.
+  //
+  // `grimeCeiling` IS THE WHOLE PARAMETER AND IT IS IN WORLD METRES. The first
+  // build of this used 1.15, reasoning that a washed cab should carry less film
+  // than a trailer at 1.75 - and 1.15 m is BELOW the cab. `millosFall` is
+  // `1 - smoothstep( floor, ceiling, worldY )`, so above the ceiling the term is
+  // exactly zero, and the treatment was inert on the only part it was applied
+  // to: the audit reported the material shaded, the frame did not move, and the
+  // cab crop's mean luminance went 81.69 -> 81.70. That is `machineSurfaces.ts`'s
+  // saturated-smoothstep trap, arrived at from the other side.
+  //
+  // A tractor cab spans roughly y 1.0-3.2 m. 2.2 puts full film on the steps and
+  // lower panels, fades it out across the door, and leaves the roof clean, which
+  // is where road spray actually stops.
   const cabMaterial = useMemo(
     () =>
-      new THREE.MeshPhysicalMaterial({
-        color: colour,
-        roughness: 0.34,
-        metalness: 0,
-        clearcoat: 1,
-        clearcoatRoughness: 0.06,
-      }),
-    [colour]
+      applyVehicleSurface(
+        new THREE.MeshPhysicalMaterial({
+          color: colour,
+          roughness: 0.34,
+          metalness: 0,
+          clearcoat: 1,
+          clearcoatRoughness: 0.06,
+        }),
+        { grime: grime * 0.45, grimeCeiling: 2.2 }
+      ),
+    [colour, grime]
   );
   const accentMaterial = useMemo(() => {
     const accent = new THREE.Color(colour);
     accent.offsetHSL(0, 0.08, 0.12);
     // The old `emissive` was a fake fill for a scene with no environment. Paint
     // does not glow, and there is an IBL now.
-    return new THREE.MeshPhysicalMaterial({
-      color: accent,
-      roughness: 0.3,
-      metalness: 0,
-      clearcoat: 1,
-      clearcoatRoughness: 0.05,
-    });
-  }, [colour]);
+    return applyVehicleSurface(
+      new THREE.MeshPhysicalMaterial({
+        color: accent,
+        roughness: 0.3,
+        metalness: 0,
+        clearcoat: 1,
+        clearcoatRoughness: 0.05,
+      }),
+      { grime: grime * 0.45, grimeCeiling: 2.2 }
+    );
+  }, [colour, grime]);
 
   // Per-truck clones so the two trucks can wear differently. Shared grime on a
   // module-level material gives both trucks pixel-identical wear, which reads

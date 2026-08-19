@@ -1,5 +1,6 @@
 import React from 'react';
 import * as THREE from 'three';
+import { GeneratedBody } from '../models/GeneratedModel';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 interface FairytaleCastleProps {
@@ -301,196 +302,212 @@ const GATE_TURRET_CAP = lathe(
   16
 );
 
+const FairytaleCastlePrimitiveBody: React.FC = React.memo(() => {
+  // Neuschwanstein Palette
+  const colors = {
+    walls: '#e8e6e1', // Off-white limestone
+    roofs: '#2b5a75', // Deep blue slate
+    trim: '#c5a582', // Decorative sandstone trim
+    rock: '#5d5d5d', // Grey mountain rock
+    gold: '#ffd700', // Spires
+  };
+
+  return (
+    <group>
+      {/* ==================== BASE MOUNTAIN ==================== */}
+      {/* Stays at 7 sides. It is the widest part here (75 m across) but 7 is
+            deliberate: with `flatShading` it reads as a crag rather than a cone,
+            and 7 is not divisible by 4 - its -Z extent is only 0.9009r, so any
+            move to a multiple of 4 would push the base 3.7 m further back into
+            whatever it is standing in. */}
+      <mesh position={[0, -10, 0]} receiveShadow>
+        <cylinderGeometry args={[18, 25, 30, 7]} />
+        <meshStandardMaterial color={colors.rock} roughness={0.9} flatShading />
+      </mesh>
+
+      {/* ==================== MAIN KEEP (PALLAS) ==================== */}
+      <group position={[2, 5, -2]}>
+        {/* Main Body */}
+        <mesh position={[0, 8, 0]} castShadow receiveShadow>
+          <boxGeometry args={[12, 16, 8]} />
+          <meshStandardMaterial color={colors.walls} roughness={0.6} />
+        </mesh>
+        {/* Roof */}
+        <mesh position={[0, 20, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
+          <coneGeometry args={[9, 8, 4]} /> {/* Pyramidal roof */}
+          <meshStandardMaterial color={colors.roofs} roughness={0.7} />
+        </mesh>
+        {/* Windows */}
+        {[-1, 0, 1].map((y) => (
+          <group key={y} position={[0, 4 + y * 4, 4.1]}>
+            {[-3, 0, 3].map((x) => (
+              <mesh key={x} position={[x, 0, 0]}>
+                <planeGeometry args={[1.2, 2]} />
+                <meshStandardMaterial color="#2a2a2a" roughness={0.2} metalness={0.5} />
+              </mesh>
+            ))}
+          </group>
+        ))}
+      </group>
+
+      {/* ==================== TALL WATCHTOWER ==================== */}
+      {/* Shaft, machicolation course, crenellated parapet, bell-cast roof.
+            The profiles and the reasoning behind each live at the top of this
+            file; the positions below are unchanged from the primitives they
+            replace, because every profile keeps the same unit envelope. */}
+      <group position={[-8, 5, 4]}>
+        {/* Tower Shaft */}
+        <mesh geometry={WATCHTOWER_SHAFT} position={[0, 12, 0]} castShadow receiveShadow>
+          <meshStandardMaterial color={colors.walls} roughness={0.6} />
+        </mesh>
+        {/* Machicolation course seated on the shaft head */}
+        <mesh geometry={WATCHTOWER_CORBEL} position={[0, 24, 0]} castShadow>
+          <meshStandardMaterial color={colors.trim} roughness={0.7} />
+        </mesh>
+        {/* Crenellated parapet standing on the coping - flatShading keeps the
+              merlon arrises sharp, which is the whole point of a prism. */}
+        <mesh geometry={WATCHTOWER_CRENELLATION} position={[0, 25, 0]} castShadow receiveShadow>
+          <meshStandardMaterial color={colors.walls} roughness={0.6} flatShading />
+        </mesh>
+        {/* Spire Roof, springing from inside the parapet */}
+        <mesh geometry={WATCHTOWER_SPIRE} position={[0, 29, 0]} castShadow>
+          <meshStandardMaterial color={colors.roofs} roughness={0.5} />
+        </mesh>
+        {/* Finial - caps the spire neck, which tapers to 0.14 inside it */}
+        <mesh position={[0, 35, 0]}>
+          <sphereGeometry args={[0.5]} />
+          <meshStandardMaterial color={colors.gold} metalness={0.8} roughness={0.2} />
+        </mesh>
+      </group>
+
+      {/* ==================== CURTAIN WALL (Gatehouse to Tower) ==================== */}
+      {/* Diagonal wall connecting the gatehouse to the tall watchtower */}
+      <group position={[-1, 5, 6]} rotation={[0, Math.atan2(4, 14) - Math.PI / 6, 0]}>
+        {/* Main wall section */}
+        <mesh position={[0, 2, 0]} castShadow receiveShadow>
+          <boxGeometry args={[15, 5, 1.5]} />
+          <meshStandardMaterial color={colors.walls} roughness={0.6} />
+        </mesh>
+        {/* Battlements / Crenellations - positioned along wall top */}
+        {[-6, -3, 0, 3, 6].map((x, i) => (
+          <mesh key={i} position={[x, 5.25, 0]} castShadow>
+            <boxGeometry args={[1.5, 1.5, 1.5]} />
+            <meshStandardMaterial color={colors.walls} roughness={0.6} />
+          </mesh>
+        ))}
+      </group>
+
+      {/* ==================== GATEHOUSE ==================== */}
+      <group position={[6, 2, 8]}>
+        {/* Left Turret - 5.4 m across and 18 m tall, flanking the gate. Shaft
+              and cap are the shared module-level profiles, so the pair costs
+              one body geometry and one cap geometry between them. */}
+        <mesh geometry={GATE_TURRET_SHAFT} position={[-3, 6, 0]} castShadow>
+          <meshStandardMaterial color={colors.walls} roughness={0.6} />
+        </mesh>
+        <mesh geometry={GATE_TURRET_CAP} position={[-3, 13, 0]} castShadow>
+          <meshStandardMaterial color={colors.roofs} roughness={0.5} />
+        </mesh>
+
+        {/* Right Turret - mirror of the left, same two geometries. */}
+        <mesh geometry={GATE_TURRET_SHAFT} position={[3, 6, 0]} castShadow>
+          <meshStandardMaterial color={colors.walls} roughness={0.6} />
+        </mesh>
+        <mesh geometry={GATE_TURRET_CAP} position={[3, 13, 0]} castShadow>
+          <meshStandardMaterial color={colors.roofs} roughness={0.5} />
+        </mesh>
+
+        {/* Archway */}
+        <mesh position={[0, 5, 0]} castShadow>
+          <boxGeometry args={[4, 8, 2]} />
+          <meshStandardMaterial color={colors.walls} roughness={0.6} />
+        </mesh>
+        <mesh position={[0, 3, 1.1]}>
+          <circleGeometry args={[1.5, 32, 0, Math.PI]} />
+          <meshStandardMaterial color="#1a1a1a" />
+        </mesh>
+      </group>
+
+      {/* ==================== GRAND STAIRCASE ==================== */}
+      {/* Stone steps leading up from ground level to the gatehouse */}
+      <group position={[6, -5, 18]}>
+        {/* Generate 20 steps going down from castle to ground */}
+        {Array.from({ length: 20 }, (_, i) => (
+          <mesh key={i} position={[0, -i * 0.8, i * 1.2]} castShadow receiveShadow>
+            <boxGeometry args={[5, 0.6, 1]} />
+            <meshStandardMaterial color={i % 2 === 0 ? '#a0a0a0' : '#909090'} roughness={0.8} />
+          </mesh>
+        ))}
+        {/* Side walls / railings */}
+        <mesh position={[-2.8, -8, 12]} castShadow>
+          <boxGeometry args={[0.4, 2, 25]} />
+          <meshStandardMaterial color={colors.rock} roughness={0.9} />
+        </mesh>
+        <mesh position={[2.8, -8, 12]} castShadow>
+          <boxGeometry args={[0.4, 2, 25]} />
+          <meshStandardMaterial color={colors.rock} roughness={0.9} />
+        </mesh>
+      </group>
+
+      {/* ==================== SIDE HALL ==================== */}
+      <group position={[-6, 3, -6]}>
+        <mesh position={[0, 6, 0]} castShadow>
+          <boxGeometry args={[10, 12, 6]} />
+          <meshStandardMaterial color={colors.walls} roughness={0.6} />
+        </mesh>
+        {/* Roof - rotated to lay flat as peaked roof (flipped right-side up) */}
+        <mesh position={[0, 14.5, 0]} rotation={[-Math.PI / 2, 0, Math.PI / 2]} castShadow>
+          <cylinderGeometry args={[4, 4, 10, 3]} />
+          <meshStandardMaterial color={colors.roofs} roughness={0.7} />
+        </mesh>
+      </group>
+
+      {/* ==================== SMALL TURRETS (Decor) ==================== */}
+      {/* Left at 8. These are plain meshes drawn three times from the map, not
+            a shared geometry, so segments here multiply where the watchtower's
+            do not - and at 3 m across they are background dressing rather than a
+            silhouette anyone reads. Large AND prominent is the bar; these are
+            neither. */}
+      {(
+        [
+          [-8, 5, -8],
+          [8, 5, -8],
+          [10, 10, 6],
+        ] as [number, number, number][]
+      ).map((pos, i) => (
+        <group key={i} position={pos}>
+          <mesh position={[0, 3, 0]} castShadow>
+            <cylinderGeometry args={[1, 1, 6, 8]} />
+            <meshStandardMaterial color={colors.walls} roughness={0.6} />
+          </mesh>
+          <mesh position={[0, 7, 0]} castShadow>
+            <coneGeometry args={[1.4, 4, 8]} />
+            <meshStandardMaterial color={colors.roofs} roughness={0.5} />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  );
+});
+FairytaleCastlePrimitiveBody.displayName = 'FairytaleCastlePrimitiveBody';
+
+/**
+ * The generated castle replaces the whole landmark, crag included - it arrives
+ * with its own rock base. The silhouette does change: the primitive is a
+ * Neuschwanstein-style keep on a 50 m mountain, and the generated one is a
+ * broader, shorter fairytale castle on a low outcrop. At the 105 m viewing
+ * distance this landmark is shot from that reads as a different castle rather
+ * than a worse one, but it is the largest single change in this pass.
+ */
 export const FairytaleCastle: React.FC<FairytaleCastleProps> = React.memo(
   ({
     position = [0, 0, 0] as [number, number, number],
     scale = 1,
     rotation = [0, 0, 0] as [number, number, number],
-  }) => {
-    // Neuschwanstein Palette
-    const colors = {
-      walls: '#e8e6e1', // Off-white limestone
-      roofs: '#2b5a75', // Deep blue slate
-      trim: '#c5a582', // Decorative sandstone trim
-      rock: '#5d5d5d', // Grey mountain rock
-      gold: '#ffd700', // Spires
-    };
-
-    return (
-      <group position={position} scale={scale} rotation={rotation}>
-        {/* ==================== BASE MOUNTAIN ==================== */}
-        {/* Stays at 7 sides. It is the widest part here (75 m across) but 7 is
-            deliberate: with `flatShading` it reads as a crag rather than a cone,
-            and 7 is not divisible by 4 - its -Z extent is only 0.9009r, so any
-            move to a multiple of 4 would push the base 3.7 m further back into
-            whatever it is standing in. */}
-        <mesh position={[0, -10, 0]} receiveShadow>
-          <cylinderGeometry args={[18, 25, 30, 7]} />
-          <meshStandardMaterial color={colors.rock} roughness={0.9} flatShading />
-        </mesh>
-
-        {/* ==================== MAIN KEEP (PALLAS) ==================== */}
-        <group position={[2, 5, -2]}>
-          {/* Main Body */}
-          <mesh position={[0, 8, 0]} castShadow receiveShadow>
-            <boxGeometry args={[12, 16, 8]} />
-            <meshStandardMaterial color={colors.walls} roughness={0.6} />
-          </mesh>
-          {/* Roof */}
-          <mesh position={[0, 20, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
-            <coneGeometry args={[9, 8, 4]} /> {/* Pyramidal roof */}
-            <meshStandardMaterial color={colors.roofs} roughness={0.7} />
-          </mesh>
-          {/* Windows */}
-          {[-1, 0, 1].map((y) => (
-            <group key={y} position={[0, 4 + y * 4, 4.1]}>
-              {[-3, 0, 3].map((x) => (
-                <mesh key={x} position={[x, 0, 0]}>
-                  <planeGeometry args={[1.2, 2]} />
-                  <meshStandardMaterial color="#2a2a2a" roughness={0.2} metalness={0.5} />
-                </mesh>
-              ))}
-            </group>
-          ))}
-        </group>
-
-        {/* ==================== TALL WATCHTOWER ==================== */}
-        {/* Shaft, machicolation course, crenellated parapet, bell-cast roof.
-            The profiles and the reasoning behind each live at the top of this
-            file; the positions below are unchanged from the primitives they
-            replace, because every profile keeps the same unit envelope. */}
-        <group position={[-8, 5, 4]}>
-          {/* Tower Shaft */}
-          <mesh geometry={WATCHTOWER_SHAFT} position={[0, 12, 0]} castShadow receiveShadow>
-            <meshStandardMaterial color={colors.walls} roughness={0.6} />
-          </mesh>
-          {/* Machicolation course seated on the shaft head */}
-          <mesh geometry={WATCHTOWER_CORBEL} position={[0, 24, 0]} castShadow>
-            <meshStandardMaterial color={colors.trim} roughness={0.7} />
-          </mesh>
-          {/* Crenellated parapet standing on the coping - flatShading keeps the
-              merlon arrises sharp, which is the whole point of a prism. */}
-          <mesh geometry={WATCHTOWER_CRENELLATION} position={[0, 25, 0]} castShadow receiveShadow>
-            <meshStandardMaterial color={colors.walls} roughness={0.6} flatShading />
-          </mesh>
-          {/* Spire Roof, springing from inside the parapet */}
-          <mesh geometry={WATCHTOWER_SPIRE} position={[0, 29, 0]} castShadow>
-            <meshStandardMaterial color={colors.roofs} roughness={0.5} />
-          </mesh>
-          {/* Finial - caps the spire neck, which tapers to 0.14 inside it */}
-          <mesh position={[0, 35, 0]}>
-            <sphereGeometry args={[0.5]} />
-            <meshStandardMaterial color={colors.gold} metalness={0.8} roughness={0.2} />
-          </mesh>
-        </group>
-
-        {/* ==================== CURTAIN WALL (Gatehouse to Tower) ==================== */}
-        {/* Diagonal wall connecting the gatehouse to the tall watchtower */}
-        <group position={[-1, 5, 6]} rotation={[0, Math.atan2(4, 14) - Math.PI / 6, 0]}>
-          {/* Main wall section */}
-          <mesh position={[0, 2, 0]} castShadow receiveShadow>
-            <boxGeometry args={[15, 5, 1.5]} />
-            <meshStandardMaterial color={colors.walls} roughness={0.6} />
-          </mesh>
-          {/* Battlements / Crenellations - positioned along wall top */}
-          {[-6, -3, 0, 3, 6].map((x, i) => (
-            <mesh key={i} position={[x, 5.25, 0]} castShadow>
-              <boxGeometry args={[1.5, 1.5, 1.5]} />
-              <meshStandardMaterial color={colors.walls} roughness={0.6} />
-            </mesh>
-          ))}
-        </group>
-
-        {/* ==================== GATEHOUSE ==================== */}
-        <group position={[6, 2, 8]}>
-          {/* Left Turret - 5.4 m across and 18 m tall, flanking the gate. Shaft
-              and cap are the shared module-level profiles, so the pair costs
-              one body geometry and one cap geometry between them. */}
-          <mesh geometry={GATE_TURRET_SHAFT} position={[-3, 6, 0]} castShadow>
-            <meshStandardMaterial color={colors.walls} roughness={0.6} />
-          </mesh>
-          <mesh geometry={GATE_TURRET_CAP} position={[-3, 13, 0]} castShadow>
-            <meshStandardMaterial color={colors.roofs} roughness={0.5} />
-          </mesh>
-
-          {/* Right Turret - mirror of the left, same two geometries. */}
-          <mesh geometry={GATE_TURRET_SHAFT} position={[3, 6, 0]} castShadow>
-            <meshStandardMaterial color={colors.walls} roughness={0.6} />
-          </mesh>
-          <mesh geometry={GATE_TURRET_CAP} position={[3, 13, 0]} castShadow>
-            <meshStandardMaterial color={colors.roofs} roughness={0.5} />
-          </mesh>
-
-          {/* Archway */}
-          <mesh position={[0, 5, 0]} castShadow>
-            <boxGeometry args={[4, 8, 2]} />
-            <meshStandardMaterial color={colors.walls} roughness={0.6} />
-          </mesh>
-          <mesh position={[0, 3, 1.1]}>
-            <circleGeometry args={[1.5, 32, 0, Math.PI]} />
-            <meshStandardMaterial color="#1a1a1a" />
-          </mesh>
-        </group>
-
-        {/* ==================== GRAND STAIRCASE ==================== */}
-        {/* Stone steps leading up from ground level to the gatehouse */}
-        <group position={[6, -5, 18]}>
-          {/* Generate 20 steps going down from castle to ground */}
-          {Array.from({ length: 20 }, (_, i) => (
-            <mesh key={i} position={[0, -i * 0.8, i * 1.2]} castShadow receiveShadow>
-              <boxGeometry args={[5, 0.6, 1]} />
-              <meshStandardMaterial color={i % 2 === 0 ? '#a0a0a0' : '#909090'} roughness={0.8} />
-            </mesh>
-          ))}
-          {/* Side walls / railings */}
-          <mesh position={[-2.8, -8, 12]} castShadow>
-            <boxGeometry args={[0.4, 2, 25]} />
-            <meshStandardMaterial color={colors.rock} roughness={0.9} />
-          </mesh>
-          <mesh position={[2.8, -8, 12]} castShadow>
-            <boxGeometry args={[0.4, 2, 25]} />
-            <meshStandardMaterial color={colors.rock} roughness={0.9} />
-          </mesh>
-        </group>
-
-        {/* ==================== SIDE HALL ==================== */}
-        <group position={[-6, 3, -6]}>
-          <mesh position={[0, 6, 0]} castShadow>
-            <boxGeometry args={[10, 12, 6]} />
-            <meshStandardMaterial color={colors.walls} roughness={0.6} />
-          </mesh>
-          {/* Roof - rotated to lay flat as peaked roof (flipped right-side up) */}
-          <mesh position={[0, 14.5, 0]} rotation={[-Math.PI / 2, 0, Math.PI / 2]} castShadow>
-            <cylinderGeometry args={[4, 4, 10, 3]} />
-            <meshStandardMaterial color={colors.roofs} roughness={0.7} />
-          </mesh>
-        </group>
-
-        {/* ==================== SMALL TURRETS (Decor) ==================== */}
-        {/* Left at 8. These are plain meshes drawn three times from the map, not
-            a shared geometry, so segments here multiply where the watchtower's
-            do not - and at 3 m across they are background dressing rather than a
-            silhouette anyone reads. Large AND prominent is the bar; these are
-            neither. */}
-        {(
-          [
-            [-8, 5, -8],
-            [8, 5, -8],
-            [10, 10, 6],
-          ] as [number, number, number][]
-        ).map((pos, i) => (
-          <group key={i} position={pos}>
-            <mesh position={[0, 3, 0]} castShadow>
-              <cylinderGeometry args={[1, 1, 6, 8]} />
-              <meshStandardMaterial color={colors.walls} roughness={0.6} />
-            </mesh>
-            <mesh position={[0, 7, 0]} castShadow>
-              <coneGeometry args={[1.4, 4, 8]} />
-              <meshStandardMaterial color={colors.roofs} roughness={0.5} />
-            </mesh>
-          </group>
-        ))}
-      </group>
-    );
-  }
+  }) => (
+    <group position={position} scale={scale} rotation={rotation}>
+      <GeneratedBody asset="castle" fallback={<FairytaleCastlePrimitiveBody />} />
+    </group>
+  )
 );
+FairytaleCastle.displayName = 'FairytaleCastle';

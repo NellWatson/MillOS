@@ -9,8 +9,14 @@ import { useProductionStore } from '../stores/productionStore';
 import { selectSafetyHoldActive, useGameSimulationStore } from '../stores/gameSimulationStore';
 import { useGraphicsStore } from '../stores/graphicsStore';
 import { useMaterialFlowStore } from '../stores/materialFlowStore';
-import { FLOOR_LAYERS, POLYGON_OFFSET, RENDER_ORDER } from '../constants/renderLayers';
+import {
+  EXTERIOR_LAYERS,
+  FLOOR_LAYERS,
+  POLYGON_OFFSET,
+  RENDER_ORDER,
+} from '../constants/renderLayers';
 import { SITE_LAYOUT } from '../constants/siteLayout';
+import { PROCEDURAL_TEXTURES } from '../utils/sharedMaterials';
 import {
   OptimizedTrafficConeInstances,
   OptimizedBollardInstances,
@@ -44,6 +50,33 @@ import {
   registerTruckComponents,
   unregisterTruckComponents,
 } from './truckbay/animationSystem';
+// ---------------------------------------------------------------------------
+// YARD PAINT IS LIT
+// ---------------------------------------------------------------------------
+// Every bay stripe, lane guide, chevron, kerb mark, stop line and dock marking
+// in this file was a `meshBasicMaterial`. Unlit paint does not darken through
+// the day/night cycle, never takes the sun's shadow, and never sits in the same
+// tonal range as the asphalt it is painted on.
+//
+// MEASURED, not reasoned: a `shipping` capture at `--time=22` shows the white
+// dashed centre line, the yellow chevron pad and the kerb marks rendering at
+// full daylight brightness against a scene that is otherwise deep blue-black.
+// Painted tarmac glowing at midnight.
+//
+// `FactoryExterior.tsx` had already reached this conclusion for the site roads -
+// see its ROAD PAINT block, which converted the same class of marking for the
+// same reason. The fix simply never crossed into the truck yard. These are now
+// `meshStandardMaterial` at roughness 0.85 (chalky, weathered thermoplastic),
+// keeping each call site's own `polygonOffset` and `depthWrite` exactly as they
+// were, because that pair is what holds the paint above the road and is
+// governed by CLAUDE.md's exterior-ground layering rules, not by this change.
+//
+// WHAT STAYS UNLIT, and why it is not an inconsistency: a surface that
+// represents EMITTED LIGHT is not paint. The headlight cones and the tunnel's
+// pure-black void behind the bars are still `meshBasicMaterial`, as are the
+// canal water plane and the vehicle shadow blobs in `FactoryExterior.tsx`.
+// Shading a shadow or a light shaft is the opposite mistake.
+
 // NOTE: ExhaustSmoke, WheelChock, FuelTank, AirTank, LandingGear, DEFTank,
 // CBAntennaComponent, SunVisor, GrainCoLogo, FlourExpressLogo are defined
 // locally in this file - do not import from TruckSmallParts/TruckLogos
@@ -56,6 +89,62 @@ interface TruckBayProps {
 // the JSX so their object identity is constant across renders; passing inline
 // object literals would churn WarehouseWorkerWithPalletJack's registration
 // effect (deps include workAreaBounds) on every parent re-render.
+// ---------------------------------------------------------------------------
+// PAVED SURFACES
+// ---------------------------------------------------------------------------
+// Every yard, apron and access road in this file was a flat colour: two 60x60 m
+// truck yards at `#1c1c1c`, two 20x16 m dock aprons at `#374151` and two
+// 10x120 m access roads at `#1c1c1c`. That is 9,840 m2 of untextured paving,
+// and in the `shipping` capture it fills most of the frame as a featureless
+// black slab while the gravel beside it reads correctly - the largest single
+// surface on the site was also the least finished.
+//
+// `FactoryExterior.tsx` already solved this for its own roads; these follow the
+// same conventions, which are load-bearing and not stylistic:
+//
+//   COLOUR. `generateTarmac`/`generateConcrete` author sRGB bytes through
+//   `createColorDataTexture`, so the sampled albedo is already correct linear
+//   reflectance. A non-white `color` beside one of these maps multiplies the
+//   same hue twice - the exact double-darkening CLAUDE.md records for the
+//   village cobbles. These take `#ffffff`.
+//
+//   TILING. Repeats are chosen for a consistent ~2 m world period per tile
+//   rather than a fixed number, so a 120 m road and a 16 m apron show aggregate
+//   at the same physical scale instead of one looking like sandpaper.
+//
+//   ONE CLONE PER SURFACE CLASS, not per call site. `Texture.clone()` shares
+//   `.source`, so a tiling variant costs a sampler binding and no upload - but
+//   texture identity is part of the `StaticMeshBatch` merge key, so a clone per
+//   call site would split each pair of yards into two batch groups.
+const cloneTiledTexture = (source: THREE.Texture, x: number, y: number): THREE.Texture => {
+  const texture = source.clone();
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(x, y);
+  return texture;
+};
+
+/** The two 60 x 60 m truck yards. */
+const YARD_TARMAC_MAP = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacColor, 30, 30);
+const YARD_TARMAC_ROUGHNESS = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacRoughness, 30, 30);
+/** The two 10 x 120 m access roads. */
+const ACCESS_ROAD_MAP = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacColor, 5, 60);
+const ACCESS_ROAD_ROUGHNESS = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacRoughness, 5, 60);
+/** The 25 x 18 m employee car park. */
+const PARKING_TARMAC_MAP = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacColor, 12, 9);
+const PARKING_TARMAC_ROUGHNESS = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacRoughness, 12, 9);
+/**
+ * The two 20 x 16 m dock aprons.
+ *
+ * Concrete rather than tarmac, and that is the real material: a loading dock
+ * apron takes trailer landing gear and jack loads that break asphalt up, so it
+ * is poured as a concrete pad. The `#374151` it replaces was already reading as
+ * a lighter grey slab against the black yard, so this keeps the tonal split
+ * that was there while giving it a surface.
+ */
+const APRON_CONCRETE_MAP = cloneTiledTexture(PROCEDURAL_TEXTURES.concreteColor, 10, 8);
+const APRON_CONCRETE_ROUGHNESS = cloneTiledTexture(PROCEDURAL_TEXTURES.concreteRoughness, 10, 8);
+
 const SHIPPING_WORKER_BOUNDS = { minX: -8, maxX: 8, minZ: -5, maxZ: 8 } as const;
 const RECEIVING_WORKER_BOUNDS = { minX: -8, maxX: 8, minZ: -8, maxZ: 5 } as const;
 // TRUCK_WHEEL_RADIUS is imported from OptimizedTruckBay, which owns the wheel
@@ -1022,12 +1111,17 @@ export const EmployeeParking: React.FC<{
   rotation?: number;
 }> = ({ position, rotation = 0 }) => (
   <group position={position} rotation={[0, rotation, 0]}>
-    {/* Parking lot surface - raised above TerrainGround (y=0.05) */}
-    <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+    {/* NOT MOUNTED. The only call site is commented out further down this file;
+        left on the site datum so it is correct if it is ever restored, rather
+        than carrying the vanished 0.05-terrain clearance back into the scene. */}
+    {/* Parking lot surface, on the ground datum with its own -2 offset */}
+    <mesh position={[0, EXTERIOR_LAYERS.ground, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
       <planeGeometry args={[25, 18]} />
       <meshStandardMaterial
-        color="#2d2d2d"
+        color="#ffffff"
         roughness={0.9}
+        map={PARKING_TARMAC_MAP}
+        roughnessMap={PARKING_TARMAC_ROUGHNESS}
         depthWrite={false}
         polygonOffset
         polygonOffsetFactor={-2}
@@ -1039,32 +1133,34 @@ export const EmployeeParking: React.FC<{
       <group key={i} position={[-10 + i * 3, 0, 0]}>
         {/* Vertical stripe */}
         <mesh
-          position={[0, 0.09, 0]}
+          position={[0, EXTERIOR_LAYERS.groundOverlay, 0]}
           rotation={[-Math.PI / 2, 0, 0]}
           renderOrder={RENDER_ORDER.floorMarkings}
         >
           <planeGeometry args={[0.1, 5]} />
-          <meshBasicMaterial
+          <meshStandardMaterial
             color="#fef3c7"
             depthWrite={false}
             polygonOffset
             polygonOffsetFactor={-3}
             polygonOffsetUnits={-3}
+            roughness={0.85}
           />
         </mesh>
         {/* Horizontal stripe at back */}
         <mesh
-          position={[1.5, 0.09, -2.4]}
+          position={[1.5, EXTERIOR_LAYERS.groundOverlay, -2.4]}
           rotation={[-Math.PI / 2, 0, 0]}
           renderOrder={RENDER_ORDER.floorMarkings}
         >
           <planeGeometry args={[3, 0.1]} />
-          <meshBasicMaterial
+          <meshStandardMaterial
             color="#fef3c7"
             depthWrite={false}
             polygonOffset
             polygonOffsetFactor={-3}
             polygonOffsetUnits={-3}
+            roughness={0.85}
           />
         </mesh>
       </group>
@@ -1078,12 +1174,13 @@ export const EmployeeParking: React.FC<{
           renderOrder={RENDER_ORDER.floorMarkings}
         >
           <planeGeometry args={[0.15, 5]} />
-          <meshBasicMaterial
+          <meshStandardMaterial
             color="#3b82f6"
             depthWrite={false}
             polygonOffset
             polygonOffsetFactor={-3}
             polygonOffsetUnits={-3}
+            roughness={0.85}
           />
         </mesh>
         {/* Handicap symbol (simplified) */}
@@ -1093,15 +1190,17 @@ export const EmployeeParking: React.FC<{
           renderOrder={RENDER_ORDER.floorMarkings}
         >
           <circleGeometry args={[0.5, 16]} />
-          <meshBasicMaterial
+          <meshStandardMaterial
             color="#3b82f6"
             depthWrite={false}
             polygonOffset
             polygonOffsetFactor={-4}
             polygonOffsetUnits={-4}
+            roughness={0.85}
           />
         </mesh>
         <Text
+          surface="painted"
           position={[1.5, 0.11, -1]}
           rotation={[-Math.PI / 2, 0, 0]}
           fontSize={0.6}
@@ -1999,6 +2098,7 @@ const WeightScale: React.FC<{ position: [number, number, number]; rotation?: num
 
       {/* Warning signs */}
       <Text
+        surface="painted"
         position={[0, 0.25, -7]}
         rotation={[-Math.PI / 2, 0, 0]}
         fontSize={0.4}
@@ -2563,7 +2663,7 @@ const RoadTunnel: React.FC<{
       {/* Center line marking */}
       <mesh position={[0, 0.07, 5]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[0.15, 10]} />
-        <meshBasicMaterial color="#fbbf24" />
+        <meshStandardMaterial color="#fbbf24" roughness={0.85} />
       </mesh>
     </group>
   );
@@ -2620,6 +2720,7 @@ export const PalletStaging: React.FC<{ position: [number, number, number] }> = (
     ))}
     {/* Staging area sign */}
     <Text
+      surface="painted"
       position={[0, 0.02, 2.5]}
       rotation={[-Math.PI / 2, 0, 0]}
       fontSize={0.3}
@@ -3281,11 +3382,11 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Yellow safety stripes on channel edges */}
         <mesh position={[-1.85, 0.32, 1.2]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.3, 5.8]} />
-          <meshBasicMaterial color="#fbbf24" />
+          <meshStandardMaterial color="#fbbf24" roughness={0.85} />
         </mesh>
         <mesh position={[1.85, 0.32, 1.2]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.3, 5.8]} />
-          <meshBasicMaterial color="#fbbf24" />
+          <meshStandardMaterial color="#fbbf24" roughness={0.85} />
         </mesh>
 
         {/* Dock bumpers - centered for single bay (narrower to fit platform) */}
@@ -3312,14 +3413,31 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             <boxGeometry args={[0.3, 0.5, 18]} />
             <meshStandardMaterial color="#374151" roughness={0.8} />
           </mesh>
-          {/* Yellow warning stripes on groove edges - raised to prevent z-fighting */}
-          <mesh position={[-2.1, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          {/* Warning stripes along the groove edges, painted on the dock apron
+              and so on the apron's overlay datum. The literal 0.08 matched the
+              old yard height rather than the apron's, which left them floating
+              once the apron came down to the ground datum. */}
+          <mesh position={[-2.1, EXTERIOR_LAYERS.groundOverlay, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <planeGeometry args={[0.3, 18]} />
-            <meshBasicMaterial color="#fbbf24" />
+            <meshStandardMaterial
+              color="#fbbf24"
+              depthWrite={false}
+              polygonOffset
+              polygonOffsetFactor={POLYGON_OFFSET.exteriorOverlay.factor}
+              polygonOffsetUnits={POLYGON_OFFSET.exteriorOverlay.units}
+              roughness={0.85}
+            />
           </mesh>
-          <mesh position={[2.1, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <mesh position={[2.1, EXTERIOR_LAYERS.groundOverlay, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <planeGeometry args={[0.3, 18]} />
-            <meshBasicMaterial color="#fbbf24" />
+            <meshStandardMaterial
+              color="#fbbf24"
+              depthWrite={false}
+              polygonOffset
+              polygonOffsetFactor={POLYGON_OFFSET.exteriorOverlay.factor}
+              polygonOffsetUnits={POLYGON_OFFSET.exteriorOverlay.units}
+              roughness={0.85}
+            />
           </mesh>
         </group>
 
@@ -3395,36 +3513,86 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
       {/* ========== FRONT TRUCK YARD ========== */}
       <group position={[0, 0, 50]}>
-        {/* Main truck yard asphalt - raised to y=0.08 to prevent z-fighting with main asphalt at y=-0.05 */}
-        <mesh position={[0, 0.08, 30]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        {/* The yard stack, on CLAUDE.md's exterior ground scheme: one Y for all
+            three surfaces, separated by polygonOffset alone - yard
+            `exteriorMid` +3 in front of the terrain's `exteriorBase` +6, apron
+            `exteriorTop` -1 in front of the yard, paint in front of both
+            (`OptimizedStripeInstances` carries `strong` -4).
+
+            This was a pure Y-separation stack: yard 0.08, apron 0.12, paint
+            0.16. The comment on the yard cited "main asphalt at y=-0.05", a
+            surface that no longer exists anywhere in this file, and 0.08 was
+            clearance for `TerrainGround`'s old 0.05 default. Against the
+            terrain's real datum of -0.02 that left the single largest authored
+            ground plane on the site - 60 x 60 m - floating 10 cm over the
+            asphalt the terrain splat already paints beneath it, with the apron
+            14 cm up and the paint 18 cm up. */}
+        <mesh
+          position={[0, EXTERIOR_LAYERS.ground, 30]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          receiveShadow
+        >
           <planeGeometry args={[60, 60]} />
-          <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+          <meshStandardMaterial
+            color="#ffffff"
+            roughness={0.95}
+            map={YARD_TARMAC_MAP}
+            roughnessMap={YARD_TARMAC_ROUGHNESS}
+            polygonOffset
+            polygonOffsetFactor={POLYGON_OFFSET.exteriorMid.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.exteriorMid.units}
+          />
         </mesh>
 
-        {/* Dock apron - raised to y=0.12 to be above truck yard asphalt */}
-        <mesh position={[0, 0.12, 8]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        {/* Dock apron, in front of the yard it sits on */}
+        <mesh
+          position={[0, EXTERIOR_LAYERS.ground, 8]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          receiveShadow
+        >
           <planeGeometry args={[20, 16]} />
-          <meshStandardMaterial color="#374151" roughness={0.85} />
+          <meshStandardMaterial
+            color="#ffffff"
+            roughness={0.85}
+            map={APRON_CONCRETE_MAP}
+            roughnessMap={APRON_CONCRETE_ROUGHNESS}
+            polygonOffset
+            polygonOffsetFactor={POLYGON_OFFSET.exteriorTop.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.exteriorTop.units}
+          />
         </mesh>
 
-        {/* Road markings - raised to y=0.16 to be above dock apron at y=0.12 */}
-        <OptimizedStripeInstances positions={[0, 10, 20, 30, 40].map((z) => [18, 0.16, z])} />
+        {/* Road markings, on the ground-overlay datum in front of the apron */}
+        <OptimizedStripeInstances
+          positions={[0, 10, 20, 30, 40].map((z) => [18, EXTERIOR_LAYERS.groundOverlay, z])}
+        />
 
-        <OptimizedStripeInstances positions={[0, 10, 20, 30, 40].map((z) => [-18, 0.16, z])} />
+        <OptimizedStripeInstances
+          positions={[0, 10, 20, 30, 40].map((z) => [-18, EXTERIOR_LAYERS.groundOverlay, z])}
+        />
 
-        <mesh position={[0, 0.16, 10]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
+        <mesh
+          position={[0, EXTERIOR_LAYERS.groundOverlay, 10]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          renderOrder={10}
+        >
           <planeGeometry args={[0.15, 20]} />
-          <meshBasicMaterial
+          <meshStandardMaterial
             color="#3b82f6"
             polygonOffset
             polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
             polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
+            roughness={0.85}
           />
         </mesh>
-        <mesh position={[-4, 0.16, 10]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
+        <mesh
+          position={[-4, EXTERIOR_LAYERS.groundOverlay, 10]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          renderOrder={10}
+        >
           <planeGeometry args={[0.1, 20]} />
-          <meshBasicMaterial
+          <meshStandardMaterial
             color="#3b82f6"
             transparent
             opacity={0.5}
@@ -3432,11 +3600,16 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
             polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
+            roughness={0.85}
           />
         </mesh>
-        <mesh position={[4, 0.16, 10]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
+        <mesh
+          position={[4, EXTERIOR_LAYERS.groundOverlay, 10]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          renderOrder={10}
+        >
           <planeGeometry args={[0.1, 20]} />
-          <meshBasicMaterial
+          <meshStandardMaterial
             color="#3b82f6"
             transparent
             opacity={0.5}
@@ -3444,17 +3617,23 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
             polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
+            roughness={0.85}
           />
         </mesh>
 
-        <mesh position={[0, 0.16, 2]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
+        <mesh
+          position={[0, EXTERIOR_LAYERS.groundOverlay, 2]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          renderOrder={10}
+        >
           <planeGeometry args={[14, 0.4]} />
-          <meshBasicMaterial
+          <meshStandardMaterial
             color="#ef4444"
             polygonOffset
             polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
             polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
+            roughness={0.85}
           />
         </mesh>
 
@@ -3510,8 +3689,12 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           </group>
         ))}
 
+        {/* Painted on the yard, so it takes the yard's overlay datum. At the
+            literal 0.05 it was UNDER the tarmac slab at 0.08 and had never
+            been visible in any capture; it is 1 cm of clean separation now. */}
         <Text
-          position={[0, 0.05, 40]}
+          surface="painted"
+          position={[0, EXTERIOR_LAYERS.groundOverlay, 40]}
           rotation={[-Math.PI / 2, 0, 0]}
           fontSize={2}
           color="#475569"
@@ -3525,15 +3708,38 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Positioned so truck at z=250 is inside the 50-unit deep tunnel */}
         <RoadTunnel position={[20, 0, 170]} rotation={Math.PI} roadWidth={10} />
 
-        {/* Road extension connecting truck yard to tunnel */}
-        <mesh position={[20, 0.07, 115]} rotation={[-Math.PI / 2, 0, 0]}>
+        {/* Road extension connecting truck yard to tunnel. Ground datum with
+            `exteriorTop`, centre line on the overlay datum with
+            `exteriorOverlay`. Both carried literal clearances (0.07 / 0.09) for
+            `TerrainGround`'s old 0.05 default and NEITHER had a polygonOffset,
+            so the offsets are new and are now what holds them off the terrain. */}
+        <mesh
+          position={[20, EXTERIOR_LAYERS.ground, 115]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          receiveShadow
+        >
           <planeGeometry args={[10, 120]} />
-          <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+          <meshStandardMaterial
+            color="#ffffff"
+            roughness={0.95}
+            map={ACCESS_ROAD_MAP}
+            roughnessMap={ACCESS_ROAD_ROUGHNESS}
+            polygonOffset
+            polygonOffsetFactor={POLYGON_OFFSET.exteriorTop.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.exteriorTop.units}
+          />
         </mesh>
         {/* Road center line */}
-        <mesh position={[20, 0.09, 115]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[20, EXTERIOR_LAYERS.groundOverlay, 115]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.15, 120]} />
-          <meshBasicMaterial color="#fbbf24" />
+          <meshStandardMaterial
+            color="#fbbf24"
+            depthWrite={false}
+            polygonOffset
+            polygonOffsetFactor={POLYGON_OFFSET.exteriorOverlay.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.exteriorOverlay.units}
+            roughness={0.85}
+          />
         </mesh>
 
         {/* Ultra yard equipment is distance-culled as one authored LOD cluster.
@@ -3698,11 +3904,11 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Yellow safety stripes on channel edges */}
         <mesh position={[-1.85, 0.32, 1.2]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.3, 5.8]} />
-          <meshBasicMaterial color="#fbbf24" />
+          <meshStandardMaterial color="#fbbf24" roughness={0.85} />
         </mesh>
         <mesh position={[1.85, 0.32, 1.2]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.3, 5.8]} />
-          <meshBasicMaterial color="#fbbf24" />
+          <meshStandardMaterial color="#fbbf24" roughness={0.85} />
         </mesh>
 
         {/* Dock bumpers - centered for single bay (narrower to fit platform) */}
@@ -3729,14 +3935,31 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             <boxGeometry args={[0.3, 0.5, 18]} />
             <meshStandardMaterial color="#374151" roughness={0.8} />
           </mesh>
-          {/* Yellow warning stripes on groove edges - raised to prevent z-fighting */}
-          <mesh position={[-2.1, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          {/* Warning stripes along the groove edges, painted on the dock apron
+              and so on the apron's overlay datum. The literal 0.08 matched the
+              old yard height rather than the apron's, which left them floating
+              once the apron came down to the ground datum. */}
+          <mesh position={[-2.1, EXTERIOR_LAYERS.groundOverlay, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <planeGeometry args={[0.3, 18]} />
-            <meshBasicMaterial color="#fbbf24" />
+            <meshStandardMaterial
+              color="#fbbf24"
+              depthWrite={false}
+              polygonOffset
+              polygonOffsetFactor={POLYGON_OFFSET.exteriorOverlay.factor}
+              polygonOffsetUnits={POLYGON_OFFSET.exteriorOverlay.units}
+              roughness={0.85}
+            />
           </mesh>
-          <mesh position={[2.1, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <mesh position={[2.1, EXTERIOR_LAYERS.groundOverlay, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <planeGeometry args={[0.3, 18]} />
-            <meshBasicMaterial color="#fbbf24" />
+            <meshStandardMaterial
+              color="#fbbf24"
+              depthWrite={false}
+              polygonOffset
+              polygonOffsetFactor={POLYGON_OFFSET.exteriorOverlay.factor}
+              polygonOffsetUnits={POLYGON_OFFSET.exteriorOverlay.units}
+              roughness={0.85}
+            />
           </mesh>
         </group>
 
@@ -3810,36 +4033,86 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
 
       {/* ========== BACK TRUCK YARD ========== */}
       <group position={[0, 0, -50]}>
-        {/* Main truck yard asphalt - raised to y=0.08 to prevent z-fighting with main asphalt at y=-0.05 */}
-        <mesh position={[0, 0.08, -30]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        {/* The yard stack, on CLAUDE.md's exterior ground scheme: one Y for all
+            three surfaces, separated by polygonOffset alone - yard
+            `exteriorMid` +3 in front of the terrain's `exteriorBase` +6, apron
+            `exteriorTop` -1 in front of the yard, paint in front of both
+            (`OptimizedStripeInstances` carries `strong` -4).
+
+            This was a pure Y-separation stack: yard 0.08, apron 0.12, paint
+            0.16. The comment on the yard cited "main asphalt at y=-0.05", a
+            surface that no longer exists anywhere in this file, and 0.08 was
+            clearance for `TerrainGround`'s old 0.05 default. Against the
+            terrain's real datum of -0.02 that left the single largest authored
+            ground plane on the site - 60 x 60 m - floating 10 cm over the
+            asphalt the terrain splat already paints beneath it, with the apron
+            14 cm up and the paint 18 cm up. */}
+        <mesh
+          position={[0, EXTERIOR_LAYERS.ground, -30]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          receiveShadow
+        >
           <planeGeometry args={[60, 60]} />
-          <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+          <meshStandardMaterial
+            color="#ffffff"
+            roughness={0.95}
+            map={YARD_TARMAC_MAP}
+            roughnessMap={YARD_TARMAC_ROUGHNESS}
+            polygonOffset
+            polygonOffsetFactor={POLYGON_OFFSET.exteriorMid.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.exteriorMid.units}
+          />
         </mesh>
 
-        {/* Dock apron - raised to y=0.12 to be above truck yard asphalt */}
-        <mesh position={[0, 0.12, -8]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        {/* Dock apron, in front of the yard it sits on */}
+        <mesh
+          position={[0, EXTERIOR_LAYERS.ground, -8]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          receiveShadow
+        >
           <planeGeometry args={[20, 16]} />
-          <meshStandardMaterial color="#374151" roughness={0.85} />
+          <meshStandardMaterial
+            color="#ffffff"
+            roughness={0.85}
+            map={APRON_CONCRETE_MAP}
+            roughnessMap={APRON_CONCRETE_ROUGHNESS}
+            polygonOffset
+            polygonOffsetFactor={POLYGON_OFFSET.exteriorTop.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.exteriorTop.units}
+          />
         </mesh>
 
-        {/* Road markings - raised to y=0.16 to be above dock apron at y=0.12 */}
-        <OptimizedStripeInstances positions={[0, -10, -20, -30, -40].map((z) => [-18, 0.16, z])} />
+        {/* Road markings, on the ground-overlay datum in front of the apron */}
+        <OptimizedStripeInstances
+          positions={[0, -10, -20, -30, -40].map((z) => [-18, EXTERIOR_LAYERS.groundOverlay, z])}
+        />
 
-        <OptimizedStripeInstances positions={[0, -10, -20, -30, -40].map((z) => [18, 0.16, z])} />
+        <OptimizedStripeInstances
+          positions={[0, -10, -20, -30, -40].map((z) => [18, EXTERIOR_LAYERS.groundOverlay, z])}
+        />
 
-        <mesh position={[0, 0.16, -10]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
+        <mesh
+          position={[0, EXTERIOR_LAYERS.groundOverlay, -10]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          renderOrder={10}
+        >
           <planeGeometry args={[0.15, 20]} />
-          <meshBasicMaterial
+          <meshStandardMaterial
             color="#3b82f6"
             polygonOffset
             polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
             polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
+            roughness={0.85}
           />
         </mesh>
-        <mesh position={[-4, 0.16, -10]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
+        <mesh
+          position={[-4, EXTERIOR_LAYERS.groundOverlay, -10]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          renderOrder={10}
+        >
           <planeGeometry args={[0.1, 20]} />
-          <meshBasicMaterial
+          <meshStandardMaterial
             color="#3b82f6"
             transparent
             opacity={0.5}
@@ -3847,11 +4120,16 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
             polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
+            roughness={0.85}
           />
         </mesh>
-        <mesh position={[4, 0.16, -10]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
+        <mesh
+          position={[4, EXTERIOR_LAYERS.groundOverlay, -10]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          renderOrder={10}
+        >
           <planeGeometry args={[0.1, 20]} />
-          <meshBasicMaterial
+          <meshStandardMaterial
             color="#3b82f6"
             transparent
             opacity={0.5}
@@ -3859,17 +4137,23 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
             polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
             polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
+            roughness={0.85}
           />
         </mesh>
 
-        <mesh position={[0, 0.16, -2]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
+        <mesh
+          position={[0, EXTERIOR_LAYERS.groundOverlay, -2]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          renderOrder={10}
+        >
           <planeGeometry args={[14, 0.4]} />
-          <meshBasicMaterial
+          <meshStandardMaterial
             color="#ef4444"
             polygonOffset
             polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
             polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
             depthWrite={false}
+            roughness={0.85}
           />
         </mesh>
 
@@ -3925,8 +4209,12 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
           </group>
         ))}
 
+        {/* Painted on the yard, so it takes the yard's overlay datum. At the
+            literal 0.05 it was UNDER the tarmac slab at 0.08 and had never
+            been visible in any capture; it is 1 cm of clean separation now. */}
         <Text
-          position={[0, 0.05, -40]}
+          surface="painted"
+          position={[0, EXTERIOR_LAYERS.groundOverlay, -40]}
           rotation={[-Math.PI / 2, 0, Math.PI]}
           fontSize={2}
           color="#475569"
@@ -3940,15 +4228,38 @@ export const TruckBay: React.FC<TruckBayProps> = ({ productionSpeed }) => {
         {/* Positioned so truck at z=-250 is inside the 50-unit deep tunnel */}
         <RoadTunnel position={[-20, 0, -170]} rotation={0} roadWidth={10} />
 
-        {/* Road extension connecting truck yard to tunnel */}
-        <mesh position={[-20, 0.07, -115]} rotation={[-Math.PI / 2, 0, 0]}>
+        {/* Road extension connecting truck yard to tunnel. Ground datum with
+            `exteriorTop`, centre line on the overlay datum with
+            `exteriorOverlay`. Both carried literal clearances (0.07 / 0.09) for
+            `TerrainGround`'s old 0.05 default and NEITHER had a polygonOffset,
+            so the offsets are new and are now what holds them off the terrain. */}
+        <mesh
+          position={[-20, EXTERIOR_LAYERS.ground, -115]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          receiveShadow
+        >
           <planeGeometry args={[10, 120]} />
-          <meshStandardMaterial color="#1c1c1c" roughness={0.95} />
+          <meshStandardMaterial
+            color="#ffffff"
+            roughness={0.95}
+            map={ACCESS_ROAD_MAP}
+            roughnessMap={ACCESS_ROAD_ROUGHNESS}
+            polygonOffset
+            polygonOffsetFactor={POLYGON_OFFSET.exteriorTop.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.exteriorTop.units}
+          />
         </mesh>
         {/* Road center line */}
-        <mesh position={[-20, 0.09, -115]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh position={[-20, EXTERIOR_LAYERS.groundOverlay, -115]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[0.15, 120]} />
-          <meshBasicMaterial color="#fbbf24" />
+          <meshStandardMaterial
+            color="#fbbf24"
+            depthWrite={false}
+            polygonOffset
+            polygonOffsetFactor={POLYGON_OFFSET.exteriorOverlay.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.exteriorOverlay.units}
+            roughness={0.85}
+          />
         </mesh>
 
         {/* Receiving-yard counterpart to the shipping detail LOD above. */}
@@ -5117,11 +5428,12 @@ const TrailerDropYard: React.FC<{ position: [number, number, number]; rotation?:
         renderOrder={RENDER_ORDER.floorMarkings}
       >
         <planeGeometry args={[0.1, 16]} />
-        <meshBasicMaterial
+        <meshStandardMaterial
           color="#fef3c7"
           polygonOffset
           polygonOffsetFactor={POLYGON_OFFSET.standard.factor}
           polygonOffsetUnits={POLYGON_OFFSET.standard.units}
+          roughness={0.85}
         />
       </mesh>
     ))}
@@ -5290,11 +5602,12 @@ const MaintenanceBay: React.FC<{ position: [number, number, number]; rotation?: 
         rotation={[-Math.PI / 2, 0, 0]}
       >
         <planeGeometry args={[0.16, 3]} />
-        <meshBasicMaterial
+        <meshStandardMaterial
           color="#e6b93d"
           polygonOffset
           polygonOffsetFactor={POLYGON_OFFSET.exteriorOverlay.factor}
           polygonOffsetUnits={POLYGON_OFFSET.exteriorOverlay.units}
+          roughness={0.85}
         />
       </mesh>
     ))}
@@ -5481,7 +5794,7 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
       renderOrder={RENDER_ORDER.floorMarkings}
     >
       <planeGeometry args={[3, 10]} />
-      <meshBasicMaterial
+      <meshStandardMaterial
         color="#22c55e"
         transparent
         opacity={0.3}
@@ -5489,6 +5802,7 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
         polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
         polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
         depthWrite={false}
+        roughness={0.85}
       />
     </mesh>
     <mesh
@@ -5497,12 +5811,13 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
       renderOrder={RENDER_ORDER.floorMarkings}
     >
       <planeGeometry args={[0.1, 10]} />
-      <meshBasicMaterial
+      <meshStandardMaterial
         color="#22c55e"
         polygonOffset
         polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
         polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
         depthWrite={false}
+        roughness={0.85}
       />
     </mesh>
     <mesh
@@ -5511,12 +5826,13 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
       renderOrder={RENDER_ORDER.floorMarkings}
     >
       <planeGeometry args={[0.1, 10]} />
-      <meshBasicMaterial
+      <meshStandardMaterial
         color="#22c55e"
         polygonOffset
         polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
         polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
         depthWrite={false}
+        roughness={0.85}
       />
     </mesh>
     <mesh
@@ -5525,7 +5841,7 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
       renderOrder={RENDER_ORDER.floorMarkings}
     >
       <planeGeometry args={[1.5, 10]} />
-      <meshBasicMaterial
+      <meshStandardMaterial
         color="#3b82f6"
         transparent
         opacity={0.3}
@@ -5533,6 +5849,7 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
         polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
         polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
         depthWrite={false}
+        roughness={0.85}
       />
     </mesh>
     <mesh
@@ -5541,7 +5858,7 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
       renderOrder={RENDER_ORDER.floorMarkings}
     >
       <planeGeometry args={[4, 5]} />
-      <meshBasicMaterial
+      <meshStandardMaterial
         color="#fbbf24"
         transparent
         opacity={0.2}
@@ -5549,6 +5866,7 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
         polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
         polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
         depthWrite={false}
+        roughness={0.85}
       />
     </mesh>
     {[
@@ -5562,12 +5880,13 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
         renderOrder={RENDER_ORDER.floorMarkings}
       >
         <planeGeometry args={[0.08, 5]} />
-        <meshBasicMaterial
+        <meshStandardMaterial
           color="#fbbf24"
           polygonOffset
           polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
           polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
           depthWrite={false}
+          roughness={0.85}
         />
       </mesh>
     ))}
@@ -5577,7 +5896,7 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
       renderOrder={RENDER_ORDER.floorMarkings}
     >
       <planeGeometry args={[5, 2]} />
-      <meshBasicMaterial
+      <meshStandardMaterial
         color="#ef4444"
         transparent
         opacity={0.25}
@@ -5585,9 +5904,11 @@ const DockFloorMarkings: React.FC<{ position: [number, number, number] }> = ({ p
         polygonOffsetFactor={POLYGON_OFFSET.moderate.factor}
         polygonOffsetUnits={POLYGON_OFFSET.moderate.units}
         depthWrite={false}
+        roughness={0.85}
       />
     </mesh>
     <Text
+      surface="painted"
       position={[0, FLOOR_LAYERS.floorText, -6]}
       rotation={[-Math.PI / 2, 0, 0]}
       fontSize={0.4}

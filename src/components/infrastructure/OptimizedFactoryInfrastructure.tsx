@@ -11,6 +11,11 @@ import {
   generateMachinePanelNormal,
   generateProceduralNormal,
 } from '../../textures/normalGenerator';
+import {
+  applyWorldSurface,
+  type WorldSurfaceOverrides,
+  type WorldSurfaceProfileName,
+} from '../../utils/worldSurface';
 
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
 const UNIT_PLANE = new THREE.PlaneGeometry(1, 1);
@@ -716,6 +721,35 @@ const MATERIALS = {
   /**
    * Slender members (trusses, eave trim, standing seams). No panel relief: a
    * grid tiled onto a 0.18 m deep member is sub-pixel noise, not detail.
+   *
+   * AUDITED AND LEFT FLAT ON PURPOSE - re-checked 2026-08-17, because this is
+   * the branch's largest untextured entry by a wide margin (3,488 m summed
+   * world size over 87 instances, next entry 976 m) and a work list ordered by
+   * that number puts it first. Three reasons it stays:
+   *
+   * 1. THE METRIC REWARDS LENGTH, NOT AREA. `worldRadius` is the geometry
+   *    radius times the largest scale axis, which is what three itself uses for
+   *    culling - so a 120 x 0.18 x 0.22 m batten scores as though it were 104 m
+   *    across. Seventy-eight of these 87 instances are the roof standing seams,
+   *    which are 0.45 m wide. Their summed EXTENT is enormous and their surface
+   *    is not.
+   * 2. THEY ARE ALREADY THE DETAIL. The seams exist so the roof deck stops
+   *    reading as a painted rectangle, and the comment on `roofDetails` records
+   *    that they were widened to 0.45 m specifically to survive SMAA at the
+   *    overview camera's 74 m. Confirmed in that frame: they read as lines.
+   *    Texturing them is texturing the texture.
+   * 3. NO SINGLE TILING CAN BE CORRECT. `InstancedBoxes` draws every instance
+   *    from one shared `UNIT_BOX`, so a `band()` repeat stretches with each
+   *    instance's scale - and this set spans 118 x 0.3 x 0.3 trusses, 120 x
+   *    0.18 x 0.22 eave trim, 5 x 1 x 3 roof units and the battens. That is
+   *    over 300:1 of aspect variation against one UV layout. It is the same
+   *    constraint `ChamferStrip` below documents for geometry.
+   *
+   * The same three apply to `accent` (facade sills and headers, 0.55 m bands),
+   * `galleryRail` (0.14 m tube, 43 m runs sharing a set with 1.45 m stanchions)
+   * and `fixtureHousing`. `glass`, `skylight`, `fixtureGlow` and the walkway
+   * paint are flat by construction - glazing, an unlit lens and a transparent
+   * marking have nothing for a surface map to do.
    */
   steelTrim: new THREE.MeshStandardMaterial({
     name: 'factory-trim',
@@ -867,6 +901,86 @@ const MATERIALS = {
 } as const;
 
 applyFloorDetailBlend(MATERIALS.floor);
+
+// ===========================================================================
+// SURFACE FINISH
+// ===========================================================================
+//
+// WHAT THIS OVERTURNS, AND ON WHAT GROUNDS. The comment on `steelTrim` above
+// audited this branch on 2026-08-17 and left it flat DELIBERATELY, giving three
+// reasons: the work-list metric rewards length rather than area, the seams are
+// already the detail, and - the decisive one - no single UV tiling can serve an
+// instanced set spanning over 300:1 of aspect variation from one shared
+// `UNIT_BOX`.
+//
+// All three still stand, and none of them is an argument against THIS. A
+// world-space analytic field is sampled in metres, not in UV, so it does not
+// stretch with an instance's scale: the 118 m truss and the 0.14 m rail tube cut
+// from the same unit box each receive detail at its own correct density. That is
+// exactly the constraint the earlier audit could not get past, so the closure is
+// reopened on new grounds rather than re-litigated on the old ones. No `map:` is
+// added to any material here; the reasons those slots are empty are unchanged.
+//
+// COST. Every material below is consumed by `InstancedBoxes`, and
+// `StaticMeshBatch` excludes `InstancedMesh` outright
+// (`inspectStaticBatchObject`: `exclude('instanced')`), so attaching a shader
+// costs no batching and no draw call - the same reasoning `FarmArea.tsx` records
+// for the crop's wind shader.
+//
+// DATUMS. `machineSurfaces` had to learn this the hard way: a grime gradient
+// measured from world zero saturates to nothing on anything standing on an
+// elevated floor, and a term that evaluates to nothing still reports as a
+// finished surface in every gate. The sifter gallery deck sits at y 8.62 with a
+// 0.46 m slab, so its walking surface is 8.85 and its rails stand on that.
+const GALLERY_DECK_TOP = 8.85;
+
+/**
+ * Which finish each shell material takes, and why it is not the default.
+ *
+ * Deliberately an explicit table rather than `resolveSurfaceProfile`: these are
+ * named, art-directed materials whose identity is known here, and a reader
+ * should be able to see that the yellow handrail is treated as SIGNAGE - meant
+ * to stay legible - rather than have to re-derive it from a saturation
+ * threshold.
+ *
+ * Absent on purpose, all of them flat BY CONSTRUCTION rather than unfinished:
+ *   floor          already owns an `onBeforeCompile` (the joint relief)
+ *   glass, skylight, walkway, zone* transparent - and a marking or a pane has
+ *                  nothing for a weathering term to do
+ *   safetyPaint, fixtureGlow  unlit `MeshBasicMaterial`: no roughness or
+ *                  metalness to modulate, and `<normal_fragment_maps>` is not
+ *                  in `meshbasic_frag` at all, so the injection would be half a
+ *                  shader. `canApplyWorldSurface` refuses them.
+ */
+const SHELL_SURFACES: readonly [
+  THREE.MeshStandardMaterial,
+  WorldSurfaceProfileName,
+  WorldSurfaceOverrides?,
+][] = [
+  [MATERIALS.wall, 'painted'],
+  [MATERIALS.wallCladding, 'painted'],
+  // The parapet caps the roof at ~15 m. Its grime term is inert up there, which
+  // is correct and is why dust, edge and the macro drift are datum-free.
+  [MATERIALS.wallParapet, 'painted'],
+  [MATERIALS.steel, 'painted'],
+  [MATERIALS.steelTrim, 'painted'],
+  [MATERIALS.roof, 'painted'],
+  [MATERIALS.accent, 'painted'],
+  [MATERIALS.plinth, 'masonry'],
+  // Hi-viz on real geometry. `signage` is the lightest profile in the set: a
+  // safety yellow weathered into the background has been broken, not finished.
+  [MATERIALS.safetyLit, 'signage'],
+  [MATERIALS.danger, 'signage'],
+  [MATERIALS.gallery, 'metal', { datum: GALLERY_DECK_TOP }],
+  [MATERIALS.galleryRail, 'signage', { datum: GALLERY_DECK_TOP }],
+  // Anodised aluminium housings, mounted at ceiling height. Grime inert by
+  // position; the edge term is what makes an extrusion read.
+  [MATERIALS.fixtureHousing, 'metal'],
+];
+
+SHELL_SURFACES.forEach(([material, profile, overrides]) => {
+  applyWorldSurface(material, profile, overrides);
+});
 
 export const FACTORY_ENVELOPE_SPEC = {
   baseHeight: 8,

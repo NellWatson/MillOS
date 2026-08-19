@@ -20,6 +20,26 @@ export interface PerfDebugSettings {
   disableMachines: boolean; // Disable Machines (9 useFrame hooks)
   disableEnvironment: boolean; // Disable FactoryEnvironment
   disableTerrain: boolean; // Disable unified terrain for GPU isolation
+  /**
+   * Hide every non-shadow-casting point and spot light.
+   *
+   * A/B instrument only, never a quality setting. In a forward renderer each
+   * light is a uniform count in every material program in the scene, so the
+   * question this answers is what our ~50 punctual light sites cost in shader
+   * permutations and frame time. See `PunctualLightIsolation`.
+   */
+  disablePunctualLights: boolean;
+  /**
+   * Switch off the analytic surface treatment in `utils/worldSurface`.
+   *
+   * A/B instrument only, never a quality setting - and unlike the others here it
+   * is a CORRECTNESS instrument rather than a performance one. Every gate in
+   * this repo marks a surface finished on the mere presence of a shader
+   * injection, so an inert treatment and a working one are indistinguishable
+   * without a paired control. See `SurfaceTreatmentIsolation` and
+   * `scripts/measure-surface-contrast.mjs`.
+   */
+  disableSurfaceTreatment: boolean;
   disableAllAnimations: boolean; // Master toggle - disable all useFrame hooks
   showPerfOverlay: boolean; // Show performance metrics overlay
 }
@@ -174,6 +194,8 @@ const DEFAULT_PERF_DEBUG: PerfDebugSettings = {
   disableMachines: false,
   disableEnvironment: false,
   disableTerrain: false,
+  disablePunctualLights: false,
+  disableSurfaceTreatment: false,
   disableAllAnimations: false,
   showPerfOverlay: false,
 };

@@ -8,6 +8,7 @@ import { FactoryColliders } from './physics/FactoryColliders';
 import { ExitZoneSensors } from './physics/ExitZoneSensors';
 import { PhysicsDebug } from './physics/PhysicsDebug';
 import { MobileFirstPersonController } from './mobile/MobileFirstPersonController';
+import { isBenchmarkRuntime } from '../runtime/runtimeMode';
 import type { MachineData, WorkerData } from '../types';
 import type { ForkliftData } from './ForkliftSystem';
 
@@ -48,10 +49,20 @@ export const PhysicsScene: React.FC<PhysicsSceneProps> = ({
     ) : (
       <OrbitControls
         ref={orbitControlsRef}
+        /*
+         * Same contract as the legacy rig in App.tsx, and the same reason: an
+         * `update()` clamp silently rewrites a scripted evidence camera. This
+         * branch is worse, not better - its `maxDistance` of 100 would haul the
+         * `overview` pose in from its authored 168.6 m. `enablePhysics` is
+         * false on all four presets today, so nothing has ever rendered through
+         * here; the fix is applied anyway because the day it is switched on is
+         * not the day to discover that every art frame moved.
+         */
+        enabled={!isBenchmarkRuntime()}
         maxPolarAngle={Math.PI / 2 - 0.05}
         minPolarAngle={0.2}
-        minDistance={15}
-        maxDistance={100}
+        minDistance={isBenchmarkRuntime() ? 0.25 : 15}
+        maxDistance={isBenchmarkRuntime() ? 1000 : 100}
         autoRotate
         autoRotateSpeed={0}
         target={[0, 5, 0]}

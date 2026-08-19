@@ -20,6 +20,9 @@ import { WorkerPersonalityLayer } from './workers/WorkerPersonalityLayer';
 import { recoverableLazy } from '../utils/recoverableLazy';
 import ErrorBoundary from './ErrorBoundary';
 import { StaticMeshBatch } from './performance/StaticMeshBatch';
+import { PunctualLightIsolation } from './performance/PunctualLightIsolation';
+import { SurfaceTreatmentIsolation } from './performance/SurfaceTreatmentIsolation';
+import { applyBatchWorldSurface } from '../utils/worldSurface';
 
 // Lazy load heavy optional layers while preserving the complete authored world.
 // Quality changes may reduce effects and geometry density, but never swap the
@@ -789,7 +792,11 @@ export const MillScene: React.FC<MillSceneProps> = ({
       {/* Internal dock openings remain mounted with the exterior site so the
           factory reads as one continuous navigable world. */}
       {authoredSiteReady && !isLowGraphics && (
-        <StaticMeshBatch name="authored-dock-openings" revision={staticBatchRevision}>
+        <StaticMeshBatch
+          name="authored-dock-openings"
+          revision={staticBatchRevision}
+          surface={applyBatchWorldSurface}
+        >
           <>
             <AuthoredDockOpening
               position={[0, 0, 48]}
@@ -797,6 +804,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
               width={30}
               height={14}
               label="SHIPPING"
+              dock="shipping"
             />
             <AuthoredDockOpening
               position={[0, 0, -48]}
@@ -804,6 +812,7 @@ export const MillScene: React.FC<MillSceneProps> = ({
               width={18}
               height={14}
               label="RECEIVING"
+              dock="receiving"
             />
           </>
         </StaticMeshBatch>
@@ -838,6 +847,11 @@ export const MillScene: React.FC<MillSceneProps> = ({
       <group name="world-environment">
         {!perfDebug?.disableEnvironment && <OptimizedFactoryEnvironment />}
       </group>
+      {/* A/B instrument, inert unless the perfDebug flag is set. Mounted
+          unconditionally so the toggle can be flipped at runtime in one page
+          load rather than across two builds. */}
+      <PunctualLightIsolation />
+      <SurfaceTreatmentIsolation />
 
       {/* Camera bounds remain useful to controls and UI, but never gate scene existence. */}
       <CameraBoundsTracker />
@@ -885,7 +899,11 @@ export const MillScene: React.FC<MillSceneProps> = ({
       <group name="world-logistics">
         {authoredSiteReady && <OperationalRemotePlayers />}
         {authoredSiteReady && !isLowGraphics && !perfDebug?.disableTruckBay && (
-          <StaticMeshBatch name="authored-truck-yard" revision={staticBatchRevision}>
+          <StaticMeshBatch
+            name="authored-truck-yard"
+            revision={staticBatchRevision}
+            surface={applyBatchWorldSurface}
+          >
             <ErrorBoundary fallback={null} resetKeys={[graphicsQuality]}>
               <Suspense fallback={null}>
                 <TruckBay productionSpeed={productionSpeed} />
@@ -908,20 +926,36 @@ export const MillScene: React.FC<MillSceneProps> = ({
       </group>
       {authoredSiteReady && (
         <>
-          <StaticMeshBatch name="authored-factory-exterior" revision={staticBatchRevision}>
+          <StaticMeshBatch
+            name="authored-factory-exterior"
+            revision={staticBatchRevision}
+            surface={applyBatchWorldSurface}
+          >
             <AuthoredFactoryExterior showFactoryShell={false} />
           </StaticMeshBatch>
-          <StaticMeshBatch name="authored-castle" revision={staticBatchRevision}>
+          <StaticMeshBatch
+            name="authored-castle"
+            revision={staticBatchRevision}
+            surface={applyBatchWorldSurface}
+          >
             <AuthoredCastle
               position={SITE_LAYOUT.landmarks.castle.position}
               scale={SITE_LAYOUT.landmarks.castle.scale}
               rotation={SITE_LAYOUT.landmarks.castle.rotation}
             />
           </StaticMeshBatch>
-          <StaticMeshBatch name="authored-farm" revision={staticBatchRevision}>
+          <StaticMeshBatch
+            name="authored-farm"
+            revision={staticBatchRevision}
+            surface={applyBatchWorldSurface}
+          >
             <AuthoredFarm />
           </StaticMeshBatch>
-          <StaticMeshBatch name="authored-village" revision={staticBatchRevision}>
+          <StaticMeshBatch
+            name="authored-village"
+            revision={staticBatchRevision}
+            surface={applyBatchWorldSurface}
+          >
             <AuthoredVillage />
           </StaticMeshBatch>
         </>

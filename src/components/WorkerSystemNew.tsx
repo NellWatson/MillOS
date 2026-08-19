@@ -18,6 +18,8 @@ import { Briefcase, FlaskConical, HardHat, Shield, User, Wrench as WrenchIcon } 
 
 // Types
 import { WorkerData } from '../types';
+import { getRuntimeMode } from '../runtime/runtimeMode';
+import { isPersonnelReviewScene } from '../runtime/personnelReview';
 
 // Store
 import { useProductionStore } from '../stores/productionStore';
@@ -127,6 +129,25 @@ const Worker: React.FC<WorkerProps> = React.memo(
     const nameHeight = statusHeight + 0.25;
     const tooltipHeight = statusHeight + 0.45;
 
+    /**
+     * Identity for anything outside React that has to find this specific
+     * worker in the scene graph.
+     *
+     * The personnel review cameras in `runtime/personnelReview.ts` resolve
+     * their subject by this name, and fall back to matching `bodyType`. They
+     * match on THIS group rather than on the authored GLB root, because the
+     * group is present at every level of detail while the GLB only mounts at
+     * `lod === 'high'`.
+     *
+     * It is also what stops the audits reporting most of `world-personnel` as
+     * `.../<Group>/<Mesh>`: an unnamed graph is why `audit-scene-motion` had to
+     * stop keying samples on path at all.
+     */
+    const workerUserData = useMemo(
+      () => ({ workerId: data.id, bodyType: appearance.bodyType, role: data.role }),
+      [data.id, appearance.bodyType, data.role]
+    );
+
     // Register with animation manager ONCE on mount (no LOD in deps!)
     useEffect(() => {
       if (!groupRef.current) return;
@@ -235,6 +256,8 @@ const Worker: React.FC<WorkerProps> = React.memo(
     return (
       <group
         ref={groupRef}
+        name={`worker-${data.id}`}
+        userData={workerUserData}
         onPointerOver={(e) => {
           e.stopPropagation();
           setHovered(true);
@@ -395,6 +418,19 @@ export const WorkerSystemNew: React.FC<WorkerSystemProps> = ({ onSelectWorker })
     }))
   );
 
+  /**
+   * Hold the roster on its spawn marks for a personnel art-review capture.
+   *
+   * False in every ordinary run and in every benchmark scene that is not one of
+   * the three personnel cameras, so this changes nothing a player ever sees.
+   * `runtime/personnelReview.ts` carries the measurement that made it
+   * necessary, and the reason it is the whole roster rather than one subject.
+   */
+  const reviewHoldActive = useMemo(() => {
+    const mode = getRuntimeMode();
+    return mode.benchmark && isPersonnelReviewScene(mode.benchmarkScene);
+  }, []);
+
   // Create animation manager with single useFrame
   const manager = useWorkerAnimationManager(
     isTabVisible,
@@ -404,7 +440,8 @@ export const WorkerSystemNew: React.FC<WorkerSystemProps> = ({ onSelectWorker })
     emergencyDrillMode,
     safetyHoldActive,
     getNearestExit,
-    markWorkerEvacuated
+    markWorkerEvacuated,
+    reviewHoldActive
   );
 
   const workers = useProductionStore((state) => state.workers);

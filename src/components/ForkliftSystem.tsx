@@ -30,6 +30,7 @@ import {
 import * as THREE from 'three';
 import ErrorBoundary from './ErrorBoundary';
 import { recoverableLazy } from '../utils/recoverableLazy';
+import { applyWorldSurface } from '../utils/worldSurface';
 
 const PhysicsForklift = recoverableLazy(() =>
   import('./physics/PhysicsForklift').then((module) => ({ default: module.PhysicsForklift }))
@@ -244,6 +245,46 @@ const FORKLIFT_LOD_CLOSE_METRES = 50;
 
 // Simplified forklift billboard for distant rendering (50+ units away)
 // Uses only 4 meshes instead of ~40+ for massive performance improvement
+/**
+ * Far-tier LOD materials, and why they carry the same finish as the near model.
+ *
+ * `test-results/pass7/unfinished-models.mjs` measures this group at 5.5 m per
+ * forklift with nothing on it, while `ForkliftModel` finishes every material on
+ * the near tier. That is not merely an omission: the LOD swap is a
+ * SUBSTITUTION, and the comment on the body colour below already records what
+ * that costs — the amber was matched to the authored GLB's linear
+ * `painted-safety-amber` precisely so "the LOD swap popped in colour as well as
+ * silhouette". An unfinished far tier reintroduces the same class of pop in the
+ * SURFACE: a forklift that acquires grime, dust and worn edges the moment it
+ * crosses the LOD distance and loses them when it recedes.
+ *
+ * Module-level and shared across both tiers' instances: `InstancedMesh` and
+ * these few meshes are outside `StaticMeshBatch` either way, and one
+ * `customProgramCacheKey` serves every profile, so this costs no draw call and
+ * no permutation.
+ *
+ * The beacon is deliberately absent — emissive at 1.1, and `isOutOfSurfaceScope`
+ * declines emitters.
+ */
+const BILLBOARD_MATERIALS = {
+  body: applyWorldSurface(
+    new THREE.MeshStandardMaterial({ color: BILLBOARD_AMBER, roughness: 0.42, metalness: 0 }),
+    'vehicle'
+  ),
+  cabin: applyWorldSurface(
+    new THREE.MeshStandardMaterial({ color: '#1f2937', roughness: 0.8, metalness: 0 }),
+    'vehicle'
+  ),
+  steel: applyWorldSurface(
+    new THREE.MeshStandardMaterial({ color: '#374151', roughness: 0.4, metalness: 0.85 }),
+    'metal'
+  ),
+  mast: applyWorldSurface(
+    new THREE.MeshStandardMaterial({ color: '#374151', roughness: 0.35, metalness: 0.85 }),
+    'metal'
+  ),
+};
+
 const ForkliftBillboard: React.FC<{ hasCargo: boolean; simulationPaused: boolean }> = ({
   hasCargo,
   simulationPaused,
@@ -291,24 +332,24 @@ const ForkliftBillboard: React.FC<{ hasCargo: boolean; simulationPaused: boolean
           silhouette; matching it leaves only the silhouette delta. */}
       <mesh position={[0, 0.7, 0]} castShadow receiveShadow>
         <boxGeometry args={[1.5, 1.2, 2.5]} />
-        <meshStandardMaterial color={BILLBOARD_AMBER} roughness={0.42} metalness={0} />
+        <primitive object={BILLBOARD_MATERIALS.body} attach="material" />
       </mesh>
       {/* Cabin */}
       <mesh position={[0, 1.5, -0.3]} castShadow receiveShadow>
         <boxGeometry args={[1.2, 0.8, 1]} />
-        <meshStandardMaterial color="#1f2937" roughness={0.8} metalness={0} />
+        <primitive object={BILLBOARD_MATERIALS.cabin} attach="material" />
       </mesh>
       {/* ROPS canopy and pillars. The near model is 2.3 m tall with an overhead
           guard; without these the far tier is a 1.2 m box and the swap reads as
           a different vehicle rather than a different level of detail. */}
       <mesh position={[0, 2.05, -0.35]} castShadow receiveShadow>
         <boxGeometry args={[1.42, 0.08, 1.22]} />
-        <meshStandardMaterial color={BILLBOARD_AMBER} roughness={0.42} metalness={0} />
+        <primitive object={BILLBOARD_MATERIALS.body} attach="material" />
       </mesh>
       {[-0.6, 0.6].map((x) => (
         <mesh key={`rops-${x}`} position={[x, 1.6, -0.85]} castShadow receiveShadow>
           <boxGeometry args={[0.09, 0.9, 0.09]} />
-          <meshStandardMaterial color="#374151" roughness={0.4} metalness={0.85} />
+          <primitive object={BILLBOARD_MATERIALS.steel} attach="material" />
         </mesh>
       ))}
       {/* Beacon, so the far silhouette has the same topmost feature. */}
@@ -326,7 +367,7 @@ const ForkliftBillboard: React.FC<{ hasCargo: boolean; simulationPaused: boolean
       {/* Mast */}
       <mesh position={[0, 1.2, 1.3]} castShadow receiveShadow>
         <boxGeometry args={[0.8, 2, 0.15]} />
-        <meshStandardMaterial color="#374151" roughness={0.35} metalness={0.85} />
+        <primitive object={BILLBOARD_MATERIALS.mast} attach="material" />
       </mesh>
       {/* Cargo - always mounted, opacity animated */}
       <mesh
@@ -336,8 +377,13 @@ const ForkliftBillboard: React.FC<{ hasCargo: boolean; simulationPaused: boolean
         visible={hasCargo || cargoOpacityRef.current > 0.01}
       >
         <boxGeometry args={[0.9, 0.7, 0.9]} />
+        {/* Sacking on a pallet, in OBJECT rest space - the forklift drives, and
+            a world-space field would slide the weave across the load. */}
         <meshStandardMaterial
-          ref={cargoMaterialRef}
+          ref={(mat) => {
+            cargoMaterialRef.current = mat;
+            if (mat) applyWorldSurface(mat, 'fabric');
+          }}
           color="#fef3c7"
           roughness={0.7}
           metalness={0}
@@ -426,7 +472,7 @@ const CrossingZoneMarkers: React.FC = () => {
               rotation={[-Math.PI / 2, 0, 0]}
             >
               <planeGeometry args={[xWidth, 0.3]} />
-              <meshBasicMaterial
+              <meshStandardMaterial
                 color="#fbbf24"
                 transparent
                 opacity={0.6}
@@ -434,6 +480,7 @@ const CrossingZoneMarkers: React.FC = () => {
                 polygonOffset
                 polygonOffsetFactor={POLYGON_OFFSET.standard.factor}
                 polygonOffsetUnits={POLYGON_OFFSET.standard.units}
+                roughness={0.85}
               />
             </mesh>
             <mesh
@@ -441,7 +488,7 @@ const CrossingZoneMarkers: React.FC = () => {
               rotation={[-Math.PI / 2, 0, 0]}
             >
               <planeGeometry args={[xWidth, 0.3]} />
-              <meshBasicMaterial
+              <meshStandardMaterial
                 color="#fbbf24"
                 transparent
                 opacity={0.6}
@@ -449,6 +496,7 @@ const CrossingZoneMarkers: React.FC = () => {
                 polygonOffset
                 polygonOffsetFactor={POLYGON_OFFSET.standard.factor}
                 polygonOffsetUnits={POLYGON_OFFSET.standard.units}
+                roughness={0.85}
               />
             </mesh>
             {/* Side markers */}
@@ -457,7 +505,7 @@ const CrossingZoneMarkers: React.FC = () => {
               rotation={[-Math.PI / 2, 0, 0]}
             >
               <planeGeometry args={[0.3, zHeight]} />
-              <meshBasicMaterial
+              <meshStandardMaterial
                 color="#fbbf24"
                 transparent
                 opacity={0.6}
@@ -465,6 +513,7 @@ const CrossingZoneMarkers: React.FC = () => {
                 polygonOffset
                 polygonOffsetFactor={POLYGON_OFFSET.standard.factor}
                 polygonOffsetUnits={POLYGON_OFFSET.standard.units}
+                roughness={0.85}
               />
             </mesh>
             <mesh
@@ -472,7 +521,7 @@ const CrossingZoneMarkers: React.FC = () => {
               rotation={[-Math.PI / 2, 0, 0]}
             >
               <planeGeometry args={[0.3, zHeight]} />
-              <meshBasicMaterial
+              <meshStandardMaterial
                 color="#fbbf24"
                 transparent
                 opacity={0.6}
@@ -480,10 +529,12 @@ const CrossingZoneMarkers: React.FC = () => {
                 polygonOffset
                 polygonOffsetFactor={POLYGON_OFFSET.standard.factor}
                 polygonOffsetUnits={POLYGON_OFFSET.standard.units}
+                roughness={0.85}
               />
             </mesh>
             {/* Warning text */}
             <Text
+              surface="painted"
               position={[zone.xMin + 3, 0.1, (zone.zMin + zone.zMax) / 2]}
               rotation={[-Math.PI / 2, 0, 0]}
               fontSize={0.5}
@@ -494,6 +545,7 @@ const CrossingZoneMarkers: React.FC = () => {
               YIELD
             </Text>
             <Text
+              surface="painted"
               position={[zone.xMax - 3, 0.1, (zone.zMin + zone.zMax) / 2]}
               rotation={[-Math.PI / 2, 0, 0]}
               fontSize={0.5}

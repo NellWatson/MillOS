@@ -205,6 +205,34 @@ describe('canonical site layout', () => {
     expect(feminineDistance).toBeLessThan(2.5);
   });
 
+  it('keeps the paddock and square cameras close enough to resolve their subjects', () => {
+    // These two exist because `farm` and `village` frame whole sites and render
+    // a 1.3 m cow at a handful of pixels. If either drifts back out to site
+    // distance it stops grading what it was added to grade, so the distance is
+    // asserted rather than left to a comment.
+    const landmarks = {
+      paddock: SITE_LAYOUT.landmarks.farm,
+      square: SITE_LAYOUT.landmarks.village,
+    } as const;
+
+    (['paddock', 'square'] as const).forEach((name) => {
+      const { position, target } = SITE_LAYOUT.cameras[name];
+      const distance = Math.hypot(
+        position[0] - target[0],
+        position[1] - target[1],
+        position[2] - target[2]
+      );
+      expect(distance).toBeGreaterThan(8);
+      expect(distance).toBeLessThan(30);
+
+      // And aimed inside the landmark it is named for, not merely near it.
+      const anchor = landmarks[name];
+      expect(Math.abs(target[0] - anchor.position[0])).toBeLessThan(anchor.footprint[0] / 2);
+      expect(Math.abs(target[2] - anchor.position[2])).toBeLessThan(anchor.footprint[1] / 2);
+      expect(position[1]).toBeGreaterThan(target[1]);
+    });
+  });
+
   it('uses one declared water surface datum', () => {
     expect(SITE_LAYOUT.datum.waterBed).toBe(WATER_LAYERS.bed);
     expect(SITE_LAYOUT.datum.water).toBe(WATER_LAYERS.surface);

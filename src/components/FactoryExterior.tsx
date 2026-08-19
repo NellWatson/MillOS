@@ -9,6 +9,7 @@ import { HeartParticle } from './effects/HeartParticle';
 import { useModelTextures } from '../utils/machineTextures';
 import { useProductionStore } from '../stores/productionStore';
 import {
+  EXTERIOR_LAYERS,
   FLOOR_LAYERS,
   POLYGON_OFFSET,
   RENDER_ORDER,
@@ -94,6 +95,41 @@ const TARMAC_ROAD_ROUGHNESS = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacRoughn
 /** Large open pours - car parks, station forecourts. */
 const TARMAC_LOT_MAP = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacColor, 25, 25);
 const TARMAC_LOT_ROUGHNESS = cloneTiledTexture(PROCEDURAL_TEXTURES.tarmacRoughness, 25, 25);
+
+// ---------------------------------------------------------------------------
+// CANAL
+// ---------------------------------------------------------------------------
+// 434 m of untextured surface across the two canals - the largest genuinely
+// unfinished block left in this branch once shader-injected surfacing is
+// discounted, and the whole of the village district's waterfront. The tilings
+// are cut for the 220 x 12 m main canal at `[-145, 0, -5]`; the 70 x 8 m spur
+// at `[-145, 0, -110]` therefore reads about 3x coarser. That is the same
+// deliberate trade the dock openings make - one clone per surface class rather
+// than one per call site, because texture identity is part of the
+// `StaticMeshBatch` merge key - and the spur sits in the far parkland where no
+// review camera frames it.
+//
+// COLOUR SPACE: all three sources come through `createColorDataTexture`, so the
+// sampled albedo is already correct linear reflectance and each surface takes
+// `#ffffff`. The old `#7d6d5e` / `#5d6d7e` / `#2c3e50` hexes are gone rather
+// than kept as tints - keeping them would multiply the same hue twice, which is
+// the double-darkening CLAUDE.md records for the village cobbles.
+
+/** Towpath: 3 m wide x 220 m. Compacted gravel; ~3 m per tile. */
+const TOWPATH_MAP = cloneTiledTexture(PROCEDURAL_TEXTURES.mudColor, 1, 73);
+const TOWPATH_ROUGHNESS = cloneTiledTexture(PROCEDURAL_TEXTURES.mudRoughness, 1, 73);
+/** Canal walls: 1.5 m high x 220 m of coursed stone; ~2 m per tile. */
+const CANAL_WALL_MAP = cloneTiledTexture(PROCEDURAL_TEXTURES.concreteColor, 110, 1);
+const CANAL_WALL_ROUGHNESS = cloneTiledTexture(PROCEDURAL_TEXTURES.concreteRoughness, 110, 1);
+const CANAL_WALL_NORMAL = cloneTiledTexture(PROCEDURAL_TEXTURES.panelNormal, 110, 1);
+const CANAL_WALL_NORMAL_SCALE = new THREE.Vector2(0.25, 0.25);
+/**
+ * Canal bed: 12 x 220 m of silt, read through 0.9-opacity water and a 0.6
+ * depth wash. Tiled coarse (~6 m) on purpose - fine detail two attenuation
+ * layers down is a texture fetch nobody can see.
+ */
+const CANAL_BED_MAP = cloneTiledTexture(PROCEDURAL_TEXTURES.mudColor, 2, 37);
+const CANAL_BED_ROUGHNESS = cloneTiledTexture(PROCEDURAL_TEXTURES.mudRoughness, 2, 37);
 
 /** Coarse brick for the 6m Victorian tunnel portal. */
 const PORTAL_BRICK_MAP = cloneTiledTexture(PROCEDURAL_TEXTURES.brickColor, 2, 3);
@@ -221,8 +257,17 @@ const getGroundBlobMaterial = (): THREE.MeshBasicMaterial => {
   return groundBlobMaterial;
 };
 
-/** Y datum for contact blobs: just above `TerrainGround`'s 0.05 default. */
-const GROUND_BLOB_Y = 0.06;
+/**
+ * Y datum for contact blobs.
+ *
+ * Was 0.06, "just above TerrainGround's 0.05 default" - but that default was
+ * itself 7 cm off the site's declared ground datum and has been corrected to
+ * `SITE_LAYOUT.datum.terrain`. Left at 0.06 these decals would hang 8 cm in the
+ * air under every parked car. `groundOverlay` is the layer CLAUDE.md's
+ * decision tree already names for a marking on the exterior ground, and it sits
+ * 1 cm above both the terrain and the authored asphalt beneath it.
+ */
+const GROUND_BLOB_Y = EXTERIOR_LAYERS.groundOverlay;
 
 // ---------------------------------------------------------------------------
 // GRAVITY WEATHERING
@@ -1074,8 +1119,10 @@ const StillCanalWater: React.FC<{
   const safeWidth = Number.isFinite(width) && width > 0 ? width : 10;
   const safeLength = Number.isFinite(length) && length > 0 ? length : 10;
 
-  // Canal water must be well above TerrainGround (y=0.05) to avoid z-fighting
-  // Use 0.15 for clear separation
+  // KEPT AT 0.15. Not terrain clearance any more - the terrain datum is -0.02 -
+  // but the canal's own stack: the bed sits at `WATER_LAYERS.bed` and the
+  // towpath at `EXTERIOR_LAYERS.ground` a few lines below, and this surface has
+  // to read as water held between banks rather than a film lying on them.
   const waterY = 0.15;
 
   return (
@@ -1153,7 +1200,17 @@ const Canal: React.FC<{
     <group position={position} rotation={[0, rotation, 0]}>
       {/* Still shiny water surface for canal */}
       <StillCanalWater width={safeWidth - 1} length={safeLength} position={[0, -0.15, 0]} />
-      {/* Water depth effect */}
+      {/* Water depth effect.
+          UNLIT ON PURPOSE, and measured rather than assumed. This plane is the
+          largest single unlit surface in the app - 144 m of summed world size,
+          109.6 m on its longest instance - which put it on the pass-3 work list
+          as "unlit and untextured at 60 m, worth one look to confirm it is
+          signage and not something that should be shading". It is neither. It
+          is the dark water underneath a translucent canal surface, seen THROUGH
+          `StillCanalWater`: the tint it contributes is depth, and shading it
+          would make the canal bed respond to the sun as though it were dry
+          ground. The row is large only because `worldRadius` rewards length and
+          a canal is long. */}
       <mesh position={[0, -0.8, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[safeWidth - 1.5, safeLength - 1]} />
         <meshBasicMaterial color="#0a2a3a" transparent opacity={0.6} depthWrite={false} />
@@ -1161,23 +1218,51 @@ const Canal: React.FC<{
       {/* Left canal wall */}
       <mesh position={[-safeWidth / 2, 0.3, 0]} castShadow receiveShadow>
         <boxGeometry args={[1, 1.5, safeLength]} />
-        <meshStandardMaterial color="#5d6d7e" roughness={0.9} />
+        <meshStandardMaterial
+          color="#ffffff"
+          map={CANAL_WALL_MAP}
+          roughnessMap={CANAL_WALL_ROUGHNESS}
+          normalMap={CANAL_WALL_NORMAL}
+          normalScale={CANAL_WALL_NORMAL_SCALE}
+          roughness={0.9}
+        />
       </mesh>
       {/* Right canal wall */}
       <mesh position={[safeWidth / 2, 0.3, 0]} castShadow receiveShadow>
         <boxGeometry args={[1, 1.5, safeLength]} />
-        <meshStandardMaterial color="#5d6d7e" roughness={0.9} />
+        <meshStandardMaterial
+          color="#ffffff"
+          map={CANAL_WALL_MAP}
+          roughnessMap={CANAL_WALL_ROUGHNESS}
+          normalMap={CANAL_WALL_NORMAL}
+          normalScale={CANAL_WALL_NORMAL_SCALE}
+          roughness={0.9}
+        />
       </mesh>
       {/* Canal bed */}
       <mesh position={[0, -1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[safeWidth, safeLength]} />
-        <meshStandardMaterial color="#2c3e50" roughness={0.95} />
+        <meshStandardMaterial
+          color="#ffffff"
+          map={CANAL_BED_MAP}
+          roughnessMap={CANAL_BED_ROUGHNESS}
+          roughness={0.95}
+        />
       </mesh>
-      {/* Towpath along left side - raised above TerrainGround (y=0.05) to prevent z-fighting */}
-      <mesh position={[-safeWidth / 2 - 2, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      {/* Towpath along the left bank. Sits on the site's ground datum with the
+          `exteriorTop` offset holding it above the terrain, per CLAUDE.md's
+          exterior stack - it used to be lifted to 0.08 to clear
+          `TerrainGround`'s old 0.05 default, which now floats it 10 cm. */}
+      <mesh
+        position={[-safeWidth / 2 - 2, EXTERIOR_LAYERS.ground, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        receiveShadow
+      >
         <planeGeometry args={[3, safeLength]} />
         <meshStandardMaterial
-          color="#7d6d5e"
+          color="#ffffff"
+          map={TOWPATH_MAP}
+          roughnessMap={TOWPATH_ROUGHNESS}
           roughness={0.9}
           depthWrite={false}
           polygonOffset
@@ -1474,7 +1559,10 @@ const Lake: React.FC<{
       {/* The opaque water shader carries its own depth gradient. Keeping a
           second disc directly beneath its animated wave troughs caused the
           two surfaces to cross and flash dark triangles at dusk. */}
-      {/* Main water surface - must be above TerrainGround (y=0.05) */}
+      {/* Main water surface. KEPT AT 0.15 for the reason the note above gives:
+          the opaque water shader carries its own depth gradient and its wave
+          troughs cut below the surface, so this is set by what the waves do,
+          not by where the terrain is. */}
       <mesh
         position={[0, 0.15, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
@@ -1711,7 +1799,7 @@ const RiverTunnel: React.FC<{
         {/* Water staining below arch */}
         <mesh position={[0, tunnelHeight * 0.3, zDir * -0.7]} rotation={[-Math.PI / 2, 0, 0]}>
           <planeGeometry args={[width * 0.6, 0.3]} />
-          <meshBasicMaterial color="#3a4a42" transparent opacity={0.5} />
+          <meshStandardMaterial color="#3a4a42" transparent opacity={0.5} roughness={0.85} />
         </mesh>
         {/* Moss patches on stone */}
         <mesh position={[width / 2 + 0.8, 0.5, zDir * 1.2]} castShadow>
@@ -1761,12 +1849,24 @@ const River: React.FC<{
   // Generate river path points with natural meander
   const riverSegments = useMemo(() => {
     const segments: { x: number; z: number; w: number }[] = [];
-    const segmentCount = 12;
+    // 12 straight quads across a 280 m meander put each joint's outside corner
+    // well clear of the channel; at 40 the same wedge error is an order of
+    // magnitude smaller, because it scales with segment length times the sine of
+    // half the turn and both shrink together.
+    const segmentCount = 40;
     for (let i = 0; i <= segmentCount; i++) {
       const t = i / segmentCount;
       const x = -length / 2 + t * length;
       const z = Math.sin(t * Math.PI * 2.5) * meander;
-      const w = width + Math.sin(t * Math.PI * 3) * (width * 0.2);
+      // THE WATER MAY NEVER BE WIDER THAN ITS CHANNEL. This was
+      // `width + sin(...) * width * 0.2`, which peaks at 1.2x - a 24 m water
+      // surface laid in the 20 m cut `MILLOS_RIVER_CONFIG` gives the terrain,
+      // overhanging the bank by up to 2 m a side. On the `river` review camera
+      // that is a hard-edged pale rectangle of water lying on the grass, which
+      // is what "river tiles" looks like from the outside. The modulation is
+      // kept - a river should breathe - but it now runs 0.76x to 0.96x, so the
+      // widest the surface ever gets is comfortably inside its own banks.
+      const w = width * (0.86 + Math.sin(t * Math.PI * 3) * 0.1);
       segments.push({ x, z, w });
     }
     return segments;
@@ -1798,7 +1898,10 @@ const River: React.FC<{
             {/* Animated flowing water surface - deep in canyon (canyon is 12 units deep) */}
             <AnimatedRiverWater
               width={avgWidth}
-              length={segLength + 0.5}
+              // Was +0.5, which on a 23 m segment was invisible and on the
+              // 7 m segments the higher count produces is a visible tile
+              // overlap at every joint. 0.15 still closes the wedge.
+              length={segLength + 0.15}
               position={[0, -10, 0]}
               flowSpeed={1.2}
             />
@@ -2114,7 +2217,12 @@ const Pond: React.FC<{
   return (
     <group position={position}>
       {/* Surrounding grass - REMOVED: now handled by TerrainGround system */}
-      {/* Stone edge - raised above TerrainGround (y=0.05) */}
+      {/* Stone kerb. KEPT AT 0.08, and no longer as terrain clearance: the
+          terrain datum moved from 0.05 to -0.02, so this now stands 10 cm proud
+          of the bank, which is what a pond kerb should do. Dropping it to the
+          ground datum with the rest of the exterior stack would flatten a
+          deliberate silhouette AND open a 22 cm step down to the water below.
+          The offset is unchanged and still holds it clear of the terrain. */}
       {/* The two ponds are 21 m and 13 m across and both are read flat-on from
           the bank, where a 24-gon is 2.7 m of dead-straight stone kerb per
           facet - the one silhouette here that has nothing else to hide behind.
@@ -2132,11 +2240,14 @@ const Pond: React.FC<{
           polygonOffsetUnits={-2}
         />
       </mesh>
-      {/* Water surface - must be above TerrainGround (y=0.05).
-          The 0.12 depth disc that used to sit here was both invisible (opaque
-          surface of the same radius 0.03 above it) and actively harmful: the
-          wave displacement is +/-0.035, so troughs cut below 0.12 and flashed
-          it through. */}
+      {/* Water surface. KEPT AT 0.15, and independently justified rather than
+          terrain clearance: the wave displacement is +/-0.035, so the trough of
+          this surface reaches 0.115 and it has to clear the kerb at 0.08 by
+          more than that. The 0.12 depth disc that used to sit here was both
+          invisible (opaque surface of the same radius 0.03 above it) and
+          actively harmful, for the same reason - troughs cut below 0.12 and
+          flashed it through. `WATER_LAYERS.surface` is 0.08 and is what the
+          OPEN water on the site uses; a kerbed pond is not that case. */}
       <mesh
         position={[0, 0.15, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
@@ -2536,6 +2647,45 @@ const Caravan: React.FC<{
   );
 };
 
+/**
+ * A small asphalt hardstanding, for vehicles that would otherwise be parked on
+ * grass.
+ *
+ * Two sites needed one and neither had it: the taco truck at (135, 42) sits
+ * 5.5 m clear of the car park's east kerb, and the three `CuteCar`s beside the
+ * gas station stand in open field 15 m south of the forecourt apron. Both read
+ * exactly as what they are - vehicles abandoned in a meadow - on the `carpark`
+ * and `forecourt` review cameras.
+ *
+ * Follows CLAUDE.md's exterior stack rather than inventing a Y offset: the pad
+ * shares the site's ground datum with the terrain and separates from it by
+ * `polygonOffset` alone, at `exteriorMid` so it draws over the grass channel and
+ * under any road or marking laid on top of it. Reuses `TARMAC_LOT_MAP`, so it
+ * costs no new texture and matches the car park it is a satellite of.
+ */
+const Hardstanding: React.FC<{
+  position: [number, number, number];
+  size: [number, number];
+  rotation?: number;
+}> = ({ position, size, rotation = 0 }) => (
+  <mesh
+    position={[position[0], EXTERIOR_LAYERS.ground, position[2]]}
+    rotation={[-Math.PI / 2, 0, rotation]}
+    receiveShadow
+  >
+    <planeGeometry args={size} />
+    <meshStandardMaterial
+      color="#ffffff"
+      roughness={0.9}
+      map={TARMAC_LOT_MAP}
+      roughnessMap={TARMAC_LOT_ROUGHNESS}
+      polygonOffset
+      polygonOffsetFactor={POLYGON_OFFSET.exteriorMid.factor}
+      polygonOffsetUnits={POLYGON_OFFSET.exteriorMid.units}
+    />
+  </mesh>
+);
+
 // Cute food truck
 const FoodTruck: React.FC<{
   position: [number, number, number];
@@ -2841,12 +2991,19 @@ const GravelPath: React.FC<{
     cobble: '#d8cec2',
   };
 
-  // Paths must be ABOVE TerrainGround (y=0.05) to prevent z-fighting
-  const pathY = 0.08;
+  // On the site's ground datum, held above the terrain by polygonOffset alone -
+  // the exterior stack CLAUDE.md documents, and what the canal towpath above
+  // already does. The literal 0.08 this replaces was chosen to clear
+  // `TerrainGround`'s old 0.05 default; the terrain now renders at
+  // `SITE_LAYOUT.datum.terrain` (-0.02), which left the path floating 10 cm over
+  // ground that already paints a path under it.
+  const pathY = EXTERIOR_LAYERS.ground;
 
   return (
     <group position={[midX, pathY, midZ]} rotation={[0, -angle, 0]}>
-      {/* Path surface - raised above terrain with negative polygonOffset to push toward camera */}
+      {/* Path surface. The negative offset is now load-bearing rather than
+          belt-and-braces: it is the whole of the separation from the terrain's
+          `exteriorBase` +6. */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[safeWidth, safeLength]} />
         <meshStandardMaterial
@@ -2908,8 +3065,9 @@ const CurvedPath: React.FC<{
     paved: '#bfc6cb',
   };
 
-  // Paths must be ABOVE TerrainGround (y=0.05) to prevent z-fighting
-  const pathY = 0.08;
+  // Ground datum plus polygonOffset, as GravelPath above - the literal 0.08 was
+  // clearance for `TerrainGround`'s old 0.05 default and floats 10 cm now.
+  const pathY = EXTERIOR_LAYERS.ground;
 
   return (
     <group position={[position[0], pathY, position[2]]}>
@@ -3580,7 +3738,7 @@ const BusStop: React.FC<{
         </mesh>
         <mesh position={[0, 3.3, 0.035]}>
           <circleGeometry args={[0.28, 16]} />
-          <meshBasicMaterial color="#ffffff" />
+          <meshStandardMaterial color="#ffffff" roughness={0.85} />
         </mesh>
         <mesh position={[0, 2.9, 0.04]} castShadow>
           <boxGeometry args={[0.5, 0.25, 0.04]} />
@@ -3604,7 +3762,7 @@ const BusStop: React.FC<{
       </mesh>
       <mesh position={[0, 1.6, -shelterDepth / 2 + 0.05]}>
         <planeGeometry args={[0.5, 0.7]} />
-        <meshBasicMaterial color="#f5f5f5" />
+        <meshStandardMaterial color="#f5f5f5" roughness={0.85} />
       </mesh>
       <Text
         position={[0, 1.85, -shelterDepth / 2 + 0.06]}
@@ -4866,13 +5024,34 @@ const ParkingLot: React.FC<{
   const totalWidth = spotsPerRow * spotWidth;
   const totalDepth = rows * spotDepth + (rows > 1 ? aisleWidth : 0);
 
-  // Surface Y positions - must be ABOVE TerrainGround (y=0.05) to prevent z-fighting
-  const asphaltY = 0.08;
-  const markingsY = 0.09;
+  /**
+   * World Z of a row's centre line. ONE definition, used by the markings and by
+   * the cars, because they were two copies of the same expression and a copy is
+   * where they drift apart.
+   *
+   * The expression they shared was `row * (spotDepth + aisleWidth / 2) -
+   * totalDepth / 2 + spotDepth / 2`, which is wrong twice over: the pitch
+   * between two rows facing across an aisle is a full bay plus a full aisle
+   * (11 m), not a bay plus half an aisle (8 m), and the result was not centred
+   * in the slab it was drawn on - rows landed at -5.5 and 2.5 inside a lot
+   * spanning -8..8, so the whole bay block sat 3 m north of its own tarmac with
+   * a bald margin along the south edge. Both are visible on the `carpark`
+   * review camera.
+   */
+  const rowCentreZ = (row: number): number =>
+    row * (spotDepth + aisleWidth) - (totalDepth - spotDepth) / 2;
+
+  // The exterior stack from CLAUDE.md: lot and markings share the site's ground
+  // datum and separate by polygonOffset, the lot at -2 against the terrain's
+  // `exteriorBase` +6 and the markings at `exteriorOverlay` -4 above that. The
+  // literals these replace (0.08 / 0.09) were clearance for `TerrainGround`'s
+  // old 0.05 default and now float the whole lot 10 cm off the ground.
+  const asphaltY = EXTERIOR_LAYERS.ground;
+  const markingsY = EXTERIOR_LAYERS.groundOverlay;
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
-      {/* Asphalt surface - raised above terrain */}
+      {/* Asphalt surface, on the ground datum */}
       <mesh position={[0, asphaltY, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[totalWidth + 4, totalDepth + 4]} />
         <meshStandardMaterial
@@ -4888,14 +5067,7 @@ const ParkingLot: React.FC<{
 
       {/* Parking spot markings */}
       {Array.from({ length: rows }).map((_, row) => (
-        <group
-          key={`row-${row}`}
-          position={[
-            0,
-            markingsY,
-            row * (spotDepth + aisleWidth / 2) - totalDepth / 2 + spotDepth / 2,
-          ]}
-        >
+        <group key={`row-${row}`} position={[0, markingsY, rowCentreZ(row)]}>
           {/* Spot dividers */}
           {Array.from({ length: spotsPerRow + 1 }).map((_, spot) => (
             <mesh
@@ -4935,7 +5107,7 @@ const ParkingLot: React.FC<{
       {/* Parked cars */}
       {cars.map((car, i) => {
         const xPos = car.spot * spotWidth - totalWidth / 2 + spotWidth / 2;
-        const zPos = car.row * (spotDepth + aisleWidth / 2) - totalDepth / 2 + spotDepth / 2;
+        const zPos = rowCentreZ(car.row);
         // Slight random offset for natural look
         const xOffset = (((car.spot * 7) % 5) - 2) * 0.1;
         const zOffset = (((car.row * 11 + car.spot) % 5) - 2) * 0.15;
@@ -4945,6 +5117,20 @@ const ParkingLot: React.FC<{
           <CuteCar
             key={`car-${i}`}
             position={[xPos + xOffset, 0, zPos + zOffset]}
+            // A bay is `spotWidth` (3.5 m) across in X and `spotDepth` (5 m)
+            // deep in Z: the dividers are the SHORT ticks running along Z and
+            // the long line across each row is its front edge. `CuteCar` is
+            // modelled length-along-local-X, so a quarter turn is exactly what
+            // puts its length down the bay - this is right and was right before.
+            //
+            // It did not look right, and the reason was not the cars. A 5 m
+            // carriageway ran straight through the lot at the same ground datum
+            // (see the ConnectingRoad note at the call site) and the two rows
+            // were pitched 8 m apart instead of 11 and sat 3 m off-centre on
+            // their own tarmac. With those two fixed the cars sit in their bays.
+            // Recorded because a quarter turn was removed here on the strength
+            // of a frame that was showing a different fault, and putting it back
+            // cost a build and a capture.
             rotation={Math.PI / 2 + rotOffset}
             color={car.color}
             style={car.style}
@@ -5023,8 +5209,11 @@ const TunnelEntrance: React.FC<{
   return (
     <group position={position} rotation={[0, rotation, 0]}>
       {/* ===== TUNNEL INTERIOR ===== */}
-      {/* Road surface inside tunnel - raised to prevent z-fighting with terrain */}
-      <mesh position={[0, 0.15, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      {/* Road surface inside the tunnel. Ground datum with its own -2 offset,
+          matching the `ConnectingRoad` carriageway it continues; the 0.15 it
+          replaces was clearance for `TerrainGround`'s old 0.05 default and left
+          a 17 cm step where the open road met the portal. */}
+      <mesh position={[0, EXTERIOR_LAYERS.ground, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[tunnelWidth - 1, length + 2]} />
         <meshStandardMaterial
           // Hue-preserving lift, not a reset to white: this is damp tarmac
@@ -5263,13 +5452,20 @@ const ConnectingRoad: React.FC<{
   const midX = (start[0] + end[0]) / 2;
   const midZ = (start[2] + end[2]) / 2;
 
-  // Roads must be ABOVE TerrainGround (y=0.05) to prevent z-fighting
-  const roadY = 0.08;
-  const linesY = 0.09;
+  // Ground datum for the carriageway, ground-overlay datum for the paint, with
+  // the existing negative offsets (-2 road, -3 lines) doing the separating
+  // against the terrain's `exteriorBase` +6. The literals these replace
+  // (0.08 / 0.09) cleared `TerrainGround`'s old 0.05 default, so the road has
+  // been standing 10 cm proud of the road the terrain splat paints beneath it.
+  //
+  // `CheckpointBarrier` draws its stop lines onto this carriageway and had to
+  // move with it - the two are one surface, in two components.
+  const roadY = EXTERIOR_LAYERS.ground;
+  const linesY = EXTERIOR_LAYERS.groundOverlay;
 
   return (
     <group>
-      {/* Road surface - raised above terrain */}
+      {/* Road surface, on the ground datum */}
       <mesh position={[midX, roadY, midZ]} rotation={[-Math.PI / 2, 0, angle]} receiveShadow>
         <planeGeometry args={[width, length]} />
         <meshStandardMaterial
@@ -5641,33 +5837,40 @@ const CheckpointBarrier: React.FC<{
         </group>
       </group>
 
-      {/* Stop lines on road surface - raised above TerrainGround (y=0.05) */}
+      {/* Stop lines painted onto `ConnectingRoad`'s carriageway. They take the
+          ground-overlay datum because the road they mark took the ground datum:
+          the old literals (0.09 here, 0.08 there) were a matched pair of
+          clearances for `TerrainGround`'s vanished 0.05 default, and moving one
+          without the other would have left the paint hanging 10 cm over its
+          own road. -3 keeps them in front of the carriageway's -2. */}
       <mesh
-        position={[0, 0.09, 5]}
+        position={[0, EXTERIOR_LAYERS.groundOverlay, 5]}
         rotation={[-Math.PI / 2, 0, 0]}
         renderOrder={RENDER_ORDER.floorMarkings}
       >
         <planeGeometry args={[roadWidth, 0.5]} />
-        <meshBasicMaterial
+        <meshStandardMaterial
           color="#ffffff"
           depthWrite={false}
           polygonOffset
           polygonOffsetFactor={-3}
           polygonOffsetUnits={-3}
+          roughness={0.85}
         />
       </mesh>
       <mesh
-        position={[0, 0.09, -5]}
+        position={[0, EXTERIOR_LAYERS.groundOverlay, -5]}
         rotation={[-Math.PI / 2, 0, 0]}
         renderOrder={RENDER_ORDER.floorMarkings}
       >
         <planeGeometry args={[roadWidth, 0.5]} />
-        <meshBasicMaterial
+        <meshStandardMaterial
           color="#ffffff"
           depthWrite={false}
           polygonOffset
           polygonOffsetFactor={-3}
           polygonOffsetUnits={-3}
+          roughness={0.85}
         />
       </mesh>
 
@@ -6478,19 +6681,29 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                   </mesh>
                   <mesh position={[-0.7, doorHeight * 0.65, 0.2]}>
                     <boxGeometry args={[0.6, 0.8, 0.02]} />
-                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                    <meshStandardMaterial
+                      color="#1e3a5f"
+                      transparent
+                      opacity={0.7}
+                      roughness={0.1}
+                    />
                   </mesh>
                   <mesh position={[0.7, doorHeight * 0.65, 0.2]}>
                     <boxGeometry args={[0.6, 0.8, 0.02]} />
-                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                    <meshStandardMaterial
+                      color="#1e3a5f"
+                      transparent
+                      opacity={0.7}
+                      roughness={0.1}
+                    />
                   </mesh>
                   <mesh position={[-0.7, doorHeight * 0.4, 0.2]}>
                     <boxGeometry args={[0.8, 0.08, 0.05]} />
-                    <meshBasicMaterial color="#fbbf24" />
+                    <meshStandardMaterial color="#fbbf24" roughness={0.85} />
                   </mesh>
                   <mesh position={[0.7, doorHeight * 0.4, 0.2]}>
                     <boxGeometry args={[0.8, 0.08, 0.05]} />
-                    <meshBasicMaterial color="#fbbf24" />
+                    <meshStandardMaterial color="#fbbf24" roughness={0.85} />
                   </mesh>
                   <mesh position={[0, doorHeight + 0.4, 0.1]}>
                     <boxGeometry args={[1.5, 0.4, 0.08]} />
@@ -6528,19 +6741,29 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                   </mesh>
                   <mesh position={[-0.7, doorHeight * 0.65, 0.2]}>
                     <boxGeometry args={[0.6, 0.8, 0.02]} />
-                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                    <meshStandardMaterial
+                      color="#1e3a5f"
+                      transparent
+                      opacity={0.7}
+                      roughness={0.1}
+                    />
                   </mesh>
                   <mesh position={[0.7, doorHeight * 0.65, 0.2]}>
                     <boxGeometry args={[0.6, 0.8, 0.02]} />
-                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                    <meshStandardMaterial
+                      color="#1e3a5f"
+                      transparent
+                      opacity={0.7}
+                      roughness={0.1}
+                    />
                   </mesh>
                   <mesh position={[-0.7, doorHeight * 0.4, 0.2]}>
                     <boxGeometry args={[0.8, 0.08, 0.05]} />
-                    <meshBasicMaterial color="#fbbf24" />
+                    <meshStandardMaterial color="#fbbf24" roughness={0.85} />
                   </mesh>
                   <mesh position={[0.7, doorHeight * 0.4, 0.2]}>
                     <boxGeometry args={[0.8, 0.08, 0.05]} />
-                    <meshBasicMaterial color="#fbbf24" />
+                    <meshStandardMaterial color="#fbbf24" roughness={0.85} />
                   </mesh>
                   <mesh position={[0, doorHeight + 0.4, 0.1]}>
                     <boxGeometry args={[1.5, 0.4, 0.08]} />
@@ -6645,19 +6868,29 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                   </mesh>
                   <mesh position={[-0.7, doorHeight * 0.65, 0.2]}>
                     <boxGeometry args={[0.6, 0.8, 0.02]} />
-                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                    <meshStandardMaterial
+                      color="#1e3a5f"
+                      transparent
+                      opacity={0.7}
+                      roughness={0.1}
+                    />
                   </mesh>
                   <mesh position={[0.7, doorHeight * 0.65, 0.2]}>
                     <boxGeometry args={[0.6, 0.8, 0.02]} />
-                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                    <meshStandardMaterial
+                      color="#1e3a5f"
+                      transparent
+                      opacity={0.7}
+                      roughness={0.1}
+                    />
                   </mesh>
                   <mesh position={[-0.7, doorHeight * 0.4, 0.2]}>
                     <boxGeometry args={[0.8, 0.08, 0.05]} />
-                    <meshBasicMaterial color="#fbbf24" />
+                    <meshStandardMaterial color="#fbbf24" roughness={0.85} />
                   </mesh>
                   <mesh position={[0.7, doorHeight * 0.4, 0.2]}>
                     <boxGeometry args={[0.8, 0.08, 0.05]} />
-                    <meshBasicMaterial color="#fbbf24" />
+                    <meshStandardMaterial color="#fbbf24" roughness={0.85} />
                   </mesh>
                   <mesh position={[0, doorHeight + 0.4, 0.1]}>
                     <boxGeometry args={[1.5, 0.4, 0.08]} />
@@ -6695,19 +6928,29 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
                   </mesh>
                   <mesh position={[-0.7, doorHeight * 0.65, 0.2]}>
                     <boxGeometry args={[0.6, 0.8, 0.02]} />
-                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                    <meshStandardMaterial
+                      color="#1e3a5f"
+                      transparent
+                      opacity={0.7}
+                      roughness={0.1}
+                    />
                   </mesh>
                   <mesh position={[0.7, doorHeight * 0.65, 0.2]}>
                     <boxGeometry args={[0.6, 0.8, 0.02]} />
-                    <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+                    <meshStandardMaterial
+                      color="#1e3a5f"
+                      transparent
+                      opacity={0.7}
+                      roughness={0.1}
+                    />
                   </mesh>
                   <mesh position={[-0.7, doorHeight * 0.4, 0.2]}>
                     <boxGeometry args={[0.8, 0.08, 0.05]} />
-                    <meshBasicMaterial color="#fbbf24" />
+                    <meshStandardMaterial color="#fbbf24" roughness={0.85} />
                   </mesh>
                   <mesh position={[0.7, doorHeight * 0.4, 0.2]}>
                     <boxGeometry args={[0.8, 0.08, 0.05]} />
-                    <meshBasicMaterial color="#fbbf24" />
+                    <meshStandardMaterial color="#fbbf24" roughness={0.85} />
                   </mesh>
                   <mesh position={[0, doorHeight + 0.4, 0.1]}>
                     <boxGeometry args={[1.5, 0.4, 0.08]} />
@@ -6966,14 +7209,24 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
 
         {/* Trees and benches now rendered via instanced components */}
 
-        {/* Small path - raised to y=0.15 to prevent z-fighting with grass and other surfaces */}
-        <mesh position={[0, 0.15, -12]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        {/* Parkland path. Ground datum with `exteriorTop`, per the block comment
+            on the grass disc above: the 0.15 it replaces was authored against
+            `TerrainGround`'s old 0.05 default and stood 17 cm over grass the
+            terrain splat already paints. */}
+        <mesh
+          position={[0, EXTERIOR_LAYERS.ground, -12]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          receiveShadow
+        >
           <planeGeometry args={[3, 8]} />
           <meshStandardMaterial
             color="#c9ced2"
             roughness={0.85}
             map={TARMAC_PATH_MAP}
             roughnessMap={TARMAC_PATH_ROUGHNESS}
+            polygonOffset
+            polygonOffsetFactor={POLYGON_OFFSET.exteriorTop.factor}
+            polygonOffsetUnits={POLYGON_OFFSET.exteriorTop.units}
           />
         </mesh>
       </group>
@@ -7107,13 +7360,28 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
       {/* Connecting road from tunnel exit to parking lot */}
       <ConnectingRoad start={[147, 0, 50]} end={[135, 0, 50]} width={6} />
 
-      {/* Road from parking lot towards factory gate */}
-      <ConnectingRoad start={[120, 0, 35]} end={[120, 0, 70]} width={5} />
+      {/* Road from parking lot towards factory gate.
+          IT MUST STOP AT THE LOT, NOT CROSS IT. This ran (120,35) -> (120,70),
+          which is a 5 m carriageway with a dashed centre line laid straight
+          through the middle of `ParkingLot` at (120, 0, 50) - the lot spans
+          x 107.5..132.5 and z 40..60, and both surfaces sit on
+          `EXTERIOR_LAYERS.ground`, so the road drew over the bay markings at
+          the same datum. On the `carpark` review camera that reads as cars
+          parked across their lines with a yellow dash running through the
+          middle of the lot, which is exactly what it is. Measured rather than
+          eyeballed: the live scene reported two coplanar slabs at y -0.02
+          centred (120, 50) and (120, 52.5) with bounding radii 16.01 and 17.68,
+          and 17.68 is sqrt(2.5^2 + 17.5^2) - the road, to the centimetre.
+          Now two stubs that meet the lot's south and north kerbs. */}
+      <ConnectingRoad start={[120, 0, 28]} end={[120, 0, 39.5]} width={5} />
+      <ConnectingRoad start={[120, 0, 60.5]} end={[120, 0, 70]} width={5} />
 
       {/* Road connecting parking area to front entrance gate */}
       <ConnectingRoad start={[105, 0, 85]} end={[120, 0, 70]} width={5} />
 
-      {/* A few extra parked cars near the gas station for variety */}
+      {/* A few extra parked cars near the gas station for variety, on a layby
+          rather than in the field they were standing in. */}
+      <Hardstanding position={[-70, 0, 125.5]} size={[17, 7]} />
       <CuteCar
         position={[-75, 0, 125]}
         rotation={Math.PI * 0.9}
@@ -7185,7 +7453,7 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
         {/* Warning sign */}
         <mesh position={[2.55, 2, 0]} rotation={[0, Math.PI / 2, 0]}>
           <planeGeometry args={[1, 1]} />
-          <meshBasicMaterial color="#ffc107" />
+          <meshStandardMaterial color="#ffc107" roughness={0.85} />
         </mesh>
         <Text
           position={[2.6, 2, 0]}
@@ -7246,7 +7514,9 @@ export const FactoryExterior: React.FC<FactoryExteriorProps> = ({ showFactoryShe
       {/* Lake in front-right area - scenic water feature */}
       <Lake position={[120, 0, 120]} size={[40, 30]} depth={0.5} />
 
-      {/* Food truck (taco truck) parked next to the parking lot */}
+      {/* Food truck (taco truck) parked next to the parking lot, on its own
+          apron - it spans x 132..138 and the lot's tarmac ends at 132.5. */}
+      <Hardstanding position={[135.5, 0, 42]} size={[9, 6.5]} />
       <FoodTruck position={[135, 0, 42]} rotation={Math.PI / 2} color="#ff6b6b" name="TACOS" />
 
       {/* Brick carport shelter next to taco truck - outdoor eating area */}

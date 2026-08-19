@@ -874,20 +874,42 @@ export const GasStation = React.memo<GasStationProps>(
           <mesh position={[0, 4, 0]} geometry={GEOMETRIES.signPole} castShadow>
             <meshStandardMaterial color="#757575" roughness={0.5} metalness={0.3} />
           </mesh>
-          {/* Sign background - orange for fun retro gas station vibe */}
+          {/* Sign cabinet.
+              THE FIELD AND THE FRAME WERE THE WRONG WAY ROUND. The orange was
+              the 4 x 5 carcass and the cream was a 3.7 x 4.7 panel laid over
+              it, which leaves 150 mm of orange showing as a rim: the comment
+              said "orange for fun retro gas station vibe" and the sign rendered
+              as a white board with a thin red edge. Swapped, so the large area
+              is the brand colour and the cream is a 150 mm keyline.
+
+              It also fixes a second fault that is not about layout. These are
+              inline materials inside `FactoryExterior`'s batch root, so they
+              take their finish from `resolveBatchSurfaceProfile`, which is
+              blind to colour by construction and can only answer `masonry` or
+              `painted`. `painted`'s macro and meso terms are authored for
+              cladding and read as grey cloud on a 3.7 x 4.7 m flat panel - on
+              the `forecourt` review camera the sign face was visibly grubby.
+              A saturated field carries that modulation as honest weathering
+              instead of as dirt on white. The real lever - letting a call site
+              name the profile a BATCHED material should take, so this could ask
+              for `signage` - does not exist yet; this is the third site to want
+              it (see the thatch note in `utils/worldSurface.ts` and the
+              outbuilding roofs in the `masonry` profile). */}
           <mesh position={[0, 7.2, 0]} castShadow>
             <boxGeometry args={[4, 5, 0.3]} />
-            <meshStandardMaterial color="#e65100" roughness={0.5} />
+            <meshStandardMaterial color="#fff3e0" roughness={0.5} />
           </mesh>
-          {/* Sign border - front */}
+          {/* Brand field - front. Lifted from #e65100: that decodes to a deep
+              rust which, once the batcher's `painted` mottling is on it, read as
+              a weathered brown board rather than a forecourt sign. */}
           <mesh position={[0, 7.2, 0.16]}>
             <boxGeometry args={[3.7, 4.7, 0.02]} />
-            <meshStandardMaterial color="#fff3e0" roughness={0.5} />
+            <meshStandardMaterial color="#f57c1f" roughness={0.5} />
           </mesh>
-          {/* Sign border - back */}
+          {/* Brand field - back */}
           <mesh position={[0, 7.2, -0.16]}>
             <boxGeometry args={[3.7, 4.7, 0.02]} />
-            <meshStandardMaterial color="#fff3e0" roughness={0.5} />
+            <meshStandardMaterial color="#f57c1f" roughness={0.5} />
           </mesh>
 
           {/* Cute Dead Dino Logo - FRONT */}
@@ -897,11 +919,18 @@ export const GasStation = React.memo<GasStationProps>(
               <sphereGeometry args={[0.7, 16, 12]} />
               <meshStandardMaterial color="#4caf50" roughness={0.6} />
             </mesh>
-            {/* Dino belly */}
-            <mesh position={[0, -0.1, 0.3]}>
-              <sphereGeometry args={[0.45, 12, 10]} />
-              <meshStandardMaterial color="#a5d6a7" roughness={0.6} />
-            </mesh>
+            {/* NO BELLY SPHERE, deliberately.
+                A 0.45 m pale sphere at z +0.3 - straight at the reader - punched
+                a light disc through the middle of the logo; moving it to the
+                flank at z 0 only made the disc smaller, because a lighter sphere
+                nested inside a darker one of similar radius protrudes wherever
+                the outer one is thinnest. On a PYLON SIGN read at 20-60 m the
+                logo has to work as a silhouette, and an internal highlight is
+                the one thing that cannot. Both captures are in
+                test-results/art-review/defects{,-final}/sign-zoom.png. The
+                cuteness lives in the X eyes, the tongue and the stubby limbs,
+                all of which survive at distance because they break the outline
+                rather than sitting inside it. */}
             {/* Dino head */}
             <mesh position={[0.5, 0.5, 0]} castShadow>
               <sphereGeometry args={[0.45, 14, 12]} />
@@ -971,18 +1000,19 @@ export const GasStation = React.memo<GasStationProps>(
             ))}
           </group>
 
-          {/* Cute Dead Dino Logo - BACK (mirrored) */}
+          {/* Cute Dead Dino Logo - BACK (mirrored).
+              THE SIGN HAS TWO OF EVERYTHING, which is worth stating because it
+              cost a build to learn: the `forecourt` review camera stands north
+              of the forecourt looking south, so what it frames is this face, not
+              the front one. A fix applied to the FRONT logo alone changes
+              nothing in that capture and looks like the fix failed. */}
           <group position={[0, 7.8, -0.25]} rotation={[0, Math.PI, 0]}>
             {/* Dino body - chubby oval */}
             <mesh position={[0, 0, 0]} castShadow>
               <sphereGeometry args={[0.7, 16, 12]} />
               <meshStandardMaterial color="#4caf50" roughness={0.6} />
             </mesh>
-            {/* Dino belly */}
-            <mesh position={[0, -0.1, 0.3]}>
-              <sphereGeometry args={[0.45, 12, 10]} />
-              <meshStandardMaterial color="#a5d6a7" roughness={0.6} />
-            </mesh>
+            {/* No belly sphere - see the front logo for why. */}
             {/* Dino head */}
             <mesh position={[0.5, 0.5, 0]} castShadow>
               <sphereGeometry args={[0.45, 14, 12]} />
@@ -1078,7 +1108,10 @@ export const GasStation = React.memo<GasStationProps>(
           <Text
             position={[0, 5.35, 0.2]}
             fontSize={0.22}
-            color="#5d4037"
+            // Cream, not the old #5d4037 brown: the field under this text is now
+            // the brand orange, and dark brown on #e65100 was the least legible
+            // thing on the sign at the 20-60 m this pylon is read from.
+            color="#fff3e0"
             anchorX="center"
             anchorY="middle"
           >
@@ -1114,7 +1147,10 @@ export const GasStation = React.memo<GasStationProps>(
             position={[0, 5.35, -0.2]}
             rotation={[0, Math.PI, 0]}
             fontSize={0.22}
-            color="#5d4037"
+            // Cream, not the old #5d4037 brown: the field under this text is now
+            // the brand orange, and dark brown on #e65100 was the least legible
+            // thing on the sign at the 20-60 m this pylon is read from.
+            color="#fff3e0"
             anchorX="center"
             anchorY="middle"
           >

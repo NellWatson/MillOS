@@ -1,8 +1,11 @@
 import { spawn } from 'node:child_process';
+import { cpus, loadavg } from 'node:os';
 import { mkdir, access, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { chromium } from '@playwright/test';
+import { acquireCaptureLock } from './lib/capture-lock.mjs';
+import { classifyDiagnostics } from './lib/diagnostics.mjs';
 
 const ROOT = process.cwd();
 const DEFAULT_OUTPUT = path.join(ROOT, 'test-results', 'runtime-benchmarks');
@@ -15,6 +18,8 @@ const PERF_SYSTEMS = {
   machines: 'disableMachines',
   environment: 'disableEnvironment',
   terrain: 'disableTerrain',
+  lights: 'disablePunctualLights',
+  surfaces: 'disableSurfaceTreatment',
 };
 const NETWORK_PROFILES = {
   native: null,
@@ -135,7 +140,54 @@ const budgets = {
   maximumLongTaskMs: 100,
 };
 
+
 let previewProcess = null;
+let captureLock = null;
+
+/**
+ * Load per core above which frame timings stop describing the scene.
+ *
+ * Calibrated against two measured runs of the same commit rather than picked:
+ *
+ * | load / core | overview | water        |
+ * |-------------|----------|--------------|
+ * | 6.38        | 63.7 FPS | 48.5 FPS FAIL|
+ * | 1.23-1.66   | 99.8 FPS | 74.5 FPS PASS|
+ *
+ * A developer machine with an editor, browsers and a few agents sits around
+ * 1.2-1.7 per core and measures perfectly well, so the obvious threshold of 1.0
+ * fires on every healthy run - and a warning that always fires is one nobody
+ * reads, which is the same failure this harness's diagnostics gate exists to
+ * prevent. 3.0 sits clear of the healthy band with margin and still catches the
+ * 6.4 case by a wide margin.
+ */
+const CONTENDED_LOAD_PER_CORE = 3;
+
+/**
+ * What else the machine was doing, recorded next to every frame timing.
+ *
+ * `.capture.lock` serialises renderers against each other, but it cannot stop a
+ * backup, a VM, or another repo's test suite from taking the CPU. A run taken at
+ * load average 63 on a 10-core box reported every scene roughly 20 FPS slower
+ * than the same commit did on a quiet machine, and one scene failed its budget
+ * purely from that. Without this field, the next reader sees only the FAIL and
+ * goes looking for a regression that is not there.
+ *
+ * Reported, never enforced: the honest response to a loaded machine is to re-run
+ * later, not to relax a budget.
+ */
+function machineLoad() {
+  const cores = cpus().length || 1;
+  const [oneMinute, fiveMinute] = loadavg();
+  return {
+    cores,
+    loadAverage1m: Number(oneMinute.toFixed(2)),
+    loadAverage5m: Number(fiveMinute.toFixed(2)),
+    loadPerCore: Number((oneMinute / cores).toFixed(2)),
+    contendedThreshold: CONTENDED_LOAD_PER_CORE,
+    contended: oneMinute / cores > CONTENDED_LOAD_PER_CORE,
+  };
+}
 
 async function waitForServer(url, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
@@ -208,9 +260,10 @@ async function stopPreview() {
   });
 }
 
-function evaluateBudgets(snapshot) {
+function evaluateBudgets(snapshot, diagnostics) {
   const longestTask = Math.max(0, ...snapshot.longTasks.map((task) => task.duration));
   const enforceWorldIntegrity = options.disabledSystems.length === 0;
+  const triage = classifyDiagnostics(diagnostics);
   const checks = {
     firstFrame: snapshot.firstFrameAt !== null && snapshot.firstFrameAt <= budgets.firstFrameMs,
     averageFps: snapshot.averageFps >= budgets.averageFps,
@@ -218,23 +271,30 @@ function evaluateBudgets(snapshot) {
     effectiveDpr: snapshot.canvas.effectiveDpr >= budgets.effectiveDpr,
     longTasks: longestTask <= budgets.maximumLongTaskMs,
     worldIntegrity: !enforceWorldIntegrity || snapshot.worldIntegrity?.passed === true,
+    // A subsystem that threw during construction can leave frame pacing looking
+    // healthy precisely because the work it should have been doing never ran.
+    pageClean: triage.actionable.length === 0,
   };
   return {
     checks,
     passed: Object.values(checks).every(Boolean),
     longestTask,
+    diagnosticTriage: triage,
   };
 }
 
-function evaluateStartupBudget(snapshot) {
+function evaluateStartupBudget(snapshot, diagnostics) {
+  const triage = classifyDiagnostics(diagnostics);
   const checks = {
     firstFrame: snapshot.firstFrameAt !== null && snapshot.firstFrameAt <= budgets.firstFrameMs,
     effectiveDpr: snapshot.canvas.effectiveDpr >= budgets.effectiveDpr,
+    pageClean: triage.actionable.length === 0,
   };
   return {
     checks,
     passed: Object.values(checks).every(Boolean),
     longestTask: Math.max(0, ...snapshot.longTasks.map((task) => task.duration)),
+    diagnosticTriage: triage,
   };
 }
 
@@ -504,7 +564,11 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
       wallClockMs: Math.round(performance.now() - startedAt),
       snapshot,
       domStacks: null,
-      budget: evaluateStartupBudget(snapshot),
+      budget: evaluateStartupBudget(snapshot, { consoleErrors, pageErrors, failedRequests }),
+      // Recorded on both paths: first-frame latency is if anything more
+      // load-sensitive than steady-state pacing, since it is dominated by
+      // single-threaded parse, compile and bake work.
+      load: machineLoad(),
       diagnostics: {
         consoleErrors,
         pageErrors,
@@ -620,7 +684,8 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
     .catch((error) => {
       screenshotError = error instanceof Error ? error.message : String(error);
     });
-  const budget = evaluateBudgets(snapshot);
+  const budget = evaluateBudgets(snapshot, { consoleErrors, pageErrors, failedRequests });
+  const load = machineLoad();
   const result = {
     scene,
     variant,
@@ -630,6 +695,7 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
     snapshot,
     domStacks,
     budget,
+    load,
     diagnostics: {
       consoleErrors,
       pageErrors,
@@ -656,6 +722,10 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
 
 async function main() {
   await mkdir(options.output, { recursive: true });
+  // Serialise against every other renderer on this machine. Concurrent GPU work
+  // does not fail the run, it halves the frame rate, and the report then
+  // measures the other process rather than the scene.
+  captureLock = await acquireCaptureLock(`benchmark:${options.scenes.join('+')}`, { root: ROOT });
   const baseUrl = options.baseUrl || (await startPreview());
   const browser = await chromium.launch({
     headless: !options.headed,
@@ -692,6 +762,8 @@ async function main() {
   } finally {
     await browser.close();
     await stopPreview();
+    await captureLock?.release();
+    captureLock = null;
   }
 
   const scadaComparisons = options.compareScada
@@ -761,6 +833,23 @@ async function main() {
         `${result.scene}${options.compareScada ? ` (${result.variant})` : ''}: ${metric.averageFps.toFixed(1)} FPS, p95 ${metric.p95FrameMs.toFixed(1)} ms, ${metric.renderer.calls} calls, DPR ${metric.canvas.effectiveDpr.toFixed(2)}, world ${metric.worldIntegrity?.passed ? 'continuous' : options.disabledSystems.length > 0 ? 'isolated' : 'BROKEN'}, ${result.budget.passed ? 'PASS' : 'FAIL'}`
       );
     }
+    // Print the page's own complaints. A `pageClean` failure with no visible
+    // reason sends the next reader to the frame timings, which is the wrong
+    // half of the report.
+    if (result.load?.contended) {
+      console.warn(
+        `  ${result.scene}: machine load ${result.load.loadAverage1m} across ${result.load.cores} cores ` +
+          `(${result.load.loadPerCore} per core). Frame timings from this run measure contention as ` +
+          'much as the scene; re-run on a quiet machine before treating them as a verdict.'
+      );
+    }
+    const actionable = result.budget.diagnosticTriage?.actionable ?? [];
+    for (const entry of actionable.slice(0, 5)) {
+      console.log(`  ${result.scene} diagnostic: ${entry}`);
+    }
+    if (actionable.length > 5) {
+      console.log(`  ${result.scene} diagnostic: +${actionable.length - 5} more, see benchmark.json`);
+    }
   }
   for (const comparison of scadaComparisons) {
     console.log(
@@ -774,6 +863,7 @@ async function main() {
 
 main().catch(async (error) => {
   await stopPreview();
+  await captureLock?.release();
   console.error(error instanceof Error ? error.stack : String(error));
   process.exitCode = 1;
 });

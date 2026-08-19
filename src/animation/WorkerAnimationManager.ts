@@ -143,6 +143,22 @@ export class WorkerAnimationManager {
   // Fire drill state (injected from store)
   private emergencyDrillMode = false;
   private safetyHoldActive = false;
+  /**
+   * True only while a personnel art-review scene is being captured.
+   *
+   * See `src/runtime/personnelReview.ts`. The short version: the patrol line
+   * runs at x = +/-10 and the silos are 4.5 m wide on x = -18, -9, 0, 9, 18, so
+   * a walking worker passes THROUGH a silo twice a lap, and a review camera
+   * that follows them there photographs the inside of a cone. Holding the
+   * roster on its spawn marks keeps every authored personnel framing clear and
+   * makes the frame reproducible run to run.
+   *
+   * A HOLD, NOT A FREEZE. Movement is suppressed and nothing else is: the
+   * mixer, the secondary signals, blinking and breathing all keep running, so
+   * what the reviewer grades is a living figure standing still rather than a
+   * mannequin.
+   */
+  private reviewHoldActive = false;
   private getNearestExitFn: ((x: number, z: number) => FireDrillExit) | null = null;
   private markWorkerEvacuatedFn: ((id: string) => void) | null = null;
 
@@ -245,7 +261,8 @@ export class WorkerAnimationManager {
     emergencyDrillMode: boolean,
     safetyHoldActive: boolean,
     getNearestExit: (x: number, z: number) => FireDrillExit,
-    markWorkerEvacuated: (id: string) => void
+    markWorkerEvacuated: (id: string) => void,
+    reviewHoldActive = false
   ): void {
     this.isTabVisible = isTabVisible;
 
@@ -260,6 +277,7 @@ export class WorkerAnimationManager {
     this.safetyHoldActive = safetyHoldActive;
     this.getNearestExitFn = getNearestExit;
     this.markWorkerEvacuatedFn = markWorkerEvacuated;
+    this.reviewHoldActive = reviewHoldActive;
   }
 
   /**
@@ -373,7 +391,7 @@ export class WorkerAnimationManager {
       return;
     }
 
-    if (this.safetyHoldActive) {
+    if (this.safetyHoldActive || this.reviewHoldActive) {
       this.setAnimationState(data, 'idle');
       group.position.y = 0;
       data.isEvading = false;
@@ -1160,7 +1178,8 @@ export function useWorkerAnimationManager(
   emergencyDrillMode: boolean,
   safetyHoldActive: boolean,
   getNearestExit: (x: number, z: number) => FireDrillExit,
-  markWorkerEvacuated: (id: string) => void
+  markWorkerEvacuated: (id: string) => void,
+  reviewHoldActive = false
 ) {
   const managerRef = useRef<WorkerAnimationManager | null>(null);
 
@@ -1180,7 +1199,8 @@ export function useWorkerAnimationManager(
     emergencyDrillMode,
     safetyHoldActive,
     getNearestExit,
-    markWorkerEvacuated
+    markWorkerEvacuated,
+    reviewHoldActive
   );
 
   // Reset evacuation when drill ends (side effect runs at commit, not render)

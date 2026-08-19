@@ -12,6 +12,11 @@ import { useIncidentReplayStore } from '../stores/incidentReplayStore';
 import { useTruckScheduleStore } from '../stores/truckScheduleStore';
 import { useAnnouncementsStore } from '../stores/announcementsStore';
 import { getRuntimeMode, type BenchmarkScene, type RuntimeMode } from '../runtime/runtimeMode';
+import {
+  PERSONNEL_FOLLOW,
+  findPersonnelSubject,
+  resolvePersonnelFollowPose,
+} from '../runtime/personnelReview';
 import { SITE_LAYOUT, type Vec3Tuple } from '../constants/siteLayout';
 import { inspectWorldIntegrity, type WorldIntegrityReport } from '../constants/worldContract';
 import { sampleAtmosphere, sampleCelestial } from '../simulation/atmosphere';
@@ -27,6 +32,25 @@ interface RuntimeRendererStats {
   geometries: number;
   textures: number;
   programs: number;
+  /**
+   * The RAW `gl.info.render` accumulators, before per-frame normalization.
+   *
+   * WHY THIS IS REPORTED. A printed `triangles: 0` can mean an empty scene, a
+   * negative total, or a NaN, and `rendererCounterPerFrame` maps all three to
+   * the same digit. Every scene in this app reported a hard zero for triangles
+   * while its draw CALLS reproduced exactly, which is only diagnosable against
+   * the unnormalized value. `null` here means "not a finite number" - JSON has
+   * no NaN, and a NaN silently serialised as `null` is still more honest than
+   * the 0 it used to be flattened to.
+   */
+  raw: {
+    frame: number | null;
+    calls: number | null;
+    triangles: number | null;
+    lines: number | null;
+    points: number | null;
+    autoReset: boolean;
+  };
 }
 
 interface RuntimeSceneGraphStats {
@@ -135,11 +159,36 @@ export interface RuntimeTelemetrySnapshot {
   shaderStates: RuntimeShaderState[];
   textureIssues: RuntimeTextureIssue[];
   worldIntegrity: WorldIntegrityReport;
+  /**
+   * What each `StaticMeshBatch` root actually did, read off
+   * `userData.staticBatchStats`.
+   *
+   * `surfaceProfiles` is the reason this is here. The batcher applies the world
+   * surface treatment to the materials it PRODUCES, and no other instrument in
+   * this repo can distinguish "the finish reached 32 merged batches" from "the
+   * finish reached nothing": `audit-scene-models.mjs` marks a mesh finished on
+   * the mere presence of an injection, and a treatment that is never applied
+   * leaves no trace at all. This is the assembly saying what it did.
+   */
+  staticBatches: RuntimeStaticBatchReport[];
   motion: RuntimeMotionState;
   audio: ReturnType<typeof audioManager.getDiagnostics>;
   sceneChildren: number;
   quality: string;
   resolutionScale: number;
+}
+
+export interface RuntimeStaticBatchReport {
+  name: string;
+  totalMeshes: number;
+  candidates: number;
+  batches: number;
+  mergedMeshes: number;
+  mergedOriginals: number;
+  instancedBatches: number;
+  instancedOriginals: number;
+  /** Profile name -> output materials it was applied to; `untreated` for declines. */
+  surfaceProfiles: Record<string, number>;
 }
 
 export interface MillOSRuntimeTelemetry {
@@ -151,6 +200,294 @@ export interface MillOSRuntimeTelemetry {
   snapshot: () => RuntimeTelemetrySnapshot;
   motionSnapshot: () => RuntimeMotionState;
   setPerfDebug: (patch: Partial<PerfDebugSettings>) => void;
+  /**
+   * Group every material instance in the graph by how it would actually draw.
+   *
+   * Batching is bounded by material sharing, not by geometry: `mergeGeometries`
+   * may only merge meshes that end up drawn with the same material. So the
+   * question "why does this scene cost 1,351 draw calls" reduces to how many of
+   * its ~1,200 material instances are genuinely distinct, and the answer has to
+   * come from the live graph rather than from reading constructors.
+   */
+  materialAudit: () => RuntimeMaterialAudit;
+  /**
+   * Every light the scene actually renders with, plus the renderer and
+   * environment state that scales them.
+   *
+   * WHY THIS EXISTS. `src/components/Environment.tsx` declares a hemisphere and
+   * a fill that no mounted component renders - the live rig is
+   * `OptimizedFactoryEnvironment` - and reading colours out of the wrong file
+   * produces a confident lighting diagnosis and an exactly 1.000 delta when it
+   * is acted on. CLAUDE.md names that ratio as the tell for an inert term. The
+   * only way to know which rig is mounted is to ask the assembled scene.
+   */
+  lightRig: () => RuntimeLightRig;
+  /**
+   * Resolved draw state for the meshes matching `query`, matched against mesh
+   * name, material name and every ancestor name.
+   *
+   * For the class of defect where two objects out of one pipeline light an
+   * order of magnitude apart: the pixels cannot say which input differs, and
+   * two material dumps side by side can.
+   */
+  inspectObjects: (query: string, limit?: number) => RuntimeObjectReport[];
+  /**
+   * World positions of any objects matching `query` - bones included, unlike
+   * `inspectObjects`, which is meshes only.
+   *
+   * A single frame cannot tell a driven rig from a static one, and this repo
+   * has already produced one confident wrong answer from a screenshot of a cow.
+   * Sampling a named bone over time can: a bone whose world position never
+   * moves is a rig nothing is calling.
+   */
+  sampleObjects: (query: string, limit?: number) => RuntimeSample[];
+}
+
+export interface RuntimeSample {
+  /**
+   * Stable identity for the object's lifetime.
+   *
+   * A motion sweep has to compare the SAME object across samples. Path is not
+   * an identity - most of this graph is unnamed, so thousands of objects
+   * serialise to `.../<Group>/<Mesh>` - and traversal index is not one either,
+   * because the graph mounts and unmounts constantly once the game clock is
+   * running. Either substitute silently compares two different objects and
+   * manufactures motion out of two static ones.
+   */
+  uuid: string;
+  name: string;
+  type: string;
+  path: string;
+  worldPosition: [number, number, number];
+  /**
+   * World orientation, as `[x, y, z, w]`.
+   *
+   * Position alone is not enough and reporting it alone produces false
+   * negatives. A joint rotated about its OWN pivot never moves its origin, so a
+   * rig driven purely in rotation - the sitting cat's head turn, which is a yaw
+   * on a leaf `Head` bone with nothing below it - reads as perfectly static on
+   * a position probe. That is the mirror of the error this whole API exists to
+   * prevent, so both channels are published.
+   */
+  worldQuaternion: [number, number, number, number];
+  /**
+   * Checksum of an `InstancedMesh`'s instance matrices, or null.
+   *
+   * THE BLIND SPOT THIS CLOSES. An instanced machine animates by writing
+   * `setMatrixAt`, which never touches the container object's own transform -
+   * so a per-object position/rotation sweep reports spinning roller mills and
+   * gyrating plansifters as perfectly static. That reading is not merely
+   * incomplete, it is inverted, and acting on it would mean "fixing" an
+   * animation that was working.
+   *
+   * Strided rather than summed whole: these buffers run to tens of thousands of
+   * floats and this is read many times a second during a sweep. A stride of 37
+   * is coprime with the 16 floats of a matrix, so successive samples walk every
+   * lane rather than reading the same element of every matrix.
+   */
+  instanceMatrixChecksum: number | null;
+  /**
+   * Checksum of everything about this object's material that a viewer reads as
+   * a state change: colour, emissive, emissive intensity, opacity, visibility.
+   *
+   * THE FOURTH BLIND SPOT. Position, orientation and instance matrices are all
+   * TRANSFORMS, and a large amount of what is alive in this scene never moves:
+   * the ceiling fixture lenses track the day/night exposure, every machine
+   * status beacon changes colour, and the dock status lamps swap between a lit
+   * green and a lit red as a truck berths. A sweep of the first three channels
+   * reports all of it as perfectly static, which is the same false zero as
+   * §6.4's instanced mills in a different medium.
+   *
+   * Null for an object with no material, so the audit can tell "not applicable"
+   * from "applicable and unchanging".
+   */
+  materialChecksum: number | null;
+}
+
+export interface RuntimeLightReport {
+  name: string;
+  type: string;
+  path: string;
+  intensity: number;
+  color: string;
+  /** Hemisphere lights only. */
+  groundColor: string | null;
+  worldPosition: [number, number, number];
+  /** Directional and spot lights only, in world space. */
+  target: [number, number, number] | null;
+  distance: number | null;
+  decay: number | null;
+  castShadow: boolean;
+  visible: boolean;
+  /** Shadow camera extent, for "is this receiver even inside the map". */
+  shadow: {
+    mapSize: [number, number];
+    bias: number;
+    normalBias: number;
+    radius: number;
+    near: number;
+    far: number;
+    /** Orthographic half-extents; null for a perspective shadow camera. */
+    halfExtent: [number, number] | null;
+  } | null;
+}
+
+export interface RuntimeLightRig {
+  lights: RuntimeLightReport[];
+  scene: {
+    environmentBound: boolean;
+    environmentIntensity: number;
+    backgroundBound: boolean;
+    fog: {
+      type: string;
+      color: string;
+      near: number | null;
+      far: number | null;
+      density: number | null;
+    } | null;
+  };
+  renderer: {
+    toneMapping: number;
+    toneMappingExposure: number;
+    outputColorSpace: string;
+    shadowMapEnabled: boolean;
+    shadowMapType: number;
+  };
+}
+
+export interface RuntimeObjectReport {
+  name: string;
+  path: string;
+  worldPosition: [number, number, number];
+  /**
+   * Sign of the world matrix determinant. A negative scale flips every face's
+   * winding and is the other way to get a body that is dark on all sides.
+   */
+  worldDeterminant: number;
+  visible: boolean;
+  /**
+   * Visibility AFTER walking the ancestors, which is what decides whether the
+   * renderer ever reaches this mesh.
+   *
+   * `Object3D.visible` is the object's OWN flag: a mesh inside a group whose
+   * `visible` is false still reports true, and three skips the whole subtree
+   * regardless. Reading the own flag as "this is drawn" is what made
+   * `audit-scene-models.mjs` report 53 zero-opacity meshes as "drawn every
+   * frame and contributes nothing" when every one of them was a forklift's
+   * cargo inside a hidden group - a real check firing on a false premise.
+   */
+  visibleInTree: boolean;
+  frustumCulled: boolean;
+  castShadow: boolean;
+  receiveShadow: boolean;
+  renderOrder: number;
+  layersMask: number;
+  /** Instanced draws report their count; everything else reports 1. */
+  instanceCount: number;
+  geometry: {
+    vertices: number;
+    attributes: string[];
+    boundingSphereRadius: number | null;
+    /**
+     * Bounding radius in metres of the LARGEST single draw of this mesh - after
+     * the mesh's world scale AND, for an `InstancedMesh`, the per-instance
+     * scale in `instanceMatrix`.
+     */
+    worldRadius: number;
+    /**
+     * The same measure summed over every instance. Use this to total a
+     * material's surface; multiplying `worldRadius` by `instanceCount` is the
+     * bug this field exists to remove.
+     */
+    worldRadiusSum: number;
+    /**
+     * A non-finite bounding volume or a non-finite POSITION value.
+     *
+     * `THREE.BufferGeometry.computeBoundingSphere(): Computed radius is NaN` is
+     * the symptom the repo already documents, and by the time it reaches the
+     * console it names no object. This names the object.
+     */
+    nonFinite: boolean;
+    /**
+     * `instanceCount` for an `InstancedBufferGeometry`, `null` for anything
+     * else, and `'unbounded'` when the count is not a finite number.
+     *
+     * `'unbounded'` is its own value because it is its own defect and it is
+     * silent. `InstancedBufferGeometry` defaults `instanceCount` to `Infinity`,
+     * and `WebGLRenderer.js:1316` only clamps that against
+     * `geometry._maxInstanceCount`, which `WebGLBindingStates` sets ONLY when it
+     * binds an instanced attribute. A geometry with none - troika's
+     * `GlyphsGeometry` before its glyphs are laid out - therefore draws with
+     * `primcount` Infinity. Nothing renders (the GL call coerces it to 0), but
+     * `WebGLInfo.update` runs first and adds `Infinity` to `render.triangles`,
+     * which with `info.autoReset` off makes one transient frame permanent for
+     * the whole measured window. See `SceneText.initialiseGlyphInstanceCount`.
+     */
+    instancedDrawCount: number | 'unbounded' | null;
+  };
+  /**
+   * Every bound texture slot, with the colour space it will be sampled in.
+   *
+   * The repo's most expensive texture bug to date was a whole class of
+   * `DataTexture` handed to the shader as linear when the bytes were sRGB, and
+   * CLAUDE.md's rule is that getting it backwards on a normal or roughness map
+   * is just as broken as leaving an albedo linear. That rule can only be
+   * enforced against the textures actually bound at runtime.
+   */
+  textures: Array<{
+    slot: string;
+    uuid: string;
+    colorSpace: string;
+    size: [number, number] | null;
+  }>;
+  material: {
+    type: string;
+    name: string;
+    uuid: string;
+    color: string;
+    emissive: string | null;
+    emissiveIntensity: number | null;
+    metalness: number | null;
+    roughness: number | null;
+    envMapIntensity: number | null;
+    envMapBound: boolean;
+    lightMapBound: boolean;
+    lightMapIntensity: number | null;
+    aoMapBound: boolean;
+    aoMapIntensity: number | null;
+    mapUuid: string | null;
+    mapColorSpace: string | null;
+    mapSize: [number, number] | null;
+    normalMapBound: boolean;
+    /** Carries its own `onBeforeCompile` / `customProgramCacheKey`. */
+    shaderInjected: boolean;
+    vertexColors: boolean;
+    side: number;
+    shadowSide: number | null;
+    flatShading: boolean;
+    transparent: boolean;
+    opacity: number;
+    toneMapped: boolean;
+    fog: boolean;
+    blending: number;
+    depthWrite: boolean;
+    visible: boolean;
+  };
+}
+
+export interface RuntimeMaterialAuditBranch {
+  name: string;
+  meshes: number;
+  materialInstances: number;
+  distinctFingerprints: number;
+}
+
+export interface RuntimeMaterialAudit {
+  totalMeshes: number;
+  materialInstances: number;
+  distinctFingerprints: number;
+  branches: RuntimeMaterialAuditBranch[];
+  worstDuplicates: Array<{ count: number; fingerprint: string }>;
 }
 
 declare global {
@@ -191,7 +528,13 @@ const BENCHMARK_CAMERAS: Record<BenchmarkScene, BenchmarkCameraPose> = {
   water: SITE_LAYOUT.cameras.water,
   village: SITE_LAYOUT.cameras.village,
   farm: SITE_LAYOUT.cameras.farm,
+  paddock: SITE_LAYOUT.cameras.paddock,
+  square: SITE_LAYOUT.cameras.square,
   garage: SITE_LAYOUT.cameras.garage,
+  markings: SITE_LAYOUT.cameras.markings,
+  forecourt: SITE_LAYOUT.cameras.forecourt,
+  carpark: SITE_LAYOUT.cameras.carpark,
+  river: SITE_LAYOUT.cameras.river,
   sun: SITE_LAYOUT.cameras.celestial,
   moon: SITE_LAYOUT.cameras.celestial,
 };
@@ -215,6 +558,657 @@ export function resolveBenchmarkCamera(
     camera.position[2] + direction[2] * 180,
   ];
   return { ...camera, target };
+}
+
+const _followPosition = new THREE.Vector3();
+const _followQuaternion = new THREE.Quaternion();
+const _followEuler = new THREE.Euler();
+
+/**
+ * Identity of a material as the renderer sees it.
+ *
+ * Two materials sharing a fingerprint would draw identically, so they could be
+ * one shared instance and their meshes could then be merged into one call. The
+ * fingerprint therefore has to cover everything that changes the draw: the
+ * program-selecting flags, the colour and PBR constants, the identity of every
+ * bound map, and any custom shader injection - a `customProgramCacheKey` makes
+ * two otherwise identical materials genuinely different, and omitting it would
+ * report a saving that does not exist.
+ */
+const MATERIAL_FINGERPRINT_SCALARS = [
+  'transparent',
+  'opacity',
+  'side',
+  'flatShading',
+  'vertexColors',
+  'depthWrite',
+  'depthTest',
+  'alphaTest',
+  'metalness',
+  'roughness',
+  'envMapIntensity',
+  'emissiveIntensity',
+  'clearcoat',
+  'transmission',
+  'wireframe',
+  'toneMapped',
+  'blending',
+  'polygonOffset',
+  'polygonOffsetFactor',
+  'polygonOffsetUnits',
+] as const;
+
+const MATERIAL_FINGERPRINT_COLORS = [
+  'color',
+  'emissive',
+  'specular',
+  'attenuationColor',
+  'sheenColor',
+] as const;
+
+const MATERIAL_FINGERPRINT_MAPS = [
+  'map',
+  'normalMap',
+  'roughnessMap',
+  'metalnessMap',
+  'aoMap',
+  'emissiveMap',
+  'alphaMap',
+  'bumpMap',
+  'displacementMap',
+] as const;
+
+function materialFingerprint(material: THREE.Material): string {
+  const source = material as unknown as Record<string, unknown>;
+  const parts: string[] = [material.type];
+  for (const key of MATERIAL_FINGERPRINT_SCALARS) {
+    if (source[key] !== undefined) parts.push(`${key}=${String(source[key])}`);
+  }
+  for (const key of MATERIAL_FINGERPRINT_COLORS) {
+    const value = source[key] as THREE.Color | undefined;
+    if (value?.getHexString) parts.push(`${key}=#${value.getHexString()}`);
+  }
+  for (const key of MATERIAL_FINGERPRINT_MAPS) {
+    const value = source[key] as THREE.Texture | undefined;
+    if (value) parts.push(`${key}=${value.uuid}`);
+  }
+  if (typeof material.customProgramCacheKey === 'function') {
+    try {
+      parts.push(`cacheKey=${material.customProgramCacheKey()}`);
+    } catch {
+      parts.push('cacheKey=threw');
+    }
+  }
+  return parts.join('|');
+}
+
+/**
+ * Descend to the level of the graph that actually divides the scene up.
+ *
+ * Testing for a single child is not enough: the root has a dominant
+ * `world-root` container beside an empty sibling, so a single-child test stops
+ * immediately and attributes every mesh to one node - a breakdown that cannot
+ * answer where draw calls come from, which is the only reason it exists. Follow
+ * whichever child holds essentially all the meshes instead, and stop as soon as
+ * no child dominates.
+ *
+ * SHARED ON PURPOSE. `sceneGraph.topBranches` and `materialAudit()` must agree
+ * about what "a branch" is, or their mesh counts silently disagree and the two
+ * tables cannot be read together. Deriving the level twice is the transcribed
+ * constant problem: both copies read correct, and they diverge the first time
+ * the scene graph gains a wrapper.
+ */
+function findBranchRoot(scene: THREE.Scene): THREE.Object3D {
+  const countMeshes = (root: THREE.Object3D) => {
+    let meshes = 0;
+    root.traverse((object) => {
+      if (object instanceof THREE.Mesh) meshes += 1;
+    });
+    return meshes;
+  };
+  let branchRoot: THREE.Object3D = scene;
+  // Bounded: a pathological graph must not stall the snapshot.
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (branchRoot.children.length === 0) break;
+    const counted = branchRoot.children.map((child) => ({ child, meshes: countMeshes(child) }));
+    const total = counted.reduce((sum, entry) => sum + entry.meshes, 0);
+    if (total === 0) break;
+    const dominant = counted.reduce((best, entry) => (entry.meshes > best.meshes ? entry : best));
+    // Anything less than near-total means this level is a real division.
+    if (dominant.meshes < total * 0.9) break;
+    if (dominant.child instanceof THREE.Mesh || dominant.child.children.length === 0) break;
+    branchRoot = dominant.child;
+  }
+  return branchRoot;
+}
+
+/**
+ * Which of `branchRoot`'s children this mesh sits under.
+ *
+ * Walks up to the child of the branch root rather than guessing from the chain
+ * of names, so every mesh lands in exactly one bucket and the buckets are the
+ * same ones `topBranches` reports. A mesh parented above the branch root - which
+ * should not happen, but is not worth crashing a diagnostic over - is reported
+ * separately rather than folded into a real branch.
+ */
+function branchNameOf(object: THREE.Object3D, branchRoot: THREE.Object3D): string {
+  let child: THREE.Object3D | null = null;
+  let node: THREE.Object3D | null = object;
+  while (node && node !== branchRoot) {
+    child = node;
+    node = node.parent;
+  }
+  if (node !== branchRoot || !child) return '(outside branch root)';
+  return child.name || '(unnamed)';
+}
+
+function auditMaterials(scene: THREE.Scene): RuntimeMaterialAudit {
+  const byBranch = new Map<
+    string,
+    { meshes: number; instances: Set<string>; prints: Map<string, number> }
+  >();
+  const globalInstances = new Set<string>();
+  const globalPrints = new Map<string, number>();
+  const branchRoot = findBranchRoot(scene);
+  let totalMeshes = 0;
+
+  scene.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    totalMeshes += 1;
+    const branch = branchNameOf(object, branchRoot);
+    let entry = byBranch.get(branch);
+    if (!entry) {
+      entry = { meshes: 0, instances: new Set(), prints: new Map() };
+      byBranch.set(branch, entry);
+    }
+    entry.meshes += 1;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) {
+      if (!material) continue;
+      entry.instances.add(material.uuid);
+      globalInstances.add(material.uuid);
+      const print = materialFingerprint(material);
+      entry.prints.set(print, (entry.prints.get(print) ?? 0) + 1);
+      globalPrints.set(print, (globalPrints.get(print) ?? 0) + 1);
+    }
+  });
+
+  return {
+    totalMeshes,
+    materialInstances: globalInstances.size,
+    distinctFingerprints: globalPrints.size,
+    branches: [...byBranch.entries()]
+      .map(([name, entry]) => ({
+        name,
+        meshes: entry.meshes,
+        materialInstances: entry.instances.size,
+        distinctFingerprints: entry.prints.size,
+      }))
+      .sort((a, b) => b.materialInstances - a.materialInstances),
+    worstDuplicates: [...globalPrints.entries()]
+      .map(([fingerprint, count]) => ({ count, fingerprint }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10),
+  };
+}
+
+/** Ancestor chain, root first, for locating a mesh in a graph of thousands. */
+function objectPath(object: THREE.Object3D): string {
+  const parts: string[] = [];
+  let node: THREE.Object3D | null = object;
+  while (node) {
+    parts.push(node.name || `<${node.type}>`);
+    node = node.parent;
+  }
+  return parts.reverse().join('/');
+}
+
+/**
+ * Whether the renderer will reach this object at all.
+ *
+ * `Object3D.visible` is the own flag; three's `projectObject` returns early on
+ * the first invisible ancestor and never descends, so a mesh under a hidden
+ * group costs nothing to draw however its own flag reads.
+ */
+function isVisibleInTree(object: THREE.Object3D): boolean {
+  let node: THREE.Object3D | null = object;
+  while (node) {
+    if (!node.visible) return false;
+    node = node.parent;
+  }
+  return true;
+}
+
+const _probePosition = new THREE.Vector3();
+const _probeQuaternion = new THREE.Quaternion();
+const _probeScale = new THREE.Vector3();
+const _probeTarget = new THREE.Vector3();
+
+const hex = (color: THREE.Color | undefined | null): string =>
+  color ? `#${color.getHexString()}` : '#000000';
+
+/**
+ * A texture's decoded pixel size, or null.
+ *
+ * `Texture.image` is `any` in three's own typings and is a canvas, an
+ * ImageBitmap, a DataTexture's `{ data, width, height }` or - for a texture
+ * that has not finished decoding - undefined. Read defensively: a diagnostic
+ * that throws is worse than one that reports a gap.
+ */
+function mapImageSize(map: THREE.Texture | null): [number, number] | null {
+  const image = map?.image as { width?: number; height?: number } | undefined;
+  if (typeof image?.width !== 'number' || typeof image?.height !== 'number') return null;
+  return [image.width, image.height];
+}
+
+function reportLights(scene: THREE.Scene, gl: THREE.WebGLRenderer): RuntimeLightRig {
+  const lights: RuntimeLightReport[] = [];
+  scene.traverse((object) => {
+    const light = object as THREE.Light & {
+      groundColor?: THREE.Color;
+      target?: THREE.Object3D;
+      distance?: number;
+      decay?: number;
+    };
+    if (!light.isLight) return;
+    light.getWorldPosition(_probePosition);
+    const shadow = light.shadow;
+    const camera = shadow?.camera as THREE.OrthographicCamera | undefined;
+    lights.push({
+      name: light.name || '(unnamed)',
+      type: light.type,
+      path: objectPath(light),
+      intensity: light.intensity,
+      color: hex(light.color),
+      groundColor: light.groundColor ? hex(light.groundColor) : null,
+      worldPosition: [_probePosition.x, _probePosition.y, _probePosition.z],
+      target: light.target
+        ? (light.target.getWorldPosition(_probeTarget).toArray() as [number, number, number])
+        : null,
+      distance: light.distance ?? null,
+      decay: light.decay ?? null,
+      castShadow: light.castShadow,
+      visible: light.visible,
+      shadow: shadow
+        ? {
+            mapSize: [shadow.mapSize.x, shadow.mapSize.y],
+            bias: shadow.bias,
+            normalBias: shadow.normalBias,
+            radius: shadow.radius,
+            near: camera?.near ?? 0,
+            far: camera?.far ?? 0,
+            halfExtent:
+              camera && (camera as THREE.OrthographicCamera).isOrthographicCamera
+                ? [
+                    Math.abs(camera.right - camera.left) / 2,
+                    Math.abs(camera.top - camera.bottom) / 2,
+                  ]
+                : null,
+          }
+        : null,
+    });
+  });
+
+  const fog = scene.fog as (Partial<THREE.Fog> & Partial<THREE.FogExp2>) | null;
+  return {
+    lights,
+    scene: {
+      environmentBound: Boolean(scene.environment),
+      environmentIntensity: scene.environmentIntensity,
+      backgroundBound: Boolean(scene.background),
+      fog: fog
+        ? {
+            type: fog.isFogExp2 ? 'FogExp2' : 'Fog',
+            color: hex(fog.color),
+            near: fog.near ?? null,
+            far: fog.far ?? null,
+            density: fog.density ?? null,
+          }
+        : null,
+    },
+    renderer: {
+      toneMapping: gl.toneMapping,
+      toneMappingExposure: gl.toneMappingExposure,
+      outputColorSpace: gl.outputColorSpace,
+      shadowMapEnabled: gl.shadowMap.enabled,
+      shadowMapType: gl.shadowMap.type,
+    },
+  };
+}
+
+/**
+ * Every texture slot three can sample, so the audit can check each one against
+ * the colour space it is REQUIRED to be in rather than against the one slot
+ * somebody remembered.
+ */
+const TEXTURE_SLOTS = [
+  'map',
+  'normalMap',
+  'roughnessMap',
+  'metalnessMap',
+  'aoMap',
+  'emissiveMap',
+  'bumpMap',
+  'displacementMap',
+  'alphaMap',
+  'lightMap',
+  'specularMap',
+  'clearcoatMap',
+  'clearcoatNormalMap',
+  'clearcoatRoughnessMap',
+  'sheenColorMap',
+  'transmissionMap',
+  'iridescenceMap',
+] as const;
+
+function surveyTextures(material: THREE.Material | undefined): RuntimeObjectReport['textures'] {
+  if (!material) return [];
+  const slots = material as unknown as Record<string, THREE.Texture | null | undefined>;
+  const out: RuntimeObjectReport['textures'] = [];
+  for (const slot of TEXTURE_SLOTS) {
+    const texture = slots[slot];
+    if (!texture?.isTexture) continue;
+    out.push({
+      slot,
+      uuid: texture.uuid,
+      colorSpace: texture.colorSpace,
+      size: mapImageSize(texture),
+    });
+  }
+  return out;
+}
+
+/**
+ * A geometry with a non-finite bound or a non-finite position.
+ *
+ * The bounds are checked first because they are O(1) and are what the renderer
+ * actually trips over. Positions are then SAMPLED rather than fully scanned:
+ * this runs over every mesh in a scene of thousands inside a single frame, and
+ * a NaN in a buffer is never a lone value - it comes from a bad argument that
+ * poisons a whole geometry, so a stride of 97 finds it. 97 is prime, so the
+ * sample cannot land on the same lane of a vec3-strided buffer every step.
+ */
+const _instanceMatrix = new THREE.Matrix4();
+const _instancePosition = new THREE.Vector3();
+const _instanceQuaternion = new THREE.Quaternion();
+const _instanceScale = new THREE.Vector3();
+
+/**
+ * World-space bounding radius of the largest single DRAW of a mesh, and the sum
+ * across all of them, both in metres.
+ *
+ * WHY THE INSTANCE MATRICES HAVE TO BE OPENED. `worldRadius` was the geometry
+ * radius times the mesh's own world scale, and for an `InstancedMesh` that is
+ * the wrong matrix: every instance's scale lives in `instanceMatrix`, and the
+ * container itself is almost always unscaled. So every instanced row reported
+ * the bare unit-geometry radius, 0.87, and the summed column degenerated to
+ * `0.87 x instanceCount` - an instance count wearing a metres label. Measured on
+ * `world-factory-infrastructure`: sixteen of nineteen rows were EXACTLY
+ * `0.87 x count`, and `factory-trim` topped the branch's work list at "78 m"
+ * purely for having 87 members.
+ *
+ * That is §4.1's own defect one level down. The work list was moved off mesh
+ * count and onto world size precisely because count ranks a hundred bolts above
+ * the wall behind them - and for instanced geometry it had quietly stayed a
+ * count the whole time.
+ */
+function measureWorldRadius(
+  mesh: THREE.Mesh,
+  meshWorldScale: THREE.Vector3
+): { largest: number; sum: number } {
+  const geometryRadius = mesh.geometry.boundingSphere?.radius ?? 0;
+  const meshScale = Math.max(
+    Math.abs(meshWorldScale.x),
+    Math.abs(meshWorldScale.y),
+    Math.abs(meshWorldScale.z)
+  );
+  const instanced = mesh as THREE.InstancedMesh;
+  if (!instanced.isInstancedMesh) {
+    const radius = geometryRadius * meshScale;
+    return { largest: radius, sum: radius };
+  }
+  let largest = 0;
+  let sum = 0;
+  for (let i = 0; i < instanced.count; i += 1) {
+    instanced.getMatrixAt(i, _instanceMatrix);
+    _instanceMatrix.decompose(_instancePosition, _instanceQuaternion, _instanceScale);
+    const radius =
+      geometryRadius *
+      meshScale *
+      Math.max(Math.abs(_instanceScale.x), Math.abs(_instanceScale.y), Math.abs(_instanceScale.z));
+    if (!Number.isFinite(radius)) continue;
+    sum += radius;
+    if (radius > largest) largest = radius;
+  }
+  return { largest, sum };
+}
+
+/**
+ * The instance count an `InstancedBufferGeometry` will actually draw with.
+ *
+ * Reported separately from `instanceCount` on the mesh because an
+ * `InstancedMesh` carries its count on the OBJECT while an instanced GEOMETRY
+ * carries it on itself, and only the second one can be silently unbounded.
+ */
+function readInstancedDrawCount(geometry: THREE.BufferGeometry): number | 'unbounded' | null {
+  const instanced = geometry as THREE.BufferGeometry & {
+    isInstancedBufferGeometry?: boolean;
+    instanceCount?: number;
+  };
+  if (!instanced.isInstancedBufferGeometry) return null;
+  return Number.isFinite(instanced.instanceCount)
+    ? (instanced.instanceCount as number)
+    : 'unbounded';
+}
+
+function hasNonFiniteGeometry(geometry: THREE.BufferGeometry): boolean {
+  const sphere = geometry.boundingSphere;
+  if (sphere && !Number.isFinite(sphere.radius)) return true;
+  const box = geometry.boundingBox;
+  if (box && (!Number.isFinite(box.min.x) || !Number.isFinite(box.max.x))) return true;
+  const position = geometry.getAttribute('position');
+  if (!position) return false;
+  const array = position.array as ArrayLike<number>;
+  for (let i = 0; i < array.length; i += 97) {
+    if (!Number.isFinite(array[i])) return true;
+  }
+  return false;
+}
+
+function reportObjects(scene: THREE.Scene, query: string, limit: number): RuntimeObjectReport[] {
+  const needle = query.toLowerCase();
+  const out: RuntimeObjectReport[] = [];
+  scene.updateMatrixWorld(true);
+  scene.traverse((object) => {
+    if (out.length >= limit) return;
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const path = objectPath(mesh).toLowerCase();
+    const matches =
+      path.includes(needle) ||
+      materials.some((m) => (m?.name ?? '').toLowerCase().includes(needle));
+    if (!matches) return;
+
+    mesh.matrixWorld.decompose(_probePosition, _probeQuaternion, _probeScale);
+    const worldRadii = measureWorldRadius(mesh, _probeScale);
+    const material = materials[0] as THREE.MeshStandardMaterial | undefined;
+    const map = material?.map ?? null;
+    out.push({
+      name: mesh.name || '(unnamed)',
+      path: objectPath(mesh),
+      worldPosition: [_probePosition.x, _probePosition.y, _probePosition.z],
+      worldDeterminant: mesh.matrixWorld.determinant(),
+      visible: mesh.visible,
+      visibleInTree: isVisibleInTree(mesh),
+      frustumCulled: mesh.frustumCulled,
+      castShadow: mesh.castShadow,
+      receiveShadow: mesh.receiveShadow,
+      renderOrder: mesh.renderOrder,
+      layersMask: mesh.layers.mask,
+      instanceCount: (mesh as THREE.InstancedMesh).isInstancedMesh
+        ? (mesh as THREE.InstancedMesh).count
+        : 1,
+      geometry: {
+        vertices: mesh.geometry.getAttribute('position')?.count ?? 0,
+        attributes: Object.keys(mesh.geometry.attributes),
+        boundingSphereRadius: mesh.geometry.boundingSphere?.radius ?? null,
+        /**
+         * Bounding radius in METRES, not in the geometry's own units, for the
+         * LARGEST single draw of this mesh.
+         *
+         * WHY BOTH. Almost nothing in this scene owns its size: a shared unit
+         * box scaled to a 60 m wall and the same shared unit box scaled to a
+         * 0.05 m bolt report an identical `boundingSphereRadius`, because that
+         * is a property of the geometry and the scale lives in the matrix. A
+         * work list ordered by mesh count therefore ranks a hundred bolts above
+         * the wall behind them, which is the opposite of what a viewer sees.
+         * `worldRadius` is what makes "which untextured surfaces actually fill
+         * the frame" answerable.
+         *
+         * Max axis rather than the mean: a plane scaled (120, 1, 10) is a
+         * 120 m road, and averaging would report it as 44.
+         */
+        worldRadius: worldRadii.largest,
+        /**
+         * The same measure summed over every instance this mesh draws.
+         *
+         * Consumers must use THIS to total a material's surface, and must not
+         * multiply `worldRadius` by `instanceCount` themselves - for an
+         * `InstancedMesh` the per-instance scale is in `instanceMatrix`, so that
+         * product silently reduces to the unit-geometry radius times a count.
+         * See `measureWorldRadius`.
+         */
+        worldRadiusSum: worldRadii.sum,
+        nonFinite: hasNonFiniteGeometry(mesh.geometry),
+        instancedDrawCount: readInstancedDrawCount(mesh.geometry),
+      },
+      textures: surveyTextures(material),
+      material: {
+        type: material?.type ?? '(none)',
+        name: material?.name ?? '',
+        uuid: material?.uuid ?? '',
+        color: hex(material?.color),
+        emissive: material?.emissive ? hex(material.emissive) : null,
+        emissiveIntensity: material?.emissiveIntensity ?? null,
+        metalness: material?.metalness ?? null,
+        roughness: material?.roughness ?? null,
+        envMapIntensity: material?.envMapIntensity ?? null,
+        envMapBound: Boolean(material?.envMap),
+        lightMapBound: Boolean(material?.lightMap),
+        lightMapIntensity: material?.lightMapIntensity ?? null,
+        aoMapBound: Boolean(material?.aoMap),
+        aoMapIntensity: material?.aoMapIntensity ?? null,
+        mapUuid: map?.uuid ?? null,
+        mapColorSpace: map?.colorSpace ?? null,
+        mapSize: mapImageSize(map),
+        normalMapBound: Boolean(material?.normalMap),
+        /**
+         * True when this material carries its own `onBeforeCompile` or
+         * `customProgramCacheKey`.
+         *
+         * WITHOUT THIS THE WORK LIST LIES. A large amount of the surfacing in
+         * this repo is injected GLSL rather than a bound texture slot: the
+         * terrain's whole splat blend, the machines' grime/dust/edge-wear, and
+         * the trailers' ribbed panels and gravity grime. Every one of them
+         * reports zero textures, so an audit that equates "no texture slot"
+         * with "unfinished" points the next pass straight at work that is
+         * already done - `world-logistics` read 97% flat while its trailer
+         * bodies carry a rib-and-grime shader with per-truck wear.
+         *
+         * Detected exactly the way `StaticMeshBatch.isSupportedMaterial` does,
+         * so the two agree on what counts as a customised material.
+         */
+        shaderInjected:
+          Boolean(material) &&
+          (Object.hasOwn(material as object, 'onBeforeCompile') ||
+            Object.hasOwn(material as object, 'customProgramCacheKey')),
+        vertexColors: Boolean(material?.vertexColors),
+        side: material?.side ?? -1,
+        shadowSide: material?.shadowSide ?? null,
+        flatShading: Boolean(material?.flatShading),
+        transparent: Boolean(material?.transparent),
+        opacity: material?.opacity ?? 1,
+        toneMapped: material?.toneMapped ?? true,
+        fog: material?.fog ?? true,
+        blending: material?.blending ?? -1,
+        depthWrite: material?.depthWrite ?? true,
+        visible: material?.visible ?? true,
+      },
+    });
+  });
+  return out;
+}
+
+/**
+ * See `RuntimeSample.materialChecksum` for why this exists.
+ *
+ * The channels are weighted by primes so two independent changes cannot cancel
+ * - a beacon going from red to green while its intensity drops would otherwise
+ * be able to sum to the same number it started at.
+ */
+function materialChecksum(object: THREE.Object3D): number | null {
+  const mesh = object as THREE.Mesh;
+  if (!mesh.isMesh) return null;
+  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  let sum = 0;
+  for (let index = 0; index < materials.length; index += 1) {
+    const material = materials[index] as THREE.MeshStandardMaterial | undefined;
+    if (!material) continue;
+    const weight = index + 1;
+    if (material.color) sum += material.color.getHex() * 3 * weight;
+    if (material.emissive) sum += material.emissive.getHex() * 5 * weight;
+    sum += (material.emissiveIntensity ?? 0) * 7919 * weight;
+    sum += material.opacity * 104729 * weight;
+    sum += (material.visible ? 1 : 0) * 1299709 * weight;
+  }
+  return sum;
+}
+
+/** See `RuntimeSample.instanceMatrixChecksum` for why this exists. */
+function instanceChecksum(object: THREE.Object3D): number | null {
+  const mesh = object as THREE.InstancedMesh;
+  if (!mesh.isInstancedMesh || !mesh.instanceMatrix) return null;
+  const array = mesh.instanceMatrix.array as ArrayLike<number>;
+  let sum = 0;
+  for (let i = 0; i < array.length; i += 37) sum += array[i] * (i + 1);
+  return sum;
+}
+
+/**
+ * World positions of everything matching `query`, bones included.
+ *
+ * Deliberately does NOT call `scene.updateMatrixWorld` first. The imperative
+ * rig handles write bone quaternions and refresh their own subtree, and the
+ * renderer has already flushed the graph for the frame just drawn; forcing
+ * another update here would sample a pose one step out of phase with what was
+ * rendered.
+ */
+function sampleObjects(scene: THREE.Scene, query: string, limit: number): RuntimeSample[] {
+  const needle = query.toLowerCase();
+  const out: RuntimeSample[] = [];
+  scene.traverse((object) => {
+    if (out.length >= limit) return;
+    if (!objectPath(object).toLowerCase().includes(needle)) return;
+    object.getWorldPosition(_probePosition);
+    object.getWorldQuaternion(_probeQuaternion);
+    out.push({
+      uuid: object.uuid,
+      name: object.name || `<${object.type}>`,
+      type: object.type,
+      path: objectPath(object),
+      worldPosition: [_probePosition.x, _probePosition.y, _probePosition.z],
+      worldQuaternion: [
+        _probeQuaternion.x,
+        _probeQuaternion.y,
+        _probeQuaternion.z,
+        _probeQuaternion.w,
+      ],
+      instanceMatrixChecksum: instanceChecksum(object),
+      materialChecksum: materialChecksum(object),
+    });
+  });
+  return out;
 }
 
 function percentile(sortedValues: number[], fraction: number): number {
@@ -273,6 +1267,9 @@ export function rendererCounterPerFrame(
   return Math.round(total / divisor);
 }
 
+/** JSON has no NaN or Infinity; a poisoned counter must not arrive as a 0. */
+const finiteOrNull = (value: number): number | null => (Number.isFinite(value) ? value : null);
+
 export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEnabled }) => {
   const mode = getRuntimeMode();
   const { camera, gl, scene, controls } = useThree();
@@ -282,6 +1279,8 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
   const drawingBufferSizeRef = useRef(new THREE.Vector2());
   const raycasterRef = useRef(new THREE.Raycaster());
   const lastReplayCaptureRef = useRef(0);
+  /** Locked subject for the personnel review cameras; see PERSONNEL_FOLLOW. */
+  const followSubjectRef = useRef<THREE.Object3D | null>(null);
 
   useAdaptiveQuality(adaptiveEnabled && !mode.benchmark);
 
@@ -585,7 +1584,8 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       });
       sceneGraph.uniqueGeometries = geometryIds.size;
       sceneGraph.uniqueMaterials = materialIds.size;
-      const branchRoot = scene.children.length === 1 ? scene.children[0] : scene;
+      // Shared with materialAudit() so both tables bucket meshes identically.
+      const branchRoot = findBranchRoot(scene);
       sceneGraph.topBranches = branchRoot.children
         .map((branch, index) => {
           let objects = 0;
@@ -619,6 +1619,14 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       scene.updateMatrixWorld(true);
       const motion = motionSnapshot();
       const worldIntegrity = inspectWorldIntegrity(scene);
+      const staticBatches: RuntimeStaticBatchReport[] = [];
+      scene.traverse((object) => {
+        const stats = object.userData?.staticBatchStats as
+          | Omit<RuntimeStaticBatchReport, 'name'>
+          | undefined;
+        if (!stats) return;
+        staticBatches.push({ name: object.name || object.type, ...stats });
+      });
       const diagnosticRays = Object.fromEntries(
         [
           ['centre', 0, 0],
@@ -731,6 +1739,14 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
           geometries: gl.info.memory.geometries,
           textures: gl.info.memory.textures,
           programs: gl.info.programs?.length ?? 0,
+          raw: {
+            frame: finiteOrNull(gl.info.render.frame),
+            calls: finiteOrNull(gl.info.render.calls),
+            triangles: finiteOrNull(gl.info.render.triangles),
+            lines: finiteOrNull(gl.info.render.lines),
+            points: finiteOrNull(gl.info.render.points),
+            autoReset: gl.info.autoReset,
+          },
         },
         sceneGraph,
         canvas: {
@@ -754,6 +1770,7 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
         shaderStates,
         textureIssues,
         worldIntegrity,
+        staticBatches,
         motion,
         audio: audioManager.getDiagnostics(),
         sceneChildren: scene.children.length,
@@ -770,6 +1787,10 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       reset,
       snapshot,
       motionSnapshot,
+      materialAudit: () => auditMaterials(scene),
+      lightRig: () => reportLights(scene, gl),
+      inspectObjects: (query, limit = 12) => reportObjects(scene, query, limit),
+      sampleObjects: (query, limit = 400) => sampleObjects(scene, query, limit),
       setPerfDebug: (patch) => {
         useGraphicsStore.setState((state) => ({
           graphics: {
@@ -797,6 +1818,38 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({ adaptiveEn
       frameTimesRef.current.push(frameMs);
       if (frameTimesRef.current.length > 7200) {
         frameTimesRef.current.shift();
+      }
+    }
+
+    // Personnel review cameras re-derive their pose from the subject every
+    // frame; see `runtime/personnelReview.ts` for why the hold alone is not
+    // enough. This runs at the default frame priority, which is AFTER drei's
+    // OrbitControls at -1, so the pose written here is the one that renders.
+    if (mode.benchmark) {
+      const follow = PERSONNEL_FOLLOW[mode.benchmarkScene];
+      if (follow) {
+        let subject = followSubjectRef.current;
+        // Re-resolve when the locked subject leaves the graph - a roster change
+        // or an unmount would otherwise freeze the camera on a detached object
+        // whose transform no longer updates.
+        if (!subject || !subject.parent) {
+          subject = findPersonnelSubject(scene, mode.benchmarkScene, _followPosition);
+          followSubjectRef.current = subject;
+        }
+        if (subject) {
+          subject.getWorldPosition(_followPosition);
+          subject.getWorldQuaternion(_followQuaternion);
+          _followEuler.setFromQuaternion(_followQuaternion, 'YXZ');
+          const pose = resolvePersonnelFollowPose(
+            follow,
+            [_followPosition.x, _followPosition.y, _followPosition.z],
+            _followEuler.y
+          );
+          camera.position.set(...pose.position);
+          camera.lookAt(...pose.target);
+          const orbit = controls as OrbitLikeControls | null;
+          if (orbit?.target) orbit.target.set(...pose.target);
+        }
       }
     }
 

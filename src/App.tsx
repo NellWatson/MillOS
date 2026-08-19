@@ -904,28 +904,47 @@ const App: React.FC = () => {
                     ) : (
                       <OrbitControls
                         ref={orbitControlsRef}
-                        maxPolarAngle={
-                          runtimeMode.benchmark &&
-                          (runtimeMode.benchmarkScene === 'sun' ||
-                            runtimeMode.benchmarkScene === 'moon')
-                            ? Math.PI - 0.001
-                            : Math.PI / 2 - 0.05
-                        }
-                        minPolarAngle={
-                          runtimeMode.benchmark &&
-                          (runtimeMode.benchmarkScene === 'sun' ||
-                            runtimeMode.benchmarkScene === 'moon')
-                            ? 0.001
-                            : 0.2
-                        }
-                        minDistance={
-                          runtimeMode.benchmark &&
-                          (runtimeMode.benchmarkScene === 'personnel-close' ||
-                            runtimeMode.benchmarkScene === 'personnel-feminine')
-                            ? 3
-                            : 15
-                        }
-                        maxDistance={220}
+                        /*
+                         * A BENCHMARK OR ART RUN SCRIPTS THE CAMERA, AND THE
+                         * ORBIT RIG WAS EDITING THE POSE IT WAS HANDED.
+                         *
+                         * `OrbitControls.update()` re-derives the camera
+                         * position from `target` plus a spherical offset
+                         * CLAMPED to [minDistance, maxDistance], so a
+                         * `minDistance` of 15 silently dollies any authored
+                         * evidence camera composed closer than that. Measured on
+                         * this build: `forklift` is composed at 12.33 m from its
+                         * subject and rendered from (49.73, 4.37, 34.95) rather
+                         * than its declared (48, 3.8, 33) - pushed 2.67 m back
+                         * along the view axis, in every art capture, from a pose
+                         * no constant in this repo states. The 3 m personnel
+                         * exceptions that used to live here were this same bug
+                         * being worked around one scene at a time, and they in
+                         * turn clamped the tracked personnel cameras out to
+                         * exactly 3 m. Nothing could catch it: the frames look
+                         * plausible and every gate stays green.
+                         *
+                         * BOTH of the following are required, which is a
+                         * measurement rather than a belief. `enabled={false}`
+                         * alone left `forklift` at (49.73, 4.37, 34.95) -
+                         * unchanged to the centimetre - so something still calls
+                         * `update()` on a disabled instance. Relaxing the limits
+                         * is what actually restored the authored pose. The
+                         * `enabled` gate is kept because it also stops the
+                         * damping integrator and any pointer handling, and
+                         * because a measurement run has no user input to serve.
+                         *
+                         * The polar limits are back to their single player
+                         * values: the `sun`/`moon` widenings only existed so
+                         * those two near-vertical poses could survive `update()`
+                         * at all, and with the distance clamp gone the pose
+                         * RuntimeController writes is the pose that renders.
+                         */
+                        enabled={!runtimeMode.benchmark}
+                        maxPolarAngle={Math.PI / 2 - 0.05}
+                        minPolarAngle={0.2}
+                        minDistance={runtimeMode.benchmark ? 0.25 : 15}
+                        maxDistance={runtimeMode.benchmark ? 1000 : 220}
                         autoRotate
                         autoRotateSpeed={0}
                         target={[0, 5, 0]}

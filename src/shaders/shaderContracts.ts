@@ -28,6 +28,12 @@ export interface ActiveShaderContract {
   readonly cacheKey: string;
   readonly disposalOwner: string;
   readonly fallbackMaterial: string;
+  /**
+   * Anything true of this family that none of the fields above can hold - most
+   * usefully, a second family COMPOSED onto the same material, which splits the
+   * compiled cache key away from the `cacheKey` literal a reader would grep for.
+   */
+  readonly notes?: string;
 }
 
 /**
@@ -236,7 +242,8 @@ export const ACTIVE_SHADER_CONTRACTS: readonly ActiveShaderContract[] = [
       'world XZ wind direction',
       'instance matrix basis, inverted as transpose(M3)/scale^2',
     ],
-    colorSpace: 'MeshStandardMaterial pipeline, vertex displacement only',
+    colorSpace:
+      'MeshStandardMaterial pipeline, vertex displacement only; the lit foliage and crop materials additionally carry the world-surface-treatment family composed on top through composeWorldSurface, which runs this injection first and appends its own cache key',
     toneMapping: 'material-pipeline',
     fog: 'material-pipeline',
     transparency: 'opaque',
@@ -248,6 +255,8 @@ export const ACTIVE_SHADER_CONTRACTS: readonly ActiveShaderContract[] = [
     timeSource: 'render-visual-only',
     cacheKey: 'millos_foliage_{kind}_v1',
     disposalOwner: 'module lifetime for the shared materials, WindDriver mounts no resources',
+    notes:
+      'the lit materials compile as millos_foliage_{kind}_v1_millos_world_surface_{version}; the MeshDepthMaterial shadow variants keep the bare key, since a depth pass has no albedo or roughness for the surface terms to modulate',
     fallbackMaterial: 'the same materials, static (uWindStrength 0)',
   },
   {
@@ -316,6 +325,55 @@ export const ACTIVE_SHADER_CONTRACTS: readonly ActiveShaderContract[] = [
     disposalOwner:
       'the calling component that owns the material (OptimizedTruckBay, ForkliftModel)',
     fallbackMaterial: 'clean painted MeshPhysicalMaterial',
+  },
+  {
+    id: 'world-surface-treatment',
+    owner: 'utils/worldSurface',
+    sources: ['src/utils/worldSurface.ts'],
+    coordinateSpaces: [
+      'world position recomputed through modelMatrix and instanceMatrix, never <worldpos_vertex> (guarded, and a compile error on low)',
+      'object rest-space metres from the `position` attribute scaled by the object matrix basis lengths, for anything that moves or deforms',
+      'the WORLD field is recomputed from `position` rather than `transformed` on composed variants (composeWorldSurface worldRest), because this anchor runs after <begin_vertex> and a swaying host has already displaced `transformed`',
+      'world normal recovered as transformedNormal * mat3(viewMatrix), so per-instance scale reaches the up-facing dust mask',
+      'view-space normal and vViewPosition for the fresnel edge-wear term and the derivative relief',
+    ],
+    colorSpace:
+      'analytic masks modulating linear diffuseColor, roughnessFactor and metalnessFactor inside the physical pipeline; no texture is sampled, so no transfer function applies',
+    toneMapping: 'material-pipeline',
+    fog: 'material-pipeline',
+    transparency: 'opaque',
+    depthBehavior:
+      'opaque authored surfaces and static-batch outputs; transparent and sub-unit-opacity materials are declined by resolveSurfaceProfile',
+    qualityVariants: ['low', 'medium', 'high', 'ultra'],
+    uniformOwner:
+      'per-material closure mirrored on userData.millosWorldSurface, except uSurfStrength which is the module-level WORLD_SURFACE_STRENGTH object shared by every treated material and written only by SurfaceTreatmentIsolation',
+    timeSource: 'none',
+    cacheKey: 'millos_world_surface_{version}',
+    disposalOwner:
+      'whoever owns the material - StaticMeshBatch.restoreBatches for batch outputs it cloned, the declaring module for named materials',
+    notes:
+      'composeWorldSurface stacks this family on top of a host injection under the key {host}_millos_world_surface_{version} and marks the material composed, which keeps it out of StaticMeshBatch: the batcher merges into a clone and Material.copy() would drop the host shader',
+    fallbackMaterial: 'the same material with uSurfStrength at 0, which is the A/B control arm',
+  },
+  {
+    id: 'generated-windmill-sails',
+    owner: 'models/GeneratedWindmill',
+    sources: ['src/components/models/GeneratedWindmill.tsx'],
+    coordinateSpaces: [
+      'object space, rotating transformed.yz about a measured hub in the YZ plane against a baked per-vertex aSailWeight',
+    ],
+    colorSpace: 'geometry only - the injection writes no colour',
+    toneMapping: 'material-pipeline',
+    fog: 'material-pipeline',
+    transparency: 'opaque',
+    depthBehavior:
+      'opaque; the matching MeshDepthMaterial carries the same position injection so the shadow turns with the sails',
+    qualityVariants: ['low', 'medium', 'high', 'ultra'],
+    uniformOwner: 'a single uSailAngle IUniform held in a ref and shared with the depth material',
+    timeSource: 'simulation',
+    cacheKey: 'windmill_sails_v1{_depth}',
+    disposalOwner: 'GeneratedWindmillModel, on the cloned scene it owns',
+    fallbackMaterial: 'the unrotated generated windmill materials',
   },
   {
     id: 'worker-relationship-lines',

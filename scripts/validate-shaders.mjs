@@ -132,7 +132,11 @@ for (const [file, source] of sources) {
     ) {
       if (!isTestFile(path)) definitionSites.add(path);
       if (node.left.name.text === 'customProgramCacheKey') {
-        customKeyCount += 1;
+        // Counted for PRODUCTION sites only. The determinism check below still
+        // runs on tests - a `Date.now()` key is worth catching wherever it is
+        // written - but a test helper that fakes a host injection would
+        // otherwise inflate a number this repo reads as a repo-shape metric.
+        if (!isTestFile(path)) customKeyCount += 1;
         if (isNonDeterministic(node.right)) {
           report(node.left, 'has a nondeterministic shader cache key');
         }
@@ -146,7 +150,7 @@ for (const [file, source] of sources) {
     ) {
       if (!isTestFile(path)) definitionSites.add(path);
       if (memberName(node) === 'customProgramCacheKey') {
-        customKeyCount += 1;
+        if (!isTestFile(path)) customKeyCount += 1;
         const value = ts.isPropertyAssignment(node) ? node.initializer : node;
         if (isNonDeterministic(value)) {
           report(node, 'has a nondeterministic shader cache key');

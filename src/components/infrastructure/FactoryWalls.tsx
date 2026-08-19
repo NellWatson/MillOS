@@ -9,6 +9,50 @@ import { useGraphicsStore } from '../../stores/graphicsStore';
 import { PROCEDURAL_TEXTURES } from '../../utils/sharedMaterials';
 import { POLYGON_OFFSET } from '../../constants/renderLayers';
 
+// ---------------------------------------------------------------------------
+// THIS FILE IS UNREACHABLE. NOTHING HERE RENDERS.
+// ---------------------------------------------------------------------------
+// `FactoryWalls` is exported by `infrastructure/index.ts` and consumed only by
+// `components/FactoryInfrastructure.tsx`, which NOTHING imports. Verified in the
+// build rather than by reading: "SAFETY FIRST", a Text label that exists only in
+// this file, does not appear anywhere in `dist/assets/`. Vite tree-shakes the
+// whole module out.
+//
+// Same status as `components/Machines.tsx` and the `Instanced*.tsx` tree, which
+// `machines/machineSurfaces.ts` already records at its top. The live factory
+// shell is `infrastructure/OptimizedFactoryInfrastructure.tsx`.
+//
+// Kept and corrected rather than deleted, on the same reasoning that keeps the
+// other dead modules: if it is ever revived it should be revived correct. But
+// ANYTHING AUTHORED HERE RENDERS NOTHING, and a measurement that credits a
+// change in this file with a visible effect is measuring something else.
+//
+// ---------------------------------------------------------------------------
+// THESE ROOMS ARE LIT
+// ---------------------------------------------------------------------------
+// Every surface in this file - the guard hut, break room, locker room, restroom
+// and office, their floors, walls, desks, lockers, benches, notice boards and
+// signage - was a `meshBasicMaterial`. An unlit material ignores the sun, the
+// zone lights and the day/night cycle entirely, so these interiors read as flat
+// cardboard cut-outs sitting inside a shaded building, and they stayed at
+// midday brightness at midnight.
+//
+// The tell was already in the source and had been for a long time: dozens of
+// these meshes carry `castShadow` and `receiveShadow`. Neither flag does
+// anything on an unlit material - `MeshBasicMaterial` has no lighting term to
+// receive a shadow into - so the author's intent is recorded right next to the
+// material that made it impossible.
+//
+// All 129 are now `meshStandardMaterial` at roughness 0.8, which is the band
+// for painted block, laminate, fabric and powder-coated steel. Nothing here
+// emits light, so nothing here needed to stay unlit; the light fittings live in
+// `OptimizedFactoryInfrastructure.tsx` (`factory-fixture-lens`) and are
+// untouched.
+//
+// See the matching note in `TruckBay.tsx` (YARD PAINT IS LIT) and the ROAD PAINT
+// block in `FactoryExterior.tsx`, which reached the same conclusion for the
+// exterior markings.
+
 interface FactoryWallsProps {
   floorWidth: number;
   floorDepth: number;
@@ -62,13 +106,13 @@ const PersonnelDoor: React.FC<{
       {/* Door frame - structural surround - bottom at y=0 */}
       <mesh position={[0, frameHeight / 2, 0]} castShadow>
         <boxGeometry args={[frameWidth, frameHeight, 0.15]} />
-        <meshBasicMaterial color="#374151" />
+        <meshStandardMaterial color="#374151" roughness={0.8} />
       </mesh>
 
       {/* Door recess */}
       <mesh position={[0, doorHeight / 2, 0.05]}>
         <boxGeometry args={[0.6, 1.3, 0.1]} />
-        <meshBasicMaterial color="#1f2937" />
+        <meshStandardMaterial color="#1f2937" roughness={0.8} />
       </mesh>
 
       {/* Door panel - bottom at floor level */}
@@ -84,25 +128,25 @@ const PersonnelDoor: React.FC<{
       {/* Door window (upper portion) */}
       <mesh position={[0, doorHeight * 0.75, 0.125]}>
         <boxGeometry args={[0.3, 0.4, 0.01]} />
-        <meshBasicMaterial color="#1e3a5f" transparent opacity={0.7} />
+        <meshStandardMaterial color="#1e3a5f" transparent opacity={0.7} roughness={0.8} />
       </mesh>
 
       {/* Push bar (crash bar for emergency exits) */}
       <mesh position={[0, doorHeight * 0.4, 0.14]}>
         <boxGeometry args={[0.35, 0.04, 0.03]} />
-        <meshBasicMaterial color={isEmergencyExit ? '#fbbf24' : '#94a3b8'} />
+        <meshStandardMaterial color={isEmergencyExit ? '#fbbf24' : '#94a3b8'} roughness={0.8} />
       </mesh>
 
       {/* Door handle */}
       <mesh position={[0.18, doorHeight * 0.5, 0.14]}>
         <boxGeometry args={[0.04, 0.08, 0.03]} />
-        <meshBasicMaterial color="#64748b" />
+        <meshStandardMaterial color="#64748b" roughness={0.8} />
       </mesh>
 
       {/* Sign above door */}
       <mesh position={[0, frameHeight + 0.12, 0.08]}>
         <boxGeometry args={[0.7, 0.18, 0.025]} />
-        <meshBasicMaterial color={isEmergencyExit ? '#dc2626' : '#1e40af'} />
+        <meshStandardMaterial color={isEmergencyExit ? '#dc2626' : '#1e40af'} roughness={0.8} />
       </mesh>
       <Text
         position={[0, frameHeight + 0.12, 0.1]}
@@ -125,19 +169,20 @@ const PersonnelDoor: React.FC<{
       {/* Floor mat - raised with depthWrite to prevent z-fighting */}
       <mesh position={[0, 0.06, 0.3]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[0.6, 0.4]} />
-        <meshBasicMaterial
+        <meshStandardMaterial
           color="#1f2937"
           depthWrite={false}
           polygonOffset
           polygonOffsetFactor={POLYGON_OFFSET.standard.factor}
           polygonOffsetUnits={POLYGON_OFFSET.standard.units}
+          roughness={0.8}
         />
       </mesh>
 
       {/* Threshold */}
       <mesh position={[0, 0.015, 0]}>
         <boxGeometry args={[0.6, 0.03, 0.15]} />
-        <meshBasicMaterial color="#64748b" />
+        <meshStandardMaterial color="#64748b" roughness={0.8} />
       </mesh>
     </group>
   );
@@ -224,7 +269,7 @@ const BreakRoom: React.FC<{ position: [number, number, number] }> = React.memo((
       {/* Floor/platform - raised with depthWrite to prevent z-fighting */}
       <mesh position={[0, 0.06, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[6, 5]} />
-        <meshBasicMaterial
+        <meshStandardMaterial
           color="#22c55e"
           transparent
           opacity={0.15}
@@ -232,13 +277,14 @@ const BreakRoom: React.FC<{ position: [number, number, number] }> = React.memo((
           polygonOffset
           polygonOffsetFactor={POLYGON_OFFSET.standard.factor}
           polygonOffsetUnits={POLYGON_OFFSET.standard.units}
+          roughness={0.8}
         />
       </mesh>
 
       {/* Shelter roof */}
       <mesh position={[0, 3, 0]} castShadow receiveShadow>
         <boxGeometry args={[6, 0.15, 5]} />
-        <meshBasicMaterial color="#334155" />
+        <meshStandardMaterial color="#334155" roughness={0.8} />
       </mesh>
 
       {/* Support pillars - INSTANCED (4 pillars -> 1 draw call) */}
@@ -247,7 +293,7 @@ const BreakRoom: React.FC<{ position: [number, number, number] }> = React.memo((
       {/* Bench top */}
       <mesh position={[0, 0.4, 1.5]} castShadow>
         <boxGeometry args={[4, 0.08, 0.5]} />
-        <meshBasicMaterial color="#78350f" />
+        <meshStandardMaterial color="#78350f" roughness={0.8} />
       </mesh>
 
       {/* Bench legs - INSTANCED (2 legs -> 1 draw call) */}
@@ -260,7 +306,7 @@ const BreakRoom: React.FC<{ position: [number, number, number] }> = React.memo((
       {/* Table top */}
       <mesh position={[0, 0.7, -0.5]} castShadow>
         <boxGeometry args={[2.5, 0.06, 1.2]} />
-        <meshBasicMaterial color="#1e293b" />
+        <meshStandardMaterial color="#1e293b" roughness={0.8} />
       </mesh>
 
       {/* Table legs - INSTANCED (4 legs -> 1 draw call) */}
@@ -274,7 +320,7 @@ const BreakRoom: React.FC<{ position: [number, number, number] }> = React.memo((
       <group position={[2.2, 0, -1.5]}>
         <mesh position={[0, 1, 0]} castShadow>
           <boxGeometry args={[0.8, 2, 0.6]} />
-          <meshBasicMaterial color="#1e40af" />
+          <meshStandardMaterial color="#1e40af" roughness={0.8} />
         </mesh>
         {/* Screen - keep standard material for emissive */}
         <mesh position={[0, 1.2, 0.31]}>
@@ -293,7 +339,7 @@ const BreakRoom: React.FC<{ position: [number, number, number] }> = React.memo((
       <group position={[0, 2.8, -2.3]}>
         <mesh>
           <boxGeometry args={[1.5, 0.4, 0.05]} />
-          <meshBasicMaterial color="#22c55e" />
+          <meshStandardMaterial color="#22c55e" roughness={0.8} />
         </mesh>
       </group>
 
@@ -362,12 +408,12 @@ const WallClock: React.FC<{ position: [number, number, number] }> = React.memo((
       {/* Clock face */}
       <mesh>
         <cylinderGeometry args={[0.35, 0.35, 0.05, 32]} />
-        <meshBasicMaterial color="#f5f5f5" />
+        <meshStandardMaterial color="#f5f5f5" roughness={0.8} />
       </mesh>
       {/* Clock rim */}
       <mesh position={[0, 0, 0.03]}>
         <torusGeometry args={[0.35, 0.03, 8, 32]} />
-        <meshBasicMaterial color="#1e293b" />
+        <meshStandardMaterial color="#1e293b" roughness={0.8} />
       </mesh>
 
       {/* Hour markers - INSTANCED (12 markers -> 1 draw call) */}
@@ -376,17 +422,17 @@ const WallClock: React.FC<{ position: [number, number, number] }> = React.memo((
       {/* Hour hand */}
       <mesh ref={hourHandRef} position={[0, 0, 0.04]}>
         <boxGeometry args={[0.2, 0.025, 0.01]} />
-        <meshBasicMaterial color="#1e293b" />
+        <meshStandardMaterial color="#1e293b" roughness={0.8} />
       </mesh>
       {/* Minute hand */}
       <mesh ref={minuteHandRef} position={[0, 0, 0.05]}>
         <boxGeometry args={[0.25, 0.015, 0.01]} />
-        <meshBasicMaterial color="#374151" />
+        <meshStandardMaterial color="#374151" roughness={0.8} />
       </mesh>
       {/* Center cap */}
       <mesh position={[0, 0, 0.06]}>
         <cylinderGeometry args={[0.025, 0.025, 0.02, 16]} />
-        <meshBasicMaterial color="#1e293b" />
+        <meshStandardMaterial color="#1e293b" roughness={0.8} />
       </mesh>
     </group>
   );
@@ -402,24 +448,24 @@ const BulletinBoard: React.FC<{ position: [number, number, number] }> = React.me
         {/* Board frame */}
         <mesh>
           <boxGeometry args={[1.2, 1, 0.08]} />
-          <meshBasicMaterial color="#78350f" />
+          <meshStandardMaterial color="#78350f" roughness={0.8} />
         </mesh>
         {/* Cork board surface */}
         <mesh position={[0, 0, 0.045]}>
           <planeGeometry args={[1.1, 0.9]} />
-          <meshBasicMaterial color="#d4a574" />
+          <meshStandardMaterial color="#d4a574" roughness={0.8} />
         </mesh>
         {/* "SAFETY FIRST" header */}
         <mesh position={[0, 0.35, 0.05]}>
           <planeGeometry args={[0.9, 0.15]} />
-          <meshBasicMaterial color="#22c55e" />
+          <meshStandardMaterial color="#22c55e" roughness={0.8} />
         </mesh>
         {/* Days counter display */}
         <group position={[0, 0, 0.05]}>
           {/* Counter background */}
           <mesh position={[0, 0, 0.01]}>
             <planeGeometry args={[0.8, 0.35]} />
-            <meshBasicMaterial color="#1e293b" />
+            <meshStandardMaterial color="#1e293b" roughness={0.8} />
           </mesh>
           {/* Number display (simplified as glowing segments) */}
           <mesh position={[0, 0, 0.02]}>
@@ -434,7 +480,7 @@ const BulletinBoard: React.FC<{ position: [number, number, number] }> = React.me
         {/* "Days Without Incident" label */}
         <mesh position={[0, -0.28, 0.05]}>
           <planeGeometry args={[0.9, 0.12]} />
-          <meshBasicMaterial color="#475569" />
+          <meshStandardMaterial color="#475569" roughness={0.8} />
         </mesh>
         {/* Push pins */}
         {[
@@ -445,7 +491,10 @@ const BulletinBoard: React.FC<{ position: [number, number, number] }> = React.me
         ].map(([x, y], i) => (
           <mesh key={i} position={[x, y, 0.06]}>
             <sphereGeometry args={[0.025, 8, 8]} />
-            <meshBasicMaterial color={['#ef4444', '#eab308', '#22c55e', '#3b82f6'][i]} />
+            <meshStandardMaterial
+              color={['#ef4444', '#eab308', '#22c55e', '#3b82f6'][i]}
+              roughness={0.8}
+            />
           </mesh>
         ))}
       </group>
@@ -516,37 +565,37 @@ const LockerRoom: React.FC<{ position: [number, number, number] }> = React.memo(
       {/* Floor */}
       <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[8, 6]} />
-        <meshBasicMaterial color="#374151" />
+        <meshStandardMaterial color="#374151" roughness={0.8} />
       </mesh>
 
       {/* Back wall */}
       <mesh position={[0, 1.5, -3]} receiveShadow castShadow>
         <boxGeometry args={[8, 3, 0.15]} />
-        <meshBasicMaterial color="#475569" />
+        <meshStandardMaterial color="#475569" roughness={0.8} />
       </mesh>
 
       {/* Side walls */}
       <mesh position={[-4, 1.5, 0]} receiveShadow castShadow>
         <boxGeometry args={[0.15, 3, 6]} />
-        <meshBasicMaterial color="#475569" />
+        <meshStandardMaterial color="#475569" roughness={0.8} />
       </mesh>
       <mesh position={[4, 1.5, 0]} receiveShadow castShadow>
         <boxGeometry args={[0.15, 3, 6]} />
-        <meshBasicMaterial color="#475569" />
+        <meshStandardMaterial color="#475569" roughness={0.8} />
       </mesh>
 
       {/* Front wall with entrance gap */}
       <mesh position={[-2.5, 1.5, 3]} receiveShadow castShadow>
         <boxGeometry args={[3, 3, 0.15]} />
-        <meshBasicMaterial color="#475569" />
+        <meshStandardMaterial color="#475569" roughness={0.8} />
       </mesh>
       <mesh position={[2.5, 1.5, 3]} receiveShadow castShadow>
         <boxGeometry args={[3, 3, 0.15]} />
-        <meshBasicMaterial color="#475569" />
+        <meshStandardMaterial color="#475569" roughness={0.8} />
       </mesh>
       <mesh position={[0, 2.7, 3]} receiveShadow castShadow>
         <boxGeometry args={[2, 0.6, 0.15]} />
-        <meshBasicMaterial color="#475569" />
+        <meshStandardMaterial color="#475569" roughness={0.8} />
       </mesh>
 
       {/* Lockers - row of 6 (bodies with unique colors) */}
@@ -555,16 +604,16 @@ const LockerRoom: React.FC<{ position: [number, number, number] }> = React.memo(
           {/* Locker body */}
           <mesh position={[0, 1, 0]} castShadow>
             <boxGeometry args={[1, 2, 0.5]} />
-            <meshBasicMaterial color={lockerColors[i]} />
+            <meshStandardMaterial color={lockerColors[i]} roughness={0.8} />
           </mesh>
           {/* Ventilation slots */}
           <mesh position={[0, 0.3, 0.26]}>
             <planeGeometry args={[0.6, 0.15]} />
-            <meshBasicMaterial color="#1e293b" />
+            <meshStandardMaterial color="#1e293b" roughness={0.8} />
           </mesh>
           <mesh position={[0, 1.7, 0.26]}>
             <planeGeometry args={[0.6, 0.15]} />
-            <meshBasicMaterial color="#1e293b" />
+            <meshStandardMaterial color="#1e293b" roughness={0.8} />
           </mesh>
         </group>
       ))}
@@ -575,7 +624,7 @@ const LockerRoom: React.FC<{ position: [number, number, number] }> = React.memo(
       {/* Bench top */}
       <mesh position={[0, 0.35, -0.5]} castShadow>
         <boxGeometry args={[6, 0.08, 0.4]} />
-        <meshBasicMaterial color="#78350f" />
+        <meshStandardMaterial color="#78350f" roughness={0.8} />
       </mesh>
 
       {/* Bench supports - INSTANCED (2 supports -> 1 draw call) */}
@@ -591,7 +640,7 @@ const LockerRoom: React.FC<{ position: [number, number, number] }> = React.memo(
       {/* "LOCKER ROOM" sign above entrance */}
       <mesh position={[0, 2.85, 3.1]}>
         <boxGeometry args={[2, 0.35, 0.05]} />
-        <meshBasicMaterial color="#3b82f6" />
+        <meshStandardMaterial color="#3b82f6" roughness={0.8} />
       </mesh>
 
       {/* Overhead light */}
@@ -608,31 +657,31 @@ const PortableToilet: React.FC<{ position: [number, number, number]; rotation?: 
         {/* Main body */}
         <mesh position={[0, 1.1, 0]} castShadow>
           <boxGeometry args={[1.2, 2.2, 1.2]} />
-          <meshBasicMaterial color="#1e40af" />
+          <meshStandardMaterial color="#1e40af" roughness={0.8} />
         </mesh>
 
         {/* Roof with slight overhang */}
         <mesh position={[0, 2.3, 0]} castShadow>
           <boxGeometry args={[1.3, 0.1, 1.3]} />
-          <meshBasicMaterial color="#1e3a5f" />
+          <meshStandardMaterial color="#1e3a5f" roughness={0.8} />
         </mesh>
 
         {/* Vent pipe on roof */}
         <mesh position={[0.4, 2.5, 0]} castShadow>
           <cylinderGeometry args={[0.06, 0.06, 0.4, 8]} />
-          <meshBasicMaterial color="#1f2937" />
+          <meshStandardMaterial color="#1f2937" roughness={0.8} />
         </mesh>
 
         {/* Door */}
         <mesh position={[0, 1, 0.61]} castShadow>
           <boxGeometry args={[0.8, 1.8, 0.02]} />
-          <meshBasicMaterial color="#1e3a5f" />
+          <meshStandardMaterial color="#1e3a5f" roughness={0.8} />
         </mesh>
 
         {/* Door handle */}
         <mesh position={[0.3, 1, 0.63]}>
           <boxGeometry args={[0.08, 0.15, 0.04]} />
-          <meshBasicMaterial color="#64748b" />
+          <meshStandardMaterial color="#64748b" roughness={0.8} />
         </mesh>
 
         {/* Occupied indicator */}
@@ -651,7 +700,7 @@ const PortableToilet: React.FC<{ position: [number, number, number]; rotation?: 
             {[-0.15, 0, 0.15].map((y, j) => (
               <mesh key={j} position={[0, y, 0]}>
                 <boxGeometry args={[0.4, 0.04, 0.02]} />
-                <meshBasicMaterial color="#0f172a" />
+                <meshStandardMaterial color="#0f172a" roughness={0.8} />
               </mesh>
             ))}
           </group>
@@ -660,7 +709,7 @@ const PortableToilet: React.FC<{ position: [number, number, number]; rotation?: 
         {/* Base/skid */}
         <mesh position={[0, 0.02, 0]}>
           <boxGeometry args={[1.25, 0.04, 1.25]} />
-          <meshBasicMaterial color="#374151" />
+          <meshStandardMaterial color="#374151" roughness={0.8} />
         </mesh>
       </group>
     );
@@ -772,45 +821,45 @@ const ToiletBlock: React.FC<{ position: [number, number, number] }> = React.memo
       {/* Floor */}
       <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[8, 5]} />
-        <meshBasicMaterial color="#e2e8f0" />
+        <meshStandardMaterial color="#e2e8f0" roughness={0.8} />
       </mesh>
 
       {/* Back wall (north, -Z) */}
       <mesh position={[0, 1.5, -2.5]} receiveShadow castShadow>
         <boxGeometry args={[8, 3, 0.15]} />
-        <meshBasicMaterial color="#f1f5f9" />
+        <meshStandardMaterial color="#f1f5f9" roughness={0.8} />
       </mesh>
 
       {/* Front wall (south, +Z) */}
       <mesh position={[-3, 1.5, 2.5]} receiveShadow castShadow>
         <boxGeometry args={[2, 3, 0.15]} />
-        <meshBasicMaterial color="#f1f5f9" />
+        <meshStandardMaterial color="#f1f5f9" roughness={0.8} />
       </mesh>
       <mesh position={[3, 1.5, 2.5]} receiveShadow castShadow>
         <boxGeometry args={[2, 3, 0.15]} />
-        <meshBasicMaterial color="#f1f5f9" />
+        <meshStandardMaterial color="#f1f5f9" roughness={0.8} />
       </mesh>
       <mesh position={[0, 2.7, 2.5]} receiveShadow castShadow>
         <boxGeometry args={[4, 0.6, 0.15]} />
-        <meshBasicMaterial color="#f1f5f9" />
+        <meshStandardMaterial color="#f1f5f9" roughness={0.8} />
       </mesh>
 
       {/* West wall (-X) */}
       <mesh position={[-4, 1.5, 0]} receiveShadow castShadow>
         <boxGeometry args={[0.15, 3, 5]} />
-        <meshBasicMaterial color="#f1f5f9" />
+        <meshStandardMaterial color="#f1f5f9" roughness={0.8} />
       </mesh>
 
       {/* East wall (+X) */}
       <mesh position={[4, 1.5, 0]} receiveShadow castShadow>
         <boxGeometry args={[0.15, 3, 5]} />
-        <meshBasicMaterial color="#f1f5f9" />
+        <meshStandardMaterial color="#f1f5f9" roughness={0.8} />
       </mesh>
 
       {/* Restroom sign */}
       <mesh position={[0, 2.8, 2.6]}>
         <boxGeometry args={[1.5, 0.4, 0.05]} />
-        <meshBasicMaterial color="#1e40af" />
+        <meshStandardMaterial color="#1e40af" roughness={0.8} />
       </mesh>
 
       {/* === TOILET STALLS - INSTANCED === */}
@@ -832,7 +881,7 @@ const ToiletBlock: React.FC<{ position: [number, number, number] }> = React.memo
       {/* === SINK AREA - INSTANCED === */}
       <mesh position={[3, 0.85, 0]} castShadow>
         <boxGeometry args={[0.8, 0.1, 4]} />
-        <meshBasicMaterial color="#475569" />
+        <meshStandardMaterial color="#475569" roughness={0.8} />
       </mesh>
 
       <instancedMesh ref={sinkBasinsRef} args={[sinkBasinGeometry, whiteMaterial, 3]} />
@@ -860,7 +909,7 @@ const ToiletBlock: React.FC<{ position: [number, number, number] }> = React.memo
       {/* Hand dryers */}
       <mesh position={[0, 1.3, 2.35]}>
         <boxGeometry args={[0.4, 0.35, 0.25]} />
-        <meshBasicMaterial color="#e2e8f0" />
+        <meshStandardMaterial color="#e2e8f0" roughness={0.8} />
       </mesh>
 
       {/* Overhead light */}
@@ -877,46 +926,46 @@ const ManagerOffice: React.FC<{ position: [number, number, number] }> = React.me
         {/* Floor - carpet */}
         <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[8, 6]} />
-          <meshBasicMaterial color="#1e3a5f" />
+          <meshStandardMaterial color="#1e3a5f" roughness={0.8} />
         </mesh>
 
         {/* Back wall */}
         <mesh position={[0, 1.5, -3]} receiveShadow castShadow>
           <boxGeometry args={[8, 3, 0.15]} />
-          <meshBasicMaterial color="#f1f5f9" />
+          <meshStandardMaterial color="#f1f5f9" roughness={0.8} />
         </mesh>
 
         {/* Side walls */}
         <mesh position={[-4, 1.5, 0]} receiveShadow castShadow>
           <boxGeometry args={[0.15, 3, 6]} />
-          <meshBasicMaterial color="#f1f5f9" />
+          <meshStandardMaterial color="#f1f5f9" roughness={0.8} />
         </mesh>
         <mesh position={[4, 1.5, 0]} receiveShadow castShadow>
           <boxGeometry args={[0.15, 3, 6]} />
-          <meshBasicMaterial color="#f1f5f9" />
+          <meshStandardMaterial color="#f1f5f9" roughness={0.8} />
         </mesh>
 
         {/* Front wall - glass panels with door gap */}
         <mesh position={[-2.5, 1.5, 3]} receiveShadow castShadow>
           <boxGeometry args={[3, 3, 0.1]} />
-          <meshBasicMaterial color="#60a5fa" transparent opacity={0.3} />
+          <meshStandardMaterial color="#60a5fa" transparent opacity={0.3} roughness={0.8} />
         </mesh>
         <mesh position={[2.5, 1.5, 3]} receiveShadow castShadow>
           <boxGeometry args={[3, 3, 0.1]} />
-          <meshBasicMaterial color="#60a5fa" transparent opacity={0.3} />
+          <meshStandardMaterial color="#60a5fa" transparent opacity={0.3} roughness={0.8} />
         </mesh>
         <mesh position={[0, 2.7, 3]} receiveShadow castShadow>
           <boxGeometry args={[2, 0.6, 0.1]} />
-          <meshBasicMaterial color="#60a5fa" transparent opacity={0.3} />
+          <meshStandardMaterial color="#60a5fa" transparent opacity={0.3} roughness={0.8} />
         </mesh>
         {/* Glass door frame */}
         <mesh position={[-1, 1.2, 3]}>
           <boxGeometry args={[0.08, 2.4, 0.12]} />
-          <meshBasicMaterial color="#374151" />
+          <meshStandardMaterial color="#374151" roughness={0.8} />
         </mesh>
         <mesh position={[1, 1.2, 3]}>
           <boxGeometry args={[0.08, 2.4, 0.12]} />
-          <meshBasicMaterial color="#374151" />
+          <meshStandardMaterial color="#374151" roughness={0.8} />
         </mesh>
 
         {/* Desk */}
@@ -924,12 +973,12 @@ const ManagerOffice: React.FC<{ position: [number, number, number] }> = React.me
           {/* Desktop */}
           <mesh position={[0, 0.75, 0]} castShadow>
             <boxGeometry args={[2.5, 0.08, 1.2]} />
-            <meshBasicMaterial color="#78350f" />
+            <meshStandardMaterial color="#78350f" roughness={0.8} />
           </mesh>
           {/* Front panel */}
           <mesh position={[0, 0.37, 0.55]} castShadow>
             <boxGeometry args={[2.5, 0.7, 0.05]} />
-            <meshBasicMaterial color="#78350f" />
+            <meshStandardMaterial color="#78350f" roughness={0.8} />
           </mesh>
           {/* Desk legs */}
           {[
@@ -940,19 +989,19 @@ const ManagerOffice: React.FC<{ position: [number, number, number] }> = React.me
           ].map(([x, z], i) => (
             <mesh key={i} position={[x, 0.35, z]} castShadow>
               <boxGeometry args={[0.08, 0.7, 0.08]} />
-              <meshBasicMaterial color="#64748b" />
+              <meshStandardMaterial color="#64748b" roughness={0.8} />
             </mesh>
           ))}
           {/* Drawer unit */}
           <mesh position={[0.8, 0.35, 0]} castShadow>
             <boxGeometry args={[0.5, 0.65, 0.9]} />
-            <meshBasicMaterial color="#78350f" />
+            <meshStandardMaterial color="#78350f" roughness={0.8} />
           </mesh>
           {/* Drawer handles */}
           {[0.5, 0.25, 0].map((y, i) => (
             <mesh key={i} position={[0.8, y, 0.46]}>
               <boxGeometry args={[0.2, 0.03, 0.03]} />
-              <meshBasicMaterial color="#94a3b8" />
+              <meshStandardMaterial color="#94a3b8" roughness={0.8} />
             </mesh>
           ))}
         </group>
@@ -962,7 +1011,7 @@ const ManagerOffice: React.FC<{ position: [number, number, number] }> = React.me
           {/* Screen */}
           <mesh position={[0, 0.25, 0]} castShadow>
             <boxGeometry args={[0.8, 0.5, 0.04]} />
-            <meshBasicMaterial color="#1e293b" />
+            <meshStandardMaterial color="#1e293b" roughness={0.8} />
           </mesh>
           {/* Screen glow - keep standard for emissive */}
           <mesh position={[0, 0.25, 0.025]}>
@@ -972,25 +1021,25 @@ const ManagerOffice: React.FC<{ position: [number, number, number] }> = React.me
           {/* Stand */}
           <mesh position={[0, 0, 0]}>
             <boxGeometry args={[0.15, 0.08, 0.15]} />
-            <meshBasicMaterial color="#374151" />
+            <meshStandardMaterial color="#374151" roughness={0.8} />
           </mesh>
           {/* Base */}
           <mesh position={[0, -0.02, 0.05]}>
             <boxGeometry args={[0.3, 0.03, 0.25]} />
-            <meshBasicMaterial color="#374151" />
+            <meshStandardMaterial color="#374151" roughness={0.8} />
           </mesh>
         </group>
 
         {/* Keyboard */}
         <mesh position={[0, 0.8, -0.7]}>
           <boxGeometry args={[0.5, 0.02, 0.18]} />
-          <meshBasicMaterial color="#1e293b" />
+          <meshStandardMaterial color="#1e293b" roughness={0.8} />
         </mesh>
 
         {/* Mouse */}
         <mesh position={[0.4, 0.8, -0.7]}>
           <boxGeometry args={[0.08, 0.02, 0.12]} />
-          <meshBasicMaterial color="#1e293b" />
+          <meshStandardMaterial color="#1e293b" roughness={0.8} />
         </mesh>
 
         {/* Office chair */}
@@ -998,22 +1047,22 @@ const ManagerOffice: React.FC<{ position: [number, number, number] }> = React.me
           {/* Seat */}
           <mesh position={[0, 0.45, 0]} castShadow>
             <boxGeometry args={[0.5, 0.1, 0.5]} />
-            <meshBasicMaterial color="#1e293b" />
+            <meshStandardMaterial color="#1e293b" roughness={0.8} />
           </mesh>
           {/* Backrest */}
           <mesh position={[0, 0.8, 0.2]} castShadow>
             <boxGeometry args={[0.48, 0.6, 0.08]} />
-            <meshBasicMaterial color="#1e293b" />
+            <meshStandardMaterial color="#1e293b" roughness={0.8} />
           </mesh>
           {/* Chair base */}
           <mesh position={[0, 0.2, 0]}>
             <cylinderGeometry args={[0.03, 0.03, 0.4, 8]} />
-            <meshBasicMaterial color="#64748b" />
+            <meshStandardMaterial color="#64748b" roughness={0.8} />
           </mesh>
           {/* Chair wheel base */}
           <mesh position={[0, 0.03, 0]}>
             <cylinderGeometry args={[0.25, 0.25, 0.03, 5]} />
-            <meshBasicMaterial color="#374151" />
+            <meshStandardMaterial color="#374151" roughness={0.8} />
           </mesh>
         </group>
 
@@ -1021,18 +1070,18 @@ const ManagerOffice: React.FC<{ position: [number, number, number] }> = React.me
         <group position={[-3, 0, -2]}>
           <mesh position={[0, 0.6, 0]} castShadow>
             <boxGeometry args={[0.5, 1.2, 0.6]} />
-            <meshBasicMaterial color="#64748b" />
+            <meshStandardMaterial color="#64748b" roughness={0.8} />
           </mesh>
           {/* Drawer fronts */}
           {[0.9, 0.5, 0.1].map((y, i) => (
             <group key={i}>
               <mesh position={[0, y, 0.31]}>
                 <planeGeometry args={[0.45, 0.35]} />
-                <meshBasicMaterial color="#475569" />
+                <meshStandardMaterial color="#475569" roughness={0.8} />
               </mesh>
               <mesh position={[0.15, y, 0.32]}>
                 <boxGeometry args={[0.1, 0.03, 0.02]} />
-                <meshBasicMaterial color="#94a3b8" />
+                <meshStandardMaterial color="#94a3b8" roughness={0.8} />
               </mesh>
             </group>
           ))}
@@ -1043,17 +1092,17 @@ const ManagerOffice: React.FC<{ position: [number, number, number] }> = React.me
           {/* Board frame */}
           <mesh>
             <boxGeometry args={[2, 1.2, 0.05]} />
-            <meshBasicMaterial color="#374151" />
+            <meshStandardMaterial color="#374151" roughness={0.8} />
           </mesh>
           {/* White surface */}
           <mesh position={[0, 0, 0.03]}>
             <planeGeometry args={[1.9, 1.1]} />
-            <meshBasicMaterial color="#f8fafc" />
+            <meshStandardMaterial color="#f8fafc" roughness={0.8} />
           </mesh>
           {/* Marker tray */}
           <mesh position={[0, -0.65, 0.08]}>
             <boxGeometry args={[1.5, 0.08, 0.1]} />
-            <meshBasicMaterial color="#64748b" />
+            <meshStandardMaterial color="#64748b" roughness={0.8} />
           </mesh>
         </group>
 
@@ -1061,11 +1110,11 @@ const ManagerOffice: React.FC<{ position: [number, number, number] }> = React.me
         <group position={[-2, 2.2, -2.9]}>
           <mesh>
             <cylinderGeometry args={[0.25, 0.25, 0.05, 32]} />
-            <meshBasicMaterial color="#1e293b" />
+            <meshStandardMaterial color="#1e293b" roughness={0.8} />
           </mesh>
           <mesh position={[0, 0, 0.03]} rotation={[Math.PI / 2, 0, 0]}>
             <circleGeometry args={[0.22, 32]} />
-            <meshBasicMaterial color="#f8fafc" />
+            <meshStandardMaterial color="#f8fafc" roughness={0.8} />
           </mesh>
         </group>
 
@@ -1074,12 +1123,12 @@ const ManagerOffice: React.FC<{ position: [number, number, number] }> = React.me
           {/* Pot */}
           <mesh position={[0, 0.2, 0]} castShadow>
             <cylinderGeometry args={[0.2, 0.15, 0.4, 16]} />
-            <meshBasicMaterial color="#78350f" />
+            <meshStandardMaterial color="#78350f" roughness={0.8} />
           </mesh>
           {/* Plant */}
           <mesh position={[0, 0.6, 0]}>
             <sphereGeometry args={[0.3, 8, 8]} />
-            <meshBasicMaterial color="#15803d" />
+            <meshStandardMaterial color="#15803d" roughness={0.8} />
           </mesh>
         </group>
 
@@ -1088,12 +1137,12 @@ const ManagerOffice: React.FC<{ position: [number, number, number] }> = React.me
           {/* Sign backing/frame - dark blue */}
           <mesh>
             <boxGeometry args={[3, 0.7, 0.1]} />
-            <meshBasicMaterial color="#1e3a5f" />
+            <meshStandardMaterial color="#1e3a5f" roughness={0.8} />
           </mesh>
           {/* Sign face - dark blue background */}
           <mesh position={[0, 0, 0.06]}>
             <boxGeometry args={[2.8, 0.55, 0.02]} />
-            <meshBasicMaterial color="#1e40af" />
+            <meshStandardMaterial color="#1e40af" roughness={0.8} />
           </mesh>
           {/* Text simulation - GOLD lettering */}
           <mesh position={[0, 0, 0.08]}>
@@ -1109,11 +1158,11 @@ const ManagerOffice: React.FC<{ position: [number, number, number] }> = React.me
           {/* Mounting brackets */}
           <mesh position={[-1.4, 0, -0.1]}>
             <boxGeometry args={[0.15, 0.5, 0.25]} />
-            <meshBasicMaterial color="#374151" />
+            <meshStandardMaterial color="#374151" roughness={0.8} />
           </mesh>
           <mesh position={[1.4, 0, -0.1]}>
             <boxGeometry args={[0.15, 0.5, 0.25]} />
-            <meshBasicMaterial color="#374151" />
+            <meshStandardMaterial color="#374151" roughness={0.8} />
           </mesh>
         </group>
 
@@ -1121,11 +1170,11 @@ const ManagerOffice: React.FC<{ position: [number, number, number] }> = React.me
         <group position={[0.7, 1.5, 3.15]}>
           <mesh>
             <boxGeometry args={[0.6, 0.2, 0.02]} />
-            <meshBasicMaterial color="#1e3a5f" />
+            <meshStandardMaterial color="#1e3a5f" roughness={0.8} />
           </mesh>
           <mesh position={[0, 0, 0.015]}>
             <boxGeometry args={[0.5, 0.12, 0.01]} />
-            <meshBasicMaterial color="#d4af37" />
+            <meshStandardMaterial color="#d4af37" roughness={0.8} />
           </mesh>
         </group>
 
@@ -1364,140 +1413,140 @@ export const FactoryWalls: React.FC<FactoryWallsProps> = () => {
           <group position={[-40, 4.5, 1.8]}>
             <mesh>
               <boxGeometry args={[2.5, 0.6, 0.08]} />
-              <meshBasicMaterial color="#1e40af" />
+              <meshStandardMaterial color="#1e40af" roughness={0.8} />
             </mesh>
             <mesh position={[0, 0, 0.05]}>
               <planeGeometry args={[2.3, 0.45]} />
-              <meshBasicMaterial color="#dbeafe" />
+              <meshStandardMaterial color="#dbeafe" roughness={0.8} />
             </mesh>
           </group>
 
           <group position={[-10, 4.5, 1.8]}>
             <mesh>
               <boxGeometry args={[2.5, 0.6, 0.08]} />
-              <meshBasicMaterial color="#15803d" />
+              <meshStandardMaterial color="#15803d" roughness={0.8} />
             </mesh>
             <mesh position={[0, 0, 0.05]}>
               <planeGeometry args={[2.3, 0.45]} />
-              <meshBasicMaterial color="#dcfce7" />
+              <meshStandardMaterial color="#dcfce7" roughness={0.8} />
             </mesh>
           </group>
 
           <group position={[10, 4.5, 1.8]}>
             <mesh>
               <boxGeometry args={[2.5, 0.6, 0.08]} />
-              <meshBasicMaterial color="#b45309" />
+              <meshStandardMaterial color="#b45309" roughness={0.8} />
             </mesh>
             <mesh position={[0, 0, 0.05]}>
               <planeGeometry args={[2.3, 0.45]} />
-              <meshBasicMaterial color="#fef3c7" />
+              <meshStandardMaterial color="#fef3c7" roughness={0.8} />
             </mesh>
           </group>
 
           <group position={[40, 4.5, 1.8]}>
             <mesh>
               <boxGeometry args={[2.5, 0.6, 0.08]} />
-              <meshBasicMaterial color="#7c3aed" />
+              <meshStandardMaterial color="#7c3aed" roughness={0.8} />
             </mesh>
             <mesh position={[0, 0, 0.05]}>
               <planeGeometry args={[2.3, 0.45]} />
-              <meshBasicMaterial color="#ede9fe" />
+              <meshStandardMaterial color="#ede9fe" roughness={0.8} />
             </mesh>
           </group>
 
           <group position={[-42, 2.5, 40]} rotation={[0, Math.PI, 0]}>
             <mesh>
               <boxGeometry args={[1.8, 0.5, 0.05]} />
-              <meshBasicMaterial color="#eab308" />
+              <meshStandardMaterial color="#eab308" roughness={0.8} />
             </mesh>
             <mesh position={[0, 0, 0.03]}>
               <planeGeometry args={[1.6, 0.35]} />
-              <meshBasicMaterial color="#1c1917" />
+              <meshStandardMaterial color="#1c1917" roughness={0.8} />
             </mesh>
           </group>
 
           <group position={[0, 2.5, -10]}>
             <mesh>
               <boxGeometry args={[2, 0.5, 0.05]} />
-              <meshBasicMaterial color="#22c55e" />
+              <meshStandardMaterial color="#22c55e" roughness={0.8} />
             </mesh>
             <mesh position={[0, 0, 0.03]}>
               <planeGeometry args={[1.8, 0.35]} />
-              <meshBasicMaterial color="#f0fdf4" />
+              <meshStandardMaterial color="#f0fdf4" roughness={0.8} />
             </mesh>
           </group>
 
           <group position={[15, 2.5, 8]} rotation={[0, -Math.PI / 4, 0]}>
             <mesh>
               <boxGeometry args={[2.2, 0.5, 0.05]} />
-              <meshBasicMaterial color="#3b82f6" />
+              <meshStandardMaterial color="#3b82f6" roughness={0.8} />
             </mesh>
             <mesh position={[0, 0, 0.03]}>
               <planeGeometry args={[2, 0.35]} />
-              <meshBasicMaterial color="#eff6ff" />
+              <meshStandardMaterial color="#eff6ff" roughness={0.8} />
             </mesh>
           </group>
 
           <group position={[-15, 2.5, -5]} rotation={[0, Math.PI / 6, 0]}>
             <mesh>
               <boxGeometry args={[2.4, 0.5, 0.05]} />
-              <meshBasicMaterial color="#f97316" />
+              <meshStandardMaterial color="#f97316" roughness={0.8} />
             </mesh>
             <mesh position={[0, 0, 0.03]}>
               <planeGeometry args={[2.2, 0.35]} />
-              <meshBasicMaterial color="#fff7ed" />
+              <meshStandardMaterial color="#fff7ed" roughness={0.8} />
             </mesh>
           </group>
 
           <group position={[0, 2.2, 42]} rotation={[0, Math.PI, 0]}>
             <mesh>
               <boxGeometry args={[2.5, 0.6, 0.05]} />
-              <meshBasicMaterial color="#dc2626" />
+              <meshStandardMaterial color="#dc2626" roughness={0.8} />
             </mesh>
             <mesh position={[0, 0, 0.03]}>
               <planeGeometry args={[2.3, 0.45]} />
-              <meshBasicMaterial color="#fef2f2" />
+              <meshStandardMaterial color="#fef2f2" roughness={0.8} />
             </mesh>
           </group>
 
           <group position={[25, 3, 35]} rotation={[0, -Math.PI / 2, 0]}>
             <mesh>
               <boxGeometry args={[2.2, 0.5, 0.05]} />
-              <meshBasicMaterial color="#1e293b" />
+              <meshStandardMaterial color="#1e293b" roughness={0.8} />
             </mesh>
             <mesh position={[0, 0, 0.03]}>
               <planeGeometry args={[2, 0.35]} />
-              <meshBasicMaterial color="#f8fafc" />
+              <meshStandardMaterial color="#f8fafc" roughness={0.8} />
             </mesh>
             <mesh position={[0.85, 0, 0.04]}>
               <boxGeometry args={[0.3, 0.15, 0.02]} />
-              <meshBasicMaterial color="#22c55e" />
+              <meshStandardMaterial color="#22c55e" roughness={0.8} />
             </mesh>
           </group>
 
           <group position={[-35, 2.5, -35]} rotation={[0, Math.PI / 2, 0]}>
             <mesh>
               <boxGeometry args={[2.8, 0.5, 0.05]} />
-              <meshBasicMaterial color="#dc2626" />
+              <meshStandardMaterial color="#dc2626" roughness={0.8} />
             </mesh>
             <mesh position={[0, 0, 0.03]}>
               <planeGeometry args={[2.6, 0.35]} />
-              <meshBasicMaterial color="#fef2f2" />
+              <meshStandardMaterial color="#fef2f2" roughness={0.8} />
             </mesh>
           </group>
 
           <group position={[40, 2.2, -20]} rotation={[0, -Math.PI / 3, 0]}>
             <mesh>
               <cylinderGeometry args={[0.35, 0.35, 0.05, 32]} />
-              <meshBasicMaterial color="#dc2626" />
+              <meshStandardMaterial color="#dc2626" roughness={0.8} />
             </mesh>
             <mesh position={[0, 0, 0.03]} rotation={[Math.PI / 2, 0, 0]}>
               <circleGeometry args={[0.3, 32]} />
-              <meshBasicMaterial color="#fef2f2" />
+              <meshStandardMaterial color="#fef2f2" roughness={0.8} />
             </mesh>
             <mesh position={[0, 0, 0.04]} rotation={[0, 0, Math.PI / 4]}>
               <boxGeometry args={[0.5, 0.06, 0.02]} />
-              <meshBasicMaterial color="#dc2626" />
+              <meshStandardMaterial color="#dc2626" roughness={0.8} />
             </mesh>
           </group>
 
@@ -1510,15 +1559,15 @@ export const FactoryWalls: React.FC<FactoryWallsProps> = () => {
             <group key={i} position={pos as [number, number, number]}>
               <mesh>
                 <boxGeometry args={[0.5, 0.6, 0.05]} />
-                <meshBasicMaterial color="#dc2626" />
+                <meshStandardMaterial color="#dc2626" roughness={0.8} />
               </mesh>
               <mesh position={[0, 0, 0.03]}>
                 <planeGeometry args={[0.4, 0.5]} />
-                <meshBasicMaterial color="#fef2f2" />
+                <meshStandardMaterial color="#fef2f2" roughness={0.8} />
               </mesh>
               <mesh position={[0, 0.05, 0.04]}>
                 <boxGeometry args={[0.15, 0.3, 0.02]} />
-                <meshBasicMaterial color="#dc2626" />
+                <meshStandardMaterial color="#dc2626" roughness={0.8} />
               </mesh>
             </group>
           ))}
@@ -1530,15 +1579,15 @@ export const FactoryWalls: React.FC<FactoryWallsProps> = () => {
             <group key={i} position={pos as [number, number, number]}>
               <mesh>
                 <boxGeometry args={[0.6, 0.6, 0.05]} />
-                <meshBasicMaterial color="#22c55e" />
+                <meshStandardMaterial color="#22c55e" roughness={0.8} />
               </mesh>
               <mesh position={[0, 0, 0.03]}>
                 <boxGeometry args={[0.35, 0.12, 0.02]} />
-                <meshBasicMaterial color="#f0fdf4" />
+                <meshStandardMaterial color="#f0fdf4" roughness={0.8} />
               </mesh>
               <mesh position={[0, 0, 0.03]}>
                 <boxGeometry args={[0.12, 0.35, 0.02]} />
-                <meshBasicMaterial color="#f0fdf4" />
+                <meshStandardMaterial color="#f0fdf4" roughness={0.8} />
               </mesh>
             </group>
           ))}
@@ -1546,21 +1595,21 @@ export const FactoryWalls: React.FC<FactoryWallsProps> = () => {
           <group position={[-48, 2.5, 47.5]}>
             <mesh>
               <boxGeometry args={[2, 0.6, 0.05]} />
-              <meshBasicMaterial color="#22c55e" />
+              <meshStandardMaterial color="#22c55e" roughness={0.8} />
             </mesh>
             <mesh position={[0, 0, 0.03]}>
               <planeGeometry args={[1.8, 0.45]} />
-              <meshBasicMaterial color="#f0fdf4" />
+              <meshStandardMaterial color="#f0fdf4" roughness={0.8} />
             </mesh>
             {[-0.4, 0, 0.4].map((x, i) => (
               <group key={i} position={[x, 0, 0.04]}>
                 <mesh position={[0, 0.12, 0]}>
                   <sphereGeometry args={[0.06, 8, 8]} />
-                  <meshBasicMaterial color="#15803d" />
+                  <meshStandardMaterial color="#15803d" roughness={0.8} />
                 </mesh>
                 <mesh position={[0, -0.02, 0]}>
                   <boxGeometry args={[0.08, 0.15, 0.02]} />
-                  <meshBasicMaterial color="#15803d" />
+                  <meshStandardMaterial color="#15803d" roughness={0.8} />
                 </mesh>
               </group>
             ))}

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { getModelTextures, type MachineTextures } from '../../utils/machineTextures';
 import { loadCompressedTexture } from '../../utils/textureCompression';
 import { useGraphicsStore } from '../../stores/graphicsStore';
+import { applyWorldSurface, type WorldSurfaceProfileName } from '../../utils/worldSurface';
 
 /**
  * Shared materials for worker body parts to reduce memory overhead
@@ -121,14 +122,28 @@ export function requestWorkerDetailMaps(): Promise<WorkerDetailMaps | null> {
   ])
     .then(([normal, roughness]) => {
       if (!normal || !roughness) return null;
-      // Neither map is colour data - leave both on the three.js default
-      // (no colour space), which is what a normal/roughness map requires.
+      // Neither map is colour data, so both are FORCED to NoColorSpace rather
+      // than left on "the three.js default".
+      //
+      // That distinction is not pedantry, it was measured. `KTX2Loader` reads
+      // the transfer function out of the file's data format descriptor and
+      // assigns `texture.colorSpace` from it, so the default is whatever the
+      // encoder wrote - and `worker_roughness.ktx2` was encoded sRGB.
+      // `inspectObjects` reported the bound slot as `roughnessMap:srgb` the
+      // first frame these maps reached a worker, which is precisely the defect
+      // `audit-scene-models.mjs` classes as a blocker: a data map decoded
+      // through the sRGB transfer is consumed as roughness values that were
+      // never written. Nothing caught it earlier because the maps were gated to
+      // `high` and every audit runs the shipping `medium` preset.
+      //
       // Anisotropy has to be set on the base texture: sampler state is applied
       // during upload and every repeat-variant clone shares one GL texture.
       for (const texture of [normal, roughness]) {
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
         texture.anisotropy = Math.max(texture.anisotropy, 4);
+        texture.colorSpace = THREE.NoColorSpace;
+        texture.needsUpdate = true;
       }
       resolvedDetailMaps = { normal, roughness };
       return resolvedDetailMaps;
@@ -251,6 +266,70 @@ export const SHARED_WORKER_MATERIALS = {
 };
 
 // =============================================================================
+// SURFACE FINISH
+// =============================================================================
+
+/**
+ * Analytic surface finish for every worker material, in OBJECT REST SPACE.
+ *
+ * WHY THIS FILE NEEDED IT TOO. `WorkerModel.tsx` finishes the surfaces that come
+ * out of the authored GLB - skin, hi-vis, shirt, denim, boots, hair - and that
+ * alone left `world-personnel` at 81% flat by mesh count on the
+ * `personnel-close` audit, because most of the meshes in that branch are not the
+ * body. They are the accessories and the procedural worker: helmets, glasses,
+ * badges, ear defenders, gloves, tools, clipboards, lockers of small parts, and
+ * the cached per-worker skin/uniform/pants/hat/accent materials this module
+ * hands out. A body finished next to unfinished accessories reads worse than
+ * neither being finished, because the mismatch is what the eye picks up.
+ *
+ * REST SPACE EVERYWHERE. Workers walk. A world-space field would make the detail
+ * swim across a moving body; `worldSurface` samples the `position` attribute, so
+ * every profile named here is welded to the bind pose. See the coordinate-space
+ * table in `utils/worldSurface.ts`.
+ *
+ * COST. `StaticMeshBatch` excludes `SkinnedMesh` and `InstancedMesh` outright,
+ * and every profile shares one `customProgramCacheKey`, so this adds no draw
+ * calls and no shader permutations.
+ *
+ * WHAT IS DELIBERATELY ABSENT:
+ *   eyeWhite, iris, pupil   An eye is a wet sphere. Dust, grime, worn edges and
+ *                           tonal drift are all diseases on it.
+ *   safetyLens, sampleGlass,
+ *   lensBlue                Transparent - `resolveSurfaceProfile` declines these
+ *                           anyway, and they are correctly flat by construction.
+ *   reflective, safetyGreen,
+ *   safetyGreenBright,
+ *   screenBlue              Emissive. These represent EMITTED light (retro-
+ *                           reflective banding under a lamp, a status LED, a lit
+ *                           screen), and weathering an emitter does nothing
+ *                           visible while making no physical sense.
+ */
+const WORKER_SURFACE_PROFILES: Partial<
+  Record<keyof typeof SHARED_WORKER_MATERIALS, WorldSurfaceProfileName>
+> = {
+  lips: 'skin',
+  black: 'vehicle',
+  darkGray: 'vehicle',
+  mediumGray: 'vehicle',
+  white: 'fabric',
+  offWhite: 'fabric',
+  boot: 'fabric',
+  glove: 'fabric',
+  sampleCap: 'vehicle',
+  badgeWhite: 'signage',
+  chrome: 'metal',
+  chromeShiny: 'metal',
+  vestOrange: 'signage',
+  clipboardBrown: 'vehicle',
+  handleRed: 'vehicle',
+};
+
+Object.entries(WORKER_SURFACE_PROFILES).forEach(([name, profile]) => {
+  const material = SHARED_WORKER_MATERIALS[name as keyof typeof SHARED_WORKER_MATERIALS];
+  if (material && profile) applyWorldSurface(material, profile);
+});
+
+// =============================================================================
 // CACHED DYNAMIC MATERIALS (vary per-worker but shared across same values)
 // =============================================================================
 
@@ -273,10 +352,10 @@ const texturedMaterials = new WeakSet<THREE.MeshStandardMaterial>();
  */
 export const getSkinMaterial = (skinTone: string): THREE.MeshStandardMaterial => {
   if (!skinMaterialCache.has(skinTone)) {
-    const material = new THREE.MeshStandardMaterial({
-      color: skinTone,
-      roughness: 0.6,
-    });
+    const material = applyWorldSurface(
+      new THREE.MeshStandardMaterial({ color: skinTone, roughness: 0.6 }),
+      'skin'
+    );
     skinMaterialCache.set(skinTone, material);
   }
 
@@ -297,10 +376,10 @@ export const getSkinMaterial = (skinTone: string): THREE.MeshStandardMaterial =>
  */
 export const getSkinSoftMaterial = (skinTone: string): THREE.MeshStandardMaterial => {
   if (!skinSoftMaterialCache.has(skinTone)) {
-    const material = new THREE.MeshStandardMaterial({
-      color: skinTone,
-      roughness: 0.55,
-    });
+    const material = applyWorldSurface(
+      new THREE.MeshStandardMaterial({ color: skinTone, roughness: 0.55 }),
+      'skin'
+    );
     skinSoftMaterialCache.set(skinTone, material);
   }
 
@@ -321,10 +400,12 @@ export const getHairMaterial = (hairColor: string): THREE.MeshStandardMaterial =
   if (!hairMaterialCache.has(hairColor)) {
     hairMaterialCache.set(
       hairColor,
-      new THREE.MeshStandardMaterial({
-        color: hairColor,
-        roughness: 0.9,
-      })
+      // `skin`, not `fabric`: at 5.5 cm the weave period would be four blotches
+      // on a head rather than a surface.
+      applyWorldSurface(
+        new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.9 }),
+        'skin'
+      )
     );
   }
   return hairMaterialCache.get(hairColor)!;
@@ -336,12 +417,15 @@ export const getHairMaterial = (hairColor: string): THREE.MeshStandardMaterial =
  */
 export const getUniformMaterial = (color: string): THREE.MeshStandardMaterial => {
   if (!uniformMaterialCache.has(color)) {
-    const material = new THREE.MeshStandardMaterial({
-      color: color,
-      emissive: color,
-      emissiveIntensity: 0.025,
-      roughness: 0.7,
-    });
+    const material = applyWorldSurface(
+      new THREE.MeshStandardMaterial({
+        color: color,
+        emissive: color,
+        emissiveIntensity: 0.025,
+        roughness: 0.7,
+      }),
+      'fabric'
+    );
     uniformMaterialCache.set(color, material);
   }
 
@@ -361,12 +445,15 @@ export const getUniformMaterial = (color: string): THREE.MeshStandardMaterial =>
  */
 export const getPantsMaterial = (color: string): THREE.MeshStandardMaterial => {
   if (!pantsMaterialCache.has(color)) {
-    const material = new THREE.MeshStandardMaterial({
-      color: color,
-      emissive: color,
-      emissiveIntensity: 0.015,
-      roughness: 0.8,
-    });
+    const material = applyWorldSurface(
+      new THREE.MeshStandardMaterial({
+        color: color,
+        emissive: color,
+        emissiveIntensity: 0.015,
+        roughness: 0.8,
+      }),
+      'fabric'
+    );
     pantsMaterialCache.set(color, material);
   }
 
@@ -387,10 +474,9 @@ export const getHatMaterial = (color: string): THREE.MeshStandardMaterial => {
   if (!hatMaterialCache.has(color)) {
     hatMaterialCache.set(
       color,
-      new THREE.MeshStandardMaterial({
-        color: color,
-        roughness: 0.5,
-      })
+      // A hard hat is moulded HDPE in a safety colour: `signage` is the lightest
+      // profile, because hi-vis weathered into the background has been broken.
+      applyWorldSurface(new THREE.MeshStandardMaterial({ color: color, roughness: 0.5 }), 'signage')
     );
   }
   return hatMaterialCache.get(color)!;
@@ -400,11 +486,10 @@ export const getAccentMaterial = (color: string): THREE.MeshStandardMaterial => 
   if (!accentMaterialCache.has(color)) {
     accentMaterialCache.set(
       color,
-      new THREE.MeshStandardMaterial({
-        color,
-        roughness: 0.48,
-        metalness: 0.12,
-      })
+      applyWorldSurface(
+        new THREE.MeshStandardMaterial({ color, roughness: 0.48, metalness: 0.12 }),
+        'signage'
+      )
     );
   }
   return accentMaterialCache.get(color)!;

@@ -77,6 +77,11 @@ describe('parseRuntimeMode', () => {
     );
     expect(parseRuntimeMode('?benchmark=true&scene=village').benchmarkScene).toBe('village');
     expect(parseRuntimeMode('?benchmark=true&scene=farm').benchmarkScene).toBe('farm');
+    // An unknown scene silently becomes `overview`, so a close camera that is
+    // declared in siteLayout but missing from BENCHMARK_SCENES would produce
+    // confidently mis-framed evidence rather than an error.
+    expect(parseRuntimeMode('?benchmark=true&scene=paddock').benchmarkScene).toBe('paddock');
+    expect(parseRuntimeMode('?benchmark=true&scene=square').benchmarkScene).toBe('square');
     expect(parseRuntimeMode('?benchmark=true&scene=garage').benchmarkScene).toBe('garage');
     expect(parseRuntimeMode('?benchmark=true&scene=sun').benchmarkScene).toBe('sun');
     expect(parseRuntimeMode('?benchmark=true&scene=moon').benchmarkScene).toBe('moon');

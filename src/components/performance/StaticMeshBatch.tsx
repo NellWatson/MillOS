@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { applyDeclinedWorldSurface, ownsOnlyWorldSurface } from '../../utils/worldSurface';
 
 type R3FObjectState = {
   eventCount?: number;
@@ -33,6 +34,28 @@ export interface StaticMeshBatchProps {
   revision?: string | number | boolean;
   minimumInstances?: number;
   sampleMilliseconds?: number;
+  /**
+   * Optional finish applied to every material this batcher PRODUCES.
+   *
+   * The batcher owns draw calls and has no opinion about how a surface should
+   * look, so the art direction is a callback: see
+   * `utils/worldSurface.applyBatchWorldSurface`, which is what every call site
+   * in `MillScene` passes.
+   *
+   * WHY THE OUTPUT AND NOT THE SOURCE. `isSupportedMaterial` rejects any
+   * material carrying an own `onBeforeCompile` or `customProgramCacheKey`, so
+   * attaching a shader finish to a source material silently evicts that mesh
+   * from batching for good - `FactoryExterior.tsx` chose decal quads over an
+   * injection for exactly this reason, and `FarmArea.tsx` says "Do NOT do this
+   * to a building material". Injecting on the clone the batcher just made costs
+   * no candidate, no merge group and no draw call.
+   *
+   * `target` is that clone; `source` is the group's representative, which still
+   * carries the roughness and metalness the merge key agreed on. Return the name
+   * of whatever was applied, or null, and it is tallied into
+   * `userData.staticBatchStats.surfaceProfiles`.
+   */
+  surface?: (target: THREE.Material, source: THREE.Material) => string | null;
 }
 
 export type StaticBatchDiagnostics = {
@@ -46,6 +69,16 @@ export type StaticBatchDiagnostics = {
   mergedMeshes: number;
   exclusions: Record<string, number>;
   materialTypes: Record<string, number>;
+  /**
+   * How many output materials each `surface` profile was applied to, plus
+   * `untreated` for the ones the callback declined.
+   *
+   * Reported because "the treatment reached nothing" and "the treatment is
+   * working" are indistinguishable in every other instrument this repo has:
+   * `audit-scene-models.mjs` marks a mesh finished on the mere presence of an
+   * injection. An empty object here means no call site passed `surface`.
+   */
+  surfaceProfiles: Record<string, number>;
 };
 
 const DYNAMIC_NAME_PATTERN = /forklift|shipping-truck|receiving-truck|worker-system/i;
@@ -293,6 +326,37 @@ const countPotentialStaticMeshes = (root: THREE.Group): number => {
   return count;
 };
 
+/**
+ * Apply the analytic finish to a material this batcher will never reach.
+ *
+ * Tallied into the same `surfaceProfiles` record as the batch outputs, under a
+ * `declined:` prefix, because "the sweep silently reached nothing" is the
+ * failure worth being able to see - and it is exactly what happened to
+ * `WORLD_SURFACE_PROFILES.vegetation` for two passes.
+ *
+ * TWO THINGS THIS SIGNATURE IS CARRYING, both found by a test rather than by
+ * reading. The counts live on the COLLECTION, not on the module: a
+ * module-level tally accumulates across every batch root and across every
+ * re-run, so the diagnostics would climb forever and never describe one tree.
+ * And the sweep is gated on the caller having asked for finishing at all -
+ * mounting `StaticMeshBatch` without a `surface` prop says "batch this, do not
+ * restyle it", and a sweep that finished the declined meshes anyway would
+ * silently overrule that.
+ */
+const finishDeclined = (
+  material: THREE.Material | THREE.Material[],
+  collection: CandidateCollection
+): void => {
+  if (!collection.finishDeclined) return;
+  const list = Array.isArray(material) ? material : [material];
+  for (const entry of list) {
+    const applied = applyDeclinedWorldSurface(entry);
+    if (!applied) continue;
+    const key = `declined:${applied}`;
+    collection.declinedProfiles[key] = (collection.declinedProfiles[key] ?? 0) + 1;
+  }
+};
+
 const isSupportedMaterial = (material: THREE.Material): boolean => {
   const supported =
     material instanceof THREE.MeshBasicMaterial ||
@@ -301,12 +365,30 @@ const isSupportedMaterial = (material: THREE.Material): boolean => {
     material instanceof THREE.MeshStandardMaterial ||
     material instanceof THREE.MeshPhysicalMaterial;
   if (!supported) return false;
+  if (material.clippingPlanes?.length) return false;
+  // An own injection normally disqualifies a material: two different injected
+  // programs cannot be merged, and there is no general way to tell one from
+  // another. The world surface treatment is the one exception this batcher can
+  // verify - every profile shares a single `customProgramCacheKey` and differs
+  // only in uniform VALUES, and `ownsOnlyWorldSurface` proves the identity by
+  // object reference rather than by name.
+  //
+  // Without the exemption, applying the finish to a mesh this batcher declined
+  // to batch would evict that mesh from batching for ever, and the eviction
+  // would only show up as a draw-call regression several passes later. That is
+  // precisely the trap `FactoryExterior.tsx` records at its GRAVITY WEATHERING
+  // block and `FarmArea.tsx` at the crop shader.
+  //
+  // ONLY, though. `composeWorldSurface` stacks the treatment on top of a host
+  // injection - the wind sway - and merging re-applies the treatment to a clone
+  // while `Material.copy()` silently drops the host. A composed material must
+  // stay out, and every one of them is consumed by an `InstancedMesh` that this
+  // function is never reached for anyway; this is the belt to that braces.
   if (
     Object.hasOwn(material, 'onBeforeCompile') ||
-    Object.hasOwn(material, 'customProgramCacheKey') ||
-    material.clippingPlanes?.length
+    Object.hasOwn(material, 'customProgramCacheKey')
   ) {
-    return false;
+    return ownsOnlyWorldSurface(material);
   }
   return true;
 };
@@ -316,13 +398,18 @@ type CandidateCollection = {
   exclusions: Record<string, number>;
   materialTypes: Record<string, number>;
   totalMeshes: number;
+  /** Whether the caller asked for a finish at all; see `finishDeclined`. */
+  finishDeclined: boolean;
+  declinedProfiles: Record<string, number>;
 };
 
-const createCandidateCollection = (): CandidateCollection => ({
+const createCandidateCollection = (finishDeclinedMeshes: boolean): CandidateCollection => ({
   candidates: [],
   exclusions: {},
   materialTypes: {},
   totalMeshes: 0,
+  finishDeclined: finishDeclinedMeshes,
+  declinedProfiles: {},
 });
 
 const inspectStaticBatchObject = (
@@ -335,7 +422,24 @@ const inspectStaticBatchObject = (
   const exclude = (reason: string): void => {
     collection.exclusions[reason] = (collection.exclusions[reason] ?? 0) + 1;
   };
-  if (object instanceof THREE.InstancedMesh) return exclude('instanced');
+  // FINISH WHAT WE DECLINE. These two exclusions are permanent - an
+  // `InstancedMesh` and anything under a dynamic or interactive ancestor will
+  // never be a batch candidate - so their materials reach the frame with
+  // whatever finish their owning module gave them, which for hundreds of inline
+  // JSX elements in `FactoryExterior` and `TruckBay` is none. Treating them
+  // here costs no draw call (they are already outside every batch) and no
+  // shader permutation (one shared cache key), and it is the only pass that can
+  // reach them without editing several hundred call sites.
+  //
+  // `skinned` is deliberately NOT swept. The workers and forklift operators
+  // carry hand-authored per-semantic profiles from their own modules, and the
+  // nine generated creatures are a stated closure on aliasing-floor grounds -
+  // see `models/RiggedCreatureModel.tsx`. A blanket sweep would silently
+  // overturn both.
+  if (object instanceof THREE.InstancedMesh) {
+    finishDeclined(object.material, collection);
+    return exclude('instanced');
+  }
   if (object instanceof THREE.SkinnedMesh) return exclude('skinned');
   if (!object.visible) return exclude('hidden');
   if (!object.geometry) return exclude('missingGeometry');
@@ -344,7 +448,10 @@ const inspectStaticBatchObject = (
   collection.materialTypes[object.material.type] =
     (collection.materialTypes[object.material.type] ?? 0) + 1;
   if (!isSupportedMaterial(object.material)) return exclude('unsupportedMaterial');
-  if (hasExcludedAncestor(object, root)) return exclude('dynamicOrInteractive');
+  if (hasExcludedAncestor(object, root)) {
+    finishDeclined(object.material, collection);
+    return exclude('dynamicOrInteractive');
+  }
   const instanceColor = getInstanceColor(object.material);
   collection.candidates.push({
     mesh: object,
@@ -380,13 +487,17 @@ const finalizeCandidateCollection = (
     mergedMeshes: 0,
     exclusions: collection.exclusions,
     materialTypes: collection.materialTypes,
+    surfaceProfiles: { ...collection.declinedProfiles },
   } satisfies StaticBatchDiagnostics;
   return collection.candidates;
 };
 
-export const collectStaticBatchCandidates = (root: THREE.Group): BatchCandidate[] => {
+export const collectStaticBatchCandidates = (
+  root: THREE.Group,
+  finishDeclinedMeshes = false
+): BatchCandidate[] => {
   root.updateWorldMatrix(true, true);
-  const collection = createCandidateCollection();
+  const collection = createCandidateCollection(finishDeclinedMeshes);
   root.traverse((object) => inspectStaticBatchObject(object, root, collection));
   return finalizeCandidateCollection(root, collection);
 };
@@ -395,14 +506,15 @@ const collectStaticBatchCandidatesIncrementally = (
   root: THREE.Group,
   schedule: (callback: () => void) => void,
   isCancelled: () => boolean,
-  onComplete: (candidates: BatchCandidate[]) => void
+  onComplete: (candidates: BatchCandidate[]) => void,
+  finishDeclinedMeshes = false
 ): void => {
   root.updateWorldMatrix(true, true);
   const meshes: THREE.Mesh[] = [];
   root.traverse((object) => {
     if (object instanceof THREE.Mesh) meshes.push(object);
   });
-  const collection = createCandidateCollection();
+  const collection = createCandidateCollection(finishDeclinedMeshes);
 
   const processSlice = (start: number): void => {
     if (isCancelled()) return;
@@ -430,7 +542,8 @@ export const createStaticMeshBatches = (
   root: THREE.Group,
   candidates: BatchCandidate[],
   name: string,
-  minimumInstances: number
+  minimumInstances: number,
+  surface?: StaticMeshBatchProps['surface']
 ): StaticBatch[] => {
   root.updateWorldMatrix(true, true);
   const inverseRoot = root.matrixWorld.clone().invert();
@@ -443,6 +556,21 @@ export const createStaticMeshBatches = (
   let mergedOriginalCount = 0;
   let mergedMeshCount = 0;
   let batchIndex = 0;
+  const surfaceProfileCounts: Record<string, number> = {};
+  /**
+   * Apply the caller's finish to one output material and tally the result.
+   *
+   * Both output paths route through here so the merged and instanced arms can
+   * never diverge on which materials get treated - the instanced arm is easy to
+   * forget precisely because it sometimes REUSES the representative's material
+   * rather than cloning it, and treating that shared instance would reach back
+   * into unbatched meshes. Guarded below at the call site.
+   */
+  const finishMaterial = (target: THREE.Material, source: THREE.Material): void => {
+    if (!surface) return;
+    const applied = surface(target, source) ?? 'untreated';
+    surfaceProfileCounts[applied] = (surfaceProfileCounts[applied] ?? 0) + 1;
+  };
 
   const stableCandidates = candidates.filter((candidate) => {
     const { mesh } = candidate;
@@ -498,6 +626,11 @@ export const createStaticMeshBatches = (
     material.color.set(0xffffff);
     material.vertexColors = true;
     material.needsUpdate = true;
+    // The clone, never `representative.material` - the source has to stay free
+    // of an own `onBeforeCompile` or `isSupportedMaterial` will stop treating it
+    // as a candidate on the next pass. The source is passed in read-only, for
+    // the roughness and metalness the merge key agreed on.
+    finishMaterial(material, representative.material);
 
     const mergedMesh = new THREE.Mesh(geometry, material);
     mergedMesh.name = `static-merge:${name}:${batchIndex}`;
@@ -566,8 +699,43 @@ export const createStaticMeshBatches = (
         vertexColors: boolean;
       };
       colorMaterial.color.set(0xffffff);
-      colorMaterial.vertexColors = true;
+      // NOT `vertexColors = true`, which is what turned three shops, two
+      // cottages, the whole truck yard and the dock openings black - 122 meshes
+      // across the app, every one of them rendering with zero diffuse.
+      //
+      // `instanceColor` does not need it and is broken by it. three defines
+      // `USE_INSTANCING_COLOR` from `object.instanceColor !== null` on its own
+      // (`WebGLPrograms.js`), and that define alone declares the `vColor`
+      // varying, initialises it to `vec3(1.0)` and multiplies it by
+      // `instanceColor` - while the FRAGMENT side defines `USE_COLOR` from
+      // `vertexColors || instancingColor || batchingColor`, so the tint still
+      // reaches `diffuseColor`. Setting `vertexColors` additionally defines
+      // `USE_COLOR` in the VERTEX shader, which inserts `vColor *= color`
+      // against a `color` attribute the geometry does not have. An unbound
+      // attribute reads as the WebGL generic default `(0, 0, 0, 1)`, so vColor
+      // is multiplied by zero and the surface loses all of its diffuse.
+      //
+      // The merge path a hundred lines above may keep its `vertexColors = true`
+      // precisely because `createMergedGeometry` writes a `color` attribute
+      // into every geometry it builds. This path reuses the representative's
+      // geometry untouched, so it has whatever the source had - and for every
+      // generated GLB in this repo that is `[position, normal, uv]`.
+      //
+      // Left as the clone's inherited value rather than forced either way: a
+      // source material that genuinely paints from a `color` attribute keeps
+      // doing so, because its geometry supplies one.
       colorMaterial.needsUpdate = true;
+      // Inside the `usesInstanceColor` branch on purpose. When it is false this
+      // path REUSES `representative.material` rather than cloning it, and that
+      // instance is shared with meshes this batch never touched and is not
+      // disposed by `restoreBatches` (`ownsMaterial: usesInstanceColor`).
+      // Treating it would attach an `onBeforeCompile` to a live source material,
+      // which is the one thing that permanently evicts a mesh from batching.
+      //
+      // Nothing is lost by the guard: `getInstanceColor` returns null exactly
+      // for transparent, sub-unit-opacity or colourless materials, and
+      // `resolveBatchSurfaceProfile` declines all of those anyway.
+      finishMaterial(batchMaterial, representative.material);
     }
     const instance = new THREE.InstancedMesh(
       representative.geometry,
@@ -610,17 +778,52 @@ export const createStaticMeshBatches = (
     batchIndex += 1;
   });
 
+  // Everything the batcher looked at and left alone still has to be finished.
+  //
+  // A branch like `authored-factory-exterior` offers 2,094 candidates and
+  // optimises most of them, but the remainder - groups under
+  // `MINIMUM_MERGE_MESHES`, singletons, anything whose neighbours went to a
+  // different 80 m cell - stays as individual meshes with their inline
+  // `<meshStandardMaterial>` untouched. Those are hundreds of authored surfaces,
+  // and finishing only the ones that happened to batch would leave the scene
+  // half-treated in a pattern determined by spatial cell boundaries, which is
+  // the least explicable seam possible.
+  //
+  // Safe because `isSupportedMaterial` now exempts this module's own injection:
+  // a leftover treated on this pass is still a candidate on the next one.
+  if (surface) {
+    const finishedSources = new Set<THREE.Material>();
+    stableCandidates.forEach((candidate) => {
+      if (optimizedOriginals.has(candidate.mesh)) return;
+      const material = candidate.mesh.material;
+      if (Array.isArray(material) || finishedSources.has(material)) return;
+      finishedSources.add(material);
+      finishMaterial(material, material);
+    });
+  }
+
   const existingDiagnostics = root.userData.staticBatchStats as StaticBatchDiagnostics | undefined;
   if (existingDiagnostics) {
-    existingDiagnostics.optimizedOriginals = batches.reduce(
+    // ACCUMULATED, not assigned. `StaticMeshBatch` slices its candidates into
+    // 512-mesh chunks and calls this function once per chunk, while
+    // `finalizeCandidateCollection` zeroes these fields once per collection
+    // pass. Assigning made every counter here report the LAST CHUNK ONLY, so a
+    // branch that batched 171 meshes across four chunks reported whatever the
+    // fourth chunk happened to do. Nothing consumed them closely enough to
+    // notice until `surfaceProfiles` needed to be trustworthy.
+    existingDiagnostics.optimizedOriginals += batches.reduce(
       (total, batch) => total + batch.originals.length,
       0
     );
-    existingDiagnostics.batches = batches.length;
-    existingDiagnostics.instancedOriginals = instancedOriginalCount;
-    existingDiagnostics.instancedBatches = instancedBatchCount;
-    existingDiagnostics.mergedOriginals = mergedOriginalCount;
-    existingDiagnostics.mergedMeshes = mergedMeshCount;
+    existingDiagnostics.batches += batches.length;
+    existingDiagnostics.instancedOriginals += instancedOriginalCount;
+    existingDiagnostics.instancedBatches += instancedBatchCount;
+    existingDiagnostics.mergedOriginals += mergedOriginalCount;
+    existingDiagnostics.mergedMeshes += mergedMeshCount;
+    Object.entries(surfaceProfileCounts).forEach(([profile, count]) => {
+      existingDiagnostics.surfaceProfiles[profile] =
+        (existingDiagnostics.surfaceProfiles[profile] ?? 0) + count;
+    });
   }
 
   return batches;
@@ -649,6 +852,7 @@ export const StaticMeshBatch: React.FC<StaticMeshBatchProps> = ({
   revision = 0,
   minimumInstances = 2,
   sampleMilliseconds = 650,
+  surface,
 }) => {
   const rootRef = useRef<THREE.Group>(null);
 
@@ -711,7 +915,13 @@ export const StaticMeshBatch: React.FC<StaticMeshBatchProps> = ({
                 const chunk = candidateChunks[index];
                 if (chunk) {
                   batches.push(
-                    ...createStaticMeshBatches(root, chunk, `${name}:${index}`, minimumInstances)
+                    ...createStaticMeshBatches(
+                      root,
+                      chunk,
+                      `${name}:${index}`,
+                      minimumInstances,
+                      surface
+                    )
                   );
                 }
                 if (index + 1 < candidateChunks.length) {
@@ -722,7 +932,8 @@ export const StaticMeshBatch: React.FC<StaticMeshBatchProps> = ({
               };
               processChunk(0);
             }, sampleMilliseconds);
-          }
+          },
+          Boolean(surface)
         );
         return;
       }
@@ -738,7 +949,7 @@ export const StaticMeshBatch: React.FC<StaticMeshBatchProps> = ({
       restoreBatches(root, batches);
       markFinished();
     };
-  }, [minimumInstances, name, revision, sampleMilliseconds]);
+  }, [minimumInstances, name, revision, sampleMilliseconds, surface]);
 
   return (
     <group ref={rootRef} name={name}>

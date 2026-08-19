@@ -30,6 +30,19 @@ describe('depth policy', () => {
     expect(SITE_LAYOUT.datum.water).toBe(WATER_LAYERS.surface);
   });
 
+  it('keeps the ground datum below every surface that is meant to sit on it', () => {
+    // `TerrainGround` defaulted to y = 0.05 for a long time: 7 cm ABOVE the
+    // authored exterior planes and 5 cm above the interior slab, hidden at
+    // review distance only by `POLYGON_OFFSET.exteriorBase`. It punched through
+    // the factory floor as a speckled band in four of the twelve art scenes.
+    // The component now takes `SITE_LAYOUT.datum.terrain`, so this ordering is
+    // what stops the same class of mistake being reintroduced anywhere else.
+    expect(SITE_LAYOUT.datum.terrain).toBeLessThan(SITE_LAYOUT.datum.interiorFloor);
+    expect(SITE_LAYOUT.datum.terrain).toBeLessThan(SITE_LAYOUT.datum.groundOverlay);
+    expect(SITE_LAYOUT.datum.terrain).toBeLessThan(SITE_LAYOUT.datum.waterBed);
+    expect(SITE_LAYOUT.datum.terrain).toBeLessThan(SITE_LAYOUT.datum.dockPlatform);
+  });
+
   it('uses a precise normal camera range without logarithmic depth', () => {
     expect(CAMERA_DEPTH.near).toBeGreaterThanOrEqual(0.5);
     expect(CAMERA_DEPTH.far).toBeLessThanOrEqual(360);

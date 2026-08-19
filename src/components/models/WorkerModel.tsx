@@ -23,6 +23,7 @@ import {
 } from '../workers/SharedWorkerMaterials';
 import { SHARED_WORKER_GEOMETRY } from '../workers/SharedWorkerGeometries';
 import type { WorkerSecondarySignals } from '../../animation';
+import { applyWorldSurface, type WorldSurfaceProfileName } from '../../utils/worldSurface';
 
 export interface WorkerModelProps {
   appearance: WorkerAppearance;
@@ -123,6 +124,24 @@ interface AccessoryMaterials {
   reflective: THREE.MeshPhysicalMaterial;
 }
 
+/**
+ * Accessory materials, and the finish each one takes.
+ *
+ * The worker BODIES have carried the analytic finish since pass 4 and their KIT
+ * did not, which `test-results/pass7/unfinished-models.mjs` measures as five
+ * separate unfinished owners - tool belt, safety glasses, hearing protection,
+ * identity badge and the vest banding. `SharedWorkerMaterials` states the cost
+ * of exactly that gap: "a body finished next to unfinished accessories reads
+ * worse than neither being finished, because the mismatch is what the eye picks
+ * up." These are the rows that make its own table complete.
+ *
+ * Two are deliberately left alone, for the reasons that module already records:
+ *
+ *   glasses     Transparent at 0.28 opacity. `isOutOfSurfaceScope` declines
+ *               sub-unit opacity, and a lens is flat by construction.
+ *   reflective  Retroreflective banding with an emissive term. Weathering
+ *               something that represents EMITTED light does nothing visible.
+ */
 function createAccessoryMaterials(appearance: WorkerAppearance): AccessoryMaterials {
   return {
     glasses: new THREE.MeshPhysicalMaterial({
@@ -133,21 +152,35 @@ function createAccessoryMaterials(appearance: WorkerAppearance): AccessoryMateri
       opacity: 0.28,
       depthWrite: false,
     }),
-    dark: new THREE.MeshStandardMaterial({
-      color: '#20272d',
-      roughness: 0.7,
-      metalness: 0.08,
-    }),
-    accent: new THREE.MeshStandardMaterial({
-      color: appearance.accentColor,
-      roughness: 0.62,
-      metalness: 0.06,
-    }),
-    badge: new THREE.MeshStandardMaterial({
-      color: '#f4f7f8',
-      roughness: 0.48,
-      metalness: 0.02,
-    }),
+    // Moulded plastic and webbing: belt, glasses temples, badge clip, ear
+    // defender band. `vehicle`, matching `SharedWorkerMaterials.darkGray`.
+    dark: applyWorldSurface(
+      new THREE.MeshStandardMaterial({
+        color: '#20272d',
+        roughness: 0.7,
+        metalness: 0.08,
+      }),
+      'vehicle'
+    ),
+    // Ear defender cups and the badge stripe - safety colour, meant to stay
+    // legible. `signage`, matching `SharedWorkerMaterials.vestOrange`.
+    accent: applyWorldSurface(
+      new THREE.MeshStandardMaterial({
+        color: appearance.accentColor,
+        roughness: 0.62,
+        metalness: 0.06,
+      }),
+      'signage'
+    ),
+    // Printed card. `signage`, matching `SharedWorkerMaterials.badgeWhite`.
+    badge: applyWorldSurface(
+      new THREE.MeshStandardMaterial({
+        color: '#f4f7f8',
+        roughness: 0.48,
+        metalness: 0.02,
+      }),
+      'signage'
+    ),
     // Retroreflective banding. The read comes from a very tight sheen lobe plus
     // an elevated environment contribution, not from an emissive cheat: at
     // 0.10 this stays below the 1.0 linear threshold that only behaves inside
@@ -282,6 +315,24 @@ interface SurfaceProfile {
   /** Tiling detail-map repeat, and normal strength. Omitted = no detail maps. */
   detailRepeat?: number;
   detailNormalScale?: number;
+  /**
+   * Analytic surface finish, in OBJECT REST SPACE. Omitted = none.
+   *
+   * This is what finally gives the workers per-surface variation, and it is the
+   * one route that does not need the unwrap they do not have.
+   * `SharedWorkerMaterials` records the hard constraint: the GLB UV unwrap spans
+   * roughly U/V [-1.0, 1.5] with no atlas intent, so `worker_color.ktx2` must
+   * NEVER be bound as `map` - it smears unrelated colour across the body. Four
+   * passes have recorded `world-personnel` as the branch with no albedo for
+   * exactly that reason. A field sampled in object metres has no opinion about
+   * UVs at all.
+   *
+   * REST SPACE, not world. `worldSurface` samples `position` rather than
+   * `transformed`, so the field is welded to the bind pose and stays put through
+   * the walk cycle. A world-space field on a walking body makes the detail swim,
+   * because the field is nailed to the world and the worker moves through it.
+   */
+  worldSurface?: WorldSurfaceProfileName;
 }
 
 /**
@@ -293,6 +344,7 @@ interface SurfaceProfile {
 const SURFACE_PROFILES: Record<WorkerSurface, SurfaceProfile> = {
   skin: {
     physical: true,
+    worldSurface: 'skin',
     roughness: 0.44,
     metalness: 0,
     envMapIntensity: 1.4,
@@ -304,6 +356,10 @@ const SURFACE_PROFILES: Record<WorkerSurface, SurfaceProfile> = {
   },
   hardHat: {
     physical: true,
+    // Moulded HDPE in a safety colour. `signage` is the lightest profile in the
+    // set: a hard hat that has been weathered into the background has been
+    // broken, not finished.
+    worldSurface: 'signage',
     roughness: 0.3,
     metalness: 0,
     envMapIntensity: 1.2,
@@ -312,6 +368,7 @@ const SURFACE_PROFILES: Record<WorkerSurface, SurfaceProfile> = {
   },
   hiVisStrap: {
     physical: true,
+    worldSurface: 'signage',
     roughness: 0.48,
     metalness: 0,
     envMapIntensity: 1.6,
@@ -323,6 +380,7 @@ const SURFACE_PROFILES: Record<WorkerSurface, SurfaceProfile> = {
   },
   hiVis: {
     physical: true,
+    worldSurface: 'signage',
     roughness: 0.6,
     metalness: 0,
     envMapIntensity: 1.8,
@@ -334,6 +392,7 @@ const SURFACE_PROFILES: Record<WorkerSurface, SurfaceProfile> = {
   },
   shirt: {
     physical: false,
+    worldSurface: 'fabric',
     roughness: 0.86,
     metalness: 0,
     envMapIntensity: 0.9,
@@ -342,6 +401,7 @@ const SURFACE_PROFILES: Record<WorkerSurface, SurfaceProfile> = {
   },
   denim: {
     physical: false,
+    worldSurface: 'fabric',
     roughness: 0.9,
     metalness: 0,
     envMapIntensity: 0.8,
@@ -350,17 +410,42 @@ const SURFACE_PROFILES: Record<WorkerSurface, SurfaceProfile> = {
   },
   denimDark: {
     physical: false,
+    worldSurface: 'fabric',
     roughness: 0.88,
     metalness: 0,
     envMapIntensity: 0.8,
     detailRepeat: 4,
     detailNormalScale: 0.35,
   },
-  bootUpper: { physical: false, roughness: 0.62, metalness: 0.02, envMapIntensity: 1 },
-  bootSole: { physical: false, roughness: 0.88, metalness: 0, envMapIntensity: 0.7 },
-  boot: { physical: false, roughness: 0.72, metalness: 0.02, envMapIntensity: 0.9 },
+  // Footwear stands in the 0-0.25 m band, which is where `fabric`'s grime
+  // gradient is at full strength. That is the point: boots in a working mill are
+  // the one surface on a person that should read as dirty.
+  bootUpper: {
+    physical: false,
+    worldSurface: 'fabric',
+    roughness: 0.62,
+    metalness: 0.02,
+    envMapIntensity: 1,
+  },
+  bootSole: {
+    physical: false,
+    worldSurface: 'fabric',
+    roughness: 0.88,
+    metalness: 0,
+    envMapIntensity: 0.7,
+  },
+  boot: {
+    physical: false,
+    worldSurface: 'fabric',
+    roughness: 0.72,
+    metalness: 0.02,
+    envMapIntensity: 0.9,
+  },
   hair: {
     physical: true,
+    // `skin`'s much finer period, not `fabric`'s 5.5 cm weave, which on a head
+    // would be four blotches rather than a surface.
+    worldSurface: 'skin',
     roughness: 0.55,
     metalness: 0,
     envMapIntensity: 1.1,
@@ -368,6 +453,8 @@ const SURFACE_PROFILES: Record<WorkerSurface, SurfaceProfile> = {
     sheenRoughness: 0.35,
   },
   eye: {
+    // No finish at all. An eye is a wet clearcoated sphere; every term this
+    // module offers - dust, grime, worn edges, tonal drift - is a disease on it.
     physical: true,
     roughness: 0.06,
     metalness: 0,
@@ -433,7 +520,9 @@ function createSurfaceMaterial(
     flatShading: false,
   };
 
-  if (!profile.physical) return new THREE.MeshStandardMaterial(base);
+  if (!profile.physical) {
+    return applyWorkerFinish(new THREE.MeshStandardMaterial(base), profile);
+  }
 
   const physical = new THREE.MeshPhysicalMaterial(base);
   if (profile.sheen !== undefined) {
@@ -450,7 +539,27 @@ function createSurfaceMaterial(
     physical.clearcoat = profile.clearcoat;
     physical.clearcoatRoughness = profile.clearcoatRoughness ?? 0.1;
   }
-  return physical;
+  return applyWorkerFinish(physical, profile);
+}
+
+/**
+ * Attach the surface finish named by the profile, if it names one.
+ *
+ * COST. `StaticMeshBatch` excludes `SkinnedMesh` outright
+ * (`inspectStaticBatchObject`: `exclude('skinned')`), so an `onBeforeCompile`
+ * on a worker material evicts nothing from batching - the same argument
+ * `FarmArea.tsx` makes for the crop's wind shader and
+ * `OptimizedFactoryInfrastructure.tsx` for its instanced sets. These materials
+ * are constructed per worker per primitive, but every profile returns the same
+ * `customProgramCacheKey`, so a roster of thirty workers still compiles two
+ * programs (standard and physical) rather than sixty.
+ */
+function applyWorkerFinish<T extends THREE.MeshStandardMaterial>(
+  material: T,
+  profile: SurfaceProfile
+): T {
+  if (!profile.worldSurface) return material;
+  return applyWorldSurface(material, profile.worldSurface);
 }
 
 const WorkerAccessories: React.FC<{
@@ -618,9 +727,26 @@ export const WorkerModel: React.FC<WorkerModelProps> = ({ appearance, activity, 
   const simulationRunning = useGameSimulationStore(
     (state) => Number.isFinite(state.gameSpeed) && state.gameSpeed > 0
   );
-  const detailMapsEnabled = useGraphicsStore(
-    (state) => state.graphics.quality === 'high' || state.graphics.quality === 'ultra'
-  );
+  /**
+   * Surface detail for the authored bodies, from `medium` upward.
+   *
+   * It used to start at `high`, which meant the SHIPPING DEFAULT rendered every
+   * worker in the mill as untextured flat colour: `audit-scene-models.mjs`
+   * reported `world-personnel` at 0% albedo, 0% normal and 0% roughness, 100%
+   * flat - the only branch in the scene with no surface detail of any kind, and
+   * the one carrying the human scale reference every other size in the frame is
+   * read against.
+   *
+   * The cost is one shared 1024 KTX2 normal and one shared 1024 KTX2 roughness
+   * for the WHOLE roster - `requestWorkerDetailMaps` resolves once and every
+   * repeat variant is a clone, which three resolves to the same
+   * `__webglTexture`. Medium already carries SSAO, bloom, an HDRI environment
+   * and shadow maps; two texture uploads is not what will cost it a frame.
+   *
+   * `low` is deliberately still excluded: that tier renders personnel as
+   * billboards, and a normal map on a billboard is a fetch for nothing.
+   */
+  const detailMapsEnabled = useGraphicsStore((state) => state.graphics.quality !== 'low');
   const visualRootRef = useRef<THREE.Group>(null);
   const previousWorldPosition = useRef(new THREE.Vector3());
   const currentWorldPosition = useRef(new THREE.Vector3());
@@ -628,6 +754,42 @@ export const WorkerModel: React.FC<WorkerModelProps> = ({ appearance, activity, 
   const actionsRef = useRef<Partial<Record<WorkerClipName, THREE.AnimationAction>>>({});
   const leftEyelidRef = useRef<THREE.Mesh>(null);
   const rightEyelidRef = useRef<THREE.Mesh>(null);
+  /**
+   * The clip-authored pose of every bone the secondary offsets premultiply,
+   * captured each frame before the offset is folded in.
+   *
+   * WHY THIS IS NOT OPTIONAL. The comment that used to sit above the offsets
+   * said they were "non-accumulating and need no save/restore" because the
+   * mixer rewrites every bone first. `PropertyMixer.apply` does not:
+   * `three/src/animation/PropertyMixer.js:231` compares the newly accumulated
+   * value against the previously applied one and calls `binding.setValue` ONLY
+   * when it differs. Five of the nine worker clips - `worker-break`,
+   * `worker-inspect`, `worker-repair`, `worker-supervise`, `worker-sample` -
+   * carry exactly two identical keys per bone, so while one of them is playing
+   * the accumulated value never changes and the mixer never writes the bone
+   * again. The premultiply then compounds on its own previous output every
+   * frame.
+   *
+   * MEASURED on the flagship `personnel-close` art frame, which grades the
+   * Supervisor - `workAction: 'supervise'`, a two-key clip. `Torso -> Chest`
+   * should be the rest pose's 0.4 degrees; the live rig read 32 deg at 6 s,
+   * 130 deg at 14 s, 28 deg at 20 s and 152 deg at 34 s. At 130 degrees the
+   * head hangs below the chest and both arms point over the head, which is the
+   * pose the capture sheet went out with. The increment is small but nearly
+   * CONSTANT for a stationary worker (`breathAmount` is a sine of `walkCycle`,
+   * and `walkCycle` barely advances when nobody is walking), so it integrates
+   * linearly at tens of degrees a second rather than averaging out.
+   *
+   * Restore-then-capture is correct in both cases: when the mixer does write,
+   * the restored value is immediately overwritten by the new clip pose; when it
+   * declines to, the bone is already holding the clip pose it should.
+   */
+  const offsetBaseRef = useRef({
+    head: new THREE.Quaternion(),
+    chest: new THREE.Quaternion(),
+    upperArmL: new THREE.Quaternion(),
+    valid: false,
+  });
   const actionWeights = useRef<Record<WorkerClipName, number>>(
     Object.fromEntries(
       WORKER_CLIPS.map((clip) => [clip, clip === 'worker-idle' ? 1 : 0])
@@ -794,6 +956,13 @@ export const WorkerModel: React.FC<WorkerModelProps> = ({ appearance, activity, 
     };
   }, [animations, mixer, prepared.model, signals]);
 
+  // A different `prepared` is a different skeleton, so the saved clip poses
+  // belong to bones that no longer exist. Restoring them onto the new rig would
+  // stamp one body type's pose onto the other's for a frame.
+  useEffect(() => {
+    offsetBaseRef.current.valid = false;
+  }, [prepared]);
+
   useEffect(
     () => () => {
       prepared.materials.forEach((material) => material.dispose());
@@ -881,14 +1050,28 @@ export const WorkerModel: React.FC<WorkerModelProps> = ({ appearance, activity, 
       runAction.timeScale = THREE.MathUtils.clamp(metresPerSecond / runSpeed, 0.7, 2.4);
     }
 
+    // RESTORE BEFORE THE MIXER RUNS. See `offsetBaseRef` - without this the
+    // premultiplied offsets below integrate without bound on any bone whose
+    // active clip is constant.
+    const bases = offsetBaseRef.current;
+    if (bases.valid) {
+      if (prepared.bones.head) prepared.bones.head.quaternion.copy(bases.head);
+      if (prepared.bones.chest) prepared.bones.chest.quaternion.copy(bases.chest);
+      if (prepared.bones.upperArmL) prepared.bones.upperArmL.quaternion.copy(bases.upperArmL);
+    }
+
     mixer.update(safeDelta);
 
-    // Secondary animation. This runs AFTER the mixer has rewritten every bone
-    // from the clips, so the additive offsets below are non-accumulating and
-    // need no save/restore. Ordering is guaranteed because both the clip
-    // evaluation and the offsets happen inside this one callback.
     if (!signals) return;
     const { head, chest, hips, upperArmL } = prepared.bones;
+
+    // CAPTURE THE CLIP POSE, before any offset is folded in. Whatever the mixer
+    // wrote this frame - or declined to write - is the correct base for the
+    // next frame's restore.
+    if (head) bases.head.copy(head.quaternion);
+    if (chest) bases.chest.copy(chest.quaternion);
+    if (upperArmL) bases.upperArmL.copy(upperArmL.quaternion);
+    bases.valid = true;
 
     const eyelidScale = 0.18 + (1 - THREE.MathUtils.clamp(signals.blinkAmount, 0, 1)) * 0.82;
     if (leftEyelidRef.current) leftEyelidRef.current.scale.y = eyelidScale;

@@ -11,6 +11,7 @@ import { access, mkdir, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { chromium } from '@playwright/test';
+import { acquireCaptureLock } from './lib/capture-lock.mjs';
 
 const ROOT = process.cwd();
 const OUTPUT_ROOT = path.join(ROOT, 'test-results', 'operational-review');
@@ -232,6 +233,7 @@ const options = {
 
 const outputDirectory = path.join(OUTPUT_ROOT, label);
 let previewProcess = null;
+let captureLock = null;
 
 function run(command, args, description) {
   return new Promise((resolve, reject) => {
@@ -523,6 +525,10 @@ async function main() {
     );
   }
 
+  // Held across the build as well as the capture: concurrent renders halve each
+  // other's frame rate, and concurrent builds write the same shared dist/.
+  captureLock = await acquireCaptureLock(`operational-review:${options.label}`, { root: ROOT });
+
   if (!options.skipBuild) {
     console.log('Building the exact tree under review...');
     await run('npm', ['run', 'build'], 'npm run build');
@@ -548,6 +554,8 @@ async function main() {
   } finally {
     await browser.close();
     await stopPreview();
+    await captureLock?.release();
+    captureLock = null;
   }
 
   const git = await gitProvenance();
@@ -602,6 +610,7 @@ async function main() {
 
 main().catch(async (error) => {
   await stopPreview();
+  await captureLock?.release();
   console.error(error instanceof Error ? error.stack : String(error));
   process.exitCode = 1;
 });

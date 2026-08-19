@@ -1,0 +1,467 @@
+/**
+ * The discriminator for surface-treatment work.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS EXISTS AT ALL
+ * ---------------------------------------------------------------------------
+ * `audit-scene-models.mjs` classifies a mesh as finished when it has a texture
+ * slot OR an injected shader:
+ *
+ *     if (mesh.material.shaderInjected) entry.shaded += 1;
+ *     else if (slots.size === 0)        entry.flat  += 1;
+ *
+ * and its flat work list skips the same meshes outright. So attaching ANY
+ * `onBeforeCompile` to a material removes it from the work list whether or not
+ * one pixel changed. A treatment that compiles and contributes nothing scores
+ * exactly as well as one that works — the audit cannot tell them apart, and it
+ * is the instrument this repo has been ordering surfacing work by.
+ *
+ * That is CLAUDE.md's "an absent term reads as exactly 1.000" in its identity
+ * form. This script is the paired control that rule demands.
+ *
+ * ---------------------------------------------------------------------------
+ * HOW IT DISCRIMINATES
+ * ---------------------------------------------------------------------------
+ * ONE page load, ONE variable. Every injected surface material in the app reads
+ * a single shared `uSurfStrength` uniform object, so the treatment can be
+ * switched off between two frames of the SAME render — same driver, same shader
+ * cache, same clock, same warm GPU, same camera.
+ *
+ * THREE SHOTS, NOT TWO: on, off, on. The middle one is the treatment arm; the
+ * two outer ones bracket it in time and measure how much of the frame moves
+ * ON ITS OWN. Benchmark mode pauses the GAME clock (`setGameSpeed(0)`) but not
+ * the render clock, so conveyors, water, workers and vehicles keep animating,
+ * and a plain two-shot diff credits all of that to the treatment. Measured: the
+ * `interior` scene reported 3.12% of pixels changed at a mean delta of 23.8,
+ * and the whole reading was four flour sacks travelling along a conveyor between
+ * the two exposures. Every pixel that also differs between the two same-arm
+ * shots is therefore struck out of the mask before anything is computed — the
+ * same intra-run-instability discriminator this repo used to separate "the
+ * surface moved" from "the surface is now z-fighting".
+ *
+ *   changedFraction   fraction of pixels attributable to the treatment
+ *   motionFraction    fraction excluded as self-animating, reported not hidden
+ *   meanAbsDelta      mean 0-255 luma change over the attributable pixels
+ *   contrastOn/Off    mean |Laplacian| (local contrast) restricted to that mask
+ *
+ * `changedFraction === 0` is the tell, and it is exact: the term is inert. Not
+ * "subtle", not "cheap" — absent. Any non-zero reading localises itself, since
+ * the mask IS the set of surfaces the treatment reaches, with no hand-authored
+ * region rectangles to go stale.
+ *
+ * Contrast is measured ONLY inside that mask. A whole-frame average is
+ * dominated by sky, terrain and machines that the treatment never touches, and
+ * would dilute a real effect into the noise of two neighbouring frames.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT IT CANNOT TELL YOU
+ * ---------------------------------------------------------------------------
+ * That the change is an IMPROVEMENT. It measures presence and magnitude. A
+ * treatment that adds 40% local contrast may well have made the surface look
+ * like sandpaper. Look at the frames — they are written next to the JSON for
+ * exactly that reason.
+ *
+ * Usage:
+ *   node scripts/measure-surface-contrast.mjs --label=<name> [options]
+ *
+ *   --label=<name>      Required. Output under test-results/surface-contrast/<name>.
+ *   --scenes=<list>     Comma-separated benchmark scenes. Default: the surface set.
+ *   --quality=<tier>    low | medium | high | ultra. Default medium.
+ *   --port=<number>     Preview port. Default 4198.
+ *   --settle=<seconds>  Seconds after worldReady before the first shot. Default 9.
+ *   --crop=x,y,w,h      Restrict every measurement to this pixel rectangle of
+ *                       the 1280x720 frame. See CROPS below.
+ *   --no-toggle         Baseline mode: one shot per scene, no A/B. Used before
+ *                       the treatment exists, to record the "before" frames.
+ *
+ * ---------------------------------------------------------------------------
+ * CROPS: A SCENE AGGREGATE ANSWERS THE WRONG QUESTION
+ * ---------------------------------------------------------------------------
+ * `changedFraction` over the whole frame answers "did this SCENE change". It
+ * cannot answer "did the thing I changed change", and the difference is not
+ * academic: a dock-threshold treatment moved `interior`'s contrast ratio from
+ * x1.031 to x1.031 because the dock is a few hundred pixels of a frame
+ * dominated by conveyors, while the same treatment measured inside a crop of
+ * the hazard band moved 321 of 655 pixels at mean delta 7.88.
+ *
+ * The crop is applied to the LUMA PLANE before any mask is built, so the
+ * self-motion exclusion, the change mask, the dilation and the Laplacian all
+ * operate on the cropped raster and every reported fraction is a fraction OF
+ * THE CROP. Cropping after the fact - masking a full-frame result - would leave
+ * the dilation reaching across the crop boundary and the denominator wrong.
+ */
+import { spawn } from 'node:child_process';
+import { access, mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import process from 'node:process';
+import { chromium } from '@playwright/test';
+import sharp from 'sharp';
+import { acquireCaptureLock } from './lib/capture-lock.mjs';
+
+const ROOT = process.cwd();
+const OUTPUT_ROOT = path.join(ROOT, 'test-results', 'surface-contrast');
+
+const arg = (name, fallback) => {
+  const match = process.argv.find((value) => value.startsWith(`--${name}=`));
+  return match ? match.slice(name.length + 3) : fallback;
+};
+const flag = (name) => process.argv.includes(`--${name}`);
+
+/**
+ * Scenes whose frames are mostly the surfaces this work touches.
+ *
+ * `yard`, `shipping` and `receiving` are the truck-yard and logistics merges;
+ * `overview` and `village` carry the exterior shell and the village; `interior`
+ * is the control that should barely move (its walls are the shell, its machines
+ * are already surfaced); `personnel-close` and `forklift` are the two skinned /
+ * moving branches, which take the rest-space profile rather than the world one.
+ */
+const DEFAULT_SCENES = [
+  'overview',
+  'yard',
+  'shipping',
+  'receiving',
+  'village',
+  'farm',
+  'interior',
+  'personnel-close',
+  'forklift',
+];
+
+/** `x,y,w,h` in frame pixels, or null for the whole frame. */
+function parseCrop(value) {
+  if (!value) return null;
+  const parts = value.split(',').map((part) => Number(part.trim()));
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
+    throw new Error(`--crop= expects four non-negative numbers x,y,w,h; got "${value}"`);
+  }
+  const [left, top, width, height] = parts;
+  if (width < 3 || height < 3) {
+    throw new Error('--crop= needs at least 3x3 pixels: the Laplacian skips a one-pixel border.');
+  }
+  return { left, top, width, height };
+}
+
+const options = {
+  label: arg('label', ''),
+  scenes: arg('scenes', '') ? arg('scenes', '').split(',') : DEFAULT_SCENES,
+  quality: arg('quality', 'medium'),
+  port: Number(arg('port', '4198')),
+  settle: Number(arg('settle', '9')),
+  crop: parseCrop(arg('crop', '')),
+  toggle: !flag('no-toggle'),
+};
+
+if (!options.label) {
+  console.error('--label=<name> is required so a reading can be tied to a tree.');
+  process.exitCode = 1;
+  process.exit();
+}
+
+let preview = null;
+let lock = null;
+
+async function startPreview() {
+  await access(path.join(ROOT, 'dist', 'index.html')).catch(() => {
+    throw new Error('dist/index.html is missing. Run npm run build first.');
+  });
+  const url = `http://127.0.0.1:${options.port}`;
+  preview = spawn(
+    process.execPath,
+    [
+      path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js'),
+      'preview',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(options.port),
+      '--strictPort',
+    ],
+    { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, BROWSER: 'none' } }
+  );
+  const deadline = Date.now() + 30000;
+  for (;;) {
+    try {
+      if ((await fetch(url)).ok) return url;
+    } catch {
+      /* not up yet */
+    }
+    if (Date.now() > deadline) throw new Error(`Preview did not start on ${url}`);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+const stopPreview = () => {
+  if (preview && !preview.killed) preview.kill('SIGTERM');
+};
+
+/**
+ * Rec. 709 luma, 0-255, one plane per frame.
+ *
+ * The crop is taken HERE, before anything is measured, so every mask and every
+ * denominator downstream belongs to the crop rather than to the frame.
+ */
+async function lumaPlane(buffer) {
+  let pipeline = sharp(buffer);
+  if (options.crop) pipeline = pipeline.extract(options.crop);
+  const { data, info } = await pipeline
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+  const luma = new Float32Array(width * height);
+  for (let index = 0, pixel = 0; index < data.length; index += channels, pixel += 1) {
+    luma[pixel] = 0.2126 * data[index] + 0.7152 * data[index + 1] + 0.0722 * data[index + 2];
+  }
+  return { luma, width, height };
+}
+
+/**
+ * Mean |Laplacian| over a mask, which is local contrast: a flat-painted surface
+ * scores near zero however bright it is, and surface detail raises it. The
+ * 4-neighbour kernel is deliberate — it responds to one-pixel structure, which
+ * is what "does this read as a surface or as paint" comes down to at these
+ * camera distances.
+ *
+ * `mask` is null for the whole frame. Border pixels are skipped rather than
+ * clamped, because a clamped border invents a zero-contrast ring whose size
+ * depends on resolution.
+ */
+function maskedLaplacian(plane, mask) {
+  const { luma, width, height } = plane;
+  let total = 0;
+  let counted = 0;
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      if (mask && !mask[index]) continue;
+      const value =
+        4 * luma[index] -
+        luma[index - 1] -
+        luma[index + 1] -
+        luma[index - width] -
+        luma[index + width];
+      total += Math.abs(value);
+      counted += 1;
+    }
+  }
+  return { mean: counted ? total / counted : 0, counted };
+}
+
+/** One luma step. Strictly-greater-than so an inert term returns exactly zero. */
+const CHANGE_THRESHOLD = 1;
+
+/**
+ * Pixels the TREATMENT changed: different between the arms, and NOT different
+ * between two shots of the same arm.
+ *
+ * The self-motion exclusion is dilated by one before it is subtracted. A moving
+ * edge lands on slightly different pixels in each of the three exposures, so an
+ * undilated motion mask leaves a one-pixel fringe of the mover behind — and a
+ * fringe of a high-contrast moving object is exactly the kind of thing that
+ * would flatter the contrast ratio.
+ *
+ * The result is dilated too, so the Laplacian window over an attributable pixel
+ * sees its real neighbourhood rather than a hard mask edge, which would itself
+ * read as contrast and inflate both arms equally.
+ */
+function changeMask(onPlane, offPlane, onPlaneLate) {
+  const { luma: on, width, height } = onPlane;
+  const { luma: off } = offPlane;
+  const late = onPlaneLate?.luma ?? null;
+
+  const moving = new Uint8Array(width * height);
+  let movingPixels = 0;
+  if (late) {
+    for (let index = 0; index < moving.length; index += 1) {
+      if (Math.abs(on[index] - late[index]) > CHANGE_THRESHOLD) {
+        moving[index] = 1;
+        movingPixels += 1;
+      }
+    }
+  }
+  const dilate = (source) => {
+    const out = new Uint8Array(source.length);
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x;
+        if (
+          source[index] ||
+          source[index - 1] ||
+          source[index + 1] ||
+          source[index - width] ||
+          source[index + width]
+        ) {
+          out[index] = 1;
+        }
+      }
+    }
+    return out;
+  };
+  const movingDilated = late ? dilate(moving) : moving;
+
+  const raw = new Uint8Array(width * height);
+  let changed = 0;
+  let deltaTotal = 0;
+  let deltaMax = 0;
+  for (let index = 0; index < raw.length; index += 1) {
+    if (movingDilated[index]) continue;
+    const delta = Math.abs(on[index] - off[index]);
+    if (delta > CHANGE_THRESHOLD) {
+      raw[index] = 1;
+      changed += 1;
+      deltaTotal += delta;
+      if (delta > deltaMax) deltaMax = delta;
+    }
+  }
+  return {
+    mask: dilate(raw),
+    changedFraction: changed / raw.length,
+    motionFraction: movingPixels / raw.length,
+    meanAbsDelta: changed ? deltaTotal / changed : 0,
+    maxAbsDelta: deltaMax,
+    changedPixels: changed,
+  };
+}
+
+async function main() {
+  const outputDir = path.join(OUTPUT_ROOT, options.label);
+  await mkdir(outputDir, { recursive: true });
+  if (options.crop) {
+    const { left, top, width, height } = options.crop;
+    console.log(`Measuring inside crop ${width}x${height} at (${left}, ${top}) of 1280x720.`);
+  }
+
+  lock = await acquireCaptureLock('measure-surface-contrast', { root: ROOT });
+  const baseUrl = await startPreview();
+  const browser = await chromium.launch({ headless: true, channel: 'chrome' });
+  const results = [];
+
+  try {
+    for (const scene of options.scenes) {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+      try {
+        await page.goto(
+          `${baseUrl}/?benchmark=${scene}&quality=${options.quality}&duration=300&art=1`,
+          { waitUntil: 'domcontentloaded', timeout: 90000 }
+        );
+        await page.waitForFunction(() => window.__MILLOS_RUNTIME__?.ready === true, null, {
+          timeout: 90000,
+        });
+        await page.waitForFunction(
+          () => document.documentElement.dataset.millosWorldReady === 'true',
+          null,
+          { timeout: 90000 }
+        );
+        // Lazily mounted branches and the static batcher both land seconds
+        // after "ready". Measuring before the batches exist measures the
+        // unbatched originals, which are a different set of materials.
+        await page.waitForTimeout(options.settle * 1000);
+
+        const onPath = path.join(outputDir, `${scene}-on.png`);
+        await page.screenshot({ path: onPath, timeout: 30000 });
+
+        if (!options.toggle) {
+          const plane = await lumaPlane(await sharp(onPath).toBuffer());
+          const whole = maskedLaplacian(plane, null);
+          results.push({ scene, mode: 'baseline', wholeFrameContrast: whole.mean });
+          console.log(`${scene.padEnd(18)} whole-frame contrast ${whole.mean.toFixed(4)}`);
+          continue;
+        }
+
+        const supported = await page.evaluate(() =>
+          Boolean(window.__MILLOS_RUNTIME__?.setPerfDebug)
+        );
+        if (!supported) throw new Error('runtime hook has no setPerfDebug');
+
+        await page.evaluate(() =>
+          window.__MILLOS_RUNTIME__.setPerfDebug({ disableSurfaceTreatment: true })
+        );
+        // The uniform is shared and needs no recompile, but the store write and
+        // the next render still have to happen. Three frames is generous.
+        await page.waitForTimeout(400);
+        const offPath = path.join(outputDir, `${scene}-off.png`);
+        await page.screenshot({ path: offPath, timeout: 30000 });
+        await page.evaluate(() =>
+          window.__MILLOS_RUNTIME__.setPerfDebug({ disableSurfaceTreatment: false })
+        );
+        // The third shot brackets the off arm at the same 400 ms spacing, so the
+        // self-motion it measures is the motion the on-off pair also contains.
+        await page.waitForTimeout(400);
+        const latePath = path.join(outputDir, `${scene}-on-late.png`);
+        await page.screenshot({ path: latePath, timeout: 30000 });
+
+        const [onPlane, offPlane, latePlane] = await Promise.all([
+          lumaPlane(await sharp(onPath).toBuffer()),
+          lumaPlane(await sharp(offPath).toBuffer()),
+          lumaPlane(await sharp(latePath).toBuffer()),
+        ]);
+        const change = changeMask(onPlane, offPlane, latePlane);
+        const contrastOn = maskedLaplacian(onPlane, change.mask);
+        const contrastOff = maskedLaplacian(offPlane, change.mask);
+        const ratio = contrastOff.mean > 0 ? contrastOn.mean / contrastOff.mean : 0;
+
+        results.push({
+          scene,
+          mode: 'toggle',
+          changedFraction: change.changedFraction,
+          motionFraction: change.motionFraction,
+          changedPixels: change.changedPixels,
+          meanAbsDelta: change.meanAbsDelta,
+          maxAbsDelta: change.maxAbsDelta,
+          contrastOn: contrastOn.mean,
+          contrastOff: contrastOff.mean,
+          contrastRatio: ratio,
+          inert: change.changedPixels === 0,
+        });
+        console.log(
+          `${scene.padEnd(18)} changed ${(change.changedFraction * 100).toFixed(2)}%` +
+            `  (self-motion ${(change.motionFraction * 100).toFixed(2)}% excluded)` +
+            `  meanΔ ${change.meanAbsDelta.toFixed(2)}` +
+            `  maxΔ ${change.maxAbsDelta.toFixed(0)}` +
+            `  contrast ${contrastOff.mean.toFixed(3)} -> ${contrastOn.mean.toFixed(3)}` +
+            `  (x${ratio.toFixed(3)})${change.changedPixels === 0 ? '   *** INERT ***' : ''}`
+        );
+      } finally {
+        await page.close();
+      }
+    }
+
+    const inert = results.filter((row) => row.inert);
+    await writeFile(
+      path.join(outputDir, 'surface-contrast.json'),
+      JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          label: options.label,
+          quality: options.quality,
+          settleSeconds: options.settle,
+          crop: options.crop,
+          toggle: options.toggle,
+          results,
+        },
+        null,
+        2
+      )
+    );
+    if (options.toggle) {
+      console.log(
+        `\n${results.length - inert.length}/${results.length} scenes moved. ` +
+          (inert.length
+            ? `INERT in: ${inert.map((row) => row.scene).join(', ')}`
+            : 'No exactly-zero readings.')
+      );
+    }
+    console.log(`Frames and JSON: ${outputDir}`);
+  } finally {
+    await browser.close();
+    stopPreview();
+    await lock?.release();
+  }
+}
+
+main().catch(async (error) => {
+  stopPreview();
+  await lock?.release();
+  console.error(error instanceof Error ? error.stack : String(error));
+  process.exitCode = 1;
+});

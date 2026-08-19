@@ -10,12 +10,12 @@ import { useGraphicsStore } from '../stores/graphicsStore';
 // Conveyor animation is now purely visual - no bag counting here
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
 import { GrainQuality } from '../types';
-import {
-  METAL_MATERIALS,
-  MACHINE_MATERIALS,
-  SAFETY_MATERIALS,
-  SHARED_GEOMETRIES,
-} from '../utils/sharedMaterials';
+import { SHARED_GEOMETRIES } from '../utils/sharedMaterials';
+// The conveyor branch's surface finish. See `conveyors/conveyorSurfaces.ts` for
+// why these are treated clones of the shared singletons rather than the
+// singletons themselves.
+import { CONVEYOR_MATERIALS, createBeltMaterial } from './conveyors/conveyorSurfaces';
+import { applyWorldSurface } from '../utils/worldSurface';
 import { FLOOR_LAYERS, POLYGON_OFFSET, RENDER_ORDER } from '../constants/renderLayers';
 import { shouldRunThisFrame } from '../utils/frameThrottle';
 import { useModelTextures } from '../utils/machineTextures';
@@ -615,12 +615,12 @@ const SideRails: React.FC<{ position: [number, number, number]; length: number }
         {/* Front rail - main structure keeps shadow */}
         <mesh position={[0, 0, -1]} castShadow>
           <boxGeometry args={[length, 0.1, 0.15]} />
-          <primitive object={METAL_MATERIALS.steelDark} attach="material" />
+          <primitive object={CONVEYOR_MATERIALS.steelDark} attach="material" />
         </mesh>
         {/* Back rail */}
         <mesh position={[0, 0, 1]} castShadow>
           <boxGeometry args={[length, 0.1, 0.15]} />
-          <primitive object={METAL_MATERIALS.steelDark} attach="material" />
+          <primitive object={CONVEYOR_MATERIALS.steelDark} attach="material" />
         </mesh>
 
         {/* Instanced brackets - 22 brackets in 1 draw call - NO SHADOWS for small parts */}
@@ -628,7 +628,7 @@ const SideRails: React.FC<{ position: [number, number, number]; length: number }
           ref={bracketsRef}
           args={[SHARED_GEOMETRIES.bracketSmall, undefined, BRACKET_COUNT]}
         >
-          <primitive object={METAL_MATERIALS.paintedSlate} attach="material" />
+          <primitive object={CONVEYOR_MATERIALS.paintedSlate} attach="material" />
         </instancedMesh>
       </group>
     );
@@ -642,26 +642,26 @@ const SupportLeg: React.FC<{ position: [number, number, number] }> = React.memo(
       {/* Front leg - only main supports cast shadows */}
       <mesh position={[0, 0.25, -0.5]} castShadow>
         <boxGeometry args={[0.3, 0.5, 0.15]} />
-        <primitive object={METAL_MATERIALS.paintedDarkGray} attach="material" />
+        <primitive object={CONVEYOR_MATERIALS.paintedDarkGray} attach="material" />
       </mesh>
       {/* Back leg */}
       <mesh position={[0, 0.25, 0.5]} castShadow>
         <boxGeometry args={[0.3, 0.5, 0.15]} />
-        <primitive object={METAL_MATERIALS.paintedDarkGray} attach="material" />
+        <primitive object={CONVEYOR_MATERIALS.paintedDarkGray} attach="material" />
       </mesh>
       {/* Cross brace - no shadow for small part */}
       <mesh position={[0, 0.25, 0]} rotation={[0, 0, 0.3]}>
         <boxGeometry args={[0.08, 0.08, 0.9]} />
-        <primitive object={METAL_MATERIALS.paintedMediumGray} attach="material" />
+        <primitive object={CONVEYOR_MATERIALS.paintedMediumGray} attach="material" />
       </mesh>
       {/* Foot pads - no shadow for floor-level parts */}
       <mesh position={[0, 0.02, -0.5]}>
         <boxGeometry args={[0.4, 0.04, 0.25]} />
-        <primitive object={METAL_MATERIALS.paintedBlack} attach="material" />
+        <primitive object={CONVEYOR_MATERIALS.paintedBlack} attach="material" />
       </mesh>
       <mesh position={[0, 0.02, 0.5]}>
         <boxGeometry args={[0.4, 0.04, 0.25]} />
-        <primitive object={METAL_MATERIALS.paintedBlack} attach="material" />
+        <primitive object={CONVEYOR_MATERIALS.paintedBlack} attach="material" />
       </mesh>
     </group>
   );
@@ -733,7 +733,7 @@ const TensionMechanism: React.FC<{ position: [number, number, number] }> = React
         {/* Tension frame - main structure keeps shadow */}
         <mesh castShadow>
           <boxGeometry args={[0.6, 0.4, 2.4]} />
-          <primitive object={METAL_MATERIALS.paintedMediumGray} attach="material" />
+          <primitive object={CONVEYOR_MATERIALS.paintedMediumGray} attach="material" />
         </mesh>
         {/* Head pulley - NO SHADOW for small roller. Shared module-level
             geometry: the inline constructor here allocated one per mechanism. */}
@@ -741,25 +741,25 @@ const TensionMechanism: React.FC<{ position: [number, number, number] }> = React
           position={[0, 0.05, 0]}
           rotation={[Math.PI / 2, 0, 0]}
           geometry={TENSION_PULLEY_GEOMETRY}
-          material={METAL_MATERIALS.steel}
+          material={CONVEYOR_MATERIALS.steel}
         />
         {/* Tension screws - no shadow for small parts */}
         <mesh position={[0.35, 0, -1]} rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[0.05, 0.05, 0.3, 8]} />
-          <primitive object={METAL_MATERIALS.brass} attach="material" />
+          <primitive object={CONVEYOR_MATERIALS.brass} attach="material" />
         </mesh>
         <mesh position={[0.35, 0, 1]} rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[0.05, 0.05, 0.3, 8]} />
-          <primitive object={METAL_MATERIALS.brass} attach="material" />
+          <primitive object={CONVEYOR_MATERIALS.brass} attach="material" />
         </mesh>
         {/* Bolt heads - no shadow for tiny parts */}
         <mesh position={[0.52, 0, -1]} rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[0.08, 0.08, 0.04, 6]} />
-          <primitive object={METAL_MATERIALS.brass} attach="material" />
+          <primitive object={CONVEYOR_MATERIALS.brass} attach="material" />
         </mesh>
         <mesh position={[0.52, 0, 1]} rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[0.08, 0.08, 0.04, 6]} />
-          <primitive object={METAL_MATERIALS.brass} attach="material" />
+          <primitive object={CONVEYOR_MATERIALS.brass} attach="material" />
         </mesh>
       </group>
     );
@@ -780,9 +780,9 @@ const DRIVE_ROLLER_MAIN_GEOMETRY = new THREE.CylinderGeometry(0.12, 0.12, 1.9, 1
 const DRIVE_ROLLER_CAP_GEOMETRY = new THREE.CylinderGeometry(0.15, 0.15, 0.05, 12);
 const DRIVE_ROLLER_BEARING_GEOMETRY = new THREE.BoxGeometry(0.15, 0.15, 0.08);
 // Use shared textured materials from sharedMaterials module
-const DRIVE_ROLLER_MAIN_MATERIAL = METAL_MATERIALS.steel;
-const DRIVE_ROLLER_CAP_MATERIAL = METAL_MATERIALS.steelDark;
-const DRIVE_ROLLER_BEARING_MATERIAL = METAL_MATERIALS.paintedSlate;
+const DRIVE_ROLLER_MAIN_MATERIAL = CONVEYOR_MATERIALS.steel;
+const DRIVE_ROLLER_CAP_MATERIAL = CONVEYOR_MATERIALS.steelDark;
+const DRIVE_ROLLER_BEARING_MATERIAL = CONVEYOR_MATERIALS.paintedSlate;
 
 export const ConveyorBelt: React.FC<{
   position: [number, number, number];
@@ -875,6 +875,22 @@ export const ConveyorBelt: React.FC<{
     [conveyorTextures, beltTextures]
   );
 
+  // The belt's own material object, so the analytic surface treatment can be
+  // attached to it. `createBeltMaterial` owns the profile; this owns the
+  // LIFETIME - R3F disposes materials it constructed from JSX, and this one it
+  // did not.
+  const beltMaterial = useMemo(
+    () =>
+      createBeltMaterial({
+        map: activeMaps.map,
+        normal: activeMaps.normal,
+        roughness: activeMaps.roughness,
+        normalScale: BELT_NORMAL_SCALE,
+      }),
+    [activeMaps]
+  );
+  useEffect(() => () => beltMaterial.dispose(), [beltMaterial]);
+
   useFrame((_, delta) => {
     // PERFORMANCE: Skip animations when tab hidden or production stopped
     if (!isTabVisible || productionSpeed === 0) return;
@@ -922,24 +938,13 @@ export const ConveyorBelt: React.FC<{
       {/* Belt surface with scrolling texture - PBR on high/ultra, procedural fallback on low/medium */}
       <mesh ref={beltRef} receiveShadow position={[0, 0.3, 0]}>
         <boxGeometry args={[length, 0.1, 2]} />
-        <meshStandardMaterial
-          // No `color`: the albedo map is now correctly tagged sRGB, so any
-          // tint here would multiply the same hue in twice.
-          map={activeMaps.map}
-          normalMap={activeMaps.normal}
-          normalScale={BELT_NORMAL_SCALE}
-          roughnessMap={activeMaps.roughness}
-          // 1.0 so the roughness map is the sole authority (three multiplies).
-          roughness={1}
-          metalness={0}
-          envMapIntensity={0.55}
-        />
+        <primitive object={beltMaterial} attach="material" />
       </mesh>
 
       {/* Belt frame */}
       <mesh position={[0, 0, 0]}>
         <boxGeometry args={[length, 0.5, 2.2]} />
-        <primitive object={METAL_MATERIALS.paintedMediumGray} attach="material" />
+        <primitive object={CONVEYOR_MATERIALS.paintedMediumGray} attach="material" />
       </mesh>
 
       {/* Drive rollers at intervals - NO SHADOWS for small rotating parts */}
@@ -987,12 +992,12 @@ export const ConveyorBelt: React.FC<{
         <group position={[-length / 2 + 1, -0.1, 1.3]}>
           <mesh castShadow>
             <boxGeometry args={[0.8, 0.6, 0.5]} />
-            <primitive object={METAL_MATERIALS.industrialBlue} attach="material" />
+            <primitive object={CONVEYOR_MATERIALS.industrialBlue} attach="material" />
           </mesh>
           {/* Motor shaft - NO SHADOW for small part */}
           <mesh position={[0, 0.1, -0.3]} rotation={[Math.PI / 2, 0, 0]}>
             <cylinderGeometry args={[0.08, 0.08, 0.3, 8]} />
-            <primitive object={MACHINE_MATERIALS.shaft} attach="material" />
+            <primitive object={CONVEYOR_MATERIALS.shaft} attach="material" />
           </mesh>
           {/* Ventilation grille - z offset increased to 0.28 to prevent z-fighting with motor housing front face at z=0.25 */}
           <mesh position={[0, 0, 0.28]}>
@@ -1008,7 +1013,7 @@ export const ConveyorBelt: React.FC<{
           {/* Warning label */}
           <mesh position={[0.41, 0.1, 0]} rotation={[0, Math.PI / 2, 0]}>
             <planeGeometry args={[0.2, 0.15]} />
-            <primitive object={SAFETY_MATERIALS.warningYellow} attach="material" />
+            <primitive object={CONVEYOR_MATERIALS.warningYellow} attach="material" />
           </mesh>
         </group>
       )}
@@ -1218,58 +1223,51 @@ export const RollerConveyor: React.FC<{
       {/* Frame with detail */}
       <mesh position={[0, -0.05, 0]}>
         <boxGeometry args={[30, 0.2, 2.5]} />
-        <primitive object={METAL_MATERIALS.steelDark} attach="material" />
+        <primitive object={CONVEYOR_MATERIALS.steelDark} attach="material" />
       </mesh>
 
       {/* Side rails - main structure gets shadows */}
       <mesh position={[0, 0.2, -1.2]} castShadow>
         <boxGeometry args={[30, 0.35, 0.1]} />
-        <primitive object={METAL_MATERIALS.paintedSlate} attach="material" />
+        <primitive object={CONVEYOR_MATERIALS.paintedSlate} attach="material" />
       </mesh>
       <mesh position={[0, 0.2, 1.2]} castShadow>
         <boxGeometry args={[30, 0.35, 0.1]} />
-        <primitive object={METAL_MATERIALS.paintedSlate} attach="material" />
+        <primitive object={CONVEYOR_MATERIALS.paintedSlate} attach="material" />
       </mesh>
 
       {/* Instanced Rollers - 25 rollers in 1 draw call - NO SHADOW for rotating parts */}
       <instancedMesh ref={rollersRef} args={[ROLLER_GEOMETRY, undefined, ROLLER_COUNT]}>
-        {/* KEPT as a colour, not reset to white: this material has NO albedo
-            map, so `color` IS its albedo (and, at metalness 0.8, its specular
-            F0 tint). Lifted to a galvanised-steel F0 and given envMapIntensity
-            now that scene.environment exists for it to reflect. */}
-        <meshStandardMaterial
-          color="#c8ccd0"
-          metalness={0.85}
-          roughness={0.28}
-          envMapIntensity={1.15}
-        />
+        {/* The branch's one flat row (25 m over 25 instances), now finished in
+            OBJECT space because these spin - see `conveyorSurfaces.ts`. */}
+        <primitive object={CONVEYOR_MATERIALS.roller} attach="material" />
       </instancedMesh>
 
       {/* Instanced Axle ends - 50 axles in 1 draw call (only on medium+ quality) */}
       {showDetails && (
         <instancedMesh ref={axlesRef} args={[AXLE_GEOMETRY, undefined, ROLLER_COUNT * 2]}>
-          <primitive object={METAL_MATERIALS.steelDark} attach="material" />
+          <primitive object={CONVEYOR_MATERIALS.steelDark} attach="material" />
         </instancedMesh>
       )}
 
       {/* End stops */}
       <mesh position={[-14.5, 0.3, 0]} castShadow>
         <boxGeometry args={[0.3, 0.4, 2.6]} />
-        <primitive object={SAFETY_MATERIALS.warningRed} attach="material" />
+        <primitive object={CONVEYOR_MATERIALS.warningRed} attach="material" />
       </mesh>
       <mesh position={[14.5, 0.3, 0]} castShadow>
         <boxGeometry args={[0.3, 0.4, 2.6]} />
-        <primitive object={SAFETY_MATERIALS.warningRed} attach="material" />
+        <primitive object={CONVEYOR_MATERIALS.warningRed} attach="material" />
       </mesh>
 
       {/* Support legs - using shared materials, no shadows for small parts */}
       {ROLLER_SUPPORT_POSITIONS.map((x, i) => (
         <group key={i} position={[x, -0.3, 0]}>
           <mesh position={[0, 0, -1]} geometry={SHARED_GEOMETRIES.legVertical}>
-            <primitive object={METAL_MATERIALS.paintedDarkGray} attach="material" />
+            <primitive object={CONVEYOR_MATERIALS.paintedDarkGray} attach="material" />
           </mesh>
           <mesh position={[0, 0, 1]} geometry={SHARED_GEOMETRIES.legVertical}>
-            <primitive object={METAL_MATERIALS.paintedDarkGray} attach="material" />
+            <primitive object={CONVEYOR_MATERIALS.paintedDarkGray} attach="material" />
           </mesh>
         </group>
       ))}
@@ -1367,6 +1365,19 @@ const getFlourSackMaterials = () => {
   // Stays under 1.0 linear, so this is safe on `low` where there is no composer
   // and `toneMapped` clamping would flatten a brighter value to white.
   hovered.emissiveIntensity = 0.12;
+
+  // CLONE FIRST, INJECT SECOND. `THREE.Material.copy()` runs userData through
+  // `JSON.parse(JSON.stringify(...))` and does NOT copy `onBeforeCompile`, so
+  // cloning a material that already carries the treatment produces a JSON ghost
+  // - the bookkeeping without the shader, and permanently deaf to the A/B
+  // toggle. Treating both clones separately is the only safe order.
+  //
+  // `fabric` in OBJECT rest space: these sacks travel the length of the belt,
+  // and a world-space field would make the weave swim across a bag as it moves
+  // through it. The profile's 0.055 m meso period is authored for a garment at
+  // the `personnel-close` camera and reads correctly on a 0.5 m sack.
+  applyWorldSurface(base, 'fabric');
+  applyWorldSurface(hovered, 'fabric');
 
   flourSackMaterialCache = { base, hovered };
   return flourSackMaterialCache;

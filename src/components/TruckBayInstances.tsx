@@ -319,12 +319,13 @@ export const OptimizedStripeInstances: React.FC<{
 
     return (
       <instancedMesh ref={ref} args={[geo, undefined, data.length]} renderOrder={10}>
-        <meshBasicMaterial
+        <meshStandardMaterial
           color={color}
           polygonOffset
           polygonOffsetFactor={POLYGON_OFFSET.strong.factor}
           polygonOffsetUnits={POLYGON_OFFSET.strong.units}
           depthWrite={false}
+          roughness={0.85}
         />
       </instancedMesh>
     );

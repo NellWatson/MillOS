@@ -21,7 +21,15 @@ import { playCritterSound } from '../utils/critterAudio';
 import { audioManager } from '../utils/audioManager';
 import { PROCEDURAL_TEXTURES } from '../utils/sharedMaterials';
 import { InstancedLamps } from './village/InstancedVillageComponents';
-import { POLYGON_OFFSET } from '../constants/renderLayers';
+import { EXTERIOR_LAYERS, POLYGON_OFFSET } from '../constants/renderLayers';
+import {
+  GeneratedBody,
+  GeneratedBoundary,
+  GeneratedModel,
+  instanceScale,
+  instanceYaw,
+} from './models/GeneratedModel';
+import { CreatureBody, type CreatureRigHandle } from './models/RiggedCreatureModel';
 import { generateCobblestoneRoughness } from '../textures';
 import { SITE_LAYOUT } from '../constants/siteLayout';
 
@@ -495,19 +503,17 @@ const ChimneySmoke: React.FC<{ position: [number, number, number]; offset?: numb
 };
 
 // ===== COTTAGE =====
-export const Cottage = React.memo<{
-  position: [number, number, number];
-  rotation?: number;
+const CottagePrimitiveBody = React.memo<{
   wallColor?: keyof typeof SM;
   roofType?: 'tile' | 'thatch' | 'slate';
   hasGarden?: boolean;
-}>(({ position, rotation = 0, wallColor = 'cream', roofType = 'tile', hasGarden = true }) => {
+}>(({ wallColor = 'cream', roofType = 'tile', hasGarden = true }) => {
   const wallMat = SM[wallColor] || SM.cream;
   const roofMat =
     roofType === 'thatch' ? SM.thatch : roofType === 'slate' ? SM.roofSlate : SM.roofTile;
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group>
       {/* Main building */}
       <mesh position={[0, 2, 0]} castShadow receiveShadow>
         <boxGeometry args={[5, 4, 4]} />
@@ -523,10 +529,6 @@ export const Cottage = React.memo<{
         <boxGeometry args={[0.6, 1.5, 0.6]} />
         <primitive object={SM.stone} attach="material" />
       </mesh>
-      {/* Chimney smoke */}
-      {/* Deterministic phase from the cottage's own position: Math.random()
-          here re-rolled the smoke every remount and defeated memoisation. */}
-      <ChimneySmoke position={[1.5, 7, 0]} offset={position[0] * 0.31 + position[2] * 0.17} />
       {/* Door */}
       <mesh position={[0, 1.2, 2.01]}>
         <boxGeometry args={[1, 2.2, 0.1]} />
@@ -595,76 +597,126 @@ export const Cottage = React.memo<{
     </group>
   );
 });
+CottagePrimitiveBody.displayName = 'CottagePrimitiveBody';
+
+/**
+ * `wallColor` and `roofType` no longer select a variant: there is one generated
+ * cottage, and every instance wears it. The props stay because the primitive
+ * fallback still honours them and because the call sites read better naming the
+ * house they asked for - but a village of six identical cottages is a real cost
+ * of this swap, and the fix is more generations rather than a colour tint,
+ * which on a baked albedo washes the whole building.
+ */
+export const Cottage = React.memo<{
+  position: [number, number, number];
+  rotation?: number;
+  wallColor?: keyof typeof SM;
+  roofType?: 'tile' | 'thatch' | 'slate';
+  hasGarden?: boolean;
+}>(({ position, rotation = 0, wallColor = 'cream', roofType = 'tile', hasGarden = true }) => (
+  // Yaw and scale jitter on the WRAPPER, so the chimney below moves with the
+  // roof it stands on and the primitive fallback varies identically.
+  <group
+    position={position}
+    rotation={[0, rotation + instanceYaw(position), 0]}
+    scale={instanceScale(position)}
+  >
+    <GeneratedBody
+      asset="cottage"
+      fallback={
+        <CottagePrimitiveBody wallColor={wallColor} roofType={roofType} hasGarden={hasGarden} />
+      }
+    />
+    {/* Hoisted out of the body so one chimney smokes on either path. Seated on
+        the generated cottage's ridge (4.33 m) rather than the primitive's 7 m
+        one; the phase is still deterministic from the cottage's own position,
+        because Math.random() here re-rolled the smoke on every remount and
+        defeated memoisation. */}
+    <ChimneySmoke position={[1.2, 4.6, 0]} offset={position[0] * 0.31 + position[2] * 0.17} />
+  </group>
+));
 Cottage.displayName = 'Cottage';
 
 // ===== SHOP BUILDING =====
+const ShopBuildingPrimitiveBody = React.memo<{
+  wallColor?: keyof typeof SM;
+  signText?: string;
+  awningColor?: string;
+}>(({ wallColor = 'yellow', signText = 'SHOP', awningColor = '#dc2626' }) => {
+  const wallMat = SM[wallColor] || SM.yellow;
+
+  return (
+    <group>
+      {/* Main building */}
+      <mesh position={[0, 2.5, 0]} castShadow receiveShadow>
+        <boxGeometry args={[6, 5, 5]} />
+        <primitive object={wallMat} attach="material" />
+      </mesh>
+      {/* Pyramid roof */}
+      <mesh position={[0, 6.5, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
+        <coneGeometry args={[5, 3, 4]} />
+        <primitive object={SM.roofTile} attach="material" />
+      </mesh>
+      {/* Shop window - resized and moved to avoid door */}
+      <mesh position={[1.2, 1.5, 2.6]} userData={{ dynamic: true }}>
+        <boxGeometry args={[2.8, 2.5, 0.1]} />
+        <primitive object={SM.windowGlass} attach="material" />
+      </mesh>
+      {/* Door */}
+      <mesh position={[-2, 1.2, 2.6]}>
+        <boxGeometry args={[1, 2.2, 0.1]} />
+        <primitive object={SM.timber} attach="material" />
+      </mesh>
+      {/* Awning */}
+      <mesh position={[0, 3.2, 3.5]} rotation={[0.4, 0, 0]} castShadow>
+        <boxGeometry args={[5.5, 0.1, 2]} />
+        <meshStandardMaterial color={awningColor} roughness={0.7} />
+      </mesh>
+      {/* Sign */}
+      <Text
+        position={[0, 4.5, 2.6]}
+        fontSize={0.5}
+        color="#1e293b"
+        anchorX="center"
+        anchorY="middle"
+        font={FONT_URL}
+      >
+        {signText}
+      </Text>
+    </group>
+  );
+});
+ShopBuildingPrimitiveBody.displayName = 'ShopBuildingPrimitiveBody';
+
 const ShopBuilding = React.memo<{
   position: [number, number, number];
   rotation?: number;
   wallColor?: keyof typeof SM;
   signText?: string;
   awningColor?: string;
-}>(
-  ({
-    position,
-    rotation = 0,
-    wallColor = 'yellow',
-    signText = 'SHOP',
-    awningColor = '#dc2626',
-  }) => {
-    const wallMat = SM[wallColor] || SM.yellow;
-
-    return (
-      <group position={position} rotation={[0, rotation, 0]}>
-        {/* Main building */}
-        <mesh position={[0, 2.5, 0]} castShadow receiveShadow>
-          <boxGeometry args={[6, 5, 5]} />
-          <primitive object={wallMat} attach="material" />
-        </mesh>
-        {/* Pyramid roof */}
-        <mesh position={[0, 6.5, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
-          <coneGeometry args={[5, 3, 4]} />
-          <primitive object={SM.roofTile} attach="material" />
-        </mesh>
-        {/* Shop window - resized and moved to avoid door */}
-        <mesh position={[1.2, 1.5, 2.6]} userData={{ dynamic: true }}>
-          <boxGeometry args={[2.8, 2.5, 0.1]} />
-          <primitive object={SM.windowGlass} attach="material" />
-        </mesh>
-        {/* Door */}
-        <mesh position={[-2, 1.2, 2.6]}>
-          <boxGeometry args={[1, 2.2, 0.1]} />
-          <primitive object={SM.timber} attach="material" />
-        </mesh>
-        {/* Awning */}
-        <mesh position={[0, 3.2, 3.5]} rotation={[0.4, 0, 0]} castShadow>
-          <boxGeometry args={[5.5, 0.1, 2]} />
-          <meshStandardMaterial color={awningColor} roughness={0.7} />
-        </mesh>
-        {/* Sign */}
-        <Text
-          position={[0, 4.5, 2.6]}
-          fontSize={0.5}
-          color="#1e293b"
-          anchorX="center"
-          anchorY="middle"
-          font={FONT_URL}
-        >
-          {signText}
-        </Text>
-      </group>
-    );
-  }
-);
+}>(({ position, rotation = 0, wallColor, signText, awningColor }) => (
+  <group
+    position={position}
+    rotation={[0, rotation + instanceYaw(position), 0]}
+    scale={instanceScale(position)}
+  >
+    <GeneratedBody
+      asset="shop"
+      fallback={
+        <ShopBuildingPrimitiveBody
+          wallColor={wallColor}
+          signText={signText}
+          awningColor={awningColor}
+        />
+      }
+    />
+  </group>
+));
 ShopBuilding.displayName = 'ShopBuilding';
 
 // ===== CHURCH =====
-const ChurchBuilding = React.memo<{
-  position: [number, number, number];
-  rotation?: number;
-  isNight?: boolean;
-}>(({ position, rotation = 0, isNight = false }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+const ChurchBuildingPrimitiveBody = React.memo<{ isNight?: boolean }>(({ isNight = false }) => (
+  <group>
     {/* Main nave */}
     <mesh position={[0, 4, 0]} castShadow receiveShadow>
       <boxGeometry args={[10, 8, 12]} />
@@ -808,23 +860,51 @@ const ChurchBuilding = React.memo<{
     ))}
   </group>
 ));
+ChurchBuildingPrimitiveBody.displayName = 'ChurchBuildingPrimitiveBody';
+
+const ChurchBuilding = React.memo<{
+  position: [number, number, number];
+  rotation?: number;
+  isNight?: boolean;
+}>(({ position, rotation = 0, isNight = false }) => (
+  <group position={position} rotation={[0, rotation, 0]}>
+    <GeneratedBody asset="church" fallback={<ChurchBuildingPrimitiveBody isNight={isNight} />} />
+  </group>
+));
 ChurchBuilding.displayName = 'ChurchBuilding';
 
-// Isolated clock component to prevent full building re-renders
+/**
+ * The town hall's hourly chime, with no geometry of its own.
+ *
+ * Split out of `TownHallClock` because that component lives inside
+ * `TownHallPrimitiveBody`, which the generated town hall replaces - so the
+ * chime, an audio feature with nothing to do with which body renders, went
+ * silent the moment the asset shipped. The generated tower carries its own
+ * baked clock face, so only the FACE is body-specific; the chime is not, and
+ * it now mounts in `TownHall` beside the body.
+ */
+const TownHallChime: React.FC = React.memo(() => {
+  const gameTime = useGameSimulationStore((state) => state.gameTime);
+  const lastChimeHourRef = useRef(-1);
+
+  useEffect(() => {
+    const currentHour = Math.floor(gameTime);
+    // Only chime when crossing an hour boundary
+    if (currentHour !== lastChimeHourRef.current && gameTime % 1 < 0.05) {
+      audioManager.playClockChime(currentHour);
+      lastChimeHourRef.current = currentHour;
+    }
+  }, [gameTime]);
+
+  return null;
+});
+TownHallChime.displayName = 'TownHallChime';
+
+// Isolated clock component to prevent full building re-renders. Face and hands
+// only - the chime is `TownHallChime` above, so it survives the asset swap.
 const TownHallClock: React.FC<{ position: [number, number, number] }> = React.memo(
   ({ position }) => {
     const gameTime = useGameSimulationStore((state) => state.gameTime);
-    const lastChimeHourRef = useRef(-1);
-
-    // Play clock chime on the hour
-    useEffect(() => {
-      const currentHour = Math.floor(gameTime);
-      // Only chime when crossing an hour boundary
-      if (currentHour !== lastChimeHourRef.current && gameTime % 1 < 0.05) {
-        audioManager.playClockChime(currentHour);
-        lastChimeHourRef.current = currentHour;
-      }
-    }, [gameTime]);
 
     // Clock hands: hour hand rotates once per 12 hours, minute hand once per hour
     const hourAngle = (gameTime / 12) * Math.PI * 2;
@@ -875,109 +955,117 @@ const TownHallClock: React.FC<{ position: [number, number, number] }> = React.me
 TownHallClock.displayName = 'TownHallClock';
 
 // ===== TOWN HALL =====
-export const TownHall = React.memo<{ position: [number, number, number]; rotation?: number }>(
-  ({ position, rotation = 0 }) => {
-    return (
-      <group position={position} rotation={[0, rotation, 0]}>
-        {/* Main building */}
-        <mesh position={[0, 3.5, 0]} castShadow receiveShadow>
-          <boxGeometry args={[12, 7, 10]} />
-          <primitive object={SM.cream} attach="material" />
-        </mesh>
+const TownHallPrimitiveBody = React.memo(() => {
+  return (
+    <group>
+      {/* Main building */}
+      <mesh position={[0, 3.5, 0]} castShadow receiveShadow>
+        <boxGeometry args={[12, 7, 10]} />
+        <primitive object={SM.cream} attach="material" />
+      </mesh>
 
-        {/* Office Windows (Added for night emissives) */}
-        {/* Front Windows (flanking entrance) */}
-        {[-4, 4].map((x, i) => (
-          <mesh key={`win-front-${i}`} position={[x, 3.5, 5.01]} userData={{ dynamic: true }}>
-            <boxGeometry args={[1.5, 2.5, 0.1]} />
-            <primitive object={SM.windowGlass} attach="material" />
-          </mesh>
-        ))}
-        {/* Side Windows */}
-        {[-1, 0, 1].map((zOffset, i) => (
-          <React.Fragment key={`win-side-${i}`}>
-            {[-6.01, 6.01].map((x, j) => (
-              <mesh
-                key={`win-side-${i}-${j}`}
-                position={[x, 3.5, zOffset * 3]}
-                rotation={[0, Math.PI / 2, 0]}
-                userData={{ dynamic: true }}
-              >
-                <boxGeometry args={[1.5, 2.5, 0.1]} />
-                <primitive object={SM.windowGlass} attach="material" />
-              </mesh>
-            ))}
-          </React.Fragment>
-        ))}
+      {/* Office Windows (Added for night emissives) */}
+      {/* Front Windows (flanking entrance) */}
+      {[-4, 4].map((x, i) => (
+        <mesh key={`win-front-${i}`} position={[x, 3.5, 5.01]} userData={{ dynamic: true }}>
+          <boxGeometry args={[1.5, 2.5, 0.1]} />
+          <primitive object={SM.windowGlass} attach="material" />
+        </mesh>
+      ))}
+      {/* Side Windows */}
+      {[-1, 0, 1].map((zOffset, i) => (
+        <React.Fragment key={`win-side-${i}`}>
+          {[-6.01, 6.01].map((x, j) => (
+            <mesh
+              key={`win-side-${i}-${j}`}
+              position={[x, 3.5, zOffset * 3]}
+              rotation={[0, Math.PI / 2, 0]}
+              userData={{ dynamic: true }}
+            >
+              <boxGeometry args={[1.5, 2.5, 0.1]} />
+              <primitive object={SM.windowGlass} attach="material" />
+            </mesh>
+          ))}
+        </React.Fragment>
+      ))}
 
-        {/* Pyramid roof */}
-        <mesh position={[0, 9, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
-          <coneGeometry args={[10, 4, 4]} />
-          <primitive object={SM.roofSlate} attach="material" />
-        </mesh>
-        {/* Clock tower */}
-        <mesh position={[0, 11, 0]} castShadow>
-          <boxGeometry args={[4, 6, 4]} />
-          <primitive object={SM.cream} attach="material" />
-        </mesh>
-        {/* Ogee cupola - see createTownHallCupolaGeometry. Fascia and eave kick
+      {/* Pyramid roof */}
+      <mesh position={[0, 9, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
+        <coneGeometry args={[10, 4, 4]} />
+        <primitive object={SM.roofSlate} attach="material" />
+      </mesh>
+      {/* Clock tower */}
+      <mesh position={[0, 11, 0]} castShadow>
+        <boxGeometry args={[4, 6, 4]} />
+        <primitive object={SM.cream} attach="material" />
+      </mesh>
+      {/* Ogee cupola - see createTownHallCupolaGeometry. Fascia and eave kick
             on the 1.6 m overhang, dome shoulder rolling into a concave sweep,
             lantern drum and ball finial. */}
-        <mesh position={[0, 16, 0]} castShadow>
-          <primitive object={TOWNHALL_CUPOLA} attach="geometry" />
-          <primitive object={SM.roofSlate} attach="material" />
-        </mesh>
+      <mesh position={[0, 16, 0]} castShadow>
+        <primitive object={TOWNHALL_CUPOLA} attach="geometry" />
+        <primitive object={SM.roofSlate} attach="material" />
+      </mesh>
 
-        {/* Clock Face & Hands - Isolated Component */}
-        <TownHallClock position={[0, 12, 2.01]} />
+      {/* Clock Face & Hands - Isolated Component */}
+      <TownHallClock position={[0, 12, 2.01]} />
 
-        {/* Grand entrance - raised to meet steps */}
-        <mesh position={[0, 2.4, 5.01]}>
-          <boxGeometry args={[3, 3, 0.2]} />
-          <primitive object={SM.timber} attach="material" />
+      {/* Grand entrance - raised to meet steps */}
+      <mesh position={[0, 2.4, 5.01]}>
+        <boxGeometry args={[3, 3, 0.2]} />
+        <primitive object={SM.timber} attach="material" />
+      </mesh>
+      {/* Steps - ascending toward building */}
+      {[0, 1, 2].map((i) => (
+        <mesh key={i} position={[0, 0.15 + i * 0.3, 7 - i * 0.5]} castShadow receiveShadow>
+          <boxGeometry args={[5 - i * 0.5, 0.3, 1]} />
+          <primitive object={SM.stone} attach="material" />
         </mesh>
-        {/* Steps - ascending toward building */}
-        {[0, 1, 2].map((i) => (
-          <mesh key={i} position={[0, 0.15 + i * 0.3, 7 - i * 0.5]} castShadow receiveShadow>
-            <boxGeometry args={[5 - i * 0.5, 0.3, 1]} />
-            <primitive object={SM.stone} attach="material" />
-          </mesh>
-        ))}
-        {/* Columns */}
-        {[-2.5, 2.5].map((x, i) => (
-          <mesh key={i} position={[x, 2, 5.5]} castShadow>
-            <cylinderGeometry args={[0.3, 0.35, 4, 12]} />
-            <primitive object={SM.white} attach="material" />
-          </mesh>
-        ))}
-        {/* Lintel across columns */}
-        <mesh position={[0, 4.2, 5.5]} castShadow>
-          <boxGeometry args={[5.5, 0.4, 0.5]} />
+      ))}
+      {/* Columns */}
+      {[-2.5, 2.5].map((x, i) => (
+        <mesh key={i} position={[x, 2, 5.5]} castShadow>
+          <cylinderGeometry args={[0.3, 0.35, 4, 12]} />
           <primitive object={SM.white} attach="material" />
         </mesh>
-        {/* TOWN HALL text */}
-        <Text
-          position={[0, 6, 5.1]}
-          fontSize={0.6}
-          color="#1e293b"
-          anchorX="center"
-          anchorY="middle"
-          font={FONT_URL}
-        >
-          TOWN HALL
-        </Text>
-      </group>
-    );
-  }
+      ))}
+      {/* Lintel across columns */}
+      <mesh position={[0, 4.2, 5.5]} castShadow>
+        <boxGeometry args={[5.5, 0.4, 0.5]} />
+        <primitive object={SM.white} attach="material" />
+      </mesh>
+      {/* TOWN HALL text */}
+      <Text
+        position={[0, 6, 5.1]}
+        fontSize={0.6}
+        color="#1e293b"
+        anchorX="center"
+        anchorY="middle"
+        font={FONT_URL}
+      >
+        TOWN HALL
+      </Text>
+    </group>
+  );
+});
+TownHallPrimitiveBody.displayName = 'TownHallPrimitiveBody';
+
+export const TownHall = React.memo<{ position: [number, number, number]; rotation?: number }>(
+  ({ position, rotation = 0 }) => (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <GeneratedBody asset="townhall" fallback={<TownHallPrimitiveBody />} />
+      {/* Hoisted out of the body so the hour still strikes on either path. The
+          generated tower's clock face is baked into its albedo, so only the
+          moving hands are lost by the swap - the sound is not. */}
+      <TownHallChime />
+    </group>
+  )
 );
 TownHall.displayName = 'TownHall';
 
 // ===== PUB =====
-const Pub = React.memo<{
-  position: [number, number, number];
-  rotation?: number;
-}>(({ position, rotation = 0 }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
+const PubPrimitiveBody = React.memo(() => (
+  <group>
     {/* Main building - timber frame style */}
     <mesh position={[0, 2.5, 0]} castShadow receiveShadow>
       <boxGeometry args={[8, 5, 6]} />
@@ -1011,8 +1099,6 @@ const Pub = React.memo<{
       <boxGeometry args={[0.8, 2, 0.8]} />
       <primitive object={SM.stone} attach="material" />
     </mesh>
-    {/* Chimney smoke */}
-    <ChimneySmoke position={[3, 8.2, 0]} offset={5} />
     {/* Door */}
     <mesh position={[0, 1.2, 3.01]}>
       <boxGeometry args={[1.5, 2.4, 0.1]} />
@@ -1061,14 +1147,28 @@ const Pub = React.memo<{
     ))}
   </group>
 ));
-Pub.displayName = 'Pub';
+PubPrimitiveBody.displayName = 'PubPrimitiveBody';
 
-// ===== SCHOOL =====
-const School = React.memo<{
+const Pub = React.memo<{
   position: [number, number, number];
   rotation?: number;
 }>(({ position, rotation = 0 }) => (
   <group position={position} rotation={[0, rotation, 0]}>
+    <GeneratedBody asset="pub" fallback={<PubPrimitiveBody />} />
+    {/* Hoisted out of the body, or the pub's chimney stops smoking the moment
+        the generated body renders - the same orphaning the cottage's smoke was
+        already saved from. Re-seated on the generated chimney mouth rather than
+        the primitive's: the largest up-facing surface in the top of `pub.glb`
+        is 0.10 m2 at y = 5.55, centroid x 1.91, z -0.06. The primitive's
+        [3, 8.2, 0] would smoke from mid-air 2.6 m above a 5.56 m building. */}
+    <ChimneySmoke position={[1.95, 5.6, -0.06]} offset={5} />
+  </group>
+));
+Pub.displayName = 'Pub';
+
+// ===== SCHOOL =====
+const SchoolPrimitiveBody = React.memo(() => (
+  <group>
     {/* Main building */}
     <mesh position={[0, 3, 0]} castShadow receiveShadow>
       <boxGeometry args={[10, 6, 7]} />
@@ -1183,6 +1283,26 @@ const School = React.memo<{
     </Text>
   </group>
 ));
+SchoolPrimitiveBody.displayName = 'SchoolPrimitiveBody';
+
+const School = React.memo<{
+  position: [number, number, number];
+  rotation?: number;
+}>(({ position, rotation = 0 }) => (
+  <group position={position} rotation={[0, rotation, 0]}>
+    {/* Sunk 0.70 m: the generated school is the one asset in the set that
+        arrives standing on its own turf disc, which reads as a lawn dropped on
+        the village cobbles. Measured off the GLB with the albedo sampled per
+        triangle - the disc's top face is 44.6 m2 of up-facing green at
+        y = 0.75-0.80, and the building stands on it, so 0.70 puts BOTH the
+        lawn and the building's base 40 mm under the cobble sheet at y = 0.12.
+        The bushes and the two markers rooted in the disc stay above ground and
+        read as planting beside the school. Sinking further would bury the
+        doorway; sinking less leaves 44 m2 of green coplanar with the cobbles.
+        The other 29 assets were checked the same way and none is green. */}
+    <GeneratedBody asset="school" sink={0.7} fallback={<SchoolPrimitiveBody />} />
+  </group>
+));
 School.displayName = 'School';
 
 /**
@@ -1294,8 +1414,8 @@ const WELL_ROOF = new THREE.LatheGeometry(
   20
 );
 
-const WishingWell = React.memo<{ position: [number, number, number] }>(({ position }) => (
-  <group position={position}>
+const WishingWellPrimitiveBody = React.memo(() => (
+  <group>
     {/* Stone kerb - see WELL_KERB for the coursing and the cat's seat. */}
     <mesh position={[0, 0.4, 0]} castShadow>
       <primitive object={WELL_KERB} attach="geometry" />
@@ -1337,15 +1457,48 @@ const WishingWell = React.memo<{ position: [number, number, number] }>(({ positi
     </mesh>
   </group>
 ));
+WishingWellPrimitiveBody.displayName = 'WishingWellPrimitiveBody';
+
+const WishingWell = React.memo<{ position: [number, number, number] }>(({ position }) => (
+  <group position={position}>
+    <GeneratedBody asset="wishingwell" fallback={<WishingWellPrimitiveBody />} />
+  </group>
+));
 WishingWell.displayName = 'WishingWell';
 
 // ===== DUCK COMPONENT =====
+/**
+ * Quarter turn: the parts below are authored facing +X and the generated duck
+ * faces +Z with the rest of the roster, so without it the fallback bird points
+ * 90 degrees away from the one that ships.
+ */
+const DuckPrimitiveBody = React.memo(() => (
+  <group rotation={[0, -Math.PI / 2, 0]}>
+    <mesh castShadow>
+      <sphereGeometry args={[0.25, 8, 8]} />
+      <meshStandardMaterial color="#fef3c7" roughness={0.8} />
+    </mesh>
+    <mesh position={[0.2, 0.1, 0]} castShadow>
+      <sphereGeometry args={[0.15, 8, 8]} />
+      <meshStandardMaterial color="#fef3c7" roughness={0.8} />
+    </mesh>
+    <mesh position={[0.35, 0.1, 0]} rotation={[0, 0, -0.3]}>
+      <boxGeometry args={[0.1, 0.05, 0.08]} />
+      <meshStandardMaterial color="#f97316" roughness={0.6} />
+    </mesh>
+  </group>
+));
+DuckPrimitiveBody.displayName = 'DuckPrimitiveBody';
+
 const Duck = React.memo<{
   position: [number, number, number];
   delay: number;
   onClick: (pos: [number, number, number]) => void;
 }>(({ position, delay, onClick }) => {
   const groupRef = useRef<THREE.Group>(null);
+  const rigRef = useRef<CreatureRigHandle>(null);
+  const dabbleRef = useRef(0);
+  const shakenRef = useRef(false);
   const [isExcited, setIsExcited] = React.useState(false);
 
   // Restored: a pond of perfectly still ducks beside animated water reads as
@@ -1366,6 +1519,23 @@ const Duck = React.memo<{
 
     groupRef.current.position.y = position[1] + yOffset;
     groupRef.current.rotation.y = rotOffset;
+
+    // Dabbling. `stride` stays unused for this species - a bird floating on a
+    // pond has nothing to swing its legs against - so the neck is the whole of
+    // its rig motion. Head down in short dips rather than held under, and the
+    // dip is suppressed while it is being petted so the bird looks up at you.
+    const rig = rigRef.current;
+    if (!rig) return;
+    const target = isExcited ? 0 : Math.max(0, Math.sin(time * 0.9 + delay * 1.7)) ** 3;
+    dabbleRef.current = THREE.MathUtils.lerp(dabbleRef.current, target, 0.12);
+    // Shake first, graze second: every setter on the handle rebuilds the whole
+    // pose from the rest quaternions and calls `updateMatrixWorld`, so writing
+    // both unconditionally would double this bird's rig cost to no effect.
+    // The shake is written only while it is live, plus once more to clear it.
+    if (isExcited) rig.setHeadShake(Math.sin(time * 20) * 0.3);
+    else if (shakenRef.current) rig.setHeadShake(0);
+    shakenRef.current = isExcited;
+    rig.setGraze(dabbleRef.current);
   });
 
   // Reset excitement
@@ -1385,18 +1555,7 @@ const Duck = React.memo<{
 
   return (
     <group ref={groupRef} position={[position[0], position[1], position[2]]} onClick={handleClick}>
-      <mesh castShadow>
-        <sphereGeometry args={[0.25, 8, 8]} />
-        <meshStandardMaterial color="#fef3c7" roughness={0.8} />
-      </mesh>
-      <mesh position={[0.2, 0.1, 0]} castShadow>
-        <sphereGeometry args={[0.15, 8, 8]} />
-        <meshStandardMaterial color="#fef3c7" roughness={0.8} />
-      </mesh>
-      <mesh position={[0.35, 0.1, 0]} rotation={[0, 0, -0.3]}>
-        <boxGeometry args={[0.1, 0.05, 0.08]} />
-        <meshStandardMaterial color="#f97316" roughness={0.6} />
-      </mesh>
+      <CreatureBody creature="duck" ref={rigRef} fallback={<DuckPrimitiveBody />} />
     </group>
   );
 });
@@ -1463,6 +1622,37 @@ const POND_SHORE = new THREE.LatheGeometry(
   48
 );
 
+/** The pond's own bank and water, kept as the generated pond's fallback. */
+const DuckPondBasin = React.memo(() => (
+  <group>
+    <mesh position={[0, 0.15, 0]} receiveShadow>
+      <primitive object={POND_SHORE} attach="geometry" />
+      <meshStandardMaterial color="#a89f91" roughness={0.9} side={THREE.DoubleSide} />
+    </mesh>
+    {/* Water pond - thin disc, its rim tucked under the kerb's lip. */}
+    <mesh position={[0, 0.15, 0]}>
+      <cylinderGeometry args={[5.5, 5.5, 0.08, 32]} />
+      <meshStandardMaterial
+        color="#3b82f6"
+        roughness={0.1}
+        // Water is a dielectric. At metalness 0.6 the pond was reflecting
+        // its own blue albedo as specular and reading as chalky enamel.
+        metalness={0}
+        // No polygonOffset. It carried -4/-4 to win against the flat annulus
+        // that used to be the shore, which itself carried -2/-2 against the
+        // cobbles. POND_SHORE is a solid bank now and its lip crosses over
+        // this disc with only 2.6 mm of clearance at r=5.5; a negative offset
+        // is applied along the view ray, so at the grazing angles you read a
+        // 14 m pond from it is worth centimetres of depth and would push the
+        // blue back out through the stone. Nothing here is coplanar with
+        // anything - the disc's wall intersects the cobble sheet at 0.12
+        // rather than lying on it - so no bias is needed in either direction.
+      />
+    </mesh>
+  </group>
+));
+DuckPondBasin.displayName = 'DuckPondBasin';
+
 const DuckPond = React.memo<{ position: [number, number, number] }>(({ position }) => {
   // Local heart particles state
   const [hearts, setHearts] = React.useState<{ id: number; pos: [number, number, number] }[]>([]);
@@ -1497,30 +1687,19 @@ const DuckPond = React.memo<{ position: [number, number, number] }>(({ position 
           this profile exists to hide. This removes the class rather than one
           observed hole. No geometry cost, back faces light correctly (three
           flips the normal), shadows unaffected - the mesh only receives. */}
-      <mesh position={[0, 0.15, 0]} receiveShadow>
-        <primitive object={POND_SHORE} attach="geometry" />
-        <meshStandardMaterial color="#a89f91" roughness={0.9} side={THREE.DoubleSide} />
-      </mesh>
-      {/* Water pond - thin disc, its rim tucked under the kerb's lip. */}
-      <mesh position={[0, 0.15, 0]}>
-        <cylinderGeometry args={[5.5, 5.5, 0.08, 32]} />
-        <meshStandardMaterial
-          color="#3b82f6"
-          roughness={0.1}
-          // Water is a dielectric. At metalness 0.6 the pond was reflecting
-          // its own blue albedo as specular and reading as chalky enamel.
-          metalness={0}
-          // No polygonOffset. It carried -4/-4 to win against the flat annulus
-          // that used to be the shore, which itself carried -2/-2 against the
-          // cobbles. POND_SHORE is a solid bank now and its lip crosses over
-          // this disc with only 2.6 mm of clearance at r=5.5; a negative offset
-          // is applied along the view ray, so at the grazing angles you read a
-          // 14 m pond from it is worth centimetres of depth and would push the
-          // blue back out through the stone. Nothing here is coplanar with
-          // anything - the disc's wall intersects the cobble sheet at 0.12
-          // rather than lying on it - so no bias is needed in either direction.
-        />
-      </mesh>
+      {/* The generated pond carries its own bank and water surface, so the
+          primitive kerb and water disc are fallback-only.
+          Sunk 0.45 m, measured rather than guessed. Weighting the asset's
+          horizontal triangles by AREA puts its water plane at y = 0.80 (48 m2
+          of surface between 0.78 and 0.84); a vertex histogram says 1.22,
+          because it counts the crinkly bank rather than one big flat disc, and
+          that estimate buried the water under the cobbles. The ducks float at
+          0.35, so 0.80 - 0.35 seats the water under them and leaves the bank
+          proud of the ground.
+          `sink` rather than a wrapper group because a wrapper sinks the
+          FALLBACK too, and `DuckPondBasin` has no bank to hide - it was going
+          0.45 m under the cobbles whenever the GLB failed to load. */}
+      <GeneratedBody asset="duckpond" sink={0.45} fallback={<DuckPondBasin />} />
       {/* Ducks - floating on water surface */}
       <group>
         {[
@@ -1562,130 +1741,386 @@ const DuckPond = React.memo<{ position: [number, number, number] }>(({ position 
 DuckPond.displayName = 'DuckPond';
 
 // ===== MARKET STALL =====
+const MarketStallPrimitiveBody = React.memo<{ color1?: string; color2?: string }>(
+  ({ color1 = '#dc2626', color2 = '#fef3c7' }) => (
+    <group>
+      {/* Table top */}
+      <mesh position={[0, 0.9, 0]} castShadow>
+        <boxGeometry args={[2.8, 0.1, 1.8]} />
+        <primitive object={SM.timber} attach="material" />
+      </mesh>
+      {/* Base/Legs with bracing */}
+      <group position={[0, 0.45, 0]}>
+        {[
+          [-1.2, 0.7],
+          [1.2, 0.7],
+          [-1.2, -0.7],
+          [1.2, -0.7],
+        ].map(([x, z], i) => (
+          <mesh key={i} position={[x, 0, z]} castShadow>
+            <boxGeometry args={[0.1, 0.9, 0.1]} />
+            <primitive object={SM.timber} attach="material" />
+          </mesh>
+        ))}
+        {/* Cross bracing sides */}
+        {[-0.7, 0.7].map((z, i) => (
+          <mesh key={`brace-${i}`} position={[0, 0.2, z]} rotation={[0, 0, Math.PI / 2]}>
+            <boxGeometry args={[0.1, 2.4, 0.05]} />
+            <primitive object={SM.timber} attach="material" />
+          </mesh>
+        ))}
+      </group>
+
+      {/* Roof Frame Posts */}
+      {[
+        [-1.3, 0.8],
+        [1.3, 0.8],
+      ].map(([x, z], i) => (
+        <mesh key={`post-${i}`} position={[x, 1.6, z]} castShadow>
+          <cylinderGeometry args={[0.04, 0.04, 1.6, 8]} />
+          <primitive object={SM.timber} attach="material" />
+        </mesh>
+      ))}
+
+      {/* Striped Awning - constructed from multiple segments */}
+      <group position={[0, 2.4, 0.2]} rotation={[0.4, 0, 0]}>
+        {[-1.4, -1.0, -0.6, -0.2, 0.2, 0.6, 1.0, 1.4].map((x, i) => (
+          <mesh key={i} position={[x, 0, 0]} receiveShadow>
+            <boxGeometry args={[0.4, 0.05, 2.2]} />
+            <meshStandardMaterial color={i % 2 === 0 ? color1 : color2} roughness={0.9} />
+          </mesh>
+        ))}
+      </group>
+
+      {/* Merchandise on table */}
+      <group position={[0, 1, 0]}>
+        {/* Crate 1 */}
+        <group position={[-0.8, 0.15, 0.2]} rotation={[0, 0.2, 0]}>
+          <mesh castShadow>
+            <boxGeometry args={[0.6, 0.3, 0.6]} />
+            <primitive object={SM.timber} attach="material" />
+          </mesh>
+          {/* Apples */}
+          {[
+            [-0.15, 0.2, -0.15],
+            [0.15, 0.2, -0.15],
+            [-0.15, 0.2, 0.15],
+            [0.15, 0.2, 0.15],
+            [0, 0.25, 0],
+          ].map(([x, y, z], i) => (
+            <mesh key={i} position={[x, y, z]}>
+              <sphereGeometry args={[0.1, 8, 8]} />
+              <meshStandardMaterial color="#ef4444" />
+            </mesh>
+          ))}
+        </group>
+
+        {/* Cheese wheels */}
+        <group position={[0.6, 0.1, -0.3]}>
+          <mesh position={[0, 0, 0]} castShadow>
+            <cylinderGeometry args={[0.2, 0.2, 0.15, 16]} />
+            <meshStandardMaterial color="#fbbf24" />
+          </mesh>
+          <mesh position={[0.1, 0.15, 0.1]} castShadow>
+            <cylinderGeometry args={[0.15, 0.15, 0.12, 16]} />
+            <meshStandardMaterial color="#fcd34d" />
+          </mesh>
+        </group>
+
+        {/* Sacks */}
+        <mesh position={[0.2, 0.2, 0.4]} rotation={[0.2, 0.1, 0]} castShadow>
+          <sphereGeometry args={[0.25, 12, 12]} />
+          <meshStandardMaterial color="#d6d3d1" roughness={1} />
+        </mesh>
+      </group>
+    </group>
+  )
+);
+MarketStallPrimitiveBody.displayName = 'MarketStallPrimitiveBody';
+
+/**
+ * Produce on a stall counter. Four sets, one per pitch.
+ *
+ * THE DRESSING IS THE FREE HALF OF THE CLONE FIX. Both independent judges named
+ * the same thing as the strongest criticism of the generated set: one model, one
+ * baked texture, yaw the only variation. Four `marketstall` instances stand 8 m
+ * apart in two rows and there is exactly one stall GLB. The paid answer is a
+ * second and third generated markings variant; the free answer, which an earlier
+ * blind A/B already demonstrated, is that a shared FRAME reads as a market
+ * rather than as copy-paste as soon as the GOODS differ - so it is taken here
+ * before anything is spent.
+ *
+ * Not a tint on the body. `Cottage.wallColor` and `ShopBuilding.wallColor` still
+ * exist and still drive their fallbacks, and wiring either to a generated body
+ * would multiply a hand-picked colour into an albedo that already carries one -
+ * the exact double-tint CLAUDE.md records for the village cobbles. These are
+ * additive meshes standing ON the counter, so the baked albedo is untouched.
+ *
+ * COUNTER HEIGHT IS MEASURED, NOT INHERITED. The fallback's table top sits at
+ * 0.9 m, which is a fact about the PRIMITIVE. `test-results/pass6/stall-surfaces.mjs`
+ * histograms up-facing triangle area by height on the shipped GLB: the generated
+ * stall's counter is a 1.445 m2 spike at y 0.85, three times the next bin,
+ * spanning x -0.51..0.48 and z -0.90..0.86. Everything below is placed inside
+ * that rectangle and stands on that plane. Goods reach y 1.2 at most; the awning
+ * underside is at 1.75, so nothing intersects it.
+ *
+ * All of this is plain static geometry with no injection, so `StaticMeshBatch`
+ * merges it into the village batch and `applyBatchWorldSurface` finishes it -
+ * these add produce to the frame, not draw calls to the budget.
+ */
+const STALL_GOODS_MATERIALS = {
+  crate: new THREE.MeshStandardMaterial({ color: '#8d6a45', roughness: 0.92 }),
+  apple: new THREE.MeshStandardMaterial({ color: '#c0392b', roughness: 0.55 }),
+  cabbage: new THREE.MeshStandardMaterial({ color: '#6b8e3d', roughness: 0.78 }),
+  pumpkin: new THREE.MeshStandardMaterial({ color: '#c9702a', roughness: 0.7 }),
+  cheese: new THREE.MeshStandardMaterial({ color: '#d9b45a', roughness: 0.68 }),
+  loaf: new THREE.MeshStandardMaterial({ color: '#b0763f', roughness: 0.85 }),
+  sack: new THREE.MeshStandardMaterial({ color: '#c8bda3', roughness: 1 }),
+  cloth: new THREE.MeshStandardMaterial({ color: '#8a6f8e', roughness: 0.95 }),
+};
+
+/** Shared primitives, so four dressed stalls cost eight geometries in total. */
+const STALL_GOODS_GEOMETRY = {
+  crate: new THREE.BoxGeometry(1, 1, 1),
+  round: new THREE.SphereGeometry(0.5, 10, 8),
+  wheel: new THREE.CylinderGeometry(0.5, 0.5, 1, 14),
+  loaf: new THREE.CapsuleGeometry(0.5, 0.6, 3, 8),
+};
+
+interface StallGood {
+  geometry: keyof typeof STALL_GOODS_GEOMETRY;
+  material: keyof typeof STALL_GOODS_MATERIALS;
+  position: [number, number, number];
+  scale: [number, number, number];
+  rotation?: [number, number, number];
+}
+
+/** The counter plane, measured off the shipped GLB. */
+const STALL_COUNTER_Y = 0.85;
+
+/**
+ * Four dressings. Each is a different TRADE, not a recolour of the same one:
+ * the point is that a passer-by reads four merchants, and two stalls of
+ * differently-coloured apples read as one merchant with a paint problem.
+ */
+const STALL_DRESSINGS: readonly (readonly StallGood[])[] = [
+  // Greengrocer: an open crate of apples and two cabbages.
+  [
+    {
+      geometry: 'crate',
+      material: 'crate',
+      position: [-0.05, 0.13, -0.5],
+      scale: [0.62, 0.26, 0.62],
+    },
+    {
+      geometry: 'round',
+      material: 'apple',
+      position: [-0.19, 0.32, -0.62],
+      scale: [0.16, 0.14, 0.16],
+    },
+    {
+      geometry: 'round',
+      material: 'apple',
+      position: [0.08, 0.32, -0.6],
+      scale: [0.16, 0.14, 0.16],
+    },
+    {
+      geometry: 'round',
+      material: 'apple',
+      position: [-0.05, 0.33, -0.36],
+      scale: [0.16, 0.14, 0.16],
+    },
+    {
+      geometry: 'round',
+      material: 'cabbage',
+      position: [0.02, 0.13, 0.31],
+      scale: [0.26, 0.24, 0.26],
+    },
+    {
+      geometry: 'round',
+      material: 'cabbage',
+      position: [-0.18, 0.12, 0.56],
+      scale: [0.23, 0.21, 0.23],
+    },
+  ],
+  // Dairy: stacked cheese wheels and a folded cloth.
+  [
+    {
+      geometry: 'wheel',
+      material: 'cheese',
+      position: [-0.12, 0.09, -0.45],
+      scale: [0.42, 0.18, 0.42],
+    },
+    {
+      geometry: 'wheel',
+      material: 'cheese',
+      position: [-0.12, 0.26, -0.45],
+      scale: [0.34, 0.16, 0.34],
+    },
+    {
+      geometry: 'wheel',
+      material: 'cheese',
+      position: [0.14, 0.08, 0.12],
+      scale: [0.38, 0.16, 0.38],
+    },
+    {
+      geometry: 'crate',
+      material: 'cloth',
+      position: [-0.02, 0.05, 0.62],
+      scale: [0.7, 0.1, 0.42],
+      rotation: [0, 0.18, 0],
+    },
+  ],
+  // Baker: loaves laid across the counter and a flour sack against the post.
+  [
+    {
+      geometry: 'loaf',
+      material: 'loaf',
+      position: [-0.16, 0.1, -0.55],
+      scale: [0.19, 0.34, 0.19],
+      rotation: [Math.PI / 2, 0, 0.1],
+    },
+    {
+      geometry: 'loaf',
+      material: 'loaf',
+      position: [0.1, 0.1, -0.5],
+      scale: [0.19, 0.34, 0.19],
+      rotation: [Math.PI / 2, 0, -0.16],
+    },
+    {
+      geometry: 'loaf',
+      material: 'loaf',
+      position: [-0.04, 0.1, -0.2],
+      scale: [0.19, 0.34, 0.19],
+      rotation: [Math.PI / 2, 0, 0.05],
+    },
+    { geometry: 'round', material: 'sack', position: [0.06, 0.19, 0.5], scale: [0.42, 0.38, 0.34] },
+    {
+      geometry: 'round',
+      material: 'sack',
+      position: [-0.22, 0.16, 0.66],
+      scale: [0.34, 0.32, 0.3],
+    },
+  ],
+  // Autumn produce: pumpkins, which are the only goods big enough to break the
+  // counter's silhouette from the square camera 8 m away.
+  [
+    {
+      geometry: 'round',
+      material: 'pumpkin',
+      position: [-0.14, 0.19, -0.5],
+      scale: [0.4, 0.34, 0.4],
+    },
+    {
+      geometry: 'round',
+      material: 'pumpkin',
+      position: [0.14, 0.16, -0.16],
+      scale: [0.34, 0.28, 0.34],
+    },
+    {
+      geometry: 'round',
+      material: 'pumpkin',
+      position: [-0.06, 0.15, 0.28],
+      scale: [0.31, 0.26, 0.31],
+    },
+    {
+      geometry: 'crate',
+      material: 'crate',
+      position: [0.06, 0.11, 0.66],
+      scale: [0.56, 0.22, 0.5],
+      rotation: [0, -0.22, 0],
+    },
+  ],
+];
+
+const StallGoods = React.memo<{ dressing: number }>(({ dressing }) => (
+  <group position={[0, STALL_COUNTER_Y, 0]}>
+    {STALL_DRESSINGS[dressing % STALL_DRESSINGS.length].map((good, index) => (
+      <mesh
+        key={index}
+        position={good.position}
+        rotation={good.rotation}
+        scale={good.scale}
+        castShadow
+        receiveShadow
+      >
+        <primitive object={STALL_GOODS_GEOMETRY[good.geometry]} attach="geometry" />
+        <primitive object={STALL_GOODS_MATERIALS[good.material]} attach="material" />
+      </mesh>
+    ))}
+  </group>
+));
+StallGoods.displayName = 'StallGoods';
+
+/**
+ * `color1` / `color2` chose the awning stripes. There is one generated stall, so
+ * every pitch in the market now wears the same dyed canvas - which is what the
+ * standing art verdict asked for ("saturated primaries... plastic toys"), but
+ * it is also one stall repeated. Kept as props for the fallback.
+ */
 const MarketStall = React.memo<{
   position: [number, number, number];
   rotation?: number;
   color1?: string;
   color2?: string;
-}>(({ position, rotation = 0, color1 = '#dc2626', color2 = '#fef3c7' }) => (
-  <group position={position} rotation={[0, rotation, 0]}>
-    {/* Table top */}
-    <mesh position={[0, 0.9, 0]} castShadow>
-      <boxGeometry args={[2.8, 0.1, 1.8]} />
-      <primitive object={SM.timber} attach="material" />
-    </mesh>
-    {/* Base/Legs with bracing */}
-    <group position={[0, 0.45, 0]}>
-      {[
-        [-1.2, 0.7],
-        [1.2, 0.7],
-        [-1.2, -0.7],
-        [1.2, -0.7],
-      ].map(([x, z], i) => (
-        <mesh key={i} position={[x, 0, z]} castShadow>
-          <boxGeometry args={[0.1, 0.9, 0.1]} />
-          <primitive object={SM.timber} attach="material" />
-        </mesh>
-      ))}
-      {/* Cross bracing sides */}
-      {[-0.7, 0.7].map((z, i) => (
-        <mesh key={`brace-${i}`} position={[0, 0.2, z]} rotation={[0, 0, Math.PI / 2]}>
-          <boxGeometry args={[0.1, 2.4, 0.05]} />
-          <primitive object={SM.timber} attach="material" />
-        </mesh>
-      ))}
-    </group>
-
-    {/* Roof Frame Posts */}
-    {[
-      [-1.3, 0.8],
-      [1.3, 0.8],
-    ].map(([x, z], i) => (
-      <mesh key={`post-${i}`} position={[x, 1.6, z]} castShadow>
-        <cylinderGeometry args={[0.04, 0.04, 1.6, 8]} />
-        <primitive object={SM.timber} attach="material" />
-      </mesh>
-    ))}
-
-    {/* Striped Awning - constructed from multiple segments */}
-    <group position={[0, 2.4, 0.2]} rotation={[0.4, 0, 0]}>
-      {[-1.4, -1.0, -0.6, -0.2, 0.2, 0.6, 1.0, 1.4].map((x, i) => (
-        <mesh key={i} position={[x, 0, 0]} receiveShadow>
-          <boxGeometry args={[0.4, 0.05, 2.2]} />
-          <meshStandardMaterial color={i % 2 === 0 ? color1 : color2} roughness={0.9} />
-        </mesh>
-      ))}
-    </group>
-
-    {/* Merchandise on table */}
-    <group position={[0, 1, 0]}>
-      {/* Crate 1 */}
-      <group position={[-0.8, 0.15, 0.2]} rotation={[0, 0.2, 0]}>
-        <mesh castShadow>
-          <boxGeometry args={[0.6, 0.3, 0.6]} />
-          <primitive object={SM.timber} attach="material" />
-        </mesh>
-        {/* Apples */}
-        {[
-          [-0.15, 0.2, -0.15],
-          [0.15, 0.2, -0.15],
-          [-0.15, 0.2, 0.15],
-          [0.15, 0.2, 0.15],
-          [0, 0.25, 0],
-        ].map(([x, y, z], i) => (
-          <mesh key={i} position={[x, y, z]}>
-            <sphereGeometry args={[0.1, 8, 8]} />
-            <meshStandardMaterial color="#ef4444" />
-          </mesh>
-        ))}
-      </group>
-
-      {/* Cheese wheels */}
-      <group position={[0.6, 0.1, -0.3]}>
-        <mesh position={[0, 0, 0]} castShadow>
-          <cylinderGeometry args={[0.2, 0.2, 0.15, 16]} />
-          <meshStandardMaterial color="#fbbf24" />
-        </mesh>
-        <mesh position={[0.1, 0.15, 0.1]} castShadow>
-          <cylinderGeometry args={[0.15, 0.15, 0.12, 16]} />
-          <meshStandardMaterial color="#fcd34d" />
-        </mesh>
-      </group>
-
-      {/* Sacks */}
-      <mesh position={[0.2, 0.2, 0.4]} rotation={[0.2, 0.1, 0]} castShadow>
-        <sphereGeometry args={[0.25, 12, 12]} />
-        <meshStandardMaterial color="#d6d3d1" roughness={1} />
-      </mesh>
-    </group>
+  /**
+   * Which of `STALL_DRESSINGS` this pitch sells. Explicit rather than hashed
+   * from the position: four stalls and four dressings should be a bijection,
+   * and `instanceNoise` would happily give two of them the same trade.
+   */
+  dressing?: number;
+}>(({ position, rotation = 0, color1, color2, dressing = 0 }) => (
+  // The four stalls stand in two rows 8 m apart and were the clearest case
+  // either reviewer named - "same awning, same crate arrangement, near-same
+  // rotation". Yaw is what a market stall actually varies in.
+  <group
+    position={position}
+    rotation={[0, rotation + instanceYaw(position), 0]}
+    scale={instanceScale(position)}
+  >
+    <GeneratedBody
+      asset="marketstall"
+      fallback={<MarketStallPrimitiveBody color1={color1} color2={color2} />}
+    />
+    {/* INSIDE the yawed group, so the goods turn with the counter they stand
+        on. Outside it they would slide off the table by up to 0.1 m at the
+        3.4 degree jitter, which is enough to float one crate in mid-air. */}
+    <StallGoods dressing={dressing} />
   </group>
 ));
 MarketStall.displayName = 'MarketStall';
 
 // ===== POSTBOX =====
+const PostboxPrimitiveBody = React.memo(() => (
+  <group>
+    {/* Main cylinder body */}
+    <mesh position={[0, 0.65, 0]} castShadow>
+      <cylinderGeometry args={[0.28, 0.28, 1.3, 12]} />
+      <primitive object={SM.red} attach="material" />
+    </mesh>
+    {/* Flatter dome top - like real British pillar box */}
+    <mesh position={[0, 1.22, 0]} castShadow>
+      <sphereGeometry args={[0.28, 12, 6, 0, Math.PI * 2, 0, Math.PI / 3]} />
+      <primitive object={SM.red} attach="material" />
+    </mesh>
+    {/* Mail slot - higher up like real pillar box */}
+    <mesh position={[0, 1.05, 0.29]}>
+      <boxGeometry args={[0.22, 0.06, 0.02]} />
+      <primitive object={SM.black} attach="material" />
+    </mesh>
+    {/* Collection times plate */}
+    <mesh position={[0, 0.5, 0.29]}>
+      <boxGeometry args={[0.18, 0.12, 0.01]} />
+      <primitive object={SM.white} attach="material" />
+    </mesh>
+  </group>
+));
+PostboxPrimitiveBody.displayName = 'PostboxPrimitiveBody';
+
 const Postbox = React.memo<{ position: [number, number, number]; rotation?: number }>(
   ({ position, rotation = 0 }) => (
     <group position={position} rotation={[0, rotation, 0]}>
-      {/* Main cylinder body */}
-      <mesh position={[0, 0.65, 0]} castShadow>
-        <cylinderGeometry args={[0.28, 0.28, 1.3, 12]} />
-        <primitive object={SM.red} attach="material" />
-      </mesh>
-      {/* Flatter dome top - like real British pillar box */}
-      <mesh position={[0, 1.22, 0]} castShadow>
-        <sphereGeometry args={[0.28, 12, 6, 0, Math.PI * 2, 0, Math.PI / 3]} />
-        <primitive object={SM.red} attach="material" />
-      </mesh>
-      {/* Mail slot - higher up like real pillar box */}
-      <mesh position={[0, 1.05, 0.29]}>
-        <boxGeometry args={[0.22, 0.06, 0.02]} />
-        <primitive object={SM.black} attach="material" />
-      </mesh>
-      {/* Collection times plate */}
-      <mesh position={[0, 0.5, 0.29]}>
-        <boxGeometry args={[0.18, 0.12, 0.01]} />
-        <primitive object={SM.white} attach="material" />
-      </mesh>
+      <GeneratedBody asset="postbox" fallback={<PostboxPrimitiveBody />} />
     </group>
   )
 );
@@ -1922,7 +2357,7 @@ const FOUNTAIN_BOWL = new THREE.LatheGeometry(
   24
 );
 
-const Fountain = React.memo<{ position: [number, number, number] }>(({ position }) => {
+const FountainPrimitiveBody = React.memo(() => {
   const rippleRef = useRef<THREE.Mesh>(null);
   const rippleMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
 
@@ -1947,7 +2382,7 @@ const Fountain = React.memo<{ position: [number, number, number] }>(({ position 
   });
 
   return (
-    <group position={position}>
+    <group>
       {/* Base pool - see FOUNTAIN_POOL for the plinth, quirk and coping. */}
       <mesh position={[0, 0.3, 0]} castShadow receiveShadow>
         <primitive object={FOUNTAIN_POOL} attach="geometry" />
@@ -2014,6 +2449,123 @@ const Fountain = React.memo<{ position: [number, number, number] }>(({ position 
     </group>
   );
 });
+FountainPrimitiveBody.displayName = 'FountainPrimitiveBody';
+
+/**
+ * Water plane of the generated basin, in the asset's own metres.
+ *
+ * Measured the way the duck pond's `sink` was, by AREA-weighting the asset's
+ * up-facing triangles rather than counting vertices: 4.41 m2 of horizontal
+ * surface sits at y 1.25 between radius 0.34 and 1.30, which is a flat annulus
+ * of water inside a coping whose own top is at 1.45 and whose outer edge is at
+ * 1.57. A vertex histogram would have picked the coping, because the coping is
+ * where the triangles are.
+ */
+const GENERATED_FOUNTAIN_WATER_Y = 1.25;
+const GENERATED_FOUNTAIN_WATER_INNER = 0.36;
+const GENERATED_FOUNTAIN_WATER_OUTER = 1.28;
+
+/**
+ * Overlay material for the generated basin.
+ *
+ * Shares `fountainWaterTexture` with the primitive - one scroll drives both -
+ * but at a third of the opacity, because this lies OVER a baked water surface
+ * rather than standing in for one. At 0.85 it would replace the asset's own
+ * water with a canvas texture, which is the swap running backwards.
+ */
+const generatedFountainWaterMaterial = new THREE.MeshStandardMaterial({
+  color: '#9ecbe8',
+  map: fountainWaterTexture,
+  transparent: true,
+  opacity: 0.3,
+  roughness: 0.15,
+  metalness: 0,
+  depthWrite: false,
+});
+
+/**
+ * The two animations the fountain swap cost, put back on the generated basin.
+ *
+ * The generated fountain is a single mesh carrying its own static water, so
+ * unlike the windmill there is no rigid sub-assembly to drive - but neither
+ * lost animation was ever geometry. One is a texture scroll and the other is a
+ * ring that grows and fades, and both can be laid over the asset at its own
+ * measured water height.
+ *
+ * Rendered INSIDE `GeneratedBoundary` rather than hoisted beside it, which is
+ * the difference from `ChimneySmoke`: the primitive fountain still owns water
+ * of its own at y 0.65, so an overlay that rendered on both paths would float a
+ * second sheet 0.6 m above the fallback's basin. Here it renders only once the
+ * GLB has resolved - exactly when the asset's own water is what is underneath.
+ */
+const GeneratedFountainWater: React.FC = () => {
+  const rippleRef = useRef<THREE.Mesh>(null);
+  const rippleMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
+
+  useFrame((state, delta) => {
+    const throttle = 3;
+    if (!shouldRunThisFrame(throttle)) return;
+    const cappedDelta = Math.min(delta * throttle, 0.1);
+    fountainWaterTexture.offset.x += cappedDelta * 0.02;
+    fountainWaterTexture.offset.y += cappedDelta * 0.035;
+
+    if (rippleRef.current && rippleMaterialRef.current) {
+      const phase = (state.clock.elapsedTime * 0.35) % 1;
+      // Grows from the pedestal to the coping: 0.34 to 1.3 over the asset's
+      // own annulus, rather than the primitive's 1x to 2.6x of a 0.5 m ring.
+      const s = 1 + phase * 2.4;
+      rippleRef.current.scale.set(s, s, 1);
+      rippleMaterialRef.current.opacity = 0.26 * (1 - phase);
+    }
+  });
+
+  return (
+    <group>
+      {/* Sheet over the asset's own water. 8 mm proud: enough to win the depth
+          test at every angle this square is read from, far too little to read
+          as a step at the coping. `depthWrite` is off, as for every transparent
+          overlay in this file. */}
+      <mesh position={[0, GENERATED_FOUNTAIN_WATER_Y + 0.008, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[GENERATED_FOUNTAIN_WATER_INNER, GENERATED_FOUNTAIN_WATER_OUTER, 48]} />
+        <primitive object={generatedFountainWaterMaterial} attach="material" />
+      </mesh>
+      {/* Ripple ring, expanding from the column. */}
+      <mesh
+        ref={rippleRef}
+        position={[0, GENERATED_FOUNTAIN_WATER_Y + 0.014, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+      >
+        <ringGeometry args={[0.38, 0.5, 32]} />
+        <meshBasicMaterial
+          ref={rippleMaterialRef}
+          color="#dbeafe"
+          transparent
+          opacity={0.26}
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
+  );
+};
+GeneratedFountainWater.displayName = 'GeneratedFountainWater';
+
+/**
+ * The generated basin with its water moving again.
+ *
+ * The swap cost the scroll and the ripple because both lived on meshes inside
+ * `FountainPrimitiveBody`; `GeneratedFountainWater` puts them back over the
+ * asset's own surface. The falling-water sheath is deliberately NOT restored -
+ * the primitive's cone runs between two heights this asset does not share, and
+ * guessing where a generated spout ends is how the duck pond lost three cycles.
+ */
+const Fountain = React.memo<{ position: [number, number, number] }>(({ position }) => (
+  <group position={position}>
+    <GeneratedBoundary fallback={<FountainPrimitiveBody />}>
+      <GeneratedModel asset="fountain" />
+      <GeneratedFountainWater />
+    </GeneratedBoundary>
+  </group>
+));
 Fountain.displayName = 'Fountain';
 
 // ===== HORSE =====
@@ -2205,48 +2757,59 @@ const Horse = React.memo<{ position: [number, number, number]; rotation?: number
 Horse.displayName = 'Horse';
 
 // ===== BLACKSMITH / FORGE =====
+const ForgePrimitiveBody = React.memo(() => (
+  <group>
+    {/* Main building */}
+    <mesh position={[0, 2.5, 0]} castShadow receiveShadow>
+      <boxGeometry args={[7, 5, 6]} />
+      <primitive object={SM.timber} attach="material" />
+    </mesh>
+    {/* Pyramid roof - raised to clear walls */}
+    <mesh position={[0, 6.0, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
+      <coneGeometry args={[5.5, 2.5, 4]} />
+      <primitive object={SM.roofSlate} attach="material" />
+    </mesh>
+    {/* Large chimney */}
+    <mesh position={[-2, 7, 0]} castShadow>
+      <boxGeometry args={[1.5, 3, 1.5]} />
+      <primitive object={SM.stone} attach="material" />
+    </mesh>
+    {/* Open front */}
+    <mesh position={[0, 1.5, 3.01]}>
+      <boxGeometry args={[4, 3, 0.1]} />
+      <primitive object={SM.black} attach="material" />
+    </mesh>
+    {/* Anvil outside */}
+    <mesh position={[2, 0.4, 4]} castShadow>
+      <boxGeometry args={[0.6, 0.8, 0.4]} />
+      <primitive object={SM.black} attach="material" />
+    </mesh>
+    {/* Sign */}
+    <Text
+      position={[0, 4.5, 3.1]}
+      fontSize={0.35}
+      color="#fef3c7"
+      anchorX="center"
+      anchorY="middle"
+      font={FONT_URL}
+    >
+      BLACKSMITH
+    </Text>
+  </group>
+));
+ForgePrimitiveBody.displayName = 'ForgePrimitiveBody';
+
 const Forge = React.memo<{ position: [number, number, number]; rotation?: number }>(
   ({ position, rotation = 0 }) => (
     <group position={position} rotation={[0, rotation, 0]}>
-      {/* Main building */}
-      <mesh position={[0, 2.5, 0]} castShadow receiveShadow>
-        <boxGeometry args={[7, 5, 6]} />
-        <primitive object={SM.timber} attach="material" />
-      </mesh>
-      {/* Pyramid roof - raised to clear walls */}
-      <mesh position={[0, 6.0, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
-        <coneGeometry args={[5.5, 2.5, 4]} />
-        <primitive object={SM.roofSlate} attach="material" />
-      </mesh>
-      {/* Large chimney */}
-      <mesh position={[-2, 7, 0]} castShadow>
-        <boxGeometry args={[1.5, 3, 1.5]} />
-        <primitive object={SM.stone} attach="material" />
-      </mesh>
-      {/* Chimney smoke */}
-      <ChimneySmoke position={[-2, 8.8, 0]} offset={2} />
-      {/* Open front */}
-      <mesh position={[0, 1.5, 3.01]}>
-        <boxGeometry args={[4, 3, 0.1]} />
-        <primitive object={SM.black} attach="material" />
-      </mesh>
-      {/* Anvil outside */}
-      <mesh position={[2, 0.4, 4]} castShadow>
-        <boxGeometry args={[0.6, 0.8, 0.4]} />
-        <primitive object={SM.black} attach="material" />
-      </mesh>
-      {/* Sign */}
-      <Text
-        position={[0, 4.5, 3.1]}
-        fontSize={0.35}
-        color="#fef3c7"
-        anchorX="center"
-        anchorY="middle"
-        font={FONT_URL}
-      >
-        BLACKSMITH
-      </Text>
-      {/* Hitched Horse */}
+      <GeneratedBody asset="forge" fallback={<ForgePrimitiveBody />} />
+      {/* Both hoisted out of the body. The horse is a whole animal that
+          vanished from the village when the generated forge replaced the
+          primitive one; it stands on the ground, so its coordinates are
+          unchanged. The smoke is re-seated on the generated chimney: the
+          highest up-facing surface in `forge.glb` is 0.89 m2 at y = 5.70,
+          centroid x -0.41, z 1.75, against the primitive's [-2, 8.8, 0]. */}
+      <ChimneySmoke position={[-0.4, 5.75, 1.75]} offset={2} />
       <Horse position={[-4, 0, 4]} rotation={Math.PI / 4} color="#795548" />
     </group>
   )
@@ -2513,8 +3076,17 @@ export const VillageArea: React.FC = () => {
       rotation={SITE_LAYOUT.landmarks.village.rotation}
       scale={SITE_LAYOUT.landmarks.village.scale}
     >
-      {/* Rounded cobblestone ground - positioned well above TerrainGround (y=0.05) to prevent z-fighting */}
-      <mesh position={[0, 0.12, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      {/* Rounded cobblestone ground, on the site's ground datum. The village
+          anchor sits at y=0 and scale 1, so this local Y is the world Y.
+
+          `villageCobbleMaterial` already carries `POLYGON_OFFSET.moderate` (-2)
+          against the terrain's `exteriorBase` (+6), which is the whole of the
+          separation now - and the material's alpha feathering wants it that
+          way: the plaza is meant to dissolve into the grass at its rim, and a
+          feathered edge held 14 cm in the air is a feathered edge with a
+          shadow gap under it. The 0.12 this replaces was clearance for
+          `TerrainGround`'s old 0.05 default. */}
+      <mesh position={[0, EXTERIOR_LAYERS.ground, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <primitive object={villageGroundGeometry} attach="geometry" />
         <primitive object={villageCobbleMaterial} attach="material" />
       </mesh>
@@ -2581,10 +3153,10 @@ export const VillageArea: React.FC = () => {
       <Cat position={[-10, 0.8, -4.3]} rotation={2.5} color="#1a1a1a" />
 
       {/* === MARKET STALLS === */}
-      <MarketStall position={[-8, 0, 10]} rotation={0} color1="#dc2626" />
-      <MarketStall position={[8, 0, 10]} rotation={0} color1="#3b82f6" />
-      <MarketStall position={[-8, 0, 2]} rotation={0} color1="#22c55e" />
-      <MarketStall position={[8, 0, 2]} rotation={0} color1="#f59e0b" />
+      <MarketStall position={[-8, 0, 10]} rotation={0} color1="#dc2626" dressing={0} />
+      <MarketStall position={[8, 0, 10]} rotation={0} color1="#3b82f6" dressing={1} />
+      <MarketStall position={[-8, 0, 2]} rotation={0} color1="#22c55e" dressing={2} />
+      <MarketStall position={[8, 0, 2]} rotation={0} color1="#f59e0b" dressing={3} />
 
       {/* === FOUNTAIN in market square === */}
       <Fountain position={[0, 0, 6]} />

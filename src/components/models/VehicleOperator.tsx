@@ -1,5 +1,6 @@
 import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import { applyWorldSurface } from '../../utils/worldSurface';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
 /**
@@ -201,6 +202,30 @@ function getOperatorMaterials(
   const cached = operatorMaterialCache.get(key);
   if (cached) return cached;
 
+  // SURFACE FINISH, matching the floor personnel semantic for semantic.
+  //
+  // These are PEOPLE, and every walking worker in the scene carries the
+  // analytic finish while the three seated operators - two forklift drivers and
+  // the truck-bay driver - carried none, which
+  // `test-results/pass7/unfinished-models.mjs` names as 3.6 m of bare denim,
+  // skin and hi-viz per cab. A cab operator sitting a metre from a finished
+  // forklift body is the mismatch `SharedWorkerMaterials` warns about: "a body
+  // finished next to unfinished accessories reads worse than neither being
+  // finished, because the mismatch is what the eye picks up."
+  //
+  // OBJECT REST SPACE, which is what every profile below ships with. An
+  // operator rides a vehicle across the yard, so a world-space field would
+  // slide the weave over the body exactly as it would on a walking worker.
+  //
+  // `reflective` is DELIBERATELY ABSENT, on the same grounds
+  // `SharedWorkerMaterials` records for its own: it is retroreflective banding
+  // with an emissive term, `isOutOfSurfaceScope` declines emitters, and
+  // weathering something that represents emitted light does nothing visible
+  // while making no physical sense.
+  //
+  // COST. Both consumers are `InstancedMesh` or plain meshes under a vehicle
+  // group, and every profile shares one `customProgramCacheKey`, so this adds
+  // no draw calls and no shader permutations.
   const materials: OperatorMaterials = {
     skin: new THREE.MeshPhysicalMaterial({
       color: skinTone,
@@ -252,6 +277,15 @@ function getOperatorMaterials(
       envMapIntensity: 0.7,
     }),
   };
+
+  applyWorldSurface(materials.skin, 'skin');
+  applyWorldSurface(materials.workwear, 'fabric');
+  // `signage`, not `fabric`: a hi-viz vest and a hard hat are meant to read as
+  // clean and legible, and a chevron weathered into the background has been
+  // broken rather than finished.
+  applyWorldSurface(materials.vest, 'signage');
+  applyWorldSurface(materials.hat, 'signage');
+  applyWorldSurface(materials.boot, 'fabric');
 
   operatorMaterialCache.set(key, materials);
   return materials;

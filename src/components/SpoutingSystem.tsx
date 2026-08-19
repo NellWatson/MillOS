@@ -1,6 +1,7 @@
 import React, { useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { applyWorldSurface } from '../utils/worldSurface';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MachineData, MachineType } from '../types';
 import { audioManager } from '../utils/audioManager';
@@ -161,14 +162,32 @@ function createPipeCrossBeamGeometry(): THREE.LatheGeometry {
 }
 
 const PIPE_CROSS_BEAM_GEOMETRY = createPipeCrossBeamGeometry();
-const PIPE_FLANGE_MATERIAL = new THREE.MeshStandardMaterial({
-  // Machined joint faces read brighter and tighter than the tube body - that
-  // contrast is what makes a spouting run legible from across the mill.
-  color: '#8b9ca0',
-  metalness: 0.62,
-  roughness: 0.35,
-  envMapIntensity: 1.25,
-});
+/**
+ * Machined joint faces read brighter and tighter than the tube body - that
+ * contrast is what makes a spouting run legible from across the mill.
+ *
+ * `metal`, and the same overturn `machineSurfaces.hardware` records. The
+ * standing closure on this row - "0.2 m members, sub-pixel noise that mips to a
+ * flat constant" - is exactly right about a UV-TILED MAP and says nothing about
+ * an analytic field sampled in metres with no UVs at all. At 17.1 m over 77
+ * instances this was the largest untreated row left after the pass-7 sweep, and
+ * the sweep could not reach it: the spouting network mounts outside every
+ * `StaticMeshBatch` root, so no batcher pass ever sees these materials.
+ *
+ * The term that pays here is `edge`, not `meso`: a 0.2 m flange is near-grazing
+ * over most of its visible area, so the fresnel wear toward bare steel is what
+ * gives a joint a silhouette at mill distance, while the 0.4 m meso period
+ * varies flange-to-flange rather than within one.
+ */
+const PIPE_FLANGE_MATERIAL = applyWorldSurface(
+  new THREE.MeshStandardMaterial({
+    color: '#8b9ca0',
+    metalness: 0.62,
+    roughness: 0.35,
+    envMapIntensity: 1.25,
+  }),
+  'metal'
+);
 
 interface PipeRouteMesh {
   readonly family: PipeRouteFamily;
