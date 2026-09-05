@@ -206,7 +206,7 @@ export const MILLOS_SOUNDTRACK_LYRICS = ${JSON.stringify(
       interpolatedCanonicalWords: sheet.interpolatedCanonicalWords,
       matchCoverage: sheet.matchCoverage,
     }))
-  )} as const satisfies readonly MillosSoundtrackLyrics[];
+  )} satisfies readonly MillosSoundtrackLyrics[] as readonly MillosSoundtrackLyrics[];
 
 export function getMillosSoundtrackLyrics(trackNumber: number): MillosSoundtrackLyrics {
   const safeNumber = Number.isFinite(trackNumber) ? Math.trunc(trackNumber) : 1;

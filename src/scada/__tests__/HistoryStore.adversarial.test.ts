@@ -534,13 +534,17 @@ describe('HistoryStore adversarial boundaries', () => {
     expect(controlled.transactions).toHaveLength(3);
 
     store.writeTagValue(tagValue('TAG', 20, 2));
-    controlled.transactions.slice(0, 3).forEach(({ transaction }) => transaction.oncomplete?.());
+    controlled.transactions
+      .slice(0, 3)
+      .forEach(({ transaction }) => (transaction.oncomplete as (() => void) | null)?.());
     await Promise.all([flushing, cleaning]);
     await vi.waitFor(() => expect(controlled.transactions).toHaveLength(5));
 
     store.writeTagValue(tagValue('TAG', 20, 3));
     store.writeAlarm(alarm('DURING_CLEAR', 3));
-    controlled.transactions.slice(3).forEach(({ transaction }) => transaction.oncomplete?.());
+    controlled.transactions
+      .slice(3)
+      .forEach(({ transaction }) => (transaction.oncomplete as (() => void) | null)?.());
     await clearing;
 
     expect(controlled.transactions.slice(3).map(({ storeName }) => storeName)).toEqual([

@@ -748,7 +748,7 @@ function fitBriefBudget(envelope, maximumBytes) {
   }
   if (byteLength(value) > maximumBytes) {
     value.data = {
-      status: data.status ?? 'unknown',
+      status: /** @type {AgentJsonValue} */ (data.status ?? 'unknown'),
       authority: /** @type {AgentJsonValue} */ (data.authority ?? {}),
       budgets: /** @type {AgentJsonValue} */ (data.budgets ?? {}),
       changeSummary: /** @type {AgentJsonValue} */ (data.changeSummary ?? {}),

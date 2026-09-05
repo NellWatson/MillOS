@@ -73,7 +73,7 @@ describe('autonomous VCL encoder', () => {
   });
 
   it('falls back safely for malformed machine telemetry', () => {
-    const malformed = { id: 'unknown-unit', status: 'offline' } as MachineData;
+    const malformed = { id: 'unknown-unit', status: 'offline' } as unknown as MachineData;
     expect(() => encodeMachineVCL(malformed)).not.toThrow();
     expect(encodeMachineVCL(malformed)).toBe('❓⚫🟢');
   });

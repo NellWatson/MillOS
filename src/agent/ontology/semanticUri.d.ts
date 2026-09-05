@@ -10,4 +10,13 @@ export function parseSemanticUri(value: unknown): {
   readonly kind: AgentEntityKind;
   readonly localId: string;
 };
-export function resolveSemanticAlias(uriOrAlias: string, aliases: Record<string, string>): string;
+export function isSemanticUri(value: unknown): boolean;
+export function resolveSemanticAlias(
+  uriOrAlias: string,
+  aliases: ReadonlyMap<string, string> | Readonly<Record<string, string>>
+): string;
+export function semanticUriEquals(
+  left: string,
+  right: string,
+  aliases?: ReadonlyMap<string, string> | Readonly<Record<string, string>>
+): boolean;

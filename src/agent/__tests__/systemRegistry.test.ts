@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -123,9 +124,20 @@ describe('MillOS agent system registry', () => {
   });
 
   it('keeps generated artifacts current with the executable source', () => {
-    const manifest = JSON.parse(
-      readFileSync(resolve(process.cwd(), 'build/generated/agent/system-manifest.json'), 'utf8')
-    );
+    // build/generated/ is gitignored, so a fresh checkout (CI) has no manifest
+    // yet. Generate it on demand; when one already exists the assertions below
+    // still catch a stale copy that predates a registry edit.
+    const manifestPath = resolve(process.cwd(), 'build/generated/agent/system-manifest.json');
+    if (!existsSync(manifestPath)) {
+      execFileSync(
+        process.execPath,
+        [resolve(process.cwd(), 'scripts/generate-agent-manifest.mjs')],
+        {
+          stdio: 'ignore',
+        }
+      );
+    }
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
     expect(manifest.schemaVersion).toBe(1);
     expect(manifest.product).toEqual(SYSTEM_REGISTRY_SOURCE.product);
     expect(manifest.capabilities).toEqual(SYSTEM_REGISTRY_SOURCE.capabilities);

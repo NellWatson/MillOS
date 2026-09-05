@@ -98,7 +98,12 @@ export interface AgentRuntimeReadApi {
       commandExecution: false;
       externalWrites: false;
     };
-    items: AgentCapabilityDescriptor[];
+    items: Array<
+      AgentCapabilityDescriptor & {
+        readonly executable: false;
+        readonly authorityReason: string;
+      }
+    >;
   }>;
   trace: (request?: AgentTraceRequest) => AgentObservationEnvelope;
 }
