@@ -67,6 +67,69 @@ function emitStatusChange(): void {
   }
 }
 
+let registrationAttempt = 0;
+let activeRegistrationAttempt = 0;
+let invalidatedRegistrationAttempt = 0;
+let releaseRegistrationListeners: (() => void) | null = null;
+
+function replaceRegistrationListeners(
+  registration: ServiceWorkerRegistration,
+  container: ServiceWorkerContainer,
+  config?: ServiceWorkerConfig
+): void {
+  releaseRegistrationListeners?.();
+
+  const workerListeners = new Map<ServiceWorker, EventListener>();
+  const stopTrackingWorker = (worker: ServiceWorker): void => {
+    const listener = workerListeners.get(worker);
+    if (!listener) return;
+    worker.removeEventListener('statechange', listener);
+    workerListeners.delete(worker);
+  };
+
+  const onUpdateFound = (): void => {
+    const installingWorker = registration.installing;
+    if (!installingWorker || workerListeners.has(installingWorker)) return;
+
+    emitStatusChange();
+    const onStateChange = (): void => {
+      emitStatusChange();
+      if (installingWorker.state === 'redundant') {
+        stopTrackingWorker(installingWorker);
+        return;
+      }
+      if (installingWorker.state !== 'installed') return;
+
+      stopTrackingWorker(installingWorker);
+      if (container.controller) {
+        config?.onUpdate?.(registration);
+      } else {
+        config?.onSuccess?.(registration);
+      }
+    };
+    workerListeners.set(installingWorker, onStateChange);
+    installingWorker.addEventListener('statechange', onStateChange);
+  };
+
+  registration.addEventListener('updatefound', onUpdateFound);
+  container.addEventListener('controllerchange', emitStatusChange);
+
+  let released = false;
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    registration.removeEventListener('updatefound', onUpdateFound);
+    container.removeEventListener('controllerchange', emitStatusChange);
+    for (const worker of workerListeners.keys()) {
+      stopTrackingWorker(worker);
+    }
+    if (releaseRegistrationListeners === release) {
+      releaseRegistrationListeners = null;
+    }
+  };
+  releaseRegistrationListeners = release;
+}
+
 export async function registerServiceWorker(
   config?: ServiceWorkerConfig
 ): Promise<ServiceWorkerRegistration | null> {
@@ -76,31 +139,23 @@ export async function registerServiceWorker(
   const forceEnable = import.meta.env?.VITE_ENABLE_SW === 'true';
   if (isDev && !forceEnable) return null;
 
+  const attempt = ++registrationAttempt;
   try {
     const scope = basePath();
-    const registration = await navigator.serviceWorker.register(`${scope}sw.js`, {
+    const container = navigator.serviceWorker;
+    const registration = await container.register(`${scope}sw.js`, {
       scope,
       updateViaCache: 'none',
     });
 
-    registration.addEventListener('updatefound', () => {
-      const installingWorker = registration.installing;
-      if (!installingWorker) return;
-
+    // Promote the newest successful attempt, rather than only the newest
+    // started attempt. A later concurrent failure must not permanently suppress
+    // an earlier success, while a later success still replaces older callbacks.
+    if (attempt > invalidatedRegistrationAttempt && attempt > activeRegistrationAttempt) {
+      activeRegistrationAttempt = attempt;
+      replaceRegistrationListeners(registration, container, config);
       emitStatusChange();
-      installingWorker.addEventListener('statechange', () => {
-        emitStatusChange();
-        if (installingWorker.state !== 'installed') return;
-        if (navigator.serviceWorker.controller) {
-          config?.onUpdate?.(registration);
-        } else {
-          config?.onSuccess?.(registration);
-        }
-      });
-    });
-
-    navigator.serviceWorker.addEventListener('controllerchange', emitStatusChange);
-    emitStatusChange();
+    }
     return registration;
   } catch (error) {
     config?.onError?.(error as Error);
@@ -110,10 +165,26 @@ export async function registerServiceWorker(
 }
 
 export async function unregisterServiceWorker(): Promise<boolean> {
+  const releaseListeners = releaseRegistrationListeners;
+  // Claim the attempt number now, but only invalidate in-flight registrations
+  // once the unregister has actually succeeded; a failed unregister must not
+  // leave a concurrent successful register() without its listeners.
+  const attempt = ++registrationAttempt;
   if (!isServiceWorkerSupported()) return false;
   try {
     const registration = await navigator.serviceWorker.getRegistration(basePath());
-    return registration ? registration.unregister() : true;
+    if (!registration) {
+      invalidatedRegistrationAttempt = Math.max(invalidatedRegistrationAttempt, attempt);
+      releaseListeners?.();
+      return true;
+    }
+
+    const unregistered = (await registration.unregister()) === true;
+    if (unregistered) {
+      invalidatedRegistrationAttempt = Math.max(invalidatedRegistrationAttempt, attempt);
+      releaseListeners?.();
+    }
+    return unregistered;
   } catch {
     return false;
   }
@@ -134,23 +205,35 @@ export async function updateServiceWorker(): Promise<boolean> {
 
 export async function activateWaitingServiceWorker(): Promise<boolean> {
   if (!isServiceWorkerSupported()) return false;
-  const registration = await navigator.serviceWorker.getRegistration(basePath());
+  const container = navigator.serviceWorker;
+  let registration: ServiceWorkerRegistration | undefined;
+  try {
+    registration = await container.getRegistration(basePath());
+  } catch {
+    return false;
+  }
   const waiting = registration?.waiting;
   if (!waiting) return false;
 
   return new Promise((resolve) => {
     let settled = false;
-    const finish = (result: boolean): void => {
+    function onControllerChange(): void {
+      finish(true);
+    }
+    function finish(result: boolean): void {
       if (settled) return;
       settled = true;
       window.clearTimeout(timeout);
-      navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+      container.removeEventListener('controllerchange', onControllerChange);
       resolve(result);
-    };
-    const onControllerChange = (): void => finish(true);
+    }
     const timeout = window.setTimeout(() => finish(false), 5000);
-    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
-    waiting.postMessage({ type: 'SKIP_WAITING' });
+    container.addEventListener('controllerchange', onControllerChange);
+    try {
+      waiting.postMessage({ type: 'SKIP_WAITING' });
+    } catch {
+      finish(false);
+    }
   });
 }
 
@@ -158,33 +241,58 @@ async function postMessageWithReply<T>(
   type: 'CLEAR_CACHE' | 'GET_CACHE_SIZE' | 'GET_BUILD_INFO'
 ): Promise<T | null> {
   if (!isServiceWorkerSupported()) return null;
-  const controller = navigator.serviceWorker.controller;
+  let controller: ServiceWorker | null;
+  try {
+    controller = navigator.serviceWorker.controller;
+  } catch {
+    return null;
+  }
   if (!controller) return null;
 
   return new Promise((resolve) => {
-    const messageChannel = new MessageChannel();
+    let messageChannel: MessageChannel;
+    try {
+      messageChannel = new MessageChannel();
+    } catch {
+      resolve(null);
+      return;
+    }
+
     let settled = false;
-    const finish = (value: T | null): void => {
+    function finish(value: T | null): void {
       if (settled) return;
       settled = true;
       window.clearTimeout(timeout);
+      messageChannel.port1.onmessage = null;
+      messageChannel.port1.onmessageerror = null;
       messageChannel.port1.close();
       resolve(value);
-    };
+    }
     const timeout = window.setTimeout(() => finish(null), 5000);
     messageChannel.port1.onmessage = (event: MessageEvent<T>) => finish(event.data);
-    controller.postMessage({ type }, [messageChannel.port2]);
+    messageChannel.port1.onmessageerror = () => finish(null);
+    try {
+      controller.postMessage({ type }, [messageChannel.port2]);
+    } catch {
+      messageChannel.port2.close();
+      finish(null);
+    }
   });
 }
 
 async function clearDirectScopedCaches(): Promise<boolean> {
   if (typeof window === 'undefined' || !('caches' in window)) return false;
-  const prefix = serviceWorkerCachePrefix();
-  const names = await caches.keys();
-  const results = await Promise.all(
-    names.filter((name) => name.startsWith(prefix)).map((name) => caches.delete(name))
-  );
-  return results.every(Boolean);
+  try {
+    const cacheStorage = window.caches;
+    const prefix = serviceWorkerCachePrefix();
+    const names = await cacheStorage.keys();
+    const results = await Promise.allSettled(
+      names.filter((name) => name.startsWith(prefix)).map((name) => cacheStorage.delete(name))
+    );
+    return results.every((result) => result.status === 'fulfilled' && result.value);
+  } catch {
+    return false;
+  }
 }
 
 export async function clearServiceWorkerCache(): Promise<boolean> {
@@ -203,10 +311,32 @@ export async function getServiceWorkerBuildInfo(): Promise<ServiceWorkerBuildInf
 
 export async function getBuildCacheDiagnostics(): Promise<BuildCacheDiagnostics> {
   const supported = isServiceWorkerSupported();
-  const registration = supported
-    ? await navigator.serviceWorker.getRegistration(basePath())
-    : undefined;
-  const worker = supported ? await getServiceWorkerBuildInfo() : null;
+  let container: ServiceWorkerContainer | null = null;
+  let registration: ServiceWorkerRegistration | undefined;
+  let worker: ServiceWorkerBuildInfo | null = null;
+  let controller: ServiceWorker | null = null;
+
+  if (supported) {
+    try {
+      container = navigator.serviceWorker;
+      registration = await container.getRegistration(basePath());
+    } catch {
+      registration = undefined;
+    }
+
+    try {
+      worker = await getServiceWorkerBuildInfo();
+    } catch {
+      worker = null;
+    }
+
+    try {
+      controller = container?.controller ?? null;
+    } catch {
+      controller = null;
+    }
+  }
+
   const cacheEntries = worker
     ? Object.values(worker.caches).reduce((total, cache) => total + cache.entries, 0)
     : 0;
@@ -216,8 +346,8 @@ export async function getBuildCacheDiagnostics(): Promise<BuildCacheDiagnostics>
     appCacheVersion: APP_CACHE_VERSION,
     online: typeof navigator === 'undefined' ? true : navigator.onLine,
     supported,
-    controlled: supported && Boolean(navigator.serviceWorker.controller),
-    controllerScriptUrl: supported ? (navigator.serviceWorker.controller?.scriptURL ?? null) : null,
+    controlled: Boolean(controller),
+    controllerScriptUrl: controller?.scriptURL ?? null,
     registrationScope: registration?.scope ?? null,
     updateWaiting: Boolean(registration?.waiting),
     installing: Boolean(registration?.installing),

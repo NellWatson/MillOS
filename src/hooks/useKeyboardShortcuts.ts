@@ -50,6 +50,22 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
   const showAIPanelRef = useRef(showAIPanel);
   const showSCAPanelRef = useRef(showSCADAPanel);
   const selectedMachineRef = useRef(selectedMachine);
+  // One pending clear at a time: overlapping timers cleared a fresh
+  // notification early, and none was cancelled on unmount.
+  const notificationTimerRef = useRef<number | null>(null);
+  const scheduleNotificationClear = (delayMs: number) => {
+    if (notificationTimerRef.current !== null) window.clearTimeout(notificationTimerRef.current);
+    notificationTimerRef.current = window.setTimeout(() => {
+      notificationTimerRef.current = null;
+      setQualityNotification(null);
+    }, delayMs);
+  };
+  useEffect(
+    () => () => {
+      if (notificationTimerRef.current !== null) window.clearTimeout(notificationTimerRef.current);
+    },
+    []
+  );
 
   // Update ALL refs when values change - this prevents event listener recreation
   useEffect(() => {
@@ -101,7 +117,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
           const current = useUIStore.getState().blueprintMode;
           useUIStore.getState().toggleBlueprintMode();
           setQualityNotification(current ? 'NORMAL VIEW' : 'BLUEPRINT MODE');
-          setTimeout(() => setQualityNotification(null), 1500);
+          scheduleNotificationClear(1500);
         }
         return;
       }
@@ -141,7 +157,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         } else {
           setQualityNotification('E-STOP RELEASED');
         }
-        setTimeout(() => setQualityNotification(null), 2000);
+        scheduleNotificationClear(2000);
         return;
       }
 
@@ -163,7 +179,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         setGraphicsQuality(quality);
         audioManager.playClick();
         setQualityNotification(quality);
-        setTimeout(() => setQualityNotification(null), 2000);
+        scheduleNotificationClear(2000);
         return;
       }
 
@@ -181,7 +197,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
           setProductionSpeed(0.8);
           setQualityNotification('RESUMED');
         }
-        setTimeout(() => setQualityNotification(null), 1500);
+        scheduleNotificationClear(1500);
         return;
       }
 
@@ -191,7 +207,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         audioManager.playClick();
         setShowZones(!showZonesRef.current);
         setQualityNotification(showZonesRef.current ? 'ZONES OFF' : 'ZONES ON');
-        setTimeout(() => setQualityNotification(null), 1500);
+        scheduleNotificationClear(1500);
         return;
       }
 
@@ -226,7 +242,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         const currentHeatMap = useProductionStore.getState().showHeatMap;
         useProductionStore.getState().setShowHeatMap(!currentHeatMap);
         setQualityNotification(currentHeatMap ? 'HEATMAP OFF' : 'HEATMAP ON');
-        setTimeout(() => setQualityNotification(null), 1500);
+        scheduleNotificationClear(1500);
         return;
       }
 
@@ -237,7 +253,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         const current = useAIConfigStore.getState().showCascadeVisualization;
         useAIConfigStore.getState().setShowCascadeVisualization(!current);
         setQualityNotification(current ? 'CASCADE OFF' : 'CASCADE ON');
-        setTimeout(() => setQualityNotification(null), 1500);
+        scheduleNotificationClear(1500);
         return;
       }
 
@@ -248,7 +264,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         const current = useAIConfigStore.getState().showStrategicOverlay;
         useAIConfigStore.getState().setShowStrategicOverlay(!current);
         setQualityNotification(current ? 'STRATEGY OFF' : 'STRATEGY ON');
-        setTimeout(() => setQualityNotification(null), 1500);
+        scheduleNotificationClear(1500);
         return;
       }
 
@@ -259,7 +275,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         const current = useAIConfigStore.getState().showProductionTarget;
         useAIConfigStore.getState().setShowProductionTarget(!current);
         setQualityNotification(current ? 'TARGET OFF' : 'TARGET ON');
-        setTimeout(() => setQualityNotification(null), 1500);
+        scheduleNotificationClear(1500);
         return;
       }
 
@@ -270,7 +286,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         const current = useAIConfigStore.getState().showEnergyDashboard;
         useAIConfigStore.getState().setShowEnergyDashboard(!current);
         setQualityNotification(current ? 'ENERGY OFF' : 'ENERGY ON');
-        setTimeout(() => setQualityNotification(null), 1500);
+        scheduleNotificationClear(1500);
         return;
       }
 
@@ -281,7 +297,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         const current = useAIConfigStore.getState().showMultiObjective;
         useAIConfigStore.getState().setShowMultiObjective(!current);
         setQualityNotification(current ? 'OBJECTIVES OFF' : 'OBJECTIVES ON');
-        setTimeout(() => setQualityNotification(null), 1500);
+        scheduleNotificationClear(1500);
         return;
       }
 
@@ -292,7 +308,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         const current = useAIConfigStore.getState().showCostOverlay;
         useAIConfigStore.getState().setShowCostOverlay(!current);
         setQualityNotification(current ? 'COSTS OFF' : 'COSTS ON');
-        setTimeout(() => setQualityNotification(null), 1500);
+        scheduleNotificationClear(1500);
         return;
       }
 
@@ -338,7 +354,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         audioManager.playClick();
         setAutoRotate(!autoRotateRef.current);
         setQualityNotification(autoRotateRef.current ? 'ROTATION OFF' : 'ROTATION ON');
-        setTimeout(() => setQualityNotification(null), 1500);
+        scheduleNotificationClear(1500);
         return;
       }
 
@@ -353,7 +369,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
           document.exitFullscreen().catch(() => {});
           setQualityNotification('WINDOWED');
         }
-        setTimeout(() => setQualityNotification(null), 1500);
+        scheduleNotificationClear(1500);
         return;
       }
 
@@ -364,7 +380,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         const current = useUIStore.getState().showMiniMap;
         useUIStore.getState().setShowMiniMap(!current);
         setQualityNotification(current ? 'GPS OFF' : 'GPS ON');
-        setTimeout(() => setQualityNotification(null), 1500);
+        scheduleNotificationClear(1500);
         return;
       }
 
@@ -375,7 +391,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         const current = useUIStore.getState().fpsMode;
         useUIStore.getState().setFpsMode(!current);
         setQualityNotification(current ? 'ORBIT MODE' : 'FPS MODE');
-        setTimeout(() => setQualityNotification(null), 1500);
+        scheduleNotificationClear(1500);
         return;
       }
 
@@ -385,7 +401,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         audioManager.playClick();
         setCameraPreset(0); // Overview preset
         setQualityNotification('RESET VIEW');
-        setTimeout(() => setQualityNotification(null), 1500);
+        scheduleNotificationClear(1500);
         return;
       }
 
@@ -397,7 +413,7 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         setCameraPreset(presetIndex);
         const preset = CAMERA_PRESETS[presetIndex];
         setQualityNotification(preset.name.toUpperCase());
-        setTimeout(() => setQualityNotification(null), 2000);
+        scheduleNotificationClear(2000);
         return;
       }
     };

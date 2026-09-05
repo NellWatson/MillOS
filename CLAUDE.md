@@ -212,7 +212,7 @@ npm run build        # Production build
 npm run preview      # Preview production build
 ```
 
-**Environment Setup:** Copy your Gemini API key to `.env.local` as `GEMINI_API_KEY`
+**Environment Setup:** `cp .env.local.example .env.local`. There is no build-time Gemini key: enter it at runtime in the in-app AI/Gemini settings modal, where it is stored only in browser localStorage under `millos-ai-config`.
 
 ## Architecture
 
@@ -262,8 +262,8 @@ This app has a service worker (`public/sw.js`) that can serve cached CSS/JS in p
 | File | Purpose |
 |------|---------|
 | `src/App.tsx` | Root component with Canvas setup, panel state, keyboard handlers |
-| `src/store.ts` | Zustand store for workers, machines, alerts, AI decisions, metrics |
-| `src/types.ts` | TypeScript interfaces and worker roster data |
+| `src/store.ts` | Backwards-compatible re-export layer over `src/stores/*` plus SCADA bridge init (`initializeSCADASync`); new code imports from `src/stores/` directly |
+| `src/types.ts` | TypeScript interfaces and machine/enum types |
 | `src/components/MillScene.tsx` | Main 3D scene composition, machine placement by zones |
 
 ### Scene Architecture (MillScene.tsx)
@@ -272,25 +272,23 @@ The factory is organized into 4 production zones:
 1. **Zone 1 (z=-22):** Silos (Alpha-Epsilon) - raw material storage
 2. **Zone 2 (z=-6):** Roller Mills (R.M. 101–104) - milling floor
 3. **Zone 3 (z=6, elevated):** Plansifters (A-C) - sifting, positioned at y=9
-4. **Zone 4 (z=20):** Packers (Lines 1-3) - packaging output
+4. **Zone 4 (z=25):** Packers (Lines 1-3) - packaging output
 
 ### Component Categories
 
 **3D Systems** (inside MillScene):
-- `Machines.tsx` - Renders silos, mills, sifters, packers with status indicators
+- `machines/CompactMachines.tsx` (`CompactMachinesContainer`) - Renders silos, mills, sifters, packers with status indicators (`Machines.tsx` is dead code)
 - `ConveyorSystem.tsx` - Animated conveyor belts and product flow
-- `WorkerSystemNew.tsx` - Worker avatars with pathfinding
 - `ForkliftSystem.tsx` - Autonomous forklifts
 - `SpoutingSystem.tsx` - Grain flow pipes between machines
 - `DustParticles.tsx` - Atmospheric particle effects
-- `Environment.tsx` - Lighting and factory environment
+- `environment/OptimizedFactoryEnvironment.tsx` plus the rigs in `environment/` (`SceneEnvironmentIBL`, `SunShadowRig`, `OptimizedSkySystem`, `InteriorLightRig`, `NearHorizonCity`) - Lighting and factory environment
 
 **UI Overlays** (React DOM):
 - `ui-new/GameInterface.tsx` - Main HUD, dock, and panel host (production controls, machine info)
-- `ui-new/panels/` - Individual panels (production, safety, BAS, settings, ...)
+- `ui-new/panels/` - Individual panels (overview, safety, settings, build-cache diagnostics)
 - `AICommandCenter.tsx` - AI decision slide-out panel
 - `AlertSystem.tsx` - Toast notifications
-- `WorkerDetailPanel.tsx` - Worker profile modal
 - `ProductionMetrics.tsx` - Charts and KPIs
 - `HolographicDisplays.tsx` - In-scene 3D UI elements
 
@@ -298,43 +296,45 @@ The factory is organized into 4 production zones:
 
 The app uses both React local state (App.tsx) and Zustand global state (store.ts):
 - Local: `productionSpeed`, `showZones`, `showAIPanel`, selection states
-- Global: workers, machines, alerts, AI decisions, metrics
+- Global: machines, alerts, AI decisions, metrics, campaign and material flow
 
-## Fire Drill System
+## Emergency Egress Verification Drill
 
-The fire drill is a fully functional evacuation simulation accessible from the Safety panel (`src/components/ui-new/panels/SafetyPanel.tsx`) in the UI.
+The site is uncrewed (see `scripts/validate-uncrewed-build.mjs`), so the drill is an automated
+egress-verification sequence rather than a worker evacuation. It is started from the Safety panel
+(`src/components/ui-new/panels/SafetyPanel.tsx`, Controls tab) or through the agent command
+`simulation.start-fire-drill`.
 
 ### How It Works
 
-When triggered via "START DRILL" button:
+When triggered via "START DRILL":
 
-1. **Alarm Sounds** - Emergency siren plays continuously
-2. **Workers Evacuate** - All workers run (6 units/sec) to their nearest exit
-3. **Forklifts Stop** - All forklift movement halts immediately
-4. **Exit Markers Appear** - Glowing green circles with labels at each exit
-5. **Progress Tracked** - Live timer and evacuation count displayed
+1. **Production stops** - `startEmergencyDrill()` calls `stopProduction()` and records a simulated `fire_drill` safety event
+2. **Mobile equipment stops** - `setForkliftEmergencyStop(true)` halts every forklift
+3. **Egress markers appear** - `FireDrillExitMarkers` in `MillScene.tsx` draws one marker per service egress point
+4. **Zones are verified in sequence** - the egress sequencer marks each zone through `markZoneVerified(zoneId)`; the Safety panel shows "X/Y zones verified"
+5. **Drill ends** - automatically when every zone is verified, or on "END DRILL"
 
-### Exit Points
+No alarm is started by the drill; `endEmergencyDrill()` calls `stopEmergencyStopAlarm()` defensively.
 
-| Exit | Position | Workers Assigned |
-|------|----------|------------------|
-| Front Exit | z=50 | Workers with z > 0 |
-| Back Exit | z=-50 | Workers with z < -15 |
-| West Exit | x=-55 | Workers with x < -20 |
-| East Exit | x=55 | Workers with x > 20 |
+### Service Egress Points (`SERVICE_EGRESS_POINTS`)
 
-Workers are assigned to the geometrically nearest exit.
+| Zone | Position |
+|------|----------|
+| Front Service Egress | x=0, z=52 |
+| Back Service Egress | x=0, z=-52 |
+| West Service Egress | x=-62, z=0 |
+| East Service Egress | x=62, z=0 |
 
 ### Key Files
 
 | File | Responsibility |
 |------|----------------|
-| `src/stores/gameSimulationStore.ts` | Drill state, metrics, `FIRE_DRILL_EXITS`, `markWorkerEvacuated()` |
-| `src/components/WorkerSystemNew.tsx` | Evacuation movement behavior (`emergencyDrillMode` / `getNearestExit` / `markWorkerEvacuated`, ~line 346) |
-| `src/components/ForkliftSystem.tsx` | Emergency stop enforcement (drill mode forces stop, ~line 577) |
-| `src/components/physics/ExitZoneSensors.tsx` | Exit-zone detection triggering `markWorkerEvacuated` |
-| `src/components/MillScene.tsx` | `FireDrillExitMarkers` component |
-| `src/components/ui-new/panels/SafetyPanel.tsx` | START/END DRILL controls with progress UI |
+| `src/stores/gameSimulationStore.ts` | Drill state, metrics, `SERVICE_EGRESS_POINTS`, `markZoneVerified()` |
+| `src/components/MillScene.tsx` | `FireDrillExitMarkers` (markers plus the verification sequencer) |
+| `src/components/ForkliftSystem.tsx` | Emergency stop enforcement (drill mode forces stop) |
+| `src/components/ui-new/panels/SafetyPanel.tsx` | START/END DRILL controls with zone progress |
+| `src/agent/adapters/runtime/runtimeCommandHandlers.ts` | `simulation.start-fire-drill` agent capability |
 
 ### Drill Metrics Interface
 
@@ -342,30 +342,18 @@ Workers are assigned to the geometrically nearest exit.
 interface DrillMetrics {
   active: boolean;
   startTime: number;
-  evacuatedWorkerIds: string[];
-  totalWorkers: number;
-  evacuationComplete: boolean;
+  verifiedZoneIds: string[];
+  totalZones: number;
+  verificationComplete: boolean;
   finalTimeSeconds: number | null;
 }
 ```
 
 ### Store Functions
 
-- `startEmergencyDrill(totalWorkers)` - Begins drill, starts alarm, initializes metrics
-- `endEmergencyDrill()` - Ends drill, stops alarm, resets metrics
-- `markWorkerEvacuated(workerId)` - Called when worker reaches exit
-- `getNearestExit(x, z)` - Returns closest exit point for a position
-
-### UI Behavior
-
-During active drill, the Emergency Drill section shows:
-- Live evacuation timer (updates every 100ms)
-- Progress bar with "Evacuated: X/Y" count
-- "ALL CLEAR" banner when all workers reach exits (with final time)
-
-The alarm automatically stops when either:
-- All workers are evacuated (evacuation complete)
-- User clicks "END DRILL" button
+- `startEmergencyDrill(totalZones?)` - Begins the drill, stops production and forklifts, initialises metrics (defaults to `SERVICE_EGRESS_POINTS.length`)
+- `endEmergencyDrill()` - Ends the drill, restores production, resets metrics, stops any active alarm
+- `markZoneVerified(zoneId)` - Records one verified zone; sets `verificationComplete` and `finalTimeSeconds` on the last one
 
 ### Path Aliases
 
@@ -425,8 +413,8 @@ mat.customProgramCacheKey = () => `terrain_v10_${hasDisplacement ? 'disp' : 'nod
 3. If debugging shader injection, use a version number you manually increment, not a timestamp
 
 **Related GC Pressure Fixes (same session):**
-- `SmartForklift.tsx`: Replaced `new THREE.Vector3()` in useFrame with module-level reusable vectors
-- `Environment.tsx`: Replaced per-frame Vector3 allocations in lens flare updates with reusable `_cameraDir`, `_lightPos`, `_toCamera`
+- `SmartForklift.tsx` (since folded into `ForkliftSystem.tsx`): Replaced `new THREE.Vector3()` in useFrame with module-level reusable vectors
+- `Environment.tsx` (since replaced by `environment/`): Replaced per-frame Vector3 allocations in lens flare updates with reusable `_cameraDir`, `_lightPos`, `_toCamera`
 
 ### Flickering on Medium+ Quality Settings
 
@@ -693,6 +681,8 @@ function App() {
 ```
 
 ### Z-Fighting Audit Log (2025-12-28)
+
+Historical record: `MachineLockIndicator.tsx` and `FactoryProps.tsx` below have since been removed from `src/`.
 
 Comprehensive audit of z-fighting issues across the codebase. Key findings and fixes:
 
@@ -988,8 +978,8 @@ rather than being filtered away).
 **Uniqueness is SUBSTRING uniqueness.** The first build of the gate tested marker
 strings for exact equality while searching `dist/` by substring, so
 `Machines.tsx` - dead for two passes - was reported as shipping on the strength
-of `text-[10px] text-red-400`, a substring of a longer className in the live
-`VotingPanel.tsx`. Four dead files read as alive that way.
+of `text-[10px] text-red-400`, a substring of a longer className in the then-live
+`VotingPanel.tsx` (since removed). Four dead files read as alive that way.
 
 ### A visibility flag is not a visibility answer
 

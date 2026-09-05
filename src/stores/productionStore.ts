@@ -58,10 +58,15 @@ let pendingBagIncrement = 0;
 let bagFlushTimer: ReturnType<typeof setTimeout> | null = null;
 const BAG_FLUSH_INTERVAL_MS = 500; // Flush accumulated bags every 500ms
 
+function sanitizeBagIncrement(count: number): number {
+  if (!Number.isFinite(count) || count <= 0) return 0;
+  return Math.min(Number.MAX_SAFE_INTEGER, Math.round(count));
+}
+
 function flushPendingBags() {
-  if (pendingBagIncrement > 0) {
-    const toFlush = pendingBagIncrement;
-    pendingBagIncrement = 0;
+  const toFlush = sanitizeBagIncrement(pendingBagIncrement);
+  pendingBagIncrement = 0;
+  if (toFlush > 0) {
     // Direct store update - bypasses the throttled wrapper
     useProductionStore.getState()._directIncrementBags(toFlush);
   }
@@ -73,7 +78,9 @@ function flushPendingBags() {
  * Use this instead of store.incrementBagsProduced for high-frequency updates
  */
 export function throttledIncrementBags(count: number) {
-  pendingBagIncrement += count;
+  const safeCount = sanitizeBagIncrement(count);
+  if (safeCount === 0) return;
+  pendingBagIncrement = Math.min(Number.MAX_SAFE_INTEGER, pendingBagIncrement + safeCount);
   if (!bagFlushTimer) {
     bagFlushTimer = setTimeout(flushPendingBags, BAG_FLUSH_INTERVAL_MS);
   }
@@ -95,9 +102,9 @@ export function cleanupThrottledBags() {
     bagFlushTimer = null;
   }
   // Flush any pending increments before cleanup
-  if (pendingBagIncrement > 0) {
-    const toFlush = pendingBagIncrement;
-    pendingBagIncrement = 0;
+  const toFlush = sanitizeBagIncrement(pendingBagIncrement);
+  pendingBagIncrement = 0;
+  if (toFlush > 0) {
     useProductionStore.getState()._directIncrementBags(toFlush);
   }
 }
@@ -350,7 +357,8 @@ export interface ProductionStore
 
   // AI Decisions
   aiDecisions: AIDecision[];
-  addAIDecision: (decision: AIDecision) => void;
+  /** Returns false when bounded unresolved-work backpressure rejects admission. */
+  addAIDecision: (decision: AIDecision) => boolean;
   updateDecisionStatus: (
     decisionId: string,
     status: AIDecision['status'],
@@ -678,20 +686,39 @@ export const useProductionStore = create<ProductionStore>()(
       })),
 
     aiDecisions: [],
-    addAIDecision: (decision) =>
+    addAIDecision: (decision) => {
+      let accepted = false;
       set((state) => {
         // Prevent duplicate decisions by checking if ID already exists
         if (state.aiDecisions.some((d) => d.id === decision.id)) {
           return state; // No-op if decision already exists
         }
+        let retainedDecisions = state.aiDecisions;
+        if (retainedDecisions.length >= 50) {
+          let evictionIndex = -1;
+          for (let index = retainedDecisions.length - 1; index >= 0; index -= 1) {
+            const status = retainedDecisions[index].status;
+            if (status === 'completed' || status === 'superseded') {
+              evictionIndex = index;
+              break;
+            }
+          }
+          // Pending and in-progress decisions require an explicit disposition.
+          // Reject new admission rather than silently dropping unresolved work.
+          if (evictionIndex === -1) return state;
+          retainedDecisions = retainedDecisions.filter((_, index) => index !== evictionIndex);
+        }
         const enrichedDecision = enrichDecisionProvenance(decision, state);
-        const updatedDecisions = [enrichedDecision, ...state.aiDecisions].slice(0, 50);
+        const updatedDecisions = [enrichedDecision, ...retainedDecisions].slice(0, 50);
 
         // Log decision to historical playback store (fire-and-forget)
         useHistoricalPlaybackStore.getState().logDecision(enrichedDecision);
+        accepted = true;
 
         return { aiDecisions: updatedDecisions };
-      }),
+      });
+      return accepted;
+    },
     updateDecisionStatus: (decisionId, status, outcome) => {
       // Update the state
       set((state) => ({
@@ -1214,7 +1241,7 @@ export const useProductionStore = create<ProductionStore>()(
     incrementBagsProduced: (count = 1) =>
       set((state) => {
         // Validate input: ensure non-negative integer count
-        const safeCount = Math.max(0, Math.round(count));
+        const safeCount = sanitizeBagIncrement(count);
         if (safeCount === 0) return state;
 
         // Safety cap: prevent counter from exceeding MAX_SAFE_INTEGER
@@ -1249,7 +1276,7 @@ export const useProductionStore = create<ProductionStore>()(
     _directIncrementBags: (count: number) =>
       set((state) => {
         // Validate input: ensure non-negative integer count
-        const safeCount = Math.max(0, Math.round(count));
+        const safeCount = sanitizeBagIncrement(count);
         if (safeCount === 0) return state;
 
         // Safety cap: prevent counter from exceeding MAX_SAFE_INTEGER

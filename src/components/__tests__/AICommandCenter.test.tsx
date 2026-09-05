@@ -208,21 +208,6 @@ describe('AICommandCenter', () => {
       expect(container.firstChild).toBeNull();
     });
 
-    it('should render when isOpen is true', () => {
-      render(<AICommandCenter isOpen={true} onClose={vi.fn()} embedded />);
-
-      expect(screen.getByText('AI Partner')).toBeInTheDocument();
-    });
-
-    it('should display initial system status', () => {
-      render(<AICommandCenter isOpen={true} onClose={vi.fn()} embedded />);
-
-      // System status cards are abbreviated in embedded mode
-      expect(screen.getByText('CPU')).toBeInTheDocument();
-      expect(screen.getByText('MEM')).toBeInTheDocument();
-      expect(screen.getByText('DEC')).toBeInTheDocument();
-    });
-
     it('should show emergency drill banner when drill mode is active', () => {
       setupStoreMocks({}, {}, { emergencyDrillMode: true });
 
@@ -238,8 +223,6 @@ describe('AICommandCenter', () => {
 
   describe('Memory Management and Cleanup', () => {
     it('should clear any pending alert reaction timeout on unmount', async () => {
-      const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout');
-
       const mockAlert: AlertData = {
         id: 'alert-cleanup',
         type: 'warning',
@@ -256,50 +239,11 @@ describe('AICommandCenter', () => {
 
       // Flush effects so the timeout is scheduled.
       await act(async () => {});
+      expect(vi.getTimerCount()).toBe(1);
 
       unmount();
 
-      expect(clearTimeoutSpy).toHaveBeenCalled();
-    });
-
-    it('should reset decisionOutcomesRef on unmount', async () => {
-      const { unmount, rerender } = render(
-        <AICommandCenter isOpen={true} onClose={vi.fn()} embedded />
-      );
-
-      // Simulate some decisions being processed
-      const storeWithDecisions = {
-        aiDecisions: [
-          {
-            id: 'd1',
-            timestamp: new Date(),
-            type: 'optimization',
-            action: 'Test',
-            reasoning: 'Test',
-            confidence: 80,
-            impact: 'Test',
-            status: 'completed',
-            priority: 'medium',
-            outcome: 'Success',
-          },
-        ] as AIDecision[],
-      };
-
-      setupStoreMocks(storeWithDecisions);
-
-      rerender(<AICommandCenter isOpen={true} onClose={vi.fn()} embedded />);
-
-      // Unmount and remount
-      unmount();
-
-      // Reset store mock
-      setupStoreMocks();
-
-      render(<AICommandCenter isOpen={true} onClose={vi.fn()} embedded />);
-
-      // Success rate display is simplified in embedded mode - check the render works
-      const efficiencyElement = screen.getByText(/Eff:/i);
-      expect(efficiencyElement).toBeInTheDocument();
+      expect(vi.getTimerCount()).toBe(0);
     });
   });
 
@@ -366,7 +310,7 @@ describe('AICommandCenter', () => {
       expect(screen.getByText('Low efficiency detected')).toBeInTheDocument();
     });
 
-    it('should display decisions with different statuses', () => {
+    it('should render status-specific cards and actions', () => {
       const mockDecisions: AIDecision[] = [
         {
           id: 'status-pending',
@@ -407,10 +351,18 @@ describe('AICommandCenter', () => {
 
       render(<AICommandCenter isOpen={true} onClose={vi.fn()} embedded />);
 
-      // All decision actions should be displayed
-      expect(screen.getByText('Pending task')).toBeInTheDocument();
-      expect(screen.getByText('In progress task')).toBeInTheDocument();
-      expect(screen.getByText('Completed task')).toBeInTheDocument();
+      const pendingCard = screen.getByText('Pending task').closest('.border');
+      const progressCard = screen.getByText('In progress task').closest('.border');
+      const completedCard = screen.getByText('Completed task').closest('.border');
+
+      expect(pendingCard).toHaveClass('border-slate-700/50');
+      expect(progressCard).toHaveClass('border-blue-500/30');
+      expect(completedCard).toHaveClass('border-green-500/20');
+      expect(pendingCard).toHaveTextContent('Accept');
+      expect(pendingCard).toHaveTextContent('Defer');
+      expect(pendingCard).toHaveTextContent('Reject');
+      expect(progressCard).not.toHaveTextContent('Accept');
+      expect(completedCard).not.toHaveTextContent('Accept');
     });
 
     it('should show empty state when no decisions exist', () => {
@@ -419,8 +371,7 @@ describe('AICommandCenter', () => {
       expect(screen.getByText(/No recommendations have been recorded/i)).toBeInTheDocument();
     });
 
-    // Updated: Embedded mode limits to 15 decisions, not 20
-    it('should limit displayed decisions to 15', () => {
+    it('renders exactly the first 15 decision cards and their actions', () => {
       const mockDecisions: AIDecision[] = Array.from({ length: 30 }, (_, i) => ({
         id: `decision-${i}`,
         timestamp: new Date(),
@@ -437,9 +388,19 @@ describe('AICommandCenter', () => {
 
       render(<AICommandCenter isOpen={true} onClose={vi.fn()} embedded />);
 
-      // Embedded mode shows 15 decisions
-      expect(screen.getByText('Action 0')).toBeInTheDocument();
-      expect(screen.getByText('Action 14')).toBeInTheDocument();
+      const inspectButtons = screen.getAllByRole('button', { name: 'Inspect evidence' });
+      expect(inspectButtons).toHaveLength(15);
+
+      const decisionCards = inspectButtons.map((button) => button.closest('.border'));
+      expect(decisionCards.every((card) => card !== null)).toBe(true);
+      expect(new Set(decisionCards).size).toBe(15);
+      expect(decisionCards.map((card) => card?.querySelector('p.text-white')?.textContent)).toEqual(
+        Array.from({ length: 15 }, (_, index) => `Action ${index}`)
+      );
+
+      expect(screen.getAllByRole('button', { name: 'Accept' })).toHaveLength(15);
+      expect(screen.getAllByRole('button', { name: 'Defer' })).toHaveLength(15);
+      expect(screen.getAllByRole('button', { name: 'Reject' })).toHaveLength(15);
       expect(screen.queryByText('Action 15')).not.toBeInTheDocument();
     });
 
@@ -448,7 +409,7 @@ describe('AICommandCenter', () => {
   });
 
   describe('Alert Reactions', () => {
-    it('should react to new alerts', async () => {
+    it('should react once and apply the returned decision after the alert delay', async () => {
       const mockAlert: AlertData = {
         id: 'alert-1',
         type: 'critical',
@@ -481,49 +442,20 @@ describe('AICommandCenter', () => {
 
       rerender(<AICommandCenter isOpen={true} onClose={vi.fn()} embedded />);
 
-      // Should react to alert after delay (1500ms)
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(1500);
+        await vi.advanceTimersByTimeAsync(1499);
       });
 
+      expect(aiEngineMock.reactToAlert).not.toHaveBeenCalled();
+      expect(aiEngineMock.applyDecisionEffects).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+
+      expect(aiEngineMock.reactToAlert).toHaveBeenCalledTimes(1);
       expect(aiEngineMock.reactToAlert).toHaveBeenCalledWith(mockAlert);
-    });
-
-    it('should apply effects of alert reaction decision', async () => {
-      const mockAlert: AlertData = {
-        id: 'alert-2',
-        type: 'warning',
-        title: 'High Temperature',
-        message: 'Temperature spike',
-        machineId: 'RM-102',
-        timestamp: new Date(),
-        acknowledged: false,
-      };
-
-      const mockDecision: AIDecision = {
-        id: 'alert-reaction',
-        timestamp: new Date(),
-        type: 'safety',
-        action: 'Reduce load',
-        reasoning: 'High temperature alert',
-        confidence: 90,
-        impact: 'Lower temperature',
-        status: 'pending',
-        priority: 'high',
-      };
-
-      aiEngineMock.reactToAlert.mockReturnValue(mockDecision);
-
-      const { rerender } = render(<AICommandCenter isOpen={true} onClose={vi.fn()} embedded />);
-
-      setupStoreMocks({}, { alerts: [mockAlert] });
-
-      rerender(<AICommandCenter isOpen={true} onClose={vi.fn()} embedded />);
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1500);
-      });
-
+      expect(aiEngineMock.applyDecisionEffects).toHaveBeenCalledTimes(1);
       expect(aiEngineMock.applyDecisionEffects).toHaveBeenCalledWith(mockDecision);
     });
   });

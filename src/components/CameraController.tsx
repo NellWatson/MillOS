@@ -496,7 +496,9 @@ export const CameraPresetIndicator: React.FC = () => {
   const preset = CAMERA_PRESETS[activePreset];
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 pointer-events-none">
+    // Keyboard-driven preset readout; on phones there is no number row and the
+    // chips were clipped behind the dock, so it is desktop-only.
+    <div className="fixed bottom-4 right-4 z-40 pointer-events-none hidden sm:block">
       <div
         className={`flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900/80 backdrop-blur-sm border border-slate-700/50 shadow-lg transition-all duration-300 ${isAnimating ? 'scale-105' : ''}`}
       >

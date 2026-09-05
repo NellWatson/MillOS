@@ -16,6 +16,7 @@
 
 import { useSyncExternalStore, useCallback, useMemo } from 'react';
 import { audioManager } from '../utils/audioManager';
+import type { MusicStation, MusicTrack } from '../audio/millosSoundtrackCatalog';
 
 export interface AudioState {
   muted: boolean;
@@ -25,11 +26,7 @@ export interface AudioState {
   machineVolume: number;
 }
 
-export interface AudioTrack {
-  id: string;
-  name: string;
-  file: string;
-}
+export type AudioTrack = MusicTrack;
 
 export interface AudioStateWithControls extends AudioState {
   currentTrack: AudioTrack;
@@ -41,6 +38,29 @@ export interface AudioStateWithControls extends AudioState {
   startMusic: () => void;
   nextTrack: () => void;
   prevTrack: () => void;
+}
+
+export interface MusicPlayerState extends AudioState {
+  currentTrack: MusicTrack;
+  availableTracks: readonly MusicTrack[];
+  trackIndex: number;
+  trackCount: number;
+  station: MusicStation;
+  shuffle: boolean;
+  playing: boolean;
+  positionSeconds: number;
+  durationSeconds: number;
+}
+
+export interface MusicPlayerStateWithControls extends MusicPlayerState {
+  setMusicEnabled: (v: boolean) => void;
+  setStation: (station: MusicStation) => void;
+  setShuffle: (shuffle: boolean) => void;
+  togglePlayback: () => void;
+  nextTrack: () => void;
+  prevTrack: () => void;
+  selectTrack: (index: number) => void;
+  seek: (positionSeconds: number) => void;
 }
 
 // Snapshot cache to prevent unnecessary object creation
@@ -113,6 +133,36 @@ function getExtendedSnapshot(): AudioState & { currentTrack: AudioTrack } {
   return cachedExtendedSnapshot;
 }
 
+let cachedMusicPlayerSnapshot: MusicPlayerState | null = null;
+
+function getMusicPlayerSnapshot(): MusicPlayerState {
+  const base = getSnapshot();
+  const next: MusicPlayerState = {
+    ...base,
+    currentTrack: audioManager.currentTrack,
+    availableTracks: audioManager.availableMusicTracks,
+    trackIndex: audioManager.trackIndex,
+    trackCount: audioManager.trackCount,
+    station: audioManager.musicStation,
+    shuffle: audioManager.musicShuffle,
+    playing: audioManager.musicPlaying,
+    // Quantised: currentTime advances between the two getSnapshot() calls of a
+    // single render, and an ever-changing field makes useSyncExternalStore
+    // re-render in a loop. The 100 ms progress ticker drives updates.
+    positionSeconds: Math.round(audioManager.musicPositionSeconds * 10) / 10,
+    durationSeconds: audioManager.musicDurationSeconds,
+  };
+  if (
+    cachedMusicPlayerSnapshot === null ||
+    Object.entries(next).some(
+      ([key, value]) => cachedMusicPlayerSnapshot?.[key as keyof MusicPlayerState] !== value
+    )
+  ) {
+    cachedMusicPlayerSnapshot = next;
+  }
+  return cachedMusicPlayerSnapshot;
+}
+
 function subscribe(callback: () => void): () => void {
   return audioManager.subscribe(callback);
 }
@@ -161,6 +211,30 @@ export function useAudioStateWithControls(): AudioStateWithControls {
     ...state,
     ...controls,
   };
+}
+
+export function useMusicPlayerState(): MusicPlayerStateWithControls {
+  const state = useSyncExternalStore(subscribe, getMusicPlayerSnapshot, getMusicPlayerSnapshot);
+  const controls = useMemo(
+    () => ({
+      setMusicEnabled: (value: boolean) => {
+        audioManager.musicEnabled = value;
+      },
+      setStation: (station: MusicStation) => {
+        audioManager.musicStation = station;
+      },
+      setShuffle: (shuffle: boolean) => {
+        audioManager.musicShuffle = shuffle;
+      },
+      togglePlayback: () => audioManager.toggleMusicPlayback(),
+      nextTrack: () => audioManager.nextTrack(),
+      prevTrack: () => audioManager.prevTrack(),
+      selectTrack: (index: number) => audioManager.selectMusicTrack(index),
+      seek: (positionSeconds: number) => audioManager.seekMusic(positionSeconds),
+    }),
+    []
+  );
+  return { ...state, ...controls };
 }
 
 /**

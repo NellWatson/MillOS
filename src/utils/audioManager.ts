@@ -1,5 +1,10 @@
 // Audio manager for realistic factory sounds using Web Audio API
 import { logger } from './logger';
+import {
+  MUSIC_STATIONS,
+  type MusicStation,
+  type MusicTrack,
+} from '../audio/millosSoundtrackCatalog';
 
 export type AmbientWeather = 'clear' | 'cloudy' | 'rain' | 'storm';
 
@@ -11,6 +16,15 @@ export interface OutdoorAmbientMix {
   ducks: number;
   pigs: number;
   cows: number;
+}
+
+interface CompressorAudioNodes {
+  source: AudioBufferSourceNode;
+  gain: GainNode;
+  lowpass: BiquadFilterNode;
+  bandpass: BiquadFilterNode;
+  lfo: OscillatorNode;
+  lfoGain: GainNode;
 }
 
 const proximity = (x: number, z: number, targetX: number, targetZ: number, range: number): number =>
@@ -184,57 +198,22 @@ class AudioManager {
   private _musicVolume: number = 0.3;
   private _machineVolume: number = 0.5; // Separate volume for machine sounds
   private _currentTrackIndex: number = 0;
-  // Store bound event listener references to properly remove them on cleanup
+  private _musicStation: MusicStation = 'original';
+  private _musicShuffle: boolean = false;
+  // Stable media event handlers for the singleton audio element.
   private musicEndedHandler: (() => void) | null = null;
   private musicErrorHandler: ((e: Event) => void) | null = null;
+  private musicProgressTimer: ReturnType<typeof setInterval> | null = null;
+  // Set when the user pressed Pause, so a tab becoming visible again does not
+  // restart music they deliberately stopped.
+  private _userPausedMusic = false;
+  // Consecutive track load failures; once every track has failed we stop
+  // advancing instead of spinning through the playlist as fast as requests fail.
+  private consecutiveMusicLoadFailures = 0;
+  private mediaSessionConfigured = false;
 
-  // Available music tracks (shuffled on init, excludes victory fanfare)
-  // Music by Kevin MacLeod (incompetech.com) - Licensed under CC BY 3.0/4.0
-  // Jolly, upbeat working/driving music for factory vibes
-  // Note: Using import.meta.env.BASE_URL for GitHub Pages subdirectory deployment
-  private readonly allMusicTracks = [
-    { id: 'the_builder', name: 'The Builder', file: `${import.meta.env.BASE_URL}The Builder.mp3` },
-    { id: 'space_jazz', name: 'Space Jazz', file: `${import.meta.env.BASE_URL}Space Jazz.mp3` },
-    {
-      id: 'upbeat_forever',
-      name: 'Upbeat Forever',
-      file: `${import.meta.env.BASE_URL}Upbeat Forever.mp3`,
-    },
-    {
-      id: 'fuzzball_parade',
-      name: 'Fuzzball Parade',
-      file: `${import.meta.env.BASE_URL}Fuzzball Parade.mp3`,
-    },
-    {
-      id: 'i_got_a_stick',
-      name: 'I Got a Stick',
-      file: `${import.meta.env.BASE_URL}I Got a Stick Feat James Gavins.mp3`,
-    },
-    {
-      id: 'boogie_party',
-      name: 'Boogie Party',
-      file: `${import.meta.env.BASE_URL}Boogie Party.mp3`,
-    },
-    {
-      id: 'voxel_revolution',
-      name: 'Voxel Revolution',
-      file: `${import.meta.env.BASE_URL}Voxel Revolution.mp3`,
-    },
-    { id: 'newer_wave', name: 'Newer Wave', file: `${import.meta.env.BASE_URL}Newer Wave.mp3` },
-    {
-      id: 'neon_laser_horizon',
-      name: 'Neon Laser Horizon',
-      file: `${import.meta.env.BASE_URL}Neon Laser Horizon.mp3`,
-    },
-    {
-      id: 'cloud_dancer',
-      name: 'Cloud Dancer',
-      file: `${import.meta.env.BASE_URL}Cloud Dancer.mp3`,
-    },
-  ];
-
-  // Shuffled playlist (Fisher-Yates shuffle on init)
-  private musicTracks: { id: string; name: string; file: string }[];
+  // Active station playlist. Original soundtrack order is authoritative unless shuffle is enabled.
+  private musicTracks: MusicTrack[];
 
   // Victory fanfare - only played when quota hits 100%
   // Music by Kevin MacLeod (incompetech.com) - Licensed under CC BY 4.0
@@ -262,9 +241,8 @@ class AudioManager {
   constructor() {
     // Load persisted settings from localStorage
     this.loadSettings();
-    // Shuffle tracks on initialization using Fisher-Yates algorithm
-    this.musicTracks = [...this.allMusicTracks];
-    this.shufflePlaylist();
+    this.musicTracks = [...MUSIC_STATIONS[this._musicStation]];
+    if (this._musicShuffle) this.shufflePlaylist();
   }
 
   // LocalStorage key for audio settings persistence
@@ -274,12 +252,14 @@ class AudioManager {
   private saveSettings(): void {
     try {
       const settings = {
-        version: 1,
+        version: 2,
         muted: this._muted,
         volume: this._volume,
         musicEnabled: this._musicEnabled,
         musicVolume: this._musicVolume,
         machineVolume: this._machineVolume,
+        musicStation: this._musicStation,
+        musicShuffle: this._musicShuffle,
       };
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(settings));
     } catch {
@@ -301,6 +281,9 @@ class AudioManager {
           this._musicVolume = Math.max(0, Math.min(1, settings.musicVolume));
         if (typeof settings.machineVolume === 'number')
           this._machineVolume = Math.max(0, Math.min(1, settings.machineVolume));
+        if (settings.musicStation === 'original' || settings.musicStation === 'legacy')
+          this._musicStation = settings.musicStation;
+        if (typeof settings.musicShuffle === 'boolean') this._musicShuffle = settings.musicShuffle;
       }
     } catch {
       // localStorage may not be available or data may be corrupted
@@ -388,7 +371,7 @@ class AudioManager {
     });
   }
 
-  get currentTrack(): { id: string; name: string; file: string } {
+  get currentTrack(): MusicTrack {
     return this.musicTracks[this._currentTrackIndex];
   }
 
@@ -396,8 +379,61 @@ class AudioManager {
     return this.musicTracks.length;
   }
 
+  get availableMusicTracks(): readonly MusicTrack[] {
+    return this.musicTracks;
+  }
+
   get trackIndex(): number {
     return this._currentTrackIndex;
+  }
+
+  get musicStation(): MusicStation {
+    return this._musicStation;
+  }
+
+  set musicStation(value: MusicStation) {
+    if (value === this._musicStation) return;
+    const shouldResume = Boolean(this.musicAudio && !this.musicAudio.paused && this._musicEnabled);
+    this._musicStation = value;
+    this.musicTracks = [...MUSIC_STATIONS[value]];
+    if (this._musicShuffle) this.shufflePlaylist();
+    this._currentTrackIndex = 0;
+    this.loadCurrentMusicTrack(shouldResume);
+    this.saveSettings();
+    this.notifyListeners();
+  }
+
+  get musicShuffle(): boolean {
+    return this._musicShuffle;
+  }
+
+  set musicShuffle(value: boolean) {
+    if (value === this._musicShuffle) return;
+    const currentTrackId = this.currentTrack.id;
+    this._musicShuffle = value;
+    this.musicTracks = [...MUSIC_STATIONS[this._musicStation]];
+    if (value) this.shufflePlaylist();
+    this._currentTrackIndex = Math.max(
+      0,
+      this.musicTracks.findIndex((track) => track.id === currentTrackId)
+    );
+    this.saveSettings();
+    this.notifyListeners();
+  }
+
+  get musicPlaying(): boolean {
+    return Boolean(this.musicAudio && !this.musicAudio.paused && !this.musicAudio.ended);
+  }
+
+  get musicPositionSeconds(): number {
+    const position = this.musicAudio?.currentTime ?? 0;
+    return Number.isFinite(position) ? position : 0;
+  }
+
+  get musicDurationSeconds(): number {
+    const mediaDuration = this.musicAudio?.duration;
+    if (Number.isFinite(mediaDuration) && mediaDuration && mediaDuration > 0) return mediaDuration;
+    return this.currentTrack.durationSeconds ?? 0;
   }
 
   get isTabVisible(): boolean {
@@ -410,34 +446,50 @@ class AudioManager {
     // When tab becomes visible again, intervals will resume normal playback
   }
 
-  nextTrack(): void {
-    this._currentTrackIndex = this._currentTrackIndex + 1;
-    // Reshuffle playlist when we've played all tracks
+  nextTrack(autoplay = this.musicPlaying): void {
+    this._currentTrackIndex += 1;
     if (this._currentTrackIndex >= this.musicTracks.length) {
       this._currentTrackIndex = 0;
-      this.shufflePlaylist();
+      if (this._musicShuffle) this.shufflePlaylist();
     }
-    if (this._musicEnabled && this.musicAudio) {
-      this.musicAudio.src = this.currentTrack.file;
-      this.updateMusicVolume(); // Ensure mute state is respected after src change
-      this.musicAudio.play().catch((e) => {
-        audioLog.warn('Music playback failed (likely autoplay policy)', e);
-      });
-    }
+    this.loadCurrentMusicTrack(autoplay && this._musicEnabled);
     this.notifyListeners();
   }
 
-  prevTrack(): void {
+  prevTrack(autoplay = this.musicPlaying): void {
     this._currentTrackIndex =
       (this._currentTrackIndex - 1 + this.musicTracks.length) % this.musicTracks.length;
-    if (this._musicEnabled && this.musicAudio) {
-      this.musicAudio.src = this.currentTrack.file;
-      this.updateMusicVolume(); // Ensure mute state is respected after src change
-      this.musicAudio.play().catch((e) => {
-        audioLog.warn('Music playback failed (likely autoplay policy)', e);
-      });
-    }
+    this.loadCurrentMusicTrack(autoplay && this._musicEnabled);
     this.notifyListeners();
+  }
+
+  selectMusicTrack(index: number): void {
+    if (!Number.isFinite(index)) return;
+    const normalizedIndex = Math.max(0, Math.min(this.musicTracks.length - 1, Math.trunc(index)));
+    if (normalizedIndex === this._currentTrackIndex) return;
+    this._currentTrackIndex = normalizedIndex;
+    this.loadCurrentMusicTrack(this._musicEnabled);
+    this.notifyListeners();
+  }
+
+  seekMusic(positionSeconds: number): void {
+    if (!this.musicAudio || !Number.isFinite(positionSeconds)) return;
+    this.musicAudio.currentTime = Math.max(0, Math.min(this.musicDurationSeconds, positionSeconds));
+    this.notifyListeners();
+  }
+
+  toggleMusicPlayback(): void {
+    if (this.musicPlaying) {
+      this._userPausedMusic = true;
+      this.musicAudio?.pause();
+      this.notifyListeners();
+      return;
+    }
+    if (!this._musicEnabled) {
+      this.musicEnabled = true;
+      return;
+    }
+    this.startMusic();
   }
 
   // Play victory fanfare when daily quota reaches 100%
@@ -727,7 +779,12 @@ class AudioManager {
     } else if (!hidden && this.backgroundMuted) {
       this.backgroundMuted = false;
       this.updateMasterVolume();
-      if (this._musicEnabled && this.musicAudio && this.musicAudio.paused) {
+      if (
+        this._musicEnabled &&
+        this.musicAudio &&
+        this.musicAudio.paused &&
+        !this._userPausedMusic
+      ) {
         this.musicAudio.play().catch((e) => {
           audioLog.warn('Music resume on tab visibility failed', e);
         });
@@ -742,33 +799,133 @@ class AudioManager {
     }
   }
 
+  private updateMediaSession(): void {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    const artworkSize = this.currentTrack.trackNumber === 7 ? '360x360' : '1024x1024';
+    if (typeof MediaMetadata !== 'undefined') {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: this.currentTrack.name,
+        artist: this.currentTrack.artist,
+        album:
+          this._musicStation === 'original' ? 'Songs of the Living Mill' : 'MillOS Legacy Music',
+        artwork: this.currentTrack.artwork
+          ? [{ src: this.currentTrack.artwork, sizes: artworkSize, type: 'image/jpeg' }]
+          : [],
+      });
+    }
+    navigator.mediaSession.playbackState = this.musicPlaying ? 'playing' : 'paused';
+    if ('setPositionState' in navigator.mediaSession) {
+      const duration = this.musicDurationSeconds;
+      if (duration > 0) {
+        try {
+          navigator.mediaSession.setPositionState({
+            duration,
+            playbackRate: this.musicAudio?.playbackRate ?? 1,
+            position: Math.min(this.musicPositionSeconds, Math.max(0, duration - 0.001)),
+          });
+        } catch {
+          // Metadata may arrive before the browser accepts a position state.
+        }
+      }
+    }
+  }
+
+  private configureMediaSession(): void {
+    if (
+      this.mediaSessionConfigured ||
+      typeof navigator === 'undefined' ||
+      !('mediaSession' in navigator)
+    ) {
+      return;
+    }
+    const handlers: ReadonlyArray<readonly [MediaSessionAction, MediaSessionActionHandler]> = [
+      ['play', () => this.startMusic()],
+      ['pause', () => this.toggleMusicPlayback()],
+      ['nexttrack', () => this.nextTrack(true)],
+      ['previoustrack', () => this.prevTrack(true)],
+      ['seekto', (details) => this.seekMusic(details.seekTime ?? 0)],
+    ];
+    handlers.forEach(([action, handler]) => {
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+      } catch {
+        // Some browsers expose Media Session but omit individual actions.
+      }
+    });
+    this.mediaSessionConfigured = true;
+  }
+
+  private syncMusicProgressTicker(): void {
+    if (this.musicPlaying && !this.musicProgressTimer) {
+      this.musicProgressTimer = setInterval(() => {
+        this.updateMediaSession();
+        this.notifyListeners();
+      }, 100);
+    } else if (!this.musicPlaying && this.musicProgressTimer) {
+      clearInterval(this.musicProgressTimer);
+      this.musicProgressTimer = null;
+    }
+    this.updateMediaSession();
+    this.notifyListeners();
+  }
+
+  private configureMusicAudio(audio: HTMLAudioElement): void {
+    audio.loop = false;
+    this.musicEndedHandler = () => this.nextTrack(true);
+    this.musicErrorHandler = (event: Event) => {
+      this.consecutiveMusicLoadFailures += 1;
+      if (this.consecutiveMusicLoadFailures >= this.musicTracks.length) {
+        audioLog.warn('Every music track failed to load; leaving the player paused', event);
+        this.syncMusicProgressTicker();
+        return;
+      }
+      audioLog.warn('Music track failed to load, advancing to next track', event);
+      this.nextTrack(true);
+    };
+    const stateHandler = () => this.syncMusicProgressTicker();
+    audio.addEventListener('ended', this.musicEndedHandler);
+    audio.addEventListener('error', this.musicErrorHandler);
+    audio.addEventListener('canplay', () => {
+      this.consecutiveMusicLoadFailures = 0;
+    });
+    for (const event of ['play', 'pause', 'timeupdate', 'loadedmetadata', 'durationchange']) {
+      audio.addEventListener(event, stateHandler);
+    }
+    this.configureMediaSession();
+  }
+
+  private loadCurrentMusicTrack(autoplay: boolean): void {
+    if (!this.musicAudio) {
+      if (autoplay) this.startMusic();
+      this.updateMediaSession();
+      return;
+    }
+    this.musicAudio.src = this.currentTrack.file;
+    this.musicAudio.currentTime = 0;
+    this.updateMusicVolume();
+    this.updateMediaSession();
+    if (autoplay) {
+      this.musicAudio.play().catch((error) => {
+        audioLog.warn('Music playback failed (likely autoplay policy)', error);
+      });
+    }
+  }
+
   startMusic(): void {
     if (!this._musicEnabled) return;
+    this._userPausedMusic = false;
 
     if (!this.musicAudio) {
       this.musicAudio = new Audio(this.currentTrack.file);
-      this.musicAudio.loop = false; // Don't loop single track - advance through playlist
+      this.configureMusicAudio(this.musicAudio);
       this.updateMusicVolume();
-
-      // Auto-advance to next track when current ends
-      // Store bound reference to allow proper cleanup and prevent memory leak
-      this.musicEndedHandler = () => {
-        this.nextTrack();
-      };
-      this.musicAudio.addEventListener('ended', this.musicEndedHandler);
-
-      // Handle errors by advancing to next track (prevents silent music stops)
-      this.musicErrorHandler = (e: Event) => {
-        audioLog.warn('Music track failed to load, advancing to next track', e);
-        this.nextTrack();
-      };
-      this.musicAudio.addEventListener('error', this.musicErrorHandler);
-    } else if (this.musicAudio.src !== window.location.origin + this.currentTrack.file) {
+    } else if (this.musicAudio.src !== new URL(this.currentTrack.file, window.location.href).href) {
       this.musicAudio.src = this.currentTrack.file;
     }
 
     // Always ensure volume respects mute state before playing
     this.updateMusicVolume();
+    this.updateMediaSession();
     this.musicAudio.play().catch((e) => {
       audioLog.warn('Music playback failed (user interaction required)', e);
     });
@@ -776,18 +933,10 @@ class AudioManager {
 
   stopMusic(): void {
     if (this.musicAudio) {
-      // Remove event listeners to prevent memory leak
-      if (this.musicEndedHandler) {
-        this.musicAudio.removeEventListener('ended', this.musicEndedHandler);
-        this.musicEndedHandler = null;
-      }
-      if (this.musicErrorHandler) {
-        this.musicAudio.removeEventListener('error', this.musicErrorHandler);
-        this.musicErrorHandler = null;
-      }
       this.musicAudio.pause();
       this.musicAudio.currentTime = 0;
     }
+    this.syncMusicProgressTicker();
   }
 
   private getEffectiveVolume(): number {
@@ -3628,7 +3777,9 @@ class AudioManager {
   // Compressor cycling state
   private compressorActive: boolean = false;
   private compressorInterval: NodeJS.Timeout | number | null = null;
-  private compressorNodes: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
+  private compressorOnTimeout: NodeJS.Timeout | number | null = null;
+  private compressorStopTimeout: NodeJS.Timeout | number | null = null;
+  private compressorNodes: CompressorAudioNodes | null = null;
 
   // Start industrial compressor cycling (kicks on/off periodically)
   startCompressorCycling() {
@@ -3636,25 +3787,27 @@ class AudioManager {
     this.compressorActive = true;
 
     const cycleCompressor = () => {
-      if (!this.compressorActive || this.getEffectiveVolume() === 0) return;
+      this.compressorInterval = null;
+      if (!this.compressorActive) return;
 
       // Random on duration (8-20 seconds)
       const onDuration = 8000 + Math.random() * 12000;
       // Random off duration (15-45 seconds)
       const offDuration = 15000 + Math.random() * 30000;
 
-      // Skip playback when tab hidden but keep scheduling to resume when visible
-      if (this._isTabVisible) {
+      // Muting or hiding a tab skips this audible cycle. Keep the scheduler
+      // alive so a later unmute or visibility change can recover naturally.
+      if (this.getEffectiveVolume() > 0 && this._isTabVisible) {
         this.startCompressorSound();
 
-        setTimeout(() => {
+        this.compressorOnTimeout = setTimeout(() => {
+          this.compressorOnTimeout = null;
           this.stopCompressorSound();
           if (this.compressorActive) {
             this.compressorInterval = setTimeout(cycleCompressor, offDuration);
           }
         }, onDuration);
       } else {
-        // When tab hidden, just schedule next cycle without playing
         this.compressorInterval = setTimeout(cycleCompressor, offDuration);
       }
     };
@@ -3665,9 +3818,13 @@ class AudioManager {
 
   stopCompressorCycling() {
     this.compressorActive = false;
-    if (this.compressorInterval) {
+    if (this.compressorInterval !== null) {
       clearTimeout(this.compressorInterval);
       this.compressorInterval = null;
+    }
+    if (this.compressorOnTimeout !== null) {
+      clearTimeout(this.compressorOnTimeout);
+      this.compressorOnTimeout = null;
     }
     this.stopCompressorSound();
   }
@@ -3675,6 +3832,7 @@ class AudioManager {
   private startCompressorSound() {
     if (this.compressorNodes || this.getEffectiveVolume() === 0) return;
 
+    let nodes: CompressorAudioNodes | null = null;
     try {
       const ctx = this.getContext();
       const masterGain = this.getMasterGain();
@@ -3690,6 +3848,11 @@ class AudioManager {
       const bandpass = ctx.createBiquadFilter();
       const lfo = ctx.createOscillator();
       const lfoGain = ctx.createGain();
+      nodes = { source, gain, lowpass, bandpass, lfo, lfoGain };
+
+      // Record the complete graph before configuring or starting it. Any Web
+      // Audio operation below may throw after an indefinite source has begun.
+      this.compressorNodes = nodes;
 
       source.buffer = buffer;
       source.loop = true;
@@ -3723,33 +3886,61 @@ class AudioManager {
       source.start();
       lfo.start();
 
-      this.compressorNodes = { source, gain };
-
       // Play startup clunk
       this.playCompressorStartup();
     } catch (e) {
+      if (nodes) this.disposeCompressorNodes(nodes);
       audioLog.warn('Compressor startup sound failed', e);
     }
   }
 
+  private disposeCompressorNodes(nodes: CompressorAudioNodes) {
+    for (const scheduledNode of [nodes.source, nodes.lfo]) {
+      try {
+        scheduledNode.stop();
+      } catch (e) {
+        audioLog.warn('Failed to stop compressor node', e);
+      }
+    }
+
+    for (const node of [
+      nodes.source,
+      nodes.lowpass,
+      nodes.bandpass,
+      nodes.gain,
+      nodes.lfo,
+      nodes.lfoGain,
+    ]) {
+      try {
+        node.disconnect();
+      } catch (e) {
+        audioLog.warn('Failed to disconnect compressor node', e);
+      }
+    }
+
+    if (this.compressorNodes === nodes) {
+      this.compressorNodes = null;
+    }
+  }
+
   private stopCompressorSound() {
-    if (this.compressorNodes) {
+    const nodes = this.compressorNodes;
+    if (nodes && this.compressorStopTimeout === null) {
       try {
         const ctx = this.getContext();
         if (ctx) {
           // Fade out before stopping
-          this.compressorNodes.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.3);
-          setTimeout(() => {
-            try {
-              this.compressorNodes?.source.stop();
-            } catch (e) {
-              audioLog.warn('Failed to stop compressor cycling', e);
-            }
-            this.compressorNodes = null;
+          nodes.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.3);
+          this.compressorStopTimeout = setTimeout(() => {
+            this.compressorStopTimeout = null;
+            this.disposeCompressorNodes(nodes);
           }, 500);
+        } else {
+          this.disposeCompressorNodes(nodes);
         }
       } catch (e) {
         audioLog.warn('Audio playback failed', e);
+        this.disposeCompressorNodes(nodes);
       }
     }
   }

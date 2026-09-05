@@ -99,8 +99,6 @@ const allowStale = process.argv.includes('--allow-stale-dist');
  * deleted. An entry that becomes reachable again FAILS the gate, so this list
  * cannot rot into a permanent mute the way a bare ignore list would.
  */
-const AMBIENT =
-  'Ambient detail subsystem. Nothing mounts AmbientDetails; MillScene imports none of it. CLAUDE.md still lists it as a High/Ultra effect.';
 const MACHINES =
   'Superseded machine renderer. The live one is machines/CompactMachines.tsx, as machineSurfaces.ts records at its top.';
 const SHELL =
@@ -111,11 +109,6 @@ const EXTERIOR =
   'Superseded exterior. The live authored exterior is FactoryExterior.tsx with TruckBay.tsx.';
 const CONVEYORS =
   'Superseded conveyors. MillScene lazily imports ConveyorSystem.tsx, which is the live owner of every belt in the mill.';
-const WORKER_DUP =
-  'Duplicate. WorkerSystemNew imports the identically named component from components/workers/SimplifiedWorker.tsx.';
-const MULTIPLAYER =
-  'Multiplayer UI. The store and protocol ship; this lobby and its indicators are mounted nowhere.';
-const WORKER_OVERLAYS = 'Worker status overlays. Authored, never mounted by WorkerSystemNew.';
 const SHADERS =
   'Standalone shader modules with no importer. The live shader work is injected from the components and machineSurfaces/worldSurface; shaderContracts.ts is the spec the validator reads.';
 const HOOKS =
@@ -125,43 +118,13 @@ const DEPTH_MATERIALS =
   'Material factory with no importer, though CLAUDE.md instructs future work to use it. Either wire it up or correct the doc.';
 const METRICS =
   'Test-only: its suite is green and it renders nowhere. The live metrics UI is under ui-new/.';
-const DIALOGUE = 'Test-only: imported by its own unit test and nothing else.';
 const TREE = 'Superseded by scenery/InstancedFoliage.tsx, which FarmArea and VillageArea mount.';
 const PHYSICS = 'Physics barrel and worker shim. PhysicsScene.tsx imports what it needs directly.';
 const VILLAGE = 'Village barrel. VillageArea.tsx imports its parts directly.';
 const BREAKDOWN = 'Breakdown VFX, authored and never mounted.';
-const MAINTENANCE = 'Maintenance overlay, authored and never mounted.';
 const ZONE_LIGHTS = 'Zone accent lighting, authored and never mounted.';
 
 const KNOWN_DEAD = new Map([
-  ['src/components/ambient/AmbientDetailsGroup.tsx', AMBIENT],
-  ['src/components/ambient/atmosphere.tsx', AMBIENT],
-  ['src/components/ambient/AtmosphericEffects.tsx', AMBIENT],
-  ['src/components/ambient/BreakRoomDetails.tsx', AMBIENT],
-  ['src/components/ambient/BulletinBoard.tsx', AMBIENT],
-  ['src/components/ambient/equipment.tsx', AMBIENT],
-  ['src/components/ambient/FactoryProps.tsx', AMBIENT],
-  ['src/components/ambient/HistoricalPhotos.tsx', AMBIENT],
-  ['src/components/ambient/index.ts', AMBIENT],
-  ['src/components/ambient/index.tsx', AMBIENT],
-  ['src/components/ambient/IndustrialDetails.tsx', AMBIENT],
-  ['src/components/ambient/LightingEffects.tsx', AMBIENT],
-  ['src/components/ambient/maintenance.tsx', AMBIENT],
-  ['src/components/ambient/microDetails.tsx', AMBIENT],
-  ['src/components/ambient/PersonalItems.tsx', AMBIENT],
-  ['src/components/ambient/QCLabRoom.tsx', AMBIENT],
-  ['src/components/ambient/safety.tsx', AMBIENT],
-  ['src/components/ambient/SafetyPosters.tsx', AMBIENT],
-  ['src/components/ambient/SeasonalDecorations.tsx', AMBIENT],
-  ['src/components/ambient/shared.ts', AMBIENT],
-  ['src/components/ambient/SteamEffects.tsx', AMBIENT],
-  ['src/components/ambient/TimeClock.tsx', AMBIENT],
-  ['src/components/ambient/utilities.tsx', AMBIENT],
-  ['src/components/ambient/wearDamage.tsx', AMBIENT],
-  ['src/components/ambient/wildlife.tsx', AMBIENT],
-  ['src/components/ambient/workplaceCulture.tsx', AMBIENT],
-  ['src/components/AmbientDetails.tsx', AMBIENT],
-
   ['src/components/Machines.tsx', MACHINES],
   ['src/components/machines/HoloLabel.tsx', MACHINES],
   ['src/components/machines/index.tsx', MACHINES],
@@ -185,31 +148,16 @@ const KNOWN_DEAD = new Map([
   ['src/components/infrastructure/FactoryRoof.tsx', SHELL],
   ['src/components/infrastructure/FactoryWalls.tsx', SHELL],
   ['src/components/infrastructure/index.ts', SHELL],
-  ['src/components/infrastructure/OpenPersonnelDoorway.tsx', SHELL],
   ['src/components/infrastructure/ReflectiveFloor.tsx', SHELL],
   ['src/components/infrastructure/SafetyEquipment.tsx', SHELL],
   ['src/components/infrastructure/UtilityConduits.tsx', SHELL],
 
-  ['src/components/Environment.tsx', ENVIRONMENT],
-  ['src/components/FactoryEnvironment.tsx', ENVIRONMENT],
   ['src/components/SkySystem.tsx', ENVIRONMENT],
   ['src/utils/environmentRegistry.ts', ENVIRONMENT],
 
   ['src/components/exterior/OptimizedExterior.tsx', EXTERIOR],
 
   ['src/components/conveyors/CompactConveyorSystem.tsx', CONVEYORS],
-
-  ['src/components/SimplifiedWorker.tsx', WORKER_DUP],
-
-  ['src/components/multiplayer/ConnectionQuality.tsx', MULTIPLAYER],
-  ['src/components/multiplayer/index.ts', MULTIPLAYER],
-  ['src/components/multiplayer/MachineLockIndicator.tsx', MULTIPLAYER],
-  ['src/components/multiplayer/MultiplayerLobby.tsx', MULTIPLAYER],
-
-  ['src/components/workers/AutonomyIndicator.tsx', WORKER_OVERLAYS],
-  ['src/components/workers/FatigueIndicator.tsx', WORKER_OVERLAYS],
-  ['src/components/workers/FlourishingIndicator.tsx', WORKER_OVERLAYS],
-  ['src/components/workers/RecommendedWorkerRing.tsx', WORKER_OVERLAYS],
 
   ['src/shaders/edgeHighlight.ts', SHADERS],
   ['src/shaders/fresnelRim.ts', SHADERS],
@@ -231,20 +179,32 @@ const KNOWN_DEAD = new Map([
 
   ['src/components/ProductionMetrics.tsx', METRICS],
 
-  ['src/utils/workerDialogue.ts', DIALOGUE],
-
   ['src/components/scenery/Tree.tsx', TREE],
 
   ['src/components/physics/index.ts', PHYSICS],
-  ['src/components/physics/PhysicsWorker.tsx', PHYSICS],
 
   ['src/components/village/index.ts', VILLAGE],
 
   ['src/components/breakdown/BreakdownEffects.tsx', BREAKDOWN],
 
-  ['src/components/MaintenanceSystem.tsx', MAINTENANCE],
-
   ['src/components/ZoneAccentLights.tsx', ZONE_LIGHTS],
+
+  [
+    'src/hooks/useSafetySimulation.ts',
+    'Uncrewed safety simulation hook with no importer; the current simulation does not mount random personnel-era incident generation.',
+  ],
+  [
+    'src/utils/sanitize.ts',
+    'Legacy multiplayer sanitizers with no production or test importer after the uncrewed release.',
+  ],
+  [
+    'src/utils/typeGuards.ts',
+    'Test-only utility collection with no production importer; its geometry helpers are documented as future-facing rather than live.',
+  ],
+  [
+    'src/agent/client/executeAgentCommand.ts',
+    'One-shot draft/preview/approve/commit adapter for programmatic callers of window.__MILLOS_AGENT__. AgentCockpit drives preview and commit as two separate user actions and does not import it; no other caller exists yet.',
+  ],
 ]);
 
 // ---------------------------------------------------------------------------

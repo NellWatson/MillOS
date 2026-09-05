@@ -32,6 +32,17 @@ const REQUIRED_AUDIO = new Set([
   'Cloud Dancer.mp3',
   'Fanfare for Space.mp3',
 ]);
+const SOUNDTRACK_DIRECTORY = 'audio/millos-originals';
+const REQUIRED_SOUNDTRACK_AUDIO = new Set([
+  '01-the-mill-wakes.mp3',
+  '02-grain-at-the-gate.mp3',
+  '03-between-the-rolls.mp3',
+  '04-the-sifters-sing.mp3',
+  '05-forty-two-bags-a-minute.mp3',
+  '06-safe-hands-clear-ways.mp3',
+  '07-every-grain-every-watt.mp3',
+  '08-partner-in-the-control-room.mp3',
+]);
 
 if (!fs.existsSync(distDirectory)) {
   throw new Error(`Build output does not exist: ${distDirectory}`);
@@ -124,6 +135,68 @@ if (missingAudio.length > 0) {
   failures.push(`Current build is missing referenced audio: ${missingAudio.join(', ')}`);
 }
 
+const soundtrackDirectory = path.join(distDirectory, SOUNDTRACK_DIRECTORY);
+const soundtrackManifestPath = path.join(soundtrackDirectory, 'manifest.json');
+const soundtrackAudio = fs.existsSync(soundtrackDirectory)
+  ? fs
+      .readdirSync(soundtrackDirectory, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.toLocaleLowerCase().endsWith('.mp3'))
+      .map((entry) => entry.name)
+      .sort()
+  : [];
+const unexpectedSoundtrackAudio = soundtrackAudio.filter(
+  (file) => !REQUIRED_SOUNDTRACK_AUDIO.has(file)
+);
+const missingSoundtrackAudio = [...REQUIRED_SOUNDTRACK_AUDIO].filter(
+  (file) => !soundtrackAudio.includes(file)
+);
+if (unexpectedSoundtrackAudio.length > 0) {
+  failures.push(
+    `Current build contains unused MillOS soundtrack audio: ${unexpectedSoundtrackAudio.join(', ')}`
+  );
+}
+if (missingSoundtrackAudio.length > 0) {
+  failures.push(
+    `Current build is missing MillOS soundtrack audio: ${missingSoundtrackAudio.join(', ')}`
+  );
+}
+
+if (!fs.existsSync(soundtrackManifestPath)) {
+  failures.push('Current build is missing the MillOS soundtrack manifest.');
+} else {
+  try {
+    const soundtrackManifest = JSON.parse(fs.readFileSync(soundtrackManifestPath, 'utf8'));
+    if (soundtrackManifest.schemaVersion !== 1 || soundtrackManifest.trackCount !== 8) {
+      failures.push('MillOS soundtrack manifest has an unexpected schema or track count.');
+    }
+    if (
+      soundtrackManifest.lyricAlignment?.humanSynchronizationReviewed !== false ||
+      soundtrackManifest.rightsAndRelease?.commercialUseEligibilityVerified !== false
+    ) {
+      failures.push('MillOS soundtrack manifest lost its human timing or commercial-rights gate.');
+    }
+    const referencedFiles = new Set([
+      soundtrackManifest.lyricAlignment?.file,
+      ...soundtrackManifest.tracks.flatMap((track) => [
+        track.file,
+        track.artwork?.file,
+        track.lyrics?.vtt?.file,
+        track.lyrics?.lrc?.file,
+      ]),
+    ]);
+    for (const referencedFile of referencedFiles) {
+      if (
+        typeof referencedFile !== 'string' ||
+        !fs.existsSync(path.join(soundtrackDirectory, referencedFile))
+      ) {
+        failures.push(`MillOS soundtrack manifest references a missing asset: ${referencedFile}`);
+      }
+    }
+  } catch (error) {
+    failures.push(`MillOS soundtrack manifest is unreadable: ${error.message}`);
+  }
+}
+
 let totalDistBytes = 0;
 const prohibitedBuildMetadata = [];
 const pendingDirectories = [distDirectory];
@@ -184,6 +257,7 @@ const report = {
     initialGzipBytes,
     totalDistBytes,
     topLevelAudio,
+    soundtrackAudio,
     archiveDirectories,
     prohibitedBuildMetadata,
   },

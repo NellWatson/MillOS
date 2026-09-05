@@ -10,6 +10,7 @@
  * - Automatic cleanup of old data
  */
 
+import { logger } from '../utils/logger';
 import {
   TagValue,
   TagHistoryPoint,
@@ -51,14 +52,86 @@ const DEFAULT_CONFIG: HistoryStoreConfig = {
   changeDeadband: 0.5, // OPT-5: Change detection
 };
 
+const INDEXED_DB_OPERATION_TIMEOUT_MS = 10_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const MAX_QUERY_POINTS = 100_000;
+const MAX_BUFFER_SIZE = 100_000;
+const MAX_BATCH_TAGS = 256;
+const MAX_BATCH_INPUT_TAGS = 1_024;
+const MAX_BATCH_CONCURRENCY = 8;
+const VALID_QUALITIES = new Set(['GOOD', 'UNCERTAIN', 'BAD', 'STALE']);
+const VALID_ALARM_TYPES = new Set(['HIHI', 'HI', 'LO', 'LOLO', 'BAD_QUALITY', 'RATE_OF_CHANGE']);
+const VALID_ALARM_STATES = new Set(['NORMAL', 'UNACK', 'ACKED', 'RTN_UNACK']);
+const VALID_ALARM_PRIORITIES = new Set(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']);
+
+const isValidTimeRange = (startTime: number, endTime: number): boolean =>
+  Number.isFinite(startTime) && Number.isFinite(endTime) && startTime <= endTime;
+
+const positiveIntegerOr = (value: number, fallback: number, maximum: number): number => {
+  if (!Number.isFinite(value) || value < 1 || value > maximum) return fallback;
+  return Math.floor(value);
+};
+
+const sanitizeConfig = (config: Partial<HistoryStoreConfig>): HistoryStoreConfig => ({
+  retentionMs: positiveIntegerOr(
+    config.retentionMs ?? DEFAULT_CONFIG.retentionMs,
+    DEFAULT_CONFIG.retentionMs,
+    Number.MAX_SAFE_INTEGER
+  ),
+  batchIntervalMs: positiveIntegerOr(
+    config.batchIntervalMs ?? DEFAULT_CONFIG.batchIntervalMs,
+    DEFAULT_CONFIG.batchIntervalMs,
+    MAX_TIMER_DELAY_MS
+  ),
+  maxQueryPoints: positiveIntegerOr(
+    config.maxQueryPoints ?? DEFAULT_CONFIG.maxQueryPoints,
+    DEFAULT_CONFIG.maxQueryPoints,
+    MAX_QUERY_POINTS
+  ),
+  maxBufferSize: positiveIntegerOr(
+    config.maxBufferSize ?? DEFAULT_CONFIG.maxBufferSize,
+    DEFAULT_CONFIG.maxBufferSize,
+    MAX_BUFFER_SIZE
+  ),
+  changeDeadband:
+    Number.isFinite(config.changeDeadband) && (config.changeDeadband ?? -1) >= 0
+      ? config.changeDeadband!
+      : DEFAULT_CONFIG.changeDeadband,
+});
+
+const createHistoryResult = (): Record<string, TagHistoryPoint[]> =>
+  Object.create(null) as Record<string, TagHistoryPoint[]>;
+
+const forEachWithConcurrency = async <T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> => {
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex++];
+      if (item !== undefined) await worker(item);
+    }
+  });
+  await Promise.all(workers);
+};
+
 /**
  * Wrap a promise with a timeout to prevent indefinite hangs
  */
 const withTimeout = <T>(promise: Promise<T>, ms: number, operation: string): Promise<T> => {
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`IndexedDB timeout: ${operation} exceeded ${ms}ms`)), ms)
-  );
-  return Promise.race([promise, timeout]);
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error(`IndexedDB timeout: ${operation} exceeded ${ms}ms`)),
+      ms
+    );
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  });
 };
 
 export class HistoryStore {
@@ -71,18 +144,24 @@ export class HistoryStore {
   private batchInterval: ReturnType<typeof setInterval> | null = null;
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private isInitialized = false;
-  private isFlushing = false;
+  private initPromise: Promise<void> | null = null;
+  private cancelPendingInit: (() => void) | null = null;
+  private lifecycleEpoch = 0;
   private flushQueued = false;
+  private activeFlush: Promise<void> | null = null;
+  private activeCleanup: Promise<void> | null = null;
+  private activeClear: Promise<void> | null = null;
   private historyDisabled = false;
 
   // Monotonically increasing ID for buffer entries to ensure safe concurrent removal
   private nextBufferId = 0;
 
-  // OPT-5: Track last written values for change detection
-  private lastWrittenValues: Map<string, number> = new Map();
+  // OPT-5: Track last written samples for value and quality change detection
+  private lastWrittenSamples: Map<string, { value: number; quality: TagValue['quality'] }> =
+    new Map();
 
   constructor(config: Partial<HistoryStoreConfig> = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.config = sanitizeConfig(config);
   }
 
   // =========================================================================
@@ -92,20 +171,56 @@ export class HistoryStore {
   /**
    * Initialize the IndexedDB database
    */
-  async init(): Promise<void> {
-    if (this.isInitialized) return;
+  init(): Promise<void> {
+    if (this.isInitialized) return Promise.resolve();
+    if (this.initPromise) return this.initPromise;
+
+    const epoch = ++this.lifecycleEpoch;
+    this.historyDisabled = false;
 
     // Graceful fallback for environments without IndexedDB (private mode/SSR)
     if (typeof indexedDB === 'undefined') {
       this.historyDisabled = true;
       this.isInitialized = true;
-      return;
+      return Promise.resolve();
     }
 
-    return new Promise((resolve, _reject) => {
-      const request = indexedDB.open(this.DB_NAME, this.DB_VERSION);
+    const initialization = new Promise<void>((resolve) => {
+      let settled = false;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      let request: IDBOpenDBRequest;
+
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId !== null) clearTimeout(timeoutId);
+        if (this.cancelPendingInit === finish) this.cancelPendingInit = null;
+        resolve();
+      };
+
+      this.cancelPendingInit = finish;
+
+      try {
+        request = indexedDB.open(this.DB_NAME, this.DB_VERSION);
+      } catch {
+        if (epoch === this.lifecycleEpoch) {
+          this.historyDisabled = true;
+          this.isInitialized = true;
+        }
+        finish();
+        return;
+      }
+
+      timeoutId = setTimeout(() => {
+        if (epoch === this.lifecycleEpoch) {
+          this.historyDisabled = true;
+          this.isInitialized = true;
+        }
+        finish();
+      }, INDEXED_DB_OPERATION_TIMEOUT_MS);
 
       request.onupgradeneeded = (event) => {
+        if (settled || epoch !== this.lifecycleEpoch) return;
         const db = (event.target as IDBOpenDBRequest).result;
 
         // Tag history store
@@ -132,27 +247,45 @@ export class HistoryStore {
       };
 
       request.onsuccess = () => {
-        this.db = request.result;
+        const openedDb = request.result;
+        if (settled || epoch !== this.lifecycleEpoch) {
+          openedDb.close();
+          return;
+        }
+
+        this.db = openedDb;
+        this.historyDisabled = false;
         this.isInitialized = true;
 
         // Start batch write interval
-        this.batchInterval = setInterval(() => this.flushBuffers(), this.config.batchIntervalMs);
+        this.batchInterval = setInterval(
+          () => void this.flushBuffers(),
+          this.config.batchIntervalMs
+        );
 
         // Start cleanup interval (every hour)
-        this.cleanupInterval = setInterval(() => this.cleanup(), 60 * 60 * 1000);
+        this.cleanupInterval = setInterval(() => void this.cleanup(), 60 * 60 * 1000);
 
         // Initial cleanup
-        this.cleanup();
+        void this.cleanup();
 
-        resolve();
+        finish();
       };
 
       request.onerror = () => {
-        this.historyDisabled = true;
-        this.isInitialized = true;
-        resolve(); // Continue in disabled mode instead of rejecting
+        if (!settled && epoch === this.lifecycleEpoch) {
+          this.historyDisabled = true;
+          this.isInitialized = true;
+        }
+        finish(); // Continue in disabled mode instead of rejecting
       };
     });
+
+    const trackedInitialization = initialization.finally(() => {
+      if (this.initPromise === trackedInitialization) this.initPromise = null;
+    });
+    this.initPromise = trackedInitialization;
+    return trackedInitialization;
   }
 
   /**
@@ -160,32 +293,74 @@ export class HistoryStore {
    * @param flush - If true (default), flush pending buffers before closing
    */
   async close(flush = true): Promise<void> {
+    ++this.lifecycleEpoch;
+    this.cancelPendingInit?.();
+
     // Stop intervals first to prevent new flushes during shutdown
-    if (this.batchInterval) {
+    if (this.batchInterval !== null) {
       clearInterval(this.batchInterval);
       this.batchInterval = null;
     }
-    if (this.cleanupInterval) {
+    if (this.cleanupInterval !== null) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
     }
 
-    // Flush any pending data before closing (unless explicitly skipped)
-    if (flush && this.db) {
+    if (this.initPromise) await this.initPromise;
+    if (this.activeClear) {
+      // clearAll retains its own rejection contract. Shutdown still needs to
+      // close the database after the bounded clear transactions settle.
+      await this.activeClear.catch(() => undefined);
+    }
+    if (this.activeCleanup) await this.activeCleanup;
+
+    // Never close a database underneath an already-running transaction. When
+    // flushing is requested, joining the active promise also requests one
+    // final pass for writes that arrived after its snapshot.
+    let flushAttempted = false;
+    if (this.activeFlush) {
+      if (flush) this.flushQueued = true;
+      flushAttempted = flush;
+      await this.activeFlush;
+    } else if (flush && this.db) {
+      flushAttempted = true;
       await this.flushBuffers();
     }
+
+    // Only a flush that was actually attempted and left records behind is a
+    // failure. With no database there is nothing to flush; throwing here made
+    // every later close() throw forever once one flush had failed.
+    const flushIncomplete =
+      flushAttempted && (this.writeBuffer.length > 0 || this.alarmBuffer.length > 0);
 
     if (this.db) {
       this.db.close();
       this.db = null;
     }
-    // Reset buffers and caches so next init starts clean
-    this.writeBuffer = [];
-    this.alarmBuffer = [];
-    this.lastWrittenValues.clear();
-    this.isFlushing = false;
+
+    // A caller that explicitly skips flushing is asking to discard pending
+    // data. A failed bounded flush retains its buffers for a later init/retry.
+    if (!flush || !flushIncomplete) {
+      const retained = this.writeBuffer.length + this.alarmBuffer.length;
+      if (flush && !flushAttempted && retained > 0) {
+        logger.warn(
+          `[HistoryStore] close() discarded ${retained} buffered record(s); no database was open to flush them`
+        );
+      }
+      this.writeBuffer = [];
+      this.alarmBuffer = [];
+      this.lastWrittenSamples.clear();
+    }
     this.flushQueued = false;
+    this.activeFlush = null;
+    this.activeCleanup = null;
+    this.activeClear = null;
     this.isInitialized = false;
+    this.historyDisabled = false;
+
+    if (flushIncomplete) {
+      throw new Error('HistoryStore closed with records that could not be flushed');
+    }
   }
 
   // =========================================================================
@@ -200,19 +375,37 @@ export class HistoryStore {
   writeTagValue(tagValue: TagValue): void {
     if (this.historyDisabled) return;
 
-    const numValue = tagValue.value as number;
+    // TagHistoryPoint is a numeric contract. Preserve BOOL tags as 0/1 and
+    // reject other non-numeric or non-finite samples before they can poison
+    // deadband state or IndexedDB key ordering.
+    const numValue =
+      typeof tagValue.value === 'boolean' ? (tagValue.value ? 1 : 0) : tagValue.value;
+    if (
+      typeof tagValue.tagId !== 'string' ||
+      tagValue.tagId.length === 0 ||
+      typeof numValue !== 'number' ||
+      !Number.isFinite(numValue) ||
+      !Number.isFinite(tagValue.timestamp) ||
+      !VALID_QUALITIES.has(tagValue.quality)
+    ) {
+      return;
+    }
 
     // OPT-5: Change detection - skip if value hasn't changed significantly
-    const lastValue = this.lastWrittenValues.get(tagValue.tagId);
-    if (lastValue !== undefined) {
-      const delta = Math.abs(numValue - lastValue);
+    const lastSample = this.lastWrittenSamples.get(tagValue.tagId);
+    if (lastSample !== undefined && lastSample.quality === tagValue.quality) {
+      const delta = Math.abs(numValue - lastSample.value);
       if (delta < this.config.changeDeadband) {
         return; // Skip unchanged values
       }
     }
 
-    // Update last written value
-    this.lastWrittenValues.set(tagValue.tagId, numValue);
+    // Quality changes are meaningful historian events even when the numeric
+    // value remains within the configured change deadband.
+    this.lastWrittenSamples.set(tagValue.tagId, {
+      value: numValue,
+      quality: tagValue.quality,
+    });
 
     this.writeBuffer.push({
       tagId: tagValue.tagId,
@@ -221,6 +414,21 @@ export class HistoryStore {
       quality: tagValue.quality,
       _bufferId: this.nextBufferId++,
     });
+
+    // A forced flush is best-effort. IndexedDB may be unavailable or stalled,
+    // so enforce the memory bound independently and retain the freshest data.
+    if (this.writeBuffer.length > this.config.maxBufferSize) {
+      const evicted = this.writeBuffer.splice(
+        0,
+        this.writeBuffer.length - this.config.maxBufferSize
+      );
+      const retainedTagIds = new Set(this.writeBuffer.map((record) => record.tagId));
+      for (const record of evicted) {
+        // An evicted tag no longer has a pending snapshot. Clear its deadband
+        // baseline so a later identical sample can restore that lost point.
+        if (!retainedTagIds.has(record.tagId)) this.lastWrittenSamples.delete(record.tagId);
+      }
+    }
 
     // OPT-13: Bounded buffer - force flush if buffer exceeds max size
     if (this.writeBuffer.length >= this.config.maxBufferSize) {
@@ -241,6 +449,22 @@ export class HistoryStore {
    */
   writeAlarm(alarm: Alarm): void {
     if (this.historyDisabled) return;
+    if (
+      typeof alarm.id !== 'string' ||
+      alarm.id.length === 0 ||
+      typeof alarm.tagId !== 'string' ||
+      alarm.tagId.length === 0 ||
+      !VALID_ALARM_TYPES.has(alarm.type) ||
+      !VALID_ALARM_STATES.has(alarm.state) ||
+      !VALID_ALARM_PRIORITIES.has(alarm.priority) ||
+      !Number.isFinite(alarm.value) ||
+      !Number.isFinite(alarm.threshold) ||
+      !Number.isFinite(alarm.timestamp) ||
+      (alarm.acknowledgedAt !== undefined && !Number.isFinite(alarm.acknowledgedAt)) ||
+      (alarm.clearedAt !== undefined && !Number.isFinite(alarm.clearedAt))
+    ) {
+      return;
+    }
 
     this.alarmBuffer.push({
       alarmId: alarm.id,
@@ -256,87 +480,131 @@ export class HistoryStore {
       acknowledgedBy: alarm.acknowledgedBy,
       _bufferId: this.nextBufferId++,
     });
+
+    if (this.alarmBuffer.length > this.config.maxBufferSize) {
+      this.alarmBuffer.splice(0, this.alarmBuffer.length - this.config.maxBufferSize);
+    }
+
+    if (this.alarmBuffer.length >= this.config.maxBufferSize) {
+      void this.flushBuffers();
+    }
   }
 
   /**
    * Flush all buffered data to IndexedDB
    */
-  private async flushBuffers(): Promise<void> {
-    if (this.historyDisabled) return;
+  private flushBuffers(): Promise<void> {
+    if (this.historyDisabled || !this.db) return Promise.resolve();
+    if (this.activeClear) return Promise.resolve();
+
+    // All callers join the same flush wave. This makes close() wait for an
+    // existing transaction instead of closing the database underneath it.
+    if (this.activeFlush) {
+      this.flushQueued = true;
+      return this.activeFlush;
+    }
 
     const db = this.db;
-    if (!db) return;
+    const activeFlush = Promise.resolve().then(async () => {
+      try {
+        do {
+          this.flushQueued = false;
+          await this.flushBufferedSnapshot(db);
+        } while (this.flushQueued && this.db === db);
+      } finally {
+        if (this.activeFlush === activeFlush) this.activeFlush = null;
+      }
+    });
+    this.activeFlush = activeFlush;
+    return activeFlush;
+  }
 
-    // Prevent overlapping flushes which can duplicate writes
-    if (this.isFlushing) {
-      this.flushQueued = true;
-      return;
-    }
-    this.isFlushing = true;
+  private async waitForTransaction(transaction: IDBTransaction, operation: string): Promise<void> {
+    const completion = new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error ?? new Error(`${operation} aborted`));
+    });
 
+    await this.withTransactionTimeout(transaction, completion, operation);
+  }
+
+  private async withTransactionTimeout<T>(
+    transaction: IDBTransaction,
+    operationPromise: Promise<T>,
+    operation: string
+  ): Promise<T> {
     try {
-      // Flush tag history
-      if (this.writeBuffer.length > 0) {
-        const records = [...this.writeBuffer];
-        // Track the IDs of records we're flushing for safe removal
-        const flushedIds = new Set(records.map((r) => r._bufferId));
+      return await withTimeout(operationPromise, INDEXED_DB_OPERATION_TIMEOUT_MS, operation);
+    } catch (error) {
+      try {
+        transaction.abort();
+      } catch {
+        // The transaction may already have completed or aborted.
+      }
+      throw error;
+    }
+  }
 
+  private async withTransactionsTimeout<T>(
+    transactions: IDBTransaction[],
+    operationPromise: Promise<T>,
+    operation: string
+  ): Promise<T> {
+    try {
+      return await withTimeout(operationPromise, INDEXED_DB_OPERATION_TIMEOUT_MS, operation);
+    } catch (error) {
+      for (const transaction of transactions) {
         try {
-          const transaction = db.transaction('tagHistory', 'readwrite');
-          const store = transaction.objectStore('tagHistory');
-
-          // Strip internal _bufferId before writing to IndexedDB
-          records.forEach((record) => {
-            const { _bufferId: _, ...dbRecord } = record;
-            store.add(dbRecord);
-          });
-
-          await new Promise<void>((resolve, reject) => {
-            transaction.oncomplete = () => resolve();
-            transaction.onerror = () => reject(transaction.error);
-          });
-
-          // Remove only the exact records we flushed by ID, not by count
-          // This prevents race conditions where concurrent writes could be missed
-          this.writeBuffer = this.writeBuffer.filter((r) => !flushedIds.has(r._bufferId));
+          transaction.abort();
         } catch {
-          // Records remain in buffer for next attempt
+          // The transaction may already have completed or aborted.
         }
       }
+      throw error;
+    }
+  }
 
-      // Flush alarm history
-      if (this.alarmBuffer.length > 0) {
-        const records = [...this.alarmBuffer];
-        // Track the IDs of records we're flushing for safe removal
-        const flushedIds = new Set(records.map((r) => r._bufferId));
+  private async flushBufferedSnapshot(db: IDBDatabase): Promise<void> {
+    // Flush tag history
+    if (this.writeBuffer.length > 0) {
+      const records = [...this.writeBuffer];
+      const flushedIds = new Set(records.map((record) => record._bufferId));
 
-        try {
-          const transaction = db.transaction('alarmHistory', 'readwrite');
-          const store = transaction.objectStore('alarmHistory');
+      try {
+        const transaction = db.transaction('tagHistory', 'readwrite');
+        const store = transaction.objectStore('tagHistory');
 
-          // Strip internal _bufferId before writing to IndexedDB
-          records.forEach((record) => {
-            const { _bufferId: _, ...dbRecord } = record;
-            store.add(dbRecord);
-          });
+        records.forEach((record) => {
+          const { _bufferId: _, ...dbRecord } = record;
+          store.add(dbRecord);
+        });
 
-          await new Promise<void>((resolve, reject) => {
-            transaction.oncomplete = () => resolve();
-            transaction.onerror = () => reject(transaction.error);
-          });
-
-          // Remove only the exact records we flushed by ID, not by count
-          // This prevents race conditions where concurrent writes could be missed
-          this.alarmBuffer = this.alarmBuffer.filter((r) => !flushedIds.has(r._bufferId));
-        } catch {
-          // Records remain in buffer for next attempt
-        }
+        await this.waitForTransaction(transaction, 'flush tag history');
+        this.writeBuffer = this.writeBuffer.filter((record) => !flushedIds.has(record._bufferId));
+      } catch {
+        // Records remain in the bounded buffer for the next attempt.
       }
-    } finally {
-      this.isFlushing = false;
-      if (this.flushQueued) {
-        this.flushQueued = false;
-        void this.flushBuffers();
+    }
+
+    // Flush alarm history
+    if (this.alarmBuffer.length > 0) {
+      const records = [...this.alarmBuffer];
+      const flushedIds = new Set(records.map((record) => record._bufferId));
+
+      try {
+        const transaction = db.transaction('alarmHistory', 'readwrite');
+        const store = transaction.objectStore('alarmHistory');
+
+        records.forEach((record) => {
+          const { _bufferId: _, ...dbRecord } = record;
+          store.add(dbRecord);
+        });
+
+        await this.waitForTransaction(transaction, 'flush alarm history');
+        this.alarmBuffer = this.alarmBuffer.filter((record) => !flushedIds.has(record._bufferId));
+      } catch {
+        // Records remain in the bounded buffer for the next attempt.
       }
     }
   }
@@ -354,12 +622,13 @@ export class HistoryStore {
     endTime: number = Date.now()
   ): Promise<TagHistoryPoint[]> {
     if (this.historyDisabled) return [];
+    if (!isValidTimeRange(startTime, endTime)) return [];
 
     const db = this.db;
     if (!db) return [];
 
+    const transaction = db.transaction('tagHistory', 'readonly');
     const query = new Promise<TagHistoryPoint[]>((resolve, reject) => {
-      const transaction = db.transaction('tagHistory', 'readonly');
       const store = transaction.objectStore('tagHistory');
       const index = store.index('tagId_timestamp');
 
@@ -368,19 +637,23 @@ export class HistoryStore {
       const request = index.getAll(range, this.config.maxQueryPoints);
 
       request.onsuccess = () => {
-        resolve(
-          request.result.map((r) => ({
-            timestamp: r.timestamp,
-            value: r.value,
-            quality: r.quality,
-          }))
-        );
+        try {
+          resolve(
+            request.result.map((r) => ({
+              timestamp: r.timestamp,
+              value: r.value,
+              quality: r.quality,
+            }))
+          );
+        } catch (error) {
+          reject(error);
+        }
       };
 
       request.onerror = () => reject(request.error);
     });
 
-    return withTimeout(query, 10000, `getHistory(${tagId})`);
+    return this.withTransactionTimeout(transaction, query, `getHistory(${tagId})`);
   }
 
   /**
@@ -391,21 +664,42 @@ export class HistoryStore {
     startTime: number,
     endTime: number = Date.now()
   ): Promise<Record<string, TagHistoryPoint[]>> {
-    if (this.historyDisabled) return {};
+    if (!Array.isArray(tagIds)) {
+      throw new TypeError('HistoryStore tagIds must be an array');
+    }
+    if (tagIds.length > MAX_BATCH_INPUT_TAGS) {
+      throw new RangeError(
+        `HistoryStore batches are limited to ${MAX_BATCH_INPUT_TAGS} input entries`
+      );
+    }
 
-    const result: Record<string, TagHistoryPoint[]> = {};
+    const uniqueTagIds: string[] = [];
+    const seenTagIds = new Set<string>();
+    for (let index = 0; index < tagIds.length; index += 1) {
+      const tagId = tagIds[index];
+      if (typeof tagId !== 'string' || tagId.length === 0) {
+        throw new TypeError('HistoryStore tagIds must be non-empty strings');
+      }
+      if (seenTagIds.has(tagId)) continue;
+      seenTagIds.add(tagId);
+      uniqueTagIds.push(tagId);
+      if (uniqueTagIds.length > MAX_BATCH_TAGS) {
+        throw new RangeError(`HistoryStore batches are limited to ${MAX_BATCH_TAGS} unique tags`);
+      }
+    }
+
+    const result = createHistoryResult();
+    if (this.historyDisabled) return result;
 
     // Per-tag isolation: a single tag's IDB timeout/error must not reject the
     // whole batch and discard every other tag's data (Record partial-result contract).
-    await Promise.all(
-      tagIds.map(async (tagId) => {
-        try {
-          result[tagId] = await this.getHistory(tagId, startTime, endTime);
-        } catch {
-          result[tagId] = [];
-        }
-      })
-    );
+    await forEachWithConcurrency(uniqueTagIds, MAX_BATCH_CONCURRENCY, async (tagId) => {
+      try {
+        result[tagId] = await this.getHistory(tagId, startTime, endTime);
+      } catch {
+        result[tagId] = [];
+      }
+    });
 
     return result;
   }
@@ -419,8 +713,8 @@ export class HistoryStore {
     const db = this.db;
     if (!db) return null;
 
+    const transaction = db.transaction('tagHistory', 'readonly');
     const query = new Promise<TagHistoryPoint | null>((resolve, reject) => {
-      const transaction = db.transaction('tagHistory', 'readonly');
       const store = transaction.objectStore('tagHistory');
       const index = store.index('tagId_timestamp');
 
@@ -429,22 +723,26 @@ export class HistoryStore {
       const request = index.openCursor(range, 'prev');
 
       request.onsuccess = () => {
-        const cursor = request.result;
-        if (cursor) {
-          resolve({
-            timestamp: cursor.value.timestamp,
-            value: cursor.value.value,
-            quality: cursor.value.quality,
-          });
-        } else {
-          resolve(null);
+        try {
+          const cursor = request.result;
+          if (cursor) {
+            resolve({
+              timestamp: cursor.value.timestamp,
+              value: cursor.value.value,
+              quality: cursor.value.quality,
+            });
+          } else {
+            resolve(null);
+          }
+        } catch (error) {
+          reject(error);
         }
       };
 
       request.onerror = () => reject(request.error);
     });
 
-    return withTimeout(query, 10000, `getLatestValue(${tagId})`);
+    return this.withTransactionTimeout(transaction, query, `getLatestValue(${tagId})`);
   }
 
   /**
@@ -456,34 +754,40 @@ export class HistoryStore {
     limit = 100
   ): Promise<AlarmHistoryRecord[]> {
     if (this.historyDisabled) return [];
+    if (!isValidTimeRange(startTime, endTime) || !Number.isFinite(limit) || limit <= 0) return [];
 
     const db = this.db;
     if (!db) return [];
 
+    const transaction = db.transaction('alarmHistory', 'readonly');
     const query = new Promise<AlarmHistoryRecord[]>((resolve, reject) => {
-      const transaction = db.transaction('alarmHistory', 'readonly');
       const store = transaction.objectStore('alarmHistory');
       const index = store.index('timestamp');
 
       const range = IDBKeyRange.bound(startTime, endTime);
       const results: AlarmHistoryRecord[] = [];
+      const safeLimit = Math.min(Math.floor(limit), this.config.maxQueryPoints);
 
       const request = index.openCursor(range, 'prev');
 
       request.onsuccess = () => {
-        const cursor = request.result;
-        if (cursor && results.length < limit) {
-          results.push(cursor.value);
-          cursor.continue();
-        } else {
-          resolve(results);
+        try {
+          const cursor = request.result;
+          if (cursor && results.length < safeLimit) {
+            results.push({ ...cursor.value });
+            cursor.continue();
+          } else {
+            resolve(results);
+          }
+        } catch (error) {
+          reject(error);
         }
       };
 
       request.onerror = () => reject(request.error);
     });
 
-    return withTimeout(query, 10000, 'getAlarmHistory');
+    return this.withTransactionTimeout(transaction, query, 'getAlarmHistory');
   }
 
   /**
@@ -514,9 +818,12 @@ export class HistoryStore {
       };
     }
 
+    const transactions: IDBTransaction[] = [];
+
     const getCount = (storeName: string): Promise<number> => {
       return new Promise((resolve, reject) => {
         const transaction = db.transaction(storeName, 'readonly');
+        transactions.push(transaction);
         const store = transaction.objectStore(storeName);
         const request = store.count();
         request.onsuccess = () => resolve(request.result);
@@ -527,6 +834,7 @@ export class HistoryStore {
     const getFirstTimestamp = (): Promise<number | null> => {
       return new Promise((resolve, reject) => {
         const transaction = db.transaction('tagHistory', 'readonly');
+        transactions.push(transaction);
         const store = transaction.objectStore('tagHistory');
         const index = store.index('timestamp');
         const request = index.openCursor();
@@ -541,6 +849,7 @@ export class HistoryStore {
     const getLastTimestamp = (): Promise<number | null> => {
       return new Promise((resolve, reject) => {
         const transaction = db.transaction('tagHistory', 'readonly');
+        transactions.push(transaction);
         const store = transaction.objectStore('tagHistory');
         const index = store.index('timestamp');
         const request = index.openCursor(null, 'prev');
@@ -552,13 +861,14 @@ export class HistoryStore {
       });
     };
 
+    const statsPromise = Promise.all([
+      getCount('tagHistory'),
+      getCount('alarmHistory'),
+      getFirstTimestamp(),
+      getLastTimestamp(),
+    ]);
     const [tagHistoryCount, alarmHistoryCount, oldestTimestamp, newestTimestamp] =
-      await Promise.all([
-        getCount('tagHistory'),
-        getCount('alarmHistory'),
-        getFirstTimestamp(),
-        getLastTimestamp(),
-      ]);
+      await this.withTransactionsTimeout(transactions, statsPromise, 'getStats');
 
     return {
       tagHistoryCount,
@@ -614,11 +924,8 @@ export class HistoryStore {
       };
     }
 
-    const tags: Record<string, TagHistoryPoint[]> = {};
-
-    for (const tagId of tagIds) {
-      tags[tagId] = await this.getHistory(tagId, startTime, endTime);
-    }
+    // Same limits, concurrency and null-prototype result as any other batch read.
+    const tags = await this.getMultipleTagHistory(tagIds, startTime, endTime);
 
     const result: SCADAExport = {
       exportTime: Date.now(),
@@ -651,7 +958,8 @@ export class HistoryStore {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // Revoking in the same tick as click() has cancelled downloads in Firefox.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
   // =========================================================================
@@ -661,89 +969,121 @@ export class HistoryStore {
   /**
    * Remove data older than retention period
    */
-  private async cleanup(): Promise<void> {
-    if (this.historyDisabled) return;
+  private cleanup(): Promise<void> {
+    if (this.historyDisabled) return Promise.resolve();
+    if (this.activeClear) return Promise.resolve();
 
     const db = this.db;
-    if (!db) return;
+    if (!db) return Promise.resolve();
+    if (this.activeCleanup) return this.activeCleanup;
 
+    const activeCleanup = this.performCleanup(db).finally(() => {
+      if (this.activeCleanup === activeCleanup) this.activeCleanup = null;
+    });
+    this.activeCleanup = activeCleanup;
+    return activeCleanup;
+  }
+
+  private async performCleanup(db: IDBDatabase): Promise<void> {
     const cutoff = Date.now() - this.config.retentionMs;
-    let deletedCount = 0;
-
-    // Cleanup tag history
-    try {
-      const transaction = db.transaction('tagHistory', 'readwrite');
-      const store = transaction.objectStore('tagHistory');
-      const index = store.index('timestamp');
-
-      const range = IDBKeyRange.upperBound(cutoff);
-      const request = index.openCursor(range);
-
-      request.onsuccess = () => {
-        const cursor = request.result;
-        if (cursor) {
-          cursor.delete();
-          deletedCount++;
-          cursor.continue();
-        }
-      };
-
-      await new Promise<void>((resolve, reject) => {
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error);
-      });
-    } catch {
-      // Cleanup failed - will retry on next interval
-    }
-
-    // Cleanup alarm history (keep longer - 7 days)
     const alarmCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    try {
-      const transaction = db.transaction('alarmHistory', 'readwrite');
-      const store = transaction.objectStore('alarmHistory');
-      const index = store.index('timestamp');
 
-      const range = IDBKeyRange.upperBound(alarmCutoff);
-      const request = index.openCursor(range);
-      let alarmDeletedCount = 0;
+    // The stores are disjoint, so start both transactions together. Their
+    // independent timeout clocks keep the whole cleanup wave within one bound.
+    await Promise.allSettled([
+      this.deleteBefore(db, 'tagHistory', cutoff),
+      this.deleteBefore(db, 'alarmHistory', alarmCutoff),
+    ]);
+  }
 
-      request.onsuccess = () => {
-        const cursor = request.result;
-        if (cursor) {
+  private async deleteBefore(
+    db: IDBDatabase,
+    storeName: 'tagHistory' | 'alarmHistory',
+    cutoff: number
+  ): Promise<void> {
+    const transaction = db.transaction(storeName, 'readwrite');
+    const store = transaction.objectStore(storeName);
+    const index = store.index('timestamp');
+
+    const range = IDBKeyRange.upperBound(cutoff);
+    const request = index.openCursor(range);
+
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (cursor) {
+        try {
           cursor.delete();
-          alarmDeletedCount++;
           cursor.continue();
+        } catch {
+          try {
+            transaction.abort();
+          } catch {
+            // The transaction may already have completed or aborted.
+          }
         }
-      };
+      }
+    };
 
-      await new Promise<void>((resolve, reject) => {
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error);
-      });
-    } catch {
-      // Cleanup failed - will retry on next interval
-    }
+    await this.waitForTransaction(transaction, `cleanup ${storeName}`);
   }
 
   /**
    * Clear all history data (use with caution!)
    */
-  async clearAll(): Promise<void> {
-    if (this.historyDisabled) return;
+  clearAll(): Promise<void> {
+    if (this.activeClear) return this.activeClear;
 
     const db = this.db;
-    if (!db) return;
+    if (this.historyDisabled || !db) {
+      this.clearPendingHistory();
+      return Promise.resolve();
+    }
 
-    const clearStore = (storeName: string): Promise<void> => {
-      return new Promise((resolve, reject) => {
+    const activeClear = (async () => {
+      // Block new maintenance waves first, then join any transactions that
+      // already captured data. Clearing starts only after both have settled.
+      await Promise.allSettled(
+        [this.activeFlush, this.activeCleanup].filter(
+          (operation): operation is Promise<void> => operation !== null
+        )
+      );
+
+      // Pending records are part of the pre-clear state. Discard them before
+      // clearing IndexedDB, then discard anything buffered while clear was in
+      // progress in the finally block so it cannot be flushed back later.
+      this.clearPendingHistory();
+
+      const clearStore = async (storeName: string): Promise<void> => {
         const transaction = db.transaction(storeName, 'readwrite');
         const store = transaction.objectStore(storeName);
-        const request = store.clear();
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-      });
-    };
+        store.clear();
+        await this.waitForTransaction(transaction, `clear ${storeName}`);
+      };
 
-    await Promise.all([clearStore('tagHistory'), clearStore('alarmHistory')]);
+      try {
+        const results = await Promise.allSettled([
+          clearStore('tagHistory'),
+          clearStore('alarmHistory'),
+        ]);
+        const failure = results.find(
+          (result): result is PromiseRejectedResult => result.status === 'rejected'
+        );
+        if (failure) throw failure.reason;
+      } finally {
+        this.clearPendingHistory();
+      }
+    })().finally(() => {
+      if (this.activeClear === activeClear) this.activeClear = null;
+    });
+
+    this.activeClear = activeClear;
+    return activeClear;
+  }
+
+  private clearPendingHistory(): void {
+    this.writeBuffer = [];
+    this.alarmBuffer = [];
+    this.lastWrittenSamples.clear();
+    this.flushQueued = false;
   }
 }

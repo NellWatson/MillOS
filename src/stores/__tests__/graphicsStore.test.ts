@@ -5,7 +5,7 @@
  * SCADA toggle, and performance debug settings.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { ToneMappingMode } from 'postprocessing';
 import * as THREE from 'three';
 import {
@@ -50,22 +50,14 @@ describe('GraphicsStore', () => {
   });
 
   beforeEach(() => {
-    // Reset store to initial state (medium preset)
-    useGraphicsStore.setState({
-      graphics: { ...GRAPHICS_PRESETS.medium },
-    });
+    useGraphicsStore.setState(useGraphicsStore.getInitialState(), true);
   });
 
-  afterEach(() => {
-    vi.clearAllMocks();
+  it('starts from the complete medium preset', () => {
+    expect(useGraphicsStore.getState().graphics).toEqual(GRAPHICS_PRESETS.medium);
   });
 
   describe('Quality Presets', () => {
-    it('should initialize with medium quality preset', () => {
-      const { graphics } = useGraphicsStore.getState();
-      expect(graphics.quality).toBe('medium');
-    });
-
     it('should set low quality preset', () => {
       const { setGraphicsQuality } = useGraphicsStore.getState();
       setGraphicsQuality('low');
@@ -192,124 +184,57 @@ describe('GraphicsStore', () => {
   });
 
   describe('Individual Settings', () => {
-    it('should set individual graphics setting', () => {
+    it.each([
+      ['enableBloom', true],
+      ['dustParticleCount', 200],
+      ['shadowMapSize', 4096],
+    ] as const)('sets %s independently', (key, value) => {
       const { setGraphicsSetting } = useGraphicsStore.getState();
+      const before = useGraphicsStore.getState().graphics;
 
-      setGraphicsSetting('enableBloom', true);
-      expect(useGraphicsStore.getState().graphics.enableBloom).toBe(true);
+      setGraphicsSetting(key, value);
 
-      setGraphicsSetting('enableBloom', false);
-      expect(useGraphicsStore.getState().graphics.enableBloom).toBe(false);
-    });
-
-    it('should set dust particle count', () => {
-      const { setGraphicsSetting } = useGraphicsStore.getState();
-
-      setGraphicsSetting('dustParticleCount', 200);
-      expect(useGraphicsStore.getState().graphics.dustParticleCount).toBe(200);
-    });
-
-    it('should set shadow map size', () => {
-      const { setGraphicsSetting } = useGraphicsStore.getState();
-
-      setGraphicsSetting('shadowMapSize', 4096);
-      expect(useGraphicsStore.getState().graphics.shadowMapSize).toBe(4096);
-    });
-
-    it('should preserve other settings when changing one', () => {
-      const { setGraphicsSetting } = useGraphicsStore.getState();
-      const originalQuality = useGraphicsStore.getState().graphics.quality;
-
-      setGraphicsSetting('enableBloom', true);
-
-      expect(useGraphicsStore.getState().graphics.quality).toBe(originalQuality);
+      const after = useGraphicsStore.getState().graphics;
+      expect(after[key]).toBe(value);
+      expect(after.quality).toBe(before.quality);
     });
   });
 
   describe('SCADA Toggle', () => {
-    it('should keep SCADA data available on the medium preset', () => {
-      const { graphics } = useGraphicsStore.getState();
-      expect(graphics.enableSCADA).toBe(true);
-    });
-
-    it('should set SCADA enabled', () => {
+    it('round-trips the independent SCADA setting', () => {
       const { setSCADAEnabled } = useGraphicsStore.getState();
 
-      setSCADAEnabled(true);
-      expect(useGraphicsStore.getState().graphics.enableSCADA).toBe(true);
-    });
-
-    it('should set SCADA disabled', () => {
-      const { setSCADAEnabled } = useGraphicsStore.getState();
-
-      setSCADAEnabled(true);
       setSCADAEnabled(false);
       expect(useGraphicsStore.getState().graphics.enableSCADA).toBe(false);
+      setSCADAEnabled(true);
+      expect(useGraphicsStore.getState().graphics.enableSCADA).toBe(true);
     });
   });
 
   describe('Reset to Preset', () => {
-    it('should reset to low preset', () => {
+    it.each(['low', 'high'] as const)('resets all settings to the %s preset', (quality) => {
       const { setGraphicsSetting, resetGraphicsToPreset } = useGraphicsStore.getState();
 
-      // Modify some settings
       setGraphicsSetting('enableBloom', true);
       setGraphicsSetting('dustParticleCount', 999);
+      resetGraphicsToPreset(quality);
 
-      // Reset to low
-      resetGraphicsToPreset('low');
-
-      const { graphics } = useGraphicsStore.getState();
-      expect(graphics.quality).toBe('low');
-      expect(graphics.enableBloom).toBe(false);
-      expect(graphics.dustParticleCount).toBe(0);
-    });
-
-    it('should reset to high preset', () => {
-      const { resetGraphicsToPreset } = useGraphicsStore.getState();
-
-      resetGraphicsToPreset('high');
-
-      const { graphics } = useGraphicsStore.getState();
-      expect(graphics).toEqual(GRAPHICS_PRESETS.high);
+      expect(useGraphicsStore.getState().graphics).toEqual(GRAPHICS_PRESETS[quality]);
     });
   });
 
   describe('Performance Debug Settings', () => {
-    it('should have all systems enabled by default', () => {
-      const { graphics } = useGraphicsStore.getState();
-      expect(graphics.perfDebug.disableTruckBay).toBe(false);
-      expect(graphics.perfDebug.disableForkliftSystem).toBe(false);
-      expect(graphics.perfDebug.disableConveyorSystem).toBe(false);
-      expect(graphics.perfDebug.disableMachines).toBe(false);
-      expect(graphics.perfDebug.disableEnvironment).toBe(false);
-      expect(graphics.perfDebug.disableAllAnimations).toBe(false);
-      expect(graphics.perfDebug.showPerfOverlay).toBe(false);
-    });
+    it.each(['disableTruckBay', 'showPerfOverlay', 'disableAllAnimations'] as const)(
+      'sets and clears %s',
+      (key) => {
+        const { setPerfDebug } = useGraphicsStore.getState();
 
-    it('should set individual perf debug setting', () => {
-      const { setPerfDebug } = useGraphicsStore.getState();
-
-      setPerfDebug('disableTruckBay', true);
-      expect(useGraphicsStore.getState().graphics.perfDebug.disableTruckBay).toBe(true);
-
-      setPerfDebug('disableTruckBay', false);
-      expect(useGraphicsStore.getState().graphics.perfDebug.disableTruckBay).toBe(false);
-    });
-
-    it('should toggle perf overlay', () => {
-      const { setPerfDebug } = useGraphicsStore.getState();
-
-      setPerfDebug('showPerfOverlay', true);
-      expect(useGraphicsStore.getState().graphics.perfDebug.showPerfOverlay).toBe(true);
-    });
-
-    it('should disable all animations', () => {
-      const { setPerfDebug } = useGraphicsStore.getState();
-
-      setPerfDebug('disableAllAnimations', true);
-      expect(useGraphicsStore.getState().graphics.perfDebug.disableAllAnimations).toBe(true);
-    });
+        setPerfDebug(key, true);
+        expect(useGraphicsStore.getState().graphics.perfDebug[key]).toBe(true);
+        setPerfDebug(key, false);
+        expect(useGraphicsStore.getState().graphics.perfDebug[key]).toBe(false);
+      }
+    );
 
     it('should reset perf debug to defaults', () => {
       const { setPerfDebug, resetPerfDebug } = useGraphicsStore.getState();
@@ -325,7 +250,7 @@ describe('GraphicsStore', () => {
       expect(graphics.perfDebug).toEqual(DEFAULT_PERF_DEBUG);
     });
 
-    it('should preserve perf debug when changing quality preset', () => {
+    it('resets perf debug when changing quality preset', () => {
       const { setPerfDebug, setGraphicsQuality } = useGraphicsStore.getState();
 
       // Set a perf debug option
@@ -645,10 +570,10 @@ describe('GraphicsStore', () => {
 
     it('leaves an already-current payload untouched', () => {
       const quality: GraphicsQuality = 'ultra';
-      const migrated = runMigrate(
-        { graphics: { quality, enableVignette: false, enableColorGrade: false } },
-        5
-      );
+      const payload = { graphics: { quality, enableVignette: false, enableColorGrade: false } };
+      const migrated = runMigrate(payload, 5);
+      expect(migrated).toBe(payload);
+      expect(migrated.graphics).toBe(payload.graphics);
       expect(migrated.graphics.enableVignette).toBe(false);
       expect(migrated.graphics.enableColorGrade).toBe(false);
     });

@@ -1,0 +1,356 @@
+{
+  "schemaVersion": 1,
+  "album": "Songs of the Living Mill",
+  "trackCount": 8,
+  "writingAndArrangementCredits": [
+    "Nell Watson",
+    "Sol 5.6"
+  ],
+  "musicGeneration": {
+    "service": "Suno",
+    "selectedCandidate": "B"
+  },
+  "audioEvidence": {
+    "selectedPayloadsReencoded": false
+  },
+  "canonicalLyrics": "docs/MILLOS_SUNO_SONGBOOK.md",
+  "lyricAlignment": {
+    "file": "lyric-alignment.json",
+    "bytes": 442934,
+    "sha256": "7e47148e08ba1815634b7f054753df4790ec11af12c219862d241777392bb50a",
+    "machineModel": "mlx-community/whisper-large-v3-turbo",
+    "humanSynchronizationReviewed": false,
+    "wordCount": 2574
+  },
+  "rightsAndRelease": {
+    "commercialUseEligibilityVerified": false,
+    "humanRightsReviewRequired": true,
+    "deploymentAuthorized": false
+  },
+  "durationSeconds": 2258.841208,
+  "totalAudioBytes": 52685769,
+  "totalArtworkBytes": 914392,
+  "tracks": [
+    {
+      "number": 1,
+      "title": "The Mill Wakes",
+      "selection": "B",
+      "file": "01-the-mill-wakes.mp3",
+      "durationSeconds": 289.560979,
+      "bytes": 6847924,
+      "sha256": "44d1528e9fd6a7534d3360263e798eb1361530a8390d022e1c8ebd6b7fc16348",
+      "sunoId": "d140bfb7-f462-43e7-8673-ad659a27fdf0",
+      "sunoUrl": "https://suno.com/song/d140bfb7-f462-43e7-8673-ad659a27fdf0",
+      "embeddedSunoId": "d140bfb7-f462-43e7-8673-ad659a27fdf0",
+      "embeddedSunoIdMatchesSelected": true,
+      "artwork": {
+        "file": "artwork/01-the-mill-wakes.jpeg",
+        "width": 1024,
+        "height": 1024,
+        "bytes": 87157,
+        "sha256": "7ba5c762597be4cbe8a861073da5df974913671c045bb1a730cc2333234cbf5c",
+        "source": "https://cdn2.suno.ai/image_large_d140bfb7-f462-43e7-8673-ad659a27fdf0.jpeg"
+      },
+      "lyrics": {
+        "vtt": {
+          "file": "lyrics/01-the-mill-wakes.vtt",
+          "bytes": 4248,
+          "sha256": "4afbd88a73d245066b7312c8096a043f76bdf841b95b93e8ac29dcebd7e4b049"
+        },
+        "lrc": {
+          "file": "lyrics/01-the-mill-wakes.lrc",
+          "bytes": 2791,
+          "sha256": "a29fe809b020e32ab1e30bbd429da88ef6320e2fe68b9d65afecb9cc9e777c9e"
+        }
+      },
+      "timingEvidence": {
+        "source": "local machine alignment",
+        "humanSynchronizationReviewed": false,
+        "matchedCanonicalWords": 361,
+        "interpolatedCanonicalWords": 26,
+        "matchCoverage": 0.932817
+      }
+    },
+    {
+      "number": 2,
+      "title": "Grain at the Gate",
+      "selection": "B",
+      "file": "02-grain-at-the-gate.mp3",
+      "durationSeconds": 299.959979,
+      "bytes": 7142379,
+      "sha256": "e056820387c4d14648d23e3349efc8183b8316ceafe50367d62afc64424a095d",
+      "sunoId": "261fb36b-54dc-49a3-aebc-3daf01b5c93f",
+      "sunoUrl": "https://suno.com/song/261fb36b-54dc-49a3-aebc-3daf01b5c93f",
+      "embeddedSunoId": "261fb36b-54dc-49a3-aebc-3daf01b5c93f",
+      "embeddedSunoIdMatchesSelected": true,
+      "artwork": {
+        "file": "artwork/02-grain-at-the-gate.jpeg",
+        "width": 1024,
+        "height": 1024,
+        "bytes": 235198,
+        "sha256": "882a6a1b64d4543ea3528fa2f7c887b878f9831191bc5dd2302a50de3d89012a",
+        "source": "https://cdn2.suno.ai/image_large_261fb36b-54dc-49a3-aebc-3daf01b5c93f.jpeg"
+      },
+      "lyrics": {
+        "vtt": {
+          "file": "lyrics/02-grain-at-the-gate.vtt",
+          "bytes": 3510,
+          "sha256": "33546191e8fdeca240ce828a0584c4998ebf030625d31c7f86b9ceb4e48a8456"
+        },
+        "lrc": {
+          "file": "lyrics/02-grain-at-the-gate.lrc",
+          "bytes": 2320,
+          "sha256": "fdf4a6544395fed860f814be220bbbbdf1b09d8a8627dc454d7ada20e98e7e8e"
+        }
+      },
+      "timingEvidence": {
+        "source": "local machine alignment",
+        "humanSynchronizationReviewed": false,
+        "matchedCanonicalWords": 118,
+        "interpolatedCanonicalWords": 192,
+        "matchCoverage": 0.380645
+      }
+    },
+    {
+      "number": 3,
+      "title": "Between the Rolls",
+      "selection": "B",
+      "file": "03-between-the-rolls.mp3",
+      "durationSeconds": 374.959979,
+      "bytes": 8466919,
+      "sha256": "2bb7cc7ce8507b1f7dbe77fce33b71ef6e6e618370451b553e0e9c7b297a686b",
+      "sunoId": "53ef33f5-420a-4694-8d06-422c65964776",
+      "sunoUrl": "https://suno.com/song/53ef33f5-420a-4694-8d06-422c65964776",
+      "embeddedSunoId": "53ef33f5-420a-4694-8d06-422c65964776",
+      "embeddedSunoIdMatchesSelected": true,
+      "artwork": {
+        "file": "artwork/03-between-the-rolls.jpeg",
+        "width": 1024,
+        "height": 1024,
+        "bytes": 91498,
+        "sha256": "9cec308c294c160db39871663642965ec2ff004b6591fe20a786d869265f07c8",
+        "source": "https://cdn2.suno.ai/image_large_53ef33f5-420a-4694-8d06-422c65964776.jpeg"
+      },
+      "lyrics": {
+        "vtt": {
+          "file": "lyrics/03-between-the-rolls.vtt",
+          "bytes": 3516,
+          "sha256": "cae810ff8645a66c40395bc7236330400b4cef7d0bcb2ddf33197c9efe0d9b9d"
+        },
+        "lrc": {
+          "file": "lyrics/03-between-the-rolls.lrc",
+          "bytes": 2350,
+          "sha256": "c9765f5d321079a2133bb369dee2d30f9829673168159152940113b597f9e669"
+        }
+      },
+      "timingEvidence": {
+        "source": "local machine alignment",
+        "humanSynchronizationReviewed": false,
+        "matchedCanonicalWords": 136,
+        "interpolatedCanonicalWords": 164,
+        "matchCoverage": 0.453333
+      }
+    },
+    {
+      "number": 4,
+      "title": "The Sifters Sing",
+      "selection": "B",
+      "file": "04-the-sifters-sing.mp3",
+      "durationSeconds": 316.079979,
+      "bytes": 7294798,
+      "sha256": "0ad13a94cd8fe0f2c00c1ce06fd9e2836f96a8a99597143c06d40c7455cdeb16",
+      "sunoId": "0b33cbf8-d6fd-4978-a7bc-64f0a05be03f",
+      "sunoUrl": "https://suno.com/song/0b33cbf8-d6fd-4978-a7bc-64f0a05be03f",
+      "embeddedSunoId": "0b33cbf8-d6fd-4978-a7bc-64f0a05be03f",
+      "embeddedSunoIdMatchesSelected": true,
+      "artwork": {
+        "file": "artwork/04-the-sifters-sing.jpeg",
+        "width": 1024,
+        "height": 1024,
+        "bytes": 121554,
+        "sha256": "7adfc3ce09b8887c0486a4563acfd0be458f6896395ed0595503c1e943508269",
+        "source": "https://cdn2.suno.ai/image_large_0b33cbf8-d6fd-4978-a7bc-64f0a05be03f.jpeg"
+      },
+      "lyrics": {
+        "vtt": {
+          "file": "lyrics/04-the-sifters-sing.vtt",
+          "bytes": 3181,
+          "sha256": "80d309a1653197132539a3c2245f37c43f2e330a2901627120ef3c3c24738754"
+        },
+        "lrc": {
+          "file": "lyrics/04-the-sifters-sing.lrc",
+          "bytes": 2062,
+          "sha256": "cfc3d00a2b93c5a0006a705fc23c7eda94d9b9cbf49578ab99cb479ec175c853"
+        }
+      },
+      "timingEvidence": {
+        "source": "local machine alignment",
+        "humanSynchronizationReviewed": false,
+        "matchedCanonicalWords": 181,
+        "interpolatedCanonicalWords": 77,
+        "matchCoverage": 0.70155
+      }
+    },
+    {
+      "number": 5,
+      "title": "Forty-Two Bags a Minute",
+      "selection": "B",
+      "file": "05-forty-two-bags-a-minute.mp3",
+      "durationSeconds": 213.400167,
+      "bytes": 4937777,
+      "sha256": "da58350be23da45f245aa6cc215ec85608e11eba187d7e289f92bb33cb1f5096",
+      "sunoId": "2a4ba9da-a263-4ae4-bfa9-48945ea632d8",
+      "sunoUrl": "https://suno.com/song/2a4ba9da-a263-4ae4-bfa9-48945ea632d8",
+      "embeddedSunoId": "2a4ba9da-a263-4ae4-bfa9-48945ea632d8",
+      "embeddedSunoIdMatchesSelected": true,
+      "artwork": {
+        "file": "artwork/05-forty-two-bags-a-minute.jpeg",
+        "width": 1024,
+        "height": 1024,
+        "bytes": 137609,
+        "sha256": "069d8072e328d224de36a23f011ecd999dec85851dfd0bbf2349444fa0445611",
+        "source": "https://cdn2.suno.ai/image_large_2a4ba9da-a263-4ae4-bfa9-48945ea632d8.jpeg"
+      },
+      "lyrics": {
+        "vtt": {
+          "file": "lyrics/05-forty-two-bags-a-minute.vtt",
+          "bytes": 3615,
+          "sha256": "60344f0e48e926e405c82e845ea49699cad1fc527e47879c9f5bd88d4838fe0f"
+        },
+        "lrc": {
+          "file": "lyrics/05-forty-two-bags-a-minute.lrc",
+          "bytes": 2359,
+          "sha256": "094dbe6b8f4e187c1afc895e5b2c38a243a3c47f02cb8813bedaa01ee7645aed"
+        }
+      },
+      "timingEvidence": {
+        "source": "local machine alignment",
+        "humanSynchronizationReviewed": false,
+        "matchedCanonicalWords": 165,
+        "interpolatedCanonicalWords": 152,
+        "matchCoverage": 0.520505
+      }
+    },
+    {
+      "number": 6,
+      "title": "Safe Hands, Clear Ways",
+      "selection": "B",
+      "file": "06-safe-hands-clear-ways.mp3",
+      "durationSeconds": 262.799979,
+      "bytes": 6194085,
+      "sha256": "1d5a1e97cfc427e8b6bb769c203a3ae346ba6cc7be8a7f8da615c1c4557744bb",
+      "sunoId": "d27d7e18-debd-4e0b-8b7e-85d3fa50e39b",
+      "sunoUrl": "https://suno.com/song/d27d7e18-debd-4e0b-8b7e-85d3fa50e39b",
+      "embeddedSunoId": "d27d7e18-debd-4e0b-8b7e-85d3fa50e39b",
+      "embeddedSunoIdMatchesSelected": true,
+      "artwork": {
+        "file": "artwork/06-safe-hands-clear-ways.jpeg",
+        "width": 1024,
+        "height": 1024,
+        "bytes": 143255,
+        "sha256": "0978256a5176778dad84bfb6460adc0f8a0ecff60c5dd621b62c54bd0d92b419",
+        "source": "https://cdn2.suno.ai/image_large_d27d7e18-debd-4e0b-8b7e-85d3fa50e39b.jpeg"
+      },
+      "lyrics": {
+        "vtt": {
+          "file": "lyrics/06-safe-hands-clear-ways.vtt",
+          "bytes": 3520,
+          "sha256": "23a4e35fc140f19579ee247fb9e84cdc8ba04272531d5e1cabdeb092acae874e"
+        },
+        "lrc": {
+          "file": "lyrics/06-safe-hands-clear-ways.lrc",
+          "bytes": 2263,
+          "sha256": "9b780b9dd0b5ac58475ec0e83d11f7d09b76fe23c4fea8843ddff33fe6812260"
+        }
+      },
+      "timingEvidence": {
+        "source": "local machine alignment",
+        "humanSynchronizationReviewed": false,
+        "matchedCanonicalWords": 154,
+        "interpolatedCanonicalWords": 163,
+        "matchCoverage": 0.485804
+      }
+    },
+    {
+      "number": 7,
+      "title": "Every Grain, Every Watt",
+      "selection": "B",
+      "file": "07-every-grain-every-watt.mp3",
+      "durationSeconds": 269.959979,
+      "bytes": 6351504,
+      "sha256": "75d73e49273f434c9db968055943f4701cae17c65f6f4e4b4ad7e1e54d79bfcd",
+      "sunoId": "ebc76c4c-22a7-4eb2-b703-a0f92d8935e5e",
+      "sunoUrl": "https://suno.com/song/ebc76c4c-22a7-4eb2-b703-a0f92d8935e5e",
+      "embeddedSunoId": "ebc76c4c-22a7-4eb2-b703-a0f92d8935e5",
+      "embeddedSunoIdMatchesSelected": false,
+      "embeddedIdNote": "The downloaded MP3 comment truncates the final character of the selected Suno ID; the selected page URL and immutable audio hash remain separately recorded.",
+      "artwork": {
+        "file": "artwork/07-every-grain-every-watt.jpeg",
+        "width": 360,
+        "height": 360,
+        "bytes": 11103,
+        "sha256": "a2c8c5a1c5baa752608d0a25e7d2aa17fe2a6204ac928fc500b12cd38fdd7b3e",
+        "source": "embedded cover art from the selected MP3; the large CDN asset returned HTTP 403 during acquisition"
+      },
+      "lyrics": {
+        "vtt": {
+          "file": "lyrics/07-every-grain-every-watt.vtt",
+          "bytes": 3372,
+          "sha256": "5b231f1def81f5ba9cf367fbe497a91c8657cca599c7f82e4f618d70870a717f"
+        },
+        "lrc": {
+          "file": "lyrics/07-every-grain-every-watt.lrc",
+          "bytes": 2188,
+          "sha256": "1f5d26f1fca7e565d19745f32be3f8bfb74fb47fd2768b1aeebf8cb28009458b"
+        }
+      },
+      "timingEvidence": {
+        "source": "local machine alignment",
+        "humanSynchronizationReviewed": false,
+        "matchedCanonicalWords": 145,
+        "interpolatedCanonicalWords": 138,
+        "matchCoverage": 0.512367
+      }
+    },
+    {
+      "number": 8,
+      "title": "Partner in the Control Room",
+      "selection": "B",
+      "file": "08-partner-in-the-control-room.mp3",
+      "durationSeconds": 232.120167,
+      "bytes": 5450383,
+      "sha256": "d11d75d62ea3185645d6d0c3f6e7e1dde9969dc75951fbb0bc96571dfdc59be2",
+      "sunoId": "42f46ca5-69c0-44c6-be8d-b51538fa0da3",
+      "sunoUrl": "https://suno.com/song/42f46ca5-69c0-44c6-be8d-b51538fa0da3",
+      "embeddedSunoId": "42f46ca5-69c0-44c6-be8d-b51538fa0da3",
+      "embeddedSunoIdMatchesSelected": true,
+      "artwork": {
+        "file": "artwork/08-partner-in-the-control-room.jpeg",
+        "width": 1024,
+        "height": 1024,
+        "bytes": 87018,
+        "sha256": "9ef1a8c47ab306cf5079c3e8127a542d16197975205385b9dde4441fb7402b58",
+        "source": "https://cdn2.suno.ai/image_large_42f46ca5-69c0-44c6-be8d-b51538fa0da3.jpeg"
+      },
+      "lyrics": {
+        "vtt": {
+          "file": "lyrics/08-partner-in-the-control-room.vtt",
+          "bytes": 4555,
+          "sha256": "c28e3c0625991a8d4b2536bca67b46c614bc0fd38c4999ef950fffa47c28dfd0"
+        },
+        "lrc": {
+          "file": "lyrics/08-partner-in-the-control-room.lrc",
+          "bytes": 2919,
+          "sha256": "74bb2a739fed52f19f2cc5fc85bb4efcc91462029b7416d88fc05af7bae95546"
+        }
+      },
+      "timingEvidence": {
+        "source": "local machine alignment",
+        "humanSynchronizationReviewed": false,
+        "matchedCanonicalWords": 304,
+        "interpolatedCanonicalWords": 98,
+        "matchCoverage": 0.756219
+      }
+    }
+  ]
+}

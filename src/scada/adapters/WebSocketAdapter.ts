@@ -21,24 +21,45 @@ import {
   ConnectionStatus,
   AdapterStatistics,
 } from '../types';
-import { isValidWSMessage, MessageValidationError } from './messageValidation';
+import {
+  isTagValueCompatible,
+  isValidWSMessage,
+  MessageValidationError,
+} from './messageValidation';
 
 /** WebSocket message types */
 interface WSMessage {
-  type: 'subscribe' | 'unsubscribe' | 'write' | 'update' | 'batch' | 'snapshot' | 'error';
+  type:
+    | 'subscribe'
+    | 'unsubscribe'
+    | 'write'
+    | 'update'
+    | 'batch'
+    | 'snapshot'
+    | 'error'
+    | 'ping'
+    | 'pong';
   tagId?: string;
   tagIds?: string[];
   value?: number | boolean | string;
   quality?: string;
   timestamp?: number;
+  sourceTimestamp?: number;
   tags?: Array<{
     tagId: string;
     value: number | boolean | string;
     quality: string;
     timestamp: number;
+    sourceTimestamp?: number;
   }>;
   error?: string;
 }
+
+// Bound JSON parsing work for an untrusted transport frame. The catalogue's
+// largest legitimate snapshot is comfortably below this ceiling.
+const MAX_WEBSOCKET_FRAME_CHARS = 1024 * 1024;
+const HEARTBEAT_INTERVAL_MS = 30_000;
+const HEARTBEAT_RESPONSE_TIMEOUT_MS = 10_000;
 
 export class WebSocketAdapter implements IProtocolAdapter {
   private config: ConnectionConfig;
@@ -55,7 +76,11 @@ export class WebSocketAdapter implements IProtocolAdapter {
   private lastError: string | undefined;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  private heartbeatResponseTimeout: ReturnType<typeof setTimeout> | null = null;
   private isDisconnecting = false; // Prevents reconnection after deliberate disconnect
+  private connectPromise: Promise<void> | null = null;
+  private cancelPendingConnect: ((error: Error) => void) | null = null;
+  private committedTimestamps = new Map<string, number>();
 
   // Statistics
   private stats = {
@@ -75,80 +100,139 @@ export class WebSocketAdapter implements IProtocolAdapter {
   // Lifecycle Methods
   // =========================================================================
 
-  async connect(): Promise<void> {
-    if (this.connected) return;
+  connect(): Promise<void> {
+    if (this.isConnected()) return Promise.resolve();
+    if (this.connectPromise) return this.connectPromise;
 
     // Reset the disconnecting flag when connecting
     this.isDisconnecting = false;
+    // A caller may recover the connection before an automatic retry fires.
+    this.stopReconnect();
 
     const wsUrl = this.config.proxyUrl ?? this.config.baseUrl;
     if (!wsUrl) {
-      throw new Error('WebSocket adapter requires proxyUrl or baseUrl in config');
+      return Promise.reject(new Error('WebSocket adapter requires proxyUrl or baseUrl in config'));
     }
 
     // Convert http(s) to ws(s) if needed
     const url = wsUrl.replace(/^http/, 'ws');
 
-    return new Promise((resolve, reject) => {
-      try {
-        this.ws = new WebSocket(url);
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(url);
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err);
+      this.stats.errorCount++;
+      return Promise.reject(err);
+    }
 
-        const timeout = setTimeout(() => {
-          // Mark as deliberately closing so the onclose handler does not
-          // schedule a background reconnect for a connect the caller already
-          // saw fail (otherwise an orphaned reconnect loop runs after reject).
-          this.isDisconnecting = true;
-          reject(new Error('Connection timeout'));
-          this.ws?.close();
-        }, 10000);
-
-        this.ws.onopen = () => {
-          clearTimeout(timeout);
-          this.connected = true;
-          this.connectTime = Date.now();
-          this.reconnectAttempts = 0;
-          this.lastError = undefined;
-
-          // Start heartbeat
-          this.startHeartbeat();
-
-          // Subscribe to all tags
-          this.sendMessage({
-            type: 'subscribe',
-            tagIds: Array.from(this.tags.keys()),
-          });
-
-          // Notify connection-state listeners that the link is up so a
-          // consumer that previously saw it go down can recover.
-          this.notifyConnectionChange();
-
-          resolve();
-        };
-
-        this.ws.onmessage = (event) => {
-          this.handleMessage(event.data);
-        };
-
-        this.ws.onerror = () => {
-          const error = new Error('WebSocket error');
-          this.lastError = error.message;
-          this.stats.errorCount++;
-
-          if (!this.connected) {
-            clearTimeout(timeout);
-            reject(error);
-          }
-        };
-
-        this.ws.onclose = (event) => {
-          this.handleDisconnect(event.reason || 'Connection closed');
-        };
-      } catch (err) {
-        this.lastError = err instanceof Error ? err.message : String(err);
-        this.stats.errorCount++;
-        reject(err);
-      }
+    this.ws = socket;
+    let resolveConnect!: () => void;
+    let rejectConnect!: (error: Error) => void;
+    let settled = false;
+    let suppressReconnectOnClose = false;
+    const promise = new Promise<void>((resolve, reject) => {
+      resolveConnect = resolve;
+      rejectConnect = reject;
     });
+    this.connectPromise = promise;
+
+    const timeout = setTimeout(() => {
+      if (this.connectPromise !== promise || this.ws !== socket) return;
+      suppressReconnectOnClose = true;
+      fail(new Error('Connection timeout'));
+      socket.close();
+    }, 10000);
+
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (this.connectPromise === promise) {
+        this.connectPromise = null;
+        this.cancelPendingConnect = null;
+      }
+    };
+
+    const succeed = (): void => {
+      if (settled) return;
+      finish();
+      resolveConnect();
+    };
+
+    const fail = (error: Error): void => {
+      if (settled) return;
+      finish();
+      rejectConnect(error);
+    };
+
+    this.cancelPendingConnect = (error) => {
+      suppressReconnectOnClose = true;
+      fail(error);
+    };
+
+    socket.onopen = () => {
+      // Events from a failed, cancelled, or replaced socket have no authority
+      // over the current connection.
+      if (this.ws !== socket || this.connectPromise !== promise || this.isDisconnecting) {
+        socket.close();
+        return;
+      }
+
+      try {
+        this.connected = true;
+        this.stopReconnect();
+        this.startHeartbeat();
+        this.sendMessage({
+          type: 'subscribe',
+          tagIds: Array.from(this.tags.keys()),
+        });
+        this.connectTime = Date.now();
+        this.reconnectAttempts = 0;
+        this.lastError = undefined;
+        this.notifyConnectionChange();
+        succeed();
+      } catch (cause) {
+        const error = cause instanceof Error ? cause : new Error(String(cause));
+        this.lastError = error.message;
+        this.stats.errorCount++;
+        suppressReconnectOnClose = true;
+        this.connected = false;
+        this.stopHeartbeat();
+        if (this.ws === socket) this.ws = null;
+        fail(error);
+        socket.close();
+      }
+    };
+
+    socket.onmessage = (event) => {
+      if (this.ws === socket && this.connected) {
+        this.handleMessage(event.data);
+      }
+    };
+
+    socket.onerror = () => {
+      if (this.ws !== socket) return;
+      const error = new Error('WebSocket error');
+      this.lastError = error.message;
+      this.stats.errorCount++;
+      if (!this.connected) {
+        suppressReconnectOnClose = true;
+        if (this.ws === socket) this.ws = null;
+        fail(error);
+        socket.close();
+      }
+    };
+
+    socket.onclose = (event) => {
+      if (this.ws !== socket) return;
+      if (this.connectPromise === promise) {
+        fail(new Error(event.reason || 'Connection closed before opening'));
+      }
+      this.handleDisconnect(socket, event.reason || 'Connection closed', !suppressReconnectOnClose);
+    };
+
+    return promise;
   }
 
   async disconnect(): Promise<void> {
@@ -158,14 +242,15 @@ export class WebSocketAdapter implements IProtocolAdapter {
     this.stopReconnect();
     this.stopHeartbeat();
 
-    if (this.ws) {
-      this.ws.close(1000, 'Client disconnect');
-      this.ws = null;
-    }
-
+    const socket = this.ws;
+    this.ws = null;
     this.connected = false;
+    this.cancelPendingConnect?.(new Error('WebSocket connection cancelled'));
+    if (socket) {
+      socket.close(1000, 'Client disconnect');
+    }
     this.lastDisconnectTime = Date.now();
-    this.values.clear();
+    this.resetValueAuthority();
     // Clear subscribers to prevent memory leaks across reconnects
     this.subscribers.clear();
     this.globalSubscribers.clear();
@@ -209,7 +294,7 @@ export class WebSocketAdapter implements IProtocolAdapter {
   // =========================================================================
 
   async writeTag(tagId: string, value: number | boolean | string): Promise<boolean> {
-    if (!this.ws || !this.connected) {
+    if (!this.isConnected()) {
       return false;
     }
 
@@ -219,6 +304,10 @@ export class WebSocketAdapter implements IProtocolAdapter {
     }
 
     if (tag.accessMode === 'READ') {
+      return false;
+    }
+
+    if (!isTagValueCompatible(tag, value)) {
       return false;
     }
 
@@ -248,7 +337,13 @@ export class WebSocketAdapter implements IProtocolAdapter {
       };
     }
 
-    tagIds.forEach((id) => {
+    const uniqueTagIds = [...new Set(tagIds)];
+    const unknownTag = uniqueTagIds.find((id) => !this.tags.has(id));
+    if (unknownTag) {
+      throw new Error(`Unknown tag: ${unknownTag}`);
+    }
+
+    uniqueTagIds.forEach((id) => {
       if (!this.subscribers.has(id)) {
         this.subscribers.set(id, new Set());
       }
@@ -256,8 +351,12 @@ export class WebSocketAdapter implements IProtocolAdapter {
     });
 
     return () => {
-      tagIds.forEach((id) => {
-        this.subscribers.get(id)?.delete(callback);
+      uniqueTagIds.forEach((id) => {
+        const callbacks = this.subscribers.get(id);
+        callbacks?.delete(callback);
+        if (callbacks?.size === 0) {
+          this.subscribers.delete(id);
+        }
       });
     };
   }
@@ -305,6 +404,11 @@ export class WebSocketAdapter implements IProtocolAdapter {
   // =========================================================================
 
   private handleMessage(data: string): void {
+    if (typeof data !== 'string' || data.length > MAX_WEBSOCKET_FRAME_CHARS) {
+      this.stats.errorCount++;
+      return;
+    }
+
     try {
       // Parse JSON
       const parsed: unknown = JSON.parse(data);
@@ -335,27 +439,63 @@ export class WebSocketAdapter implements IProtocolAdapter {
           // Only accept values for known tags so a compromised/MITM proxy
           // cannot inject arbitrary tagIds into the value store.
           if (msg.tagId && this.tags.has(msg.tagId)) {
+            const tag = this.tags.get(msg.tagId)!;
+            if (
+              !isTagValueCompatible(tag, msg.value) ||
+              !this.isValidSourceTimestamp(msg.sourceTimestamp)
+            ) {
+              throw new MessageValidationError(
+                'WebSocket update value does not match tag type',
+                msg,
+                'WebSocket'
+              );
+            }
             const tagValue = this.parseTagValue(msg);
-            this.values.set(msg.tagId, tagValue);
-            this.notifySubscribers([tagValue]);
+            if (this.commitTagValue(tagValue)) {
+              this.notifySubscribers([tagValue]);
+            }
           }
           break;
 
         case 'batch':
         case 'snapshot':
           if (msg.tags) {
-            const tagValues = msg.tags
-              // Drop tags that are not part of the known TagDefinition set.
-              .filter((t) => this.tags.has(t.tagId))
-              .map((t) => ({
-                tagId: t.tagId,
-                value: t.value ?? 0,
-                quality: this.parseQuality(t.quality),
-                timestamp: t.timestamp ?? Date.now(),
-              }));
-            tagValues.forEach((tv) => this.values.set(tv.tagId, tv));
-            this.notifySubscribers(tagValues);
+            const knownTags = msg.tags.filter((tagValue) => this.tags.has(tagValue.tagId));
+            const isCompatibleSnapshot = knownTags.every((tagValue) => {
+              const tag = this.tags.get(tagValue.tagId)!;
+              return (
+                isTagValueCompatible(tag, tagValue.value) &&
+                this.isValidSourceTimestamp(tagValue.sourceTimestamp)
+              );
+            });
+            if (!isCompatibleSnapshot) {
+              throw new MessageValidationError(
+                'WebSocket batch contains an incompatible known-tag value',
+                msg,
+                'WebSocket'
+              );
+            }
+
+            const tagValues = knownTags.map((t) => ({
+              tagId: t.tagId,
+              value: t.value,
+              quality: this.parseQuality(t.quality),
+              timestamp: t.timestamp,
+              ...(t.sourceTimestamp === undefined ? {} : { sourceTimestamp: t.sourceTimestamp }),
+            }));
+            const committedValues = tagValues.filter((tagValue) => this.commitTagValue(tagValue));
+            if (committedValues.length > 0) {
+              this.notifySubscribers(committedValues);
+            }
           }
+          break;
+
+        case 'ping':
+          this.sendMessage({ type: 'pong' });
+          break;
+
+        case 'pong':
+          this.clearHeartbeatResponseTimeout();
           break;
 
         case 'error':
@@ -375,9 +515,10 @@ export class WebSocketAdapter implements IProtocolAdapter {
   private parseTagValue(msg: WSMessage): TagValue {
     return {
       tagId: msg.tagId!,
-      value: msg.value ?? 0,
-      quality: this.parseQuality(msg.quality ?? 'GOOD'),
-      timestamp: msg.timestamp ?? Date.now(),
+      value: msg.value!,
+      quality: this.parseQuality(msg.quality!),
+      timestamp: msg.timestamp!,
+      ...(msg.sourceTimestamp === undefined ? {} : { sourceTimestamp: msg.sourceTimestamp }),
     };
   }
 
@@ -392,45 +533,57 @@ export class WebSocketAdapter implements IProtocolAdapter {
   }
 
   private sendMessage(msg: WSMessage): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg));
-      this.stats.messagesSent++;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket is not open');
     }
+    this.ws.send(JSON.stringify(msg));
+    this.stats.messagesSent++;
   }
 
-  private handleDisconnect(_reason: string): void {
+  private handleDisconnect(socket: WebSocket, _reason: string, allowReconnect = true): void {
+    if (this.ws !== socket) return;
+
     this.stopHeartbeat();
     this.connected = false;
     this.lastDisconnectTime = Date.now();
     this.ws = null;
+    this.resetValueAuthority();
 
     // Don't attempt reconnection if this was a deliberate disconnect
-    if (this.isDisconnecting) {
+    if (this.isDisconnecting || !allowReconnect) {
       this.notifyConnectionChange();
       return;
     }
 
-    // Attempt reconnection
-    if (this.reconnectAttempts < 10) {
-      this.reconnectAttempts++;
-      const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-      const jitter = Math.random() * 1000;
-
-      this.reconnectTimeout = setTimeout(() => {
-        this.connect().catch(() => {
-          // Reconnect failed - will be retried
-        });
-      }, delay + jitter);
-    } else {
-      // Reconnection abandoned after the max attempts. Record a terminal error
-      // so getConnectionStatus reflects it, then push the state to listeners so
-      // a data-only consumer learns the feed is permanently dead instead of
-      // silently showing stale values forever.
-      this.lastError = 'WebSocket reconnection abandoned after maximum attempts';
-    }
+    this.scheduleReconnect();
 
     // Surface the connection-state transition to listeners.
     this.notifyConnectionChange();
+  }
+
+  private scheduleReconnect(): void {
+    if (this.isDisconnecting || this.connected || this.connectPromise || this.reconnectTimeout) {
+      return;
+    }
+
+    if (this.reconnectAttempts >= 10) {
+      this.lastError = 'WebSocket reconnection abandoned after maximum attempts';
+      this.notifyConnectionChange();
+      return;
+    }
+
+    this.reconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+    const jitter = Math.random() * 1000;
+    this.reconnectTimeout = setTimeout(() => {
+      this.reconnectTimeout = null;
+      if (this.isDisconnecting || this.connected || this.connectPromise) return;
+      this.connect().catch(() => {
+        // A constructor failure or timed-out attempt may not produce a close
+        // event, so explicitly keep the bounded recovery loop moving.
+        this.scheduleReconnect();
+      });
+    }, delay + jitter);
   }
 
   private stopReconnect(): void {
@@ -441,11 +594,33 @@ export class WebSocketAdapter implements IProtocolAdapter {
   }
 
   private startHeartbeat(): void {
+    this.stopHeartbeat();
+    const socket = this.ws;
     this.heartbeatInterval = setInterval(() => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: 'ping' }));
+      if (this.ws !== socket || socket?.readyState !== WebSocket.OPEN) return;
+      if (this.heartbeatResponseTimeout) return;
+
+      try {
+        socket.send(JSON.stringify({ type: 'ping' }));
+        this.stats.messagesSent++;
+        this.heartbeatResponseTimeout = setTimeout(() => {
+          this.heartbeatResponseTimeout = null;
+          if (this.ws !== socket || !this.connected || socket.readyState !== WebSocket.OPEN) return;
+
+          const error = new Error('WebSocket heartbeat timeout');
+          this.lastError = error.message;
+          this.stats.errorCount++;
+          socket.close();
+          this.handleDisconnect(socket, error.message);
+        }, HEARTBEAT_RESPONSE_TIMEOUT_MS);
+      } catch (cause) {
+        const error = cause instanceof Error ? cause : new Error(String(cause));
+        this.lastError = error.message;
+        this.stats.errorCount++;
+        socket.close();
+        this.handleDisconnect(socket, error.message);
       }
-    }, 30000);
+    }, HEARTBEAT_INTERVAL_MS);
   }
 
   private stopHeartbeat(): void {
@@ -453,6 +628,35 @@ export class WebSocketAdapter implements IProtocolAdapter {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
+    this.clearHeartbeatResponseTimeout();
+  }
+
+  private clearHeartbeatResponseTimeout(): void {
+    if (this.heartbeatResponseTimeout) {
+      clearTimeout(this.heartbeatResponseTimeout);
+      this.heartbeatResponseTimeout = null;
+    }
+  }
+
+  private isValidSourceTimestamp(timestamp: number | undefined): boolean {
+    return timestamp === undefined || Number.isFinite(timestamp);
+  }
+
+  private commitTagValue(tagValue: TagValue): boolean {
+    const timestamp = tagValue.sourceTimestamp ?? tagValue.timestamp;
+    const committedTimestamp = this.committedTimestamps.get(tagValue.tagId);
+    if (committedTimestamp !== undefined && timestamp < committedTimestamp) {
+      return false;
+    }
+
+    this.values.set(tagValue.tagId, { ...tagValue });
+    this.committedTimestamps.set(tagValue.tagId, timestamp);
+    return true;
+  }
+
+  private resetValueAuthority(): void {
+    this.values.clear();
+    this.committedTimestamps.clear();
   }
 
   private notifySubscribers(tagValues: TagValue[]): void {
@@ -460,7 +664,7 @@ export class WebSocketAdapter implements IProtocolAdapter {
     const globalCallbacksCopy = [...this.globalSubscribers];
     globalCallbacksCopy.forEach((callback) => {
       try {
-        callback(tagValues);
+        callback(tagValues.map((value) => ({ ...value })));
       } catch {
         // Remove faulty callback to prevent repeated errors
         try {
@@ -490,7 +694,7 @@ export class WebSocketAdapter implements IProtocolAdapter {
       // Always attempt to notify collected subscribers, even if collection had errors
       subscriberUpdates.forEach((values, callback) => {
         try {
-          callback(values);
+          callback(values.map((value) => ({ ...value })));
         } catch {
           // Remove faulty callback from all tag subscriptions
           try {

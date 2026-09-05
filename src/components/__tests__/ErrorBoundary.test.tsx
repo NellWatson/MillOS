@@ -1,24 +1,10 @@
-/**
- * Comprehensive Tests for ErrorBoundary Component
- *
- * Tests cover:
- * - Error catching and rendering fallback UI
- * - Custom fallback rendering
- * - Error logging via onError callback
- * - Reload functionality
- * - Children rendering when no error
- * - getDerivedStateFromError lifecycle
- * - componentDidCatch lifecycle
- */
-
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import '@testing-library/jest-dom';
 import { Suspense } from 'react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import '@testing-library/jest-dom';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ErrorBoundary, { RecoverableFeatureBoundary } from '../ErrorBoundary';
 import { recoverableLazy } from '../../utils/recoverableLazy';
 
-// Component that throws an error
 const ThrowError = ({ shouldThrow }: { shouldThrow: boolean }) => {
   if (shouldThrow) {
     throw new Error('Test error message');
@@ -27,509 +13,207 @@ const ThrowError = ({ shouldThrow }: { shouldThrow: boolean }) => {
 };
 
 describe('ErrorBoundary', () => {
-  // Suppress console.error for these tests since we're intentionally throwing errors
-  const originalError = console.error;
+  const locationDescriptor = Object.getOwnPropertyDescriptor(window, 'location');
 
   beforeEach(() => {
-    console.error = vi.fn();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
-    console.error = originalError;
+    if (locationDescriptor) {
+      Object.defineProperty(window, 'location', locationDescriptor);
+    }
     vi.restoreAllMocks();
   });
 
-  describe('Normal Rendering', () => {
-    it('should render children when there is no error', () => {
-      render(
-        <ErrorBoundary>
-          <div>Test child content</div>
-        </ErrorBoundary>
-      );
+  it('renders children and does not report an error on the healthy path', () => {
+    const onError = vi.fn();
 
-      expect(screen.getByText('Test child content')).toBeInTheDocument();
-    });
+    render(
+      <ErrorBoundary onError={onError}>
+        <ThrowError shouldThrow={false} />
+        <div>Second child</div>
+      </ErrorBoundary>
+    );
 
-    it('should render multiple children when there is no error', () => {
-      render(
-        <ErrorBoundary>
-          <div>First child</div>
-          <div>Second child</div>
-        </ErrorBoundary>
-      );
-
-      expect(screen.getByText('First child')).toBeInTheDocument();
-      expect(screen.getByText('Second child')).toBeInTheDocument();
-    });
+    expect(screen.getByText('Child component')).toBeInTheDocument();
+    expect(screen.getByText('Second child')).toBeInTheDocument();
+    expect(onError).not.toHaveBeenCalled();
   });
 
-  describe('Error Catching', () => {
-    it('should catch errors and render fallback UI', () => {
-      render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
+  it('renders the complete default fallback for the caught error', () => {
+    render(
+      <ErrorBoundary>
+        <ThrowError shouldThrow />
+      </ErrorBoundary>
+    );
 
-      expect(screen.getByText('Something went wrong')).toBeInTheDocument();
-      expect(screen.getByText('Test error message')).toBeInTheDocument();
-    });
-
-    it('should display error message in fallback UI', () => {
-      render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      const errorMessage = screen.getByText('Test error message');
-      expect(errorMessage).toBeInTheDocument();
-    });
-
-    it('should render alert triangle icon in fallback UI', () => {
-      const { container } = render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      // Check for SVG icon (AlertTriangle from lucide-react)
-      const svg = container.querySelector('svg');
-      expect(svg).toBeInTheDocument();
-    });
-
-    it('should render reload button in fallback UI', () => {
-      render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      const reloadButton = screen.getByRole('button', { name: /reload/i });
-      expect(reloadButton).toBeInTheDocument();
-    });
+    expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
+    expect(screen.getByText('Test error message')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeEnabled();
+    expect(screen.queryByText('Child component')).not.toBeInTheDocument();
   });
 
-  describe('Custom Fallback', () => {
-    it('should render custom fallback when provided', () => {
-      const customFallback = <div>Custom error UI</div>;
+  it('uses a supplied fallback instead of the default fallback', () => {
+    render(
+      <ErrorBoundary fallback={<div>Custom error UI</div>}>
+        <ThrowError shouldThrow />
+      </ErrorBoundary>
+    );
 
-      render(
-        <ErrorBoundary fallback={customFallback}>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      expect(screen.getByText('Custom error UI')).toBeInTheDocument();
-      expect(screen.queryByText('Something went wrong')).not.toBeInTheDocument();
-    });
-
-    it('should use custom fallback instead of default UI', () => {
-      const customFallback = (
-        <div>
-          <h1>Custom Error</h1>
-          <p>Please contact support</p>
-        </div>
-      );
-
-      render(
-        <ErrorBoundary fallback={customFallback}>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      expect(screen.getByText('Custom Error')).toBeInTheDocument();
-      expect(screen.getByText('Please contact support')).toBeInTheDocument();
-    });
+    expect(screen.getByText('Custom error UI')).toBeInTheDocument();
+    expect(screen.queryByText('Something went wrong')).not.toBeInTheDocument();
   });
 
-  describe('Error Callback', () => {
-    it('should call onError callback when error is caught', () => {
-      const onErrorMock = vi.fn();
+  it('reports the exact error and component stack once', () => {
+    const onError = vi.fn();
 
-      render(
-        <ErrorBoundary onError={onErrorMock}>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
+    render(
+      <ErrorBoundary onError={onError}>
+        <ThrowError shouldThrow />
+      </ErrorBoundary>
+    );
 
-      expect(onErrorMock).toHaveBeenCalled();
-    });
-
-    it('should pass error and errorInfo to onError callback', () => {
-      const onErrorMock = vi.fn();
-
-      render(
-        <ErrorBoundary onError={onErrorMock}>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      expect(onErrorMock).toHaveBeenCalledWith(
-        expect.objectContaining({ message: 'Test error message' }),
-        expect.objectContaining({ componentStack: expect.any(String) })
-      );
-    });
-
-    it('should not throw if onError is not provided', () => {
-      expect(() => {
-        render(
-          <ErrorBoundary>
-            <ThrowError shouldThrow={true} />
-          </ErrorBoundary>
-        );
-      }).not.toThrow();
-    });
+    expect(onError).toHaveBeenCalledTimes(1);
+    const [error, errorInfo] = onError.mock.calls[0];
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe('Test error message');
+    expect(errorInfo.componentStack).toContain('ThrowError');
   });
 
-  describe('Reload Functionality', () => {
-    it('should reload page when reload button is clicked', () => {
-      // Mock window.location.reload
-      const reloadMock = vi.fn();
-      Object.defineProperty(window, 'location', {
-        value: { reload: reloadMock },
-        writable: true,
-      });
+  it('logs one structured ErrorBoundary diagnostic for the caught error', () => {
+    render(
+      <ErrorBoundary>
+        <ThrowError shouldThrow />
+      </ErrorBoundary>
+    );
 
-      render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      const reloadButton = screen.getByRole('button', { name: /reload/i });
-      fireEvent.click(reloadButton);
-
-      expect(reloadMock).toHaveBeenCalled();
-    });
+    const boundaryCalls = vi
+      .mocked(console.error)
+      .mock.calls.filter(([prefix]) => prefix === '[ErrorBoundary]');
+    expect(boundaryCalls).toHaveLength(1);
+    expect(boundaryCalls[0]).toEqual([
+      '[ErrorBoundary]',
+      expect.objectContaining({ message: 'Test error message' }),
+      expect.objectContaining({ componentStack: expect.stringContaining('ThrowError') }),
+    ]);
   });
 
-  describe('Error Logging', () => {
-    it('should log error to console', () => {
-      const consoleSpy = vi.spyOn(console, 'error');
+  it('keeps nested failures inside the nearest boundary', () => {
+    const outerOnError = vi.fn();
+    const innerOnError = vi.fn();
 
-      render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
+    render(
+      <ErrorBoundary onError={outerOnError}>
+        <ErrorBoundary onError={innerOnError}>
+          <ThrowError shouldThrow />
         </ErrorBoundary>
-      );
+      </ErrorBoundary>
+    );
 
-      expect(consoleSpy).toHaveBeenCalled();
-    });
-
-    it('should log with ErrorBoundary prefix', () => {
-      const consoleSpy = vi.spyOn(console, 'error');
-
-      render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      expect(consoleSpy).toHaveBeenCalledWith(
-        '[ErrorBoundary]',
-        expect.objectContaining({ message: 'Test error message' }),
-        expect.any(Object)
-      );
-    });
+    expect(innerOnError).toHaveBeenCalledTimes(1);
+    expect(outerOnError).not.toHaveBeenCalled();
+    expect(screen.getByText('Test error message')).toBeInTheDocument();
   });
 
-  describe('Error State Management', () => {
-    it('should set hasError state to true when error occurs', () => {
-      render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      // If fallback UI is showing, hasError must be true
-      expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+  it('reloads the page exactly once from the default recovery action', () => {
+    const reload = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { reload },
     });
 
-    it('should store error object in state', () => {
-      render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
+    render(
+      <ErrorBoundary>
+        <ThrowError shouldThrow />
+      </ErrorBoundary>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
 
-      // Error message is displayed, so error object must be in state
-      expect(screen.getByText('Test error message')).toBeInTheDocument();
-    });
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 
-  describe('getDerivedStateFromError', () => {
-    it('should return correct state when error is thrown', () => {
-      const error = new Error('Derived state test');
-      const state = ErrorBoundary.getDerivedStateFromError(error);
+  it('retains a failure until a reset key changes, then renders recovered children', () => {
+    const { rerender } = render(
+      <ErrorBoundary
+        resetKeys={['same']}
+        fallbackRender={({ error }) => <div>{error?.message}</div>}
+      >
+        <ThrowError shouldThrow />
+      </ErrorBoundary>
+    );
 
-      expect(state).toEqual({
-        hasError: true,
-        error: error,
-      });
-    });
+    rerender(
+      <ErrorBoundary
+        resetKeys={['same']}
+        fallbackRender={({ error }) => <div>{error?.message}</div>}
+      >
+        <ThrowError shouldThrow={false} />
+      </ErrorBoundary>
+    );
+    expect(screen.getByText('Test error message')).toBeInTheDocument();
+    expect(screen.queryByText('Child component')).not.toBeInTheDocument();
 
-    it('should preserve error object in returned state', () => {
-      const error = new Error('Preserve test');
-      const state = ErrorBoundary.getDerivedStateFromError(error);
-
-      expect(state.error?.message).toBe('Preserve test');
-    });
+    rerender(
+      <ErrorBoundary
+        resetKeys={['changed']}
+        fallbackRender={({ error }) => <div>{error?.message}</div>}
+      >
+        <ThrowError shouldThrow={false} />
+      </ErrorBoundary>
+    );
+    expect(screen.getByText('Child component')).toBeInTheDocument();
+    expect(screen.queryByText('Test error message')).not.toBeInTheDocument();
   });
 
-  describe('UI Styling', () => {
-    it('should apply correct CSS classes to fallback container', () => {
-      const { container } = render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
+  it('keeps an optional feature failure local and retries it in place', () => {
+    let featureAvailable = false;
+    const OptionalFeature = () => {
+      if (!featureAvailable) throw new Error('Optional chunk unavailable');
+      return <div>Recovered feature</div>;
+    };
 
-      const fallbackDiv = container.querySelector('.fixed.inset-0');
-      expect(fallbackDiv).toBeInTheDocument();
-      expect(fallbackDiv).toHaveClass('flex', 'items-center', 'justify-center');
-    });
+    render(
+      <RecoverableFeatureBoundary featureName="SCADA">
+        <OptionalFeature />
+      </RecoverableFeatureBoundary>
+    );
 
-    it('should apply error styling to error box', () => {
-      const { container } = render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
+    expect(screen.getByRole('alert', { name: 'SCADA unavailable' })).toHaveTextContent(
+      'Optional chunk unavailable'
+    );
+    featureAvailable = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry feature' }));
 
-      const errorBox = container.querySelector('.border-red-500\\/50');
-      expect(errorBox).toBeInTheDocument();
-    });
-
-    it('should style reload button correctly', () => {
-      render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      const reloadButton = screen.getByRole('button', { name: /reload/i });
-      expect(reloadButton).toHaveClass('bg-red-500', 'hover:bg-red-600');
-    });
+    expect(screen.getByText('Recovered feature')).toBeInTheDocument();
+    expect(screen.queryByRole('alert', { name: 'SCADA unavailable' })).not.toBeInTheDocument();
   });
 
-  describe('Accessibility', () => {
-    it('should have proper button semantics for reload button', () => {
-      render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      const reloadButton = screen.getByRole('button');
-      expect(reloadButton).toBeInTheDocument();
-      expect(reloadButton).toHaveAccessibleName(/reload/i);
+  it('creates a fresh lazy payload after an exhausted chunk import is retried', async () => {
+    let importAttempt = 0;
+    const importer = vi.fn(async () => {
+      importAttempt += 1;
+      if (importAttempt <= 2) throw new Error('Chunk still unavailable');
+      return { default: () => <div>Recovered lazy feature</div> };
+    });
+    const LazyFeature = recoverableLazy(importer, {
+      attempts: 2,
+      attemptTimeoutMs: 50,
+      retryDelayMs: 0,
     });
 
-    it('should render icon with proper accessibility', () => {
-      const { container } = render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
+    render(
+      <RecoverableFeatureBoundary featureName="SCADA">
+        <Suspense fallback={<div>Loading SCADA</div>}>
+          <LazyFeature />
+        </Suspense>
+      </RecoverableFeatureBoundary>
+    );
 
-      const icon = container.querySelector('svg');
-      expect(icon).toBeInTheDocument();
-    });
-  });
+    expect(await screen.findByRole('alert', { name: 'SCADA unavailable' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry feature' }));
 
-  describe('Edge Cases', () => {
-    it('should handle null error message gracefully', () => {
-      const ThrowNullError = () => {
-        throw new Error();
-      };
-
-      render(
-        <ErrorBoundary>
-          <ThrowNullError />
-        </ErrorBoundary>
-      );
-
-      // Should still render fallback UI
-      expect(screen.getByText('Something went wrong')).toBeInTheDocument();
-    });
-
-    it('should handle errors with very long messages', () => {
-      const longMessage = 'A'.repeat(500);
-      const ThrowLongError = () => {
-        throw new Error(longMessage);
-      };
-
-      render(
-        <ErrorBoundary>
-          <ThrowLongError />
-        </ErrorBoundary>
-      );
-
-      expect(screen.getByText(longMessage)).toBeInTheDocument();
-    });
-
-    it('should work with nested error boundaries', () => {
-      const outerOnError = vi.fn();
-      const innerOnError = vi.fn();
-
-      render(
-        <ErrorBoundary onError={outerOnError}>
-          <div>Outer boundary</div>
-          <ErrorBoundary onError={innerOnError}>
-            <ThrowError shouldThrow={true} />
-          </ErrorBoundary>
-        </ErrorBoundary>
-      );
-
-      // Inner boundary should catch the error
-      expect(innerOnError).toHaveBeenCalled();
-      expect(outerOnError).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('Component Lifecycle', () => {
-    it('should maintain error state across re-renders', () => {
-      const { rerender } = render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      expect(screen.getByText('Something went wrong')).toBeInTheDocument();
-
-      // Re-render
-      rerender(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      // Should still show error UI
-      expect(screen.getByText('Something went wrong')).toBeInTheDocument();
-    });
-
-    it('should not catch errors from children when no error is thrown', () => {
-      const onErrorMock = vi.fn();
-
-      render(
-        <ErrorBoundary onError={onErrorMock}>
-          <ThrowError shouldThrow={false} />
-        </ErrorBoundary>
-      );
-
-      expect(onErrorMock).not.toHaveBeenCalled();
-      expect(screen.getByText('Child component')).toBeInTheDocument();
-    });
-  });
-
-  describe('Reload Button Interaction', () => {
-    it('should have clickable reload button', () => {
-      const reloadMock = vi.fn();
-      Object.defineProperty(window, 'location', {
-        value: { reload: reloadMock },
-        writable: true,
-      });
-
-      render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      const reloadButton = screen.getByRole('button', { name: /reload/i });
-
-      expect(reloadButton).not.toBeDisabled();
-      fireEvent.click(reloadButton);
-
-      expect(reloadMock).toHaveBeenCalledTimes(1);
-    });
-
-    it('should display reload icon in button', () => {
-      render(
-        <ErrorBoundary>
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      const button = screen.getByRole('button', { name: /reload/i });
-      const icon = button.querySelector('svg');
-
-      expect(icon).toBeInTheDocument();
-    });
-  });
-
-  describe('Recoverable feature isolation', () => {
-    it('resets a failed boundary when its recovery key changes', () => {
-      const { rerender } = render(
-        <ErrorBoundary
-          resetKeys={['failed']}
-          fallbackRender={({ error }) => <div>{error?.message}</div>}
-        >
-          <ThrowError shouldThrow={true} />
-        </ErrorBoundary>
-      );
-
-      expect(screen.getByText('Test error message')).toBeInTheDocument();
-
-      rerender(
-        <ErrorBoundary
-          resetKeys={['recovered']}
-          fallbackRender={({ error }) => <div>{error?.message}</div>}
-        >
-          <ThrowError shouldThrow={false} />
-        </ErrorBoundary>
-      );
-
-      expect(screen.getByText('Child component')).toBeInTheDocument();
-    });
-
-    it('keeps an optional feature failure local and retries it in place', () => {
-      let featureAvailable = false;
-      const OptionalFeature = () => {
-        if (!featureAvailable) throw new Error('Optional chunk unavailable');
-        return <div>Recovered feature</div>;
-      };
-
-      render(
-        <RecoverableFeatureBoundary featureName="SCADA">
-          <OptionalFeature />
-        </RecoverableFeatureBoundary>
-      );
-
-      expect(screen.getByRole('alert', { name: 'SCADA unavailable' })).toBeInTheDocument();
-      featureAvailable = true;
-      fireEvent.click(screen.getByRole('button', { name: 'Retry feature' }));
-
-      expect(screen.getByText('Recovered feature')).toBeInTheDocument();
-    });
-
-    it('creates a fresh lazy payload when retrying an exhausted chunk import', async () => {
-      let importAttempt = 0;
-      const importer = vi.fn(async () => {
-        importAttempt += 1;
-        if (importAttempt <= 2) throw new Error('Chunk still unavailable');
-        return { default: () => <div>Recovered lazy feature</div> };
-      });
-      const LazyFeature = recoverableLazy(importer, {
-        attempts: 2,
-        attemptTimeoutMs: 50,
-        retryDelayMs: 0,
-      });
-
-      render(
-        <RecoverableFeatureBoundary featureName="SCADA">
-          <Suspense fallback={<div>Loading SCADA</div>}>
-            <LazyFeature />
-          </Suspense>
-        </RecoverableFeatureBoundary>
-      );
-
-      expect(await screen.findByRole('alert', { name: 'SCADA unavailable' })).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: 'Retry feature' }));
-
-      expect(await screen.findByText('Recovered lazy feature')).toBeInTheDocument();
-      expect(importer).toHaveBeenCalledTimes(3);
-    });
+    expect(await screen.findByText('Recovered lazy feature')).toBeInTheDocument();
+    expect(importer).toHaveBeenCalledTimes(3);
   });
 });

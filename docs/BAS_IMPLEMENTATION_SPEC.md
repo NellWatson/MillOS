@@ -4,6 +4,14 @@
 
 *Building on the existing bilateral alignment foundation to create a comprehensive simulation of Semler/Mondragon-style workplace democracy with AI servant leadership, grounded in Wallace's mathematical framework.*
 
+**Status:** historical implementation blueprint
+
+**Current implementation authority:** source plus [MillOS Architecture](./architecture.md)
+
+**Current target:** [Agent Operating Architecture](./AGENT_OPERATING_ARCHITECTURE.md)
+
+This document preserves the comprehensive early blueprint and its rationale. Many file names, store boundaries, “current state” claims, and phased estimates describe an earlier generation. Verify every implementation claim against current source. New agent-facing state, control, authority, evidence, and accretion work follows the newer target and execution contract.
+
 ---
 
 ## Table of Contents

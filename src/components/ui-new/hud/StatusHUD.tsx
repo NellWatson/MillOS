@@ -9,7 +9,7 @@ import {
   CheckCircle,
   GripVertical,
 } from 'lucide-react';
-import { useSafetyStore } from '../../../stores/safetyStore';
+import { computeSafetyScore, useSafetyStore } from '../../../stores/safetyStore';
 import { useFPSStore } from '../../FPSMonitor';
 import { useUIStore } from '../../../stores/uiStore';
 import { useProductionStore } from '../../../stores/productionStore';
@@ -94,6 +94,22 @@ export const StatusHUD: React.FC = () => {
     }));
   }, []);
 
+  // Re-clamp when the window shrinks, or a HUD dragged to the right edge
+  // ends up off-screen with no handle to drag it back.
+  useEffect(() => {
+    const clampToViewport = () => {
+      const rect = hudRef.current?.getBoundingClientRect();
+      const maxX = window.innerWidth - (rect?.width ?? 200) - 16;
+      const maxY = window.innerHeight - (rect?.height ?? 50) - 16;
+      setPosition((prev) => ({
+        x: Math.max(16, Math.min(maxX, prev.x)),
+        y: Math.max(16, Math.min(maxY, prev.y)),
+      }));
+    };
+    window.addEventListener('resize', clampToViewport);
+    return () => window.removeEventListener('resize', clampToViewport);
+  }, []);
+
   // Handle mouse move while dragging
   useEffect(() => {
     if (!isDragging) return;
@@ -148,17 +164,8 @@ export const StatusHUD: React.FC = () => {
     };
   }, [showNotifications]);
 
-  // Compute safety score from metrics (100 baseline minus penalties)
-  const safetyScore = Math.max(
-    0,
-    Math.min(
-      100,
-      100 -
-        (safetyMetrics?.nearMisses ?? 0) * 5 -
-        (safetyMetrics?.safetyStops ?? 0) * 2 -
-        (safetyMetrics?.routeConflicts ?? 0)
-    )
-  );
+  // Shared formula with OverviewPanel so both surfaces show the same number.
+  const safetyScore = computeSafetyScore(safetyMetrics);
 
   // Determine safety color
   const safetyColor =
@@ -209,7 +216,7 @@ export const StatusHUD: React.FC = () => {
 
           <div
             className="flex items-center gap-1.5 text-[10px] text-cyan-300 font-mono"
-            aria-label={`Final packer throughput ${throughput} bags per hour`}
+            aria-label={`Final packer throughput ${throughput.toLocaleString()} bags per hour`}
             title="Measured from final-stage packer mass flow"
           >
             <span>{throughput.toLocaleString()} BAGS/H</span>
@@ -328,7 +335,10 @@ export const StatusHUD: React.FC = () => {
                                   ? 'bg-green-500'
                                   : 'bg-blue-500'
                         }`}
+                        aria-hidden="true"
                       />
+                      {/* The dot is colour-only; name the type for screen readers. */}
+                      <span className="sr-only">{alert.type}: </span>
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-medium text-white truncate">{alert.title}</div>
                         <div className="text-[10px] text-slate-400 truncate">{alert.message}</div>
@@ -342,6 +352,7 @@ export const StatusHUD: React.FC = () => {
                             onClick={() => acknowledgeAlert(alert.id)}
                             className="p-1 text-slate-500 hover:text-green-400 transition-colors"
                             title="Acknowledge"
+                            aria-label={`Acknowledge ${alert.title}`}
                           >
                             <CheckCircle size={12} />
                           </button>
@@ -350,6 +361,7 @@ export const StatusHUD: React.FC = () => {
                           onClick={() => removeAlert(alert.id)}
                           className="p-1 text-slate-500 hover:text-red-400 transition-colors"
                           title="Dismiss"
+                          aria-label={`Dismiss ${alert.title}`}
                         >
                           <X size={12} />
                         </button>

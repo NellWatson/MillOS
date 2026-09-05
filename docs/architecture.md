@@ -1,350 +1,264 @@
-# Architecture Overview
+# MillOS Architecture
 
-MillOS is a real-time 3D digital twin simulator for a grain mill factory covering system architecture, design patterns, and key technical decisions.
+**Status:** current implementation map
 
-## Table of Contents
+**Reviewed:** 2026-08-31
 
-1. [Technology Stack](#technology-stack)
-2. [Application Architecture](#application-architecture)
-3. [Rendering Pipeline](#rendering-pipeline)
-4. [State Management](#state-management)
-5. [Factory Layout](#factory-layout)
-6. [Design Patterns](#design-patterns)
+**Target architecture:** [Agent Operating Architecture](./AGENT_OPERATING_ARCHITECTURE.md)
 
----
+This document answers “what exists and where is its authority?” The target document answers “what should MillOS become?” Source and runtime evidence remain authoritative over prose.
 
-## Technology Stack
+## System shape
 
-### Core Framework
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| React | 19.2.0 | UI framework |
-| TypeScript | 5.8.2 | Type safety |
-| Vite | 6.2.0 | Build tool and dev server |
+MillOS is a browser-based, real-time 3D grain mill simulation. It combines a persistent operational model, SCADA projections, safety and logistics systems, a strategic and tactical AI layer, an operational React interface, and a continuously rendered Three.js world.
 
-### 3D Rendering
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| Three.js | 0.181.2 | WebGL 3D rendering |
-| React Three Fiber | 9.4.0 | React renderer for Three.js |
-| @react-three/drei | 10.7.7 | R3F helper components |
-| @react-three/postprocessing | 3.0.4 | Visual effects |
+```text
+main.tsx
+  -> App.tsx
+       -> startup and runtime mode
+       -> R3F Canvas
+            -> PhysicsScene
+            -> MillScene and authored world
+            -> RuntimeController and live diagnostics
+       -> DeferredOperationalUI
+            -> GameInterface
+            -> SCADA, AI, safety, production, settings, and replay surfaces
 
-### State & Animation
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| Zustand | 5.0.0 | Global state management |
-| Framer Motion | 11.15.0 | UI animations |
+CentralTickProvider
+  -> CentralTickSystem
+       -> UnifiedGameTick
+            -> domain-specific Zustand stores
+            -> operational world consequences
 
-### UI & Styling
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| Tailwind CSS | 3.4.17 | Utility-first CSS |
-| Lucide React | 0.555.0 | Icon library |
-| Recharts | 2.15.0 | Data visualization charts |
-
----
-
-## Application Architecture
-
-### High-Level Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        App.tsx (Root)                            │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
-│  │  UI Layer    │  │ Alert System │  │  AI Command Center    │  │
-│  │  (DOM)       │  │  (DOM)       │  │  (DOM Slide-out)      │  │
-│  └──────────────┘  └──────────────┘  └───────────────────────┘  │
-├─────────────────────────────────────────────────────────────────┤
-│                      R3F Canvas                                  │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │                    MillScene                                │ │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐   │ │
-│  │  │ Machines │ │ Workers  │ │Forklifts │ │ Conveyors    │   │ │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────────┘   │ │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐   │ │
-│  │  │ Spouting │ │  Dust    │ │ TruckBay │ │ Holographics │   │ │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────────┘   │ │
-│  │  ┌──────────────────────────────────────────────────────┐   │ │
-│  │  │              Factory Environment                      │   │ │
-│  │  │  (Lighting, Walls, Ceiling, Skylights)               │   │ │
-│  │  └──────────────────────────────────────────────────────┘   │ │
-│  └────────────────────────────────────────────────────────────┘ │
-├─────────────────────────────────────────────────────────────────┤
-│                      Zustand Store                               │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐   │
-│  │ Workers  │ │ Machines │ │  Alerts  │ │  Safety Metrics  │   │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────────────┘   │
-├─────────────────────────────────────────────────────────────────┤
-│                     Utility Services                             │
-│  ┌──────────────────────┐  ┌─────────────────────────────────┐  │
-│  │    Audio Manager     │  │      Position Registry          │  │
-│  │  (Web Audio API)     │  │   (Collision Detection)         │  │
-│  └──────────────────────┘  └─────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+SCADAService <-> adapters, alarms, history, SCADABridge <-> domain stores and UI
+AI engine -> production observations and decision records -> current effect handlers
+Replay stores <- snapshots, commands, decisions, and operational events
 ```
 
-### Component Layers
+## Technology stack
 
-1. **DOM Layer** - Traditional React components for UI overlays, panels, alerts
-2. **Canvas Layer** - React Three Fiber components for 3D rendering
-3. **State Layer** - Zustand store for global application state
-4. **Service Layer** - Singleton utilities for audio and position tracking
+Use `package.json` as the version authority.
 
----
+| Concern     | Primary technology                                           |
+| ----------- | ------------------------------------------------------------ |
+| application | React 19, TypeScript, Vite                                   |
+| 3D world    | Three.js, React Three Fiber, Drei, Rapier where enabled      |
+| state       | Zustand domain stores                                        |
+| UI          | Tailwind CSS, Framer Motion, Lucide, Recharts                |
+| SCADA       | browser adapters, IndexedDB history, optional Node proxy     |
+| AI          | deterministic heuristics, Gemini or WebGPU strategic backend |
+| testing     | Vitest, Playwright, source validators, runtime capture tools |
 
-## Rendering Pipeline
+## Runtime assembly
 
-### React Three Fiber Setup
+### Application shell
 
-```tsx
-<Canvas
-  shadows
-  camera={{ position: [40, 25, 40], fov: 45, near: 0.1, far: 500 }}
-  gl={{ antialias: true, alpha: false }}
-  dpr={[1, 2]}
->
-  <color attach="background" args={['#0a0f1a']} />
-  <fog attach="fog" args={['#0a0f1a', 150, 500]} />
+`src/App.tsx` owns:
 
-  <Suspense fallback={null}>
-    <OrbitControls ... />
-    <MillScene ... />
-    <PostProcessing />
-    <Preload all />
-  </Suspense>
-</Canvas>
+- runtime-mode parsing;
+- progressive loading of physics, the authored world, and operational UI;
+- Canvas lifecycle and WebGL recovery;
+- top-level camera and selection bridges;
+- SCADA synchronization startup;
+- graphics, audio, mobile, and accessibility integration.
+
+The complete world and operational UI are lazy-loaded. A lightweight first frame renders while the authored scene hydrates.
+
+### Runtime modes
+
+`src/runtime/runtimeMode.ts` parses deterministic benchmark and review options. It controls scene, duration, quality, game time, weather, SCADA, PA mode, motion capture, art review, and operational UI capture.
+
+These query parameters are measurement controls. They are not a general operational command interface.
+
+### Runtime diagnostics
+
+`src/components/RuntimeController.tsx` installs `window.__MILLOS_RUNTIME__`.
+
+It exposes:
+
+- performance and scene snapshots;
+- motion and checkpoint telemetry;
+- named object poses;
+- material, light, object, and sample audits;
+- camera control for deterministic captures;
+- performance-system isolation.
+
+This is the authoritative assembled-scene measurement surface. The planned semantic agent API will link to it rather than duplicate it.
+
+The same controller also installs the separate, non-writable `window.__MILLOS_AGENT__` read
+surface. Its `brief`, `query`, `capabilities`, and `trace` methods project canonical operational
+store state into bounded immutable envelopes. They do not subscribe to stores, invoke actions, or
+replace assembled-scene measurement. `trace` remains explicitly partial until causal command
+events exist.
+
+### Agent contract and query plane
+
+Phases 0 through 2 of the agent operating programme are implemented under `src/agent/`. They
+provide semantic URIs, 11 domain descriptors, 10 invariant descriptors, three discovery-only
+capability candidates, deterministic domain revisions, Level 0 and Level 1 observations, runtime
+validation, source fingerprints, and generated evidence under `build/generated/agent/`.
+
+`scripts/agent-brief.mjs` composes bounded Git state and generated contract facts without reading
+diffs, environment values, credentials, or arbitrary repository contents. The browser imports the
+registry only through the read adapter. Current authority is observation-only: command execution,
+grants, cockpit mutation controls, and external writes remain absent.
+
+The exact Phase 2 production build transforms 3,609 modules. The initial JavaScript budget is
+0.45 MiB gzip across five files. A capture-locked shipping-page probe confirmed all four methods,
+the non-writable property descriptor, a 3,714-byte live brief, preserved legacy telemetry, and zero
+browser console errors. The deterministic local measurement is generated at
+`build/generated/agent/query-plane-measurement.json`; its machine-specific timing must be read as
+local evidence rather than a universal performance claim.
+
+## Simulation and control
+
+### Central tick
+
+`src/systems/CentralTickSystem.ts` schedules work by priority. `CentralTickProvider.tsx` owns its React lifecycle.
+
+`src/systems/UnifiedGameTick.ts` composes canonical operational transitions including:
+
+- simulation time and day rollover;
+- machine wear, temperature, efficiency, status, and breakdowns;
+- material flow and production throughput;
+- campaign orders, incidents, economics, and constraints;
+- maintenance progression and restart confirmation;
+- quality and dispatch interlocks;
+- truck transfers and loading;
+- energy and shift metrics.
+
+The tick stores truth and leaves cosmetic smoothing to presentation systems.
+
+### Domain state
+
+MillOS has 20 domain-oriented `*Store.ts` modules under `src/stores`. `src/store.ts` and `src/stores/index.ts` retain a compatibility facade for older consumers.
+
+New code should use the smallest domain owner directly. See [State Management](./state-management.md) for the ownership map and mutation rules.
+
+### Physical and visual simulation
+
+Frame-local movement and rendering live in components and `src/simulation`. Important separation:
+
+- canonical operational state belongs in stores or deterministic controllers;
+- high-frequency pose and cosmetic variance stay outside global stores;
+- runtime measurement reads the assembled scene;
+- operational commands should not enter the render loop.
+
+## Operational domains
+
+| Domain                                  | Current authority                                 |
+| --------------------------------------- | ------------------------------------------------- |
+| clock, weather, shifts, drill           | `gameSimulationStore.ts`                          |
+| machines, metrics, decision records     | `productionStore.ts`                              |
+| inventory, buffers, batches, genealogy  | `materialFlowStore.ts`                            |
+| sampling, disposition, recall           | `qcLabStore.ts`                                   |
+| breakdowns, work orders, parts          | `breakdownStore.ts`                               |
+| orders, incidents, economics, logbook   | `operationsCampaignStore.ts`                      |
+| truck schedules and dock state          | `truckScheduleStore.ts`                           |
+| safety records and configuration        | `safetyStore.ts`                                  |
+| tagged data, alarms, historian          | `src/scada/`                                      |
+| recent diagnostic and decision evidence | replay stores                                     |
+| presentation preferences                | UI, graphics, audio, mobile, and knowledge stores |
+
+Cross-domain effects currently use explicit coordinator code and some direct `getState()` calls. The target command plane will make consequence-bearing operations inspectable without centralizing all state.
+
+## SCADA architecture
+
+```text
+domain truth
+  -> SCADA synchronization and tag projection
+  -> SCADAService
+       -> SimulationAdapter
+       -> REST, MQTT, WebSocket, PI, and Wonderware adapters
+       -> AlarmManager
+       -> HistoryStore and HistorianRouter
+  -> SCADAPanel, hooks, alerts, and 3D visual projections
 ```
 
-### Camera Configuration
+Simulation, disconnected, replay, hybrid, and external conditions must remain visibly distinct. External protocol availability does not imply current connectivity or control authority.
 
-| Property | Value | Description |
-|----------|-------|-------------|
-| Position | [40, 25, 40] | Isometric-style view |
-| FOV | 45 | Moderate field of view |
-| Near Plane | 0.1 | Close clipping |
-| Far Plane | 500 | Extended draw distance |
-| Auto Rotate | 0.3 speed | When no selection active |
+See [SCADA Integration](./SCADA_PLAN.md).
 
-### Lighting System
+## AI architecture
 
-The factory uses a multi-layer lighting approach:
+The current AI layer has:
 
-1. **Ambient Light** - Base illumination (intensity: 0.15, color: #b4c6e7)
-2. **Directional Key Light** - Primary shadows (intensity: 1.5)
-3. **Directional Fill Light** - Shadow softening (intensity: 0.4)
-4. **Point Lights (5x)** - Industrial overhead fixtures
-5. **Accent Lights (3x)** - Colored dramatic lighting
-6. **Spot Light** - Machine highlighting
+- a fast heuristic tactical engine in `src/utils/aiEngine.ts`;
+- strategic reasoning through Gemini or an on-device WebGPU backend;
+- mode, backend, priority, model readiness, and cost state in `aiConfigStore.ts`;
+- provenance-bearing decision records in `productionStore.ts`;
+- human accept, defer, reject, inspect, and replay surfaces in `AICommandCenter.tsx`.
 
----
+Current decision effects call domain actions directly. The target architecture routes consequence-bearing effects through registered capabilities, authority checks, receipts, and causal evidence.
 
-## State Management
+See [AI Integration](./ai-integration.md).
 
-### Zustand Store Structure
+## Evidence and replay
 
-```typescript
-interface MillStore {
-  // Time System (24-hour cycle)
-  gameTime: number;              // 0-24 hour representation
-  setGameTime: (time: number) => void;
-  tickGameTime: () => void;
+`incidentReplayStore.ts` records bounded operational frames and diagnostic commands. `historicalPlaybackStore.ts` records bounded AI decision history and time-based queries. The campaign logbook, maintenance audit, quality audit, SCADA alarm history, and historian provide domain evidence.
 
-  // Production Control
-  productionSpeed: number;       // 0-2 multiplier
+These are strong local records with different schemas. The target causal evidence plane links them with semantic IDs, correlation and causation IDs, revisions, actors, authority, and outcomes.
 
-  // Entity State
-  workers: WorkerData[];
-  machines: MachineData[];
+## UI architecture
 
-  // Selection State
-  selectedWorker: WorkerData | null;
-  selectedMachine: MachineData | null;
+`DeferredOperationalUI.tsx` loads the main interface after the first scene frame. `src/components/ui-new/GameInterface.tsx` hosts the dock, sidebar, panels, alerts, and operational widgets. Large panels such as SCADA and the AI Command Center remain deferred.
 
-  // Alert System
-  alerts: AlertData[];
+The previous UI migration plan is historical. The next design layer is the agent cockpit in the [Agent Operating Architecture](./AGENT_OPERATING_ARCHITECTURE.md#12-agent-cockpit-and-interfaces).
 
-  // AI Integration
-  aiDecisions: AIDecision[];
+## 3D world architecture
 
-  // Production Metrics
-  metrics: {
-    throughput: number;
-    efficiency: number;
-    uptime: number;
-    quality: number;
-  };
+`src/components/MillScene.tsx` composes the factory, machines, conveyors, forklifts, trucks, terrain, water, village, farm, atmosphere, safety markers, and operational signals.
 
-  // Safety System
-  safetyMetrics: {
-    nearMisses: number;
-    safetyStops: number;
-    workerEvasions: number;
-    lastIncidentTime: number | null;
-  };
+Rendering work must respect:
 
-  safetyConfig: {
-    workerDetectionRadius: number;
-    forkliftSafetyRadius: number;
-    pathCheckDistance: number;
-    speedZoneSlowdown: number;
-  };
+- canonical site coordinates and render layers;
+- reachability, because many legacy modules are intentionally dead;
+- shared geometry and material budgets;
+- quality-tier contracts;
+- capture serialization through `.capture.lock`;
+- runtime assembly evidence over source-only assumptions.
 
-  // UI State
-  showZones: boolean;
-  showAIPanel: boolean;
-}
-```
+## Services and boundaries
 
-### State Flow
+Singleton or registry services include audio, GPU resources, positions, vehicle telemetry, SCADA, and runtime measurement. Each service needs explicit lifecycle cleanup and bounded subscriptions.
 
-```
-User Interaction
-      │
-      ▼
-┌─────────────┐    ┌─────────────┐
-│  UI Overlay │◄──►│ Zustand     │
-│  (controls) │    │ Store       │
-└─────────────┘    └──────┬──────┘
-                         │
-           ┌─────────────┼─────────────┐
-           ▼             ▼             ▼
-      ┌─────────┐  ┌─────────┐  ┌─────────┐
-      │ Workers │  │Machines │  │ Safety  │
-      │ System  │  │ Meshes  │  │ Display │
-      └─────────┘  └─────────┘  └─────────┘
-```
+Important boundaries:
 
----
+1. browser simulation versus external industrial systems;
+2. canonical state versus display smoothing;
+3. operational actions versus UI preferences;
+4. observed state versus prediction;
+5. source validation versus runtime, human, deployment, and publication evidence;
+6. current live modules versus archived and unreachable code.
 
-## Factory Layout
+## Current architectural seams
 
-### Zone Organization
+The following are migration targets, not blanket defects:
 
-The factory floor is divided into 4 production zones along the Z-axis:
+- broad direct store access makes cross-domain actions difficult to inventory;
+- the compatibility aggregate covers only selected core stores;
+- runtime diagnostics are rich but not semantically organized for operational control;
+- AI, UI, replay, and SCADA describe actions through different contracts;
+- documentation from older generations can compete with current source truth;
+- causal records correlate some state changes by time or local IDs rather than one cross-domain chain.
 
-| Zone | Z Position | Equipment | Count |
-|------|------------|-----------|-------|
-| Zone 1 | z = -22 | Silos (Alpha-Epsilon) | 5 |
-| Zone 2 | z = -6 | Roller Mills (RM-101 to RM-106) | 6 |
-| Zone 3 | z = 6, y = 9 | Plansifters (A, B, C) - Elevated | 3 |
-| Zone 4 | z = 20 | Packers (Lines 1-3) | 3 |
+The [Agent Operating Architecture](./AGENT_OPERATING_ARCHITECTURE.md) addresses these seams through a strangler migration. It does not require a whole-system rewrite.
 
-### Coordinate System
+## Source navigation
 
-```
-        +Y (Up)
-         │
-         │    +Z (North/Front)
-         │   /
-         │  /
-         │ /
-         │/
-─────────┼───────── +X (East)
-        /│
-       / │
-      /  │
-     /   │
-    /    │
-```
+| Question                                | Start here                                                         |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| How does the app boot?                  | `src/main.tsx`, `src/App.tsx`                                      |
+| What is mounted in the world?           | `src/components/MillScene.tsx`                                     |
+| What changes canonical state over time? | `src/systems/UnifiedGameTick.ts`                                   |
+| Which store owns a value?               | `src/stores/README.md`, `src/stores/`                              |
+| How does SCADA project or write data?   | `src/scada/`, `src/store.ts`                                       |
+| How are AI decisions produced?          | `src/utils/aiEngine.ts`, `src/stores/aiConfigStore.ts`             |
+| What did the assembled scene render?    | `window.__MILLOS_RUNTIME__`                                        |
+| How is an incident replayed?            | replay stores and `src/components/game/IncidentReplayControls.tsx` |
+| What agent contracts exist now?         | `docs/agent/README.md`, `src/agent/`, `build/generated/agent/`     |
+| What should agent control become?       | `docs/AGENT_OPERATING_ARCHITECTURE.md`                             |
 
-### Floor Dimensions
+## Validation
 
-- **Floor Size:** 80 units
-- **Wall Height:** 35 units
-- **Ceiling Height:** 32 units
-- **Factory Bounds:** X: -55 to +55, Z: -40 to +40
-
----
-
-## Design Patterns
-
-### 1. Component Composition
-
-The 3D scene uses hierarchical composition:
-
-```tsx
-<MillScene>
-  <FactoryEnvironment />        // Static environment
-  <Machines machines={...} />    // Equipment meshes
-  <WorkerSystem />               // Animated workers
-  <ForkliftSystem />             // Vehicles + safety
-  <ConveyorSystem />             // Product flow
-  <DustParticles />              // Atmosphere
-  <HolographicDisplays />        // 3D UI elements
-</MillScene>
-```
-
-### 2. Singleton Services
-
-Utilities are implemented as singleton instances:
-
-```typescript
-// audioManager.ts
-class AudioManager { ... }
-export const audioManager = new AudioManager();
-
-// positionRegistry.ts
-class PositionRegistry { ... }
-export const positionRegistry = new PositionRegistry();
-```
-
-### 3. Frame-Based Animation
-
-Using R3F's `useFrame` hook for per-frame updates:
-
-```typescript
-useFrame((state, delta) => {
-  // Animation logic
-  mesh.current.position.x += speed * delta;
-
-  // Collision detection
-  positionRegistry.register(id, x, z, 'worker');
-});
-```
-
-### 4. Memoized Data
-
-Heavy data structures are memoized with `useMemo`:
-
-```typescript
-const machines = useMemo(() => {
-  const _machines: MachineData[] = [];
-  // Generate machine configurations
-  return _machines;
-}, []); // Empty deps = generated once
-```
-
-### 5. Event-Driven Audio
-
-Audio is triggered by state changes and user interactions:
-
-```typescript
-useEffect(() => {
-  if (status === 'running') {
-    audioManager.playMillSound(machineId, rpm);
-  }
-  return () => audioManager.stopMachineSound(machineId);
-}, [status]);
-```
-
----
-
-## Performance Considerations
-
-### Optimization Techniques
-
-1. **Instanced Meshes** - Multiple similar objects share geometry
-2. **Level of Detail** - Simplified geometry for distant objects
-3. **Frustum Culling** - Automatic via Three.js
-4. **Texture Atlasing** - Reduced draw calls
-5. **DPR Limiting** - Device pixel ratio capped at 2
-6. **Suspense Loading** - Progressive asset loading
-
-### Target Performance
-
-- **60 FPS** on modern desktop browsers
-- **30 FPS** minimum on mobile devices
-- **< 3 second** initial load time
+Choose focused checks for the touched domain, then run repository-mandated aggregate gates before completion. The normal source ladder includes typecheck, lint, formatting, tests, build, asset, shader, depth, bundle, and reachability validation. Runtime, visual, accessibility, performance, external, and human gates remain distinct.

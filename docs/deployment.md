@@ -1,5 +1,9 @@
 # Deployment Guide
 
+**Status:** legacy topical reference, current workflow and hosted-runtime verification required
+
+**Evidence rule:** a local build does not prove deployment or publication.
+
 Building and deploying MillOS to various hosting platforms.
 
 ## Table of Contents
@@ -87,8 +91,6 @@ jobs:
 
       - name: Build
         run: npm run build
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -281,7 +283,8 @@ See `.github/workflows/deploy-k8s.yml` for Kubernetes deployment configuration.
 > **SECURITY WARNING**: Never embed API keys in client-side bundles using Vite's `define`.
 > API keys in client bundles can be extracted by anyone viewing your site.
 
-For sensitive API keys, use a backend proxy or serverless function:
+MillOS ships no serverless functions today; the Gemini key is entered at runtime in the app and
+stored only in the browser (`millos-ai-config`). If a proxy is added later, the pattern is:
 
 ```typescript
 // api/proxy.ts (serverless function)
@@ -295,11 +298,7 @@ export default async function handler(req, res) {
 
 #### Local Development
 
-Create `.env.local` for backend/serverless functions:
-
-```bash
-GEMINI_API_KEY=your_key_here
-```
+`cp .env.local.example .env.local`. No build-time key is read; see `.env.local.example`.
 
 **Note**: The `.env.local` file is gitignored and should never be committed.
 
@@ -310,9 +309,7 @@ These are only accessible server-side in serverless functions.
 
 #### Vercel
 
-```bash
-vercel env add GEMINI_API_KEY
-```
+No environment variables are required for the static site.
 
 #### Netlify
 
@@ -330,6 +327,9 @@ For the backend SCADA proxy service:
 | `MODBUS_HOST` | - | Modbus TCP host |
 | `MODBUS_PORT` | 502 | Modbus TCP port |
 | `MQTT_BROKER_URL` | - | MQTT broker for pub/sub |
+| `SCADA_API_KEY` (or `API_KEY`) | - | Required in production; clients must present it |
+
+These are read by `scada-proxy/src/index.ts`, not by the browser app.
 
 Example `.env` file for scada-proxy:
 

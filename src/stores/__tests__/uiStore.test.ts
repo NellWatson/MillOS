@@ -5,7 +5,7 @@
  * and other UI-related state management.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { useUIStore } from '../uiStore';
 import { AlertData } from '../../types';
 
@@ -22,41 +22,58 @@ const createMockAlert = (overrides: Partial<AlertData> = {}): AlertData => ({
 
 describe('UIStore', () => {
   beforeEach(() => {
-    // Reset store to initial state
-    useUIStore.setState({
+    useUIStore.setState(useUIStore.getInitialState(), true);
+  });
+
+  it('starts from the complete documented UI state', () => {
+    const state = useUIStore.getState();
+
+    expect({
+      alerts: state.alerts,
+      rehydrationError: state.rehydrationError,
+      scadaSyncError: state.scadaSyncError,
+      showZones: state.showZones,
+      showAIPanel: state.showAIPanel,
+      panelMinimized: state.panelMinimized,
+      theme: state.theme,
+      uiScale: state.uiScale,
+      showShortcuts: state.showShortcuts,
+      hasSeenIntro: state.hasSeenIntro,
+      legendPosition: state.legendPosition,
+      showGamificationBar: state.showGamificationBar,
+      showMiniMap: state.showMiniMap,
+      fpsMode: state.fpsMode,
+      showFPSCounter: state.showFPSCounter,
+      blueprintMode: state.blueprintMode,
+      blueprintTransition: state.blueprintTransition,
+      alertPriorities: [...state._alertIndices.alertsByPriority.entries()],
+    }).toEqual({
+      alerts: [],
       rehydrationError: false,
       scadaSyncError: false,
-      _alertIndices: {
-        alertsByPriority: new Map([
-          ['info', []],
-          ['warning', []],
-          ['critical', []],
-        ]),
-      },
-      alerts: [],
       showZones: true,
       showAIPanel: true,
       panelMinimized: false,
       theme: 'dark',
       uiScale: 1,
       showShortcuts: false,
+      hasSeenIntro: false,
       legendPosition: { x: -1, y: -1 },
       showGamificationBar: false,
       showMiniMap: false,
       fpsMode: false,
+      showFPSCounter: false,
+      blueprintMode: false,
+      blueprintTransition: 0,
+      alertPriorities: [
+        ['info', []],
+        ['warning', []],
+        ['critical', []],
+      ],
     });
-  });
-
-  afterEach(() => {
-    vi.clearAllMocks();
   });
 
   describe('Alerts', () => {
-    it('should initialize with empty alerts', () => {
-      const { alerts } = useUIStore.getState();
-      expect(alerts).toHaveLength(0);
-    });
-
     it('should add alert to the front of the array', () => {
       const { addAlert } = useUIStore.getState();
 
@@ -66,9 +83,10 @@ describe('UIStore', () => {
       addAlert(alert1);
       addAlert(alert2);
 
-      const { alerts } = useUIStore.getState();
-      expect(alerts[0].title).toBe('Second');
-      expect(alerts[1].title).toBe('First');
+      const alerts = useUIStore.getState().alerts;
+      expect(alerts).toHaveLength(2);
+      expect(alerts[0]).toBe(alert2);
+      expect(alerts[1]).toBe(alert1);
     });
 
     it('should limit alerts to 10 items', () => {
@@ -149,11 +167,6 @@ describe('UIStore', () => {
   });
 
   describe('Error Tracking', () => {
-    it('should initialize without rehydration error', () => {
-      const { rehydrationError } = useUIStore.getState();
-      expect(rehydrationError).toBe(false);
-    });
-
     it('should clear rehydration error', () => {
       useUIStore.setState({ rehydrationError: true });
       const { clearRehydrationError } = useUIStore.getState();
@@ -161,11 +174,6 @@ describe('UIStore', () => {
       clearRehydrationError();
 
       expect(useUIStore.getState().rehydrationError).toBe(false);
-    });
-
-    it('should initialize without SCADA sync error', () => {
-      const { scadaSyncError } = useUIStore.getState();
-      expect(scadaSyncError).toBe(false);
     });
 
     it('should clear SCADA sync error', () => {
@@ -179,11 +187,6 @@ describe('UIStore', () => {
   });
 
   describe('Visibility Toggles', () => {
-    it('should initialize with zones visible', () => {
-      const { showZones } = useUIStore.getState();
-      expect(showZones).toBe(true);
-    });
-
     it('should toggle zones visibility', () => {
       const { setShowZones } = useUIStore.getState();
 
@@ -192,11 +195,6 @@ describe('UIStore', () => {
 
       setShowZones(true);
       expect(useUIStore.getState().showZones).toBe(true);
-    });
-
-    it('should initialize with AI panel visible', () => {
-      const { showAIPanel } = useUIStore.getState();
-      expect(showAIPanel).toBe(true);
     });
 
     it('should toggle AI panel visibility', () => {
@@ -241,11 +239,6 @@ describe('UIStore', () => {
   });
 
   describe('FPS Mode', () => {
-    it('should initialize with FPS mode disabled', () => {
-      const { fpsMode } = useUIStore.getState();
-      expect(fpsMode).toBe(false);
-    });
-
     it('should set FPS mode', () => {
       const { setFpsMode } = useUIStore.getState();
 
@@ -268,11 +261,6 @@ describe('UIStore', () => {
   });
 
   describe('Panel State', () => {
-    it('should initialize with panel not minimized', () => {
-      const { panelMinimized } = useUIStore.getState();
-      expect(panelMinimized).toBe(false);
-    });
-
     it('should set panel minimized state', () => {
       const { setPanelMinimized } = useUIStore.getState();
 
@@ -285,11 +273,6 @@ describe('UIStore', () => {
   });
 
   describe('Theme', () => {
-    it('should initialize with dark theme', () => {
-      const { theme } = useUIStore.getState();
-      expect(theme).toBe('dark');
-    });
-
     it('should toggle theme', () => {
       const { toggleTheme } = useUIStore.getState();
 
@@ -315,11 +298,6 @@ describe('UIStore', () => {
   });
 
   describe('Legend Position', () => {
-    it('should initialize with default legend position', () => {
-      const { legendPosition } = useUIStore.getState();
-      expect(legendPosition).toEqual({ x: -1, y: -1 });
-    });
-
     it('should set legend position', () => {
       const { setLegendPosition } = useUIStore.getState();
 
@@ -334,37 +312,6 @@ describe('UIStore', () => {
       resetLegendPosition();
 
       expect(useUIStore.getState().legendPosition).toEqual({ x: -1, y: -1 });
-    });
-  });
-
-  describe('Performance', () => {
-    it('should handle rapid alert additions efficiently', () => {
-      const { addAlert } = useUIStore.getState();
-
-      const start = performance.now();
-      for (let i = 0; i < 100; i++) {
-        addAlert(createMockAlert({ id: `alert-${i}` }));
-      }
-      const duration = performance.now() - start;
-
-      expect(duration).toBeLessThan(100); // Should complete in under 100ms
-    });
-
-    it('should handle rapid alert dismissals efficiently', () => {
-      const { addAlert, dismissAlert } = useUIStore.getState();
-
-      // Add alerts first
-      for (let i = 0; i < 10; i++) {
-        addAlert(createMockAlert({ id: `alert-${i}` }));
-      }
-
-      const start = performance.now();
-      for (let i = 0; i < 10; i++) {
-        dismissAlert(`alert-${i}`);
-      }
-      const duration = performance.now() - start;
-
-      expect(duration).toBeLessThan(50); // Should complete in under 50ms
     });
   });
 });

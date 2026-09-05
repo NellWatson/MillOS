@@ -1,5 +1,9 @@
 # 3D Scene System
 
+**Status:** legacy scene snapshot, assembled-runtime verification required
+
+**Current authorities:** `src/components/MillScene.tsx`, `src/components/RuntimeController.tsx`, and [MillOS Architecture](./architecture.md)
+
 Three.js and React Three Fiber implementation for the MillOS 3D factory visualization.
 
 ## Table of Contents
@@ -68,7 +72,7 @@ camera={{
   minPolarAngle={0.2}                  // Minimum angle from above
   minDistance={15}                     // Closest zoom
   maxDistance={100}                    // Furthest zoom
-  autoRotate={!selectedMachine && !selectedWorker && !showAIPanel}
+  autoRotateEnabled={!selectedMachine && !showAIPanel}  // auto-rotate also pauses on manual input
   autoRotateSpeed={0.3}
   target={[0, 5, 0]}                   // Look at center, elevated
   enableDamping
@@ -163,7 +167,6 @@ Colored lights for dramatic effect:
 ├── <SpoutingSystem>              # Grain pipes
 ├── <FactoryInfrastructure>       # Floor, zones, markings
 ├── <ConveyorSystem>              # Belts and products
-├── <WorkerSystem>                # Animated workers
 ├── <ForkliftSystem>              # Vehicles and paths
 ├── <TruckBay>                    # Loading area
 ├── <DustParticles>               # Atmosphere
@@ -237,20 +240,6 @@ if (type === MachineType.ROLLER_MILL) {
   const speed = 40;
   groupRef.current.position.y = position[1] + Math.sin(state.clock.elapsedTime * speed) * intensity;
 }
-```
-
-### Worker Walk Cycle
-
-```typescript
-useFrame((state, delta) => {
-  if (!isIdle) {
-    setWalkCycle(prev => prev + delta * 5.5);
-  }
-
-  // Bob height based on walk cycle
-  const bobHeight = Math.abs(Math.sin(walkCycle)) * 0.025;
-  ref.current.position.y = bobHeight;
-});
 ```
 
 ### Limb Animation

@@ -48,6 +48,9 @@ export const SafetyPanel: React.FC = () => {
     safetyEvents,
     activeSafetyEventId,
     acknowledgeSafetyEvent,
+    startEmergencyDrill,
+    endEmergencyDrill,
+    drillMetrics,
   } = useGameSimulationStore(
     useShallow((state) => ({
       emergencyActive: state.emergencyActive,
@@ -58,6 +61,9 @@ export const SafetyPanel: React.FC = () => {
       safetyEvents: state.safetyEvents,
       activeSafetyEventId: state.activeSafetyEventId,
       acknowledgeSafetyEvent: state.acknowledgeSafetyEvent,
+      startEmergencyDrill: state.startEmergencyDrill,
+      endEmergencyDrill: state.endEmergencyDrill,
+      drillMetrics: state.drillMetrics,
     }))
   );
   const activeSafetyEvent = safetyEvents.find((event) => event.id === activeSafetyEventId);
@@ -91,8 +97,20 @@ export const SafetyPanel: React.FC = () => {
         {tabs.map((t) => (
           <button
             key={t.id}
+            id={`safety-tab-${t.id}`}
             role="tab"
             aria-selected={tab === t.id}
+            aria-controls={`safety-tabpanel-${t.id}`}
+            tabIndex={tab === t.id ? 0 : -1}
+            onKeyDown={(event) => {
+              if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+              event.preventDefault();
+              const index = tabs.findIndex((candidate) => candidate.id === t.id);
+              const next =
+                tabs[(index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+              setTab(next.id);
+              document.getElementById(`safety-tab-${next.id}`)?.focus();
+            }}
             onClick={() => setTab(t.id)}
             className={`flex-1 py-1.5 rounded-md text-xs font-bold transition-colors ${
               tab === t.id
@@ -105,185 +123,242 @@ export const SafetyPanel: React.FC = () => {
         ))}
       </div>
 
-      {tab === 'analytics' && (
-        <div className="space-y-4">
-          <RecoverableFeatureBoundary featureName="Safety metrics">
-            <Suspense fallback={<TabLoader />}>
-              <SafetyMetricsDisplay />
-            </Suspense>
-          </RecoverableFeatureBoundary>
-          <RecoverableFeatureBoundary featureName="Safety analytics">
-            <Suspense fallback={<TabLoader />}>
-              <SafetyAnalyticsPanel />
-            </Suspense>
-          </RecoverableFeatureBoundary>
-          <RecoverableFeatureBoundary featureName="Incident history">
-            <Suspense fallback={<TabLoader />}>
-              <IncidentHistoryPanel />
-            </Suspense>
-          </RecoverableFeatureBoundary>
-        </div>
-      )}
+      <div role="tabpanel" id={`safety-tabpanel-${tab}`} aria-labelledby={`safety-tab-${tab}`}>
+        {tab === 'analytics' && (
+          <div className="space-y-4">
+            <RecoverableFeatureBoundary featureName="Safety metrics">
+              <Suspense fallback={<TabLoader />}>
+                <SafetyMetricsDisplay />
+              </Suspense>
+            </RecoverableFeatureBoundary>
+            <RecoverableFeatureBoundary featureName="Safety analytics">
+              <Suspense fallback={<TabLoader />}>
+                <SafetyAnalyticsPanel />
+              </Suspense>
+            </RecoverableFeatureBoundary>
+            <RecoverableFeatureBoundary featureName="Incident history">
+              <Suspense fallback={<TabLoader />}>
+                <IncidentHistoryPanel />
+              </Suspense>
+            </RecoverableFeatureBoundary>
+          </div>
+        )}
 
-      {tab === 'config' && (
-        <div className="space-y-4">
-          <RecoverableFeatureBoundary featureName="Safety configuration">
-            <Suspense fallback={<TabLoader />}>
-              <SafetyConfigPanel />
-            </Suspense>
-          </RecoverableFeatureBoundary>
-          <RecoverableFeatureBoundary featureName="Zone customization">
-            <Suspense fallback={<TabLoader />}>
-              <ZoneCustomizationPanel />
-            </Suspense>
-          </RecoverableFeatureBoundary>
-        </div>
-      )}
+        {tab === 'config' && (
+          <div className="space-y-4">
+            <RecoverableFeatureBoundary featureName="Safety configuration">
+              <Suspense fallback={<TabLoader />}>
+                <SafetyConfigPanel />
+              </Suspense>
+            </RecoverableFeatureBoundary>
+            <RecoverableFeatureBoundary featureName="Zone customization">
+              <Suspense fallback={<TabLoader />}>
+                <ZoneCustomizationPanel />
+              </Suspense>
+            </RecoverableFeatureBoundary>
+          </div>
+        )}
 
-      {tab !== 'controls' ? null : (
-        <>
-          {/* Emergency Controls */}
-          <section>
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-              <Shield size={14} className="text-orange-500" />
-              Emergency Response
-            </h3>
+        {tab !== 'controls' ? null : (
+          <>
+            {/* Emergency Controls */}
+            <section>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <Shield size={14} className="text-orange-500" />
+                Emergency Response
+              </h3>
 
-            <div className="space-y-3">
-              {activeSafetyEvent && (
+              <div className="space-y-3">
+                {activeSafetyEvent && (
+                  <div
+                    className={`rounded-xl border p-3 ${
+                      activeSafetyEvent.simulated
+                        ? 'border-amber-500/50 bg-amber-500/10'
+                        : 'border-red-500/50 bg-red-500/10'
+                    }`}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wide text-white">
+                        {activeSafetyEvent.simulated
+                          ? 'Simulated safety event'
+                          : 'Safety interlock'}
+                      </span>
+                      <span className="rounded border border-white/20 px-2 py-0.5 text-[10px] uppercase text-slate-200">
+                        {activeSafetyEvent.stage}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-200">{activeSafetyEvent.cause}</p>
+                    <p className="mt-1 text-[11px] text-slate-400">{activeSafetyEvent.response}</p>
+                    {activeSafetyEvent.stage === 'active' && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          acknowledgeSafetyEvent(
+                            activeSafetyEvent.id,
+                            'Acknowledged in the Safety workspace'
+                          )
+                        }
+                        className="mt-3 min-h-9 rounded-lg bg-slate-700 px-3 text-xs font-semibold text-white hover:bg-slate-600"
+                      >
+                        Acknowledge event
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {!activeSafetyEvent && latestClearedSafetyEvent && (
+                  <div
+                    className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3"
+                    role="status"
+                    aria-label="Safety state recovered"
+                    aria-live="polite"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-emerald-100">
+                        <CheckCircle2 size={14} aria-hidden="true" />
+                        Safety state recovered
+                      </span>
+                      <span className="rounded border border-emerald-300/30 px-2 py-0.5 text-[10px] uppercase text-emerald-100">
+                        Cleared
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-200">{latestClearedSafetyEvent.cause}</p>
+                    <p className="mt-1 text-[11px] text-emerald-100/80">
+                      {latestClearedSafetyEvent.recovery}
+                    </p>
+                  </div>
+                )}
+
+                {/* Egress verification drill. The only other caller is the agent
+                  command plane; without these controls a drill started there
+                  locked the operator out of the E-Stop with no way to end it. */}
                 <div
-                  className={`rounded-xl border p-3 ${
-                    activeSafetyEvent.simulated
-                      ? 'border-amber-500/50 bg-amber-500/10'
-                      : 'border-red-500/50 bg-red-500/10'
-                  }`}
-                  role="status"
-                  aria-live="polite"
+                  className="rounded-xl border border-white/5 bg-slate-800/50 p-3"
+                  role="group"
+                  aria-label="Emergency egress verification drill"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wide text-white">
-                      {activeSafetyEvent.simulated ? 'Simulated safety event' : 'Safety interlock'}
+                    <span className="text-xs font-bold uppercase tracking-wide text-slate-200">
+                      Egress verification drill
                     </span>
-                    <span className="rounded border border-white/20 px-2 py-0.5 text-[10px] uppercase text-slate-200">
-                      {activeSafetyEvent.stage}
-                    </span>
+                    {emergencyDrillMode && (
+                      <span
+                        className="rounded border border-amber-300/40 px-2 py-0.5 text-[10px] uppercase text-amber-100"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {drillMetrics.verificationComplete
+                          ? 'All zones verified'
+                          : `${drillMetrics.verifiedZoneIds.length}/${drillMetrics.totalZones} zones verified`}
+                      </span>
+                    )}
                   </div>
-                  <p className="mt-2 text-xs text-slate-200">{activeSafetyEvent.cause}</p>
-                  <p className="mt-1 text-[11px] text-slate-400">{activeSafetyEvent.response}</p>
-                  {activeSafetyEvent.stage === 'active' && (
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Stops production and mobile equipment while the service-egress sensors run their
+                    verification sequence.
+                  </p>
+                  {emergencyDrillMode ? (
                     <button
                       type="button"
-                      onClick={() =>
-                        acknowledgeSafetyEvent(
-                          activeSafetyEvent.id,
-                          'Acknowledged in the Safety workspace'
-                        )
-                      }
-                      className="mt-3 min-h-9 rounded-lg bg-slate-700 px-3 text-xs font-semibold text-white hover:bg-slate-600"
+                      onClick={() => endEmergencyDrill()}
+                      className="mt-3 min-h-9 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white hover:bg-amber-500"
                     >
-                      Acknowledge event
+                      END DRILL
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={emergencyActive || crisisActive}
+                      title={
+                        emergencyActive || crisisActive
+                          ? 'Clear the active emergency before starting a drill'
+                          : undefined
+                      }
+                      onClick={() => startEmergencyDrill()}
+                      className="mt-3 min-h-9 rounded-lg bg-slate-700 px-3 text-xs font-semibold text-white hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      START DRILL
                     </button>
                   )}
                 </div>
-              )}
 
-              {!activeSafetyEvent && latestClearedSafetyEvent && (
-                <div
-                  className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3"
-                  role="status"
-                  aria-label="Safety state recovered"
-                  aria-live="polite"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-emerald-100">
-                      <CheckCircle2 size={14} aria-hidden="true" />
-                      Safety state recovered
-                    </span>
-                    <span className="rounded border border-emerald-300/30 px-2 py-0.5 text-[10px] uppercase text-emerald-100">
-                      Cleared
-                    </span>
-                  </div>
-                  <p className="mt-2 text-xs text-slate-200">{latestClearedSafetyEvent.cause}</p>
-                  <p className="mt-1 text-[11px] text-emerald-100/80">
-                    {latestClearedSafetyEvent.recovery}
-                  </p>
-                </div>
-              )}
-
-              {/* E-Stop Button */}
-              <button
-                type="button"
-                disabled={crisisActive || emergencyDrillMode}
-                aria-disabled={crisisActive || emergencyDrillMode}
-                title={
-                  crisisActive
-                    ? 'Resolve the active crisis before clearing its interlock'
-                    : emergencyDrillMode
-                      ? 'End the active fire drill before using the emergency stop'
-                      : undefined
-                }
-                onClick={() => {
-                  if (emergencyActive && !emergencyDrillMode && !crisisActive) {
-                    // If already in emergency, resolve it
-                    useGameSimulationStore.getState().resolveEmergency();
-                    audioManager.stopEmergencyStopAlarm();
-                  } else if (!emergencyActive) {
-                    setConfirmEmergencyStop(true);
+                {/* E-Stop Button */}
+                <button
+                  type="button"
+                  disabled={crisisActive || emergencyDrillMode}
+                  aria-disabled={crisisActive || emergencyDrillMode}
+                  title={
+                    crisisActive
+                      ? 'Resolve the active crisis before clearing its interlock'
+                      : emergencyDrillMode
+                        ? 'End the active fire drill before using the emergency stop'
+                        : undefined
                   }
-                }}
-                className={`w-full py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${
-                  crisisActive || emergencyDrillMode
-                    ? 'cursor-not-allowed border border-amber-500/50 bg-amber-900/30 text-amber-200'
-                    : emergencyActive && !emergencyDrillMode
-                      ? 'bg-green-600 hover:bg-green-500 text-white animate-pulse'
-                      : 'bg-red-900/30 border border-red-500/50 hover:bg-red-900/50 text-red-400'
-                }`}
-              >
-                <AlertTriangle size={16} />
-                {crisisActive
-                  ? 'CRISIS INTERLOCK ACTIVE'
-                  : emergencyDrillMode
-                    ? 'DRILL INTERLOCK ACTIVE'
-                    : emergencyActive && !emergencyDrillMode
-                      ? 'CLEAR EMERGENCY'
-                      : 'TRIGGER EMERGENCY STOP'}
-              </button>
-            </div>
-          </section>
+                  onClick={() => {
+                    if (emergencyActive && !emergencyDrillMode && !crisisActive) {
+                      // If already in emergency, resolve it
+                      useGameSimulationStore.getState().resolveEmergency();
+                      audioManager.stopEmergencyStopAlarm();
+                    } else if (!emergencyActive) {
+                      setConfirmEmergencyStop(true);
+                    }
+                  }}
+                  className={`w-full py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${
+                    crisisActive || emergencyDrillMode
+                      ? 'cursor-not-allowed border border-amber-500/50 bg-amber-900/30 text-amber-200'
+                      : emergencyActive && !emergencyDrillMode
+                        ? 'bg-green-600 hover:bg-green-500 text-white animate-pulse'
+                        : 'bg-red-900/30 border border-red-500/50 hover:bg-red-900/50 text-red-400'
+                  }`}
+                >
+                  <AlertTriangle size={16} />
+                  {crisisActive
+                    ? 'CRISIS INTERLOCK ACTIVE'
+                    : emergencyDrillMode
+                      ? 'DRILL INTERLOCK ACTIVE'
+                      : emergencyActive && !emergencyDrillMode
+                        ? 'CLEAR EMERGENCY'
+                        : 'TRIGGER EMERGENCY STOP'}
+                </button>
+              </div>
+            </section>
 
-          {/* Environment Controls */}
-          <section>
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-              <Cloud size={14} className="text-blue-400" />
-              Environment
-            </h3>
+            {/* Environment Controls */}
+            <section>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <Cloud size={14} className="text-blue-400" />
+                Environment
+              </h3>
 
-            <div className="bg-slate-800/50 p-3 rounded-xl border border-white/5 space-y-4">
-              {/* Weather */}
-              <div>
-                <label className="text-xs text-slate-500 block mb-2">Weather Conditions</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {weatherOptions.map((opt) => (
-                    <button
-                      key={opt.value}
-                      onClick={() => setWeather(opt.value)}
-                      aria-pressed={weather === opt.value}
-                      aria-label={`Set weather to ${opt.label}`}
-                      className={`px-2 py-1.5 rounded text-xs font-medium transition-colors ${
-                        weather === opt.value
-                          ? 'bg-blue-700 text-white'
-                          : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
+              <div className="bg-slate-800/50 p-3 rounded-xl border border-white/5 space-y-4">
+                {/* Weather */}
+                <div role="group" aria-label="Weather conditions">
+                  <span className="text-xs text-slate-500 block mb-2">Weather Conditions</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {weatherOptions.map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setWeather(opt.value)}
+                        aria-pressed={weather === opt.value}
+                        aria-label={`Set weather to ${opt.label}`}
+                        className={`px-2 py-1.5 rounded text-xs font-medium transition-colors ${
+                          weather === opt.value
+                            ? 'bg-blue-700 text-white'
+                            : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          </section>
-        </>
-      )}
+            </section>
+          </>
+        )}
+      </div>
 
       <ConfirmDialog
         isOpen={confirmEmergencyStop}

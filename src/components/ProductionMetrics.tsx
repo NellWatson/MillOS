@@ -14,7 +14,10 @@ interface MetricsData {
 
 export const bagsPerHourToTonnesPerHour = (bagsPerHour: number): number => {
   const safeBagsPerHour = Number.isFinite(bagsPerHour) ? Math.max(0, bagsPerHour) : 0;
-  return Math.round(((safeBagsPerHour * BAG_WEIGHT_KG) / 1000) * 10) / 10;
+  const tonnesPerHour = (safeBagsPerHour / 1000) * BAG_WEIGHT_KG;
+  if (!Number.isFinite(tonnesPerHour)) return Number.MAX_VALUE;
+  if (tonnesPerHour > Number.MAX_VALUE / 10) return tonnesPerHour;
+  return Math.round(tonnesPerHour * 10) / 10;
 };
 
 // Energy consumption by machine type (kWh when running)
@@ -170,13 +173,17 @@ export const ProductionMetrics: React.FC = () => {
     },
   ]);
 
-  // Track previous efficiency for trend calculation
+  // Track previous efficiency for trend calculation. The delta is committed
+  // from an effect, not computed inside render: a render-phase ref write ran
+  // twice under StrictMode and the second pass always read +0.0%.
+  const [efficiencyDiff, setEfficiencyDiff] = useState(0);
   const prevEfficiencyRef = useRef(storeMetrics.efficiency);
-  const efficiencyTrend = React.useMemo(() => {
-    const diff = storeMetrics.efficiency - prevEfficiencyRef.current;
+  useEffect(() => {
+    setEfficiencyDiff(storeMetrics.efficiency - prevEfficiencyRef.current);
     prevEfficiencyRef.current = storeMetrics.efficiency;
-    return diff >= 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`;
   }, [storeMetrics.efficiency]);
+  const efficiencyTrend =
+    efficiencyDiff >= 0 ? `+${efficiencyDiff.toFixed(1)}%` : `${efficiencyDiff.toFixed(1)}%`;
 
   // Calculate time since last safety incident
   const getTimeSinceIncident = () => {

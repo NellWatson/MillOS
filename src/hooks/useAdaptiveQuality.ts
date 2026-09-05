@@ -29,7 +29,8 @@ export function useAdaptiveQuality(enabled: boolean = true): void {
     }
 
     return () => {
-      adaptiveQualityManager.setEnabled(false);
+      // Only the instance that enabled the shared manager may disable it.
+      if (enabled) adaptiveQualityManager.setEnabled(false);
     };
   }, [enabled]);
 

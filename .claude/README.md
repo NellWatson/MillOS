@@ -2,6 +2,19 @@
 
 This directory contains custom Claude Code agents and slash commands tailored for the MillOS grain mill digital twin simulator.
 
+## System Orientation
+
+Before structural, state, AI, SCADA, or agent-control work:
+
+1. use `docs/architecture.md` for the current assembled system;
+2. use `docs/state-management.md` for current state ownership and mutation rules;
+3. use `docs/AGENT_OPERATING_ARCHITECTURE.md` for the accepted agent-facing target;
+4. use `_contprompts/millos_agent_operating_system_2026-08-31.md` only as a phased plan, subject to its authorization holds.
+
+Historical BAS, UI, migration, and wiki documents preserve context. They do not override current source or the status labels in `docs/README.md`.
+
+Working if a cold agent can distinguish present behaviour, target architecture, and unimplemented plan before choosing an edit path.
+
 ## Quick Reference
 
 ### Slash Commands

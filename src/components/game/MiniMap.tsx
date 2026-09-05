@@ -36,6 +36,11 @@ export const MiniMap: React.FC = () => {
   const offsetX = mapWidth / 2;
   const offsetZ = mapHeight / 2;
 
+  // Bottom-left, above the production target widget (about 17rem tall when
+  // expanded): the bottom-right corner is
+  // the camera preset readout and the context sidebar's footer, which the map
+  // used to cover at z-[100]. z-30 keeps it below the sidebar (z-40) and the
+  // emergency and PA overlays (z-[60]). It stays draggable.
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
@@ -43,7 +48,7 @@ export const MiniMap: React.FC = () => {
       drag
       dragMomentum={false}
       dragElastic={0}
-      className="fixed bottom-4 right-4 z-[100] pointer-events-auto cursor-move"
+      className="fixed bottom-[17.5rem] left-4 z-30 pointer-events-auto cursor-move"
     >
       <div className="bg-slate-900/95 backdrop-blur-xl rounded-xl border border-cyan-500/30 overflow-hidden shadow-xl">
         {/* Header */}

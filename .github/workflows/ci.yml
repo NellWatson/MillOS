@@ -33,6 +33,23 @@ jobs:
       - name: Check TypeScript
         run: npm run typecheck --if-present || npx tsc --noEmit
 
+      - name: Check formatting
+        run: npm run format:check
+
+      # Static contract gates that need no build or browser. They exist locally
+      # and were never run in CI, so drift only surfaced on a developer machine.
+      - name: Validate depth policy
+        run: npm run validate:depth
+
+      - name: Validate shader contracts
+        run: npm run validate:shaders
+
+      - name: Typecheck agent plane
+        run: npm run agent:typecheck
+
+      - name: Generate and check agent manifest
+        run: npm run agent:manifest && npm run agent:manifest:check
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -79,6 +96,13 @@ jobs:
 
       - name: Build application
         run: npm run build
+
+      # Both read dist/ and src/ only; neither needs a GPU or a browser.
+      - name: Validate bundle budget
+        run: npm run validate:bundle
+
+      - name: Validate module reachability
+        run: npm run validate:reachability
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7

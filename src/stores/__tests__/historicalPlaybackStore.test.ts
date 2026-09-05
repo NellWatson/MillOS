@@ -8,14 +8,34 @@
  * - Decision retrieval by timestamp
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useHistoricalPlaybackStore } from '../historicalPlaybackStore';
 import { AIDecision } from '../../types';
 
+const FIXED_NOW = new Date('2026-08-20T12:00:00.000Z');
+
 describe('historicalPlaybackStore', () => {
   beforeEach(() => {
-    // Reset store to initial state
-    useHistoricalPlaybackStore.setState({
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW);
+    useHistoricalPlaybackStore.setState(useHistoricalPlaybackStore.getInitialState(), true);
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it('starts from the complete documented playback state', () => {
+    const state = useHistoricalPlaybackStore.getState();
+
+    expect({
+      isReplaying: state.isReplaying,
+      playbackTime: state.playbackTime,
+      availableStart: state.availableStart,
+      availableEnd: state.availableEnd,
+      decisionHistory: state.decisionHistory,
+    }).toEqual({
       isReplaying: false,
       playbackTime: null,
       availableStart: null,
@@ -25,19 +45,13 @@ describe('historicalPlaybackStore', () => {
   });
 
   describe('replay mode', () => {
-    it('should start in live mode (not replaying)', () => {
-      const { isReplaying, playbackTime } = useHistoricalPlaybackStore.getState();
-      expect(isReplaying).toBe(false);
-      expect(playbackTime).toBeNull();
-    });
-
     it('should enter replay mode with default time', () => {
       const store = useHistoricalPlaybackStore.getState();
       store.enterReplayMode();
 
       const { isReplaying, playbackTime } = useHistoricalPlaybackStore.getState();
       expect(isReplaying).toBe(true);
-      expect(playbackTime).not.toBeNull();
+      expect(playbackTime).toBe(FIXED_NOW.getTime() - 60_000);
     });
 
     it('should enter replay mode with specific timestamp', () => {
@@ -111,18 +125,7 @@ describe('historicalPlaybackStore', () => {
       priority: 'medium',
     });
 
-    it('should log a decision', () => {
-      const store = useHistoricalPlaybackStore.getState();
-      const decision = createMockDecision('d1', Date.now());
-
-      store.logDecision(decision);
-
-      const { decisionHistory } = useHistoricalPlaybackStore.getState();
-      expect(decisionHistory).toHaveLength(1);
-      expect(decisionHistory[0].id).toBe('d1');
-    });
-
-    it('should store correct decision fields', () => {
+    it('stores the complete lightweight decision projection', () => {
       const store = useHistoricalPlaybackStore.getState();
       const timestamp = Date.now();
       const decision = createMockDecision('d2', timestamp);
@@ -130,14 +133,16 @@ describe('historicalPlaybackStore', () => {
 
       store.logDecision(decision);
 
-      const { decisionHistory } = useHistoricalPlaybackStore.getState();
-      const entry = decisionHistory[0];
-      expect(entry.id).toBe('d2');
-      expect(entry.timestamp).toBe(timestamp);
-      expect(entry.type).toBe('coordination');
-      expect(entry.action).toBe('Test action d2');
-      expect(entry.priority).toBe('medium');
-      expect(entry.machineId).toBe('machine-1');
+      expect(useHistoricalPlaybackStore.getState().decisionHistory).toEqual([
+        {
+          id: 'd2',
+          timestamp,
+          type: 'coordination',
+          action: 'Test action d2',
+          priority: 'medium',
+          machineId: 'machine-1',
+        },
+      ]);
     });
 
     it('should respect ring buffer size limit (500 max)', () => {
@@ -185,9 +190,7 @@ describe('historicalPlaybackStore', () => {
 
       const nearby = store.getDecisionsAt(targetTime, 90000); // ±1.5 min window
 
-      // Should get decisions 4, 5, 6 (within 90s each direction)
-      expect(nearby.length).toBeGreaterThanOrEqual(1);
-      expect(nearby.length).toBeLessThanOrEqual(5);
+      expect(nearby.map((decision) => decision.id)).toEqual(['d4', 'd5', 'd6']);
     });
 
     it('should get decisions in a range', () => {

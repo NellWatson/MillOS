@@ -9,7 +9,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useAIConfigStore } from '../stores/aiConfigStore';
 import { useProductionStore, DAILY_TARGET_BAGS } from '../stores/productionStore';
 import { useGameSimulationStore } from '../stores/gameSimulationStore';
-import { Target, Clock, TrendingUp, TrendingDown, Minus, X } from 'lucide-react';
+import { Target, Clock, TrendingUp, TrendingDown, Minus, X, GripVertical } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BAG_WEIGHT_KG } from '../types';
 
@@ -152,7 +152,7 @@ export const ProductionTargetWidget: React.FC = () => {
           <div className="flex items-center gap-2">
             <Target className={`w-5 h-5 ${colors.text}`} />
             <span className="text-white font-semibold text-sm">Production Target</span>
-            <span className="text-[9px] text-slate-500">⋮⋮</span>
+            <GripVertical className="w-3 h-3 text-slate-500" aria-hidden="true" />
           </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1">

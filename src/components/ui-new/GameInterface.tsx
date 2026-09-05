@@ -26,6 +26,7 @@ import { KeyboardShortcutsModal } from '../ui/KeyboardShortcutsModal';
 import { OnboardingGuide, type OnboardingStep } from './onboarding/OnboardingGuide';
 import { useCameraStore } from '../CameraController';
 import { getTourCameraPreset } from './onboarding/tourCamera';
+import { MillOSMusicPlayer } from './MillOSMusicPlayer';
 
 const INTRO_STEPS: OnboardingStep[] = [
   {
@@ -210,8 +211,14 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
   // ping-pong that tripped React's "Maximum update depth exceeded". Reacting only
   // to a flag's own transition makes the last-opened panel win, once, with no
   // feedback between the two effects.
+  // The keyboard paths (I, O, B) must clear the 3D selection like a dock click
+  // does, or ContextSidebar keeps showing the MachineInspector and the panel
+  // the user asked for never appears.
   useEffect(() => {
-    if (showAIPanel) setSidebarVisible(true);
+    if (showAIPanel) {
+      setSidebarVisible(true);
+      onCloseSelection();
+    }
     setActiveMode((prev) => (showAIPanel ? 'ai' : prev === 'ai' ? 'overview' : prev));
   }, [showAIPanel]);
 
@@ -229,6 +236,7 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
       } else {
         setActiveMode('management');
         setSidebarVisible(true);
+        onCloseSelection();
       }
     };
     window.addEventListener('toggleManagementPanel', handleToggleManagement);
@@ -330,6 +338,9 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
       {!isCompactLayout && <MiniMap />}
       <IncidentReplayControls />
 
+      {/* The soundtrack player remains directly reachable without opening a control panel. */}
+      <MillOSMusicPlayer />
+
       {/* 5. Bottom Dock - Always visible (adapts to mobile) */}
       <Dock
         activeMode={activeMode}
@@ -367,7 +378,7 @@ export const GameInterface: React.FC<GameInterfaceProps> = ({
         !safetyStateActive && (
           <aside
             aria-label="AI reflection"
-            className="pointer-events-auto fixed bottom-24 right-4 z-40 w-[min(24rem,calc(100vw-2rem))]"
+            className="pointer-events-auto fixed bottom-[11.5rem] right-4 z-40 w-[min(24rem,calc(100vw-2rem))]"
           >
             <AINarration narration={currentNarration} onDismiss={handleNarrationDismiss} />
           </aside>

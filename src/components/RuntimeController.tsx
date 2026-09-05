@@ -16,6 +16,8 @@ import { SITE_LAYOUT, type Vec3Tuple } from '../constants/siteLayout';
 import { inspectWorldIntegrity, type WorldIntegrityReport } from '../constants/worldContract';
 import { sampleAtmosphere, sampleCelestial } from '../simulation/atmosphere';
 import { audioManager } from '../utils/audioManager';
+import { installMillOSAgentRuntime } from '../agent/adapters/runtime/installAgentRuntime';
+import { registerSceneCapture } from '../utils/sceneCapture';
 
 interface RuntimeRendererStats {
   vendor: string;
@@ -607,6 +609,13 @@ const BENCHMARK_CAMERAS: Record<BenchmarkScene, BenchmarkCameraPose> = {
   forecourt: SITE_LAYOUT.cameras.forecourt,
   carpark: SITE_LAYOUT.cameras.carpark,
   river: SITE_LAYOUT.cameras.river,
+  tunnel: SITE_LAYOUT.cameras.tunnel,
+  huts: SITE_LAYOUT.cameras.huts,
+  offices: SITE_LAYOUT.cameras.offices,
+  canal: SITE_LAYOUT.cameras.canal,
+  lake: SITE_LAYOUT.cameras.lake,
+  busstop: SITE_LAYOUT.cameras.busstop,
+  kiosk: SITE_LAYOUT.cameras.kiosk,
   sun: SITE_LAYOUT.cameras.celestial,
   moon: SITE_LAYOUT.cameras.celestial,
 };
@@ -1430,6 +1439,16 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({
 
   useAdaptiveQuality(adaptiveEnabled && !mode.benchmark);
 
+  // Screenshot bridge: re-render and read back in one tick, because the
+  // context does not preserve its drawing buffer between frames.
+  useEffect(() => {
+    registerSceneCapture(() => {
+      gl.render(scene, camera);
+      return gl.domElement.toDataURL('image/png');
+    });
+    return () => registerSceneCapture(null);
+  }, [gl, scene, camera]);
+
   useEffect(() => {
     if (!mode.benchmark) return undefined;
 
@@ -2014,9 +2033,11 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({
         }));
       },
     };
+    const removeAgentRuntime = installMillOSAgentRuntime(window);
 
     return () => {
       observer?.disconnect();
+      removeAgentRuntime();
       delete window.__MILLOS_RUNTIME__;
     };
   }, [camera, controls, gl, mode, orbitControlsRef, scene]);
@@ -2027,8 +2048,10 @@ export const RuntimeController: React.FC<RuntimeControllerProps> = ({
     // a misleading 0 ms percentile merely because every frame exceeded 5 s.
     if (Number.isFinite(frameMs) && frameMs > 0 && frameMs < 120000) {
       frameTimesRef.current.push(frameMs);
-      if (frameTimesRef.current.length > 7200) {
-        frameTimesRef.current.shift();
+      // Trim in blocks: a per-frame shift() on 7,200 entries is an O(n)
+      // reindex inside the instrument itself.
+      if (frameTimesRef.current.length > 8000) {
+        frameTimesRef.current.splice(0, frameTimesRef.current.length - 7200);
       }
     }
 

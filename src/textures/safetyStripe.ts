@@ -36,44 +36,47 @@ export const generateSafetyStripe = (
   stripeWidth: number = 32,
   colors: StripeColors = DEFAULT_COLORS
 ): THREE.DataTexture => {
-  return getTexture(`safety-stripe-${size}-${stripeWidth}`, () => {
-    const data = new Uint8Array(size * size * 4);
+  return getTexture(
+    `safety-stripe-${size}-${stripeWidth}-${colors.primary}-${colors.secondary}`,
+    () => {
+      const data = new Uint8Array(size * size * 4);
 
-    // Parse colors
-    const primary = parseHex(colors.primary);
-    const secondary = parseHex(colors.secondary);
+      // Parse colors
+      const primary = parseHex(colors.primary);
+      const secondary = parseHex(colors.secondary);
 
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const i = (y * size + x) * 4;
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const i = (y * size + x) * 4;
 
-        // Diagonal stripe
-        const diagonal = (x + y) % (stripeWidth * 2);
-        const isPrimary = diagonal < stripeWidth;
+          // Diagonal stripe
+          const diagonal = (x + y) % (stripeWidth * 2);
+          const isPrimary = diagonal < stripeWidth;
 
-        // Add subtle wear/noise
-        const nx = x / size;
-        const ny = y / size;
-        const wear = fbmNoise(nx * 15, ny * 15, 2) * 0.1;
+          // Add subtle wear/noise
+          const nx = x / size;
+          const ny = y / size;
+          const wear = fbmNoise(nx * 15, ny * 15, 2) * 0.1;
 
-        let r: number, g: number, b: number;
-        if (isPrimary) {
-          r = primary.r - wear;
-          g = primary.g - wear;
-          b = primary.b - wear;
-        } else {
-          r = secondary.r - wear * 0.5;
-          g = secondary.g - wear * 0.5;
-          b = secondary.b - wear * 0.5;
+          let r: number, g: number, b: number;
+          if (isPrimary) {
+            r = primary.r - wear;
+            g = primary.g - wear;
+            b = primary.b - wear;
+          } else {
+            r = secondary.r - wear * 0.5;
+            g = secondary.g - wear * 0.5;
+            b = secondary.b - wear * 0.5;
+          }
+
+          data[i] = Math.floor(Math.max(0, r) * 255);
+          data[i + 1] = Math.floor(Math.max(0, g) * 255);
+          data[i + 2] = Math.floor(Math.max(0, b) * 255);
+          data[i + 3] = 255;
         }
-
-        data[i] = Math.floor(Math.max(0, r) * 255);
-        data[i + 1] = Math.floor(Math.max(0, g) * 255);
-        data[i + 2] = Math.floor(Math.max(0, b) * 255);
-        data[i + 3] = 255;
       }
-    }
 
-    return createColorDataTexture(data, size, size);
-  });
+      return createColorDataTexture(data, size, size);
+    }
+  );
 };

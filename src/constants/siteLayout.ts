@@ -393,6 +393,21 @@ export const SITE_LAYOUT = {
     // The river channel: centreline (0, -145), 280 m long, 20 m wide, cut 12 m
     // into the terrain with 25 m sloped banks.
     river: { position: [34, 16, -118], target: [0, -2, -145] },
+    // Exterior sweep cameras, one per feature that had never been framed.
+    // Tunnel portal at (160, 0, 50), rotated a quarter turn, 15 m long.
+    tunnel: { position: [132, 8, 36], target: [160, 3, 50] },
+    // Nissen hut at (-75, 0, -100), 14 m long, with the modern path lamps.
+    huts: { position: [-52, 8, -78], target: [-75, 3, -100] },
+    // Four-floor office block at (-78, 0, 95).
+    offices: { position: [-50, 14, 68], target: [-78, 8, 95] },
+    // Canal at x -145 with the boat at z 15 and the lock gate at z 50.
+    canal: { position: [-118, 10, 12], target: [-145, 1, 38] },
+    // Lake at (120, 0, 120), 40 x 30 m, with the picnic tables and LAKE sign.
+    lake: { position: [86, 14, 86], target: [120, 0, 120] },
+    // Bus stop at (29, 0, 140) beside the front road.
+    busstop: { position: [44, 5, 122], target: [29, 2, 140] },
+    // Kiosk cafe at (-108, 0, 105) with the pond at (-125, 0, 105).
+    kiosk: { position: [-84, 8, 84], target: [-114, 2, 106] },
     celestial: { position: [90, 12, 72], target: [0, 12, 0] },
   },
   renderCells: {

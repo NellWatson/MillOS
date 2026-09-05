@@ -136,8 +136,9 @@ const clayTilesColorTexture = generateClayTiles(512, { tileWidth: 40, tileHeight
 const clayTilesNormalTexture = generateClayTilesNormal(512, 40, 56);
 const slateColorTexture = generateSlate(512, { tileWidth: 44, tileHeight: 32 });
 const slateNormalTexture = generateSlateNormal(512, 44, 32);
-const thatchColorTexture = generateThatch(512, { bundleWidth: 40 });
-const thatchNormalTexture = generateThatchNormal(512, 40);
+const thatchSurfaceOptions = { bundleWidth: 40, density: 0.8 };
+const thatchColorTexture = generateThatch(512, thatchSurfaceOptions);
+const thatchNormalTexture = generateThatchNormal(512, thatchSurfaceOptions);
 
 // Village wall textures - neutral gray for proper tinting
 const stuccoColorTexture = generateStucco(512, { weathering: 0.12, contrast: 0.1 });

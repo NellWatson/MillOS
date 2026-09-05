@@ -18,6 +18,7 @@ import {
   ConnectionStatus,
   AdapterStatistics,
 } from '../types';
+import { isTagValueCompatible } from './messageValidation';
 
 /** REST API response format for tag values */
 interface RESTTagResponse {
@@ -40,6 +41,18 @@ interface RESTWriteRequest {
   value: number | boolean | string;
 }
 
+class RESTRequestAbortedError extends Error {
+  constructor() {
+    super('Request aborted');
+    this.name = 'AbortError';
+  }
+}
+
+const isAbortError = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
+
+const MAX_REST_BATCH_TAG_IDS = 1_000;
+
 export class RESTAdapter implements IProtocolAdapter {
   private config: ConnectionConfig;
   private tags: Map<string, TagDefinition> = new Map();
@@ -53,6 +66,13 @@ export class RESTAdapter implements IProtocolAdapter {
   private reconnectAttempts = 0;
   private lastError: string | undefined;
   private reconnectTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  private connectPromise: Promise<void> | null = null;
+  private pollPromise: Promise<void> | null = null;
+  private lifecycleEpoch = 0;
+  private deliberatelyDisconnected = true;
+  private activeControllers = new Set<AbortController>();
+  private nextReadSequence = 0;
+  private committedReads = new Map<string, { timestamp: number; requestSequence: number }>();
 
   // Statistics
   private stats = {
@@ -72,51 +92,35 @@ export class RESTAdapter implements IProtocolAdapter {
   // Lifecycle Methods
   // =========================================================================
 
-  async connect(): Promise<void> {
-    if (this.connected) return;
+  connect(): Promise<void> {
+    if (this.connected) return Promise.resolve();
+    if (this.connectPromise) return this.connectPromise;
 
-    const baseUrl = this.config.baseUrl;
-    if (!baseUrl) {
-      throw new Error('REST adapter requires baseUrl in config');
+    if (this.reconnectTimeoutId) {
+      clearTimeout(this.reconnectTimeoutId);
+      this.reconnectTimeoutId = null;
     }
 
-    try {
-      // Test connection with health check
-      const response = await this.fetchWithAuth(`${baseUrl}/health`);
-      if (!response.ok) {
-        throw new Error(`Health check failed: ${response.status}`);
+    this.deliberatelyDisconnected = false;
+    const epoch = ++this.lifecycleEpoch;
+    const connection = this.performConnect(epoch).finally(() => {
+      if (this.connectPromise === connection) {
+        this.connectPromise = null;
       }
-
-      this.connected = true;
-      this.connectTime = Date.now();
-      this.reconnectAttempts = 0;
-      this.lastError = undefined;
-
-      // Reset the statistics accumulation window so rate/latency denominators
-      // (derived from connectTime/uptime) match the counters, avoiding inflated
-      // readsPerSecond/avgReadLatency on the diagnostics panel after a reconnect.
-      this.stats = {
-        readCount: 0,
-        writeCount: 0,
-        errorCount: 0,
-        totalLatency: 0,
-        latencyCount: 0,
-      };
-
-      // Start polling
-      const interval = this.config.pollInterval ?? 1000;
-      this.pollInterval = setInterval(() => this.poll(), interval);
-
-      // Do initial poll
-      await this.poll();
-    } catch (err) {
-      this.lastError = err instanceof Error ? err.message : String(err);
-      this.stats.errorCount++;
-      throw err;
-    }
+    });
+    this.connectPromise = connection;
+    return connection;
   }
 
   async disconnect(): Promise<void> {
+    this.deliberatelyDisconnected = true;
+    this.lifecycleEpoch++;
+    // Detach cancelled work immediately. Its epoch checks still prevent a
+    // late result from committing, while callers may begin a fresh lifecycle
+    // without waiting for an abort-ignoring transport to settle.
+    this.connectPromise = null;
+    this.pollPromise = null;
+
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
@@ -125,9 +129,10 @@ export class RESTAdapter implements IProtocolAdapter {
       clearTimeout(this.reconnectTimeoutId);
       this.reconnectTimeoutId = null;
     }
+    this.abortActiveRequests();
     this.connected = false;
     this.lastDisconnectTime = Date.now();
-    this.values.clear();
+    this.resetReadAuthority();
     // Clear subscribers to prevent memory leaks across reconnects
     this.subscribers.clear();
     this.globalSubscribers.clear();
@@ -143,62 +148,131 @@ export class RESTAdapter implements IProtocolAdapter {
 
   async readTag(tagId: string): Promise<TagValue> {
     const start = performance.now();
+    const epoch = this.lifecycleEpoch;
+    const tag = this.tags.get(tagId);
+    if (!tag) {
+      throw new Error(`Unknown tag: ${tagId}`);
+    }
+    const requestSequence = ++this.nextReadSequence;
 
     try {
-      const response = await this.fetchWithAuth(
-        `${this.config.baseUrl}/tags/${encodeURIComponent(tagId)}`
+      this.assertCurrentLifecycle(epoch);
+      const { response, data } = await this.fetchWithAuthAndConsume(
+        `${this.config.baseUrl}/tags/${encodeURIComponent(tagId)}`,
+        {},
+        async (result) => ({
+          response: result,
+          data: result.ok ? await result.json() : undefined,
+        })
       );
+      this.assertCurrentLifecycle(epoch);
 
       if (!response.ok) {
         throw new Error(`Failed to read tag: ${response.status}`);
       }
 
-      const data: RESTTagResponse = await response.json();
-      if (!this.isValidTagResponse(data)) {
+      if (
+        !this.isValidTagResponse(data) ||
+        data.tagId !== tagId ||
+        !isTagValueCompatible(tag, data.value)
+      ) {
         throw new Error('Malformed tag response: missing required fields');
       }
       const tagValue = this.parseTagResponse(data);
 
-      this.values.set(tagId, tagValue);
+      this.commitTagValue(tagValue, requestSequence);
       this.stats.readCount++;
       this.updateLatency(performance.now() - start);
 
-      return tagValue;
+      return { ...tagValue };
     } catch (err) {
-      this.stats.errorCount++;
+      if (epoch !== this.lifecycleEpoch || this.deliberatelyDisconnected) {
+        throw new RESTRequestAbortedError();
+      }
+      this.recordError(err);
       throw err;
     }
   }
 
   async readTags(tagIds: string[]): Promise<TagValue[]> {
+    const { values } = await this.readTagsAndCommit(tagIds);
+    return values;
+  }
+
+  private async readTagsAndCommit(
+    tagIds: string[]
+  ): Promise<{ values: TagValue[]; committedValues: TagValue[] }> {
+    if (tagIds.length > MAX_REST_BATCH_TAG_IDS) {
+      throw new Error(`Batch tag limit exceeded (${MAX_REST_BATCH_TAG_IDS})`);
+    }
+    const uniqueTagIds = Array.from(new Set(tagIds));
+    if (uniqueTagIds.length === 0) return { values: [], committedValues: [] };
+    const unknownTag = uniqueTagIds.find((tagId) => !this.tags.has(tagId));
+    if (unknownTag) {
+      throw new Error(`Unknown tag: ${unknownTag}`);
+    }
+
     const start = performance.now();
+    const epoch = this.lifecycleEpoch;
+    const requestSequence = ++this.nextReadSequence;
 
     try {
-      const response = await this.fetchWithAuth(`${this.config.baseUrl}/tags/batch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tagIds }),
-      });
+      this.assertCurrentLifecycle(epoch);
+      const { response, data } = await this.fetchWithAuthAndConsume(
+        `${this.config.baseUrl}/tags/batch`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tagIds: uniqueTagIds }),
+        },
+        async (result) => ({
+          response: result,
+          data: result.ok ? await result.json() : undefined,
+        })
+      );
+      this.assertCurrentLifecycle(epoch);
 
       if (!response.ok) {
         throw new Error(`Failed to read tags: ${response.status}`);
       }
 
-      const data: RESTBatchResponse = await response.json();
-      if (!data || !Array.isArray(data.tags)) {
+      if (!data || typeof data !== 'object' || !('tags' in data) || !Array.isArray(data.tags)) {
         throw new Error('Malformed batch response: missing tags array');
       }
-      const tagValues = data.tags
-        .filter((t) => this.isValidTagResponse(t))
-        .map((t) => this.parseTagResponse(t));
+      const batch = data as RESTBatchResponse;
+      const requested = new Set(uniqueTagIds);
+      const returned = new Set<string>();
+      const isCompleteSnapshot =
+        batch.tags.length === uniqueTagIds.length &&
+        batch.tags.every((entry) => {
+          const tag =
+            this.isValidTagResponse(entry) && requested.has(entry.tagId)
+              ? this.tags.get(entry.tagId)
+              : undefined;
+          if (!tag || !isTagValueCompatible(tag, entry.value)) return false;
+          if (!requested.has(entry.tagId) || returned.has(entry.tagId)) return false;
+          returned.add(entry.tagId);
+          return true;
+        });
+      if (!isCompleteSnapshot || returned.size !== requested.size) {
+        throw new Error('Malformed batch response: incomplete or invalid tag snapshot');
+      }
 
-      tagValues.forEach((tv) => this.values.set(tv.tagId, tv));
-      this.stats.readCount += tagIds.length;
+      const tagValues = batch.tags.map((entry) => this.parseTagResponse(entry));
+
+      const committedValues = tagValues.filter((tv) => this.commitTagValue(tv, requestSequence));
+      this.stats.readCount += tagValues.length;
       this.updateLatency(performance.now() - start);
 
-      return tagValues;
+      return {
+        values: tagValues.map((value) => ({ ...value })),
+        committedValues: committedValues.map((value) => ({ ...value })),
+      };
     } catch (err) {
-      this.stats.errorCount++;
+      if (epoch !== this.lifecycleEpoch || this.deliberatelyDisconnected) {
+        throw new RESTRequestAbortedError();
+      }
+      this.recordError(err);
       throw err;
     }
   }
@@ -213,6 +287,10 @@ export class RESTAdapter implements IProtocolAdapter {
   // =========================================================================
 
   async writeTag(tagId: string, value: number | boolean | string): Promise<boolean> {
+    if (!this.connected || this.deliberatelyDisconnected) {
+      return false;
+    }
+
     const tag = this.tags.get(tagId);
     if (!tag) {
       return false;
@@ -222,6 +300,11 @@ export class RESTAdapter implements IProtocolAdapter {
       return false;
     }
 
+    if (!isTagValueCompatible(tag, value)) {
+      return false;
+    }
+
+    const epoch = this.lifecycleEpoch;
     try {
       const request: RESTWriteRequest = { tagId, value };
       const response = await this.fetchWithAuth(
@@ -232,6 +315,7 @@ export class RESTAdapter implements IProtocolAdapter {
           body: JSON.stringify(request),
         }
       );
+      this.assertCurrentLifecycle(epoch);
 
       if (!response.ok) {
         throw new Error(`Failed to write tag: ${response.status}`);
@@ -239,8 +323,11 @@ export class RESTAdapter implements IProtocolAdapter {
 
       this.stats.writeCount++;
       return true;
-    } catch {
-      this.stats.errorCount++;
+    } catch (error) {
+      if (epoch !== this.lifecycleEpoch || this.deliberatelyDisconnected) {
+        return false;
+      }
+      this.recordError(error);
       return false;
     }
   }
@@ -258,7 +345,13 @@ export class RESTAdapter implements IProtocolAdapter {
       };
     }
 
-    tagIds.forEach((id) => {
+    const uniqueTagIds = [...new Set(tagIds)];
+    const unknownTag = uniqueTagIds.find((id) => !this.tags.has(id));
+    if (unknownTag) {
+      throw new Error(`Unknown tag: ${unknownTag}`);
+    }
+
+    uniqueTagIds.forEach((id) => {
       if (!this.subscribers.has(id)) {
         this.subscribers.set(id, new Set());
       }
@@ -266,8 +359,12 @@ export class RESTAdapter implements IProtocolAdapter {
     });
 
     return () => {
-      tagIds.forEach((id) => {
-        this.subscribers.get(id)?.delete(callback);
+      uniqueTagIds.forEach((id) => {
+        const callbacks = this.subscribers.get(id);
+        callbacks?.delete(callback);
+        if (callbacks?.size === 0) {
+          this.subscribers.delete(id);
+        }
       });
     };
   }
@@ -302,70 +399,105 @@ export class RESTAdapter implements IProtocolAdapter {
   // Polling
   // =========================================================================
 
-  private async poll(): Promise<void> {
-    if (!this.connected) return;
+  private poll(): Promise<void> {
+    if (!this.connected) return Promise.resolve();
+    if (this.pollPromise) return this.pollPromise;
 
-    try {
-      const tagValues = await this.readAllTags();
-      this.notifySubscribers(tagValues);
-    } catch {
-      this.handleConnectionError();
-    }
+    const epoch = this.lifecycleEpoch;
+    const polling = (async () => {
+      try {
+        const { committedValues } = await this.readTagsAndCommit(Array.from(this.tags.keys()));
+        if (
+          committedValues.length > 0 &&
+          this.connected &&
+          !this.deliberatelyDisconnected &&
+          epoch === this.lifecycleEpoch
+        ) {
+          this.notifySubscribers(committedValues);
+        }
+      } catch (error) {
+        if (
+          this.connected &&
+          !this.deliberatelyDisconnected &&
+          epoch === this.lifecycleEpoch &&
+          !isAbortError(error)
+        ) {
+          this.handleConnectionError(error);
+        }
+      }
+    })().finally(() => {
+      if (this.pollPromise === polling) {
+        this.pollPromise = null;
+      }
+    });
+    this.pollPromise = polling;
+    return polling;
   }
 
-  private handleConnectionError(): void {
-    // Already scheduled a reconnect, prevent race condition
-    if (this.reconnectTimeoutId) return;
+  private handleConnectionError(error: unknown): void {
+    if (this.deliberatelyDisconnected || this.reconnectTimeoutId) return;
 
-    this.reconnectAttempts++;
-
-    if (this.reconnectAttempts >= 5) {
-      // Terminal failure: surface a distinct error so consumers polling
-      // getConnectionStatus() can distinguish a permanent give-up from a
-      // transient blip. (Reconnect ceiling and subscriber-teardown behavior
-      // are intentionally unchanged pending a product decision.)
-      this.lastError = 'Reconnect limit reached (5 attempts)';
-      this.disconnect();
-    } else {
-      this.lastError = 'Connection lost';
-
-      // Exponential backoff
-      const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-
-      this.reconnectTimeoutId = setTimeout(() => {
-        this.reconnectTimeoutId = null;
-        this.connect().catch(() => {
-          // Reconnection failed - will be retried
-        });
-      }, delay);
+    this.connected = false;
+    this.lastDisconnectTime = Date.now();
+    this.lastError = error instanceof Error ? error.message : 'Connection lost';
+    this.lifecycleEpoch++;
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+      this.pollInterval = null;
     }
+    this.abortActiveRequests();
+    // The recovering server may have restarted its source clock. Values and
+    // ordering metadata from the failed connection have no authority over the
+    // replacement lifecycle.
+    this.resetReadAuthority();
+    this.reconnectAttempts++;
+    this.scheduleReconnect();
   }
 
   // =========================================================================
   // Helpers
   // =========================================================================
 
-  private async fetchWithTimeout(
+  private async fetchWithTimeout<T>(
     url: string,
-    options: RequestInit = {},
+    options: RequestInit,
+    consume: (response: Response) => Promise<T> | T,
     timeoutMs = 10000
-  ): Promise<Response> {
+  ): Promise<T> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let timedOut = false;
+    this.activeControllers.add(controller);
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
 
     try {
-      return await fetch(url, { ...options, signal: controller.signal });
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      return await consume(response);
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error(`Request timeout after ${timeoutMs}ms`);
+      if (isAbortError(err)) {
+        if (timedOut) {
+          throw new Error(`Request timeout after ${timeoutMs}ms`);
+        }
+        throw new RESTRequestAbortedError();
       }
       throw err;
     } finally {
       clearTimeout(timeout);
+      this.activeControllers.delete(controller);
     }
   }
 
   private async fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
+    return this.fetchWithAuthAndConsume(url, options, (response) => response);
+  }
+
+  private async fetchWithAuthAndConsume<T>(
+    url: string,
+    options: RequestInit,
+    consume: (response: Response) => Promise<T> | T
+  ): Promise<T> {
     // Validate URL format
     try {
       new URL(url);
@@ -379,7 +511,7 @@ export class RESTAdapter implements IProtocolAdapter {
       headers.set('Authorization', `Bearer ${this.config.apiKey}`);
     }
 
-    return this.fetchWithTimeout(url, { ...options, headers });
+    return this.fetchWithTimeout(url, { ...options, headers }, consume);
   }
 
   /**
@@ -394,11 +526,16 @@ export class RESTAdapter implements IProtocolAdapter {
     const d = data as Record<string, unknown>;
     return (
       typeof d.tagId === 'string' &&
+      d.tagId.length > 0 &&
       (typeof d.value === 'number' ||
         typeof d.value === 'boolean' ||
         typeof d.value === 'string') &&
+      (typeof d.value !== 'number' || Number.isFinite(d.value)) &&
       typeof d.quality === 'string' &&
-      typeof d.timestamp === 'number'
+      typeof d.timestamp === 'number' &&
+      Number.isFinite(d.timestamp) &&
+      (d.sourceTimestamp === undefined ||
+        (typeof d.sourceTimestamp === 'number' && Number.isFinite(d.sourceTimestamp)))
     );
   }
 
@@ -408,7 +545,7 @@ export class RESTAdapter implements IProtocolAdapter {
       value: data.value,
       quality: this.parseQuality(data.quality),
       timestamp: data.timestamp,
-      sourceTimestamp: data.sourceTimestamp,
+      ...(data.sourceTimestamp === undefined ? {} : { sourceTimestamp: data.sourceTimestamp }),
     };
   }
 
@@ -425,11 +562,30 @@ export class RESTAdapter implements IProtocolAdapter {
     this.stats.latencyCount++;
   }
 
+  private commitTagValue(tagValue: TagValue, requestSequence: number): boolean {
+    const incomingTimestamp = tagValue.sourceTimestamp ?? tagValue.timestamp;
+    const committed = this.committedReads.get(tagValue.tagId);
+    if (
+      committed &&
+      (incomingTimestamp < committed.timestamp ||
+        (incomingTimestamp === committed.timestamp && requestSequence < committed.requestSequence))
+    ) {
+      return false;
+    }
+
+    this.values.set(tagValue.tagId, { ...tagValue });
+    this.committedReads.set(tagValue.tagId, {
+      timestamp: incomingTimestamp,
+      requestSequence,
+    });
+    return true;
+  }
+
   private notifySubscribers(tagValues: TagValue[]): void {
     // Notify global subscribers
     this.globalSubscribers.forEach((callback) => {
       try {
-        callback(tagValues);
+        callback(tagValues.map((value) => ({ ...value })));
       } catch {
         // Subscriber callback error - silently ignored in production
       }
@@ -452,10 +608,126 @@ export class RESTAdapter implements IProtocolAdapter {
 
     subscriberUpdates.forEach((values, callback) => {
       try {
-        callback(values);
+        callback(values.map((value) => ({ ...value })));
       } catch {
         // Subscriber callback error - silently ignored in production
       }
     });
+  }
+
+  private async performConnect(epoch: number): Promise<void> {
+    const baseUrl = this.config.baseUrl;
+    let initialReadStarted = false;
+
+    try {
+      if (!baseUrl) {
+        throw new Error('REST adapter requires baseUrl in config');
+      }
+
+      const response = await this.fetchWithAuth(`${baseUrl}/health`);
+      this.assertCurrentLifecycle(epoch);
+      if (!response.ok) {
+        throw new Error(`Health check failed: ${response.status}`);
+      }
+
+      // A successful health check begins a fresh diagnostics window. The
+      // initial snapshot remains part of that window and must also succeed
+      // before the adapter is advertised as connected.
+      this.stats = {
+        readCount: 0,
+        writeCount: 0,
+        errorCount: 0,
+        totalLatency: 0,
+        latencyCount: 0,
+      };
+
+      initialReadStarted = true;
+      const { committedValues: initialValues } = await this.readTagsAndCommit(
+        Array.from(this.tags.keys())
+      );
+      this.assertCurrentLifecycle(epoch);
+
+      this.connected = true;
+      this.connectTime = Date.now();
+      this.reconnectAttempts = 0;
+      this.lastError = undefined;
+      if (initialValues.length > 0) {
+        this.notifySubscribers(initialValues);
+      }
+
+      const interval = this.safePollInterval();
+      this.pollInterval = setInterval(() => void this.poll(), interval);
+    } catch (error) {
+      if (epoch !== this.lifecycleEpoch) {
+        throw new RESTRequestAbortedError();
+      }
+      this.connected = false;
+      if (!isAbortError(error)) {
+        this.lastError = error instanceof Error ? error.message : String(error);
+      }
+      // The batch read owns the error counter for the initial snapshot. Health,
+      // configuration, and lifecycle failures are owned by connect itself.
+      if (!initialReadStarted) {
+        this.recordError(error);
+      }
+      if (this.pollInterval) {
+        clearInterval(this.pollInterval);
+        this.pollInterval = null;
+      }
+      throw error;
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.deliberatelyDisconnected || this.reconnectTimeoutId) return;
+
+    if (this.reconnectAttempts >= 5) {
+      this.lastError = 'Reconnect limit reached (5 attempts)';
+      // Keep subscribers: a failure path must not silently unsubscribe callers
+      // (disconnect() is where clearing is intentional).
+      this.values.clear();
+      return;
+    }
+
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+    this.reconnectTimeoutId = setTimeout(() => {
+      this.reconnectTimeoutId = null;
+      if (this.deliberatelyDisconnected) return;
+
+      this.connect().catch((error) => {
+        if (this.deliberatelyDisconnected || isAbortError(error)) return;
+        this.reconnectAttempts++;
+        this.scheduleReconnect();
+      });
+    }, delay);
+  }
+
+  private safePollInterval(): number {
+    const interval = this.config.pollInterval;
+    return Number.isFinite(interval) && (interval as number) > 0
+      ? Math.max(10, interval as number)
+      : 1000;
+  }
+
+  private assertCurrentLifecycle(epoch: number): void {
+    if (this.deliberatelyDisconnected || epoch !== this.lifecycleEpoch) {
+      throw new RESTRequestAbortedError();
+    }
+  }
+
+  private abortActiveRequests(): void {
+    this.activeControllers.forEach((controller) => controller.abort());
+    this.activeControllers.clear();
+  }
+
+  private resetReadAuthority(): void {
+    this.values.clear();
+    this.committedReads.clear();
+    this.nextReadSequence = 0;
+  }
+
+  private recordError(error: unknown): void {
+    if (isAbortError(error)) return;
+    this.stats.errorCount++;
   }
 }

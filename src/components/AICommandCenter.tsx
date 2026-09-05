@@ -54,19 +54,13 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
   const [activeTab, setActiveTab] = useState<'decisions' | 'strategic'>('decisions');
   const [selectedDecision, setSelectedDecision] = useState<AIDecision | null>(null);
 
-  // Track actual decision outcomes for real success rate calculation
-  // Track actual decision outcomes for real success rate calculation
-  const decisionOutcomesRef = useRef<{ successful: number; total: number }>({
-    successful: 0,
-    total: 0,
-  });
-
   const [systemStatus, setSystemStatus] = useState({
     cpu: 15,
     memory: 35,
     decisions: 0,
-    successRate: 0, // Start at 0, will be calculated from actual decisions
   });
+  // Subscribed, not read imperatively, so the readout follows trackAPICost.
+  const formattedSessionCost = useAIConfigStore((state) => state.getFormattedCost());
 
   const lastAlertCountRef = useRef(0);
 
@@ -174,26 +168,6 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
     }));
   }, [storeSystemStatus]);
 
-  // Calculate real success rate from actual decision outcomes
-  useEffect(() => {
-    // Count completed and successful decisions from the store
-    const completedDecisions = aiDecisions.filter((d: AIDecision) => d.status === 'completed');
-
-    // Track outcomes - successful if completed with positive outcome
-    const successful = completedDecisions.filter(
-      (d: AIDecision) =>
-        d.outcome?.toLowerCase().includes('success') ||
-        d.outcome?.toLowerCase().includes('resolved') ||
-        d.outcome?.toLowerCase().includes('completed') ||
-        d.outcome?.toLowerCase().includes('improved')
-    ).length;
-
-    decisionOutcomesRef.current = {
-      successful,
-      total: completedDecisions.length,
-    };
-  }, [aiDecisions]);
-
   // Decision icon/color functions now imported from utils/decisionIcons
 
   // Weather icon helper - kept for future UI expansion
@@ -275,9 +249,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
                 isGeminiConnected ? (
                   <>
                     <span className="text-slate-400">$</span>
-                    <span className="text-emerald-400 ml-1">
-                      {useAIConfigStore.getState().getFormattedCost()}
-                    </span>
+                    <span className="text-emerald-400 ml-1">{formattedSessionCost}</span>
                   </>
                 ) : (
                   <>
@@ -436,6 +408,14 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
                                 <XCircle className="h-3 w-3" aria-hidden="true" />
                                 Reject
                               </button>
+                              {aiDecisions.length > 15 && (
+                                <p
+                                  className="text-center text-[10px] text-slate-500 py-1"
+                                  role="status"
+                                >
+                                  Showing 15 of {aiDecisions.length} decisions
+                                </p>
+                              )}
                             </>
                           )}
                         </div>

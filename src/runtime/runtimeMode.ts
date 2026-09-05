@@ -24,6 +24,13 @@ export type BenchmarkScene =
   | 'forecourt'
   | 'carpark'
   | 'river'
+  | 'tunnel'
+  | 'huts'
+  | 'offices'
+  | 'canal'
+  | 'lake'
+  | 'busstop'
+  | 'kiosk'
   | 'sun'
   | 'moon';
 
@@ -90,6 +97,17 @@ const BENCHMARK_SCENES: ReadonlySet<string> = new Set<BenchmarkScene>([
   'forecourt',
   'carpark',
   'river',
+  // Sweep cameras (2026-09-02) for exterior features no benchmark camera had
+  // ever framed: the tunnel portal, the Nissen huts, the office block, the
+  // canal with its boat and lock, the lake with its picnic area, the bus stop,
+  // and the kiosk cafe by the pond. See _contprompts/millos_visual_defect_sweep_2026-08-19.md.
+  'tunnel',
+  'huts',
+  'offices',
+  'canal',
+  'lake',
+  'busstop',
+  'kiosk',
   'sun',
   'moon',
 ]);

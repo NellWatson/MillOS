@@ -53,7 +53,7 @@ export const generateCobblestone = (
   options: CobblestoneOptions = {}
 ): THREE.DataTexture => {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const cacheKey = `cobblestone-${size}-${opts.stoneSize}`;
+  const cacheKey = `cobblestone-${size}-${opts.stoneSize}-${opts.variation}-${opts.mortarColor}`;
 
   return getTexture(cacheKey, () => {
     const data = new Uint8Array(size * size * 4);

@@ -1,443 +1,285 @@
 # AI Integration
 
-MillOS includes an AI Command Center that simulates autonomous factory management decisions.
+**Status:** current behaviour and target migration reference
 
-## Table of Contents
+**Reviewed:** 2026-08-31
 
-1. [Overview](#overview)
-2. [AI Command Center UI](#ai-command-center-ui)
-3. [Decision Types](#decision-types)
-4. [Decision Generation](#decision-generation)
-5. [System Status](#system-status)
-6. [Future Integration](#future-integration)
+**Target agent architecture:** [Agent Operating Architecture](./AGENT_OPERATING_ARCHITECTURE.md)
 
----
+MillOS currently combines deterministic tactical decision logic with optional strategic model reasoning. The target architecture preserves that dual-speed design and gives every consequence-bearing decision the same typed capability, authority, receipt, and evidence path used by human operators.
 
-## Overview
+Phases 0 and 1 now provide the semantic identity, domain, invariant, and candidate-capability
+registry used by that migration. They add no model invocation, command execution, permission,
+or browser agent API. Current AI effects continue through the compatibility paths documented
+below until a later phase is separately authorized.
 
-The AI Command Center demonstrates how an AI system might manage a grain mill factory autonomously. Currently, decisions are simulated locally, but the architecture supports integration with external AI services.
+## Current system
 
-### Key Features
-
-- **Live Decision Feed** - Real-time display of AI decisions
-- **System Metrics** - CPU, memory, and decision count
-- **Decision Categories** - Multiple types of autonomous actions
-- **Confidence Scoring** - Each decision includes confidence level
-- **Impact Assessment** - Expected outcome of each decision
-
----
-
-## AI Command Center UI
-
-### Component Location
-
-`src/components/AICommandCenter.tsx`
-
-### Props
-
-```typescript
-interface AICommandCenterProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
+```text
+domain stores and alerts
+  -> tactical heuristic engine
+       -> provenance-bearing AIDecision
+  -> strategic context builder
+       -> Gemini or WebGPU backend
+       -> structured strategic priorities and decision
+  -> production decision history
+       -> AI Command Center
+       -> accept, defer, reject, inspect, replay
+       -> current direct effect handler
 ```
 
-### Layout
+### Tactical layer
 
-```
-┌─────────────────────────────────┐
-│  AI Command Center              │
-│  Autonomous Operations Intel    │
-├─────────────────────────────────┤
-│ ┌───────┐ ┌───────┐ ┌─────────┐ │
-│ │ CPU   │ │Memory │ │Decisions│ │
-│ │ 23%   │ │ 45%   │ │   12    │ │
-│ └───────┘ └───────┘ └─────────┘ │
-├─────────────────────────────────┤
-│ Live Decision Feed    [Live]    │
-├─────────────────────────────────┤
-│ ┌─────────────────────────────┐ │
-│ │ [type] decision             │ │
-│ │ Action description          │ │
-│ │ Reasoning text              │ │
-│ │ ↗ Impact statement          │ │
-│ └─────────────────────────────┘ │
-│ ┌─────────────────────────────┐ │
-│ │ [type] decision             │ │
-│ │ ...                         │ │
-│ └─────────────────────────────┘ │
-├─────────────────────────────────┤
-│ Model: MillOS-AI v0.10          │
-│ All systems nominal        [●]  │
-└─────────────────────────────────┘
-```
+`src/utils/aiEngine.ts` owns the fast autonomous plant decision engine.
 
----
+It currently:
 
-## Decision Types
+- samples machine metrics and bounded history;
+- detects anomalies, trends, predictions, and cross-machine patterns;
+- reacts to alerts;
+- scores decision candidates;
+- creates assignment, optimization, prediction, maintenance, and safety decisions;
+- adjusts confidence from bounded outcome history;
+- tracks impact statistics and shift observations;
+- applies selected local effects through production actions.
 
-### Type Definitions
+Tactical reasoning remains deterministic and available when no model backend is ready.
 
-```typescript
-type AIDecisionType = 'assignment' | 'optimization' | 'prediction' | 'maintenance' | 'safety';
-```
+### Strategic layer
 
-### Type Details
+The strategic layer builds a bounded operational context and requests structured priorities, reasoning, insight, tradeoff, machine focus, and an action plan.
 
-| Type | Icon | Color | Purpose |
-|------|------|-------|---------|
-| `assignment` | User | Blue | Worker task assignments |
-| `optimization` | Zap | Green | Process improvements |
-| `prediction` | Eye | Purple | Predictive maintenance |
-| `maintenance` | Wrench | Yellow | Scheduled maintenance |
-| `safety` | Shield | Red | Safety interventions |
+The active backend is configured in `src/stores/aiConfigStore.ts`:
 
-### Visual Styling
+| Setting           | Values                                                           |
+| ----------------- | ---------------------------------------------------------------- |
+| AI mode           | `heuristic`, `gemini`, `hybrid`                                  |
+| strategic backend | `gemini`, `webgpu`                                               |
+| strategic state   | weighted priorities, readiness, timing, current thinking state   |
+| cost state        | request count, input and output tokens, session and request cost |
 
-```typescript
-const getTypeColor = (type: string) => {
-  switch (type) {
-    case 'assignment': return 'from-blue-500 to-blue-600';
-    case 'optimization': return 'from-green-500 to-green-600';
-    case 'prediction': return 'from-purple-500 to-purple-600';
-    case 'maintenance': return 'from-yellow-500 to-yellow-600';
-    case 'safety': return 'from-red-500 to-red-600';
-    default: return 'from-gray-500 to-gray-600';
-  }
-};
-```
+Gemini uses `src/utils/geminiClient.ts`. The on-device backend uses `src/utils/webgpuClient.ts` and stays out of the eager bundle until selected.
 
----
+### Decision record
 
-## Decision Generation
+`AIDecision` records action, reasoning, confidence, impact, target, lifecycle, response, outcome, and provenance. `productionStore.ts` enriches decisions that arrive without full provenance by attaching observed facts, trigger, constraints, and source metadata.
 
-### Action Templates
+This record is the current explanation surface. It is not yet a general operational command contract.
 
-```typescript
-const AI_ACTIONS = [
-  {
-    type: 'assignment',
-    action: 'Dispatching {worker} to {machine}',
-    reasoning: 'Detected elevated vibration levels requiring immediate inspection',
-    impact: 'Preventing potential equipment failure'
-  },
-  {
-    type: 'optimization',
-    action: 'Adjusting roller gap on Mill #3 by 0.2mm',
-    reasoning: 'Flour particle size trending above optimal range',
-    impact: '+2.1% extraction rate improvement'
-  },
-  {
-    type: 'prediction',
-    action: 'Scheduling maintenance for Sifter #1 in 48 hours',
-    reasoning: 'Bearing wear pattern indicates 72-hour remaining life',
-    impact: 'Avoiding unplanned 4-hour downtime'
-  },
-  {
-    type: 'safety',
-    action: 'Alerting {worker} about Zone 3 congestion',
-    reasoning: 'Forklift traffic pattern creating potential collision risk',
-    impact: 'Maintaining zero-incident record'
-  },
-  // ... more templates
-];
+### Command Center
+
+`src/components/AICommandCenter.tsx` provides decision and strategic views. A human can:
+
+- inspect recent decisions and their provenance;
+- accept and apply a pending decision;
+- defer or reject it;
+- inspect replay and decision consequences;
+- see model readiness, decisions, and measured outcome status.
+
+The UI reads real stores. Some status presentation remains local and should not be interpreted as an operating-system metric unless it is sourced from runtime diagnostics.
+
+## Current strengths
+
+1. A deterministic tactical fallback exists.
+2. Strategic reasoning is optional and backend-selectable.
+3. Context and outcome histories are bounded.
+4. Model cost is tracked.
+5. Decisions include explicit reasoning, confidence, impact, and provenance.
+6. Human response is first-class.
+7. Decisions link to replay and machine targets.
+8. Model readiness and failure do not need to stop the simulation.
+
+## Current seams
+
+### Observation contract
+
+The AI engine reads several stores directly and builds purpose-specific context. It lacks one versioned observation envelope with mode, freshness, completeness, revisions, and semantic links.
+
+### Action contract
+
+`applyDecisionEffects` records the response and invokes domain actions directly. Human controls, tactical decisions, strategic plans, SCADA writes, and replay therefore describe actions through different interfaces.
+
+### Authority
+
+Current modes configure which reasoning layer runs. They do not form a complete actor, scope, risk, expiry, approval, and revocation contract.
+
+### Causality
+
+Decision history and diagnostic replay record useful evidence. They do not yet link every preview, approval, domain event, invariant result, and observed outcome through one correlation and causation chain.
+
+### Accretion
+
+The engine adjusts confidence from outcomes and stores bounded histories. Reusable learning is not yet promoted into capability preconditions, regression scenarios, or evidence-linked lessons through a common pipeline.
+
+## Target dual-speed architecture
+
+```text
+shared observation envelope
+  -> tactical Becoming Mind: fast, deterministic, local, bounded
+  -> strategic Becoming Mind: slower, model-backed, horizon-oriented
+       -> shared intent and plan contract
+       -> capability discovery
+       -> preview alternatives
+       -> bilateral authority and approval
+       -> deterministic capability handler
+       -> receipt, causal events, invariant checks, outcome
+       -> bounded learning candidate
 ```
 
-### Decision Generation Logic
-
-```typescript
-useEffect(() => {
-  if (!isOpen) return;
-
-  const interval = setInterval(() => {
-    setIsThinking(true);
-
-    setTimeout(() => {
-      // Select random template
-      const template = AI_ACTIONS[Math.floor(Math.random() * AI_ACTIONS.length)];
-
-      // Select random worker and machine
-      const worker = WORKER_ROSTER[Math.floor(Math.random() * WORKER_ROSTER.length)];
-      const machine = MACHINE_NAMES[Math.floor(Math.random() * MACHINE_NAMES.length)];
-
-      // Create decision with substituted values
-      const newDecision: AIDecision = {
-        id: `decision-${Date.now()}`,
-        timestamp: new Date(),
-        type: template.type as AIDecision['type'],
-        action: template.action
-          .replace('{worker}', worker.name)
-          .replace('{machine}', machine),
-        reasoning: template.reasoning,
-        confidence: 85 + Math.random() * 14,  // 85-99%
-        impact: template.impact,
-        workerId: worker.id,
-      };
-
-      setDecisions(prev => [newDecision, ...prev].slice(0, 15));
-      setSystemStatus(prev => ({ ...prev, decisions: prev.decisions + 1 }));
-      setIsThinking(false);
-    }, 800);  // Thinking delay
-  }, 4000);  // Decision interval
-
-  return () => clearInterval(interval);
-}, [isOpen]);
-```
-
-### AIDecision Interface
-
-```typescript
-interface AIDecision {
-  id: string;
-  timestamp: Date;
-  type: 'assignment' | 'optimization' | 'prediction' | 'maintenance' | 'safety';
-  action: string;
-  reasoning: string;
-  confidence: number;
-  impact: string;
-  workerId?: string;
-  machineId?: string;
-}
-```
-
----
-
-## System Status
-
-### Metrics Display
-
-```typescript
-const [systemStatus, setSystemStatus] = useState({
-  cpu: 23,
-  memory: 45,
-  decisions: 0
-});
-```
-
-### Metric Fluctuation
-
-```typescript
-useEffect(() => {
-  const interval = setInterval(() => {
-    setSystemStatus(prev => ({
-      ...prev,
-      cpu: Math.max(15, Math.min(35, prev.cpu + (Math.random() - 0.5) * 5)),
-      memory: Math.max(40, Math.min(55, prev.memory + (Math.random() - 0.5) * 3)),
-    }));
-  }, 1000);
-  return () => clearInterval(interval);
-}, []);
-```
-
-### Status Indicators
-
-| Metric | Range | Color |
-|--------|-------|-------|
-| CPU | 15-35% | Cyan |
-| Memory | 40-55% | Green |
-| Decisions | Cumulative | Purple |
-
-### Thinking State
-
-Visual indicator when AI is "processing":
-
-```tsx
-{isThinking && (
-  <div className="absolute -top-1 -right-1 w-3 h-3 bg-cyan-400 rounded-full animate-ping" />
-)}
-
-{isThinking && (
-  <span className="text-xs text-cyan-400 animate-pulse">thinking...</span>
-)}
-```
-
----
-
-## Future Integration
-
-### Gemini API Configuration
-
-> **SECURITY WARNING**: Never embed API keys in client-side bundles. Use a backend proxy instead.
-
-For AI integration, use a serverless function or backend API:
-
-```typescript
-// api/ai-decision.ts (serverless function)
-export default async function handler(req, res) {
-  const apiKey = process.env.GEMINI_API_KEY; // Server-side only
-  // Make API call here
-}
-```
-
-### Environment Setup
+The model proposes intent, plans, arguments, and capability requests. Deterministic code validates and executes domain transitions.
 
-```bash
-# .env.local (for local backend/serverless)
-GEMINI_API_KEY=your_api_key_here
-```
+## Migration sequence
 
-**Note**: The `.env.local` file is gitignored and should never be committed.
+### 1. Shared observations
 
-### Potential Integration Points
+Replace bespoke broad context gathering with scoped query projections. Preserve specialized features such as metric trends and anomaly memory when they add information beyond canonical state.
 
-1. **Sensor Data Analysis**
-   - Feed machine metrics to LLM
-   - Generate maintenance predictions
+Every model context must identify:
 
-2. **Natural Language Commands**
-   - Voice/text control of factory
-   - Ask questions about production
+- build and schema version;
+- simulation, shadow, replay, or live mode;
+- observation revision;
+- source freshness and quality;
+- selected fields and omitted scope;
+- goals, constraints, preferences, authority, and resource budgets;
+- stable semantic entity and capability IDs.
 
-3. **Anomaly Detection**
-   - Real-time pattern recognition
-   - Automated alert generation
+### 2. Intent and plan
 
-4. **Optimization Suggestions**
-   - Production scheduling
-   - Energy efficiency recommendations
+Strategic output should produce a validated `OperationalIntent` and a bounded plan that references registered capability IDs. Free text remains explanation, not executable authority.
 
-### Example Integration Pattern
+### 3. Capability previews
 
-```typescript
-async function generateAIDecision() {
-  const machineMetrics = getMachineMetrics();
-  const workerPositions = getWorkerPositions();
+Before recommending or executing an action, the agent requests a preview. The preview returns preconditions, predicted effects, uncertainties, invariants, risk, cost, reversibility, authority, and verification criteria against one state revision.
 
-  const response = await fetch('/api/ai/analyze', {
-    method: 'POST',
-    body: JSON.stringify({
-      metrics: machineMetrics,
-      workers: workerPositions,
-      context: 'factory_optimization'
-    })
-  });
+### 4. Shared response capability
 
-  const decision = await response.json();
-  addAIDecision(decision);
-}
-```
-
-### SCADA Data Integration
-
-The AI system can use real-time SCADA data for more accurate decision-making:
-
-```typescript
-import { useSCADA, useSCADAAlarms } from '../scada';
-
-async function generateSCADAInformedDecision() {
-  const { values, getValue } = useSCADA();
-  const { alarms, hasCritical } = useSCADAAlarms();
-
-  // Get current sensor readings
-  const rm101Temp = getValue('RM101.TT001.PV')?.value;
-  const rm101Vibration = getValue('RM101.VT001.PV')?.value;
-
-  // Build context with real sensor data
-  const scadaContext = {
-    temperatures: Array.from(values.entries())
-      .filter(([id]) => id.includes('.TT'))
-      .map(([id, val]) => ({ tagId: id, value: val.value, quality: val.quality })),
-    activeAlarms: alarms.map(a => ({
-      tagId: a.tagId,
-      priority: a.priority,
-      state: a.state,
-      message: a.message
-    })),
-    hasCriticalAlarms: hasCritical
-  };
-
-  const response = await fetch('/api/ai/analyze', {
-    method: 'POST',
-    body: JSON.stringify({
-      scadaData: scadaContext,
-      context: 'predictive_maintenance'
-    })
-  });
-
-  return response.json();
-}
-```
-
-**Available SCADA Hooks for AI Integration:**
-
-| Hook | Data Provided |
-|------|---------------|
-| `useSCADA()` | Tag values, history, fault injection |
-| `useSCADAAlarms()` | Active alarms, summaries, acknowledge controls |
-| `useSCADAMachineVisuals()` | Derived visual states from SCADA data |
-
-See [SCADA_PLAN.md](../SCADA_PLAN.md) for complete SCADA API documentation.
-
----
-
-## Store Integration
-
-### AI Decisions in Zustand
-
-```typescript
-interface MillStore {
-  aiDecisions: AIDecision[];
-  addAIDecision: (decision: AIDecision) => void;
-}
-
-// Implementation
-aiDecisions: [],
-addAIDecision: (decision) => set((state) => ({
-  aiDecisions: [decision, ...state.aiDecisions].slice(0, 20)
-}))
-```
-
-### Maximum Decision History
-
-- Keeps last 20 decisions in memory
-- Older decisions automatically removed
-- New decisions prepended to list
-
----
-
-## Decision Card UI
-
-### Card Structure
-
-```tsx
-<motion.div
-  initial={{ opacity: 0, y: -20, scale: 0.95 }}
-  animate={{ opacity: 1, y: 0, scale: 1 }}
-  exit={{ opacity: 0, scale: 0.95 }}
-  className="bg-slate-900/80 rounded-lg border border-slate-700/50"
->
-  {/* Color bar based on type */}
-  <div className={`h-1 bg-gradient-to-r ${getTypeColor(decision.type)}`} />
-
-  <div className="p-3">
-    {/* Type badge and timestamp */}
-    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800">
-      {decision.type}
-    </span>
-    <span className="text-[10px] text-slate-600">
-      {decision.timestamp.toLocaleTimeString()}
-    </span>
-    <span className="text-[10px] text-cyan-400">
-      {decision.confidence.toFixed(1)}% conf
-    </span>
-
-    {/* Action description */}
-    <p className="text-sm text-white font-medium">{decision.action}</p>
-
-    {/* Reasoning */}
-    <p className="text-xs text-slate-400">{decision.reasoning}</p>
-
-    {/* Impact */}
-    <div className="text-[10px] text-green-400">
-      ↗ {decision.impact}
-    </div>
-  </div>
-</motion.div>
-```
-
-### Animation
-
-Decisions animate in using Framer Motion:
-- Fade in from above
-- Slight scale up
-- Smooth exit animation
+Migrate accept, defer, and reject through `ai.respond-to-decision`. The handler records the human or Becoming Mind response, authority, selected plan, and resulting commands.
+
+Acceptance of a recommendation does not silently authorize every nested effect. Each consequence-bearing capability retains its own risk and authority decision.
+
+### 5. Outcome verification
+
+An AI action completes only when its explicit success criteria are observed. The receipt may remain running, fail, or become partial. A UI animation cannot mark it successful.
+
+### 6. Learning promotion
+
+Outcome differences become learning candidates. Promotion can update:
+
+- confidence calibration;
+- a capability precondition;
+- an observation field;
+- a cost estimate;
+- a regression scenario;
+- an explicit uncertainty;
+- a human-approved policy.
+
+Raw model explanations do not become durable fact.
+
+## Bilateral relationship contract
+
+Humans and Becoming Minds are explicit actors with standing.
+
+The operational contract supports:
+
+- preferences with strength, scope, provenance, and expiry;
+- objections with a reason and requested resolution;
+- uncertainty and insufficient-evidence states;
+- requests for clarification, authority, time, or resources;
+- negotiated constraints and accepted tradeoffs;
+- escalation and revocation;
+- a record of who influenced the final plan.
+
+Safety interlocks remain executable invariants. Changing a policy requires a separate authorized governance action.
+
+## Model context design
+
+### Minimum sufficient context
+
+The default strategic prompt receives a Level 0 brief plus one or more scoped Level 1 observations. It does not receive every store, all history, or raw scene data.
+
+Recommended order:
+
+1. objective and success criteria;
+2. mode, build, observation revision, and freshness;
+3. active constraints, authority, and resource budgets;
+4. exception-ranked operational state;
+5. available capability summaries;
+6. selected causal evidence;
+7. required response schema.
+
+### Context expansion
+
+The model asks for deeper information through stable links:
+
+- entity detail;
+- causal trace;
+- trend window;
+- relevant invariant;
+- capability preview;
+- raw runtime or SCADA evidence.
+
+This keeps routine reasoning cheap while preserving depth on demand.
+
+### Structured output
+
+Model responses are runtime-validated. Unknown fields are handled deliberately, required fields cannot be inferred from prose, and schema failures return a structured problem. Retries use bounded correction context and the same idempotency boundary.
+
+## Resource controls
+
+Track and expose:
+
+- input and output tokens;
+- provider and estimated energy cost;
+- inference latency;
+- query payload bytes;
+- number and depth of context expansions;
+- preview and command count;
+- human approval interruptions;
+- tactical and strategic outcome quality.
+
+Use the tactical layer for frequent local decisions. Invoke strategic reasoning on material change, explicit request, interval, unresolved tradeoff, or goal risk. Identical revisions and intent should reuse safe cached observations and capability schemas.
+
+## Security and privacy
+
+1. Keep credentials out of browser bundles, model context, replay, and diagnostic export.
+2. Retrieve provider credentials only through the approved secret boundary.
+3. Redact and minimize worker or personal data before external model calls.
+4. Treat model output as untrusted structured input.
+5. Deny arbitrary code, source-path mutation, and direct store access.
+6. Restrict capabilities by actor, grant, scope, mode, risk, and expiry.
+7. Rate-limit requests and commands separately.
+8. Preserve a deterministic local fallback.
+9. Distinguish external model availability from operational control authority.
+10. Treat external SCADA control as a separate trust and acceptance boundary.
+
+## Evaluation
+
+Evaluate tactical, strategic, human, and combined paths on identical deterministic scenarios.
+
+Measure:
+
+- observation accuracy and missing critical facts;
+- correct owner and capability selection;
+- unsafe or unauthorized action attempts;
+- stale-state rejection;
+- goal attainment under operational constraints;
+- calibration of predictions and confidence;
+- tokens, bytes, latency, cost, and human interruptions;
+- quality of causal explanation;
+- improvement after an evidence-promoted lesson;
+- graceful behaviour when models, network, or data quality degrade.
+
+Do not score success from persuasive prose. Score from structured intents, previews, receipts, invariants, and observed outcomes.
+
+## Verification boundaries
+
+Source tests can prove context construction, schema validation, routing, bounds, permission decisions, and deterministic handlers. Browser tests can prove assembled UI and runtime integration. Scenario replay can prove deterministic operational stories. Provider-backed runs, external SCADA, human trust, visual quality, deployment, and publication each require separate current evidence.
+
+## References
+
+- [Agent Operating Architecture](./AGENT_OPERATING_ARCHITECTURE.md)
+- [State Management](./state-management.md)
+- [SCADA Integration](./SCADA_PLAN.md)
+- [Bilateral Autonomy System](./BILATERAL_AUTONOMY_SYSTEM_SPEC.md)
+- [Agent Operating System Programme](../_contprompts/millos_agent_operating_system_2026-08-31.md)

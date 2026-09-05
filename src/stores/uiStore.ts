@@ -90,6 +90,9 @@ interface UIStore {
   // FPS Counter
   showFPSCounter: boolean;
   setShowFPSCounter: (show: boolean) => void;
+  // One achievements panel, whichever button opened it (not persisted).
+  showAchievements: boolean;
+  setShowAchievements: (show: boolean) => void;
   toggleFPSCounter: () => void;
 
   // Blueprint Mode (Ctrl+B toggle)
@@ -212,6 +215,8 @@ export const useUIStore = create<UIStore>()(
       // FPS Counter
       showFPSCounter: false,
       setShowFPSCounter: (show: boolean) => set({ showFPSCounter: show }),
+      showAchievements: false,
+      setShowAchievements: (show: boolean) => set({ showAchievements: show }),
       toggleFPSCounter: () => set((state) => ({ showFPSCounter: !state.showFPSCounter })),
 
       // Blueprint Mode (Ctrl+B toggle)

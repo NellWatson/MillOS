@@ -6,25 +6,49 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { useSafetyStore } from '../safetyStore';
+import { computeSafetyScore, useSafetyStore } from '../safetyStore';
 import { mockIncidents, generateBatchIncidents } from '../../test/fixtures';
+
+const FIXED_NOW = new Date('2026-08-20T12:00:00.000Z');
 
 describe('SafetyStore', () => {
   beforeEach(() => {
-    // Reset store to initial state
-    useSafetyStore.setState({
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW);
+    useSafetyStore.setState(useSafetyStore.getInitialState(), true);
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('starts from the complete documented safety state', () => {
+    const state = useSafetyStore.getState();
+
+    expect({
+      safetyMetrics: state.safetyMetrics,
+      safetyIncidents: state.safetyIncidents,
+      forkliftEmergencyStop: state.forkliftEmergencyStop,
+      forkliftMetrics: state.forkliftMetrics,
+      forkliftUpdateTimes: [...state.forkliftUpdateTimes.entries()],
+      incidentHeatMap: state.incidentHeatMap,
+      showIncidentHeatMap: state.showIncidentHeatMap,
+      safetyConfig: state.safetyConfig,
+      speedZones: state.speedZones,
+    }).toEqual({
       safetyMetrics: {
         nearMisses: 0,
         safetyStops: 0,
         routeConflicts: 0,
         lastIncidentTime: null,
-        daysSinceIncident: 127,
+        daysSinceIncident: 0,
       },
       safetyIncidents: [],
       forkliftEmergencyStop: false,
       forkliftMetrics: {},
-      forkliftUpdateTimes: new Map(),
-      _incidentIndices: { incidentHeatMapIndex: new Map() },
+      forkliftUpdateTimes: [],
       incidentHeatMap: [],
       showIncidentHeatMap: false,
       safetyConfig: {
@@ -44,21 +68,7 @@ describe('SafetyStore', () => {
     });
   });
 
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
-
   describe('Safety Metrics', () => {
-    it('should initialize with zero near misses', () => {
-      const { safetyMetrics } = useSafetyStore.getState();
-      expect(safetyMetrics.nearMisses).toBe(0);
-    });
-
-    it('should initialize with high days since incident', () => {
-      const { safetyMetrics } = useSafetyStore.getState();
-      expect(safetyMetrics.daysSinceIncident).toBe(127);
-    });
-
     it('should record safety stop and increment counters', () => {
       const { recordSafetyStop } = useSafetyStore.getState();
       recordSafetyStop();
@@ -67,7 +77,7 @@ describe('SafetyStore', () => {
       expect(safetyMetrics.safetyStops).toBe(1);
       expect(safetyMetrics.nearMisses).toBe(1);
       expect(safetyMetrics.daysSinceIncident).toBe(0);
-      expect(safetyMetrics.lastIncidentTime).toBeDefined();
+      expect(safetyMetrics.lastIncidentTime).toBe(FIXED_NOW.getTime());
     });
 
     it('should record a mobile-equipment route conflict', () => {
@@ -101,9 +111,11 @@ describe('SafetyStore', () => {
 
       const { safetyIncidents } = useSafetyStore.getState();
       expect(safetyIncidents).toHaveLength(1);
-      expect(safetyIncidents[0].id).toMatch(/^incident-/);
-      expect(safetyIncidents[0].timestamp).toBeDefined();
-      expect(safetyIncidents[0].type).toBe('stop');
+      expect(safetyIncidents[0]).toEqual({
+        ...mockIncidents[0],
+        id: expect.stringMatching(/^incident-/),
+        timestamp: FIXED_NOW.getTime(),
+      });
     });
 
     it('should add incidents to the front of the array', () => {
@@ -147,11 +159,6 @@ describe('SafetyStore', () => {
   });
 
   describe('Forklift Emergency Stop', () => {
-    it('should initialize with emergency stop disabled', () => {
-      const { forkliftEmergencyStop } = useSafetyStore.getState();
-      expect(forkliftEmergencyStop).toBe(false);
-    });
-
     it('should enable emergency stop', () => {
       const { setForkliftEmergencyStop } = useSafetyStore.getState();
       setForkliftEmergencyStop(true);
@@ -169,34 +176,23 @@ describe('SafetyStore', () => {
   });
 
   describe('Forklift Metrics', () => {
-    beforeEach(() => {
-      vi.useFakeTimers();
-    });
-
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    it('should initialize with empty forklift metrics', () => {
-      const { forkliftMetrics } = useSafetyStore.getState();
-      expect(Object.keys(forkliftMetrics)).toHaveLength(0);
-    });
-
     it('should update forklift metrics', () => {
       const { updateForkliftMetrics } = useSafetyStore.getState();
 
-      vi.advanceTimersByTime(150); // Exceed debounce threshold
       updateForkliftMetrics('forklift-1', true);
 
       const { forkliftMetrics } = useSafetyStore.getState();
-      expect(forkliftMetrics['forklift-1']).toBeDefined();
-      expect(forkliftMetrics['forklift-1'].isMoving).toBe(true);
+      expect(forkliftMetrics['forklift-1']).toEqual({
+        totalMovingTime: 0,
+        totalStoppedTime: 0,
+        lastUpdateTime: FIXED_NOW.getTime(),
+        isMoving: true,
+      });
     });
 
     it('should debounce rapid updates', () => {
       const { updateForkliftMetrics } = useSafetyStore.getState();
 
-      vi.advanceTimersByTime(150);
       updateForkliftMetrics('forklift-1', true);
 
       // Rapid update within 100ms should be ignored
@@ -210,7 +206,6 @@ describe('SafetyStore', () => {
     it('should reset forklift metrics', () => {
       const { updateForkliftMetrics, resetForkliftMetrics } = useSafetyStore.getState();
 
-      vi.advanceTimersByTime(150);
       updateForkliftMetrics('forklift-1', true);
       resetForkliftMetrics();
 
@@ -219,17 +214,23 @@ describe('SafetyStore', () => {
       expect(forkliftUpdateTimes.size).toBe(0);
     });
 
-    it('should track moving and stopped time', () => {
+    it('attributes elapsed time exactly to the prior moving state', () => {
       const { updateForkliftMetrics } = useSafetyStore.getState();
 
-      vi.advanceTimersByTime(150);
-      updateForkliftMetrics('forklift-1', true); // Start moving
+      updateForkliftMetrics('forklift-1', true);
 
-      vi.advanceTimersByTime(1150); // 1 second later
-      updateForkliftMetrics('forklift-1', false); // Stop
+      vi.advanceTimersByTime(1000);
+      updateForkliftMetrics('forklift-1', false);
 
-      const { forkliftMetrics } = useSafetyStore.getState();
-      expect(forkliftMetrics['forklift-1'].totalMovingTime).toBeGreaterThan(0);
+      vi.advanceTimersByTime(2500);
+      updateForkliftMetrics('forklift-1', true);
+
+      expect(useSafetyStore.getState().forkliftMetrics['forklift-1']).toEqual({
+        totalMovingTime: 1,
+        totalStoppedTime: 2.5,
+        lastUpdateTime: FIXED_NOW.getTime() + 3500,
+        isMoving: true,
+      });
     });
   });
 
@@ -245,7 +246,7 @@ describe('SafetyStore', () => {
       expect(incidentHeatMap[0].type).toBe('stop');
     });
 
-    it('should cluster nearby incidents', () => {
+    it('should cluster nearby incidents across a grid-cell boundary', () => {
       const { recordIncidentLocation } = useSafetyStore.getState();
 
       // Record two nearby incidents (within threshold)
@@ -253,47 +254,34 @@ describe('SafetyStore', () => {
       recordIncidentLocation(11, 21, 'stop'); // Within grid threshold
 
       const { incidentHeatMap } = useSafetyStore.getState();
-      // Should be clustered into same grid key
-      expect(incidentHeatMap.length).toBeLessThanOrEqual(2);
+      expect(incidentHeatMap).toEqual([{ x: 10, z: 20, type: 'stop', intensity: 2 }]);
     });
 
-    it('should increase intensity for clustered incidents', () => {
+    it('keeps incidents at the exact clustering threshold distinct', () => {
       const { recordIncidentLocation } = useSafetyStore.getState();
 
-      // Record multiple incidents at exact same grid location
-      recordIncidentLocation(0, 0, 'stop');
-      recordIncidentLocation(0, 0, 'stop');
-      recordIncidentLocation(0, 0, 'stop');
+      recordIncidentLocation(0, 0, 'near_miss');
+      recordIncidentLocation(3, 0, 'stop');
 
       const { incidentHeatMap } = useSafetyStore.getState();
-      const point = incidentHeatMap.find((p) => p.x === 0 && p.z === 0);
-      expect(point?.intensity).toBeGreaterThan(1);
+      expect(incidentHeatMap).toEqual([
+        { x: 0, z: 0, intensity: 1, type: 'near_miss' },
+        { x: 3, z: 0, intensity: 1, type: 'stop' },
+      ]);
     });
 
-    it('should cap intensity at 10', () => {
-      const { recordIncidentLocation } = useSafetyStore.getState();
+    it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+      'ignores malformed incident coordinate %s without corrupting either index',
+      (coordinate) => {
+        const before = useSafetyStore.getState();
+        before.recordIncidentLocation(coordinate, 2, 'stop');
+        before.recordIncidentLocation(2, coordinate, 'stop');
 
-      // Record many incidents at same location
-      for (let i = 0; i < 15; i++) {
-        recordIncidentLocation(0, 0, 'stop');
+        const state = useSafetyStore.getState();
+        expect(state.incidentHeatMap).toEqual([]);
+        expect(state._incidentIndices.incidentHeatMapIndex.size).toBe(0);
       }
-
-      const { incidentHeatMap } = useSafetyStore.getState();
-      const point = incidentHeatMap.find((p) => p.x === 0 && p.z === 0);
-      expect(point?.intensity).toBeLessThanOrEqual(10);
-    });
-
-    it('should limit heat map to 100 points', () => {
-      const { recordIncidentLocation } = useSafetyStore.getState();
-
-      // Record 120 incidents at different locations
-      for (let i = 0; i < 120; i++) {
-        recordIncidentLocation(i * 10, i * 10, 'stop'); // Spread out to avoid clustering
-      }
-
-      const { incidentHeatMap } = useSafetyStore.getState();
-      expect(incidentHeatMap.length).toBeLessThanOrEqual(100);
-    });
+    );
 
     it('should clear incident heat map', () => {
       const { recordIncidentLocation, clearIncidentHeatMap } = useSafetyStore.getState();
@@ -321,14 +309,6 @@ describe('SafetyStore', () => {
   });
 
   describe('Safety Configuration', () => {
-    it('should have default safety config', () => {
-      const { safetyConfig } = useSafetyStore.getState();
-      expect(safetyConfig.vehicleDetectionRadius).toBe(1.8);
-      expect(safetyConfig.forkliftSafetyRadius).toBe(3);
-      expect(safetyConfig.pathCheckDistance).toBe(4);
-      expect(safetyConfig.speedZoneSlowdown).toBe(0.5);
-    });
-
     it('should update safety config partially', () => {
       const { setSafetyConfig } = useSafetyStore.getState();
       setSafetyConfig({ vehicleDetectionRadius: 2.5 });
@@ -352,31 +332,18 @@ describe('SafetyStore', () => {
   });
 
   describe('Speed Zones', () => {
-    it('should initialize with default speed zones', () => {
-      const { speedZones } = useSafetyStore.getState();
-      expect(speedZones.length).toBeGreaterThan(0);
-      expect(speedZones[0].name).toBe('Central Area');
-    });
-
-    it('should add speed zone', () => {
+    it('adds speed zones with distinct generated identities even within one millisecond', () => {
       const { addSpeedZone } = useSafetyStore.getState();
-      addSpeedZone({ x: 50, z: 50, radius: 5, name: 'New Zone' });
+      addSpeedZone({ x: 50, z: 50, radius: 5, name: 'New Zone A' });
+      addSpeedZone({ x: 60, z: 70, radius: 6, name: 'New Zone B' });
 
       const { speedZones } = useSafetyStore.getState();
-      const newZone = speedZones.find((z) => z.name === 'New Zone');
-      expect(newZone).toBeDefined();
-      expect(newZone?.x).toBe(50);
-      expect(newZone?.z).toBe(50);
-      expect(newZone?.radius).toBe(5);
-    });
-
-    it('should generate unique id for new zones', () => {
-      const { addSpeedZone } = useSafetyStore.getState();
-      addSpeedZone({ x: 50, z: 50, radius: 5, name: 'New Zone' });
-
-      const { speedZones } = useSafetyStore.getState();
-      const newZone = speedZones.find((z) => z.name === 'New Zone');
-      expect(newZone?.id).toMatch(/^zone-/);
+      const added = speedZones.slice(-2);
+      expect(added).toEqual([
+        { id: expect.stringMatching(/^zone-/), x: 50, z: 50, radius: 5, name: 'New Zone A' },
+        { id: expect.stringMatching(/^zone-/), x: 60, z: 70, radius: 6, name: 'New Zone B' },
+      ]);
+      expect(added[0].id).not.toBe(added[1].id);
     });
 
     it('should remove speed zone by id', () => {
@@ -419,6 +386,7 @@ describe('SafetyStore', () => {
     it('should record a rapid batch of incidents newest-first', () => {
       const { addSafetyIncident } = useSafetyStore.getState();
       const batchIncidents = generateBatchIncidents(50);
+      vi.spyOn(Math, 'random').mockReturnValue(0);
 
       batchIncidents.forEach((incident) => addSafetyIncident(incident));
 
@@ -457,5 +425,16 @@ describe('SafetyStore', () => {
       expect(incidentHeatMap).toHaveLength(100);
       expect(incidentHeatMap.every((p) => p.intensity >= 1 && p.intensity <= 10)).toBe(true);
     });
+  });
+});
+
+describe('computeSafetyScore', () => {
+  it('is the single formula shared by the HUD and the Overview panel', () => {
+    expect(computeSafetyScore(undefined)).toBe(100);
+    expect(computeSafetyScore({ nearMisses: 1 })).toBe(95);
+    expect(computeSafetyScore({ safetyStops: 1 })).toBe(98);
+    // Route conflicts used to be counted by the HUD but not by the panel.
+    expect(computeSafetyScore({ routeConflicts: 1 })).toBe(99);
+    expect(computeSafetyScore({ nearMisses: 50, safetyStops: 50, routeConflicts: 50 })).toBe(0);
   });
 });

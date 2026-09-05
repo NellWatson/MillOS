@@ -54,6 +54,72 @@ interface PIPointResponse {
   Future: boolean;
 }
 
+interface ActiveRequest {
+  controller: AbortController;
+  timeoutId: ReturnType<typeof setTimeout>;
+}
+
+const DEFAULT_TIMEOUT_MS = 30000;
+const MAX_REQUEST_TIMEOUT_MS = 300000;
+const DEFAULT_MAX_POINTS = 10000;
+const DEFAULT_PLOT_INTERVALS = 100;
+const MAX_QUERY_POINTS = 100000;
+const MAX_BATCH_TAGS = 256;
+const MAX_BATCH_CONCURRENCY = 8;
+
+function positiveIntegerOr(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.max(1, Math.floor(value))
+    : fallback;
+}
+
+function boundedPositiveIntegerOr(
+  value: number | undefined,
+  fallback: number,
+  maximum: number
+): number {
+  return Math.min(positiveIntegerOr(value, fallback), maximum);
+}
+
+async function forEachWithConcurrency<T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex++];
+      if (item !== undefined) await worker(item);
+    }
+  });
+  await Promise.all(workers);
+}
+
+function isValidRange(startTime: Date, endTime: Date): boolean {
+  const start = startTime instanceof Date ? startTime.getTime() : Number.NaN;
+  const end = endTime instanceof Date ? endTime.getTime() : Number.NaN;
+  return Number.isFinite(start) && Number.isFinite(end) && end >= start;
+}
+
+function abortError(): Error {
+  const error = new Error('PI Web API request aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  let candidate = value;
+  if (candidate !== null && typeof candidate === 'object') {
+    candidate = (candidate as Record<string, unknown>).Value;
+  }
+  if (typeof candidate === 'boolean') return candidate ? 1 : 0;
+  if (typeof candidate === 'number') return Number.isFinite(candidate) ? candidate : null;
+  if (typeof candidate !== 'string' || candidate.trim() === '') return null;
+  const parsed = Number(candidate);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 // ============================================================================
 // PI Adapter Implementation
 // ============================================================================
@@ -65,11 +131,22 @@ export class PIAdapter implements IHistorian {
   private connected: boolean = false;
   private timeout: number;
   private webIdCache: Map<string, string> = new Map();
+  // Negative cache: a tag the server does not know is otherwise re-requested
+  // (and re-warned about) on every poll cycle.
+  private missingWebIds: Set<string> = new Set();
+  private webIdInFlight: Map<string, Promise<string | null>> = new Map();
+  private activeRequests: Set<ActiveRequest> = new Set();
+  private lifecycleGeneration = 0;
+  private connectPromise: Promise<void> | null = null;
 
   constructor(config: PIConnectionConfig) {
     this.baseUrl = config.baseUrl;
     this.serverPath = config.serverPath;
-    this.timeout = config.timeout ?? 30000;
+    this.timeout = boundedPositiveIntegerOr(
+      config.timeout,
+      DEFAULT_TIMEOUT_MS,
+      MAX_REQUEST_TIMEOUT_MS
+    );
 
     // Build authorization header based on auth method
     switch (config.authMethod) {
@@ -94,25 +171,48 @@ export class PIAdapter implements IHistorian {
 
   // === Lifecycle ===
 
-  async connect(): Promise<void> {
+  connect(): Promise<void> {
+    if (this.connectPromise) return this.connectPromise;
+
+    const generation = ++this.lifecycleGeneration;
+    const pending = this.performConnect(generation);
+    this.connectPromise = pending;
+    const clearPending = () => {
+      if (this.connectPromise === pending) this.connectPromise = null;
+    };
+    void pending.then(clearPending, clearPending);
+    return pending;
+  }
+
+  private async performConnect(generation: number): Promise<void> {
     try {
       // Test connection by fetching system info
-      const response = await this.fetchWithAuth(`${this.baseUrl}/system`);
+      const response = await this.requestStatus(`${this.baseUrl}/system`);
       if (!response.ok) {
         throw new Error(`PI Web API connection failed: ${response.status} ${response.statusText}`);
+      }
+      if (generation !== this.lifecycleGeneration) {
+        throw abortError();
       }
       this.connected = true;
       logger.info('[PIAdapter] Connected to PI Web API');
     } catch (error) {
-      this.connected = false;
+      if (generation === this.lifecycleGeneration) {
+        this.connected = false;
+      }
       logger.error('[PIAdapter] Connection failed:', error);
       throw error;
     }
   }
 
   async disconnect(): Promise<void> {
+    this.lifecycleGeneration += 1;
     this.connected = false;
+    this.connectPromise = null;
+    this.abortActiveRequests();
     this.webIdCache.clear();
+    this.missingWebIds.clear();
+    this.webIdInFlight.clear();
     logger.info('[PIAdapter] Disconnected');
   }
 
@@ -132,25 +232,35 @@ export class PIAdapter implements IHistorian {
     endTime: Date,
     options?: HistorianQueryOptions
   ): Promise<TagHistoryPoint[]> {
-    const webId = await this.getWebId(tagId);
-    if (!webId) return [];
+    if (!tagId || !isValidRange(startTime, endTime)) return [];
 
-    const maxCount = options?.maxPoints ?? 10000;
-    const url =
-      `${this.baseUrl}/streams/${webId}/recorded?` +
-      `startTime=${startTime.toISOString()}&` +
-      `endTime=${endTime.toISOString()}&` +
-      `maxCount=${maxCount}`;
+    try {
+      const webId = await this.getWebId(tagId);
+      if (!webId) return [];
 
-    const response = await this.fetchWithAuth(url);
-    if (!response.ok) {
-      logger.warn(`[PIAdapter] Failed to get recorded values for ${tagId}: ${response.status}`);
+      const maxCount = boundedPositiveIntegerOr(
+        options?.maxPoints,
+        DEFAULT_MAX_POINTS,
+        MAX_QUERY_POINTS
+      );
+      const url =
+        `${this.baseUrl}/streams/${webId}/recorded?` +
+        `startTime=${startTime.toISOString()}&` +
+        `endTime=${endTime.toISOString()}&` +
+        `maxCount=${maxCount}`;
+
+      const { response, data } = await this.requestJson<PIStreamValuesResponse>(url);
+      if (!response.ok) {
+        logger.warn(`[PIAdapter] Failed to get recorded values for ${tagId}: ${response.status}`);
+        return [];
+      }
+
+      const items = Array.isArray(data?.Items) ? data.Items : [];
+      return this.mapPIValuesToHistoryPoints(items);
+    } catch (error) {
+      logger.warn(`[PIAdapter] Error getting recorded values for ${tagId}:`, error);
       return [];
     }
-
-    const data: PIStreamValuesResponse = await response.json();
-    const items = Array.isArray(data?.Items) ? data.Items : [];
-    return this.mapPIValuesToHistoryPoints(items);
   }
 
   async getInterpolatedValues(
@@ -160,26 +270,40 @@ export class PIAdapter implements IHistorian {
     intervalMs: number,
     _options?: HistorianQueryOptions
   ): Promise<TagHistoryPoint[]> {
-    const webId = await this.getWebId(tagId);
-    if (!webId) return [];
+    if (!tagId || !isValidRange(startTime, endTime)) return [];
 
-    // PI Web API expects interval as ISO 8601 duration
-    const intervalStr = this.msToIsoDuration(intervalMs);
-    const url =
-      `${this.baseUrl}/streams/${webId}/interpolated?` +
-      `startTime=${startTime.toISOString()}&` +
-      `endTime=${endTime.toISOString()}&` +
-      `interval=${intervalStr}`;
+    try {
+      const webId = await this.getWebId(tagId);
+      if (!webId) return [];
 
-    const response = await this.fetchWithAuth(url);
-    if (!response.ok) {
-      logger.warn(`[PIAdapter] Failed to get interpolated values for ${tagId}: ${response.status}`);
+      // PI Web API expects interval as ISO 8601 duration
+      const minimumIntervalMs = Math.max(
+        1,
+        Math.ceil((endTime.getTime() - startTime.getTime()) / MAX_QUERY_POINTS)
+      );
+      const intervalStr = this.msToIsoDuration(
+        Math.max(positiveIntegerOr(intervalMs, 1000), minimumIntervalMs)
+      );
+      const url =
+        `${this.baseUrl}/streams/${webId}/interpolated?` +
+        `startTime=${startTime.toISOString()}&` +
+        `endTime=${endTime.toISOString()}&` +
+        `interval=${intervalStr}`;
+
+      const { response, data } = await this.requestJson<PIStreamValuesResponse>(url);
+      if (!response.ok) {
+        logger.warn(
+          `[PIAdapter] Failed to get interpolated values for ${tagId}: ${response.status}`
+        );
+        return [];
+      }
+
+      const items = Array.isArray(data?.Items) ? data.Items : [];
+      return this.mapPIValuesToHistoryPoints(items);
+    } catch (error) {
+      logger.warn(`[PIAdapter] Error getting interpolated values for ${tagId}:`, error);
       return [];
     }
-
-    const data: PIStreamValuesResponse = await response.json();
-    const items = Array.isArray(data?.Items) ? data.Items : [];
-    return this.mapPIValuesToHistoryPoints(items);
   }
 
   async getPlotValues(
@@ -189,42 +313,59 @@ export class PIAdapter implements IHistorian {
     intervals: number,
     _options?: HistorianQueryOptions
   ): Promise<TagHistoryPoint[]> {
-    const webId = await this.getWebId(tagId);
-    if (!webId) return [];
+    if (!tagId || !isValidRange(startTime, endTime)) return [];
 
-    const url =
-      `${this.baseUrl}/streams/${webId}/plot?` +
-      `startTime=${startTime.toISOString()}&` +
-      `endTime=${endTime.toISOString()}&` +
-      `intervals=${intervals}`;
+    try {
+      const webId = await this.getWebId(tagId);
+      if (!webId) return [];
 
-    const response = await this.fetchWithAuth(url);
-    if (!response.ok) {
-      logger.warn(`[PIAdapter] Failed to get plot values for ${tagId}: ${response.status}`);
+      const safeIntervals = boundedPositiveIntegerOr(
+        intervals,
+        DEFAULT_PLOT_INTERVALS,
+        MAX_QUERY_POINTS
+      );
+      const url =
+        `${this.baseUrl}/streams/${webId}/plot?` +
+        `startTime=${startTime.toISOString()}&` +
+        `endTime=${endTime.toISOString()}&` +
+        `intervals=${safeIntervals}`;
+
+      const { response, data } = await this.requestJson<PIStreamValuesResponse>(url);
+      if (!response.ok) {
+        logger.warn(`[PIAdapter] Failed to get plot values for ${tagId}: ${response.status}`);
+        return [];
+      }
+
+      const items = Array.isArray(data?.Items) ? data.Items : [];
+      return this.mapPIValuesToHistoryPoints(items);
+    } catch (error) {
+      logger.warn(`[PIAdapter] Error getting plot values for ${tagId}:`, error);
       return [];
     }
-
-    const data: PIStreamValuesResponse = await response.json();
-    const items = Array.isArray(data?.Items) ? data.Items : [];
-    return this.mapPIValuesToHistoryPoints(items);
   }
 
   async getLatestValue(tagId: string): Promise<TagHistoryPoint | null> {
-    const webId = await this.getWebId(tagId);
-    if (!webId) return null;
+    if (!tagId) return null;
 
-    const url = `${this.baseUrl}/streams/${webId}/value`;
-    const response = await this.fetchWithAuth(url);
-    if (!response.ok) {
+    try {
+      const webId = await this.getWebId(tagId);
+      if (!webId) return null;
+
+      const url = `${this.baseUrl}/streams/${webId}/value`;
+      const { response, data } = await this.requestJson<PIValue>(url);
+      if (!response.ok) {
+        return null;
+      }
+
+      if (!data || typeof data !== 'object' || data.Timestamp === undefined) {
+        return null;
+      }
+      const points = this.mapPIValuesToHistoryPoints([data]);
+      return points[0] ?? null;
+    } catch (error) {
+      logger.warn(`[PIAdapter] Error getting latest value for ${tagId}:`, error);
       return null;
     }
-
-    const data: PIValue = await response.json();
-    if (!data || typeof data !== 'object' || data.Timestamp === undefined) {
-      return null;
-    }
-    const points = this.mapPIValuesToHistoryPoints([data]);
-    return points[0] ?? null;
   }
 
   async getMultipleTagHistory(
@@ -234,12 +375,20 @@ export class PIAdapter implements IHistorian {
     mode: InterpolationMode = 'recorded',
     options?: HistorianQueryOptions
   ): Promise<Record<string, TagHistoryPoint[]>> {
+    if (!Array.isArray(tagIds)) {
+      throw new TypeError('PI historian tagIds must be an array');
+    }
+    if (tagIds.length > MAX_BATCH_TAGS) {
+      throw new RangeError(`PI historian batches are limited to ${MAX_BATCH_TAGS} tags`);
+    }
+
+    const uniqueTagIds = [...new Set(tagIds)];
+    if (uniqueTagIds.some((tagId) => typeof tagId !== 'string' || tagId.length === 0)) {
+      throw new TypeError('PI historian tagIds must be non-empty strings');
+    }
     const result: Record<string, TagHistoryPoint[]> = {};
 
-    // Fetch in parallel for better performance. A single tag's failure must
-    // not poison the whole batch, so each tag's body is guarded and rejected
-    // tags resolve to [].
-    const promises = tagIds.map(async (tagId) => {
+    await forEachWithConcurrency(uniqueTagIds, MAX_BATCH_CONCURRENCY, async (tagId) => {
       try {
         let points: TagHistoryPoint[];
         switch (mode) {
@@ -264,14 +413,22 @@ export class PIAdapter implements IHistorian {
           default:
             points = await this.getRecordedValues(tagId, startTime, endTime, options);
         }
-        result[tagId] = points;
+        Object.defineProperty(result, tagId, {
+          value: points,
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
       } catch (error) {
         logger.warn(`[PIAdapter] Failed to get history for ${tagId}:`, error);
-        result[tagId] = [];
+        Object.defineProperty(result, tagId, {
+          value: [],
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
       }
     });
-
-    await Promise.allSettled(promises);
     return result;
   }
 
@@ -279,28 +436,42 @@ export class PIAdapter implements IHistorian {
 
   async getAvailableRange(tagId: string): Promise<{ start: Date; end: Date } | null> {
     // PI doesn't have a direct API for this, use summary endpoint
+    if (!tagId) return null;
     const webId = await this.getWebId(tagId);
     if (!webId) return null;
 
     // Get first and last recorded values
     try {
       const [first, last] = await Promise.all([
-        this.fetchWithAuth(`${this.baseUrl}/streams/${webId}/recorded?maxCount=1&startTime=*-100y`),
-        this.fetchWithAuth(
+        this.requestJson<PIStreamValuesResponse>(
+          `${this.baseUrl}/streams/${webId}/recorded?maxCount=1&startTime=*-100y`
+        ),
+        this.requestJson<PIStreamValuesResponse>(
           `${this.baseUrl}/streams/${webId}/recorded?maxCount=1&startTime=*&endTime=*&reversed=true`
         ),
       ]);
 
-      if (!first.ok || !last.ok) return null;
+      if (!first.response.ok || !last.response.ok) return null;
 
-      const firstData: PIStreamValuesResponse = await first.json();
-      const lastData: PIStreamValuesResponse = await last.json();
+      const firstData = first.data;
+      const lastData = last.data;
 
-      if (firstData.Items.length === 0 || lastData.Items.length === 0) return null;
+      if (
+        !Array.isArray(firstData?.Items) ||
+        !Array.isArray(lastData?.Items) ||
+        firstData.Items.length === 0 ||
+        lastData.Items.length === 0
+      ) {
+        return null;
+      }
+
+      const start = new Date(firstData.Items[0]?.Timestamp);
+      const end = new Date(lastData.Items[0]?.Timestamp);
+      if (!isValidRange(start, end)) return null;
 
       return {
-        start: new Date(firstData.Items[0].Timestamp),
-        end: new Date(lastData.Items[0].Timestamp),
+        start,
+        end,
       };
     } catch {
       return null;
@@ -321,28 +492,44 @@ export class PIAdapter implements IHistorian {
   // === Private Helpers ===
 
   private async getWebId(tagId: string): Promise<string | null> {
+    if (!tagId) return null;
+
     // Check cache first
     const cachedWebId = this.webIdCache.get(tagId);
     if (cachedWebId !== undefined) {
       return cachedWebId;
     }
+    if (this.missingWebIds.has(tagId)) return null;
 
-    // Look up by path
+    const existingLookup = this.webIdInFlight.get(tagId);
+    if (existingLookup) return existingLookup;
+
+    const lookup = this.lookupWebId(tagId);
+    this.webIdInFlight.set(tagId, lookup);
+    try {
+      return await lookup;
+    } finally {
+      if (this.webIdInFlight.get(tagId) === lookup) {
+        this.webIdInFlight.delete(tagId);
+      }
+    }
+  }
+
+  private async lookupWebId(tagId: string): Promise<string | null> {
     const path = `${this.serverPath}\\${tagId}`;
     const encodedPath = encodeURIComponent(path);
     const url = `${this.baseUrl}/points?path=${encodedPath}`;
 
     try {
-      const response = await this.fetchWithAuth(url);
+      const { response, data } = await this.requestJson<PIPointResponse>(url);
       if (!response.ok) {
         logger.warn(`[PIAdapter] Tag not found: ${tagId}`);
+        this.missingWebIds.add(tagId);
         return null;
       }
 
-      const data: PIPointResponse = await response.json();
-      // Validate before caching so a transient/malformed lookup is not cached
-      // as a permanent failure (the cache hit check uses `!== undefined`).
-      if (!data || typeof data.WebId !== 'string') {
+      if (!data || typeof data.WebId !== 'string' || data.WebId.length === 0) {
+        this.missingWebIds.add(tagId);
         return null;
       }
       this.webIdCache.set(tagId, data.WebId);
@@ -353,9 +540,30 @@ export class PIAdapter implements IHistorian {
     }
   }
 
-  private async fetchWithAuth(url: string): Promise<Response> {
+  private requestStatus(url: string): Promise<Response> {
+    return this.runRequest(url, async (response) => response);
+  }
+
+  private requestJson<T>(url: string): Promise<{ response: Response; data: T | null }> {
+    return this.runRequest(url, async (response) => ({
+      response,
+      data: response.ok ? ((await response.json()) as T) : null,
+    }));
+  }
+
+  private async runRequest<T>(
+    url: string,
+    consume: (response: Response) => Promise<T>
+  ): Promise<T> {
     const controller = new AbortController();
+    let onAbort = (): void => undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(abortError());
+      controller.signal.addEventListener('abort', onAbort, { once: true });
+    });
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+    const request: ActiveRequest = { controller, timeoutId };
+    this.activeRequests.add(request);
 
     try {
       const headers: Record<string, string> = {
@@ -366,47 +574,53 @@ export class PIAdapter implements IHistorian {
         headers['Authorization'] = this.authHeader;
       }
 
-      return await fetch(url, {
-        headers,
-        signal: controller.signal,
-        // Note: SSL verification is browser-controlled
-        // In Node.js, would need additional configuration
-      });
+      const operation = (async () => {
+        const response = await fetch(url, {
+          headers,
+          signal: controller.signal,
+          // Note: SSL verification is browser-controlled
+          // In Node.js, would need additional configuration
+        });
+        if (controller.signal.aborted) throw abortError();
+        const result = await consume(response);
+        if (controller.signal.aborted) throw abortError();
+        return result;
+      })();
+      return await Promise.race([operation, aborted]);
     } finally {
       clearTimeout(timeoutId);
+      controller.signal.removeEventListener('abort', onAbort);
+      this.activeRequests.delete(request);
     }
   }
 
-  private mapPIValuesToHistoryPoints(items: PIValue[]): TagHistoryPoint[] {
-    return items.map((item) => {
-      // Handle complex value objects (e.g., digital states)
-      let value: number;
-      if (typeof item.Value === 'object' && item.Value !== null) {
-        value = (item.Value as { Value: number }).Value ?? 0;
-      } else if (typeof item.Value === 'boolean') {
-        value = item.Value ? 1 : 0;
-      } else if (typeof item.Value === 'string') {
-        value = parseFloat(item.Value) || 0;
-      } else {
-        value = item.Value ?? 0;
-      }
+  private abortActiveRequests(): void {
+    for (const request of this.activeRequests) {
+      clearTimeout(request.timeoutId);
+      request.controller.abort();
+    }
+    this.activeRequests.clear();
+  }
 
-      // Map PI quality flags to our Quality type
+  private mapPIValuesToHistoryPoints(items: unknown[]): TagHistoryPoint[] {
+    const points: TagHistoryPoint[] = [];
+    for (const candidate of items) {
+      if (candidate === null || typeof candidate !== 'object') continue;
+      const item = candidate as Record<string, unknown>;
+      const timestamp = new Date(item.Timestamp as string).getTime();
+      const value = toFiniteNumber(item.Value);
+      if (!Number.isFinite(timestamp) || value === null) continue;
+
       let quality: Quality = 'GOOD';
-      if (!item.Good) {
+      if (item.Good !== true) {
         quality = 'BAD';
-      } else if (item.Questionable) {
-        quality = 'UNCERTAIN';
-      } else if (item.Substituted) {
+      } else if (item.Questionable === true || item.Substituted === true) {
         quality = 'UNCERTAIN';
       }
 
-      return {
-        timestamp: new Date(item.Timestamp).getTime(),
-        value,
-        quality,
-      };
-    });
+      points.push({ timestamp, value, quality });
+    }
+    return points;
   }
 
   private msToIsoDuration(ms: number): string {

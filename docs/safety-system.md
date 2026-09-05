@@ -1,12 +1,16 @@
 # Safety System
 
-MillOS implements a complete safety simulation demonstrating realistic industrial collision avoidance between workers and forklifts.
+**Status:** legacy topical reference, source and runtime verification required
+
+**Current orientation:** [MillOS Architecture](./architecture.md) and [State Management](./state-management.md)
+
+MillOS implements a safety simulation for an uncrewed site: forklift and truck collision avoidance, speed zones, emergency stop interlocks, and an automated egress-verification drill. Worker-related behaviours described below are historical.
 
 ## Table of Contents
 
 1. [Overview](#overview)
 2. [Position Registry](#position-registry)
-3. [Worker Safety Behaviors](#worker-safety-behaviors)
+3. [Worker Safety Behaviors](#worker-safety-behaviors) (historical, removed with the uncrewed pivot)
 4. [Forklift Safety Features](#forklift-safety-features)
 5. [Speed Zones](#speed-zones)
 6. [Safety Metrics](#safety-metrics)
@@ -19,9 +23,7 @@ MillOS implements a complete safety simulation demonstrating realistic industria
 The safety system simulates real-world industrial safety protocols:
 
 - **Collision Detection** - Real-time proximity monitoring
-- **Automatic Stopping** - Forklifts stop for workers
-- **Worker Evasion** - Workers step aside for approaching vehicles
-- **Visual Communication** - Waving gestures between workers and operators
+- **Automatic Stopping** - Forklifts stop for other vehicles and obstacles
 - **Audio Alerts** - Horns and backup beepers
 - **Metrics Tracking** - Safety incident logging
 
@@ -167,64 +169,8 @@ if (nearestForklift && positionRegistry.isForkliftApproaching(...)) {
 }
 ```
 
-### Evasion Parameters
+> The worker evasion and wave behaviours once documented here were removed with the uncrewed pivot (`scripts/validate-uncrewed-build.mjs`).
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `FORKLIFT_DETECTION_RANGE` | 8 | Detection distance |
-| `EVADE_DISTANCE` | 3 | How far to step aside |
-| `EVADE_SPEED` | 4 | Sideways movement speed |
-
-### Acknowledgment Wave
-
-After evasion, workers wave to acknowledge the forklift:
-
-```typescript
-useEffect(() => {
-  if (!isEvadingRef.current && wasEvadingRef.current) {
-    // Alternate between wave and thumbs-up gestures
-    gestureCountRef.current += 1;
-    const useThumbsUp = gestureCountRef.current % 2 === 0;
-
-    if (useThumbsUp) {
-      setIsThumbsUp(true);
-      setTimeout(() => setIsThumbsUp(false), 1800);
-    } else {
-      setIsWaving(true);
-      setTimeout(() => setIsWaving(false), 1500);
-    }
-  }
-  wasEvadingRef.current = isEvadingRef.current;
-});
-```
-
-### Friendly Wave at Passing Forklifts
-
-Workers also wave when forklifts pass nearby, even without requiring evasion:
-
-```typescript
-const WAVE_TRIGGER_DISTANCE = 6; // Distance at which we consider a forklift "passing"
-
-// Track when forklift is nearby
-if (nearestForklift && distToForklift < WAVE_TRIGGER_DISTANCE) {
-  forkliftNearbyRef.current = true;
-}
-
-// When forklift passes and leaves range, trigger friendly wave
-if (!nearestForklift && forkliftNearbyRef.current && waveCooldownRef.current <= 0) {
-  if (!wasEvadingRef.current) {  // Only if didn't already wave from evading
-    setIsWaving(true);
-    setTimeout(() => setIsWaving(false), 1200);
-    waveCooldownRef.current = 15; // 15 second cooldown between waves
-  }
-  forkliftNearbyRef.current = false;
-}
-```
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `WAVE_TRIGGER_DISTANCE` | 6 | Distance to detect passing forklift |
-| `waveCooldownRef` | 15s | Cooldown between friendly waves |
 
 ---
 
@@ -321,10 +267,7 @@ if (forkliftsNearby.length > 0 && isStuck) {
 }
 ```
 
-| Threshold | Value | Description |
-|-----------|-------|-------------|
-| `STUCK_THRESHOLD` | 3s | Time before considered stuck |
-| `SKIP_THRESHOLD` | 8s | Time before skipping waypoint |
+> The `STUCK_THRESHOLD` / `SKIP_THRESHOLD` constants no longer exist; see `ForkliftSystem.tsx` for the current path-recovery logic.
 
 ### Operator Wave
 

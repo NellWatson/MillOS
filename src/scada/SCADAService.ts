@@ -10,6 +10,7 @@
  * This is the primary API for UI components to interact with SCADA data.
  */
 
+import { logger } from '../utils/logger';
 import {
   IProtocolAdapter,
   TagDefinition,
@@ -68,7 +69,10 @@ export class SCADAService {
   private alarmListeners: Set<AlarmUpdateCallback> = new Set();
 
   // Sample rate throttling for history
-  private lastHistorySample = 0;
+  // Per-tag sample clocks. A single batch-level clock dropped every batch that
+  // missed the boundary, so tags that only ever arrived in those batches were
+  // never historised at all.
+  private lastHistorySample = new Map<string, number>();
   private historySampleInterval: number;
 
   // Unsubscribe function from adapter
@@ -161,9 +165,15 @@ export class SCADAService {
     // Reset alarm state so future starts don't reuse stale alarms/suppressions
     this.alarmManager.reset();
 
-    await this.historyStore.close();
-    this.currentValues.clear();
-    this.archivedAlarmIds.clear();
+    // close() throws to say "records retained for a later flush". That must not
+    // leave the value cache half torn down or make every later stop() fatal.
+    try {
+      await this.historyStore.close();
+    } finally {
+      this.currentValues.clear();
+      this.archivedAlarmIds.clear();
+      this.lastHistorySample.clear();
+    }
   }
 
   /**
@@ -172,13 +182,27 @@ export class SCADAService {
   async setMode(mode: SCADAMode): Promise<void> {
     if (mode === this.config.mode) return;
 
-    await this.stop();
+    try {
+      await this.stop();
+    } catch (error) {
+      // stop() only throws from HistoryStore.close() (adapter disconnect errors
+      // are contained inside the adapters); retained history is not a reason
+      // to lose the mode change.
+      logger.warn('[SCADAService] stop() reported unflushed history during mode change', error);
+    }
     this.config.mode = mode;
     await this.start();
   }
 
   private async createAdapter(): Promise<void> {
     const connectionType = this.config.connection?.type ?? 'simulation';
+
+    // A failed connect() leaves the previous adapter assigned with its own
+    // timers; building a second one on top would orphan those.
+    if (this.adapter) {
+      await this.adapter.disconnect().catch(() => undefined);
+      this.adapter = null;
+    }
 
     switch (this.config.mode) {
       case 'simulation':
@@ -263,7 +287,11 @@ export class SCADAService {
     const wasRunning = this.adapter?.isConnected() ?? false;
 
     if (wasRunning) {
-      await this.stop();
+      try {
+        await this.stop();
+      } catch (error) {
+        logger.warn('[SCADAService] stop() reported unflushed history during reconfigure', error);
+      }
     }
 
     this.config.connection = config;
@@ -298,11 +326,16 @@ export class SCADAService {
       }
     });
 
-    // Sample to history at configured rate
-    if (now - this.lastHistorySample >= this.historySampleInterval) {
-      this.historyStore.writeTagValues(values);
-      this.lastHistorySample = now;
+    // Sample to history at the configured rate, per tag.
+    const due: TagValue[] = [];
+    for (const value of values) {
+      const last = this.lastHistorySample.get(value.tagId) ?? 0;
+      if (now - last >= this.historySampleInterval) {
+        due.push(value);
+        this.lastHistorySample.set(value.tagId, now);
+      }
     }
+    if (due.length > 0) this.historyStore.writeTagValues(due);
 
     // Notify value listeners
     this.valueListeners.forEach((cb) => {
@@ -436,12 +469,9 @@ export class SCADAService {
       const updatedValue = await this.adapter.readTag(tagId);
       this.handleTagUpdates([updatedValue]);
     } catch {
-      this.currentValues.set(tagId, {
-        tagId,
-        value,
-        quality: 'GOOD',
-        timestamp: Date.now(),
-      });
+      // Read-back failed: still route the written value through the normal
+      // update path so listeners and alarm evaluation see it.
+      this.handleTagUpdates([{ tagId, value, quality: 'GOOD', timestamp: Date.now() }]);
     }
 
     return true;
@@ -617,10 +647,15 @@ export class SCADAService {
   subscribeToValues(callback: ValueUpdateCallback): () => void {
     this.valueListeners.add(callback);
 
-    // Immediately send current values
+    // Immediately send current values. Guarded like the notify path, or a
+    // throwing callback would leak into the Set with no unsubscribe returned.
     const currentValues = this.getAllValues();
     if (currentValues.length > 0) {
-      callback(currentValues);
+      try {
+        callback(currentValues);
+      } catch {
+        // Listener error - silently ignored, matching handleTagUpdates
+      }
     }
 
     return () => {
@@ -634,8 +669,12 @@ export class SCADAService {
   subscribeToAlarms(callback: AlarmUpdateCallback): () => void {
     this.alarmListeners.add(callback);
 
-    // Immediately send current alarms
-    callback(this.getActiveAlarms());
+    // Immediately send current alarms (guarded, see subscribeToValues)
+    try {
+      callback(this.getActiveAlarms());
+    } catch {
+      // Listener error - silently ignored, matching handleAlarmUpdates
+    }
 
     return () => {
       this.alarmListeners.delete(callback);
@@ -718,11 +757,21 @@ export class SCADAService {
   /**
    * Get service state
    */
+  private latestTimestamp(): number {
+    // A loop rather than Math.max(...spread): the spread allocates per call and
+    // overflows the call stack past ~100k tags.
+    let latest = 0;
+    for (const value of this.currentValues.values()) {
+      if (value.timestamp > latest) latest = value.timestamp;
+    }
+    return latest;
+  }
+
   getState(): ServiceState {
     return {
       mode: this.config.mode,
       connected: this.adapter?.isConnected() ?? false,
-      lastUpdate: Math.max(...Array.from(this.currentValues.values()).map((v) => v.timestamp), 0),
+      lastUpdate: this.latestTimestamp(),
       tagCount: this.currentValues.size,
       activeAlarmCount: this.alarmManager.getActiveAlarms().length,
     };
@@ -790,6 +839,11 @@ export function getSCADAService(): SCADAService {
   if (!scadaServiceInstance) {
     scadaServiceInstance = new SCADAService();
   }
+  return scadaServiceInstance;
+}
+
+/** Read the assembled singleton without creating a service as a query side effect. */
+export function peekSCADAService(): SCADAService | null {
   return scadaServiceInstance;
 }
 

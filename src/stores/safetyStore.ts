@@ -6,19 +6,55 @@ interface IncidentHeatMapIndex {
   incidentHeatMapIndex: Map<string, { x: number; z: number; intensity: number; type: string }>;
 }
 
+function findNearbyIncidentKey(
+  index: IncidentHeatMapIndex['incidentHeatMapIndex'],
+  x: number,
+  z: number,
+  threshold: number
+): string | undefined {
+  // This collection is capped at 100 entries. A bounded scan preserves the
+  // original per-axis proximity contract across rounded cell boundaries.
+  for (const [key, point] of index) {
+    if (Math.abs(point.x - x) < threshold && Math.abs(point.z - z) < threshold) {
+      return key;
+    }
+  }
+
+  return undefined;
+}
+
 function getGridKey(x: number, z: number, threshold: number): string {
   return `${Math.round(x / threshold)}_${Math.round(z / threshold)}`;
 }
 
+export interface SafetyMetrics {
+  nearMisses: number;
+  safetyStops: number;
+  routeConflicts: number;
+  lastIncidentTime: number | null;
+  daysSinceIncident: number;
+}
+
+/**
+ * The one safety-score formula. The HUD and the Overview panel used to carry
+ * their own copies and disagreed by the route-conflict term, so a single
+ * conflict showed "99%" in the HUD next to "100%" in the panel.
+ */
+export const computeSafetyScore = (metrics?: Partial<SafetyMetrics> | null): number =>
+  Math.max(
+    0,
+    Math.min(
+      100,
+      100 -
+        (metrics?.nearMisses ?? 0) * 5 -
+        (metrics?.safetyStops ?? 0) * 2 -
+        (metrics?.routeConflicts ?? 0)
+    )
+  );
+
 interface SafetyStore {
   // Safety metrics
-  safetyMetrics: {
-    nearMisses: number;
-    safetyStops: number;
-    routeConflicts: number;
-    lastIncidentTime: number | null;
-    daysSinceIncident: number;
-  };
+  safetyMetrics: SafetyMetrics;
   recordSafetyStop: () => void;
   recordRouteConflict: () => void;
   incrementDaysSafe: () => void;
@@ -132,16 +168,23 @@ export const useSafetyStore = create<SafetyStore>()(
       // Safety incident history
       safetyIncidents: [],
       addSafetyIncident: (incident) =>
-        set((state) => ({
-          safetyIncidents: [
-            {
-              ...incident,
-              id: `incident-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-              timestamp: Date.now(),
-            },
-            ...state.safetyIncidents,
-          ].slice(0, 50), // Keep last 50 incidents
-        })),
+        set((state) => {
+          const timestamp = Date.now();
+          const baseId = `incident-${timestamp}-${Math.random().toString(36).slice(2, 7)}`;
+          const existingIds = new Set(state.safetyIncidents.map((entry) => entry.id));
+          let id = baseId;
+          let suffix = 1;
+          while (existingIds.has(id)) {
+            id = `${baseId}-${suffix}`;
+            suffix += 1;
+          }
+          return {
+            safetyIncidents: [{ ...incident, id, timestamp }, ...state.safetyIncidents].slice(
+              0,
+              50
+            ),
+          };
+        }),
       clearSafetyIncidents: () => set({ safetyIncidents: [] }),
 
       // Forklift emergency stop
@@ -218,15 +261,16 @@ export const useSafetyStore = create<SafetyStore>()(
       incidentHeatMap: [],
       recordIncidentLocation: (x, z, type) =>
         set((state) => {
+          if (!Number.isFinite(x) || !Number.isFinite(z)) return {};
           const threshold = 3;
-          const gridKey = getGridKey(x, z, threshold);
           const newIndex = new Map(state._incidentIndices.incidentHeatMapIndex);
 
-          const existing = newIndex.get(gridKey);
-          if (existing) {
+          const existingKey = findNearbyIncidentKey(newIndex, x, z, threshold);
+          const existing = existingKey ? newIndex.get(existingKey) : undefined;
+          if (existing && existingKey) {
             // Update existing point (guard against undefined intensity)
             const updated = { ...existing, intensity: Math.min((existing.intensity ?? 0) + 1, 10) };
-            newIndex.set(gridKey, updated);
+            newIndex.set(existingKey, updated);
             return {
               incidentHeatMap: Array.from(newIndex.values()),
               _incidentIndices: {
@@ -237,6 +281,7 @@ export const useSafetyStore = create<SafetyStore>()(
 
           // Add new point with size limiting
           const newPoint = { x, z, intensity: 1, type };
+          const gridKey = getGridKey(x, z, threshold);
           newIndex.set(gridKey, newPoint);
 
           // Limit size to 100 points (remove oldest by deleting first entry)
@@ -283,9 +328,17 @@ export const useSafetyStore = create<SafetyStore>()(
         { id: 'zone-6', x: 0, z: 18, radius: 4, name: 'Packing Zone' },
       ],
       addSpeedZone: (zone) =>
-        set((state) => ({
-          speedZones: [...state.speedZones, { ...zone, id: `zone-${Date.now()}` }],
-        })),
+        set((state) => {
+          const baseId = `zone-${Date.now()}`;
+          const existingIds = new Set(state.speedZones.map((speedZone) => speedZone.id));
+          let id = baseId;
+          let suffix = 1;
+          while (existingIds.has(id)) {
+            id = `${baseId}-${suffix}`;
+            suffix += 1;
+          }
+          return { speedZones: [...state.speedZones, { ...zone, id }] };
+        }),
       removeSpeedZone: (id) =>
         set((state) => ({
           speedZones: state.speedZones.filter((z) => z.id !== id),
@@ -298,17 +351,41 @@ export const useSafetyStore = create<SafetyStore>()(
     {
       name: 'millos-safety',
       storage: safeJSONStorage,
+      version: 1,
       partialize: (state) => ({
         safetyConfig: state.safetyConfig,
         speedZones: state.speedZones,
       }),
+      // zustand's default merge is shallow, so a persisted safetyConfig would
+      // replace the default object wholesale and any key added later would
+      // rehydrate as undefined (NaN in the proximity checks). Merge per key and
+      // keep only finite numbers.
+      merge: (persisted, current) => {
+        const record =
+          persisted !== null && typeof persisted === 'object' && !Array.isArray(persisted)
+            ? (persisted as Partial<SafetyStore>)
+            : {};
+        const persistedConfig =
+          record.safetyConfig && typeof record.safetyConfig === 'object' ? record.safetyConfig : {};
+        const safetyConfig = { ...current.safetyConfig };
+        for (const key of Object.keys(safetyConfig) as Array<keyof typeof safetyConfig>) {
+          const value = (persistedConfig as Record<string, unknown>)[key];
+          if (typeof value === 'number' && Number.isFinite(value)) safetyConfig[key] = value;
+        }
+        return {
+          ...current,
+          safetyConfig,
+          speedZones: Array.isArray(record.speedZones) ? record.speedZones : current.speedZones,
+        };
+      },
       onRehydrateStorage: () => (state, error) => {
         if (error) {
           return;
         }
 
-        // Validate arrays exist
-        if (state && state.speedZones && !Array.isArray(state.speedZones)) {
+        // Validate arrays exist (a persisted null is falsy, so test the shape
+        // directly rather than truthiness).
+        if (state && !Array.isArray(state.speedZones)) {
           state.speedZones = [
             { id: 'zone-1', x: 0, z: 0, radius: 5, name: 'Central Area' },
             { id: 'zone-2', x: 0, z: 28, radius: 4, name: 'North Loading' },

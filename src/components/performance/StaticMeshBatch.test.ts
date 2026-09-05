@@ -59,6 +59,181 @@ describe('StaticMeshBatch', () => {
     ]);
   });
 
+  it('keeps descendants of hidden groups out of visible root-level batches', () => {
+    const root = new THREE.Group();
+    const hidden = new THREE.Group();
+    hidden.visible = false;
+    hidden.add(makeBox(-1), makeBox(1));
+    root.add(hidden);
+
+    const candidates = collectStaticBatchCandidates(root);
+    const batches = createStaticMeshBatches(root, candidates, 'hidden', 2);
+
+    expect(candidates).toHaveLength(0);
+    expect(batches).toHaveLength(0);
+    expect(root.children).toEqual([hidden]);
+  });
+
+  it('rechecks ancestor eligibility before replacing collected meshes', () => {
+    const root = new THREE.Group();
+    const parent = new THREE.Group();
+    const left = makeBox(-1);
+    const right = makeBox(1);
+    parent.add(left, right);
+    root.add(parent);
+
+    const candidates = collectStaticBatchCandidates(root);
+    expect(candidates).toHaveLength(2);
+
+    parent.visible = false;
+    const batches = createStaticMeshBatches(root, candidates, 'newly-hidden', 2);
+
+    expect(batches).toHaveLength(0);
+    expect(parent.children).toEqual([left, right]);
+  });
+
+  it('does not instance geometries with different render attributes', () => {
+    const root = new THREE.Group();
+    const firstGeometry = new THREE.BoxGeometry(1, 1, 1);
+    const secondGeometry = firstGeometry.clone();
+    secondGeometry.getAttribute('uv').setX(0, 0.375);
+    const material = new THREE.MeshStandardMaterial({ color: '#778899' });
+    const first = new THREE.Mesh(firstGeometry, material);
+    const second = new THREE.Mesh(secondGeometry, material.clone());
+    second.position.x = 2;
+    root.add(first, second);
+
+    const candidates = collectStaticBatchCandidates(root);
+    const batches = createStaticMeshBatches(root, candidates, 'attributes', 2);
+
+    expect(batches).toHaveLength(0);
+    expect(first.parent).toBe(root);
+    expect(second.parent).toBe(root);
+  });
+
+  it('does not instance materials with different rendered properties', () => {
+    const root = new THREE.Group();
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const aoMap = new THREE.Texture();
+    const dim = new THREE.MeshStandardMaterial({ color: '#778899', aoMap, aoMapIntensity: 0 });
+    const strong = new THREE.MeshStandardMaterial({
+      color: '#778899',
+      aoMap,
+      aoMapIntensity: 1,
+    });
+    const first = new THREE.Mesh(geometry, dim);
+    const second = new THREE.Mesh(geometry, strong);
+    second.position.x = 2;
+    root.add(first, second);
+
+    const candidates = collectStaticBatchCandidates(root);
+    const batches = createStaticMeshBatches(root, candidates, 'material-properties', 2);
+
+    expect(batches).toHaveLength(0);
+    expect(first.parent).toBe(root);
+    expect(second.parent).toBe(root);
+  });
+
+  it.each([
+    {
+      property: 'channel',
+      configure: (texture: THREE.Texture) => {
+        texture.channel = 1;
+      },
+    },
+    {
+      property: 'minFilter',
+      configure: (texture: THREE.Texture) => {
+        texture.minFilter = THREE.NearestFilter;
+      },
+    },
+  ])('does not instance textures with different $property settings', ({ configure }) => {
+    const root = new THREE.Group();
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const firstMap = new THREE.Texture({ width: 1, height: 1 });
+    const secondMap = firstMap.clone();
+    configure(secondMap);
+    const first = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({ color: '#778899', map: firstMap })
+    );
+    const second = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({ color: '#778899', map: secondMap })
+    );
+    second.position.x = 2;
+    root.add(first, second);
+
+    const candidates = collectStaticBatchCandidates(root);
+    const batches = createStaticMeshBatches(root, candidates, 'texture-settings', 2);
+
+    expect(batches).toHaveLength(0);
+    expect(first.parent).toBe(root);
+    expect(second.parent).toBe(root);
+  });
+
+  it('handles cyclic custom material data conservatively', () => {
+    const root = new THREE.Group();
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const firstDefines: Record<string, unknown> = {};
+    const secondDefines: Record<string, unknown> = {};
+    firstDefines.self = firstDefines;
+    secondDefines.self = secondDefines;
+    const firstMaterial = new THREE.MeshStandardMaterial({ color: '#778899' });
+    const secondMaterial = firstMaterial.clone();
+    firstMaterial.defines = firstDefines as Record<string, string>;
+    secondMaterial.defines = secondDefines as Record<string, string>;
+    const first = new THREE.Mesh(geometry, firstMaterial);
+    const second = new THREE.Mesh(geometry, secondMaterial);
+    second.position.x = 2;
+    root.add(first, second);
+
+    const candidates = collectStaticBatchCandidates(root);
+    const batches = createStaticMeshBatches(root, candidates, 'cyclic-material', 2);
+
+    expect(candidates).toHaveLength(2);
+    expect(batches).toHaveLength(0);
+    expect(root.children).toEqual([first, second]);
+  });
+
+  it('partitions coarse geometry collisions without repeatedly rescanning every buffer', () => {
+    const root = new THREE.Group();
+    const material = new THREE.MeshStandardMaterial({
+      color: '#778899',
+      transparent: true,
+      opacity: 0.5,
+    });
+    const geometryCount = 24;
+    let arrayReads = 0;
+
+    for (let geometryIndex = 0; geometryIndex < geometryCount; geometryIndex += 1) {
+      const values = new Float32Array(48 * 3);
+      values.set([-1, -1, -1, 1, 1, 1]);
+      values[24 * 3] = geometryIndex / geometryCount;
+      const position = new THREE.BufferAttribute(values, 3);
+      Object.defineProperty(position, 'array', {
+        configurable: true,
+        get: () => {
+          arrayReads += 1;
+          return values;
+        },
+      });
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', position);
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.x = geometryIndex * 2;
+      root.add(mesh);
+    }
+
+    const candidates = collectStaticBatchCandidates(root);
+    arrayReads = 0;
+    const batches = createStaticMeshBatches(root, candidates, 'geometry-collisions', 2);
+
+    expect(batches).toHaveLength(0);
+    expect(root.children).toHaveLength(geometryCount);
+    expect(arrayReads).toBeLessThan(geometryCount * 10);
+  });
+
   it('instances exact transparent duplicates without merging their draw order', () => {
     const root = new THREE.Group();
     const left = makeBox(-1);

@@ -248,6 +248,9 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
   const [mqttBrokerUrl, setMqttBrokerUrl] = useState('ws://localhost:8883');
   const [mqttTopicPrefix, setMqttTopicPrefix] = useState('scada');
   const [proxyUrl, setProxyUrl] = useState('http://localhost:3001');
+  // The WebSocket adapter and the OPC-UA/Modbus proxy take different URL
+  // schemes, so they no longer share one field.
+  const [websocketUrl, setWebsocketUrl] = useState('ws://localhost:3001/ws');
   const [isApplyingSettings, setIsApplyingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<{
     type: 'success' | 'error';
@@ -506,7 +509,10 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
       if (config.pollInterval) setRestPollInterval(config.pollInterval);
       if (config.brokerUrl) setMqttBrokerUrl(config.brokerUrl);
       if (config.topicPrefix) setMqttTopicPrefix(config.topicPrefix);
-      if (config.proxyUrl) setProxyUrl(config.proxyUrl);
+      if (config.proxyUrl) {
+        if (config.type === 'websocket') setWebsocketUrl(config.proxyUrl);
+        else setProxyUrl(config.proxyUrl);
+      }
     } catch {
       // Failed to load SCADA connection config - use defaults
     }
@@ -2769,8 +2775,8 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                       <input
                         id="websocket-url"
                         type="text"
-                        value={proxyUrl}
-                        onChange={(e) => setProxyUrl(e.target.value)}
+                        value={websocketUrl}
+                        onChange={(e) => setWebsocketUrl(e.target.value)}
                         placeholder="ws://localhost:3001/ws"
                         className="w-full px-3 py-2 bg-slate-900/50 border border-slate-700/50 rounded text-sm text-white placeholder-slate-400 focus:outline-none focus:border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/30"
                       />
@@ -2837,7 +2843,7 @@ export const SCADAPanel: React.FC<SCADAPanelProps> = ({
                         config.brokerUrl = mqttBrokerUrl;
                         config.topicPrefix = mqttTopicPrefix;
                       } else if (connectionType === 'websocket') {
-                        config.proxyUrl = proxyUrl;
+                        config.proxyUrl = websocketUrl;
                       } else if (connectionType === 'opcua' || connectionType === 'modbus') {
                         config.proxyUrl = proxyUrl;
                       }

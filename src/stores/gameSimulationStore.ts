@@ -4,6 +4,7 @@ import { safeJSONStorage } from './storage';
 import { audioManager } from '../utils/audioManager';
 import { useProductionStore } from './productionStore';
 import { useSafetyStore } from './safetyStore';
+import { sanitizeGameSimulationState, sanitizeGameSpeed } from './persistenceMigrations';
 
 export type CelebrationType = 'milestone' | 'zero_incident' | 'target_met' | 'shift_complete';
 export type CrisisType = 'fire' | 'power_outage' | 'supply_emergency' | 'inspection' | 'weather';
@@ -117,6 +118,8 @@ export interface GameSimulationStore {
 }
 
 const MAX_SAFETY_EVENTS = 50;
+const MAX_DIRECT_TICK_DELTA_SECONDS = 1;
+const MAX_PERSISTED_CELEBRATION_SCAN = 50;
 
 export const getShiftForHour = (hour: number): RunWindow => {
   const normalized = ((hour % 24) + 24) % 24;
@@ -149,6 +152,67 @@ const defaultCelebrations = (): GameSimulationStore['celebrations'] => ({
   celebrationActive: false,
   packerBellEnabled: true,
 });
+
+const CELEBRATION_TYPES = new Set<CelebrationType>([
+  'milestone',
+  'zero_incident',
+  'target_met',
+  'shift_complete',
+]);
+
+const sanitizeCelebrationEvent = (value: unknown): CelebrationEvent | null => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value as Partial<CelebrationEvent>;
+  if (!source.type || !CELEBRATION_TYPES.has(source.type) || !Number.isFinite(source.timestamp)) {
+    return null;
+  }
+  const event: CelebrationEvent = { type: source.type, timestamp: source.timestamp as number };
+  if (typeof source.value === 'number' && Number.isFinite(source.value)) event.value = source.value;
+  if (typeof source.message === 'string') event.message = source.message.slice(0, 500);
+  if (
+    Array.isArray(source.position) &&
+    source.position.length === 3 &&
+    source.position.every((coordinate) => Number.isFinite(coordinate))
+  ) {
+    event.position = [...source.position] as [number, number, number];
+  }
+  return event;
+};
+
+const sanitizeCelebrations = (value: unknown): GameSimulationStore['celebrations'] => {
+  const defaults = defaultCelebrations();
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return defaults;
+  const source = value as Partial<GameSimulationStore['celebrations']>;
+  const milestoneQueue: CelebrationEvent[] = [];
+  if (Array.isArray(source.milestoneQueue)) {
+    const lowerBound = Math.max(0, source.milestoneQueue.length - MAX_PERSISTED_CELEBRATION_SCAN);
+    for (
+      let index = source.milestoneQueue.length - 1;
+      index >= lowerBound && milestoneQueue.length < 5;
+      index -= 1
+    ) {
+      const event = sanitizeCelebrationEvent(source.milestoneQueue[index]);
+      if (event) milestoneQueue.push(event);
+    }
+    milestoneQueue.reverse();
+  }
+  return {
+    lastMilestone:
+      typeof source.lastMilestone === 'number' && Number.isFinite(source.lastMilestone)
+        ? Math.min(100, Math.max(0, source.lastMilestone))
+        : defaults.lastMilestone,
+    milestoneQueue,
+    zeroIncidentStreak:
+      typeof source.zeroIncidentStreak === 'number' && Number.isFinite(source.zeroIncidentStreak)
+        ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.floor(source.zeroIncidentStreak)))
+        : defaults.zeroIncidentStreak,
+    celebrationActive: milestoneQueue.length > 0,
+    packerBellEnabled:
+      typeof source.packerBellEnabled === 'boolean'
+        ? source.packerBellEnabled
+        : defaults.packerBellEnabled,
+  };
+};
 
 const stopProduction = (): Map<string, string> => {
   const production = useProductionStore.getState();
@@ -191,6 +255,7 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
       gameDay: 0,
       gameSpeed: 180,
       setGameTime: (time) => {
+        if (!Number.isFinite(time)) return;
         const gameTime = ((time % 24) + 24) % 24;
         const currentShift = getShiftForHour(gameTime);
         set((state) => ({
@@ -199,18 +264,27 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
           shiftStartTime: state.currentShift === currentShift ? state.shiftStartTime : Date.now(),
         }));
       },
-      setGameSpeed: (speed) => set({ gameSpeed: Math.max(0, Math.min(3600, speed)) }),
+      setGameSpeed: (speed) => set({ gameSpeed: sanitizeGameSpeed(speed) }),
       tickGameTime: (deltaSeconds) =>
         set((state) => {
-          if (state.gameSpeed === 0) return {};
-          const elapsedHours = (Math.max(0, deltaSeconds) * state.gameSpeed) / 3600;
-          const unwrapped = state.gameTime + elapsedHours;
+          if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return {};
+          const gameSpeed = sanitizeGameSpeed(state.gameSpeed);
+          if (gameSpeed === 0) return {};
+          const safeDeltaSeconds = Math.min(deltaSeconds, MAX_DIRECT_TICK_DELTA_SECONDS);
+          const elapsedHours = (safeDeltaSeconds * gameSpeed) / 3600;
+          const currentGameTime = Number.isFinite(state.gameTime)
+            ? ((state.gameTime % 24) + 24) % 24
+            : 0;
+          const currentGameDay = Number.isFinite(state.gameDay)
+            ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.floor(state.gameDay)))
+            : 0;
+          const unwrapped = currentGameTime + elapsedHours;
           const gameTime = ((unwrapped % 24) + 24) % 24;
           const dayIncrement = Math.max(0, Math.floor(unwrapped / 24));
           const currentShift = getShiftForHour(gameTime);
           return {
             gameTime,
-            gameDay: state.gameDay + dayIncrement,
+            gameDay: Math.min(Number.MAX_SAFE_INTEGER, currentGameDay + dayIncrement),
             currentShift,
             shiftStartTime: state.currentShift === currentShift ? state.shiftStartTime : Date.now(),
           };
@@ -462,13 +536,14 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
       celebrations: defaultCelebrations(),
       triggerCelebration: (type, data = {}) =>
         set((state) => {
-          const event: CelebrationEvent = { type, timestamp: Date.now(), ...data };
+          const event = sanitizeCelebrationEvent({ ...data, type, timestamp: Date.now() });
+          if (!event) return {};
           return {
             celebrations: {
               ...state.celebrations,
               lastMilestone:
-                type === 'milestone' && typeof data.value === 'number'
-                  ? data.value
+                type === 'milestone' && typeof event.value === 'number'
+                  ? Math.min(100, Math.max(0, event.value))
                   : state.celebrations.lastMilestone,
               milestoneQueue: [
                 ...(Array.isArray(state.celebrations.milestoneQueue)
@@ -489,9 +564,15 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
           },
         })),
       updateZeroIncidentStreak: (days) =>
-        set((state) => ({
-          celebrations: { ...state.celebrations, zeroIncidentStreak: Math.max(0, days) },
-        })),
+        set((state) => {
+          if (!Number.isFinite(days)) return {};
+          return {
+            celebrations: {
+              ...state.celebrations,
+              zeroIncidentStreak: Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.floor(days))),
+            },
+          };
+        }),
       setPackerBellEnabled: (enabled) =>
         set((state) => ({
           celebrations: { ...state.celebrations, packerBellEnabled: enabled },
@@ -510,18 +591,17 @@ export const useGameSimulationStore = create<GameSimulationStore>()(
         celebrations: state.celebrations,
       }),
       merge: (persisted, current) => {
-        const state = persisted as Partial<GameSimulationStore> | undefined;
-        const persistedCelebrations = state?.celebrations;
+        const persistedRecord =
+          persisted !== null && typeof persisted === 'object' && !Array.isArray(persisted)
+            ? (persisted as Partial<GameSimulationStore>)
+            : undefined;
+        const state = sanitizeGameSimulationState(persistedRecord);
+        const gameTime = state.gameTime ?? current.gameTime;
         return {
           ...current,
-          ...(state ?? {}),
-          celebrations: {
-            ...defaultCelebrations(),
-            ...(persistedCelebrations ?? {}),
-            milestoneQueue: Array.isArray(persistedCelebrations?.milestoneQueue)
-              ? persistedCelebrations.milestoneQueue.slice(-5)
-              : [],
-          },
+          ...state,
+          currentShift: getShiftForHour(gameTime),
+          celebrations: sanitizeCelebrations(persistedRecord?.celebrations),
           preEmergencyMachineStatuses: new Map(),
           emergencyActive: false,
           emergencyMachineId: null,

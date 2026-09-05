@@ -43,3 +43,6 @@ coverage/
 
 # Whole-machine mutex for anything that renders (scripts/lib/capture-lock.mjs)
 /.capture.lock
+
+# Generated agent manifest (npm run agent:manifest); CI regenerates it.
+/build/generated/

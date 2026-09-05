@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { MachineData, MaintenanceRecord, MachineType } from '../../../types';
 import { RotateCcw, FileText, CheckCircle, Loader2, Wrench } from 'lucide-react';
 import { useProductionStore } from '../../../stores/productionStore';
 import { useBreakdownStore, PartsInventory } from '../../../stores/breakdownStore';
 import { useUIStore } from '../../../stores/uiStore';
+import { useGameSimulationStore } from '../../../stores/gameSimulationStore';
 
 // Order in which spare parts are consumed by routine maintenance
 const MAINTENANCE_PART_PRIORITY: Array<keyof PartsInventory> = [
@@ -192,6 +193,14 @@ export const MachineInspector: React.FC<{ machine: MachineData }> = ({ machine }
     setIsMaintaining(false);
   };
 
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const handleRestart = async () => {
     setIsRestarting(true);
     const previousStatus = machine.status;
@@ -211,6 +220,14 @@ export const MachineInspector: React.FC<{ machine: MachineData }> = ({ machine }
     });
 
     await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    // The 2.5 s sequence can outlive the panel or an emergency stop. Never
+    // force a machine back to running after the facility has been stopped.
+    if (!mountedRef.current) return;
+    if (useGameSimulationStore.getState().emergencyActive) {
+      setIsRestarting(false);
+      return;
+    }
 
     // Set back to running with clean state
     updateMachineStatus(machine.id, 'running');
@@ -249,7 +266,9 @@ export const MachineInspector: React.FC<{ machine: MachineData }> = ({ machine }
                 ? 'bg-green-500/20 text-green-400'
                 : machine.status === 'warning'
                   ? 'bg-orange-500/20 text-orange-400'
-                  : 'bg-red-500/20 text-red-400'
+                  : machine.status === 'idle'
+                    ? 'bg-slate-500/20 text-slate-300'
+                    : 'bg-red-500/20 text-red-400'
             }`}
           >
             {machine.status}
@@ -268,17 +287,18 @@ export const MachineInspector: React.FC<{ machine: MachineData }> = ({ machine }
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-2 gap-2">
-        <MetricCard label="RPM" value={metrics.rpm?.toFixed(0) || '0'} unit="r/min" color="blue" />
+        {/* An absent reading shows as a dash, not as a measured zero. */}
+        <MetricCard label="RPM" value={metrics.rpm?.toFixed(0) ?? '--'} unit="r/min" color="blue" />
         <MetricCard
           label="Temp"
-          value={metrics.temperature?.toFixed(1) || '0'}
+          value={metrics.temperature?.toFixed(1) ?? '--'}
           unit="°C"
           color="orange"
         />
-        <MetricCard label="Load" value={metrics.load?.toFixed(1) || '0'} unit="%" color="green" />
+        <MetricCard label="Load" value={metrics.load?.toFixed(1) ?? '--'} unit="%" color="green" />
         <MetricCard
           label="Vibration"
-          value={metrics.vibration?.toFixed(2) || '0'}
+          value={metrics.vibration?.toFixed(2) ?? '--'}
           unit="mm/s"
           color="purple"
         />

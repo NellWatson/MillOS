@@ -65,15 +65,6 @@ logger.ai.info('AI decision completed', { decisionId: 'dec-123' });
 logger.ai.warn('Low confidence prediction', { confidence: 0.3 });
 ```
 
-### Worker System
-
-```typescript
-import { logger } from './utils/logger';
-
-logger.worker.debug('Worker pathfinding started', { workerId: 'W001' });
-logger.worker.info('Worker assigned to machine', { workerId: 'W001', machineId: 'RM-101' });
-```
-
 ### Store/State Management
 
 ```typescript
@@ -90,7 +81,7 @@ logger.store.error('Failed to persist state', error);
 import { logger } from './utils/logger';
 
 logger.perf.debug('Frame render took 16.7ms');
-logger.perf.warn('Slow component render detected', { component: 'WorkerSystem', time: 45 });
+logger.perf.warn('Slow component render detected', { component: 'ForkliftSystem', time: 45 });
 ```
 
 ## Creating Custom Loggers
@@ -185,7 +176,6 @@ All logs include timestamps and prefixes:
 - `logger.scada` - SCADA system operations
 - `logger.audio` - Audio manager and sound system
 - `logger.ai` - AI engine and decision generation
-- `logger.worker` - Worker system and pathfinding
 - `logger.store` - Zustand store and state management
 - `logger.perf` - Performance metrics and optimization
 

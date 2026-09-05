@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { mergeAndDownsampleTrendHistory, TREND_QUALITY_SUFFIX } from '../trendProcessing';
+import {
+  MAX_TREND_ROWS,
+  MAX_TREND_TAGS,
+  mergeAndDownsampleTrendHistory,
+  TREND_QUALITY_SUFFIX,
+} from '../trendProcessing';
+import type { TagHistoryPoint } from '../types';
 
 describe('SCADA trend processing', () => {
   it('preserves bad-quality samples as explicit gaps', () => {
@@ -31,4 +37,85 @@ describe('SCADA trend processing', () => {
     expect(rows[0].timestamp).toBe(0);
     expect(rows.at(-1)?.timestamp).toBe(1_999_000);
   });
+
+  it('skips malformed legacy points instead of returning non-finite chart rows', () => {
+    const corruptHistory = [
+      { timestamp: 1_100, value: 42, quality: 'GOOD' },
+      { timestamp: Number.NaN, value: 1, quality: 'GOOD' },
+      { timestamp: Number.POSITIVE_INFINITY, value: 2, quality: 'GOOD' },
+      { timestamp: 2_100, value: Number.NaN, quality: 'GOOD' },
+      { timestamp: 3_100, value: Number.NEGATIVE_INFINITY, quality: 'BAD' },
+      { timestamp: 4_100, value: 4, quality: 'BROKEN' },
+      null,
+    ] as unknown as TagHistoryPoint[];
+
+    const rows = mergeAndDownsampleTrendHistory(['tag'], [corruptHistory]);
+
+    expect(rows).toEqual([{ timestamp: 1_000, tag: 42, tag__quality: 'GOOD' }]);
+    expect(rows.every((row) => Number.isFinite(row.timestamp))).toBe(true);
+  });
+
+  it('ignores reserved and quality-suffix-colliding tag IDs without corrupting rows', () => {
+    const tagIds = ['safe', 'timestamp', '__proto__', `safe${TREND_QUALITY_SUFFIX}`];
+    const histories = tagIds.map((_, index) => [
+      { timestamp: 1_100, value: index + 1, quality: 'GOOD' as const },
+    ]);
+
+    const rows = mergeAndDownsampleTrendHistory(tagIds, histories);
+
+    expect(rows).toEqual([{ timestamp: 1_000, safe: 1, safe__quality: 'GOOD' }]);
+    expect(Object.getPrototypeOf(rows[0])).toBe(Object.prototype);
+  });
+
+  it('bounds raw tag traversal even when every candidate is invalid', () => {
+    let indexedReads = 0;
+    const tagIds = new Proxy(
+      Array.from({ length: 10_000 }, () => ''),
+      {
+        get(target, property, receiver) {
+          if (typeof property === 'string' && /^\d+$/.test(property)) indexedReads += 1;
+          return Reflect.get(target, property, receiver);
+        },
+      }
+    );
+
+    expect(mergeAndDownsampleTrendHistory(tagIds, [])).toEqual([]);
+    expect(indexedReads).toBe(MAX_TREND_TAGS);
+  });
+
+  it.each([
+    { maxRows: 0, expectedTimestamps: [] },
+    { maxRows: Number.NaN, expectedTimestamps: [] },
+    { maxRows: Number.NEGATIVE_INFINITY, expectedTimestamps: [] },
+    { maxRows: 1, expectedTimestamps: [0] },
+    { maxRows: 1.9, expectedTimestamps: [0] },
+    { maxRows: 2, expectedTimestamps: [0, 3_000] },
+  ])('honours the exact $maxRows row boundary', ({ maxRows, expectedTimestamps }) => {
+    const history = Array.from({ length: 4 }, (_, index) => ({
+      timestamp: index * 1_000,
+      value: index,
+      quality: 'GOOD' as const,
+    }));
+
+    const rows = mergeAndDownsampleTrendHistory(['tag'], [history], maxRows);
+
+    expect(rows.map((row) => row.timestamp)).toEqual(expectedTimestamps);
+  });
+
+  it.each([Number.POSITIVE_INFINITY, Number.MAX_VALUE])(
+    'caps an excessive maxRows value of %s at the application row ceiling',
+    (maxRows) => {
+      const history = Array.from({ length: MAX_TREND_ROWS + 100 }, (_, index) => ({
+        timestamp: index * 1_000,
+        value: index,
+        quality: 'GOOD' as const,
+      }));
+
+      const rows = mergeAndDownsampleTrendHistory(['tag'], [history], maxRows);
+
+      expect(rows).toHaveLength(MAX_TREND_ROWS);
+      expect(rows[0].timestamp).toBe(0);
+      expect(rows.at(-1)?.timestamp).toBe((history.length - 1) * 1_000);
+    }
+  );
 });

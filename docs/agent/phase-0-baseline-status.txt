@@ -1,0 +1,95 @@
+ M .claude/README.md
+ M README.md
+ M _contprompts/millos_master_refinement_2026-07-26.md
+ M _wiki/index.md
+ M docs/3d-scene.md
+ M docs/BAS_IMPLEMENTATION_SPEC.md
+ M docs/BILATERAL_AUTONOMY_SYSTEM_SPEC.md
+ M docs/MILLOS_SUNO_SONGBOOK.md
+ M docs/README.md
+ M docs/SCADA_PLAN.md
+ M docs/UI_REDESIGN_SPEC.md
+ M docs/ai-integration.md
+ M docs/architecture.md
+ M docs/audio-system.md
+ M docs/components.md
+ M docs/deployment.md
+ M docs/development.md
+ M docs/safety-system.md
+ M docs/state-management.md
+ M package.json
+ M scripts/audit-module-reachability.mjs
+ M scripts/validate-bundle.mjs
+ M src/components/AboutModal.tsx
+ M src/components/ProductionMetrics.tsx
+ M src/components/__tests__/AICommandCenter.test.tsx
+ M src/components/__tests__/AlertSystem.test.tsx
+ M src/components/__tests__/ErrorBoundary.test.tsx
+ M src/components/__tests__/ProductionMetrics.test.tsx
+ M src/components/performance/StaticMeshBatch.test.ts
+ M src/components/performance/StaticMeshBatch.tsx
+ M src/components/ui-new/GameInterface.tsx
+ M src/hooks/useAudioState.ts
+ M src/scada/HistoryStore.ts
+ M src/scada/__tests__/SimulationAdapter.test.ts
+ M src/scada/__tests__/integration.test.ts
+ M src/scada/__tests__/trendProcessing.test.ts
+ M src/scada/adapters/MQTTAdapter.ts
+ M src/scada/adapters/PIAdapter.ts
+ M src/scada/adapters/RESTAdapter.ts
+ M src/scada/adapters/WebSocketAdapter.ts
+ M src/scada/adapters/WonderwareAdapter.ts
+ M src/scada/adapters/__tests__/messageValidation.test.ts
+ M src/scada/adapters/messageValidation.ts
+ M src/scada/trendProcessing.ts
+ M src/shaders/shaderContracts.ts
+ M src/stores/__tests__/gameSimulationStore.test.ts
+ M src/stores/__tests__/graphicsStore.test.ts
+ M src/stores/__tests__/historicalPlaybackStore.test.ts
+ M src/stores/__tests__/persistenceMigrations.test.ts
+ M src/stores/__tests__/productionStore.test.ts
+ M src/stores/__tests__/safetyStore.test.ts
+ M src/stores/__tests__/uiStore.test.ts
+ M src/stores/gameSimulationStore.ts
+ M src/stores/persistenceMigrations.ts
+ M src/stores/productionStore.ts
+ M src/stores/safetyStore.ts
+ M src/systems/CentralTickSystem.ts
+ M src/systems/UnifiedGameTick.ts
+ M src/systems/__tests__/UnifiedGameTick.shift.test.ts
+ M src/textures/brick.ts
+ M src/textures/cobblestone.ts
+ M src/textures/mud.ts
+ M src/textures/roofTiles.ts
+ M src/textures/safetyStripe.ts
+ M src/utils/__tests__/aiEngine.test.ts
+ M src/utils/__tests__/frameThrottle.test.ts
+ M src/utils/__tests__/serviceWorkerRegistration.test.ts
+ M src/utils/__tests__/statusColors.test.ts
+ M src/utils/__tests__/strategicIntegration.test.ts
+ M src/utils/__tests__/worldSurface.test.ts
+ M src/utils/aiEngine.ts
+ M src/utils/audioManager.test.ts
+ M src/utils/audioManager.ts
+ M src/utils/geminiClient.test.ts
+ M src/utils/geminiClient.ts
+ M src/utils/serviceWorkerRegistration.ts
+ M src/utils/sharedMaterials.ts
+?? _contprompts/millos_agent_operating_system_2026-08-31.md
+?? docs/AGENT_OPERATING_ARCHITECTURE.md
+?? public/audio/
+?? scripts/align-millos-soundtrack.py
+?? scripts/generate-millos-soundtrack-assets.mjs
+?? src/audio/
+?? src/components/ui-new/MillOSMusicPlayer.tsx
+?? src/components/ui-new/__tests__/
+?? src/scada/__tests__/HistoryStore.adversarial.test.ts
+?? src/scada/__tests__/trendProcessing.worker.test.ts
+?? src/scada/adapters/__tests__/MQTTAdapter.test.ts
+?? src/scada/adapters/__tests__/PIAdapter.test.ts
+?? src/scada/adapters/__tests__/RESTAdapter.test.ts
+?? src/scada/adapters/__tests__/WebSocketAdapter.test.ts
+?? src/scada/adapters/__tests__/WonderwareAdapter.test.ts
+?? src/systems/__tests__/CentralTickSystem.test.ts
+?? src/textures/cacheIdentity.test.ts
+?? src/utils/__tests__/aiEngine.memory.test.ts

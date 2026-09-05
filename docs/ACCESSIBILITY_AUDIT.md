@@ -4,6 +4,15 @@
 **Standard:** WCAG 2.1 Level AA
 **Auditor:** Claude Code (Accessibility Expert)
 
+> **Historical record (2025-12-04).** File paths below refer to the UI of that date. Since the
+> `ui-new` redesign: `UIOverlay.tsx` became `src/components/ui-new/GameInterface.tsx`;
+> `WorkerDetailPanel.tsx` no longer exists and worker details live in the Workforce sidebar
+> hosted by `src/components/ui-new/sidebar/ContextSidebar.tsx`; `FactoryLayoutMap.tsx` was
+> replaced by `src/components/game/MiniMap.tsx`; and `AlertSystem.tsx` now renders only a
+> screen-reader `role="alert"` region, with the visible notification list in
+> `src/components/ui-new/hud/StatusHUD.tsx`. The live accessibility gate is the axe check in
+> `e2e/master-refinement.spec.ts`. (Note added 2026-09-02.)
+
 ## Executive Summary
 
 This audit identified **23 accessibility issues** across the MillOS application, including:

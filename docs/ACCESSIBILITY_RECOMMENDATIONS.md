@@ -5,6 +5,15 @@
 
 Detailed recommendations for addressing Medium and Low priority accessibility issues identified in the audit. While these are not blocking issues, implementing them will significantly improve the user experience for all users, including those with disabilities.
 
+> **Historical record (2025-12-04).** File paths below refer to the UI of that date. Since the
+> `ui-new` redesign: `UIOverlay.tsx` became `src/components/ui-new/GameInterface.tsx`;
+> `WorkerDetailPanel.tsx` no longer exists and worker details live in the Workforce sidebar
+> hosted by `src/components/ui-new/sidebar/ContextSidebar.tsx`; `FactoryLayoutMap.tsx` was
+> replaced by `src/components/game/MiniMap.tsx`; and `AlertSystem.tsx` now renders only a
+> screen-reader `role="alert"` region, with the visible notification list in
+> `src/components/ui-new/hud/StatusHUD.tsx`. The live accessibility gate is the axe check in
+> `e2e/master-refinement.spec.ts`. (Note added 2026-09-02.)
+
 ---
 
 ## Medium Priority Recommendations

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSafetyStore } from '../safetyStore';
+import { safeJSONStorage } from '../storage';
 import {
   SERVICE_EGRESS_POINTS,
   getShiftForHour,
@@ -40,6 +41,59 @@ describe('autonomous game simulation store', () => {
     store.setGameTime(23.75);
     store.tickGameTime(0.5);
     expect(useGameSimulationStore.getState()).toMatchObject({ gameDay: 1, currentShift: 'night' });
+  });
+
+  it('supports every advertised clock speed and rejects non-finite time inputs', () => {
+    const store = useGameSimulationStore.getState();
+
+    store.setGameSpeed(20_000);
+    expect(useGameSimulationStore.getState().gameSpeed).toBe(10800);
+    store.setGameSpeed(-1);
+    expect(useGameSimulationStore.getState().gameSpeed).toBe(0);
+
+    store.setGameSpeed(10800);
+    store.tickGameTime(1);
+    expect(useGameSimulationStore.getState().gameTime).toBe(13);
+
+    store.setGameTime(Number.NaN);
+    store.tickGameTime(Number.POSITIVE_INFINITY);
+    expect(useGameSimulationStore.getState()).toMatchObject({ gameTime: 13, gameSpeed: 10800 });
+
+    store.setGameSpeed(Number.NaN);
+    expect(useGameSimulationStore.getState().gameSpeed).toBe(0);
+  });
+
+  it('bounds hostile finite deltas and saturates the day counter', () => {
+    useGameSimulationStore.setState({
+      gameTime: 23.75,
+      gameDay: Number.MAX_SAFE_INTEGER,
+      gameSpeed: 3600,
+    });
+
+    useGameSimulationStore.getState().tickGameTime(Number.MAX_VALUE);
+
+    expect(useGameSimulationStore.getState()).toMatchObject({
+      gameTime: 0.75,
+      gameDay: Number.MAX_SAFE_INTEGER,
+      currentShift: 'night',
+    });
+  });
+
+  it('repairs corrupt clock and day authorities on the next valid tick', () => {
+    useGameSimulationStore.setState({
+      gameTime: Number.NaN,
+      gameDay: Number.POSITIVE_INFINITY,
+      gameSpeed: 3600,
+      currentShift: 'morning',
+    });
+
+    useGameSimulationStore.getState().tickGameTime(1);
+
+    expect(useGameSimulationStore.getState()).toMatchObject({
+      gameTime: 1,
+      gameDay: 0,
+      currentShift: 'night',
+    });
   });
 
   it('records and clears a facility stop with the mobile fleet interlock', () => {
@@ -106,5 +160,116 @@ describe('autonomous game simulation store', () => {
       useGameSimulationStore.getState().triggerCelebration('target_met', { value: index });
     }
     expect(useGameSimulationStore.getState().celebrations.milestoneQueue).toHaveLength(5);
+  });
+
+  it('sanitizes malformed celebration payloads and streak updates', () => {
+    const store = useGameSimulationStore.getState();
+
+    store.triggerCelebration('milestone', {
+      timestamp: Number.NaN,
+      value: Number.POSITIVE_INFINITY,
+      message: 'x'.repeat(600),
+      position: [0, Number.NaN, 2],
+    });
+    store.updateZeroIncidentStreak(Number.POSITIVE_INFINITY);
+
+    let celebrations = useGameSimulationStore.getState().celebrations;
+    expect(celebrations.lastMilestone).toBe(0);
+    expect(celebrations.zeroIncidentStreak).toBe(0);
+    expect(celebrations.milestoneQueue).toEqual([
+      {
+        type: 'milestone',
+        timestamp: expect.any(Number),
+        message: 'x'.repeat(500),
+      },
+    ]);
+
+    store.updateZeroIncidentStreak(3.9);
+    celebrations = useGameSimulationStore.getState().celebrations;
+    expect(celebrations.zeroIncidentStreak).toBe(3);
+  });
+
+  it('rehydrates only valid data and cannot replace store actions', async () => {
+    await safeJSONStorage.setItem('millos-autonomous-simulation', {
+      version: 1,
+      state: {
+        gameTime: 25.5,
+        gameDay: 3.8,
+        gameSpeed: 10800,
+        weather: 'storm',
+        currentShift: 'morning',
+        setGameSpeed: 'corrupt action',
+        celebrations: {
+          lastMilestone: 1_000_000,
+          milestoneQueue: [
+            { type: 'milestone', timestamp: 1, message: 'expired one' },
+            'corrupt event',
+            { type: 'target_met', timestamp: 2, value: 2 },
+            { type: 'zero_incident', timestamp: 3 },
+            { type: 'shift_complete', timestamp: 4 },
+            { type: 'milestone', timestamp: 5 },
+            null,
+            { type: 'target_met', timestamp: 6, value: 6 },
+            { type: 'zero_incident', timestamp: 7, position: [1, 2, 3] },
+          ],
+          zeroIncidentStreak: Number.MAX_VALUE,
+          celebrationActive: 'yes',
+          packerBellEnabled: false,
+        },
+      },
+    });
+
+    await useGameSimulationStore.persist.rehydrate();
+
+    const state = useGameSimulationStore.getState();
+    expect(state).toMatchObject({
+      gameTime: 1.5,
+      gameDay: 3,
+      gameSpeed: 10800,
+      weather: 'storm',
+      currentShift: 'night',
+    });
+    expect(typeof state.setGameSpeed).toBe('function');
+    expect(state.celebrations).toEqual({
+      lastMilestone: 100,
+      milestoneQueue: [
+        { type: 'zero_incident', timestamp: 3 },
+        { type: 'shift_complete', timestamp: 4 },
+        { type: 'milestone', timestamp: 5 },
+        { type: 'target_met', timestamp: 6, value: 6 },
+        { type: 'zero_incident', timestamp: 7, position: [1, 2, 3] },
+      ],
+      zeroIncidentStreak: Number.MAX_SAFE_INTEGER,
+      celebrationActive: true,
+      packerBellEnabled: false,
+    });
+  });
+
+  it('bounds work while sanitizing a hostile persisted celebration queue', () => {
+    let indexedReads = 0;
+    const hostileQueue = new Proxy(
+      Array.from({ length: 10_000 }, () => 'corrupt'),
+      {
+        get(target, property, receiver) {
+          if (typeof property === 'string' && /^\d+$/.test(property)) indexedReads += 1;
+          return Reflect.get(target, property, receiver);
+        },
+      }
+    );
+    const merge = useGameSimulationStore.persist.getOptions().merge;
+    expect(merge).toBeTypeOf('function');
+
+    const merged = merge!(
+      { celebrations: { milestoneQueue: hostileQueue } },
+      useGameSimulationStore.getState()
+    );
+
+    expect(
+      (merged as ReturnType<typeof useGameSimulationStore.getState>).celebrations
+    ).toMatchObject({
+      milestoneQueue: [],
+      celebrationActive: false,
+    });
+    expect(indexedReads).toBe(50);
   });
 });

@@ -18,7 +18,7 @@
 
 <br/>
 
-A browser-based 3D industrial simulation with simulated workers, deterministic forklifts and trucks,<br/>production metrics, a simulated SCADA workspace, and an AI partner interface.
+A browser-based 3D industrial simulation with deterministic forklifts and trucks,<br/>production metrics, a simulated SCADA workspace, and an AI partner interface.
 
 <br/>
 
@@ -66,13 +66,13 @@ If you're exploring agentic development yourself, I hope MillOS serves as both i
 
 ## Overview
 
-MillOS is an interactive grain mill operations simulator built with React Three Fiber. Watch 10 simulated workers move through the factory, follow 2 deterministic forklifts and 2 scheduled trucks, and inspect simulated telemetry as 15 machines process grain across 4 production zones. The SCADA workspace provides 78 process tags, ISA-18.2-informed alarm behavior, historian views, fault injection, and development adapters for several industrial protocols. It does not claim formal standards conformance or control of a real factory.
+MillOS is an interactive grain mill operations simulator built with React Three Fiber. Follow 2 deterministic forklifts and 2 scheduled trucks, and inspect simulated telemetry as 15 machines process grain across 4 production zones. The SCADA workspace provides 122 process, utility, vehicle, and operational tags, ISA-18.2-informed alarm behavior, historian views, fault injection, and development adapters for several industrial protocols. It does not claim formal standards conformance or control of a real factory.
 
 <table>
 <tr>
 <td align="center"><strong>15</strong><br/>Interactive Machines</td>
-<td align="center"><strong>78</strong><br/>SCADA Tags</td>
-<td align="center"><strong>10</strong><br/>Simulated Workers</td>
+<td align="center"><strong>122</strong><br/>SCADA Tags</td>
+<td align="center"><strong>13</strong><br/>Agent Capabilities</td>
 <td align="center"><strong>4</strong><br/>Production Zones</td>
 </tr>
 <tr>
@@ -95,15 +95,6 @@ MillOS is an interactive grain mill operations simulator built with React Three 
 | **2** | 4 Roller Mills (R.M. 101–104) | Milling floor with RPM, temperature & vibration monitoring |
 | **3** | 3 Plansifters (A–C) | Elevated sifting platforms with oscillation animation |
 | **4** | 3 Packer Lines | High-speed packaging at 42 bags/minute |
-
-### Autonomous Worker System
-
-Ten individually modeled workers with:
-- **Role-based uniforms** — Supervisors, Engineers, Operators, QC, Maintenance, Safety Officers
-- **Realistic walk cycles** — Full limb animation with natural movement
-- **Intelligent patrolling** — Workers navigate aisles and avoid obstacles
-- **Forklift evasion** — Workers detect approaching vehicles and step aside (a skill some humans never master)
-- **Detailed profiles** — Experience levels, certifications, shift schedules
 
 ### Smart Forklift Fleet
 
@@ -129,13 +120,11 @@ The v0.40 operations campaign connects commercial commitments to the physical mi
 
 ### Fire Drill Evacuation System
 
-Fully functional emergency evacuation simulation:
-- **Real-time alarm** with continuous emergency siren
-- **Four exit points** (Front, Back, West, East) with glowing markers
-- **Worker evacuation** at running speed (6 units/sec) to nearest exit
-- **Forklift emergency stop** during active drills
-- **Live progress tracking** with evacuation timer and worker count
-- **Completion detection** with final evacuation time
+Automated emergency egress verification:
+- **Four service egress points** (Front, Back, West, East) with glowing markers
+- **Production and forklift emergency stop** during active drills
+- **Zone-by-zone verification** with a live timer and zone count
+- **Completion detection** with final verification time
 
 ### First-Person Mode
 
@@ -172,7 +161,7 @@ Real-time decision feed simulating agentic AI operations:
 
 | Type | Icon | Example |
 |------|:----:|---------|
-| Assignment | 👤 | Dispatching workers to machines |
+| Coordination | ⚙️ | Sequencing machine and vehicle activity |
 | Optimization | ⚡ | Adjusting production parameters |
 | Prediction | 🔮 | Scheduling preventive maintenance (the ancient art of fixing things before they break) |
 | Maintenance | 🔧 | Component care recommendations |
@@ -231,7 +220,7 @@ The heuristic engine excels at **reactive, deterministic decisions**. Gemini foc
 | **Cascade Prevention** | Monitors each machine independently | "Silo Delta at 87% → Mill 103 overloading → Sifter A queuing. Reduce Delta output, divert to Epsilon." |
 | **Shift Orchestration** | No timing awareness | "Shift change in 18 min. Expedite Mill 105 oil change, defer Sifter B to next shift." |
 | **Weather Adaptation** | Weather is decorative | "Storm in 2 hours. Complete outdoor loading by 14:00, stage inventory indoors." |
-| **Fatigue Management** | Assigns nearest worker | "Night shift hour 5. Assign experienced workers to critical machines, rotate others to monitoring." (Proximity is not the same as capacity) |
+| **Shift Load Management** | Treats every machine alike | "Night shift hour 5. Concentrate throughput on the machines with maintenance headroom, rotate the others to monitoring." (Proximity is not the same as capacity) |
 | **Pattern Recognition** | Reacts to each alert | "Third Mill 103 spike this week. Correlates with high humidity (78%). Recommend preemptive cooling." |
 
 **Key Differentiator:**
@@ -251,7 +240,7 @@ All visualizations are **optional** and **default OFF** — toggle via keyboard 
 **Strategic Response Enhancements:**
 - **Multi-step Action Plans** — 3-step plans (immediate, short-term, preparation)
 - **Confidence Scoring** — Gemini reports confidence % per decision
-- **Worker Recommendations** — Specific worker names for critical tasks
+- **Machine Recommendations** — Specific machines named for critical actions
 - **VCL Encoding** — Compact emoji-based context (75% token savings)
 - **Response Caching** — 30s TTL reduces API calls for similar contexts
 
@@ -399,7 +388,7 @@ BAS tracks six dimensions of worker flourishing (based on eudaimonic well-being 
 | **Wholeness** | Balance and integration | Work-life harmony, stress levels |
 | **Agency** | Autonomy and self-direction (the sensation that what you do matters because it actually does) | Decision latitude, voice |
 
-The FlourishingDashboard shows aggregate and individual worker flourishing scores.
+These dimensions are specified in `docs/BILATERAL_AUTONOMY_SYSTEM_SPEC.md`; the site is uncrewed, so no flourishing dashboard ships.
 
 #### BAS UI Components
 
@@ -408,7 +397,6 @@ The FlourishingDashboard shows aggregate and individual worker flourishing score
 | **FiveAxesPanel** | Sidebar | Adjust all five control axes |
 | **ValueDashboard** | Sidebar | V = Z × S × E × F visualization |
 | **StabilityMonitor** | Sidebar | Wallace metrics and phase warnings |
-| **FlourishingDashboard** | Sidebar | Worker eudaimonia tracking |
 | **BASEducation** | Widget | Interactive learning modules |
 | **ScenarioPlayground** | Widget | Test configurations safely |
 | **BASTimeline** | Widget | Historical axis changes |
@@ -661,7 +649,7 @@ An operator-style workspace for simulated process monitoring:
 
 | Feature | Description |
 |---------|-------------|
-| **78 Process Tags** | ISA-5.1 compliant naming (e.g., `RM101.TT001.PV`) |
+| **122 SCADA Tags** | Process, utility, vehicle, and operational definitions with ISA-5.1-informed naming (e.g., `RM101.TT001.PV`) |
 | **Full Workspace** | Process, tags, alarms, trends, events, Simulation Lab, connections |
 | **ISA-18.2-informed Alarms** | UNACK, ACKED, and RTN state behavior with 4 priority levels |
 | **Historical Trends** | 24-hour retention in IndexedDB with CSV/JSON export |
@@ -784,7 +772,6 @@ MODBUS_PORT=502
 | **E** | Move camera up |
 | **Shift** | Sprint (3.6x faster movement) |
 | **Click machine** | Open machine detail panel |
-| **Click worker** | Open worker profile |
 
 ### First-Person Mode
 
@@ -834,155 +821,53 @@ MODBUS_PORT=502
 
 ## Architecture
 
-```
-src/
-├── App.tsx                     # Root component, canvas setup, event handlers
-├── store.ts                    # Zustand state management
-├── types.ts                    # TypeScript interfaces & worker roster
-│
-├── components/
-│   ├── MillScene.tsx           # Main 3D scene composition
-│   │
-│   │   # 3D Systems
-│   ├── Machines.tsx            # Silos, mills, sifters, packers
-│   ├── ConveyorSystem.tsx      # Animated belt & flour bags
-│   ├── SpoutingSystem.tsx      # Curved grain pipes
-│   ├── WorkerSystemNew.tsx     # Worker avatars & pathfinding
-│   ├── ForkliftSystem.tsx      # Autonomous vehicles
-│   ├── DustParticles.tsx       # Instanced particle effects
-│   ├── Environment.tsx         # Lighting & factory structure
-│   ├── HolographicDisplays.tsx # In-scene 3D UI billboards
-│   ├── FirstPersonController.tsx # WASD first-person walkthrough
-│   ├── SkySystem.tsx           # Dynamic sky & weather
-│   │
-│   │   # Physics (Rapier)
-│   ├── physics/
-│   │   ├── FactoryColliders.tsx         # Machine collision boxes
-│   │   ├── PhysicsWorker.tsx            # Worker physics bodies
-│   │   ├── PhysicsForklift.tsx          # Forklift physics
-│   │   ├── PhysicsFirstPersonController.tsx # FPS physics
-│   │   ├── ExitZoneSensors.tsx          # Fire drill exit detection
-│   │   └── PhysicsDebug.tsx             # Debug visualization
-│   │
-│   │   # UI Overlays (React DOM)
-│   ├── ui-new/
-│   │   ├── GameInterface.tsx   # Main HUD, dock & panel host
-│   │   └── panels/             # Production, safety & system panels
-│   ├── AICommandCenter.tsx     # AI decision slide-out panel
-│   ├── SCADAPanel.tsx          # SCADA monitor with 5 tabs
-│   ├── WorkerDetailPanel.tsx   # Worker profile modal
-│   ├── ProductionMetrics.tsx   # Charts & KPIs
-│   └── AlertSystem.tsx         # Toast notifications
-│
-├── scada/                      # SCADA Integration Layer
-│   ├── types.ts                # TypeScript interfaces
-│   ├── tagDatabase.ts          # 78 process tags (ISA-5.1 naming)
-│   ├── AlarmManager.ts         # ISA-18.2 alarm state machine
-│   ├── HistoryStore.ts         # IndexedDB with 24h retention
-│   ├── SCADAService.ts         # Main orchestration service
-│   ├── SCADABridge.ts          # SCADA-to-3D visual mapping
-│   ├── useSCADA.ts             # React hooks
-│   ├── useSCADAVisuals.ts      # 3D visualization hooks
-│   └── adapters/
-│       ├── SimulationAdapter.ts    # Physics-based simulation
-│       ├── RESTAdapter.ts          # HTTP polling
-│       ├── MQTTAdapter.ts          # MQTT over WebSocket
-│       └── WebSocketAdapter.ts     # Direct WebSocket
-│
-├── multiplayer/                # WebRTC Multiplayer System
-│   ├── types.ts                # Player, room, message types
-│   ├── MultiplayerManager.ts   # Session orchestration
-│   ├── SignalingService.ts     # Room creation & peer discovery
-│   ├── PeerConnection.ts       # WebRTC data channel wrapper
-│   ├── PlayerInterpolation.ts  # Smooth remote player movement
-│   ├── HostMigration.ts        # Explicit host-loss session teardown
-│   └── hooks/                  # React hooks (useMultiplayerSync)
-│
-├── hooks/                      # Reusable React Hooks
-│   ├── useKeyboardShortcuts.ts # Keyboard navigation (F1-F4, Z, I, H, etc.)
-│   ├── useProceduralTextures.ts # Metal, concrete, wall textures
-│   ├── useAdaptiveQuality.ts   # Dynamic graphics quality adjustment
-│   ├── useMobileDetection.ts   # Mobile device & orientation detection
-│   ├── useGPUResource.ts       # GPU memory tracking & management
-│   └── useDisposable.ts        # Three.js resource cleanup
-│
-├── stores/                     # Zustand State Stores
-│   ├── basStore.ts             # BAS axis values and settings
-│   ├── stabilityStore.ts       # Wallace stability metrics
-│   ├── flourishingStore.ts     # Eudaimonia dimensions
-│   ├── engagementStore.ts      # Engagement signature tracking
-│   ├── scenarioStore.ts        # Scenario playground state
-│   ├── basHistoryStore.ts      # Axis change history
-│   └── votingStore.ts          # Democratic decision voting
-│
-├── systems/bas/                # Bilateral Autonomy System Engines
-│   ├── stabilityCalculator.ts  # Wallace metrics, phase transitions
-│   ├── valueCalculator.ts      # V = Z × S × E × F formula
-│   └── aiBehaviorEngine.ts     # Axis-aware suggestion generation
-│
-├── protocols/vcp/              # VCP 2.0: Value Coordination Protocol
-│   ├── types.ts                # Core type definitions (6 layers)
-│   ├── encoder.ts              # Compact encoding for all layers
-│   ├── decoder.ts              # Parse encoded VCP
-│   ├── integration.ts          # Bridge to existing stores
-│   ├── generators/             # Reasoning scaffold generators
-│   │   ├── moralFrame.ts       # Ethical reasoning scaffolds
-│   │   ├── prosocialFrame.ts   # Trust/cooperation scaffolds
-│   │   ├── tacticalFrame.ts    # Immediate action scaffolds
-│   │   └── strategicFrame.ts   # Long-term flourishing scaffolds
-│   ├── memory/                 # Self-learning system
-│   │   ├── patternStore.ts     # Situation pattern matching
-│   │   ├── outcomeTracker.ts   # Decision outcome tracking
-│   │   └── hypothesisEngine.ts # Hypothesis generation/testing
-│   └── layers/
-│       └── healing.ts          # Anomaly detection, interventions
-│
-└── test/                       # Test suite
-    └── setup.ts                # Vitest configuration
+The concise current map is [docs/architecture.md](docs/architecture.md). The canonical design for making MillOS agent-intuitive, agent-ergonomic, and agent-accretive is [docs/AGENT_OPERATING_ARCHITECTURE.md](docs/AGENT_OPERATING_ARCHITECTURE.md), with phased work in [_contprompts/millos_agent_operating_system_2026-08-31.md](_contprompts/millos_agent_operating_system_2026-08-31.md).
 
-scada-proxy/                    # Backend Proxy Service
-├── src/
-│   ├── index.ts                # Express server
-│   ├── TagRegistry.ts          # Tag management
-│   └── adapters/
-│       ├── OPCUAAdapter.ts     # OPC-UA client
-│       └── ModbusAdapter.ts    # Modbus TCP client
-├── Dockerfile
-├── docker-compose.yml
-└── mosquitto/                  # MQTT broker config
+```text
+App and runtime shell
+  -> React Three Fiber Canvas and continuous authored world
+  -> deferred operational React interface
+  -> assembled-scene diagnostics through window.__MILLOS_RUNTIME__
+
+Central tick
+  -> domain-specific Zustand authorities
+  -> production, material, quality, maintenance, logistics, safety, and campaign effects
+
+SCADA service
+  -> simulation and development adapters, alarms, history, bridge, and operator workspace
+
+Dual-speed AI
+  -> deterministic tactical engine
+  -> optional Gemini or WebGPU strategic backend
+  -> provenance-bearing decisions and human response
+
+Evidence
+  -> incident replay, decision history, logbooks, audit records, and runtime captures
 ```
+
+| Concern | Current source authority |
+| --- | --- |
+| boot, loading, Canvas | `src/main.tsx`, `src/App.tsx` |
+| mounted world | `src/components/MillScene.tsx` |
+| assembled runtime truth | `src/components/RuntimeController.tsx` |
+| deterministic operational updates | `src/systems/UnifiedGameTick.ts` |
+| state ownership | `src/stores/`, `docs/state-management.md` |
+| compatibility and SCADA synchronization | `src/store.ts` |
+| SCADA | `src/scada/`, `src/components/SCADAPanel.tsx` |
+| AI | `src/utils/aiEngine.ts`, `src/stores/aiConfigStore.ts` |
+| operational UI | `src/components/ui-new/GameInterface.tsx` |
+| replay | `src/stores/incidentReplayStore.ts`, `src/stores/historicalPlaybackStore.ts` |
 
 ### State Management
 
-MillOS uses **Zustand** for lightweight, performant global state:
-
-```typescript
-interface MillStore {
-  // Entities
-  workers: Worker[]           // 10 workers with positions, tasks, status
-  machines: Machine[]         // 15 machines with metrics and status
-
-  // AI System
-  aiDecisions: AIDecision[]   // Rolling feed (max 20)
-
-  // Production
-  metrics: ProductionMetrics  // Throughput, efficiency, quality, uptime
-  productionSpeed: number     // Animation multiplier (0-2.0)
-
-  // UI State
-  selectedWorker: string | null
-  selectedMachine: string | null
-  showZones: boolean
-  showAIPanel: boolean
-}
-```
+MillOS uses domain-specific **Zustand** stores. `src/store.ts` is a compatibility and SCADA synchronization layer. New code reads the smallest domain owner directly. Consequence-bearing human and Becoming Mind actions will migrate incrementally to the shared capability contract described in the Agent Operating Architecture.
 
 ### Collision System
 
 A custom **PositionRegistry** singleton coordinates inter-entity awareness:
-- Workers register positions each frame
+- Forklifts and trucks register positions each frame
 - Forklifts check path clearance 5 units ahead
-- Safety radii: 2.5 units (workers), 4 units (forklifts)
+- Safety radius: 4 units (forklifts)
 
 ---
 
@@ -1025,7 +910,7 @@ MillOS implements OWASP-aligned frontend security practices:
 
 ### Completed
 
-- [x] Simulated SCADA workspace with 78 process tags
+- [x] Simulated SCADA workspace with 122 process, utility, vehicle, and operational tags
 - [x] ISA-18.2-informed alarm behavior
 - [x] Multiple protocol adapters (REST, MQTT, WebSocket)
 - [x] OPC-UA and Modbus backend proxy
@@ -1067,7 +952,7 @@ MillOS implements OWASP-aligned frontend security practices:
 
 ### Planned
 
-_No major features currently planned._
+- [ ] **Agent Operating System programme**: semantic identities, bounded queries, typed capability previews and commands, bilateral authority, causal evidence, and verified knowledge accretion. See [the canonical architecture](docs/AGENT_OPERATING_ARCHITECTURE.md).
 
 ### Recently Completed
 

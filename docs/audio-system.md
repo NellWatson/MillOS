@@ -1,5 +1,9 @@
 # Audio System
 
+**Status:** legacy topical reference, source verification required
+
+**Current entrypoints:** `src/utils/audioManager.ts`, `src/hooks/useAudioState.ts`, and `src/audio/`
+
 MillOS features a detailed audio system using the Web Audio API to create an immersive factory soundscape.
 
 ## Table of Contents
@@ -161,9 +165,8 @@ audioManager.playAirBrake();
 ### 5. Worker Sounds
 
 #### Footsteps
-```typescript
-audioManager.playFootstep(workerId: string);
-```
+
+Removed with the uncrewed pivot; `playFootstep` no longer exists.
 
 - Brown noise with random pitch variation
 - Quick attack, fast decay
@@ -184,10 +187,8 @@ audioManager.playClunk();        // Mechanical state changes
 
 Periodic radio communication sounds:
 
-```typescript
-audioManager.startRadioChatter();
-audioManager.stopRadioChatter();
-```
+Removed: `startRadioChatter` / `stopRadioChatter` are on the human-presence forbid list
+(`src/config/humanPresencePolicy.test.ts`) and must not be reintroduced.
 
 - Random intervals: 8-25 seconds
 - Types: static, beeps, squelch
@@ -281,18 +282,7 @@ useEffect(() => {
 
 ### Worker Movement
 
-```typescript
-// In WorkerSystem.tsx
-useFrame((state, delta) => {
-  if (!isIdle) {
-    const currentStep = Math.floor(walkCycle / Math.PI);
-    if (currentStep !== lastStepRef.current) {
-      lastStepRef.current = currentStep;
-      audioManager.playFootstep(data.id);
-    }
-  }
-});
-```
+_(Footstep example removed; the site is uncrewed.)_
 
 ### UI Interactions
 

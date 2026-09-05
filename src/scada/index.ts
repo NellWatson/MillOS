@@ -23,7 +23,13 @@ export {
 } from './tagDatabase';
 
 // Core Services
-export { SCADAService, getSCADAService, initializeSCADA, shutdownSCADA } from './SCADAService';
+export {
+  SCADAService,
+  getSCADAService,
+  initializeSCADA,
+  peekSCADAService,
+  shutdownSCADA,
+} from './SCADAService';
 export { AlarmManager } from './AlarmManager';
 export { HistoryStore } from './HistoryStore';
 

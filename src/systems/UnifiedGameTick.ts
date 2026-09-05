@@ -31,6 +31,7 @@ import {
   type OperationalIncident,
 } from '../stores/operationsCampaignStore';
 import { getFacilityBaseLoad, getMachineEnergy } from '../utils/energyCalculations';
+import { sanitizeGameSpeed } from '../stores/persistenceMigrations';
 
 // Tracks the receiving dock's docked state across ticks so a false->true
 // transition (a grain truck arriving) triggers exactly one silo delivery.
@@ -371,16 +372,15 @@ function updateMachineTruth(
 function unifiedGameTick(ctx: TickContext): void {
   const { deltaSeconds: rawDeltaSeconds, gameSpeed } = ctx;
 
-  // Skip if paused
-  if (gameSpeed === 0) return;
-
   // Cap delta to prevent large time jumps (e.g., from tab being hidden)
   // Must be >= tickInterval (0.5s) to avoid slowing down game time
   // Cap at 1.0s to handle minor frame drops while preventing runaway accumulation
-  const deltaSeconds = Math.min(rawDeltaSeconds, 1.0);
+  const deltaSeconds = Number.isFinite(rawDeltaSeconds)
+    ? Math.max(0, Math.min(rawDeltaSeconds, 1.0))
+    : 0;
 
-  // Validate gameSpeed is reasonable (0-1000x is sane range)
-  const safeGameSpeed = Math.max(0, Math.min(gameSpeed, 1000));
+  const safeGameSpeed = sanitizeGameSpeed(gameSpeed);
+  if (deltaSeconds === 0 || safeGameSpeed === 0) return;
 
   // Clear reusable arrays (no allocation)
   _breakdowns.length = 0;
@@ -393,7 +393,7 @@ function unifiedGameTick(ctx: TickContext): void {
   // Handle day rollover
   let newGameDay = gameStore.gameDay;
   if (newGameTime < gameStore.gameTime && hoursElapsed > 0) {
-    newGameDay++;
+    newGameDay = Math.min(Number.MAX_SAFE_INTEGER, newGameDay + 1);
 
     // Close out the production day: celebrate the result, then reset the
     // daily counter and milestone tracking so the target loop restarts fresh.
@@ -850,10 +850,35 @@ function unifiedGameTick(ctx: TickContext): void {
 // HOOK TO REGISTER TICK
 // ============================================================
 
+/**
+ * Clear the module-level edge-detection state. Without this a remount (HMR,
+ * a new game) inherits the previous session's dock and shipping edges and can
+ * miss the next grain delivery.
+ */
+export function resetUnifiedTickState(): void {
+  _lastReceivingTransferReady = false;
+  _lastShippingTransferReady = false;
+  _shippingLoad = {
+    cycleId: 'shipping-0',
+    status: 'away',
+    loadedKg: 0,
+    capacityKg: 5000,
+    materialType: 'flour',
+    blockReason: null,
+    lastDispatchKg: 0,
+  };
+  _bagProductionCarry = 0;
+  _milestonesReachedMask = 0;
+}
+
 export function useUnifiedGameTick(): void {
   useEffect(() => {
+    resetUnifiedTickState();
     centralTick.register('unified-game-tick', unifiedGameTick, TICK_PRIORITY.CRITICAL);
-    return () => centralTick.unregister('unified-game-tick');
+    return () => {
+      centralTick.unregister('unified-game-tick');
+      resetUnifiedTickState();
+    };
   }, []);
 }
 

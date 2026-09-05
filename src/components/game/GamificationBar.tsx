@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Trophy, History, Map } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
@@ -15,7 +15,9 @@ export const GamificationBar: React.FC = () => {
   // the bar itself is hidden (the early return below happens after hooks).
   useAchievementTracker();
 
-  const [showAchievements, setShowAchievements] = useState(false);
+  // Shared with OverviewPanel through uiStore so the two toggles drive one panel.
+  const showAchievements = useUIStore((state) => state.showAchievements);
+  const setShowAchievements = useUIStore((state) => state.setShowAchievements);
   const { showMiniMap, setShowMiniMap, showGamificationBar, setShowGamificationBar } = useUIStore(
     useShallow((state) => ({
       showMiniMap: state.showMiniMap,
@@ -31,7 +33,10 @@ export const GamificationBar: React.FC = () => {
 
   // Memoized handlers to prevent re-renders
   const handleHideBar = useCallback(() => setShowGamificationBar(false), [setShowGamificationBar]);
-  const handleToggleAchievements = useCallback(() => setShowAchievements((prev) => !prev), []);
+  const handleToggleAchievements = useCallback(
+    () => setShowAchievements(!showAchievements),
+    [setShowAchievements, showAchievements]
+  );
   const handleToggleMiniMap = useCallback(
     () => setShowMiniMap(!showMiniMap),
     [setShowMiniMap, showMiniMap]
@@ -92,10 +97,11 @@ export const GamificationBar: React.FC = () => {
                 playbackStore.enterReplayMode();
               }
             }}
+            aria-pressed={isReplaying}
             className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${
               isReplaying ? 'bg-red-600 text-white' : 'bg-slate-800 text-red-400 hover:bg-slate-700'
             }`}
-            title="Replay History"
+            title={isReplaying ? 'Exit replay' : 'Replay history'}
           >
             <History className="w-5 h-5" />
           </button>
@@ -109,7 +115,7 @@ export const GamificationBar: React.FC = () => {
                 ? 'bg-green-600 text-white'
                 : 'bg-slate-800 text-green-400 hover:bg-slate-700'
             }`}
-            title="GPS Tracking"
+            title="Mini-map"
           >
             <Map className="w-5 h-5" />
           </button>

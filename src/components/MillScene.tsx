@@ -343,6 +343,35 @@ const ServiceEgressMarkers = React.memo(() => {
   const drillMetrics = useGameSimulationStore((state) => state.drillMetrics);
   const materialRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
 
+  // The verification sequence itself. Nothing else calls markZoneVerified, so
+  // without this a started drill could never complete: each egress point is
+  // verified in turn, and the drill ends shortly after the last one.
+  useEffect(() => {
+    if (!emergencyDrillMode || !drillMetrics.active) return;
+    const ZONE_INTERVAL_MS = 4000;
+    const COMPLETION_HOLD_MS = 5000;
+    let index = 0;
+    const store = () => useGameSimulationStore.getState();
+    const timer = window.setInterval(() => {
+      const current = store();
+      if (!current.emergencyDrillMode || !current.drillMetrics.active) return;
+      if (current.drillMetrics.verificationComplete) {
+        window.clearInterval(timer);
+        window.setTimeout(() => {
+          const latest = store();
+          if (latest.emergencyDrillMode && latest.drillMetrics.verificationComplete) {
+            latest.endEmergencyDrill();
+          }
+        }, COMPLETION_HOLD_MS);
+        return;
+      }
+      const zone = SERVICE_EGRESS_POINTS[index % SERVICE_EGRESS_POINTS.length];
+      index += 1;
+      current.markZoneVerified(zone.id);
+    }, ZONE_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [emergencyDrillMode, drillMetrics.active]);
+
   // Pulse during the automated verification sequence.
   useFrame((state) => {
     if (!emergencyDrillMode) return;

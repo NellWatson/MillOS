@@ -114,12 +114,23 @@ export function useAudioReactive() {
       return;
     }
 
+    // One cleanup for every branch below. The no-context branch is the normal
+    // cold-load path (an AudioContext needs a user gesture), and returning
+    // without a cleanup there left a self-rescheduling 30 Hz loop running
+    // after unmount, one more per remount.
+    const stopLoop = () => {
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+    };
+
     const context = audioManager.getAudioContext();
     if (!context) {
       // No audio context yet - try fallback mode
       setFallbackMode(true);
       rafIdRef.current = requestAnimationFrame(animate);
-      return;
+      return stopLoop;
     }
 
     try {

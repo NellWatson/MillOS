@@ -3,7 +3,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { isValidWSMessage, isValidMQTTPayload, MessageValidationError } from '../messageValidation';
+import {
+  isTagValueCompatible,
+  isValidWSMessage,
+  isValidMQTTPayload,
+  MessageValidationError,
+} from '../messageValidation';
 
 describe('WebSocket Message Validation', () => {
   describe('isValidWSMessage', () => {
@@ -102,22 +107,13 @@ describe('WebSocket Message Validation', () => {
       expect(isValidWSMessage(msg)).toBe(false);
     });
 
-    it('should reject update message without tagId', () => {
-      const msg = {
-        type: 'update',
-        value: 75.5,
-      };
-
-      expect(isValidWSMessage(msg)).toBe(false);
-    });
-
-    it('should reject update message with empty tagId', () => {
-      const msg = {
-        type: 'update',
-        tagId: '',
-        value: 75.5,
-      };
-
+    it.each([
+      ['tagId', { type: 'update', value: 75.5, quality: 'GOOD', timestamp: 1 }],
+      ['nonempty tagId', { type: 'update', tagId: '', value: 75.5, quality: 'GOOD', timestamp: 1 }],
+      ['value', { type: 'update', tagId: 'SILO_A_LEVEL', quality: 'GOOD', timestamp: 1 }],
+      ['quality', { type: 'update', tagId: 'SILO_A_LEVEL', value: 75.5, timestamp: 1 }],
+      ['timestamp', { type: 'update', tagId: 'SILO_A_LEVEL', value: 75.5, quality: 'GOOD' }],
+    ])('rejects an update without a valid required %s', (_field, msg) => {
       expect(isValidWSMessage(msg)).toBe(false);
     });
 
@@ -229,6 +225,36 @@ describe('WebSocket Message Validation', () => {
 
       expect(isValidWSMessage(msg)).toBe(true);
     });
+  });
+});
+
+describe('tag data type compatibility', () => {
+  it.each([
+    ['BOOL', true, true],
+    ['BOOL', 1, false],
+    ['STRING', '', true],
+    ['STRING', 1, false],
+    ['INT16', -32_768, true],
+    ['INT16', 32_767, true],
+    ['INT16', -32_769, false],
+    ['INT16', 32_768, false],
+    ['INT16', 1.5, false],
+    ['INT32', -2_147_483_648, true],
+    ['INT32', 2_147_483_647, true],
+    ['INT32', -2_147_483_649, false],
+    ['INT32', 2_147_483_648, false],
+    ['FLOAT32', 1.5, true],
+    ['FLOAT32', -3.4028234663852886e38, true],
+    ['FLOAT32', 3.4028234663852886e38, true],
+    ['FLOAT32', -6.805646932770577e38, false],
+    ['FLOAT32', 6.805646932770577e38, false],
+    ['FLOAT32', Number.MAX_VALUE, false],
+    ['FLOAT32', Number.NaN, false],
+    ['FLOAT32', Number.POSITIVE_INFINITY, false],
+    ['FLOAT64', Number.NaN, false],
+    ['FLOAT64', Number.POSITIVE_INFINITY, false],
+  ] as const)('%s classifies %s as compatible=%s', (dataType, value, expected) => {
+    expect(isTagValueCompatible({ dataType }, value)).toBe(expected);
   });
 });
 
@@ -384,6 +410,150 @@ describe('MQTT Payload Validation', () => {
 
       expect(isValidMQTTPayload(payload)).toBe(false);
     });
+  });
+});
+
+describe('Adversarial message boundaries', () => {
+  const validTag = {
+    tagId: 'RM101.TT001.PV',
+    value: 42,
+    quality: 'GOOD',
+    timestamp: 1_700_000_000_000,
+  };
+
+  const invalidMessages: Array<[string, unknown, (value: unknown) => boolean]> = [
+    [
+      'WebSocket update with NaN value',
+      { type: 'update', ...validTag, value: Number.NaN },
+      isValidWSMessage,
+    ],
+    [
+      'WebSocket write with positive-infinite value',
+      { type: 'write', tagId: validTag.tagId, value: Number.POSITIVE_INFINITY },
+      isValidWSMessage,
+    ],
+    [
+      'WebSocket update with negative-infinite timestamp',
+      { type: 'update', ...validTag, timestamp: Number.NEGATIVE_INFINITY },
+      isValidWSMessage,
+    ],
+    [
+      'WebSocket update with unsupported quality',
+      { type: 'update', ...validTag, quality: 'EXCELLENT' },
+      isValidWSMessage,
+    ],
+    [
+      'WebSocket batch with a malformed nested value',
+      { type: 'batch', tags: [validTag, { ...validTag, value: Number.NaN }] },
+      isValidWSMessage,
+    ],
+    [
+      'WebSocket snapshot with a malformed nested quality',
+      { type: 'snapshot', tags: [validTag, { ...validTag, quality: 'UNKNOWN' }] },
+      isValidWSMessage,
+    ],
+    [
+      'WebSocket snapshot with a malformed nested timestamp',
+      { type: 'snapshot', tags: [validTag, { ...validTag, timestamp: Number.POSITIVE_INFINITY }] },
+      isValidWSMessage,
+    ],
+    [
+      'WebSocket snapshot with a null nested tag',
+      { type: 'snapshot', tags: [validTag, null] },
+      isValidWSMessage,
+    ],
+    ['MQTT payload with NaN value', { ...validTag, value: Number.NaN }, isValidMQTTPayload],
+    [
+      'MQTT payload with positive-infinite timestamp',
+      { ...validTag, timestamp: Number.POSITIVE_INFINITY },
+      isValidMQTTPayload,
+    ],
+    [
+      'MQTT payload with negative-infinite source timestamp',
+      { ...validTag, sourceTimestamp: Number.NEGATIVE_INFINITY },
+      isValidMQTTPayload,
+    ],
+    [
+      'MQTT payload with unsupported quality',
+      { ...validTag, quality: 'UNKNOWN' },
+      isValidMQTTPayload,
+    ],
+  ];
+
+  it.each(invalidMessages)('rejects %s', (_name, message, validate) => {
+    expect(validate(message)).toBe(false);
+  });
+
+  const validQualityMessages: Array<[string, unknown, (value: unknown) => boolean]> = [
+    ['WebSocket', { type: 'update', ...validTag, quality: 'good' }, isValidWSMessage],
+    ['MQTT', { ...validTag, quality: 'uncertain' }, isValidMQTTPayload],
+  ];
+
+  it.each(validQualityMessages)(
+    'accepts a supported %s quality case-insensitively',
+    (_name, message, validate) => {
+      expect(validate(message)).toBe(true);
+    }
+  );
+
+  const collectionCases: Array<[string, (length: number) => unknown]> = [
+    [
+      'subscribe tag IDs',
+      (length) => ({ type: 'subscribe', tagIds: Array.from({ length }, (_, i) => `TAG.${i}`) }),
+    ],
+    [
+      'unsubscribe tag IDs',
+      (length) => ({ type: 'unsubscribe', tagIds: Array.from({ length }, (_, i) => `TAG.${i}`) }),
+    ],
+    [
+      'batch tags',
+      (length) => ({
+        type: 'batch',
+        tags: Array.from({ length }, (_, i) => ({ ...validTag, tagId: `TAG.${i}` })),
+      }),
+    ],
+    [
+      'snapshot tags',
+      (length) => ({
+        type: 'snapshot',
+        tags: Array.from({ length }, (_, i) => ({ ...validTag, tagId: `TAG.${i}` })),
+      }),
+    ],
+  ];
+
+  it.each(collectionCases)('bounds %s at 1,000 items', (_name, buildMessage) => {
+    expect(isValidWSMessage(buildMessage(1_000))).toBe(true);
+    expect(isValidWSMessage(buildMessage(1_001))).toBe(false);
+  });
+
+  it('rejects an oversized snapshot before traversing attacker-controlled entries', () => {
+    const oversized = new Array<unknown>(1_001);
+    Object.defineProperty(oversized, 0, {
+      get: () => {
+        throw new Error('oversized snapshot was traversed');
+      },
+    });
+    let result: boolean | undefined;
+
+    expect(() => {
+      result = isValidWSMessage({ type: 'snapshot', tags: oversized });
+    }).not.toThrow();
+    expect(result).toBe(false);
+  });
+
+  it('revalidates an accepted snapshot without mutating or retaining its state', () => {
+    const snapshot = {
+      type: 'snapshot',
+      tags: [{ ...validTag }],
+    };
+    const original = structuredClone(snapshot);
+
+    expect(isValidWSMessage(snapshot)).toBe(true);
+    expect(snapshot).toEqual(original);
+
+    snapshot.tags[0].value = Number.NaN;
+    expect(isValidWSMessage(snapshot)).toBe(false);
+    expect(original.tags[0].value).toBe(42);
   });
 });
 

@@ -1,5 +1,9 @@
 # Development Guide
 
+**Status:** topical reference, verify commands against `package.json` and rules against `AGENTS.md`
+
+**Agent orientation:** [`.claude/README.md`](../.claude/README.md) and [Documentation Map](./README.md)
+
 Development workflow, environment setup, and coding conventions for MillOS.
 
 ## Table of Contents
@@ -51,12 +55,15 @@ npm install
 
 ### 3. Environment Variables
 
-Create `.env.local` file:
+Copy the example file:
 
 ```bash
-# .env.local
-GEMINI_API_KEY=your_gemini_api_key_here
+cp .env.local.example .env.local
 ```
+
+There is no build-time Gemini key. Enter it at runtime in the in-app AI/Gemini settings modal; it is
+stored only in browser localStorage under `millos-ai-config`. The only variable the example documents
+is the optional `VITE_ENABLE_SW=true` for testing the service worker on the dev server.
 
 ### 4. Start Development Server
 
@@ -117,9 +124,7 @@ MillOS/
 │   │   ├── ProductionMetrics.tsx
 │   │   ├── SpoutingSystem.tsx
 │   │   ├── TruckBay.tsx
-│   │   ├── UIOverlay.tsx
-│   │   ├── WorkerDetailPanel.tsx
-│   │   └── WorkerSystem.tsx
+│   │   └── ui-new/GameInterface.tsx
 │   ├── utils/
 │   │   ├── audioManager.ts  # Web Audio API manager
 │   │   └── positionRegistry.ts  # Collision detection
@@ -201,7 +206,7 @@ import { Siren } from 'lucide-react';
 
 **Exception:** The mill emoji is permitted in these branding locations only:
 - `index.html` - Favicon and loading screen
-- `UIOverlay.tsx` - Top-left header logo
+- `ui-new/sidebar/ContextSidebar.tsx` - Header logo
 
 ### Available Lucide Icons
 
@@ -279,33 +284,6 @@ playNewMachineSound(machineId: string) {
 _machines.push({
   id: 'new-machine-1',
   type: MachineType.NEW_MACHINE,
-  // ...
-});
-```
-
-### Adding a New Worker Role
-
-1. **Update type** in `types.ts`:
-```typescript
-role: 'Operator' | 'Engineer' | ... | 'NewRole';
-```
-
-2. **Add appearance** in `WorkerSystem.tsx`:
-```typescript
-case 'NewRole':
-  return {
-    uniformColor: '#color',
-    hatColor: '#color',
-    tool: 'toolType'
-  };
-```
-
-3. **Add to roster** in `types.ts`:
-```typescript
-WORKER_ROSTER.push({
-  id: 'w11',
-  name: 'New Worker',
-  role: 'NewRole',
   // ...
 });
 ```

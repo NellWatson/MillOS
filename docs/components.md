@@ -1,17 +1,19 @@
 # Components Reference
 
+**Status:** legacy component snapshot, source and reachability verification required
+
+**Current orientation:** [MillOS Architecture](./architecture.md)
+
 Reference documentation for all React components in the MillOS application.
 
 ## Table of Contents
 
 1. [Root Components](#root-components)
 2. [3D Scene Components](#3d-scene-components)
-3. [Machine Components](#machine-components)
-4. [Worker Components](#worker-components)
-5. [Vehicle Components](#vehicle-components)
-6. [Environment Components](#environment-components)
-7. [UI Components](#ui-components)
-8. [Effect Components](#effect-components)
+4. [Vehicle Components](#vehicle-components)
+5. [Environment Components](#environment-components)
+6. [UI Components](#ui-components)
+7. [Effect Components](#effect-components)
 
 ---
 
@@ -26,7 +28,7 @@ The root application component that sets up the React Three Fiber canvas and man
 #### Responsibilities
 - Canvas initialization with camera and renderer settings
 - OrbitControls configuration
-- Panel state management (AI panel, machine selection, worker selection)
+- Panel state management (AI panel, machine selection)
 - Audio initialization on first user interaction
 - Keyboard event handling (Escape to close panels)
 
@@ -38,7 +40,6 @@ The root application component that sets up the React Three Fiber canvas and man
 | `showZones` | boolean | true | Toggle safety zone visibility |
 | `showAIPanel` | boolean | false | AI Command Center panel visibility |
 | `selectedMachine` | MachineData \| null | null | Currently selected machine |
-| `selectedWorker` | WorkerData \| null | null | Currently selected worker |
 | `audioInitialized` | boolean | false | Audio context initialization state |
 
 #### Key Features
@@ -61,7 +62,6 @@ interface MillSceneProps {
   productionSpeed: number;
   showZones: boolean;
   onSelectMachine: (data: MachineData) => void;
-  onSelectWorker: (data: WorkerData) => void;
 }
 ```
 
@@ -92,7 +92,6 @@ const packerNames = ['Pack Line 1', 'Pack Line 2', 'Pack Line 3'];
   <SpoutingSystem machines={machines} />
   <FactoryInfrastructure floorSize={FLOOR_SIZE} showZones={showZones} />
   <ConveyorSystem productionSpeed={productionSpeed} />
-  <WorkerSystem onSelectWorker={onSelectWorker} />
   <ForkliftSystem />
   <TruckBay productionSpeed={productionSpeed} />
   <DustParticles count={500} />
@@ -105,9 +104,9 @@ const packerNames = ['Pack Line 1', 'Pack Line 2', 'Pack Line 3'];
 
 ## 3D Scene Components
 
-### Machines.tsx
+### CompactMachines.tsx
 
-**Location:** `src/components/Machines.tsx`
+**Location:** `src/components/machines/CompactMachines.tsx` (`Machines.tsx` at the components root is dead code and is listed as such by `npm run validate:reachability`)
 
 Renders all factory machinery with type-specific geometry and status indicators.
 
@@ -180,155 +179,11 @@ useFrame((_, delta) => {
 
 ---
 
-## Worker Components
-
-### WorkerSystem.tsx
-
-**Location:** `src/components/WorkerSystem.tsx`
-
-Complete worker simulation system with realistic human models and behaviors.
-
-#### Worker Roster
-
-The system initializes workers from `WORKER_ROSTER` in types.ts:
-
-| ID | Name | Role | Speed | Target Machine | Color |
-|----|------|------|-------|----------------|-------|
-| w1 | Marcus Chen | Supervisor | 1.2 | rm-103 | #3b82f6 |
-| w2 | Sarah Mitchell | Engineer | 1.5 | mill-1.5 | #ffffff |
-| w3 | James Rodriguez | Operator | 1.3 | silo-0 | #f97316 |
-| w4 | Emily Ronson | Quality Control | 1.1 | packer-2 | #a855f7 |
-| w5 | David Kim | Maintenance | 1.4 | packer-0 | #eab308 |
-| w6 | Lisa Thompson | Safety Officer | 1.0 | sifter-b | #22c55e |
-| w7 | Robert Garcia | Operator | 1.2 | silo-2 | #f97316 |
-| w8 | Anna Kowalski | Engineer | 1.6 | sifter-0 | #ffffff |
-| w9 | Michael Brown | Operator | 1.3 | packer-2 | #f97316 |
-| w10 | Jennifer Lee | Quality Control | 1.2 | sifter-a | #a855f7 |
-
-Workers with `targetMachine` assignments periodically walk to their assigned machine to perform work tasks (8-20 seconds), then return to patrolling.
-
-#### HumanModel Component
-
-Detailed articulated human figure with:
-
-- Animated limbs (arms, legs)
-- Role-specific uniforms
-- Skin tone variation
-- Hair styles (bald, short, medium, curly, ponytail)
-- Hard hats with role-based colors
-- Tool accessories (clipboard, tablet, radio, wrench, magnifier)
-
-#### Worker Behaviors
-
-1. **Walking** - Patrol movement with boundary turnaround
-2. **Idle** - Periodic pausing for 1-3 seconds
-3. **Evasion** - Step aside when forklift approaches
-4. **Waving** - Acknowledge forklift after evasion or when passing nearby
-5. **Head Tracking** - Look toward approaching forklifts
-6. **Task Movement** - Walk to assigned machine, perform work, return to patrol
-7. **Breaks** - Walk to break room when energy low, recover with coffee
-8. **Conversations** - Stop and chat with nearby workers (2-4 seconds)
-9. **Shift Changes** - Leave through exits and re-enter when shift change triggered
-
-#### Shift Change System
-
-Workers respond to shift changes by walking to the nearest exit, "leaving" the factory, and then re-entering refreshed:
-
-```typescript
-// Entry/exit positions
-const ENTRY_POSITIONS: [number, number, number][] = [
-  [0, 0, 38],   // Front entrance
-  [-30, 0, 38], // Left loading bay
-  [30, 0, 38],  // Right loading bay
-];
-
-// When shift change is triggered:
-// 1. Workers walk to nearest exit
-// 2. "Disappear" (position.y = -100)
-// 3. Re-appear at entry point
-// 4. Walk back to work position with full energy
-```
-
-Shift change can be triggered from the UI panel under "Emergency & Environment" > "Shift Change".
-
-#### Appearance Configuration
-
-```typescript
-const getWorkerAppearance = (role: string, color: string, id: string) => {
-  switch (role) {
-    case 'Supervisor':
-      return { uniformColor: '#1e40af', hatColor: '#1e40af', tool: 'clipboard' };
-    case 'Engineer':
-      return { uniformColor: '#374151', hatColor: '#ffffff', tool: 'tablet' };
-    case 'Safety Officer':
-      return { uniformColor: '#166534', hatColor: '#22c55e', hasVest: true, tool: 'radio' };
-    // ... more roles
-  }
-};
-```
-
----
-
-## Vehicle Components
-
-### ForkliftSystem.tsx
-
-**Location:** `src/components/ForkliftSystem.tsx`
-
-Autonomous forklift vehicles with safety systems.
-
-#### Forklift Configuration
-
-| ID | Operator | Speed | Path Points | Cargo |
-|----|----------|-------|-------------|-------|
-| forklift-1 | Tom | 3.0 | 4 | pallet |
-| forklift-2 | Jake | 2.5 | 4 | empty |
-
-#### Speed Zones
-
-Areas where forklifts automatically slow down:
-
-| Zone | Position | Radius | Name |
-|------|----------|--------|------|
-| 1 | (0, 0) | 6 | Central Intersection |
-| 2 | (0, 15) | 5 | North Loading |
-| 3 | (0, -15) | 5 | South Loading |
-| 4 | (-20, -6) | 4 | Milling Area West |
-| 5 | (20, -6) | 4 | Milling Area East |
-| 6 | (0, 20) | 5 | Packing Zone |
-
-#### Safety Features
-
-1. **Path Visualization** - Dashed lines showing forklift routes
-2. **Warning Lights** - Amber when moving, red when stopped, fast amber strobe with side lights when yielding
-3. **Operator Waving** - Visual acknowledgment of safety stops
-4. **Backup Beeper** - Audio warning when reversing
-5. **Intersection Horn** - Honks when approaching waypoints (5 units distance)
-6. **Yielding System** - Higher ID forklift yields (backs up) when two forklifts meet
-
-#### Collision Detection
-
-```typescript
-const isSafeToMove = pathClear &&
-                     workersNearby.length === 0 &&
-                     forkliftsNearby.length === 0;
-```
-
----
-
-### TruckBay.tsx
-
-**Location:** `src/components/TruckBay.tsx`
-
-External truck loading area for product dispatch.
-
----
-
 ## Environment Components
 
-### Environment.tsx
+### OptimizedFactoryEnvironment.tsx
 
-**Location:** `src/components/Environment.tsx`
+**Location:** `src/components/environment/OptimizedFactoryEnvironment.tsx` (with `SceneEnvironmentIBL.tsx`, `SunShadowRig.tsx`, `OptimizedSkySystem.tsx`, `InteriorLightRig.tsx`, `NearHorizonCity.tsx` in the same directory)
 
 Factory environment including lighting, walls, and time-of-day effects.
 
@@ -371,9 +226,9 @@ Atmospheric particle effects for factory ambiance.
 
 ## UI Components
 
-### UIOverlay.tsx
+### GameInterface.tsx
 
-**Location:** `src/components/UIOverlay.tsx`
+**Location:** `src/components/ui-new/GameInterface.tsx`
 
 Main control panel and information display.
 
@@ -462,16 +317,8 @@ Real-time production KPIs and safety metrics.
 #### Safety Dashboard
 
 - Safety stops count
-- Worker evasions count
+- Route conflicts count
 - Time since last incident
-
----
-
-### WorkerDetailPanel.tsx
-
-**Location:** `src/components/WorkerDetailPanel.tsx`
-
-Modal panel showing detailed worker information.
 
 ---
 

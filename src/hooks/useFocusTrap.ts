@@ -1,4 +1,4 @@
-import { useEffect, RefObject } from 'react';
+import { useEffect, useRef, RefObject } from 'react';
 
 /**
  * Custom hook to trap focus within a modal dialog
@@ -9,6 +9,12 @@ import { useEffect, RefObject } from 'react';
  * @param onClose - Callback to close the modal
  */
 export const useFocusTrap = (ref: RefObject<HTMLElement>, isOpen: boolean, onClose: () => void) => {
+  // Callers often pass an inline onClose. Reading it through a ref keeps the
+  // trap effect keyed on isOpen alone, so a parent re-render does not re-run
+  // the trap, steal focus back to the first control, and bounce it out again.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!isOpen || !ref.current) return;
 
@@ -54,7 +60,7 @@ export const useFocusTrap = (ref: RefObject<HTMLElement>, isOpen: boolean, onClo
     const handleEscapeKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
       }
     };
 
@@ -72,5 +78,5 @@ export const useFocusTrap = (ref: RefObject<HTMLElement>, isOpen: boolean, onClo
         previouslyFocusedElement.focus();
       }
     };
-  }, [isOpen, onClose, ref]);
+  }, [isOpen, ref]);
 };

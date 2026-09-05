@@ -3,6 +3,7 @@ import { Activity, Boxes, Cpu, Gauge, Route, ShieldCheck, Truck } from 'lucide-r
 import { useShallow } from 'zustand/react/shallow';
 import { useProductionStore } from '../../../stores/productionStore';
 import { useSafetyStore } from '../../../stores/safetyStore';
+import { AgentCockpit } from './AgentCockpit';
 
 const clampPercent = (value: number): number => Math.min(100, Math.max(0, value));
 
@@ -179,6 +180,8 @@ export const AutonomyPanel: React.FC = () => {
         <Truck className="h-4 w-4 flex-none text-slate-400" />
         Select Simulated SCADA for alarm provenance, tag quality, trends, and control history.
       </div>
+
+      <AgentCockpit />
     </div>
   );
 };

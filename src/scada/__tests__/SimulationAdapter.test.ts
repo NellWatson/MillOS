@@ -79,25 +79,26 @@ describe('SimulationAdapter', () => {
   });
 
   describe('Lifecycle', () => {
-    it('should start disconnected', () => {
+    it('owns exactly one sampling interval across idempotent connect and disconnect', async () => {
       expect(adapter.isConnected()).toBe(false);
-    });
+      expect(vi.getTimerCount()).toBe(0);
 
-    it('should connect successfully', async () => {
       await adapter.connect();
       expect(adapter.isConnected()).toBe(true);
-    });
+      expect(adapter.getConnectionStatus()).toMatchObject({
+        connected: true,
+        reconnectAttempts: 0,
+      });
+      expect(vi.getTimerCount()).toBe(1);
 
-    it('should disconnect successfully', async () => {
       await adapter.connect();
+      expect(adapter.isConnected()).toBe(true);
+      expect(vi.getTimerCount()).toBe(1);
+
+      await adapter.disconnect();
       await adapter.disconnect();
       expect(adapter.isConnected()).toBe(false);
-    });
-
-    it('should handle multiple connect calls gracefully', async () => {
-      await adapter.connect();
-      await adapter.connect();
-      expect(adapter.isConnected()).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
     });
 
     it('produces the same telemetry sequence for the same tag catalogue', async () => {
@@ -187,50 +188,24 @@ describe('SimulationAdapter', () => {
       await adapter.connect();
     });
 
-    it('should notify subscribers on value updates', async () => {
+    it('replays current data, publishes each tick, and stops exactly at unsubscribe', async () => {
       const callback = vi.fn();
       const unsubscribe = adapter.subscribe(['TEST.TT001.PV'], callback);
 
-      // Advance fake timers past simulation tick interval (1000ms)
-      await vi.advanceTimersByTimeAsync(1100);
-
-      expect(callback).toHaveBeenCalled();
-      unsubscribe();
-    });
-
-    it('should stop notifying after unsubscribe', async () => {
-      const callback = vi.fn();
-      const unsubscribe = adapter.subscribe(['TEST.TT001.PV'], callback);
-
-      // Advance to trigger first tick
-      await vi.advanceTimersByTimeAsync(1100);
-      const callCount = callback.mock.calls.length;
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback.mock.calls[0][0]).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(callback).toHaveBeenCalledTimes(3);
 
       unsubscribe();
-
-      // Advance to trigger another tick
-      await vi.advanceTimersByTimeAsync(1100);
-
-      // Should not have received significantly more calls
-      expect(callback.mock.calls.length).toBeLessThanOrEqual(callCount + 1);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(callback).toHaveBeenCalledTimes(3);
     });
   });
 
   describe('Machine State Integration', () => {
     beforeEach(async () => {
       await adapter.connect();
-    });
-
-    it('should update machine states', () => {
-      adapter.updateMachineStates([
-        {
-          id: 'test-1',
-          status: 'running',
-          metrics: { load: 75, rpm: 1400 },
-        },
-      ]);
-
-      expect(adapter.getPlantLoad()).toBe(75);
     });
 
     it('should calculate plant load from running machines', () => {
@@ -278,9 +253,6 @@ describe('SimulationAdapter', () => {
       expect(faults).toHaveLength(1);
       expect(faults[0].faultType).toBe('sensor_fail');
 
-      // Advance fake timers past simulation tick interval (1000ms)
-      await vi.advanceTimersByTimeAsync(1100);
-
       const value = await adapter.readTag('TEST.TT001.PV');
       expect(value.quality).toBe('BAD');
     });
@@ -324,30 +296,21 @@ describe('SimulationAdapter', () => {
   });
 
   describe('Diagnostics', () => {
-    it('should return connection status', async () => {
-      const status = adapter.getConnectionStatus();
-      expect(status.connected).toBe(false);
-      expect(status.reconnectAttempts).toBe(0);
-
+    it('reports exact read rate and errors over elapsed uptime', async () => {
       await adapter.connect();
-      const connectedStatus = adapter.getConnectionStatus();
-      expect(connectedStatus.connected).toBe(true);
-      expect(connectedStatus.lastConnectTime).toBeDefined();
-    });
-
-    it('should return statistics', async () => {
-      await adapter.connect();
+      await vi.advanceTimersByTimeAsync(1_000);
       await adapter.readTag('TEST.TT001.PV');
       await adapter.readTag('TEST.ST001.PV');
+      await expect(adapter.readTag('UNKNOWN.TAG')).rejects.toThrow('Tag not found');
 
       const stats = adapter.getStatistics();
-      expect(stats).toHaveProperty('readsPerSecond');
-      expect(stats).toHaveProperty('writesPerSecond');
-      expect(stats).toHaveProperty('avgReadLatency');
-      expect(stats).toHaveProperty('errorCount');
-      expect(stats).toHaveProperty('uptime');
-      expect(stats.errorCount).toBe(0);
-      expect(stats.uptime).toBeGreaterThanOrEqual(0);
+      expect(stats).toMatchObject({
+        readsPerSecond: 3,
+        writesPerSecond: 0,
+        errorCount: 1,
+        uptime: 1,
+      });
+      expect(stats.avgReadLatency).toBeGreaterThanOrEqual(0);
     });
   });
 });

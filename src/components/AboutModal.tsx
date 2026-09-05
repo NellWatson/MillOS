@@ -86,6 +86,19 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, theme }
                       (CC BY 4.0)
                     </span>
                   </li>
+                  <li className="flex items-start gap-2">
+                    <span>
+                      Original MillOS soundtrack by Nell Watson, created with{' '}
+                      <a
+                        href="https://suno.com/@nellwatson"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-500 hover:underline inline-flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-cyan-500 rounded"
+                      >
+                        Suno <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                      </a>
+                    </span>
+                  </li>
                 </ul>
               </div>
 

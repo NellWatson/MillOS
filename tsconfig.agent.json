@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/env.d.ts", "src/agent/**/*.js", "src/agent/**/*.ts"],
+  "exclude": ["src/agent/**/__tests__/**"],
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true
+  }
+}

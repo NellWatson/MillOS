@@ -32,7 +32,7 @@ const DEFAULT_OPTIONS: Required<MudOptions> = {
  */
 export const generateMud = (size: number = 512, options: MudOptions = {}): THREE.DataTexture => {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const cacheKey = `mud-${size}-${opts.wetness}-${opts.hasPuddles}`;
+  const cacheKey = `mud-${size}-${opts.wetness}-${opts.hasPuddles}-${opts.hasFootprints}`;
 
   return getTexture(cacheKey, () => {
     const data = new Uint8Array(size * size * 4);

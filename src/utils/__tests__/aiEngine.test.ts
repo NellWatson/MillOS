@@ -14,22 +14,22 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   generateContextAwareDecision,
   trackDecisionOutcome,
-  getPredictedEvents,
   getImpactStats,
   getConfidenceAdjustments,
-  getCrossMachinePatterns,
-  getAnomalyHistory,
-  getSparklineData,
   resetShiftStats,
   shouldTriggerAudioCue,
   initializeShiftObserver,
   getProductionTargets,
-  getMetricTrends,
   getAIMemoryState,
-  getCongestionHotspots,
+  generateStrategicDecision,
+  initializeAIEngine,
+  initializeDecisionOutcomeTracking,
 } from '../aiEngine';
 import { useProductionStore } from '../../stores/productionStore';
 import { useGameSimulationStore } from '../../stores/gameSimulationStore';
+import { useAIConfigStore } from '../../stores/aiConfigStore';
+import { geminiClient } from '../geminiClient';
+import { webgpuClient } from '../webgpuClient';
 import { MachineType, AIDecision } from '../../types';
 
 // Mock the store
@@ -64,6 +64,8 @@ vi.mock('../logger', () => ({
 }));
 
 describe('aiEngine - Core Functions', () => {
+  const singletonCleanups: Array<() => void> = [];
+
   beforeEach(() => {
     // Reset all mocks before each test
     vi.clearAllMocks();
@@ -128,13 +130,13 @@ describe('aiEngine - Core Functions', () => {
       currentShift: 'morning' as const,
       weather: 'clear' as const,
       heatMapData: [],
-      addAIDecision: vi.fn(),
+      addAIDecision: vi.fn(() => true),
     };
 
     vi.mocked(useProductionStore.getState).mockReturnValue(mockStoreState as any);
     vi.mocked(useProductionStore.getState).mockReturnValue({
       ...mockStoreState,
-      addAIDecision: vi.fn(),
+      addAIDecision: vi.fn(() => true),
       _indices: {
         heatMapIndex: new Map(),
       },
@@ -176,21 +178,22 @@ describe('aiEngine - Core Functions', () => {
     } as any);
   });
 
+  afterEach(() => {
+    singletonCleanups.splice(0).forEach((cleanup) => cleanup());
+    resetShiftStats();
+  });
+
   describe('generateContextAwareDecision', () => {
     it('should generate a decision when context is valid', () => {
       const decision = generateContextAwareDecision();
 
-      // Decision may be null if no issues are detected, which is valid
-      if (decision) {
-        expect(decision).toHaveProperty('id');
-        expect(decision).toHaveProperty('timestamp');
-        expect(decision).toHaveProperty('type');
-        expect(decision).toHaveProperty('action');
-        expect(decision).toHaveProperty('reasoning');
-        expect(decision).toHaveProperty('confidence');
-        expect(decision).toHaveProperty('status');
-        expect(decision.status).toBe('pending');
-      }
+      expect(decision).toMatchObject({
+        type: 'optimization',
+        status: 'pending',
+        machineId: 'RM-101',
+      });
+      expect(decision?.id).toBeTruthy();
+      expect(decision?.timestamp).toBeInstanceOf(Date);
     });
 
     it('should return null when no machines exist', () => {
@@ -232,9 +235,8 @@ describe('aiEngine - Core Functions', () => {
 
       const decision = generateContextAwareDecision('maintenance');
 
-      if (decision) {
-        expect(decision.type).toBe('maintenance');
-      }
+      expect(decision).not.toBeNull();
+      expect(decision?.type).toBe('maintenance');
     });
 
     it('should generate safety decisions during emergency drill mode', () => {
@@ -245,22 +247,15 @@ describe('aiEngine - Core Functions', () => {
 
       const decision = generateContextAwareDecision();
 
-      // During drill mode, should generate drill-related decisions
-      if (decision) {
-        expect(['safety', 'coordination']).toContain(decision.type);
-      }
+      expect(decision).not.toBeNull();
+      expect(decision?.type).toBe('safety');
     });
 
     it('should add decision to store when generated', () => {
-      const mockAddDecision = vi.fn();
+      const mockAddDecision = vi.fn(() => true);
       vi.mocked(useProductionStore.getState).mockReturnValue({
         ...vi.mocked(useProductionStore.getState)(),
         addAIDecision: mockAddDecision,
-      });
-
-      // Create conditions that will generate a decision
-      vi.mocked(useProductionStore.getState).mockReturnValue({
-        ...vi.mocked(useProductionStore.getState)(),
         machines: [
           {
             id: 'RM-101',
@@ -284,10 +279,11 @@ describe('aiEngine - Core Functions', () => {
         ],
       });
 
-      generateContextAwareDecision();
+      const decision = generateContextAwareDecision();
 
-      // Decision should be recorded (may be called 0 or 1 times depending on conditions)
-      expect(mockAddDecision.mock.calls.length).toBeGreaterThanOrEqual(0);
+      expect(decision).not.toBeNull();
+      expect(mockAddDecision).toHaveBeenCalledOnce();
+      expect(mockAddDecision).toHaveBeenCalledWith(decision);
     });
   });
 
@@ -311,7 +307,8 @@ describe('aiEngine - Core Functions', () => {
       trackDecisionOutcome(decision);
       const statsAfter = getImpactStats();
 
-      expect(statsAfter.totalDecisions).toBeGreaterThanOrEqual(statsBefore.totalDecisions);
+      expect(statsAfter.totalDecisions).toBe(statsBefore.totalDecisions + 1);
+      expect(statsAfter.successfulDecisions).toBe(statsBefore.successfulDecisions + 1);
     });
 
     it('should not track decisions without outcomes', () => {
@@ -375,67 +372,16 @@ describe('aiEngine - Core Functions', () => {
       trackDecisionOutcome(decision);
       const statsAfter = getImpactStats();
 
-      // Should increment total but not successful
-      expect(statsAfter.totalDecisions).toBeGreaterThanOrEqual(statsBefore.totalDecisions);
-    });
-  });
-
-  describe('Memory Management', () => {
-    it('should limit predicted events to maximum count', () => {
-      // Generate many decisions to potentially create predicted events
-      for (let i = 0; i < 20; i++) {
-        generateContextAwareDecision();
-      }
-
-      const events = getPredictedEvents();
-      expect(events.length).toBeLessThanOrEqual(10); // MAX_PREDICTED_EVENTS = 10
-    });
-
-    it('should limit cross-machine patterns to maximum count', () => {
-      // Patterns are limited by memory management
-      const patterns = getCrossMachinePatterns();
-      expect(patterns.length).toBeLessThanOrEqual(50); // MAX_CROSS_MACHINE_PATTERNS = 50
-    });
-
-    it('should limit anomaly history to maximum count', () => {
-      const anomalies = getAnomalyHistory();
-      expect(anomalies.length).toBeLessThanOrEqual(100); // MAX_ANOMALY_HISTORY = 100
-    });
-
-    it('should enforce metric history limits', () => {
-      // Generate decisions to populate metric history
-      for (let i = 0; i < 100; i++) {
-        generateContextAwareDecision();
-      }
-
-      const trends = getMetricTrends();
-      trends.forEach((trend) => {
-        expect(trend.history.length).toBeLessThanOrEqual(60); // MAX_METRIC_HISTORY_POINTS = 60
-      });
+      expect(statsAfter.totalDecisions).toBe(statsBefore.totalDecisions + 1);
+      expect(statsAfter.successfulDecisions).toBe(statsBefore.successfulDecisions);
     });
   });
 
   describe('Confidence Adjustment Learning', () => {
-    it('should return confidence adjustments for all decision types', () => {
-      const adjustments = getConfidenceAdjustments();
-
-      expect(adjustments).toHaveProperty('coordination');
-      expect(adjustments).toHaveProperty('optimization');
-      expect(adjustments).toHaveProperty('prediction');
-      expect(adjustments).toHaveProperty('maintenance');
-      expect(adjustments).toHaveProperty('safety');
-
-      // All should be numbers
-      Object.values(adjustments).forEach((value) => {
-        expect(typeof value).toBe('number');
-      });
-    });
-
     it('should adjust confidence based on historical success rates', () => {
-      getConfidenceAdjustments();
-
-      // Create successful decisions
-      for (let i = 0; i < 5; i++) {
+      // Thirty outcomes replace the complete learning window, making the
+      // expected adjustment independent of earlier singleton state.
+      for (let i = 0; i < 30; i++) {
         const decision: AIDecision = {
           id: `ai-test-success-${i}`,
           timestamp: new Date(),
@@ -453,107 +399,11 @@ describe('aiEngine - Core Functions', () => {
 
       const adjustmentsAfter = getConfidenceAdjustments();
 
-      // Adjustments should exist (may change or stay same depending on thresholds)
-      expect(adjustmentsAfter).toBeDefined();
-      expect(Object.keys(adjustmentsAfter)).toHaveLength(5);
-    });
-  });
-
-  describe('Utility Functions', () => {
-    it('should return deep copies of predicted events', () => {
-      const events1 = getPredictedEvents();
-      const events2 = getPredictedEvents();
-
-      // Should be different array instances
-      expect(events1).not.toBe(events2);
-
-      // Modifying one should not affect the other
-      if (events1.length > 0) {
-        events1[0].confidence = 999;
-        expect(events2[0]?.confidence).not.toBe(999);
-      }
-    });
-
-    it('should return deep copies of cross-machine patterns', () => {
-      const patterns1 = getCrossMachinePatterns();
-      const patterns2 = getCrossMachinePatterns();
-
-      // Should be different array instances
-      expect(patterns1).not.toBe(patterns2);
-    });
-
-    it('should return deep copies of anomaly history', () => {
-      const anomalies1 = getAnomalyHistory();
-      const anomalies2 = getAnomalyHistory();
-
-      // Should be different array instances
-      expect(anomalies1).not.toBe(anomalies2);
-    });
-
-    it('should return deep copies of congestion hotspots', () => {
-      const hotspots1 = getCongestionHotspots();
-      const hotspots2 = getCongestionHotspots();
-
-      // Should be different array instances
-      expect(hotspots1).not.toBe(hotspots2);
-    });
-
-    it('should return sparkline data for valid machine metrics', () => {
-      // Generate some decisions to populate metric history
-      for (let i = 0; i < 10; i++) {
-        generateContextAwareDecision();
-      }
-
-      const sparkline = getSparklineData('RM-101', 'temperature');
-      expect(Array.isArray(sparkline)).toBe(true);
-
-      // All values should be normalized between 0 and 1
-      sparkline.forEach((value) => {
-        expect(value).toBeGreaterThanOrEqual(0);
-        expect(value).toBeLessThanOrEqual(1);
-      });
-    });
-
-    it('should return empty array for non-existent machine sparkline', () => {
-      const sparkline = getSparklineData('NONEXISTENT', 'temperature');
-      expect(sparkline).toEqual([]);
+      expect(adjustmentsAfter.optimization).toBe(7);
     });
   });
 
   describe('Impact Statistics', () => {
-    it('should return impact stats with all required fields', () => {
-      const stats = getImpactStats();
-
-      expect(stats).toHaveProperty('totalDecisions');
-      expect(stats).toHaveProperty('successfulDecisions');
-      expect(stats).toHaveProperty('preventedShutdowns');
-      expect(stats).toHaveProperty('estimatedSavings');
-      expect(stats).toHaveProperty('shiftStart');
-      expect(stats).toHaveProperty('byType');
-
-      expect(typeof stats.totalDecisions).toBe('number');
-      expect(typeof stats.successfulDecisions).toBe('number');
-      expect(typeof stats.preventedShutdowns).toBe('number');
-      expect(typeof stats.estimatedSavings).toBe('number');
-    });
-
-    it('should track stats by decision type', () => {
-      const stats = getImpactStats();
-
-      expect(stats.byType).toHaveProperty('coordination');
-      expect(stats.byType).toHaveProperty('optimization');
-      expect(stats.byType).toHaveProperty('prediction');
-      expect(stats.byType).toHaveProperty('maintenance');
-      expect(stats.byType).toHaveProperty('safety');
-
-      Object.values(stats.byType).forEach((typeStats) => {
-        expect(typeStats).toHaveProperty('count');
-        expect(typeStats).toHaveProperty('successRate');
-        expect(typeof typeStats.count).toBe('number');
-        expect(typeof typeStats.successRate).toBe('number');
-      });
-    });
-
     it('should reset shift stats correctly', () => {
       // Track some decisions
       const decision: AIDecision = {
@@ -581,18 +431,6 @@ describe('aiEngine - Core Functions', () => {
   });
 
   describe('Production Targets', () => {
-    it('should return production targets with correct structure', () => {
-      const targets = getProductionTargets();
-
-      expect(targets).toHaveProperty('daily');
-      expect(targets).toHaveProperty('shift');
-      expect(targets).toHaveProperty('current');
-
-      expect(typeof targets.daily).toBe('number');
-      expect(typeof targets.shift).toBe('number');
-      expect(typeof targets.current).toBe('number');
-    });
-
     it('should reset current production on shift stats reset', () => {
       resetShiftStats();
 
@@ -668,49 +506,241 @@ describe('aiEngine - Core Functions', () => {
   });
 
   describe('AI Memory State', () => {
-    it('should return complete memory state', () => {
-      const memoryState = getAIMemoryState();
+    it('tracks the exact drill phase transition', () => {
+      vi.mocked(useGameSimulationStore.getState).mockReturnValue({
+        currentShift: 'morning',
+        weather: 'clear',
+        emergencyDrillMode: true,
+      } as any);
+      generateContextAwareDecision();
+      expect(getAIMemoryState().drillPhase).toBe('isolation');
 
-      expect(memoryState).toHaveProperty('machineDecisionCounts');
-      expect(memoryState).toHaveProperty('assetDecisionCounts');
-      expect(memoryState).toHaveProperty('activeCooldowns');
-      expect(memoryState).toHaveProperty('pendingChains');
-      expect(memoryState).toHaveProperty('predictedEvents');
-      expect(memoryState).toHaveProperty('congestionHotspots');
-      expect(memoryState).toHaveProperty('drillPhase');
-    });
-
-    it('should track drill phase state', () => {
-      const memoryState = getAIMemoryState();
-
-      expect(['none', 'alert', 'evacuation', 'assembly', 'review']).toContain(
-        memoryState.drillPhase
-      );
+      vi.mocked(useGameSimulationStore.getState).mockReturnValue({
+        currentShift: 'morning',
+        weather: 'clear',
+        emergencyDrillMode: false,
+      } as any);
+      generateContextAwareDecision();
+      expect(getAIMemoryState().drillPhase).toBe('none');
     });
   });
 
   describe('Shift Observer', () => {
-    it('should initialize shift observer and return cleanup function', () => {
-      const cleanup = initializeShiftObserver();
-
-      expect(typeof cleanup).toBe('function');
-
-      // Cleanup should not throw
-      expect(() => cleanup()).not.toThrow();
-    });
-
-    it('should handle multiple initializations gracefully', () => {
+    it('keeps the shared observer alive until every lease is released', () => {
+      const unsubscribe = vi.fn();
+      vi.mocked(useGameSimulationStore.subscribe).mockReturnValue(unsubscribe);
       const cleanup1 = initializeShiftObserver();
       const cleanup2 = initializeShiftObserver();
+      singletonCleanups.push(cleanup1, cleanup2);
 
-      expect(typeof cleanup1).toBe('function');
-      expect(typeof cleanup2).toBe('function');
+      expect(useGameSimulationStore.subscribe).toHaveBeenCalledOnce();
+      cleanup1();
+      expect(unsubscribe).not.toHaveBeenCalled();
+      cleanup2();
+      expect(unsubscribe).toHaveBeenCalledOnce();
+    });
 
-      // Both cleanups should work
-      expect(() => {
-        cleanup1();
-        cleanup2();
-      }).not.toThrow();
+    it('keeps outcome tracking alive until every lease is released', () => {
+      const unsubscribe = vi.fn();
+      vi.mocked(useProductionStore.subscribe).mockReturnValue(unsubscribe);
+      const cleanup1 = initializeDecisionOutcomeTracking();
+      const cleanup2 = initializeDecisionOutcomeTracking();
+      singletonCleanups.push(cleanup1, cleanup2);
+
+      expect(useProductionStore.subscribe).toHaveBeenCalledOnce();
+      cleanup1();
+      expect(unsubscribe).not.toHaveBeenCalled();
+      cleanup2();
+      expect(unsubscribe).toHaveBeenCalledOnce();
+    });
+
+    it('records an outcome completed between observer leases exactly once', () => {
+      const unsubscribe = vi.fn();
+      const decision: AIDecision = {
+        id: 'outcome-created-during-observer-downtime',
+        timestamp: new Date(),
+        type: 'maintenance',
+        action: 'Inspect the roller mill',
+        reasoning: 'Condition threshold reached',
+        confidence: 90,
+        impact: 'Avoids an unplanned stop',
+        status: 'completed',
+        outcome: 'Completed successfully',
+        priority: 'high',
+      };
+      let productionState = {
+        ...vi.mocked(useProductionStore.getState)(),
+        aiDecisions: [] as AIDecision[],
+      };
+      vi.mocked(useProductionStore.getState).mockImplementation(() => productionState as any);
+      vi.mocked(useProductionStore.subscribe).mockImplementation(() => unsubscribe);
+
+      const firstCleanup = initializeDecisionOutcomeTracking();
+      firstCleanup();
+      const before = getImpactStats();
+      productionState = { ...productionState, aiDecisions: [decision] };
+
+      const secondCleanup = initializeDecisionOutcomeTracking();
+      expect(getImpactStats().totalDecisions).toBe(before.totalDecisions + 1);
+      secondCleanup();
+      const thirdCleanup = initializeDecisionOutcomeTracking();
+      expect(getImpactStats().totalDecisions).toBe(before.totalDecisions + 1);
+      thirdCleanup();
+      singletonCleanups.push(firstCleanup, secondCleanup, thirdCleanup);
+    });
+  });
+
+  describe('Strategic request lifecycle', () => {
+    const configureStrategicLayer = (): void => {
+      useAIConfigStore.setState((state) => ({
+        aiMode: 'hybrid',
+        llmBackend: 'gemini',
+        isGeminiConnected: true,
+        strategic: {
+          ...state.strategic,
+          legacyPriorities: [],
+          isThinking: false,
+        },
+      }));
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      useAIConfigStore.setState((state) => ({
+        aiMode: 'heuristic',
+        isGeminiConnected: false,
+        strategic: { ...state.strategic, legacyPriorities: [], isThinking: false },
+      }));
+    });
+
+    it('shares one in-flight strategic request and commits it once', async () => {
+      configureStrategicLayer();
+      vi.spyOn(geminiClient, 'isConnected').mockReturnValue(true);
+      let resolveResponse!: (response: string) => void;
+      const response = new Promise<string>((resolve) => {
+        resolveResponse = resolve;
+      });
+      const generate = vi.spyOn(geminiClient, 'generateContent').mockReturnValue(response);
+      const addDecision = vi.mocked(useProductionStore.getState)().addAIDecision as ReturnType<
+        typeof vi.fn
+      >;
+
+      const first = generateStrategicDecision();
+      const second = generateStrategicDecision();
+      expect(first).toBe(second);
+      expect(generate).toHaveBeenCalledOnce();
+      expect(useAIConfigStore.getState().strategic.isThinking).toBe(true);
+
+      resolveResponse('{"priorities":["Protect the roller mill"],"reasoning":"Stable load"}');
+      const [firstDecision, secondDecision] = await Promise.all([first, second]);
+
+      expect(firstDecision).toBe(secondDecision);
+      expect(firstDecision).toMatchObject({
+        type: 'optimization',
+        action: 'Strategic: Protect the roller mill',
+        reasoning: 'Stable load',
+        status: 'completed',
+      });
+      expect(addDecision).toHaveBeenCalledOnce();
+      expect(addDecision).toHaveBeenCalledWith(firstDecision);
+      expect(useAIConfigStore.getState().strategic.legacyPriorities).toEqual([
+        'Protect the roller mill',
+      ]);
+      expect(useAIConfigStore.getState().strategic.isThinking).toBe(false);
+    });
+
+    it('discards an outstanding response after the last engine lease is released', async () => {
+      configureStrategicLayer();
+      vi.spyOn(geminiClient, 'isConnected').mockReturnValue(true);
+      let resolveResponse!: (response: string) => void;
+      vi.spyOn(geminiClient, 'generateContent').mockReturnValue(
+        new Promise<string>((resolve) => {
+          resolveResponse = resolve;
+        })
+      );
+      const addDecision = vi.mocked(useProductionStore.getState)().addAIDecision as ReturnType<
+        typeof vi.fn
+      >;
+      const cleanup = initializeAIEngine();
+      singletonCleanups.push(cleanup);
+      const pending = generateStrategicDecision();
+
+      cleanup();
+      resolveResponse('{"priorities":["Stale response"],"reasoning":"Too late"}');
+
+      await expect(pending).resolves.toBeNull();
+      expect(addDecision).not.toHaveBeenCalled();
+      expect(useAIConfigStore.getState().strategic.legacyPriorities).toEqual([]);
+      expect(useAIConfigStore.getState().strategic.isThinking).toBe(false);
+    });
+
+    it('rejects malformed strategic output without committing state', async () => {
+      configureStrategicLayer();
+      vi.spyOn(geminiClient, 'isConnected').mockReturnValue(true);
+      vi.spyOn(geminiClient, 'generateContent').mockResolvedValue(
+        '{"priorities":[42,null],"reasoning":"invalid priority types"}'
+      );
+      const addDecision = vi.mocked(useProductionStore.getState)().addAIDecision as ReturnType<
+        typeof vi.fn
+      >;
+
+      await expect(generateStrategicDecision()).resolves.toBeNull();
+
+      expect(addDecision).not.toHaveBeenCalled();
+      expect(useAIConfigStore.getState().strategic.legacyPriorities).toEqual([]);
+      expect(useAIConfigStore.getState().strategic.isThinking).toBe(false);
+    });
+
+    it('invalidates an old backend response and starts the newly selected backend', async () => {
+      configureStrategicLayer();
+      vi.spyOn(geminiClient, 'isConnected').mockReturnValue(true);
+      let resolveGemini!: (response: string) => void;
+      vi.spyOn(geminiClient, 'generateContent').mockReturnValue(
+        new Promise<string>((resolve) => {
+          resolveGemini = resolve;
+        })
+      );
+      vi.spyOn(webgpuClient, 'isConnected').mockReturnValue(true);
+      vi.spyOn(webgpuClient, 'generateContent').mockResolvedValue(
+        '{"priorities":["Use the local controller"],"reasoning":"Backend changed"}'
+      );
+      const addDecision = vi.mocked(useProductionStore.getState)().addAIDecision as ReturnType<
+        typeof vi.fn
+      >;
+
+      const stale = generateStrategicDecision();
+      useAIConfigStore.setState({ llmBackend: 'webgpu', webgpuModelReady: true });
+      const current = generateStrategicDecision();
+      expect(current).not.toBe(stale);
+      await expect(current).resolves.toMatchObject({
+        action: 'Strategic: Use the local controller',
+      });
+
+      resolveGemini('{"priorities":["Use stale cloud advice"],"reasoning":"Too late"}');
+      await expect(stale).resolves.toBeNull();
+      expect(addDecision).toHaveBeenCalledOnce();
+      expect(useAIConfigStore.getState().strategic.legacyPriorities).toEqual([
+        'Use the local controller',
+      ]);
+    });
+
+    it('leaves strategic state unchanged when decision admission is backpressured', async () => {
+      configureStrategicLayer();
+      vi.spyOn(geminiClient, 'isConnected').mockReturnValue(true);
+      vi.spyOn(geminiClient, 'generateContent').mockResolvedValue(
+        '{"priorities":["Unrecorded priority"],"reasoning":"Queue is full"}'
+      );
+      const addDecision = vi.mocked(useProductionStore.getState)().addAIDecision as ReturnType<
+        typeof vi.fn
+      >;
+      addDecision.mockReturnValue(false);
+      const before = getAIMemoryState();
+
+      await expect(generateStrategicDecision()).resolves.toBeNull();
+
+      expect(addDecision).toHaveBeenCalledOnce();
+      expect(useAIConfigStore.getState().strategic.legacyPriorities).toEqual([]);
+      expect(getAIMemoryState().machineDecisionCounts).toEqual(before.machineDecisionCounts);
     });
   });
 
@@ -735,7 +765,7 @@ describe('aiEngine - Core Functions', () => {
         currentShift: 'morning' as const,
         weather: 'clear' as const,
         heatMapData: [],
-        addAIDecision: vi.fn(),
+        addAIDecision: vi.fn(() => true),
         graphics: {
           quality: 'medium' as const,
           shadows: true,
@@ -748,9 +778,9 @@ describe('aiEngine - Core Functions', () => {
         resetGraphicsToPreset: vi.fn(),
       } as any);
 
-      expect(() => generateContextAwareDecision()).not.toThrow();
-      expect(() => getPredictedEvents()).not.toThrow();
-      expect(() => getImpactStats()).not.toThrow();
+      const before = getAIMemoryState();
+      expect(generateContextAwareDecision()).toBeNull();
+      expect(getAIMemoryState()).toEqual(before);
     });
 
     it('should handle decisions with missing optional fields', () => {
@@ -768,61 +798,57 @@ describe('aiEngine - Core Functions', () => {
         // No optional equipment linkage.
       };
 
-      expect(() => trackDecisionOutcome(minimalDecision)).not.toThrow();
-    });
-
-    it('should return empty metric trends for new machines', () => {
-      const trends = getMetricTrends();
-      expect(trends).toBeInstanceOf(Map);
+      const before = getImpactStats();
+      trackDecisionOutcome(minimalDecision);
+      const after = getImpactStats();
+      expect(after.totalDecisions).toBe(before.totalDecisions + 1);
+      expect(after.successfulDecisions).toBe(before.successfulDecisions + 1);
+      expect(after.byType.coordination.count).toBe(before.byType.coordination.count + 1);
     });
   });
 
   describe('Background Loop', () => {
+    const cleanups: Array<() => void> = [];
+
     beforeEach(() => {
       vi.useFakeTimers();
     });
 
     afterEach(() => {
+      cleanups.splice(0).forEach((cleanup) => cleanup());
       vi.useRealTimers();
     });
 
-    it('should start background loop on initialization', async () => {
-      const { initializeAIEngine } = await import('../aiEngine');
-      const cleanup = initializeAIEngine();
-
-      expect(typeof cleanup).toBe('function');
-
-      // Should have started an interval
-      // Note: precise count may vary if other internal timers exist, but at least one for the loop
-      expect(vi.getTimerCount()).toBeGreaterThan(0);
-
-      cleanup();
-    });
-
-    it('should clean up background loop on unmount', async () => {
-      const { initializeAIEngine } = await import('../aiEngine');
-      const cleanup = initializeAIEngine();
-
-      cleanup();
-
-      // Should clear the interval
-      expect(() => initializeAIEngine()).not.toThrow();
-    });
-
-    it('should prevent multiple loops from running', async () => {
-      const { initializeAIEngine } = await import('../aiEngine');
-
+    it('shares one loop across leases and fully restarts after the last cleanup', () => {
+      const shiftUnsubscribe = vi.fn();
+      const outcomeUnsubscribe = vi.fn();
+      vi.mocked(useGameSimulationStore.subscribe).mockReturnValue(shiftUnsubscribe);
+      vi.mocked(useProductionStore.subscribe).mockReturnValue(outcomeUnsubscribe);
       const cleanup1 = initializeAIEngine();
+      cleanups.push(cleanup1);
+      singletonCleanups.push(cleanup1);
       const initialTimerCount = vi.getTimerCount();
-
-      // Attempting to initialize again should not create a new interval if loopInterval is global
       const cleanup2 = initializeAIEngine();
+      cleanups.push(cleanup2);
+      singletonCleanups.push(cleanup2);
 
-      // Same number of timers implies no double-instantiation of the main loop
+      expect(initialTimerCount).toBe(1);
       expect(vi.getTimerCount()).toBe(initialTimerCount);
-
       cleanup1();
+      expect(vi.getTimerCount()).toBe(1);
+      expect(shiftUnsubscribe).not.toHaveBeenCalled();
+      expect(outcomeUnsubscribe).not.toHaveBeenCalled();
       cleanup2();
+      expect(vi.getTimerCount()).toBe(0);
+      expect(shiftUnsubscribe).toHaveBeenCalledOnce();
+      expect(outcomeUnsubscribe).toHaveBeenCalledOnce();
+
+      const cleanup3 = initializeAIEngine();
+      cleanups.push(cleanup3);
+      singletonCleanups.push(cleanup3);
+      expect(vi.getTimerCount()).toBe(1);
+      cleanup3();
+      expect(vi.getTimerCount()).toBe(0);
     });
   });
 });

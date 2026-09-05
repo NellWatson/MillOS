@@ -74,6 +74,9 @@ export const TICK_PRIORITY = {
   BACKGROUND: 200, // Analytics, history recording
 } as const;
 
+const DEFAULT_TICK_INTERVAL = 0.5;
+const DEFAULT_LAZY_ITEMS_PER_FRAME = 1;
+
 class CentralTickSystemImpl {
   private callbacks: Map<string, RegisteredCallback> = new Map();
   private sortedCallbacks: RegisteredCallback[] = [];
@@ -81,7 +84,7 @@ class CentralTickSystemImpl {
 
   // Timing
   private lastTickTime = 0;
-  private tickInterval = 0.5; // seconds - 0.5s gives ~1.5 game-min jumps at gameSpeed=180
+  private tickInterval = DEFAULT_TICK_INTERVAL;
   private tickCount = 0;
   private elapsedTime = 0;
 
@@ -93,7 +96,7 @@ class CentralTickSystemImpl {
 
   // LAZY EXECUTION - spread non-critical work across frames
   private lazyQueue: Array<{ callback: RegisteredCallback; ctx: TickContext }> = [];
-  private lazyItemsPerFrame = 1; // Process 1 callback per frame for smoothest distribution
+  private lazyItemsPerFrame = DEFAULT_LAZY_ITEMS_PER_FRAME;
   private lazyEnabled = true; // Can disable for testing
 
   /**
@@ -105,6 +108,7 @@ class CentralTickSystemImpl {
   register(id: string, callback: TickCallback, priority: number = TICK_PRIORITY.NORMAL): void {
     if (this.callbacks.has(id)) {
       console.warn(`[CentralTick] Callback '${id}' already registered, replacing`);
+      this.lazyQueue = this.lazyQueue.filter((item) => item.callback.id !== id);
     }
 
     this.callbacks.set(id, {
@@ -134,6 +138,9 @@ class CentralTickSystemImpl {
     const cb = this.callbacks.get(id);
     if (cb) {
       cb.enabled = enabled;
+      if (!enabled) {
+        this.lazyQueue = this.lazyQueue.filter((item) => item.callback.id !== id);
+      }
     }
   }
 
@@ -141,7 +148,7 @@ class CentralTickSystemImpl {
    * Set tick interval in seconds
    */
   setInterval(seconds: number): void {
-    this.tickInterval = Math.max(0.1, seconds);
+    this.tickInterval = Number.isFinite(seconds) ? Math.max(0.1, seconds) : DEFAULT_TICK_INTERVAL;
   }
 
   /**
@@ -149,6 +156,7 @@ class CentralTickSystemImpl {
    */
   setPaused(paused: boolean): void {
     this.isPaused = paused;
+    if (paused) this.lazyQueue = [];
   }
 
   /**
@@ -164,13 +172,16 @@ class CentralTickSystemImpl {
    */
   setLazyEnabled(enabled: boolean): void {
     this.lazyEnabled = enabled;
+    if (!enabled) this.lazyQueue = [];
   }
 
   /**
    * Set how many lazy callbacks to process per frame
    */
   setLazyItemsPerFrame(count: number): void {
-    this.lazyItemsPerFrame = Math.max(1, count);
+    this.lazyItemsPerFrame = Number.isFinite(count)
+      ? Math.max(1, Math.floor(count))
+      : DEFAULT_LAZY_ITEMS_PER_FRAME;
   }
 
   /**
@@ -181,7 +192,14 @@ class CentralTickSystemImpl {
    * @returns true if a tick was executed
    */
   tick(currentTime: number, gameTime: number, gameSpeed: number): boolean {
-    if (this.isPaused) return false;
+    if (
+      this.isPaused ||
+      !Number.isFinite(currentTime) ||
+      !Number.isFinite(gameTime) ||
+      !Number.isFinite(gameSpeed)
+    ) {
+      return false;
+    }
 
     // Check if enough time has passed
     const deltaTime = currentTime - this.lastTickTime;
@@ -224,8 +242,16 @@ class CentralTickSystemImpl {
           console.error(`[CentralTick] Error in callback '${registered.id}':`, error);
         }
       } else {
-        // Queue non-critical callbacks for lazy execution
-        this.lazyQueue.push({ callback: registered, ctx });
+        // Keep only the freshest pending context for each callback. If rendering
+        // cannot drain as fast as ticks arrive, historical work is stale rather
+        // than valuable and must not grow without bound.
+        const pending = this.lazyQueue.find((item) => item.callback.id === registered.id);
+        if (pending) {
+          pending.callback = registered;
+          pending.ctx = ctx;
+        } else {
+          this.lazyQueue.push({ callback: registered, ctx });
+        }
       }
     }
 
@@ -240,7 +266,7 @@ class CentralTickSystemImpl {
    * Processes a few queued callbacks per frame to spread CPU load
    */
   processLazyQueue(): void {
-    if (this.lazyQueue.length === 0) return;
+    if (this.isPaused || this.lazyQueue.length === 0) return;
 
     // Process up to lazyItemsPerFrame callbacks
     const toProcess = Math.min(this.lazyItemsPerFrame, this.lazyQueue.length);
@@ -248,6 +274,8 @@ class CentralTickSystemImpl {
     for (let i = 0; i < toProcess; i++) {
       const item = this.lazyQueue.shift();
       if (!item) break;
+      const current = this.callbacks.get(item.callback.id);
+      if (current !== item.callback || !current.enabled) continue;
 
       try {
         item.callback.callback(item.ctx);
@@ -312,6 +340,10 @@ class CentralTickSystemImpl {
     this.elapsedTime = 0;
     this.pendingUpdates = [];
     this.lazyQueue = [];
+    this.tickInterval = DEFAULT_TICK_INTERVAL;
+    this.isPaused = false;
+    this.lazyItemsPerFrame = DEFAULT_LAZY_ITEMS_PER_FRAME;
+    this.lazyEnabled = true;
   }
 }
 

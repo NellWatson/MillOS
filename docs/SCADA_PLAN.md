@@ -1,8 +1,18 @@
 # SCADA Integration Plan for MillOS
 
-## Status: COMPLETE
+## Status: current subsystem reference, core implementation complete
 
-All phases of the SCADA integration have been implemented, serving as both the original architecture plan and current usage documentation.
+The core SCADA phases have been implemented. This document remains a subsystem reference, while current source and real runtime evidence are authoritative. Protocol support does not prove that a live endpoint is connected, writable, secure, or operationally accepted.
+
+**Agent-operating target:** [Agent Operating Architecture](./AGENT_OPERATING_ARCHITECTURE.md)
+
+**State ownership:** [State Management](./state-management.md)
+
+### Agent control boundary
+
+SCADA observations will enter the planned query plane with tag identity, source mode, quality, freshness, timestamp, and completeness. Alarm and setpoint actions will enter the command plane through typed capabilities, previews, actor grants, current-revision checks, receipts, and far-side verification.
+
+Simulation, shadow, replay, hybrid, disconnected, and live external modes remain distinct. A simulation grant cannot authorize an external write. External setpoints remain default denied until endpoint identity, transport, allowlists, ranges, acknowledgement, observed far-side state, audit retention, and human operational acceptance are proven.
 
 ---
 
@@ -18,12 +28,12 @@ All phases of the SCADA integration have been implemented, serving as both the o
 | Phase 6 | Backend Proxy (OPC-UA/Modbus) | Complete |
 | Phase 7 | Testing & Documentation | Complete |
 
-### Files Created
+### Core entrypoints
 
 ```
 src/scada/
 ├── types.ts                    # All TypeScript interfaces
-├── tagDatabase.ts              # 90 SCADA tags (ISA naming)
+├── tagDatabase.ts              # 122 process, utility, vehicle, and operational tags
 ├── AlarmManager.ts             # ISA-18.2 alarm state machine
 ├── HistoryStore.ts             # IndexedDB with 24h retention
 ├── SCADAService.ts             # Main orchestration service
@@ -38,7 +48,9 @@ src/scada/
     ├── SimulationAdapter.ts    # Physics-based simulation
     ├── RESTAdapter.ts          # HTTP polling
     ├── MQTTAdapter.ts          # MQTT over WebSocket
-    └── WebSocketAdapter.ts     # Direct WebSocket
+    ├── WebSocketAdapter.ts     # Direct WebSocket
+    ├── PIAdapter.ts            # PI Web API development adapter
+    └── WonderwareAdapter.ts    # Historian development adapter
 
 src/components/
 ├── SCADAPanel.tsx              # Full SCADA monitor with 5 tabs
@@ -269,16 +281,19 @@ const visuals = useSCADAMachineVisuals(machineId, machineStatus);
 
 ## Tag Database
 
-90 SCADA tags organized by zone:
+122 SCADA tags are composed from production zones and operational projections:
 
 | Zone | Equipment | Tags per Unit | Total |
 |------|-----------|---------------|-------|
 | Zone 1 | 5 Silos | 4 (Level, Temp, Moisture, Vibration) | 20 |
-| Zone 2 | 6 Roller Mills | 6 (Speed, Temp, Vibration, Current, Feed, Setpoint) | 36 |
+| Zone 2 | 4 Roller Mills | 6 (Speed, Temp, Vibration, Current, Feed, Setpoint) | 24 |
 | Zone 3 | 3 Plansifters | 4 (Vibration, Temp, Current, Sieve) | 12 |
 | Zone 4 | 3 Packers | 4 (Count, Weight, Speed, Pressure) | 12 |
-| Utility | Ambient + Systems | 10 | 10 |
-| **Total** | | | **90** |
+| Utility | Ambient and system measurements | varies | 10 |
+| Utility assets | 5 visible vessels | 3 | 15 |
+| Vehicles | 4 autonomous vehicles | 4 | 16 |
+| Operations | Material, quality, dispatch, and maintenance | varies | 13 |
+| **Total** | | | **122** |
 
 ### Tag Naming Convention (ISA-5.1)
 

@@ -23,6 +23,47 @@ function stringArray(value: unknown, maximum = 500): string[] | undefined {
   );
 }
 
+export const MAX_GAME_SPEED = 10800;
+
+export function sanitizeGameSpeed(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(MAX_GAME_SPEED, Math.max(0, value))
+    : fallback;
+}
+
+export interface PersistedGameSimulationState {
+  gameTime?: number;
+  gameDay?: number;
+  gameSpeed?: number;
+  weather?: 'clear' | 'cloudy' | 'rain' | 'storm';
+}
+
+export function sanitizeGameSimulationState(value: unknown): PersistedGameSimulationState {
+  const source = asRecord(value);
+  if (!source) return {};
+  const output: PersistedGameSimulationState = {};
+
+  if (typeof source.gameTime === 'number' && Number.isFinite(source.gameTime)) {
+    output.gameTime = ((source.gameTime % 24) + 24) % 24;
+  }
+  if (typeof source.gameDay === 'number' && Number.isFinite(source.gameDay)) {
+    output.gameDay = Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.floor(source.gameDay)));
+  }
+  if (typeof source.gameSpeed === 'number' && Number.isFinite(source.gameSpeed)) {
+    output.gameSpeed = sanitizeGameSpeed(source.gameSpeed);
+  }
+  if (
+    source.weather === 'clear' ||
+    source.weather === 'cloudy' ||
+    source.weather === 'rain' ||
+    source.weather === 'storm'
+  ) {
+    output.weather = source.weather;
+  }
+
+  return output;
+}
+
 export interface PersistedUIState {
   hasSeenIntro?: boolean;
   showZones?: boolean;

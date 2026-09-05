@@ -22,7 +22,8 @@ import {
 } from 'lucide-react';
 import { useProductionStore } from '../../../stores/productionStore';
 import { useGameSimulationStore } from '../../../stores/gameSimulationStore';
-import { useSafetyStore } from '../../../stores/safetyStore';
+import { computeSafetyScore, useSafetyStore } from '../../../stores/safetyStore';
+import { downloadScenePng } from '../../../utils/sceneCapture';
 import { useUIStore } from '../../../stores/uiStore';
 import { useHistoricalPlaybackStore } from '../../../stores/historicalPlaybackStore';
 import { useMaterialFlowStore } from '../../../stores/materialFlowStore';
@@ -488,18 +489,15 @@ export const OverviewPanel: React.FC = React.memo(() => {
     idle: machines.filter((m) => m.status === 'idle').length,
   };
 
-  // Calculate safety score
-  const safetyScore = Math.max(
-    0,
-    Math.min(
-      100,
-      100 - (safetyMetrics?.nearMisses ?? 0) * 5 - (safetyMetrics?.safetyStops ?? 0) * 2
-    )
-  );
+  // Shared formula with StatusHUD so both surfaces show the same number.
+  const safetyScore = computeSafetyScore(safetyMetrics);
 
   // Progress to target
   const targetProgress = productionTarget
-    ? Math.min(100, (productionTarget.producedBags / productionTarget.targetBags) * 100)
+    ? Math.min(
+        100,
+        (productionTarget.producedBags / Math.max(1, productionTarget.targetBags)) * 100
+      )
     : 0;
 
   return (
@@ -513,7 +511,7 @@ export const OverviewPanel: React.FC = React.memo(() => {
         <div className="grid grid-cols-2 gap-2">
           <StatCard
             label="Throughput"
-            value={`${metrics.throughput}`}
+            value={metrics.throughput.toLocaleString()}
             unit="bags/hr"
             icon={<Package size={14} />}
             color="cyan"
@@ -778,7 +776,9 @@ const DockCard: React.FC<{ label: string; status: string; eta: number }> = ({
 
 // Quick Actions Section with Gamification Controls
 const QuickActionsSection: React.FC = () => {
-  const [showAchievements, setShowAchievements] = useState(false);
+  // Shared with GamificationBar through uiStore so the two toggles drive one panel.
+  const showAchievements = useUIStore((state) => state.showAchievements);
+  const setShowAchievements = useUIStore((state) => state.setShowAchievements);
   const achievements = useProductionStore((state) => state.achievements);
   const { showMiniMap, setShowMiniMap } = useUIStore(
     useShallow((state) => ({
@@ -791,13 +791,8 @@ const QuickActionsSection: React.FC = () => {
   const unlockedCount = achievements.filter((a) => a.unlockedAt).length;
 
   const handleScreenshot = useCallback(() => {
-    const canvas = document.querySelector('canvas');
-    if (canvas) {
-      const link = document.createElement('a');
-      link.download = `millos-${new Date().toISOString().split('T')[0]}.png`;
-      link.href = canvas.toDataURL('image/png');
-      link.click();
-    }
+    // Through the renderer: a direct canvas.toDataURL() reads a cleared buffer.
+    downloadScenePng(`millos-${new Date().toISOString().split('T')[0]}.png`);
   }, []);
 
   const handleExport = useCallback(() => {
@@ -810,10 +805,17 @@ const QuickActionsSection: React.FC = () => {
       achievements: store.achievements.filter((a) => a.unlockedAt),
     };
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.download = `millos-report-${new Date().toISOString().split('T')[0]}.json`;
-    link.href = URL.createObjectURL(blob);
+    link.href = url;
+    document.body.appendChild(link);
     link.click();
+    // Same pattern as the diagnostics export: revoke on the next tick.
+    setTimeout(() => {
+      link.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
   }, []);
 
   const handleToggleReplay = useCallback(() => {
@@ -866,18 +868,19 @@ const QuickActionsSection: React.FC = () => {
             <span className="text-xs font-medium">Replay</span>
           </button>
 
-          {/* GPS Map */}
+          {/* Mini-map */}
           <button
             onClick={() => setShowMiniMap(!showMiniMap)}
+            aria-pressed={showMiniMap}
             className={`py-2.5 px-3 rounded-lg flex items-center gap-2 transition-colors ${
               showMiniMap
                 ? 'bg-green-600 text-white'
                 : 'bg-slate-700/80 text-slate-300 hover:bg-slate-600'
             }`}
-            title="GPS Map"
+            title="Mini-map"
           >
             <Map size={16} className={showMiniMap ? 'text-white' : 'text-green-400'} />
-            <span className="text-xs font-medium">GPS Map</span>
+            <span className="text-xs font-medium">Mini-map</span>
           </button>
         </div>
 

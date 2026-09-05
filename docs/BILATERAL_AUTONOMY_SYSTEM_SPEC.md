@@ -4,6 +4,14 @@
 
 *Integrating Bilateral Alignment, Servant Leadership, and Information-Theoretic Value Quantification*
 
+**Status:** values, governance, and conceptual foundation
+
+**Current implementation authority:** source plus [MillOS Architecture](./architecture.md)
+
+**Agent-operating realization:** [Agent Operating Architecture](./AGENT_OPERATING_ARCHITECTURE.md)
+
+This specification defines why bilateral operation matters and which values it must preserve. Its older code sketches are illustrative. Stable actors, preference claims, objections, negotiated grants, capability authority, and causal receipts are specified for future implementation in the Agent Operating Architecture.
+
 ---
 
 ## Table of Contents

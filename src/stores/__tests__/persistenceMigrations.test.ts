@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeKnowledgeState, sanitizeUIState } from '../persistenceMigrations';
+import {
+  sanitizeGameSimulationState,
+  sanitizeKnowledgeState,
+  sanitizeUIState,
+} from '../persistenceMigrations';
 
 describe('persistence migrations', () => {
   it('loads a clean first run from absent or malformed roots', () => {
@@ -37,5 +41,32 @@ describe('persistence migrations', () => {
       unlockedEntries: ['a'],
       showTooltips: false,
     });
+  });
+
+  it('preserves valid simulation values while excluding corrupt state and actions', () => {
+    expect(
+      sanitizeGameSimulationState({
+        gameTime: 25.5,
+        gameDay: 2.9,
+        gameSpeed: 10800,
+        weather: 'storm',
+        currentShift: 'morning',
+        setGameSpeed: 'corrupt action',
+      })
+    ).toEqual({
+      gameTime: 1.5,
+      gameDay: 2,
+      gameSpeed: 10800,
+      weather: 'storm',
+    });
+
+    expect(
+      sanitizeGameSimulationState({
+        gameTime: Number.NaN,
+        gameDay: -4,
+        gameSpeed: Number.POSITIVE_INFINITY,
+        weather: 'hail',
+      })
+    ).toEqual({ gameDay: 0 });
   });
 });

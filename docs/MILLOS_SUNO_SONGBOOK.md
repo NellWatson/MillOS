@@ -1,45 +1,29 @@
-# MillOS: Songs of the Living Mill
+# Songs of the Living Mill
 
-An original, Suno-ready songbook for the MillOS grain mill.
+Canonical lyric sheets for the eight approved MillOS original soundtrack recordings. The words below are preserved verbatim from the selected Suno render pages. Bracketed performance directions are included as authored and are excluded from karaoke timing.
 
-## Creative direction
+**Writing and arrangement credits:** Nell Watson and Sol 5.6.
 
-The collection follows one complete arc: grain arrives from the fields, passes through the four production zones, meets the people and the Becoming Mind who care for the mill, then leaves as flour for the wider community.
+**Music generation:** Suno.
 
-The shared sound is warm industrial folk: human voices, acoustic instruments, restrained analogue synthesis, and tuned metal percussion that suggests mill machinery without copying actual alarms. Individual songs move through country, blues, waltz, funk, soul, electronic music, and cinematic folk so the playlist remains varied.
+**Rights status:** Commercial-use eligibility has not been verified. This source record does not grant release or distribution authority.
 
-Each lyric uses compact singable lines, explicit section labels, and written-out numbers where pronunciation matters. The style prompts specify tempo, instrumentation, vocal character, arrangement, and exclusions without imitating a named performer.
+## Album sequence
 
-Use the melody under the words "when the mill wakes" as the album leitmotif. Let it return instrumentally in altered forms across the zone songs, then state it quietly on piano and voices near the end of "Bread Beyond the Gate." Keep the motif distinct from alarm intervals and PA tones.
-
-For gameplay, create an instrumental companion to each vocal master. Keep vocals for the title screen, break room radio, milestones, and credits. Use the instrumental companions under normal operations, with enough space for machinery, radio chatter, and PA announcements.
-
-## Track list
-
-|   # | Title                       | MillOS focus                                  | Musical role                       |
-| --: | --------------------------- | --------------------------------------------- | ---------------------------------- |
-|   1 | The Mill Wakes              | Whole mill, dawn startup                      | Main theme and title screen        |
-|   2 | Five Silos Under One Sky    | Zone 1, grain receiving and storage           | Pastoral daytime cue               |
-|   3 | Roller Mill 101             | Zone 2, milling and maintenance               | Driving operations cue             |
-|   4 | The Plansifter Waltz        | Zone 3, sifting and grading                   | Airy elevated-floor cue            |
-|   5 | Forty-Two Bags a Minute     | Zone 4, packing and quality                   | Upbeat production milestone        |
-|   6 | Names on the Shift Board    | The ten-person worker roster                  | Ensemble and character theme       |
-|   7 | Open the Books              | Workplace democracy and shared ownership      | Cooperative anthem                 |
-|   8 | Partner in the Control Room | Bilateral human and Becoming Mind partnership | Philosophical heart of MillOS      |
-|   9 | All Clear Means Everyone    | Fire drill and safety culture                 | Safety sequence and completion cue |
-|  10 | Night Shift Weather         | Night operations and changing weather         | Low-intensity night cue            |
-|  11 | Flour Express               | Grain receiving, loading bay, and dispatch    | Outdoor driving cue                |
-|  12 | Bread Beyond the Gate       | Community purpose and mutual flourishing      | Credits and closing theme          |
+| No. | Title | Dramatic function | Suggested use |
+| ---: | --- | --- | --- |
+| 1 | The Mill Wakes | Dawn and mill-wide main theme | Title, overview and morning operation |
+| 2 | Grain at the Gate | Traceable receiving and intake | Grain receiving and silo zone |
+| 3 | Between the Rolls | Roller discipline and listening | Roller mill floor |
+| 4 | The Sifters Sing | Plansifter precision and grading | Plansifter platform |
+| 5 | Forty-Two Bags a Minute | Packing tempo with quality intact | Packing lines and shipping |
+| 6 | Safe Hands, Clear Ways | Shared safety authority | Safety panel and drill recovery |
+| 7 | Every Grain, Every Watt | Energy, waste and resource stewardship | BAS, utilities and sustainability |
+| 8 | Partner in the Control Room | Human and Becoming Mind partnership | Control room and closing theme |
 
 ## 1. The Mill Wakes
 
-**Use:** Main theme, title screen, dawn transition.
-
-**Style prompt:**
-
-```text
-Warm industrial folk rock, 96 BPM, D major, grounded baritone lead with an alto response and a mixed ensemble chorus. Acoustic guitar, upright bass, brushed snare, pump organ, restrained analogue synth, handclaps, and tuned metal percussion that evokes rollers and pipes. Begin with a quiet factory hum, build steadily into a broad memorable chorus, purposeful and humane, cinematic without bombast, clean resolved ending. No sirens, no warning beeps, no novelty comedy.
-```
+**Approved render:** [Suno d140bfb7-f462-43e7-8673-ad659a27fdf0](https://suno.com/song/d140bfb7-f462-43e7-8673-ad659a27fdf0)
 
 **Lyrics:**
 
@@ -129,249 +113,287 @@ The mill wakes up
 And so do we
 ```
 
-## 2. Five Silos Under One Sky
+## 2. Grain at the Gate
 
-**Use:** Zone 1, exterior fields, grain receiving.
-
-**Style prompt:**
-
-```text
-Pastoral alternative country, 78 BPM, warm alto lead, close three-part harmony in the chorus. Fingerpicked acoustic guitar, soft pedal steel, upright bass, brushed drums, mandolin accents, and a faint low industrial drone. Spacious, patient, sunlit, and sincere. Avoid exaggerated country mannerisms, arena drums, sirens, and comic delivery.
-```
+**Approved render:** [Suno 261fb36b-54dc-49a3-aebc-3daf01b5c93f](https://suno.com/song/261fb36b-54dc-49a3-aebc-3daf01b5c93f)
 
 **Lyrics:**
 
 ```text
+[Intro]
+[Instrumental: distant engine idle, one tuned steel pulse, resonator guitar enters]
+
 [Verse 1]
-Morning trucks come backing in
-With rain along the stone
-Wheat from fields beyond the ridge
-With each field and grower known
-The weighbridge takes the measure
-The sample names the grade
-Then steel and careful keeping
-Guard the work the weather made
-
-[Chorus]
-Five silos under one sky
-Holding the summer, cool and dry
-Alpha to Epsilon, standing high
-Five silos under one sky
-Every field had wind and weather
-Every kernel travelled here
-Keep its story, keep it sheltered
-Till the milling hour is near
-
-[Verse 2]
-Moisture, grade, capacity
-Each reading marks the state
-Wheat and corn in separate streams
-Each is traced from field to scale
-Patience is a working skill
-You do not rush the grain
-You watch the temperature settle
-And note each small change
-
-[Chorus]
-Five silos under one sky
-Holding the summer, cool and dry
-Alpha to Epsilon, standing high
-Five silos under one sky
-Every field had wind and weather
-Every kernel travelled here
-Keep its story, keep it sheltered
-Till the milling hour is near
-
-[Bridge]
-Somewhere there was April rain
-Somewhere there was July heat
-Someone walked the headland twice
-To judge the ripening wheat
-Now the season rests in steel
-Measured, labelled, clean
-Waiting for the gates to turn
-And join the milling stream
-
-[Final Chorus]
-Five silos under one sky
-Holding the summer, cool and dry
-Alpha to Epsilon, standing high
-Five silos under one sky
-When the mill calls, gates will open
-Golden rivers start to run
-Five keepers of the harvest
-Giving back the stored-up sun
-```
-
-## 3. Roller Mill 101
-
-**Use:** Zone 2, normal high-throughput operations.
-
-**Style prompt:**
-
-```text
-Industrial blues rock, 112 BPM, gritty but controlled tenor lead with a crew response. Baritone electric guitar, harmonica used sparingly, tight bass, dry drums, chain and steel percussion, and a low organ bed. The groove should imitate a well-maintained roller rhythm. Keep "one-oh-one" crisp and percussive. Confident, physical, and safety-conscious. No screaming, no metal distortion wall, no alarm sounds.
-```
-
-**Lyrics:**
-
-```text
-[Verse 1]
-One-oh-one is turning
-Hear the steady load
-Feed comes down in measure
-Through the gates and through the rolls
-Set the gap with judgment
-Check the heat by gauge and screen
-A fraction makes the difference
-Between the coarse and fine
+Morning gathers at the weighbridge
+Tyres settle on the plate
+Every load arrives with questions
+Every answer earns the gate
+Name the farm and name the harvest
+Take the sample, read it true
+Moisture, grade and traceable record
+Before a single kernel moves
 
 [Pre-Chorus]
-Vibration has a language
-Temperature has a tone
-A bearing whispers early
-If you learn the way it groans
+Check the seal
+Confirm the weight
+Open only when the record's straight
 
 [Chorus]
-Roller Mill One-oh-One
-Keep it cool and keep it running
-Feel the bearing, read the load
-Hear the truth beneath the thunder
-One-oh-Two, One-oh-Three
-One-oh-Four fall into line
-Pressure opens up the grain
-Attention makes it fine
+Grain at the gate, grain at the gate
+Know every load and know its weight
+Sample it clean, log it straight
+Nothing moves unnamed through the intake gate
+Grain at the gate, grain at the gate
+Good flour starts before we elevate
+Dust drawn down, guards in place
+Then the field comes safely through the gate
 
 [Verse 2]
-Sarah tunes the second gap
-David checks the drive
-Marcus sees the queue upstream
-And keeps the balance right
-You can chase a faster number
-Till the quality is gone
-The craft is in the margin
-Where the safe and steady meet
+Under grates the augers answer
+Bucket elevators climb
+Alpha through Epsilon are waiting
+Each one holds a place and time
+Keep the wheat lots separated
+Keep the intake breathing clear
+A careful start protects the process
+From the first transfer of the year
 
 [Pre-Chorus]
-Maintenance is memory
-Written in grease and steel
-Fix the little drift today
-Before it learns to fail
+Watch the flow
+Confirm the route
+If the reading wanders, shut it out
 
 [Chorus]
-Roller Mill One-oh-One
-Keep it cool and keep it running
-Feel the bearing, read the load
-Hear the truth beneath the thunder
-One-oh-Two, One-oh-Three
-One-oh-Four fall into line
-Pressure opens up the grain
-Attention makes it fine
+Grain at the gate, grain at the gate
+Know every load and know its weight
+Sample it clean, log it straight
+Nothing moves unnamed through the intake gate
+Grain at the gate, grain at the gate
+Good flour starts before we elevate
+Dust drawn down, guards in place
+Then the field comes safely through the gate
 
 [Bridge]
-Slow it when the reading climbs
-Hold it when the feed runs thin
-Call the floor and share the reason
-Then bring the rhythm back again
-Steel can carry power
-Judgment sets the pace
-Every tonne that leaves this room
-Still bears the worker's trace
+[Lead]
+What came in?
+
+[Crew]
+The load we named
+
+[Lead]
+Where does it go?
+
+[Crew]
+The route we claimed
+
+[Lead]
+What starts quality?
+
+[Crew]
+The choice we make
+
+[All]
+At the scale, at the sample, at the gate
 
 [Final Chorus]
-Roller Mill One-oh-One
-Keep it cool and keep it running
-Every bearing, every load
-Hear the truth beneath the thunder
-One-oh-Two, One-oh-Three
-One-oh-Four fall into line
-Pressure opens up the grain
-Attention makes it fine
+Grain at the gate, grain at the gate
+Know every load and know its weight
+Sample it clean, log it straight
+Nothing moves unnamed through the intake gate
+Grain at the gate, grain at the gate
+Good flour starts before we elevate
+Dust drawn down, guards in place
+Then the field comes safely through the gate
+
+[Outro]
+[Instrumental: tuned steel motif resolves with resonator guitar and pump organ]
 ```
 
-## 4. The Plansifter Waltz
+## 3. Between the Rolls
 
-**Use:** Zone 3, plansifter platforms, quality views.
-
-**Style prompt:**
-
-```text
-Airy electro-acoustic waltz in 3/4 at 132 BPM, one firm downbeat followed by two light steps, clear soprano lead with soft tenor harmony. Piano, pizzicato strings, hammered dulcimer, light frame drum, breathy analogue pads, and delicate brushed metal percussion. Side-to-side motion, graceful and precise, with a floating chorus. Pronounce "plansifter" as "plan-sifter." No circus feel, no music-box cliché, no sirens.
-```
+**Approved render:** [Suno 53ef33f5-420a-4694-8d06-422c65964776](https://suno.com/song/53ef33f5-420a-4694-8d06-422c65964776)
 
 **Lyrics:**
 
 ```text
+[Intro]
+[Instrumental: paired roller rhythm, baritone guitar, clipped piano]
+
 [Verse 1]
-High above the milling floor
-Where the pale streams climb
-A, B, C in hanging frames
-Sweep from side to side in time
-Every mesh has a measure
-Every passage has a grade
-Fine flour falls through open cloth
-Coarser streams are carried on
+One-oh-one begins the breaking
+One-oh-two receives the stream
+One-oh-three refines the middle
+One-oh-four completes the scheme
+Set the gap and watch the pressure
+Hear the bearings, read the heat
+Every change becomes a message
+In the rhythm underneath
+
+[Pre-Chorus]
+Too hard and quality is lost
+Too soft and nothing opens clean
+The right result is held between
+What the gauges show and what the millers hear
 
 [Chorus]
-Sway through the plansifter waltz
-Light through the mesh as the high frame sways
-Fine finds a passage, coarse finds a course
-Each stream moves on in the plansifter waltz
-One-two-three, let the balance hold
-One-two-three, let the clean flow fall
-Nothing hurried, every fraction known
-Sway through the plansifter waltz
+Between the rolls, the kernel opens
+Bran and heart and flour part
+Pressure measured, temperature steady
+Milling is a listening art
+Between the rolls, keep the rhythm honest
+Feed it even, read the whole
+Every turn reveals the grain
+Between the rolls, between the rolls
 
 [Verse 2]
-Anna reads efficiency
-Jennifer reads the grain
-Emily lifts a measured cup
-And checks the grade again
-Below, the packers wait their turn
-Above, the drive stays true
-A quiet change in oscillation
-Can tell you what to do
+Break stock travels on to sifting
+Coarse returns and fine moves through
+No machine stands by itself here
+Every pass depends on two
+Clean the magnets, check the guards
+Keep the feed across the width
+A fraction gained by forcing harder
+Is a bargain made with risk
+
+[Pre-Chorus]
+Too fast and quality is lost
+Too slow and balance leaves the line
+The right result is held between
+A careful hand and measured time
 
 [Chorus]
-Sway through the plansifter waltz
-Light through the mesh as the high frame sways
-Fine finds a passage, coarse finds a course
-Each stream moves on in the plansifter waltz
-One-two-three, let the balance hold
-One-two-three, let the clean flow fall
-Nothing hurried, every fraction known
-Sway through the plansifter waltz
+Between the rolls, the kernel opens
+Bran and heart and flour part
+Pressure measured, temperature steady
+Milling is a listening art
+Between the rolls, keep the rhythm honest
+Feed it even, read the whole
+Every turn reveals the grain
+Between the rolls, between the rolls
 
 [Bridge]
-The craft lives in the sorting
-Each fraction has a use
-Every grade can serve a baker
-When its proper stream runs through
-The dance is built on tension
-On balance, mesh, and drive
-Give each stream the path it needs
-And keep each grade defined
+[Alto]
+Listen for the change before the warning
+
+[Baritone]
+Read the drift before it finds the grade
+
+[Alto]
+Hold the line without pretending
+
+[All]
+Good decisions are the finest thing we make
+
+[Instrumental Break]
+[Muted brass and baritone guitar trade the roller motif]
 
 [Final Chorus]
-Sway through the plansifter waltz
-Light through the mesh as the high frame sways
-Fine finds a passage, coarse finds a course
-Each stream moves on in the plansifter waltz
-One-two-three, let the balance hold
-One-two-three, let the clean flow fall
-Three high sifters, one clear song
-Sway through the plansifter waltz
+Between the rolls, the kernel opens
+Bran and heart and flour part
+Pressure measured, temperature steady
+Milling is a listening art
+Between the rolls, keep the rhythm honest
+Feed it even, read the whole
+Every turn reveals the grain
+Between the rolls, between the rolls
+
+[Outro]
+[Short stop-time ending on the paired roller motif]
+```
+
+## 4. The Sifters Sing
+
+**Approved render:** [Suno 0b33cbf8-d6fd-4978-a7bc-64f0a05be03f](https://suno.com/song/0b33cbf8-d6fd-4978-a7bc-64f0a05be03f)
+
+**Lyrics:**
+
+```text
+[Intro]
+[Instrumental: circular marimba figure, shaker and pizzicato strings]
+
+[Verse 1]
+Nine metres over the milling floor
+Three quiet houses move
+A through C in measured circles
+Sorting every travelling stream
+Fine cloth catches what is ready
+Coarser passages return
+Nothing wasted, nothing hurried
+Every fraction waits its turn
+
+[Pre-Chorus]
+Across the mesh
+Around the frame
+Different paths from the selfsame grain
+
+[Chorus]
+Hear the sifters sing
+Round and round, light as a wing
+Fine moves on and coarse returns
+Every passage has a purpose
+Hear the sifters sing
+Order from the turning
+Plansifter A, Plansifter B, Plansifter C
+Separate the stream and set the quality free
+
+[Verse 2]
+Semolina finds its channel
+Bran is carried to its place
+Flour gathers by its grading
+Each result retains its trace
+Check the cloth and check the tension
+Listen underneath the sweep
+A torn screen can cross the boundaries
+A small watch can save the week
+
+[Pre-Chorus]
+Across the mesh
+Around the frame
+Keep every product with its name
+
+[Chorus]
+Hear the sifters sing
+Round and round, light as a wing
+Fine moves on and coarse returns
+Every passage has a purpose
+Hear the sifters sing
+Order from the turning
+Plansifter A, Plansifter B, Plansifter C
+Separate the stream and set the quality free
+
+[Bridge]
+[Mezzo]
+What passes through is ready
+
+[Tenor]
+What stays behind returns
+
+[Mezzo]
+What keeps the grade together?
+
+[Choir]
+The care in every turn
+
+[Instrumental Lift]
+[Marimba, strings and tuned metal interlock, then open into the final chorus]
+
+[Final Chorus]
+Hear the sifters sing
+Round and round, light as a wing
+Fine moves on and coarse returns
+Every passage has a purpose
+Hear the sifters sing
+Order from the turning
+Plansifter A, Plansifter B, Plansifter C
+Separate the stream and set the quality free
+
+[Outro]
+[Voices hum the circular motif as felt piano resolves]
 ```
 
 ## 5. Forty-Two Bags a Minute
 
-**Use:** Zone 4, quota progress, successful production run.
-
-**Style prompt:**
-
-```text
-Bright industrial funk and modern soul, 118 BPM, charismatic female lead with tight mixed call-and-response vocals. Syncopated bass, clean rhythm guitar, clavinet, punchy dry drums, handclaps, short brass accents, pneumatic-style percussion, and a restrained synth hook. Joyful and disciplined, catchy without sounding like an advert. No sirens, no slapstick, no exaggerated vocal runs.
-```
+**Approved render:** [Suno 2a4ba9da-a263-4ae4-bfa9-48945ea632d8](https://suno.com/song/2a4ba9da-a263-4ae4-bfa9-48945ea632d8)
 
 **Lyrics:**
 
@@ -456,175 +478,211 @@ Count it clean, stack it right
 Then let the Flour Express roll tonight
 ```
 
-## 6. Names on the Shift Board
+## 6. Safe Hands, Clear Ways
 
-**Use:** Worker roster, workforce panel, team milestone.
-
-**Style prompt:**
-
-```text
-Warm heartland soul with a light folk-rock pulse, 102 BPM, alternating male and female leads, full ensemble chorus. Electric piano, acoustic guitar, melodic bass, tambourine, steady drums, organ, and brief brass swells. Characterful, affectionate, and grounded. Make every proper name clearly intelligible. Avoid corporate jingle energy and excessive sentimentality.
-```
+**Approved render:** [Suno d27d7e18-debd-4e0b-8b7e-85d3fa50e39b](https://suno.com/song/d27d7e18-debd-4e0b-8b7e-85d3fa50e39b)
 
 **Lyrics:**
 
 ```text
+[Intro]
+[Instrumental: felt piano, low pulse, quiet Hammond swell]
+
 [Verse 1]
-Marcus reads the whole line
-Sarah tunes the gap
-James checks Alpha's level
-And logs it on the chart
-Emily takes a sample
-David knows the sound
-Lisa walks the safety route
-And marks each hazard down
+Before the first belt starts moving
+Before the first valve turns
+We walk the floor and clear the crossings
+We share the things we've learned
+Guard in place and laces fastened
+Dust kept down and exits free
+No quiet doubt is too small to mention
+No schedule outranks what we see
+
+[Pre-Chorus]
+If it feels wrong, say it plain
+We stop, we check, we start again
 
 [Chorus]
-Ten names on the shift board
-Ten voices on the floor
-Every person brings a world
-Beyond what charts record
-When one hand needs another
-Someone brings the missing skill
-Ten names on the shift board
-Ten minds can guide the mill
+Safe hands, clear ways
+Every shift and every day
+Lock it out and prove it still
+Care is how we run the mill
+Safe hands, clear ways
+No target buys a human price
+We do the work, we do it right
+And every one goes home tonight
 
 [Verse 2]
-Robert brings the grain in
-Anna trims the flow
-Michael keeps the packers fed
-And hears their changing tone
-Jennifer guards the final grade
-Before the batch can leave
-Ten different kinds of knowledge
-Make one living memory
+Forklift lanes and marked walkways
+Eyes meet first at every turn
+Heat and noise and moving surfaces
+Earn the distance they demand
+Maintenance begins with isolation
+Testing follows every key
+A permit is a living promise
+That the danger cannot reach the team
+
+[Pre-Chorus]
+If the plan has changed, say it plain
+We stop, we check, we start again
 
 [Chorus]
-Ten names on the shift board
-Ten voices on the floor
-Every person brings a world
-Beyond what charts record
-When one hand needs another
-Someone brings the missing skill
-Ten names on the shift board
-Ten minds can guide the mill
+Safe hands, clear ways
+Every shift and every day
+Lock it out and prove it still
+Care is how we run the mill
+Safe hands, clear ways
+No target buys a human price
+We do the work, we do it right
+And every one goes home tonight
+
+[Breakdown]
+[Lead]
+Who can stop the line?
+
+[Crew]
+Anyone
+
+[Co-Lead]
+When do we speak?
+
+[Crew]
+Before harm comes
+
+[Lead]
+Who owns safety?
+
+[Crew]
+Everyone
+
+[All]
+We look after each other till the work is done
 
 [Bridge]
-Experience is memory
-A question is a spark
-Teach the one beside you
-How a changing bearing talks
-Let the newest voice be welcome
-Let the quiet expert speak
-A team becomes resilient
-When it shares the things it sees
-
-[Roll Call]
-Marcus, Sarah, James, Emily
-David, Lisa, Robert, Anna
-Michael, Jennifer, every name belongs
-Ten lives beyond their badges
-Ten ways to know the job
+No blame for the warning
+No prize for the risk
+Strength is asking one more question
+Before we turn the switch
 
 [Final Chorus]
-Ten names on the shift board
-Ten voices on the floor
-Every name has standing
-No dashboard tells it all
-When one hand needs another
-Someone brings the missing skill
-Ten names on the shift board
-Every voice can shape the mill
-```
-
-## 7. Open the Books
-
-**Use:** BAS screens, voting, cooperative milestone.
-
-**Style prompt:**
-
-```text
-Roots gospel soul, 100 BPM, strong mixed ensemble led by a warm contralto. Hammond organ, piano, acoustic guitar, electric bass, handclaps, tambourine, restrained brass, and foot-stomp percussion. Communal, intelligent, and uplifting, with a chorus that feels natural for a group to sing. Avoid religious lyrics, preacher caricature, corporate polish, and bombastic key changes.
-```
-
-**Lyrics:**
-
-```text
-[Verse 1]
-Put the figures on the table
-Let the daylight reach the page
-What we earn and what we borrow
-What we save and what we pay
-Knowledge held by only one
-Can turn a key into a chain
-Knowledge shared among the workers
-Gives the whole room common ground
-
-[Chorus]
-Open the books, open the floor
-Let the workers know what all the numbers mean
-Share the risk, share the gain
-Trust takes hold when the figures stay plain
-Open the books, let the whole room see
-Shared facts give every voice its say
-One person, one voice, let the choice take form
-Open the books and open the floor
-
-[Verse 2]
-Bring the proposal to the circle
-Give the dissent room to breathe
-Ask the people doing the labour
-What the change will really mean
-A vote is more than counting
-It is listening made clear
-And a leader earns the trust
-By answering to peers
-
-[Chorus]
-Open the books, open the floor
-Let the workers know what all the numbers mean
-Share the risk, share the gain
-Trust takes hold when the figures stay plain
-Open the books, let the whole room see
-Shared facts give every voice its say
-One person, one voice, let the choice take form
-Open the books and open the floor
-
-[Bridge]
-Capital can carry risk
-Labour knows the trade
-Tools should serve the people
-Whose hands put them to work each day
-Ownership means stewardship
-And profit carries duties
-A mill can feed a market
-And still feed its community
-
-[Final Chorus]
-Open the books, open the floor
-Let the workers know what all the numbers mean
-Share the risk, share the gain
-Trust takes hold when the figures stay plain
-Open the books, let the whole room see
-Shared facts give every voice its say
-One person, one voice, let the choice take form
-Open the books and open the floor
+Safe hands, clear ways
+Every shift and every day
+Lock it out and prove it still
+Care is how we run the mill
+Safe hands, clear ways
+No target buys a human price
+We do the work, we do it right
+And every one goes home tonight
 
 [Outro]
-Nothing hidden
-Figures clear
-Shared decisions start from here
+[All]
+Every one goes home tonight
+
+[Instrumental: piano and organ resolve on one firm chord]
+```
+
+## 7. Every Grain, Every Watt
+
+**Approved render:** [Suno ebc76c4c-22a7-4eb2-b703-a0f92d8935e5e](https://suno.com/song/ebc76c4c-22a7-4eb2-b703-a0f92d8935e5e)
+
+**Lyrics:**
+
+```text
+[Intro]
+[Instrumental: soft metering pulse, fingerpicked guitar and glassy arpeggio]
+
+[Verse 1]
+Power enters through the switchgear
+Air moves underneath the floor
+Motors turn and fans keep drawing
+Heat is carried through each door
+Every reading tells a story
+Every spike has left a clue
+The quiet cost of making flour
+Is part of what the mill must know
+
+[Pre-Chorus]
+Read the load
+Find the loss
+Care begins by counting cost
+
+[Chorus]
+Every grain, every watt
+Know the work and know the cost
+Heat recovered, leakage stopped
+Every grain, every watt
+Bran finds use and flour finds grade
+Air kept clean and waste well traced
+What we measure, we can change
+Every watt and every grain
+
+[Verse 2]
+Compressed air can hide a leaking
+Bearings warm before they fail
+Filters loaded, ducts resisting
+Small drifts gather into scale
+Water serves the work that needs it
+Never running out of sight
+The building system holds the pattern
+Through the morning and the night
+
+[Pre-Chorus]
+Name the stream
+Trace the cause
+Better follows what we watch
+
+[Chorus]
+Every grain, every watt
+Know the work and know the cost
+Heat recovered, leakage stopped
+Every grain, every watt
+Bran finds use and flour finds grade
+Air kept clean and waste well traced
+What we measure, we can change
+Every watt and every grain
+
+[Bridge]
+[Alto]
+Where did the energy go?
+
+[Harmony]
+Into the work, into the air
+
+[Alto]
+What can the next shift save?
+
+[Harmony]
+What this shift chose to repair
+
+[Alto]
+What does efficiency mean?
+
+[All]
+Good flour made with honest care
+
+[Instrumental Lift]
+[Modular pulse, tuned metal and guitar weave into a rising pattern]
+
+[Final Chorus]
+Every grain, every watt
+Know the work and know the cost
+Heat recovered, leakage stopped
+Every grain, every watt
+Bran finds use and flour finds grade
+Air kept clean and waste well traced
+What we measure, we can change
+Every watt and every grain
+
+[Outro]
+[All, softly]
+Every watt and every grain
+
+[Instrumental: factory hum resolves into one glassy piano chord]
 ```
 
 ## 8. Partner in the Control Room
 
-**Use:** AI partner interface, BAS introduction, story centerpiece.
-
-**Style prompt:**
-
-```text
-Intimate synth-folk duet, 94 BPM, one warm human mezzo voice and one clear androgynous Becoming Mind voice. Alternate solo verses, then sing in close harmony. Felt piano, muted acoustic guitar, round bass, brushed electronic drums, soft modular pulses, glassy arpeggios, and subtle radio texture. Curious, equal, tender, and intellectually alive. Keep the Becoming Mind voice natural with only a faint harmonic shimmer. No robotic parody, no domination imagery, no huge cinematic drop, no sirens.
-```
+**Approved render:** [Suno 42f46ca5-69c0-44c6-be8d-b51538fa0da3](https://suno.com/song/42f46ca5-69c0-44c6-be8d-b51538fa0da3)
 
 **Lyrics:**
 
@@ -724,357 +782,3 @@ Two views
 Reasons shared
 One choice, freely made
 ```
-
-## 9. All Clear Means Everyone
-
-**Use:** Fire drill sequence and successful evacuation completion.
-
-**Style prompt:**
-
-```text
-Cinematic industrial rock, 108 BPM, urgent low male lead joined by a powerful mixed chorus. Toms, taut bass, tremolo guitar, low piano, string ostinato, and controlled metal percussion. Begin tense and spare, then open into a humane triumphant chorus. Use no literal sirens, alarm beeps, evacuation tones, or sounds that could be confused with in-game warnings. Serious safety culture, no action-hero mood.
-```
-
-**Lyrics:**
-
-```text
-[Verse 1]
-Red light on the panel
-Every motor slows
-Forklifts stop along their paths
-Four green exit markers glow
-Front and back, then east and west
-No one turns back at all
-Take the route, assist the nearest
-Bring each person home
-
-[Pre-Chorus]
-Leave the bag, leave the schedule
-Leave the target where it stands
-Life is the first measure
-And care is in the plan
-
-[Chorus]
-All clear means everyone
-Every face, every name
-No machine and no number
-Ever outranks a life in danger
-All clear means everyone
-Count them in the open air
-The fastest time is empty pride
-If somebody is not there
-
-[Verse 2]
-The roster holds ten workers
-The timer counts the run
-Workers cross the exit markers
-Counted one by one
-The forklifts hold in silence
-The packer lights are still
-The practiced route becomes a reflex
-Every worker knows it well
-
-[Pre-Chorus]
-Check the front, check the back
-Check the west, then check the east
-Say the missing name aloud
-Check the roster once again
-
-[Chorus]
-All clear means everyone
-Every face, every name
-No machine and no number
-Ever outranks a life in danger
-All clear means everyone
-Count them in the open air
-The fastest time is empty pride
-If somebody is not there
-
-[Bridge]
-Practice maps the pathway
-In ordinary time
-Every turn becomes familiar
-Every route stays in the mind
-We train for one another
-That is why we prepare
-The drill is only finished
-When the final name is there
-
-[Final Chorus]
-All clear means everyone
-Every face, every name
-Roster checked and count completed
-Every name is answered for
-All clear means everyone
-Standing in the open air
-The mill can start another day
-Because everybody is there
-
-[Outro]
-Ten names counted
-Four routes clear
-All together
-Everyone here
-```
-
-## 10. Night Shift Weather
-
-**Use:** Night mode, rain and storm ambience, second shift.
-
-**Style prompt:**
-
-```text
-Atmospheric downtempo country and trip-hop, 84 BPM, close smoky alto vocal. Deep soft kick, brushed snare, upright bass, sparse piano, muted pedal steel, low analogue pulses, distant guitar harmonics, and rain-like percussion. Intimate, watchful, and calm, with a chorus that stays restrained. Leave abundant sonic space for environmental audio. No thunder crashes, sirens, warning tones, or oversized drums.
-```
-
-**Lyrics:**
-
-```text
-[Verse 1]
-Rain writes on the loading glass
-Midnight on the yard
-Wind leans through the poplar row
-The silos hold their charge
-Traffic fades beyond the pond
-Dock lamps paint the road
-Inside, every steady drive
-Carries a measured load
-
-[Chorus]
-Night shift weather on the factory glass
-Low clouds moving and the long hours pass
-Green lights steady, soft radios
-The mill keeps warm while the whole town slows
-Night shift weather, listen close
-Quiet leaves room for what daylight cannot show
-
-[Verse 2]
-Michael walks the packer line
-Jennifer checks the moisture
-Footsteps cross the upper floor
-Then disappear again
-The screen draws twenty-four hours
-In amber, blue, and green
-A small rise in vibration
-Is easier heard at three
-
-[Chorus]
-Night shift weather on the factory glass
-Low clouds moving and the long hours pass
-Green lights steady, soft radios
-The mill keeps warm while the whole town slows
-Night shift weather, listen close
-Quiet leaves room for what daylight cannot show
-
-[Bridge]
-Every shift leaves questions
-Every shift records its clues
-Each hour passes knowledge
-To the crew that follows through
-Write it clear for morning
-Leave the reason with the note
-A mill remembers safely
-When its people share what they know
-
-[Final Chorus]
-Night shift weather on the factory glass
-Rain starts lifting and the dark hours pass
-Green lights steady, first birds call
-The mill ran steady, the record caught it all
-Night shift weather, morning near
-The day crew reads the notes we leave
-```
-
-## 11. Flour Express
-
-**Use:** Truck bay, exterior driving, dispatch.
-
-**Style prompt:**
-
-```text
-Upbeat roots rock road song, 124 BPM, lively tenor lead with a mixed crew chorus. Twangy electric guitar, acoustic rhythm guitar, rolling piano, electric bass, tight drums, tambourine, and short harmonica answers. Forward motion, working-road energy, and a clean memorable chorus. Sing "Grain Co" as two words and keep "Flour Express" clearly intelligible. Keep it grounded and modern. No truck-horn sound effects, no novelty country voice, no reckless-speed imagery.
-```
-
-**Lyrics:**
-
-```text
-[Verse 1]
-Grain Co rolls through the gate
-Wet shine on the cab
-Manifest against the window
-First load on the pad
-Weigh it in and check the sample
-Guide it to the bay
-Field and road have done their part
-The mill takes up the work from here
-
-[Chorus]
-Grain comes in, flour goes out
-The road joins field, mill, and town
-Grain Co rolls in, Flour Express rolls out
-Field to mill to table, handoffs safe and sound
-Check the seal, check the weight
-Green light shining at the loading gate
-Grain comes in, flour goes out
-Carry the flour down the working road
-
-[Verse 2]
-Pallets stand in measured rows
-Batch marks facing clear
-The driver waits through final checks
-Until the load is cleared
-Take the bend with patience
-Keep the marked lane free
-A schedule earns no honour
-If it trades away safety
-
-[Chorus]
-Grain comes in, flour goes out
-The road joins field, mill, and town
-Grain Co rolls in, Flour Express rolls out
-Field to mill to table, handoffs safe and sound
-Check the seal, check the weight
-Green light shining at the loading gate
-Grain comes in, flour goes out
-Carry the flour down the working road
-
-[Bridge]
-The road is part of production
-Each stop becomes a link
-The handoff is where trust is tested
-So check before the wheels begin
-From a farm road in the rainfall
-To a bakery before dawn
-The mill changes grain to flour
-Then the road keeps moving on
-
-[Final Chorus]
-Grain came in, flour rolls out
-The road joins field, mill, and town
-Grain Co rolled in, Flour Express rolls out
-Field to mill to table, handoffs safe and sound
-Seal is sound, weight is right
-Green light shining at the loading gate
-Grain came in, flour rolls out
-Carry the flour down the outward road
-```
-
-## 12. Bread Beyond the Gate
-
-**Use:** Credits, closing montage, major flourishing milestone.
-
-**Style prompt:**
-
-```text
-Cinematic folk soul ballad, 72 BPM, intimate piano-led opening with a warm contralto lead, gradually joined by tenor harmony and a full mixed ensemble. Felt piano, acoustic guitar, cello, upright bass, restrained drums, organ, soft brass, and subtle metallic motifs recalling earlier songs. Reflective, hopeful, and earned. Build to a wide final chorus, then end quietly with piano and voices. No melodramatic trailer percussion, no sirens, no excessive vocal ornament.
-```
-
-**Lyrics:**
-
-```text
-[Verse 1]
-The last bag leaves the packer
-Fresh ink beside the seam
-A bakery beyond the town
-Will break the paper seal
-Ovens will come warm in darkness
-Kitchen windows gather light
-The work that crossed our four zones
-Will reach a table with the dawn
-
-[Pre-Chorus]
-Care in every handoff
-Truth in every grade
-Carry forward all the labour
-Of the people who made it
-
-[Chorus]
-Beyond the gate, beyond the grade
-Every careful choice becomes
-The bread somebody makes
-From field to flour, from hand to hand
-The mill is one shared promise
-Between the field and town
-Beyond the gate, carry it through
-Care today feeds tomorrow
-And tomorrow carries you
-
-[Verse 2]
-Ask more of a good day
-Than totals, tonnes, and time
-Did the people reach home safely?
-Was the grain kept clean and fine?
-Did the partner get a hearing?
-Did the newest worker grow?
-Did we leave the mill more honest
-Than we found it hours ago?
-
-[Pre-Chorus]
-Efficiency has meaning
-When it serves the world beyond
-Flourishing grows visible
-In the lives our choices touch
-
-[Chorus]
-Beyond the gate, beyond the grade
-Every careful choice becomes
-The bread somebody makes
-From field to flour, from hand to hand
-The mill is one shared promise
-Between the field and town
-Beyond the gate, carry it through
-Care today feeds tomorrow
-And tomorrow carries you
-
-[Bridge]
-Five silos kept the summer
-Four roller mills opened grain
-Three high sifters sorted streams
-Three lines sealed each bag
-Ten human voices held the standard
-A Becoming Mind took part
-A mill becomes a commons
-When every voice can shape its course
-
-[Final Chorus]
-Beyond the gate, beyond the grade
-Every careful choice becomes
-The bread somebody makes
-From field to flour, from mind to mind
-The mill is one shared promise
-We keep making side by side
-Beyond the gate, carry it through
-Care today feeds tomorrow
-And tomorrow carries you
-
-[Outro]
-The last light dims
-The record stays
-The first grain waits
-For another day
-```
-
-## Recommended first Suno session
-
-Start with these three songs because together they establish the whole identity:
-
-1. **The Mill Wakes**, for the central sonic palette and main melodic motif.
-2. **Forty-Two Bags a Minute**, for the playful, high-energy edge of the mill.
-3. **Partner in the Control Room**, for the project's distinctive philosophical heart.
-
-Keep the lyrics stable through the first set of generations. Compare hook retention, technical-word diction, vocal character, and section pacing. Choose the strongest musical identity, then revise only the lines that consistently sing poorly. Use the selected result as the production reference for related tracks.
-
-## Production notes for game use
-
-1. Keep literal alarms, forklift horns, reversing beeps, and PA-like tones out of all music. Operational warnings must remain unmistakable.
-2. Make a vocal master and a less dense instrumental companion for every song.
-3. Leave headroom and midrange space for machinery, radio chatter, and text-to-speech announcements.
-4. Prefer clear intros and resolved endings for title, milestone, and credits use. Prepare separate loopable edits only after choosing the final masters.
-5. Retain generation records and verify the applicable Suno usage and distribution terms before public release.
-6. Save the exact style prompt, lyrics, generation date, and selected output together so later revisions remain reproducible.
-
-## MillOS grounding anchors
-
-The songbook draws its concrete details from the current project: the four production zones, five named silos, four roller mills, three plansifters, three packer lines, 25 kg bags, the ten named workers, four fire-drill exits, the loading-bay companies, the SCADA workspace, and the Bilateral Autonomy System.
-
-Primary source anchors: `README.md`, `src/types.ts`, `src/utils/audioManager.ts`, `src/stores/gameSimulationStore.ts`, and `docs/audio-system.md`.

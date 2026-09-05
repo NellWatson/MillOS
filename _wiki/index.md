@@ -5,6 +5,8 @@
 <!-- wiki:created = 2026-05-23 -->
 <!-- wiki:updated = 2026-05-23 -->
 
+> **Status:** compiled snapshot last refreshed 2026-05-23. Several modules and store groups have changed since this snapshot. Use [the current architecture map](../docs/architecture.md) for orientation, verify every load-bearing claim against source and reachability, and use [the Agent Operating Architecture](../docs/AGENT_OPERATING_ARCHITECTURE.md) for the accepted target.
+
 ## Systems
 - [[millos:systems/store-architecture]] — Domain stores, useMillStore backward-compat, BAS store groups (updated: 2026-05-23)
 - [[millos:systems/scada-layer]] — Adapter pattern, AlarmManager, HistoryStore, protocol adapters (updated: 2026-05-23)

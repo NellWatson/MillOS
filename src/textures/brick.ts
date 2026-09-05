@@ -53,7 +53,7 @@ export const generateBrick = (
   options: BrickOptions = {}
 ): THREE.DataTexture => {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const cacheKey = `brick-${size}-${opts.brickWidth}-${opts.brickHeight}-${opts.baseColor}`;
+  const cacheKey = `brick-${size}-${opts.brickWidth}-${opts.brickHeight}-${opts.mortarWidth}-${opts.baseColor}-${opts.mortarColor}`;
 
   return getTexture(cacheKey, () => {
     const data = new Uint8Array(size * size * 4);
@@ -139,7 +139,7 @@ export const generateBrickNormal = (
   brickHeight: number = 16,
   mortarWidth: number = 2
 ): THREE.DataTexture => {
-  return getTexture(`brick-normal-${size}-${brickWidth}-${brickHeight}`, () => {
+  return getTexture(`brick-normal-${size}-${brickWidth}-${brickHeight}-${mortarWidth}`, () => {
     const data = new Uint8Array(size * size * 4);
 
     for (let y = 0; y < size; y++) {

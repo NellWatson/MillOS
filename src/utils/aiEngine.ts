@@ -235,9 +235,10 @@ function recordPrediction(machine: MachineData, now = Date.now()): void {
   ].slice(-MAX_PREDICTED_EVENTS);
 }
 
-function recordDecision(decision: AIDecision): AIDecision {
+function recordDecision(decision: AIDecision): AIDecision | null {
   const store = useProductionStore.getState();
-  store.addAIDecision?.(decision);
+  const accepted = store.addAIDecision?.(decision);
+  if (accepted !== true) return null;
   if (decision.machineId) {
     machineDecisionCounts.set(
       decision.machineId,
@@ -380,7 +381,7 @@ export function reactToAlert(alert: AlertData): AIDecision | null {
 
 export function applyDecisionEffects(
   decision: AIDecision,
-  disposition: 'automatic' | 'accepted' = 'automatic'
+  disposition: 'automatic' | 'accepted' | 'modified' = 'automatic'
 ): void {
   const store = useProductionStore.getState();
   store.recordDecisionResponse?.(decision.id, disposition);
@@ -519,48 +520,71 @@ export function shouldTriggerAudioCue(decision: AIDecision): boolean {
   );
 }
 
-let shiftObserverCleanup: (() => void) | null = null;
+let shiftObserverUnsubscribe: (() => void) | null = null;
+let shiftObserverUsers = 0;
 let lastObservedShift: string | null = null;
 
 export function initializeShiftObserver(): () => void {
-  if (shiftObserverCleanup) return shiftObserverCleanup;
-  lastObservedShift = useGameSimulationStore.getState().currentShift;
-  const unsubscribe = useGameSimulationStore.subscribe((state) => {
-    if (lastObservedShift && state.currentShift !== lastObservedShift) resetShiftStats();
-    lastObservedShift = state.currentShift;
-  });
-  let cleaned = false;
-  shiftObserverCleanup = () => {
-    if (cleaned) return;
-    cleaned = true;
-    unsubscribe();
-    shiftObserverCleanup = null;
+  if (!shiftObserverUnsubscribe) {
+    lastObservedShift = useGameSimulationStore.getState().currentShift;
+    shiftObserverUnsubscribe = useGameSimulationStore.subscribe((state) => {
+      if (lastObservedShift && state.currentShift !== lastObservedShift) resetShiftStats();
+      lastObservedShift = state.currentShift;
+    });
+  }
+  shiftObserverUsers += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    shiftObserverUsers = Math.max(0, shiftObserverUsers - 1);
+    if (shiftObserverUsers > 0) return;
+    shiftObserverUnsubscribe?.();
+    shiftObserverUnsubscribe = null;
     lastObservedShift = null;
   };
-  return shiftObserverCleanup;
 }
 
-let outcomeObserverCleanup: (() => void) | null = null;
+let outcomeObserverUnsubscribe: (() => void) | null = null;
+let outcomeObserverUsers = 0;
 const trackedOutcomeIds = new Set<string>();
+const MAX_TRACKED_OUTCOME_IDS = 500;
+
+function trackTerminalOutcomeOnce(decision: AIDecision): void {
+  if (
+    !decision.outcome ||
+    trackedOutcomeIds.has(decision.id) ||
+    (decision.status !== 'completed' && decision.status !== 'superseded')
+  ) {
+    return;
+  }
+  trackedOutcomeIds.add(decision.id);
+  while (trackedOutcomeIds.size > MAX_TRACKED_OUTCOME_IDS) {
+    const oldestId = trackedOutcomeIds.values().next().value;
+    if (oldestId === undefined) break;
+    trackedOutcomeIds.delete(oldestId);
+  }
+  trackDecisionOutcome(decision);
+}
 
 export function initializeDecisionOutcomeTracking(): () => void {
-  if (outcomeObserverCleanup) return outcomeObserverCleanup;
-  const unsubscribe = useProductionStore.subscribe((state) => {
-    for (const decision of state.aiDecisions) {
-      if (!decision.outcome || trackedOutcomeIds.has(decision.id)) continue;
-      if (decision.status !== 'completed' && decision.status !== 'superseded') continue;
-      trackedOutcomeIds.add(decision.id);
-      trackDecisionOutcome(decision);
-    }
-  });
-  let cleaned = false;
-  outcomeObserverCleanup = () => {
-    if (cleaned) return;
-    cleaned = true;
-    unsubscribe();
-    outcomeObserverCleanup = null;
+  if (!outcomeObserverUnsubscribe) {
+    outcomeObserverUnsubscribe = useProductionStore.subscribe((state) => {
+      state.aiDecisions.forEach(trackTerminalOutcomeOnce);
+    });
+    const currentDecisions = useProductionStore.getState().aiDecisions;
+    if (Array.isArray(currentDecisions)) currentDecisions.forEach(trackTerminalOutcomeOnce);
+  }
+  outcomeObserverUsers += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    outcomeObserverUsers = Math.max(0, outcomeObserverUsers - 1);
+    if (outcomeObserverUsers > 0) return;
+    outcomeObserverUnsubscribe?.();
+    outcomeObserverUnsubscribe = null;
   };
-  return outcomeObserverCleanup;
 }
 
 function getActiveLLM(): {
@@ -638,21 +662,53 @@ function parseStrategicResponse(response: string): {
   }
 }
 
-export async function generateStrategicDecision(): Promise<AIDecision | null> {
+let strategicRequestEpoch = 0;
+let strategicDecisionPromise: Promise<AIDecision | null> | null = null;
+let strategicDecisionKey: string | null = null;
+
+async function runStrategicDecision(
+  requestEpoch: number,
+  requestMode: string,
+  requestBackend: string
+): Promise<AIDecision | null> {
   const config = useAIConfigStore.getState();
-  if (!isStrategicLayerActive()) return null;
+  if (
+    config.aiMode !== requestMode ||
+    config.llmBackend !== requestBackend ||
+    !isStrategicLayerActive()
+  ) {
+    return null;
+  }
   const llm = getActiveLLM();
   if (!llm.isConnected()) return null;
 
+  let configurationChanged = false;
+  const unsubscribeConfig = useAIConfigStore.subscribe((state) => {
+    if (state.aiMode !== requestMode || state.llmBackend !== requestBackend) {
+      configurationChanged = true;
+    }
+  });
   config.setStrategicThinking(true);
   try {
     const prompt = strategicPrompt(getMachines());
     const response = await llm.generateContent(prompt);
-    if (!response || !llm.isConnected()) return null;
-    if (config.llmBackend === 'gemini') config.recordApiUsage(prompt.length, response.length);
+    if (
+      requestEpoch !== strategicRequestEpoch ||
+      configurationChanged ||
+      !response ||
+      !llm.isConnected() ||
+      !isStrategicLayerActive() ||
+      useAIConfigStore.getState().aiMode !== requestMode ||
+      useAIConfigStore.getState().llmBackend !== requestBackend
+    ) {
+      return null;
+    }
+    const liveConfig = useAIConfigStore.getState();
+    if (config.llmBackend === 'gemini') {
+      liveConfig.recordApiUsage(prompt.length, response.length);
+    }
     const strategic = parseStrategicResponse(response);
     if (!strategic) return null;
-    config.setStrategicPriorities(strategic.priorities);
     const decision: AIDecision = {
       id: makeId('strategic'),
       timestamp: new Date(),
@@ -671,13 +727,42 @@ export async function generateStrategicDecision(): Promise<AIDecision | null> {
       priority: 'medium',
       triggeredBy: 'prediction',
     };
-    return recordDecision(decision);
+    const recorded = recordDecision(decision);
+    if (!recorded) return null;
+    liveConfig.setStrategicPriorities(strategic.priorities);
+    return recorded;
   } catch (error) {
     logger.ai.error('Strategic decision generation failed', error);
     return null;
   } finally {
-    useAIConfigStore.getState().setStrategicThinking(false);
+    unsubscribeConfig();
   }
+}
+
+export function generateStrategicDecision(): Promise<AIDecision | null> {
+  const config = useAIConfigStore.getState();
+  const requestKey = `${config.aiMode}:${config.llmBackend}`;
+  if (strategicDecisionPromise && strategicDecisionKey === requestKey) {
+    return strategicDecisionPromise;
+  }
+  if (strategicDecisionPromise) {
+    strategicRequestEpoch += 1;
+    strategicDecisionPromise = null;
+    strategicDecisionKey = null;
+  }
+  const requestEpoch = strategicRequestEpoch;
+  const promise = runStrategicDecision(requestEpoch, config.aiMode, config.llmBackend);
+  strategicDecisionPromise = promise;
+  strategicDecisionKey = requestKey;
+  void promise.finally(() => {
+    if (strategicDecisionPromise !== promise) return;
+    strategicDecisionPromise = null;
+    strategicDecisionKey = null;
+    if (requestEpoch === strategicRequestEpoch) {
+      useAIConfigStore.getState().setStrategicThinking(false);
+    }
+  });
+  return promise;
 }
 
 let loopInterval: ReturnType<typeof setInterval> | null = null;
@@ -746,11 +831,17 @@ export function initializeAIEngine(): () => void {
     if (cleaned) return;
     cleaned = true;
     engineUsers = Math.max(0, engineUsers - 1);
-    if (engineUsers > 0) return;
+    // Every engine lease owns one observer lease. Release those independently
+    // even while another engine user keeps the shared loop alive.
     shiftCleanup();
     outcomeCleanup();
+    if (engineUsers > 0) return;
     if (loopInterval) clearInterval(loopInterval);
     loopInterval = null;
+    strategicRequestEpoch += 1;
+    strategicDecisionPromise = null;
+    strategicDecisionKey = null;
+    useAIConfigStore.getState().setStrategicThinking(false);
     logger.ai.info('Autonomous plant decision engine stopped');
   };
 }

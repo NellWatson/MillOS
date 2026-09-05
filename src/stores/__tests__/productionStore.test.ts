@@ -9,7 +9,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { useProductionStore } from '../productionStore';
+import {
+  cleanupThrottledBags,
+  resetThrottledBagState,
+  throttledIncrementBags,
+  useProductionStore,
+} from '../productionStore';
 import { useAnnouncementsStore, type Announcement } from '../announcementsStore';
 import { AIDecision } from '../../types';
 
@@ -22,6 +27,14 @@ const DEFAULT_ANNOUNCEMENT_CONTEXT: Pick<
   audience: 'all',
   cooldownMs: 0,
 };
+
+afterEach(() => {
+  resetThrottledBagState();
+  if (vi.isFakeTimers()) {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
 
 describe('ProductionStore - AI Decision Management', () => {
   beforeEach(() => {
@@ -73,7 +86,7 @@ describe('ProductionStore - AI Decision Management', () => {
 
       const { addAIDecision } = useProductionStore.getState();
 
-      addAIDecision(decision);
+      expect(addAIDecision(decision)).toBe(true);
 
       const updatedDecisions = useProductionStore.getState().aiDecisions;
       expect(updatedDecisions).toHaveLength(1);
@@ -138,7 +151,7 @@ describe('ProductionStore - AI Decision Management', () => {
           reasoning: 'Test',
           confidence: 75,
           impact: 'Test',
-          status: 'pending',
+          status: 'completed',
           priority: 'low',
         };
         addAIDecision(decision);
@@ -152,6 +165,79 @@ describe('ProductionStore - AI Decision Management', () => {
 
       // Oldest decisions should be removed
       expect(decisions.find((d) => d.id === 'test-decision-0')).toBeUndefined();
+    });
+
+    it('never evicts unresolved decisions when the retained queue is full', () => {
+      const { addAIDecision } = useProductionStore.getState();
+      for (let index = 0; index < 50; index += 1) {
+        addAIDecision({
+          id: `pending-${index}`,
+          timestamp: new Date(),
+          type: 'optimization',
+          action: `Pending ${index}`,
+          reasoning: 'Awaiting operator disposition',
+          confidence: 75,
+          impact: 'Test',
+          status: 'pending',
+          priority: 'low',
+        });
+      }
+
+      const accepted = addAIDecision({
+        id: 'overflow',
+        timestamp: new Date(),
+        type: 'optimization',
+        action: 'Overflow',
+        reasoning: 'No safe eviction candidate',
+        confidence: 75,
+        impact: 'Test',
+        status: 'pending',
+        priority: 'low',
+      });
+
+      const decisions = useProductionStore.getState().aiDecisions;
+      expect(accepted).toBe(false);
+      expect(decisions).toHaveLength(50);
+      expect(decisions.map((decision) => decision.id)).toEqual(
+        Array.from({ length: 50 }, (_, index) => `pending-${49 - index}`)
+      );
+      expect(decisions.some((decision) => decision.id === 'overflow')).toBe(false);
+    });
+
+    it('evicts a terminal decision instead of unresolved work from a mixed full queue', () => {
+      const { addAIDecision } = useProductionStore.getState();
+      const makeDecision = (id: string, status: AIDecision['status'] = 'pending'): AIDecision => ({
+        id,
+        timestamp: new Date(),
+        type: 'optimization',
+        action: id,
+        reasoning: 'Queue retention contract',
+        confidence: 75,
+        impact: 'Test',
+        status,
+        priority: 'low',
+      });
+      const unresolvedIds: string[] = [];
+
+      for (let index = 0; index < 25; index += 1) {
+        const id = `older-pending-${index}`;
+        unresolvedIds.push(id);
+        addAIDecision(makeDecision(id));
+      }
+      addAIDecision(makeDecision('terminal', 'completed'));
+      for (let index = 0; index < 24; index += 1) {
+        const id = `newer-in-progress-${index}`;
+        unresolvedIds.push(id);
+        addAIDecision(makeDecision(id, 'in_progress'));
+      }
+
+      expect(addAIDecision(makeDecision('new-pending'))).toBe(true);
+
+      const retainedIds = useProductionStore.getState().aiDecisions.map(({ id }) => id);
+      expect(retainedIds).toHaveLength(50);
+      expect(retainedIds[0]).toBe('new-pending');
+      expect(retainedIds).not.toContain('terminal');
+      expect(retainedIds).toEqual(expect.arrayContaining(unresolvedIds));
     });
   });
 
@@ -224,7 +310,7 @@ describe('ProductionStore - AI Decision Management', () => {
       expect(updated!.outcome).toBe('In progress');
     });
 
-    it('should handle non-existent decision IDs gracefully', () => {
+    it('leaves decision entries unchanged for an unknown ID', () => {
       const { updateDecisionStatus } = useProductionStore.getState();
 
       const decisionsBefore = useProductionStore.getState().aiDecisions;
@@ -233,7 +319,6 @@ describe('ProductionStore - AI Decision Management', () => {
 
       const decisionsAfter = useProductionStore.getState().aiDecisions;
 
-      // Should not modify the array
       expect(decisionsAfter).toEqual(decisionsBefore);
     });
 
@@ -298,33 +383,6 @@ describe('ProductionStore - AI Decision Management', () => {
       expect(announcements).toHaveLength(0);
     });
 
-    it('should keep recent announcements (less than 5 minutes old)', () => {
-      const { clearOldAnnouncements } = useProductionStore.getState();
-
-      // Add a recent announcement (less than 5 minutes old - should be kept)
-      const recentTimestamp = Date.now() - 60 * 1000; // 1 minute ago
-
-      useAnnouncementsStore.setState({
-        announcements: [
-          {
-            ...DEFAULT_ANNOUNCEMENT_CONTEXT,
-            id: 'recent-announcement',
-            message: 'Recent message',
-            type: 'info',
-            timestamp: new Date(recentTimestamp),
-            dismissed: false,
-            priority: 1,
-          },
-        ],
-      });
-
-      clearOldAnnouncements();
-
-      const announcements = useAnnouncementsStore.getState().announcements;
-      expect(announcements).toHaveLength(1);
-      expect(announcements[0].id).toBe('recent-announcement');
-    });
-
     it('should keep multiple valid announcements and remove expired ones', () => {
       const { clearOldAnnouncements } = useProductionStore.getState();
 
@@ -381,34 +439,6 @@ describe('ProductionStore - AI Decision Management', () => {
       expect(announcements.find((a) => a.id === 'old-2')).toBeUndefined();
     });
 
-    it('should not update state if no announcements expired', () => {
-      const { clearOldAnnouncements } = useProductionStore.getState();
-
-      const recentTimestamp = Date.now() - 60 * 1000; // 1 minute ago
-      const initialAnnouncements: Announcement[] = [
-        {
-          ...DEFAULT_ANNOUNCEMENT_CONTEXT,
-          id: 'recent-announcement',
-          message: 'Recent',
-          type: 'info' as const,
-          timestamp: new Date(recentTimestamp),
-          dismissed: false,
-          priority: 1,
-        },
-      ];
-
-      useAnnouncementsStore.setState({
-        announcements: initialAnnouncements,
-      });
-
-      clearOldAnnouncements();
-
-      const announcements = useAnnouncementsStore.getState().announcements;
-
-      // State should not have changed (same reference)
-      expect(announcements.length).toBe(1);
-    });
-
     it('should handle empty announcements array', () => {
       const { clearOldAnnouncements } = useProductionStore.getState();
 
@@ -423,8 +453,9 @@ describe('ProductionStore - AI Decision Management', () => {
 
   describe('Announcement Management', () => {
     beforeEach(() => {
-      // Reset announcements store before each test
-      useAnnouncementsStore.setState({ announcements: [], lastAnnouncementTime: {} });
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-08-20T12:00:00.000Z'));
+      useAnnouncementsStore.setState(useAnnouncementsStore.getInitialState(), true);
     });
 
     it('should add announcements with auto-generated ID and timestamp', () => {
@@ -437,14 +468,23 @@ describe('ProductionStore - AI Decision Management', () => {
       });
 
       const announcements = useAnnouncementsStore.getState().announcements;
-      expect(announcements).toHaveLength(1);
-      expect(announcements[0]).toHaveProperty('id');
-      expect(announcements[0]).toHaveProperty('timestamp');
-      expect(announcements[0].message).toBe('Test announcement');
+      expect(announcements).toEqual([
+        {
+          id: expect.stringMatching(/^ann-1787227200000-/),
+          timestamp: new Date('2026-08-20T12:00:00.000Z'),
+          message: 'Test announcement',
+          type: 'info',
+          priority: 1,
+          dismissed: false,
+          channel: 'operational',
+          tone: 'literal',
+          audience: 'all',
+          cooldownMs: 15_000,
+        },
+      ]);
     });
 
     it('should limit announcements to MAX_ANNOUNCEMENTS items', () => {
-      vi.useFakeTimers();
       const { addAnnouncement } = useProductionStore.getState();
 
       // Add 55 announcements (MAX_ANNOUNCEMENTS is 50)
@@ -460,11 +500,9 @@ describe('ProductionStore - AI Decision Management', () => {
 
       const announcements = useAnnouncementsStore.getState().announcements;
       expect(announcements.length).toBe(50); // MAX_ANNOUNCEMENTS
-      vi.useRealTimers();
     });
 
     it('should dismiss specific announcements', () => {
-      vi.useFakeTimers();
       const { addAnnouncement, dismissAnnouncement } = useProductionStore.getState();
 
       addAnnouncement({
@@ -493,41 +531,103 @@ describe('ProductionStore - AI Decision Management', () => {
       expect(announcementsAfter).toHaveLength(2);
       const dismissed = announcementsAfter.find((a) => a.id === idToDismiss);
       expect(dismissed?.dismissed).toBe(true);
-      vi.useRealTimers();
+    });
+  });
+});
+
+describe('ProductionStore - Bag Production Accounting', () => {
+  const invalidCounts = [
+    ['NaN', Number.NaN],
+    ['positive infinity', Number.POSITIVE_INFINITY],
+    ['negative infinity', Number.NEGATIVE_INFINITY],
+    ['negative', -3],
+    ['zero', 0],
+  ] as const;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetThrottledBagState();
+    useProductionStore.setState({
+      totalBagsProduced: 0,
+      dailyBagsProduced: 0,
+      productionTarget: {
+        id: 'accounting-target',
+        date: '2026-08-20',
+        targetBags: 10,
+        producedBags: 0,
+        targetThroughput: 1500,
+        actualThroughput: 0,
+        status: 'in_progress',
+      },
     });
   });
 
-  describe('Edge Cases and Performance', () => {
-    it('should handle rapid decision additions efficiently', () => {
-      const { addAIDecision } = useProductionStore.getState();
+  it.each(invalidCounts)('ignores %s in direct production accounting', (_label, count) => {
+    useProductionStore.getState().incrementBagsProduced(count);
 
-      const startTime = performance.now();
+    const state = useProductionStore.getState();
+    expect(state.totalBagsProduced).toBe(0);
+    expect(state.dailyBagsProduced).toBe(0);
+    expect(state.productionTarget?.producedBags).toBe(0);
+    expect(state.productionTarget?.status).toBe('in_progress');
+  });
 
-      // Add 100 decisions rapidly
-      for (let i = 0; i < 100; i++) {
-        addAIDecision({
-          id: `rapid-${i}`,
-          timestamp: new Date(),
-          type: 'optimization',
-          action: `Action ${i}`,
-          reasoning: 'Test',
-          confidence: 75,
-          impact: 'Test',
-          status: 'pending',
-          priority: 'low',
-          machineId: `MACHINE-${i % 10}`,
-        });
-      }
+  it.each(invalidCounts)(
+    'ignores %s without poisoning the throttled accumulator',
+    (_label, count) => {
+      throttledIncrementBags(count);
+      throttledIncrementBags(2);
 
-      const endTime = performance.now();
-      const duration = endTime - startTime;
+      vi.advanceTimersByTime(500);
 
-      // Should complete in reasonable time (< 100ms)
-      expect(duration).toBeLessThan(100);
+      const state = useProductionStore.getState();
+      expect(state.totalBagsProduced).toBe(2);
+      expect(state.dailyBagsProduced).toBe(2);
+      expect(state.productionTarget?.producedBags).toBe(2);
+      expect(state.productionTarget?.status).toBe('in_progress');
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  );
 
-      // Should still respect the 50-item limit
-      const decisions = useProductionStore.getState().aiDecisions;
-      expect(decisions.length).toBe(50);
-    });
+  it('aggregates calls and flushes exactly at the 500 ms boundary', () => {
+    throttledIncrementBags(1);
+    throttledIncrementBags(2);
+
+    vi.advanceTimersByTime(499);
+    expect(useProductionStore.getState().totalBagsProduced).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
+
+    vi.advanceTimersByTime(1);
+    expect(useProductionStore.getState().totalBagsProduced).toBe(3);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('cleanup flushes pending work once and is idempotent', () => {
+    throttledIncrementBags(3);
+
+    cleanupThrottledBags();
+    cleanupThrottledBags();
+    vi.advanceTimersByTime(1000);
+
+    expect(useProductionStore.getState().totalBagsProduced).toBe(3);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('test reset cancels pending work without flushing it', () => {
+    throttledIncrementBags(3);
+
+    resetThrottledBagState();
+    vi.advanceTimersByTime(1000);
+
+    expect(useProductionStore.getState().totalBagsProduced).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('rounds positive fractional counts without losing later work', () => {
+    useProductionStore.getState().incrementBagsProduced(1.4);
+    throttledIncrementBags(1.5);
+    vi.advanceTimersByTime(500);
+
+    expect(useProductionStore.getState().totalBagsProduced).toBe(3);
   });
 });

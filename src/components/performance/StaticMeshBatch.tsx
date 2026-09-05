@@ -113,20 +113,61 @@ const finishStaticBatch = (token: symbol): void => {
 
 const rounded = (value: number): number => Math.round(value * 10000) / 10000;
 
+const signatureObjectIds = new WeakMap<object, number>();
+let nextSignatureObjectId = 1;
+
+const signatureObjectIdentity = (value: object): number => {
+  const existing = signatureObjectIds.get(value);
+  if (existing !== undefined) return existing;
+  const identity = nextSignatureObjectId;
+  nextSignatureObjectId += 1;
+  signatureObjectIds.set(value, identity);
+  return identity;
+};
+
 const textureSignature = (texture: THREE.Texture | null): string => {
   if (!texture) return 'none';
   const image = texture.source?.data as { currentSrc?: string; src?: string } | undefined;
+  const extendedTexture = texture as THREE.Texture & {
+    compareFunction?: number | null;
+    wrapR?: number;
+  };
   return [
-    image?.currentSrc ?? image?.src ?? texture.source?.uuid ?? texture.uuid,
+    texture.constructor.name,
+    texture.source?.uuid ?? texture.uuid,
+    image?.currentSrc ?? image?.src ?? 'no-url',
     texture.colorSpace,
     texture.mapping,
+    texture.channel,
     texture.wrapS,
     texture.wrapT,
-    rounded(texture.repeat.x),
-    rounded(texture.repeat.y),
-    rounded(texture.offset.x),
-    rounded(texture.offset.y),
-    rounded(texture.rotation),
+    extendedTexture.wrapR ?? 'none',
+    texture.magFilter,
+    texture.minFilter,
+    texture.anisotropy,
+    texture.format,
+    texture.internalFormat ?? 'none',
+    texture.type,
+    texture.repeat.x,
+    texture.repeat.y,
+    texture.offset.x,
+    texture.offset.y,
+    texture.center.x,
+    texture.center.y,
+    texture.rotation,
+    texture.matrixAutoUpdate,
+    texture.matrix.elements.join(','),
+    texture.generateMipmaps,
+    texture.premultiplyAlpha,
+    texture.flipY,
+    texture.unpackAlignment,
+    extendedTexture.compareFunction ?? 'none',
+    texture.mipmaps.length,
+    ...texture.mipmaps.map((mipmap) =>
+      typeof mipmap === 'object' && mipmap !== null
+        ? signatureObjectIdentity(mipmap)
+        : String(mipmap)
+    ),
   ].join(':');
 };
 
@@ -167,68 +208,75 @@ const geometrySignature = (geometry: THREE.BufferGeometry): string => {
   ].join('|');
 };
 
+type MaterialSignatureOptions = { includeColor?: boolean; mergeCompatible?: boolean };
+
+const MATERIAL_IDENTITY_KEYS = new Set(['id', 'uuid', 'name', 'userData', 'version', 'type']);
+const MERGE_QUANTIZED_KEYS = new Set(['roughness', 'metalness']);
+
+const materialValueSignature = (
+  key: string,
+  value: unknown,
+  options: MaterialSignatureOptions,
+  ancestors: Set<object>
+): string => {
+  if (key === 'color' && options.includeColor === false) return 'vertex-color';
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (value instanceof THREE.Texture) return `texture:${textureSignature(value)}`;
+  if (value instanceof THREE.Color) return `color:${value.r},${value.g},${value.b}`;
+  if (typeof value === 'number') {
+    return String(
+      options.mergeCompatible && MERGE_QUANTIZED_KEYS.has(key) ? Math.round(value * 4) / 4 : value
+    );
+  }
+  if (typeof value === 'string' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+  if (typeof value === 'function') return `function:${signatureObjectIdentity(value)}`;
+  if (typeof value === 'object') {
+    if (ancestors.has(value)) return `cycle:${signatureObjectIdentity(value)}`;
+    ancestors.add(value);
+    try {
+      if (Array.isArray(value)) {
+        return `[${value
+          .map((entry) => materialValueSignature(key, entry, options, ancestors))
+          .join(',')}]`;
+      }
+      if ('toArray' in value && typeof value.toArray === 'function') {
+        const array = value.toArray() as unknown[];
+        return `[${array
+          .map((entry) => materialValueSignature(key, entry, options, ancestors))
+          .join(',')}]`;
+      }
+      const prototype = Object.getPrototypeOf(value);
+      if (prototype !== Object.prototype && prototype !== null) {
+        return `object:${signatureObjectIdentity(value)}`;
+      }
+      return `{${Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(
+          ([nestedKey, nestedValue]) =>
+            `${nestedKey}:${materialValueSignature(nestedKey, nestedValue, options, ancestors)}`
+        )
+        .join(',')}}`;
+    } finally {
+      ancestors.delete(value);
+    }
+  }
+  return String(value);
+};
+
 const materialSignature = (
   material: THREE.Material,
-  options: { includeColor?: boolean; mergeCompatible?: boolean } = {}
-): string => {
-  const standard = material as THREE.MeshStandardMaterial;
-  const physical = material as THREE.MeshPhysicalMaterial;
-  const phong = material as THREE.MeshPhongMaterial;
-  const includeColor = options.includeColor ?? true;
-  const scalar = options.mergeCompatible
-    ? (value: number): number => Math.round(value * 4) / 4
-    : rounded;
-  return [
+  options: MaterialSignatureOptions = {}
+): string =>
+  [
     material.type,
-    includeColor ? (standard.color?.getHexString() ?? 'none') : 'vertex-color',
-    standard.emissive?.getHexString() ?? 'none',
-    rounded(standard.emissiveIntensity ?? 0),
-    scalar(standard.roughness ?? 0),
-    scalar(standard.metalness ?? 0),
-    scalar(phong.shininess ?? 0),
-    phong.specular?.getHexString() ?? 'none',
-    rounded(physical.clearcoat ?? 0),
-    rounded(physical.clearcoatRoughness ?? 0),
-    rounded(physical.ior ?? 0),
-    rounded(physical.reflectivity ?? 0),
-    rounded(physical.transmission ?? 0),
-    rounded(physical.thickness ?? 0),
-    rounded(physical.attenuationDistance ?? 0),
-    physical.attenuationColor?.getHexString() ?? 'none',
-    rounded(physical.sheen ?? 0),
-    physical.sheenColor?.getHexString() ?? 'none',
-    rounded(physical.sheenRoughness ?? 0),
-    rounded(physical.iridescence ?? 0),
-    rounded(physical.iridescenceIOR ?? 0),
-    rounded(material.opacity),
-    rounded(material.alphaTest),
-    material.alphaHash,
-    material.alphaToCoverage,
-    material.side,
-    material.blending,
-    material.depthTest,
-    material.depthWrite,
-    material.colorWrite,
-    material.vertexColors,
-    material.toneMapped,
-    material.polygonOffset,
-    material.polygonOffsetFactor,
-    material.polygonOffsetUnits,
-    standard.flatShading ?? false,
-    standard.wireframe ?? false,
-    standard.fog ?? false,
-    standard.dithering ?? false,
-    standard.premultipliedAlpha ?? false,
-    vectorSignature(standard.normalScale),
-    textureSignature(standard.map),
-    textureSignature(standard.normalMap),
-    textureSignature(standard.roughnessMap),
-    textureSignature(standard.metalnessMap),
-    textureSignature(standard.aoMap),
-    textureSignature(standard.emissiveMap),
-    textureSignature(standard.alphaMap),
+    ...Object.entries(material)
+      .filter(([key, value]) => !MATERIAL_IDENTITY_KEYS.has(key) && typeof value !== 'function')
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => `${key}:${materialValueSignature(key, value, options, new Set())}`),
   ].join('|');
-};
 
 const getInstanceColor = (material: THREE.Material): THREE.Color | null => {
   const colorMaterial = material as THREE.Material & { color?: THREE.Color };
@@ -256,6 +304,143 @@ const geometryAttributeSignature = (geometry: THREE.BufferGeometry): string =>
     )
     .sort()
     .join('|');
+
+const attributesHaveEqualData = (
+  left: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+  right: THREE.BufferAttribute | THREE.InterleavedBufferAttribute
+): boolean => {
+  const leftInterleaved = left instanceof THREE.InterleavedBufferAttribute;
+  const rightInterleaved = right instanceof THREE.InterleavedBufferAttribute;
+  if (
+    left.itemSize !== right.itemSize ||
+    left.count !== right.count ||
+    left.normalized !== right.normalized ||
+    left.array.constructor !== right.array.constructor ||
+    left.array.length !== right.array.length ||
+    leftInterleaved !== rightInterleaved
+  ) {
+    return false;
+  }
+  if (leftInterleaved && rightInterleaved) {
+    if (left.offset !== right.offset || left.data.stride !== right.data.stride) return false;
+  }
+  for (let index = 0; index < left.array.length; index += 1) {
+    if (!Object.is(left.array[index], right.array[index])) return false;
+  }
+  return true;
+};
+
+const geometriesHaveEqualRenderData = (
+  left: THREE.BufferGeometry,
+  right: THREE.BufferGeometry
+): boolean => {
+  if (left === right) return true;
+  const leftNames = Object.keys(left.attributes).sort();
+  const rightNames = Object.keys(right.attributes).sort();
+  if (leftNames.length !== rightNames.length) return false;
+  for (let index = 0; index < leftNames.length; index += 1) {
+    const name = leftNames[index];
+    if (name !== rightNames[index]) return false;
+    if (!attributesHaveEqualData(left.getAttribute(name), right.getAttribute(name))) return false;
+  }
+  if (Boolean(left.index) !== Boolean(right.index)) return false;
+  if (left.index && right.index && !attributesHaveEqualData(left.index, right.index)) return false;
+  if (
+    left.drawRange.start !== right.drawRange.start ||
+    left.drawRange.count !== right.drawRange.count ||
+    left.groups.length !== right.groups.length
+  ) {
+    return false;
+  }
+  return left.groups.every((group, index) => {
+    const other = right.groups[index];
+    return (
+      other !== undefined &&
+      group.start === other.start &&
+      group.count === other.count &&
+      group.materialIndex === other.materialIndex
+    );
+  });
+};
+
+const geometryRenderDataFingerprint = (
+  geometry: THREE.BufferGeometry,
+  cache: WeakMap<THREE.BufferGeometry, string>
+): string => {
+  const cached = cache.get(geometry);
+  if (cached !== undefined) return cached;
+
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  const updateByte = (value: number): void => {
+    first = Math.imul(first ^ value, 0x01000193);
+    second = Math.imul(second ^ value, 0x85ebca6b);
+  };
+  const updateText = (value: unknown): void => {
+    const text = String(value);
+    for (let index = 0; index < text.length; index += 1) {
+      const code = text.charCodeAt(index);
+      updateByte(code & 0xff);
+      updateByte(code >>> 8);
+    }
+    updateByte(0xff);
+  };
+  const updateAttribute = (
+    name: string,
+    attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute
+  ): void => {
+    const interleaved = attribute instanceof THREE.InterleavedBufferAttribute;
+    const array = attribute.array;
+    updateText(name);
+    updateText(attribute.itemSize);
+    updateText(attribute.count);
+    updateText(attribute.normalized);
+    updateText(array.constructor.name);
+    updateText('gpuType' in attribute ? attribute.gpuType : '');
+    updateText(interleaved);
+    if (interleaved) {
+      updateText(attribute.offset);
+      updateText(attribute.data.stride);
+    }
+    const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
+    for (const byte of bytes) updateByte(byte);
+  };
+
+  for (const [name, attribute] of Object.entries(geometry.attributes).sort(([left], [right]) =>
+    left.localeCompare(right)
+  )) {
+    updateAttribute(name, attribute);
+  }
+  if (geometry.index) updateAttribute('index', geometry.index);
+  else updateText('no-index');
+  updateText(geometry.drawRange.start);
+  updateText(geometry.drawRange.count);
+  for (const group of geometry.groups) {
+    updateText(group.start);
+    updateText(group.count);
+    updateText(group.materialIndex);
+  }
+
+  const fingerprint = `${first >>> 0}:${second >>> 0}`;
+  cache.set(geometry, fingerprint);
+  return fingerprint;
+};
+
+const partitionByGeometryData = (candidates: BatchCandidate[]): BatchCandidate[][] => {
+  const fingerprintCache = new WeakMap<THREE.BufferGeometry, string>();
+  const buckets = new Map<string, BatchCandidate[][]>();
+  for (const candidate of candidates) {
+    const fingerprint = geometryRenderDataFingerprint(candidate.geometry, fingerprintCache);
+    const groups = buckets.get(fingerprint) ?? [];
+    const existing = groups.find((group) =>
+      geometriesHaveEqualRenderData(group[0].geometry, candidate.geometry)
+    );
+    if (existing) existing.push(candidate);
+    else groups.push([candidate]);
+    if (!buckets.has(fingerprint)) buckets.set(fingerprint, groups);
+  }
+  return [...buckets.values()].flat();
+};
 
 const createMergedGeometry = (
   group: BatchCandidate[],
@@ -305,6 +490,7 @@ const hasExcludedAncestor = (mesh: THREE.Mesh, root: THREE.Group): boolean => {
   let object: THREE.Object3D | null = mesh;
   while (object && object !== root) {
     if (
+      object.visible === false ||
       object.userData.noStaticBatch === true ||
       object.userData.dynamic === true ||
       DYNAMIC_NAME_PATTERN.test(object.name) ||
@@ -621,6 +807,7 @@ export const createStaticMeshBatches = (
     return Boolean(
       mesh.parent &&
       mesh.visible &&
+      !hasExcludedAncestor(mesh, root) &&
       matrixIsStable(candidate.matrixWorld, mesh.matrixWorld) &&
       mesh.geometry === candidate.geometry &&
       mesh.material === candidate.material
@@ -714,6 +901,7 @@ export const createStaticMeshBatches = (
     if (!mesh.parent || optimizedOriginals.has(mesh)) return;
     const key = [
       candidate.geometrySignature,
+      candidate.geometryAttributeSignature,
       candidate.batchMaterialSignature,
       mesh.castShadow,
       mesh.receiveShadow,
@@ -725,101 +913,103 @@ export const createStaticMeshBatches = (
     else instanceGroups.set(key, [candidate]);
   });
 
-  instanceGroups.forEach((group) => {
-    const activeGroup = group.filter(
-      (candidate) => candidate.mesh.parent && !optimizedOriginals.has(candidate.mesh)
-    );
-    if (activeGroup.length < minimumInstances) return;
-    const representative = activeGroup[0]?.mesh;
-    if (!representative || Array.isArray(representative.material)) return;
+  instanceGroups.forEach((coarseGroup) => {
+    partitionByGeometryData(coarseGroup).forEach((group) => {
+      const activeGroup = group.filter(
+        (candidate) => candidate.mesh.parent && !optimizedOriginals.has(candidate.mesh)
+      );
+      if (activeGroup.length < minimumInstances) return;
+      const representative = activeGroup[0]?.mesh;
+      if (!representative || Array.isArray(representative.material)) return;
 
-    const usesInstanceColor = activeGroup.every((candidate) => candidate.instanceColor);
-    const batchMaterial = usesInstanceColor
-      ? (representative.material as THREE.Material).clone()
-      : representative.material;
-    if (usesInstanceColor) {
-      const colorMaterial = batchMaterial as THREE.Material & {
-        color: THREE.Color;
-        vertexColors: boolean;
-      };
-      colorMaterial.color.set(0xffffff);
-      // NOT `vertexColors = true`, which is what turned three shops, two
-      // cottages, the whole truck yard and the dock openings black - 122 meshes
-      // across the app, every one of them rendering with zero diffuse.
-      //
-      // `instanceColor` does not need it and is broken by it. three defines
-      // `USE_INSTANCING_COLOR` from `object.instanceColor !== null` on its own
-      // (`WebGLPrograms.js`), and that define alone declares the `vColor`
-      // varying, initialises it to `vec3(1.0)` and multiplies it by
-      // `instanceColor` - while the FRAGMENT side defines `USE_COLOR` from
-      // `vertexColors || instancingColor || batchingColor`, so the tint still
-      // reaches `diffuseColor`. Setting `vertexColors` additionally defines
-      // `USE_COLOR` in the VERTEX shader, which inserts `vColor *= color`
-      // against a `color` attribute the geometry does not have. An unbound
-      // attribute reads as the WebGL generic default `(0, 0, 0, 1)`, so vColor
-      // is multiplied by zero and the surface loses all of its diffuse.
-      //
-      // The merge path a hundred lines above may keep its `vertexColors = true`
-      // precisely because `createMergedGeometry` writes a `color` attribute
-      // into every geometry it builds. This path reuses the representative's
-      // geometry untouched, so it has whatever the source had - and for every
-      // generated GLB in this repo that is `[position, normal, uv]`.
-      //
-      // Left as the clone's inherited value rather than forced either way: a
-      // source material that genuinely paints from a `color` attribute keeps
-      // doing so, because its geometry supplies one.
-      colorMaterial.needsUpdate = true;
-      // Inside the `usesInstanceColor` branch on purpose. When it is false this
-      // path REUSES `representative.material` rather than cloning it, and that
-      // instance is shared with meshes this batch never touched and is not
-      // disposed by `restoreBatches` (`ownsMaterial: usesInstanceColor`).
-      // Treating it would attach an `onBeforeCompile` to a live source material,
-      // which is the one thing that permanently evicts a mesh from batching.
-      //
-      // Nothing is lost by the guard: `getInstanceColor` returns null exactly
-      // for transparent, sub-unit-opacity or colourless materials, and
-      // `resolveBatchSurfaceProfile` declines all of those anyway.
-      finishMaterial(batchMaterial, representative.material);
-    }
-    const instance = new THREE.InstancedMesh(
-      representative.geometry,
-      batchMaterial,
-      activeGroup.length
-    );
-    instance.name = `static-batch:${name}:${batchIndex}`;
-    instance.castShadow = representative.castShadow;
-    instance.receiveShadow = representative.receiveShadow;
-    instance.renderOrder = representative.renderOrder;
-    instance.layers.mask = representative.layers.mask;
-    instance.userData.staticBatch = true;
-
-    const originals: StaticBatch['originals'] = [];
-    activeGroup.forEach((candidate, index) => {
-      relativeMatrix.multiplyMatrices(inverseRoot, candidate.mesh.matrixWorld);
-      instance.setMatrixAt(index, relativeMatrix);
-      if (usesInstanceColor && candidate.instanceColor) {
-        instance.setColorAt(index, candidate.instanceColor);
+      const usesInstanceColor = activeGroup.every((candidate) => candidate.instanceColor);
+      const batchMaterial = usesInstanceColor
+        ? (representative.material as THREE.Material).clone()
+        : representative.material;
+      if (usesInstanceColor) {
+        const colorMaterial = batchMaterial as THREE.Material & {
+          color: THREE.Color;
+          vertexColors: boolean;
+        };
+        colorMaterial.color.set(0xffffff);
+        // NOT `vertexColors = true`, which is what turned three shops, two
+        // cottages, the whole truck yard and the dock openings black - 122 meshes
+        // across the app, every one of them rendering with zero diffuse.
+        //
+        // `instanceColor` does not need it and is broken by it. three defines
+        // `USE_INSTANCING_COLOR` from `object.instanceColor !== null` on its own
+        // (`WebGLPrograms.js`), and that define alone declares the `vColor`
+        // varying, initialises it to `vec3(1.0)` and multiplies it by
+        // `instanceColor` - while the FRAGMENT side defines `USE_COLOR` from
+        // `vertexColors || instancingColor || batchingColor`, so the tint still
+        // reaches `diffuseColor`. Setting `vertexColors` additionally defines
+        // `USE_COLOR` in the VERTEX shader, which inserts `vColor *= color`
+        // against a `color` attribute the geometry does not have. An unbound
+        // attribute reads as the WebGL generic default `(0, 0, 0, 1)`, so vColor
+        // is multiplied by zero and the surface loses all of its diffuse.
+        //
+        // The merge path a hundred lines above may keep its `vertexColors = true`
+        // precisely because `createMergedGeometry` writes a `color` attribute
+        // into every geometry it builds. This path reuses the representative's
+        // geometry untouched, so it has whatever the source had - and for every
+        // generated GLB in this repo that is `[position, normal, uv]`.
+        //
+        // Left as the clone's inherited value rather than forced either way: a
+        // source material that genuinely paints from a `color` attribute keeps
+        // doing so, because its geometry supplies one.
+        colorMaterial.needsUpdate = true;
+        // Inside the `usesInstanceColor` branch on purpose. When it is false this
+        // path REUSES `representative.material` rather than cloning it, and that
+        // instance is shared with meshes this batch never touched and is not
+        // disposed by `restoreBatches` (`ownsMaterial: usesInstanceColor`).
+        // Treating it would attach an `onBeforeCompile` to a live source material,
+        // which is the one thing that permanently evicts a mesh from batching.
+        //
+        // Nothing is lost by the guard: `getInstanceColor` returns null exactly
+        // for transparent, sub-unit-opacity or colourless materials, and
+        // `resolveBatchSurfaceProfile` declines all of those anyway.
+        finishMaterial(batchMaterial, representative.material);
       }
-      const parent = candidate.mesh.parent;
-      if (!parent) return;
-      originals.push({ mesh: candidate.mesh, parent, visible: candidate.mesh.visible });
-      parent.remove(candidate.mesh);
-      optimizedOriginals.add(candidate.mesh);
+      const instance = new THREE.InstancedMesh(
+        representative.geometry,
+        batchMaterial,
+        activeGroup.length
+      );
+      instance.name = `static-batch:${name}:${batchIndex}`;
+      instance.castShadow = representative.castShadow;
+      instance.receiveShadow = representative.receiveShadow;
+      instance.renderOrder = representative.renderOrder;
+      instance.layers.mask = representative.layers.mask;
+      instance.userData.staticBatch = true;
+
+      const originals: StaticBatch['originals'] = [];
+      activeGroup.forEach((candidate, index) => {
+        relativeMatrix.multiplyMatrices(inverseRoot, candidate.mesh.matrixWorld);
+        instance.setMatrixAt(index, relativeMatrix);
+        if (usesInstanceColor && candidate.instanceColor) {
+          instance.setColorAt(index, candidate.instanceColor);
+        }
+        const parent = candidate.mesh.parent;
+        if (!parent) return;
+        originals.push({ mesh: candidate.mesh, parent, visible: candidate.mesh.visible });
+        parent.remove(candidate.mesh);
+        optimizedOriginals.add(candidate.mesh);
+      });
+      instance.instanceMatrix.needsUpdate = true;
+      if (instance.instanceColor) instance.instanceColor.needsUpdate = true;
+      instance.computeBoundingBox();
+      instance.computeBoundingSphere();
+      root.add(instance);
+      batches.push({
+        mesh: instance,
+        originals,
+        ownsGeometry: false,
+        ownsMaterial: usesInstanceColor,
+      });
+      instancedOriginalCount += originals.length;
+      instancedBatchCount += 1;
+      batchIndex += 1;
     });
-    instance.instanceMatrix.needsUpdate = true;
-    if (instance.instanceColor) instance.instanceColor.needsUpdate = true;
-    instance.computeBoundingBox();
-    instance.computeBoundingSphere();
-    root.add(instance);
-    batches.push({
-      mesh: instance,
-      originals,
-      ownsGeometry: false,
-      ownsMaterial: usesInstanceColor,
-    });
-    instancedOriginalCount += originals.length;
-    instancedBatchCount += 1;
-    batchIndex += 1;
   });
 
   // Everything the batcher looked at and left alone still has to be finished.

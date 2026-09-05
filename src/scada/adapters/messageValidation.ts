@@ -6,6 +6,8 @@
  */
 
 /** Valid WebSocket message types */
+import type { TagDefinition } from '../types';
+
 type WSMessageType =
   | 'subscribe'
   | 'unsubscribe'
@@ -41,6 +43,63 @@ interface WSMessage {
     timestamp: number;
   }>;
   error?: string;
+}
+
+// Bound traversal of untrusted arrays while leaving ample headroom above the
+// current plant-wide tag catalogue.
+const MAX_COLLECTION_ITEMS = 1_000;
+// Matches trendProcessing's tag id cap; error text is bounded so a hostile
+// proxy cannot amplify memory through retained validation errors.
+const MAX_TAG_ID_LENGTH = 256;
+const MAX_ERROR_LENGTH = 1_024;
+const VALID_QUALITIES = new Set(['GOOD', 'UNCERTAIN', 'BAD', 'STALE']);
+const FLOAT32_MAX = 3.4028234663852886e38;
+
+function isValidTagValue(value: unknown): value is number | boolean | string {
+  if (typeof value === 'number') {
+    return Number.isFinite(value);
+  }
+  return typeof value === 'boolean' || typeof value === 'string';
+}
+
+/**
+ * Validate a control or telemetry value against the PLC type declared by a tag.
+ * Keeping this contract shared prevents protocol adapters from accepting
+ * different wire values for the same tag definition.
+ */
+export function isTagValueCompatible(
+  tag: Pick<TagDefinition, 'dataType'>,
+  value: unknown
+): value is number | boolean | string {
+  switch (tag.dataType) {
+    case 'BOOL':
+      return typeof value === 'boolean';
+    case 'STRING':
+      return typeof value === 'string';
+    case 'INT16':
+      return (
+        typeof value === 'number' && Number.isInteger(value) && value >= -32_768 && value <= 32_767
+      );
+    case 'INT32':
+      return (
+        typeof value === 'number' &&
+        Number.isInteger(value) &&
+        value >= -2_147_483_648 &&
+        value <= 2_147_483_647
+      );
+    case 'FLOAT32':
+      return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= FLOAT32_MAX;
+    case 'FLOAT64':
+      return typeof value === 'number' && Number.isFinite(value);
+  }
+}
+
+function isValidQuality(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 9 && VALID_QUALITIES.has(value.toUpperCase());
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 /**
@@ -80,29 +139,39 @@ export function isValidWSMessage(data: unknown): data is WSMessage {
   // Validate type-specific required fields
   switch (msg.type) {
     case 'update':
-      // 'update' requires tagId
-      if (typeof msg.tagId !== 'string' || msg.tagId.length === 0) {
+      // Updates are complete telemetry samples. Missing fields must not be
+      // fabricated into GOOD zeroes by a downstream adapter.
+      if (
+        typeof msg.tagId !== 'string' ||
+        msg.tagId.length === 0 ||
+        msg.tagId.length > MAX_TAG_ID_LENGTH
+      ) {
         return false;
       }
-      // value can be number, boolean, or string
-      if (msg.value !== undefined) {
-        const valueType = typeof msg.value;
-        if (valueType !== 'number' && valueType !== 'boolean' && valueType !== 'string') {
-          return false;
-        }
+      if (!isValidTagValue(msg.value)) {
+        return false;
+      }
+      if (!isValidQuality(msg.quality)) {
+        return false;
+      }
+      if (!isFiniteNumber(msg.timestamp)) {
+        return false;
       }
       break;
 
     case 'write': {
       // 'write' requires tagId and value
-      if (typeof msg.tagId !== 'string' || msg.tagId.length === 0) {
+      if (
+        typeof msg.tagId !== 'string' ||
+        msg.tagId.length === 0 ||
+        msg.tagId.length > MAX_TAG_ID_LENGTH
+      ) {
         return false;
       }
       if (msg.value === undefined) {
         return false;
       }
-      const valueType = typeof msg.value;
-      if (valueType !== 'number' && valueType !== 'boolean' && valueType !== 'string') {
+      if (!isValidTagValue(msg.value)) {
         return false;
       }
       break;
@@ -114,15 +183,20 @@ export function isValidWSMessage(data: unknown): data is WSMessage {
       if (!Array.isArray(msg.tagIds)) {
         return false;
       }
-      if (!msg.tagIds.every((id) => typeof id === 'string' && id.length > 0)) {
+      if (msg.tagIds.length > MAX_COLLECTION_ITEMS) {
         return false;
+      }
+      for (const id of msg.tagIds) {
+        if (typeof id !== 'string' || id.length === 0) {
+          return false;
+        }
       }
       break;
 
     case 'batch':
     case 'snapshot':
-      // Requires tags array
-      if (!Array.isArray(msg.tags)) {
+      // Requires a bounded tags array
+      if (!Array.isArray(msg.tags) || msg.tags.length > MAX_COLLECTION_ITEMS) {
         return false;
       }
       // Validate each tag in the batch
@@ -135,7 +209,10 @@ export function isValidWSMessage(data: unknown): data is WSMessage {
 
     case 'error':
       // Optional error message
-      if (msg.error !== undefined && typeof msg.error !== 'string') {
+      if (
+        msg.error !== undefined &&
+        (typeof msg.error !== 'string' || msg.error.length > MAX_ERROR_LENGTH)
+      ) {
         return false;
       }
       break;
@@ -147,11 +224,11 @@ export function isValidWSMessage(data: unknown): data is WSMessage {
   }
 
   // Validate optional fields if present
-  if (msg.quality !== undefined && typeof msg.quality !== 'string') {
+  if (msg.quality !== undefined && !isValidQuality(msg.quality)) {
     return false;
   }
 
-  if (msg.timestamp !== undefined && typeof msg.timestamp !== 'number') {
+  if (msg.timestamp !== undefined && !isFiniteNumber(msg.timestamp)) {
     return false;
   }
 
@@ -172,20 +249,19 @@ function isValidBatchTag(tag: unknown): boolean {
   const t = tag as Record<string, unknown>;
 
   // Required fields
-  if (typeof t.tagId !== 'string' || t.tagId.length === 0) {
+  if (typeof t.tagId !== 'string' || t.tagId.length === 0 || t.tagId.length > MAX_TAG_ID_LENGTH) {
     return false;
   }
 
-  const valueType = typeof t.value;
-  if (valueType !== 'number' && valueType !== 'boolean' && valueType !== 'string') {
+  if (!isValidTagValue(t.value)) {
     return false;
   }
 
-  if (typeof t.quality !== 'string') {
+  if (!isValidQuality(t.quality)) {
     return false;
   }
 
-  if (typeof t.timestamp !== 'number') {
+  if (!isFiniteNumber(t.timestamp)) {
     return false;
   }
 
@@ -206,25 +282,28 @@ export function isValidMQTTPayload(data: unknown): data is MQTTTagPayload {
   const payload = data as Record<string, unknown>;
 
   // Validate required fields
-  if (typeof payload.tagId !== 'string' || payload.tagId.length === 0) {
+  if (
+    typeof payload.tagId !== 'string' ||
+    payload.tagId.length === 0 ||
+    payload.tagId.length > MAX_TAG_ID_LENGTH
+  ) {
     return false;
   }
 
-  const valueType = typeof payload.value;
-  if (valueType !== 'number' && valueType !== 'boolean' && valueType !== 'string') {
+  if (!isValidTagValue(payload.value)) {
     return false;
   }
 
-  if (typeof payload.quality !== 'string') {
+  if (!isValidQuality(payload.quality)) {
     return false;
   }
 
-  if (typeof payload.timestamp !== 'number') {
+  if (!isFiniteNumber(payload.timestamp)) {
     return false;
   }
 
   // Validate optional sourceTimestamp
-  if (payload.sourceTimestamp !== undefined && typeof payload.sourceTimestamp !== 'number') {
+  if (payload.sourceTimestamp !== undefined && !isFiniteNumber(payload.sourceTimestamp)) {
     return false;
   }
 

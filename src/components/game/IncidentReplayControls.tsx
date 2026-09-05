@@ -62,11 +62,13 @@ export const IncidentReplayControls: React.FC = () => {
 
   if (!replayMode) return null;
 
+  // Sits above the dock (bottom-6, z-50) and the always-present music player
+  // (bottom-[6.75rem]). At bottom-4 the play and skip buttons were behind the dock.
   return (
     <motion.div
       initial={{ opacity: 0, y: 50 }}
       animate={{ opacity: 1, y: 0 }}
-      className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 pointer-events-auto"
+      className="fixed bottom-[11.5rem] left-1/2 -translate-x-1/2 z-50 pointer-events-auto"
     >
       <div className="bg-slate-900/95 backdrop-blur-xl rounded-xl border border-red-500/30 px-4 py-3 shadow-2xl">
         <div className="flex items-center gap-4">

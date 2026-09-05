@@ -8,7 +8,7 @@
  * - Context length protection (token limits)
  */
 
-import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
+import { GoogleGenerativeAI, type GenerativeModel } from '@google/generative-ai';
 import { logger } from './logger';
 
 /**
@@ -56,6 +56,18 @@ const CHARS_PER_TOKEN_ESTIMATE = 3.5;
 const CIRCUIT_BREAKER_THRESHOLD = 3;
 const CIRCUIT_BREAKER_RESET_MS = 30000; // 30 seconds
 
+// MillOS decisions are interactive and must yield to the heuristic layer rather
+// than holding plant-state prompts forever when the provider transport stalls.
+// Eight provider-bound prompt copies cap at roughly 192 KB after truncation;
+// exact-match keys retain the raw input and therefore have a separate cap below.
+export const GEMINI_REQUEST_TIMEOUT_MS = 15000;
+export const GEMINI_MAX_IN_FLIGHT_REQUESTS = 8;
+// The provider sees only MAX_PROMPT_CHARS after truncation, but exact cache and
+// coalescing keys retain the caller's original string. Cap that raw key so a
+// handful of adversarial prompts cannot pin unbounded memory while preserving
+// ample room for the largest generated plant-state prompt.
+export const GEMINI_MAX_RAW_PROMPT_CHARS = 128 * 1024;
+
 // Error patterns that indicate context overflow
 const CONTEXT_OVERFLOW_PATTERNS = [
   'context length',
@@ -66,7 +78,35 @@ const CONTEXT_OVERFLOW_PATTERNS = [
   'input too large',
 ] as const;
 
-class GeminiClient {
+type RequestCancellationReason = 'timeout' | 'invalidated';
+
+interface RequestControl {
+  readonly signal: AbortSignal;
+  readonly cancellation: Promise<never>;
+  reason: RequestCancellationReason | null;
+  cancel: (reason: RequestCancellationReason) => void;
+  finish: () => void;
+}
+
+interface InFlightRequest {
+  promise: Promise<string | null>;
+}
+
+class GeminiRequestTimeoutError extends Error {
+  constructor() {
+    super(`Request timed out after ${GEMINI_REQUEST_TIMEOUT_MS}ms`);
+    this.name = 'GeminiRequestTimeoutError';
+  }
+}
+
+class GeminiRequestInvalidatedError extends Error {
+  constructor() {
+    super('Client state changed during provider request');
+    this.name = 'GeminiRequestInvalidatedError';
+  }
+}
+
+export class GeminiClient {
   private genAI: GoogleGenerativeAI | null = null;
   private model: GenerativeModel | null = null;
   private modelIndex = 0;
@@ -77,6 +117,9 @@ class GeminiClient {
     isOpen: false,
   };
   private lastContextOverflow: boolean = false;
+  private requestEpoch = 0;
+  private inFlightRequests = new Map<string, InFlightRequest>();
+  private activeRequestControls = new Set<RequestControl>();
 
   // Response cache for similar contexts
   private responseCache: Map<string, { response: string; timestamp: number }> = new Map();
@@ -121,9 +164,15 @@ class GeminiClient {
    * Initialize the Gemini client with an API key
    */
   initialize(apiKey: string): boolean {
+    if (typeof apiKey !== 'string' || apiKey.trim().length === 0) {
+      logger.warn('[GeminiClient] Refusing to initialize with an empty API key');
+      return false;
+    }
+
     try {
-      this.apiKey = apiKey;
-      this.genAI = new GoogleGenerativeAI(apiKey);
+      this.invalidateOutstandingRequests();
+      this.apiKey = apiKey.trim();
+      this.genAI = new GoogleGenerativeAI(this.apiKey);
       this.modelIndex = 0;
       this.buildModel();
 
@@ -200,6 +249,7 @@ class GeminiClient {
    * Disconnect and clear the client
    */
   disconnect(): void {
+    this.invalidateOutstandingRequests();
     this.genAI = null;
     this.model = null;
     this.apiKey = null;
@@ -213,7 +263,7 @@ class GeminiClient {
   private checkCircuitBreaker(): void {
     if (
       this.circuitBreaker.isOpen &&
-      Date.now() - this.circuitBreaker.lastFailure > CIRCUIT_BREAKER_RESET_MS
+      Date.now() - this.circuitBreaker.lastFailure >= CIRCUIT_BREAKER_RESET_MS
     ) {
       this.resetCircuitBreaker();
       logger.info('[GeminiClient] Circuit breaker reset');
@@ -247,6 +297,75 @@ class GeminiClient {
     };
   }
 
+  /** Invalidate work and cached responses belonging to an old credential session. */
+  private invalidateOutstandingRequests(): void {
+    this.requestEpoch++;
+    for (const control of this.activeRequestControls) {
+      control.cancel('invalidated');
+    }
+    this.activeRequestControls.clear();
+    this.inFlightRequests.clear();
+    this.responseCache.clear();
+    this.lastContextOverflow = false;
+  }
+
+  /**
+   * Create one bounded provider-call lifetime. The SDK supports both timeout
+   * and AbortSignal request options; the local rejection is retained because a
+   * transport or test double can ignore either option and otherwise hang the
+   * caller indefinitely.
+   */
+  private beginRequest(): RequestControl {
+    const controller = new AbortController();
+    let rejectCancellation!: (error: Error) => void;
+    let finished = false;
+    const cancellation = new Promise<never>((_resolve, reject) => {
+      rejectCancellation = reject;
+    });
+
+    const control: RequestControl = {
+      signal: controller.signal,
+      cancellation,
+      reason: null,
+      cancel: (reason) => {
+        if (finished || control.reason !== null) return;
+        control.reason = reason;
+        rejectCancellation(
+          reason === 'timeout'
+            ? new GeminiRequestTimeoutError()
+            : new GeminiRequestInvalidatedError()
+        );
+        controller.abort();
+      },
+      finish: () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeoutId);
+      },
+    };
+
+    const timeoutId = setTimeout(() => control.cancel('timeout'), GEMINI_REQUEST_TIMEOUT_MS);
+    this.activeRequestControls.add(control);
+    return control;
+  }
+
+  private finishRequest(control: RequestControl): void {
+    control.finish();
+    this.activeRequestControls.delete(control);
+  }
+
+  private requestModel(
+    model: GenerativeModel,
+    prompt: string,
+    control: RequestControl
+  ): ReturnType<GenerativeModel['generateContent']> {
+    const providerRequest = model.generateContent(prompt, {
+      timeout: GEMINI_REQUEST_TIMEOUT_MS,
+      signal: control.signal,
+    });
+    return Promise.race([providerRequest, control.cancellation]);
+  }
+
   /**
    * Estimate token count from character length (conservative)
    */
@@ -271,10 +390,32 @@ class GeminiClient {
     const keepStart = Math.floor(MAX_PROMPT_CHARS * 0.6); // 60% from start
     const keepEnd = Math.floor(MAX_PROMPT_CHARS * 0.35); // 35% from end (5% for truncation notice)
 
+    // Avoid cutting between UTF-16 surrogate pairs. A lone surrogate is
+    // malformed input for the SDK's JSON transport and corrupts the prompt.
+    let startEnd = keepStart;
+    if (
+      prompt.charCodeAt(startEnd - 1) >= 0xd800 &&
+      prompt.charCodeAt(startEnd - 1) <= 0xdbff &&
+      prompt.charCodeAt(startEnd) >= 0xdc00 &&
+      prompt.charCodeAt(startEnd) <= 0xdfff
+    ) {
+      startEnd--;
+    }
+
+    let endStart = prompt.length - keepEnd;
+    if (
+      prompt.charCodeAt(endStart - 1) >= 0xd800 &&
+      prompt.charCodeAt(endStart - 1) <= 0xdbff &&
+      prompt.charCodeAt(endStart) >= 0xdc00 &&
+      prompt.charCodeAt(endStart) <= 0xdfff
+    ) {
+      endStart++;
+    }
+
     const truncated =
-      prompt.slice(0, keepStart) +
+      prompt.slice(0, startEnd) +
       '\n\n[... context truncated for token limits ...]\n\n' +
-      prompt.slice(-keepEnd);
+      prompt.slice(endStart);
 
     return truncated;
   }
@@ -293,23 +434,46 @@ class GeminiClient {
    * Generate content with the Gemini model
    * Includes token estimation, safe truncation, and context overflow detection
    */
-  async generateContent(prompt: string): Promise<string | null> {
+  generateContent(prompt: string): Promise<string | null> {
     this.checkCircuitBreaker();
+
+    if (typeof prompt !== 'string' || prompt.trim().length === 0) {
+      logger.warn('[GeminiClient] Refusing to generate content for an empty prompt');
+      return Promise.resolve(null);
+    }
+
+    if (prompt.length > GEMINI_MAX_RAW_PROMPT_CHARS) {
+      logger.warn(
+        `[GeminiClient] Refusing prompt above ${GEMINI_MAX_RAW_PROMPT_CHARS} retained characters`
+      );
+      return Promise.resolve(null);
+    }
 
     if (!this.model) {
       logger.warn('[GeminiClient] Model not initialized');
-      return null;
+      return Promise.resolve(null);
+    }
+
+    // Cached work needs no provider call and remains useful during an outage.
+    const cachedResponse = this.getCachedResponse(prompt);
+    if (cachedResponse !== null) {
+      this.lastContextOverflow = false;
+      return Promise.resolve(cachedResponse);
+    }
+
+    const existingRequest = this.inFlightRequests.get(prompt);
+    if (existingRequest) {
+      return existingRequest.promise;
     }
 
     if (this.circuitBreaker.isOpen) {
       logger.warn('[GeminiClient] Circuit breaker is open, skipping request');
-      return null;
+      return Promise.resolve(null);
     }
 
-    // Check cache first
-    const cachedResponse = this.getCachedResponse(prompt);
-    if (cachedResponse) {
-      return cachedResponse;
+    if (this.activeRequestControls.size >= GEMINI_MAX_IN_FLIGHT_REQUESTS) {
+      logger.warn('[GeminiClient] Provider request capacity reached, skipping unique prompt');
+      return Promise.resolve(null);
     }
 
     // Estimate and log token usage
@@ -320,21 +484,41 @@ class GeminiClient {
 
     // Safe truncation if needed
     const safePrompt = this.truncatePrompt(prompt);
+    const requestEpoch = this.requestEpoch;
+    const control = this.beginRequest();
+    const request = this.generateUncached(prompt, safePrompt, requestEpoch, control).finally(() => {
+      this.finishRequest(control);
+      if (this.inFlightRequests.get(prompt)?.promise === request) {
+        this.inFlightRequests.delete(prompt);
+      }
+    });
+    this.inFlightRequests.set(prompt, { promise: request });
+    return request;
+  }
 
+  private async generateUncached(
+    originalPrompt: string,
+    safePrompt: string,
+    requestEpoch: number,
+    control: RequestControl
+  ): Promise<string | null> {
     // One attempt per model candidate: a retired/invalid model ID advances
     // the fallback chain instead of opening the circuit breaker.
     for (;;) {
       const model = this.model;
       if (!model) return null;
+      const attemptedModelIndex = this.modelIndex;
       try {
-        const result = await model.generateContent(safePrompt);
+        const result = await this.requestModel(model, safePrompt, control);
+        if (requestEpoch !== this.requestEpoch) return null;
         const response = result.response;
         const text = response.text();
 
         // Guard against empty/null model output before caching, so a transient
         // empty response is not cached and silently returned for future prompts
-        if (!text) {
+        if (typeof text !== 'string' || text.trim().length === 0) {
           logger.warn('[GeminiClient] Empty response from model');
+          this.recordFailure();
           return null;
         }
 
@@ -343,10 +527,18 @@ class GeminiClient {
         this.lastContextOverflow = false;
 
         // Cache the successful response
-        this.setCachedResponse(prompt, text);
+        this.setCachedResponse(originalPrompt, text);
 
         return text;
       } catch (error) {
+        if (requestEpoch !== this.requestEpoch || control.reason === 'invalidated') return null;
+
+        if (control.reason === 'timeout') {
+          this.recordFailure();
+          logger.error('[GeminiClient] Generation deadline exceeded');
+          return null;
+        }
+
         // Check for context overflow specifically
         if (this.isContextOverflowError(error)) {
           this.lastContextOverflow = true;
@@ -356,8 +548,12 @@ class GeminiClient {
         }
 
         // Retired/invalid model ID: try the next candidate in the chain
-        if (this.isModelUnavailableError(error) && this.advanceModel()) {
-          continue;
+        if (this.isModelUnavailableError(error)) {
+          // Another concurrent request may already have advanced this exact
+          // retired model. Reuse its result instead of skipping a candidate.
+          if (this.modelIndex !== attemptedModelIndex || this.advanceModel()) {
+            continue;
+          }
         }
 
         this.recordFailure();
@@ -381,33 +577,65 @@ class GeminiClient {
       return { success: false, message: 'Circuit breaker is open' };
     }
 
-    for (;;) {
-      const model = this.model;
-      if (!model) return { success: false, message: 'Client not initialized' };
-      try {
-        const result = await model.generateContent(
-          'Reply with exactly: "MillOS connection successful"'
-        );
-        const text = result.response.text();
+    if (this.activeRequestControls.size >= GEMINI_MAX_IN_FLIGHT_REQUESTS) {
+      return { success: false, message: 'Provider request capacity reached' };
+    }
 
-        // Reset failures on a successful connection
-        this.circuitBreaker.failures = 0;
+    const requestEpoch = this.requestEpoch;
+    const control = this.beginRequest();
+    try {
+      for (;;) {
+        const model = this.model;
+        if (!model) return { success: false, message: 'Client not initialized' };
+        const attemptedModelIndex = this.modelIndex;
+        try {
+          const result = await this.requestModel(
+            model,
+            'Reply with exactly: "MillOS connection successful"',
+            control
+          );
+          if (requestEpoch !== this.requestEpoch) {
+            return { success: false, message: 'Client state changed during connection test' };
+          }
+          const text = result.response.text();
 
-        if (text.toLowerCase().includes('successful')) {
-          return { success: true, message: `Connection verified (${this.getActiveModelId()})` };
+          if (typeof text !== 'string' || text.trim().length === 0) {
+            this.recordFailure();
+            return { success: false, message: 'Empty response from model' };
+          }
+
+          // Reset failures on a successful connection
+          this.circuitBreaker.failures = 0;
+
+          if (text.toLowerCase().includes('successful')) {
+            return { success: true, message: `Connection verified (${this.getActiveModelId()})` };
+          }
+
+          return { success: true, message: `Connected (${this.getActiveModelId()})` };
+        } catch (error) {
+          if (requestEpoch !== this.requestEpoch || control.reason === 'invalidated') {
+            return { success: false, message: 'Client state changed during connection test' };
+          }
+
+          if (control.reason === 'timeout') {
+            this.recordFailure();
+            return { success: false, message: new GeminiRequestTimeoutError().message };
+          }
+
+          // Retired/invalid model ID: try the next candidate in the chain
+          if (this.isModelUnavailableError(error)) {
+            if (this.modelIndex !== attemptedModelIndex || this.advanceModel()) {
+              continue;
+            }
+          }
+
+          this.recordFailure();
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          return { success: false, message: errorMessage };
         }
-
-        return { success: true, message: `Connected (${this.getActiveModelId()})` };
-      } catch (error) {
-        // Retired/invalid model ID: try the next candidate in the chain
-        if (this.isModelUnavailableError(error) && this.advanceModel()) {
-          continue;
-        }
-
-        this.recordFailure();
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return { success: false, message: errorMessage };
       }
+    } finally {
+      this.finishRequest(control);
     }
   }
 

@@ -1,5 +1,13 @@
 # MillOS Interface Redesign Specification & Test Plan
 
+**Status:** historical interface migration plan
+
+**Current UI authority:** `src/components/ui-new/GameInterface.tsx` and assembled browser evidence
+
+**Next interface target:** [Agent Operating Architecture](./AGENT_OPERATING_ARCHITECTURE.md#12-agent-cockpit-and-interfaces)
+
+This plan records the move from scattered overlays to the dock, sidebar, and HUD generation now present in the codebase. Its “new” labels and implementation steps are historical. Future interface work should extend the current UI through shared semantic queries, capability previews, authority decisions, causal receipts, and evidence links.
+
 ## 1. Vision: "Cyber-Industrial" Dashboard
 The goal is to transform the MillOS interface from a "debug overlay" feel to a polished, professional "Digital Twin Operating System". The new design will prioritize situational awareness, ease of use, and immersion.
 

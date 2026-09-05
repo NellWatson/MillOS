@@ -37,6 +37,7 @@
  *   --weather=<name>      clear | cloudy | rain | storm. Default clear.
  *   --duration=<seconds>  Sample seconds per scene. Default 6.
  *   --warmup=<seconds>    Warmup seconds per scene. Default 4.
+ *   --settle-timeout=<s>  How long to wait for the scene graph to settle. Default 30.
  *   --perf-gate           Also run a non-art budget run on the same scenes.
  *   --skip-build          Reuse the existing dist/ (records the risk in the manifest).
  *   --headed              Show the browser (real GPU; headless falls back to SwiftShader).
@@ -116,6 +117,7 @@ if (hasFlag('help') || hasFlag('h')) {
       '  --weather=<name>      clear | cloudy | rain | storm (default clear)',
       '  --duration=<seconds>  Sample seconds per scene (default 6)',
       '  --warmup=<seconds>    Warmup seconds per scene (default 4)',
+      '  --settle-timeout=<s>  Scene-graph settle wait in seconds (default 30)',
       '  --perf-gate           Also run the non-art budget gate on the same scenes',
       '  --skip-build          Reuse existing dist/',
       '  --headed              Show the browser window',
@@ -292,6 +294,7 @@ async function main() {
     weather: readArgument('weather', 'clear'),
     duration: readArgument('duration', '6'),
     warmup: readArgument('warmup', '4'),
+    settleTimeout: readArgument('settle-timeout', '30'),
     perfGate: hasFlag('perf-gate'),
     skipBuild: hasFlag('skip-build'),
     headed: hasFlag('headed'),
@@ -322,6 +325,7 @@ async function main() {
     `--weather=${options.weather}`,
     `--duration=${options.duration}`,
     `--warmup=${options.warmup}`,
+    `--settle-timeout=${options.settleTimeout}`,
     `--output=${outputDirectory}`,
     '--art',
     '--motion',
@@ -349,6 +353,7 @@ async function main() {
       `--weather=${options.weather}`,
       `--duration=${options.duration}`,
       `--warmup=${options.warmup}`,
+      `--settle-timeout=${options.settleTimeout}`,
       `--output=${perfDirectory}`,
       '--report-only',
       ...(options.headed ? ['--headed'] : []),

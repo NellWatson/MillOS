@@ -10,11 +10,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { bagsPerHourToTonnesPerHour, ProductionMetrics } from '../ProductionMetrics';
 import { useProductionStore } from '../../stores/productionStore';
 import { useSafetyStore } from '../../stores/safetyStore';
+import { useGameSimulationStore } from '../../stores/gameSimulationStore';
 import { MachineType } from '../../types';
 
 // Mock Recharts - it's a heavy dependency
@@ -33,6 +34,7 @@ vi.mock('recharts', () => ({
 describe('ProductionMetrics', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-20T12:00:00.000Z'));
 
     // Reset production store
     useProductionStore.setState({
@@ -95,113 +97,83 @@ describe('ProductionMetrics', () => {
         daysSinceIncident: 127,
       },
     });
+
+    useGameSimulationStore.setState({
+      gameTime: 10,
+      emergencyActive: false,
+    });
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  describe('Rendering', () => {
-    it('should render the component', () => {
+  describe('Rendering and Accessibility', () => {
+    it('renders the complete KPI, secondary, safety, and live-status contract', () => {
       render(<ProductionMetrics />);
 
-      // Component should render without errors
-      expect(document.body).toBeInTheDocument();
+      const labelledValues = [
+        ['Throughput', '30'],
+        ['Efficiency', '87%'],
+        ['Quality', '94%'],
+        ['bags/min', '20'],
+        ['uptime', '98%'],
+        ['kWh', '152'],
+        ['stops', '2'],
+        ['evasions', '1'],
+      ];
+
+      for (const [label, value] of labelledValues) {
+        const labelElement = screen.getByText(label);
+        expect(labelElement.parentElement).toHaveTextContent(value);
+      }
+
+      expect(within(screen.getByText('Throughput').parentElement!).getByText('t/hr')).toBeVisible();
+      expect(screen.getByText('Safety')).toBeInTheDocument();
+      expect(screen.getByText('Live')).toBeInTheDocument();
     });
 
-    it('should render KPI cards', () => {
+    it('exposes a named chart and a complete screen-reader data table', () => {
       render(<ProductionMetrics />);
 
-      // Look for KPI labels (may have multiple matches due to chart data)
-      expect(screen.getAllByText(/Throughput/i).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/Efficiency/i).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/Quality/i).length).toBeGreaterThan(0);
-    });
-
-    it('should render the chart container', () => {
-      render(<ProductionMetrics />);
-
-      // Recharts ResponsiveContainer should be present
+      expect(
+        screen.getByRole('img', {
+          name: 'Recent production throughput chart showing a current value of 30 tonnes per hour',
+        })
+      ).toBeInTheDocument();
       expect(screen.getByTestId('responsive-container')).toBeInTheDocument();
-    });
+      expect(screen.getByTestId('area-chart')).toBeInTheDocument();
 
-    it('should render secondary stats', () => {
-      render(<ProductionMetrics />);
-
-      // Secondary stat labels
-      expect(screen.getByText(/bags\/min/i)).toBeInTheDocument();
-      expect(screen.getByText(/uptime/i)).toBeInTheDocument();
-      expect(screen.getByText(/kWh/i)).toBeInTheDocument();
-    });
-
-    it('should render safety section', () => {
-      render(<ProductionMetrics />);
-
-      // Safety section
-      expect(screen.getByText(/Safety/i)).toBeInTheDocument();
-      expect(screen.getByText(/stops/i)).toBeInTheDocument();
-      expect(screen.getByText(/evasions/i)).toBeInTheDocument();
+      const table = screen.getByRole('table', {
+        name: 'Recent sampled production throughput data',
+      });
+      expect(
+        within(table)
+          .getAllByRole('columnheader')
+          .map((cell) => cell.textContent)
+      ).toEqual(['Time', 'Throughput (t/hr)', 'Efficiency (%)', 'Quality (%)']);
+      const cells = within(table).getAllByRole('cell');
+      expect(cells.slice(1).map((cell) => cell.textContent)).toEqual(['30.0', '87.0', '94.0']);
     });
   });
 
-  describe('Data Display', () => {
-    it('should display efficiency from store', () => {
-      render(<ProductionMetrics />);
-
-      // Efficiency value should be displayed
-      expect(screen.getByText('87%')).toBeInTheDocument();
+  describe('Throughput Conversion', () => {
+    it.each([
+      { name: 'zero', bagsPerHour: 0, expected: 0 },
+      { name: 'negative input', bagsPerHour: -1, expected: 0 },
+      { name: 'NaN', bagsPerHour: Number.NaN, expected: 0 },
+      { name: 'positive infinity', bagsPerHour: Number.POSITIVE_INFINITY, expected: 0 },
+      { name: 'one tonne per hour', bagsPerHour: 40, expected: 1 },
+      { name: 'the baseline production rate', bagsPerHour: 1200, expected: 30 },
+    ])('converts $name safely', ({ bagsPerHour, expected }) => {
+      expect(bagsPerHourToTonnesPerHour(bagsPerHour)).toBe(expected);
     });
 
-    it('should display quality from store', () => {
-      render(<ProductionMetrics />);
+    it('keeps the maximum finite production rate finite', () => {
+      const converted = bagsPerHourToTonnesPerHour(Number.MAX_VALUE);
 
-      // Quality value should be displayed
-      expect(screen.getByText('94%')).toBeInTheDocument();
-    });
-
-    it('should display uptime from store', () => {
-      render(<ProductionMetrics />);
-
-      // Uptime value should be displayed
-      expect(screen.getByText('98%')).toBeInTheDocument();
-    });
-
-    it('should display safety stops from store', () => {
-      render(<ProductionMetrics />);
-
-      // Safety stops value
-      expect(screen.getByText('2')).toBeInTheDocument();
-    });
-
-    it('should display route conflicts from store', () => {
-      render(<ProductionMetrics />);
-
-      // Route-conflict value
-      expect(screen.getByText('1')).toBeInTheDocument();
-    });
-  });
-
-  describe('Live Metrics Calculation', () => {
-    it('should convert the authoritative bags-per-hour rate to tonnes per hour', () => {
-      render(<ProductionMetrics />);
-
-      expect(bagsPerHourToTonnesPerHour(1200)).toBe(30);
-      expect(screen.getByText('30')).toBeInTheDocument();
-      expect(screen.getAllByText(/t\/hr/i).length).toBeGreaterThan(0);
-    });
-
-    it('should derive bags per minute from the same authoritative rate', () => {
-      render(<ProductionMetrics />);
-
-      expect(screen.getByText('20')).toBeInTheDocument();
-      expect(screen.getByText(/bags\/min/i)).toBeInTheDocument();
-    });
-
-    it('should calculate energy usage', () => {
-      render(<ProductionMetrics />);
-
-      // Energy usage (kWh label)
-      expect(screen.getByText(/kWh/i)).toBeInTheDocument();
+      expect(Number.isFinite(converted)).toBe(true);
+      expect(converted).toBeGreaterThan(0);
     });
   });
 
@@ -251,19 +223,43 @@ describe('ProductionMetrics', () => {
   });
 
   describe('Data Updates Over Time', () => {
-    it('should update chart data periodically', async () => {
+    it('samples on the original five-second deadline using the latest store metrics', async () => {
       render(<ProductionMetrics />);
 
-      // Initial render
-      expect(screen.getByTestId('area-chart')).toBeInTheDocument();
+      expect(document.querySelectorAll('tbody tr')).toHaveLength(1);
 
-      // Advance time past update interval (5 seconds)
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(5100);
+        await vi.advanceTimersByTimeAsync(4000);
       });
 
-      // Chart should still be rendered
-      expect(screen.getByTestId('area-chart')).toBeInTheDocument();
+      act(() => {
+        useProductionStore.setState({
+          metrics: {
+            throughput: 1600,
+            efficiency: 91,
+            quality: 97,
+            uptime: 99,
+          },
+        });
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(999);
+      });
+      expect(document.querySelectorAll('tbody tr')).toHaveLength(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+
+      const rows = document.querySelectorAll('tbody tr');
+      expect(rows).toHaveLength(2);
+      expect(Array.from(rows[1].querySelectorAll('td')).map((cell) => cell.textContent)).toEqual([
+        expect.any(String),
+        '40.0',
+        '91.0',
+        '97.0',
+      ]);
     });
   });
 
@@ -284,7 +280,7 @@ describe('ProductionMetrics', () => {
       expect(screen.getByText(/No incidents/i)).toBeInTheDocument();
     });
 
-    it('should show elapsed time when there was an incident', () => {
+    it('shows an exact five-minute elapsed duration under a fixed clock', () => {
       const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
       useSafetyStore.setState({
         safetyMetrics: {
@@ -298,8 +294,8 @@ describe('ProductionMetrics', () => {
 
       render(<ProductionMetrics />);
 
-      // Should show elapsed time in minutes/seconds format
-      expect(screen.getByText(/elapsed/i)).toBeInTheDocument();
+      const elapsedLabel = screen.getByText('elapsed');
+      expect(elapsedLabel.previousElementSibling).toHaveTextContent(/^5m 0s$/);
     });
   });
 
@@ -338,65 +334,27 @@ describe('ProductionMetrics', () => {
     });
   });
 
-  describe('Accessibility', () => {
-    it('should have accessible chart with aria-label', () => {
-      render(<ProductionMetrics />);
-
-      // Chart should have role="img" and aria-label
-      const chartContainer = document.querySelector('[role="img"]');
-      expect(chartContainer).toBeInTheDocument();
-      expect(chartContainer).toHaveAttribute('aria-label');
-    });
-
-    it('should have screen reader table for chart data', () => {
-      render(<ProductionMetrics />);
-
-      // SR-only table should exist
-      const table = document.querySelector('table.sr-only');
-      expect(table).toBeInTheDocument();
-    });
-
-    it('should have table headers for screen reader data', () => {
-      render(<ProductionMetrics />);
-
-      // Table headers
-      expect(screen.getByText('Time')).toBeInTheDocument();
-      expect(screen.getByText('Throughput (t/hr)')).toBeInTheDocument();
-      expect(screen.getByText('Efficiency (%)')).toBeInTheDocument();
-      expect(screen.getByText('Quality (%)')).toBeInTheDocument();
-    });
-
-    it('should have caption for data table', () => {
-      render(<ProductionMetrics />);
-
-      const caption = document.querySelector('caption');
-      expect(caption).toBeInTheDocument();
-      expect(caption).toHaveTextContent(/Production throughput data/i);
-    });
-  });
-
   describe('Efficiency Trend', () => {
-    it('should calculate efficiency trend', () => {
+    it('should display the exact efficiency delta in the efficiency card', () => {
       render(<ProductionMetrics />);
 
-      // The efficiency trend is displayed below the efficiency percentage
-      // Look for the trend text pattern (+X.X% or -X.X%)
-      const efficiencyCards = screen.getAllByText(/Efficiency/i);
-      expect(efficiencyCards.length).toBeGreaterThan(0);
+      const efficiencyCard = screen.getByText('Efficiency').parentElement;
+      expect(efficiencyCard).not.toBeNull();
+      expect(within(efficiencyCard!).getByText('+0.0%')).toBeInTheDocument();
 
-      // The trend should be rendered as part of the efficiency display
-      // It will show something like "+0.0%" or "-0.0%" initially
-      const trendPattern = /[+-]\d+\.\d+%/;
-      const allText = document.body.textContent || '';
-      expect(trendPattern.test(allText)).toBe(true);
-    });
-  });
+      act(() => {
+        useProductionStore.setState({
+          metrics: {
+            throughput: 1200,
+            efficiency: 91.5,
+            quality: 94,
+            uptime: 98,
+          },
+        });
+      });
 
-  describe('Live Indicator', () => {
-    it('should show live indicator', () => {
-      render(<ProductionMetrics />);
-
-      expect(screen.getByText(/Live/i)).toBeInTheDocument();
+      expect(within(efficiencyCard!).getByText('91.5%')).toBeInTheDocument();
+      expect(within(efficiencyCard!).getByText('+4.5%')).toBeInTheDocument();
     });
   });
 });

@@ -19,6 +19,12 @@ verification_criteria:
 
 # MillOS Master Refinement Programme
 
+## Relationship to the agent operating programme
+
+This programme remains the completed authority for its v0.40 refinement scope and acceptance evidence. The later [Agent Operating Architecture](../docs/AGENT_OPERATING_ARCHITECTURE.md) extends its requirements for explainable AI decisions, SCADA truth, replay, operational coherence, and agent legibility into a shared semantic query, command, authority, evidence, and accretion spine.
+
+Future agent-system implementation follows [`millos_agent_operating_system_2026-08-31.md`](./millos_agent_operating_system_2026-08-31.md). It must preserve this programme's accepted world, performance, accessibility, safety, state, and evidence contracts. Historical acceptance here does not transfer to source changed by that programme.
+
 ## 1. Executive decision
 
 MillOS should become a coherent, warm, stylized industrial digital twin whose simulation, world, vehicles, SCADA, and interface feel like parts of the same operating system.

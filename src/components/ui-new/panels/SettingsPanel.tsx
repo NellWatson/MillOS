@@ -700,8 +700,14 @@ export const SettingsPanel: React.FC<{
                 anchor.download = `millos-diagnostic-${new Date(data.exportedAt)
                   .toISOString()
                   .replaceAll(':', '-')}.json`;
+                // Attach, click, then revoke on the next tick: a synchronous
+                // revoke cancels the download in Firefox and some Safari versions.
+                document.body.appendChild(anchor);
                 anchor.click();
-                URL.revokeObjectURL(url);
+                setTimeout(() => {
+                  anchor.remove();
+                  URL.revokeObjectURL(url);
+                }, 0);
               }}
               className="min-h-10 rounded-lg bg-emerald-700 px-3 text-xs font-semibold text-white hover:bg-emerald-600"
             >
@@ -750,7 +756,7 @@ export const SettingsPanel: React.FC<{
         title="Reset to 10am"
         tone="amber"
         confirmLabel="Reset to 10am"
-        message="Reset the simulation back to 10am? Current progress will be lost."
+        message="Reset the clock, weather, shift and emergency state back to 10am? Production totals, machine states, alerts and achievements are kept."
         onCancel={() => setResetConfirm(null)}
         onConfirm={() => {
           clearPersistedState();
@@ -797,9 +803,12 @@ const Toggle: React.FC<{
       <span aria-hidden="true">{icon}</span>
       <span>{label}</span>
     </div>
-    <div
-      className={`w-2 h-2 rounded-full ${value ? 'bg-green-400' : 'bg-slate-500'}`}
-      aria-hidden="true"
-    />
+    <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider">
+      <span className={value ? 'text-green-300' : 'text-slate-500'}>{value ? 'On' : 'Off'}</span>
+      <span
+        className={`w-2 h-2 rounded-full ${value ? 'bg-green-400' : 'bg-slate-500'}`}
+        aria-hidden="true"
+      />
+    </span>
   </button>
 );

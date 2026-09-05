@@ -87,6 +87,11 @@ const options = {
   previewPort: finiteNumber(readArgument('port', '4173'), 4173, 1024, 65535),
   durationSeconds: finiteNumber(readArgument('duration', '10'), 10, 2, 300),
   warmupSeconds: finiteNumber(readArgument('warmup', '5'), 5, 0, 60),
+  // Static batching runs on setTimeout(0) chunks, so on a loaded machine the
+  // scene graph can take far longer than 30 s to settle. The default is
+  // unchanged; the flag exists so a capture under load can wait rather than
+  // report a topology that is still being built.
+  settleTimeoutSeconds: finiteNumber(readArgument('settle-timeout', '30'), 30, 5, 600),
   scenes: readArgument('scenes', DEFAULT_SCENES.join(','))
     .split(',')
     .map((value) => value.trim())
@@ -873,7 +878,9 @@ async function runScene(context, baseUrl, scene, scadaEnabled = options.scadaEna
   // resource and call counters are deliberately excluded because animated
   // materials, text atlases, and visibility can update them after topology is
   // complete.
-  const runtimeSettle = await waitForRuntimeSettled(page);
+  const runtimeSettle = await waitForRuntimeSettled(page, {
+    timeoutMs: options.settleTimeoutSeconds * 1000,
+  });
   const motionStart = options.motionEnabled
     ? await page.evaluate(() => window.__MILLOS_RUNTIME__?.motionSnapshot())
     : null;
@@ -1108,7 +1115,9 @@ async function main() {
       console.log(`  ${result.scene} diagnostic: ${entry}`);
     }
     if (actionable.length > 5) {
-      console.log(`  ${result.scene} diagnostic: +${actionable.length - 5} more, see benchmark.json`);
+      console.log(
+        `  ${result.scene} diagnostic: +${actionable.length - 5} more, see benchmark.json`
+      );
     }
   }
   for (const comparison of scadaComparisons) {

@@ -63,11 +63,25 @@ export const Dock: React.FC<DockProps> = ({ activeMode, onModeChange, onDatalink
     const closeOnOutside = (event: MouseEvent) => {
       if (!moreMenuRef.current?.contains(event.target as Node)) setMoreOpen(false);
     };
+    const menuItems = () =>
+      Array.from(moreMenuRef.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? []);
     const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        // role="menu" promises arrow-key movement; keep that promise.
+        const items = menuItems();
+        if (items.length === 0) return;
+        event.preventDefault();
+        const index = items.indexOf(document.activeElement as HTMLElement);
+        const step = event.key === 'ArrowDown' ? 1 : items.length - 1;
+        items[(Math.max(index, 0) + (index === -1 ? 0 : step)) % items.length]?.focus();
+        return;
+      }
       if (event.key !== 'Escape') return;
       setMoreOpen(false);
       requestAnimationFrame(() => moreMenuTriggerRef.current?.focus());
     };
+    // Move focus into the menu on open, as a menu role implies.
+    requestAnimationFrame(() => menuItems()[0]?.focus());
     document.addEventListener('mousedown', closeOnOutside);
     document.addEventListener('keydown', closeOnEscape);
     return () => {
@@ -280,9 +294,8 @@ const DockItem: React.FC<{
   label: string;
   isActive: boolean;
   onClick: (trigger: HTMLButtonElement) => void;
-  badge?: boolean;
   isMobile?: boolean;
-}> = ({ mode, icon, label, isActive, onClick, badge, isMobile }) => {
+}> = ({ mode, icon, label, isActive, onClick, isMobile }) => {
   return (
     <button
       onClick={(event) => onClick(event.currentTarget)}
@@ -296,12 +309,6 @@ const DockItem: React.FC<{
       } ${isActive ? 'bg-white/10 text-cyan-400' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
     >
       <span aria-hidden="true">{icon}</span>
-      {badge && (
-        <span
-          className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full"
-          aria-label="Active session"
-        />
-      )}
       {isActive && (
         <motion.div
           layoutId="dock-active"

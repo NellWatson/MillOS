@@ -16,6 +16,7 @@ import '@testing-library/jest-dom';
 import { AlertSystem } from '../AlertSystem';
 import { useSafetyStore } from '../../stores/safetyStore';
 import { useUIStore } from '../../stores/uiStore';
+import { audioManager } from '../../utils/audioManager';
 
 // Mock audio manager
 vi.mock('../../utils/audioManager', () => ({
@@ -46,32 +47,17 @@ describe('AlertSystem', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe('Rendering', () => {
-    it('should render the screen reader alert container', () => {
+    it('should render exactly one atomic, screen-reader-only alert region', () => {
       render(<AlertSystem />);
 
-      const alertContainer = document.querySelector('[role="alert"]');
-      expect(alertContainer).toBeInTheDocument();
-    });
-
-    it('should have accessible screen reader region', () => {
-      render(<AlertSystem />);
-
-      // role="alert" is an implicitly assertive live region
-      const liveRegion = document.querySelector('[role="alert"]');
-      expect(liveRegion).toBeInTheDocument();
-      expect(liveRegion).toHaveClass('sr-only');
-    });
-
-    it('should not render any visible alert UI', () => {
-      render(<AlertSystem />);
-
-      // AlertSystem only renders an sr-only screen reader region
       const alertElements = document.querySelectorAll('[role="alert"]');
-      expect(alertElements.length).toBe(1);
+      expect(alertElements).toHaveLength(1);
       expect(alertElements[0]).toHaveClass('sr-only');
+      expect(alertElements[0]).toHaveAttribute('aria-atomic', 'true');
     });
   });
 
@@ -84,9 +70,12 @@ describe('AlertSystem', () => {
         await vi.advanceTimersByTimeAsync(100);
       });
 
-      // Check that alerts were added to uiStore
       const alerts = useUIStore.getState().alerts;
-      expect(alerts.length).toBeGreaterThan(0);
+      expect(alerts).toHaveLength(2);
+      expect(alerts.map(({ id, type, title }) => ({ id, type, title }))).toEqual([
+        { id: 'alert-1', type: 'warning', title: 'Temperature Rising' },
+        { id: 'alert-0', type: 'success', title: 'Maintenance Complete' },
+      ]);
     });
 
     it('should generate periodic alerts in dev mode', async () => {
@@ -105,12 +94,13 @@ describe('AlertSystem', () => {
       });
 
       const newCount = useUIStore.getState().alerts.length;
-      expect(newCount).toBeGreaterThan(initialCount);
+      expect(newCount).toBe(initialCount + 1);
     });
   });
 
   describe('Safety Integration', () => {
     it('should create safety alert when safety stop occurs', async () => {
+      vi.spyOn(Math, 'random').mockReturnValue(0);
       render(<AlertSystem />);
 
       // Wait for initial mount
@@ -128,35 +118,20 @@ describe('AlertSystem', () => {
         await vi.advanceTimersByTimeAsync(100);
       });
 
-      // Check that a safety alert was added
       const alerts = useUIStore.getState().alerts;
       const safetyAlerts = alerts.filter((a) => a.type === 'safety');
 
-      // Safety alert should be added
-      expect(alerts.length).toBeGreaterThan(initialAlertCount);
-      expect(safetyAlerts.length).toBeGreaterThan(0);
-    });
-
-    it('should increment safety stops correctly', () => {
-      const { recordSafetyStop } = useSafetyStore.getState();
-
-      recordSafetyStop();
-      recordSafetyStop();
-      recordSafetyStop();
-
-      const state = useSafetyStore.getState();
-      expect(state.safetyMetrics.safetyStops).toBe(3);
-    });
-  });
-
-  describe('Accessibility', () => {
-    it('should update live region for critical alerts', async () => {
-      render(<AlertSystem />);
-
-      // role="alert" is an implicitly assertive live region
-      const liveRegion = document.querySelector('[role="alert"]');
-      expect(liveRegion).toBeInTheDocument();
-      expect(liveRegion).toHaveAttribute('aria-atomic', 'true');
+      expect(alerts).toHaveLength(initialAlertCount + 1);
+      expect(safetyAlerts).toHaveLength(1);
+      expect(safetyAlerts[0]).toMatchObject({
+        title: 'Near-Miss Avoided',
+        message: 'Forklift stopped for a blocked aisle - safety protocol activated',
+        acknowledged: false,
+      });
+      expect(audioManager.playAlert).toHaveBeenCalledTimes(1);
+      expect(document.querySelector('[role="alert"]')).toHaveTextContent(
+        'Safety alert: Near-Miss Avoided. Forklift stopped for a blocked aisle - safety protocol activated'
+      );
     });
   });
 });

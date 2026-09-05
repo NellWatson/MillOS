@@ -1,3 +1,4 @@
+import { downloadScenePng } from '../../utils/sceneCapture';
 import React, { useState } from 'react';
 import { Image, Download } from 'lucide-react';
 import { useProductionStore } from '../../stores/productionStore';
@@ -11,9 +12,12 @@ export const ScreenshotButton: React.FC = () => {
     setIsExporting(true);
 
     try {
-      // Find the canvas element
-      const canvas = document.querySelector('canvas');
-      if (!canvas) {
+      // Capture through the renderer, not querySelector('canvas'): the context
+      // does not preserve its drawing buffer, so a direct toDataURL is blank.
+      const saved = downloadScenePng(
+        `millos-screenshot-${new Date().toISOString().split('T')[0]}.png`
+      );
+      if (!saved) {
         useUIStore.getState().addAlert({
           id: `screenshot-fail-${Date.now()}`,
           type: 'warning',
@@ -24,12 +28,6 @@ export const ScreenshotButton: React.FC = () => {
         });
         return;
       }
-
-      // Create a link and download
-      const link = document.createElement('a');
-      link.download = `millos-screenshot-${new Date().toISOString().split('T')[0]}.png`;
-      link.href = canvas.toDataURL('image/png');
-      link.click();
     } catch (error) {
       console.warn('Screenshot capture failed:', error);
       useUIStore.getState().addAlert({

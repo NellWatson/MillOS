@@ -67,7 +67,7 @@ export const generateClayTiles = (
   options: ClayTileOptions = {}
 ): THREE.DataTexture => {
   const opts = { ...DEFAULT_CLAY_OPTIONS, ...options };
-  const cacheKey = `clay-tiles-v4-${size}-${opts.tileWidth}-${opts.tileHeight}-${opts.baseColor}`;
+  const cacheKey = `clay-tiles-v4-${size}-${opts.tileWidth}-${opts.tileHeight}-${opts.baseColor}-${opts.variation}`;
 
   return getTexture(cacheKey, () => {
     const data = new Uint8Array(size * size * 4);
@@ -245,7 +245,7 @@ export const generateSlate = (
   options: SlateOptions = {}
 ): THREE.DataTexture => {
   const opts = { ...DEFAULT_SLATE_OPTIONS, ...options };
-  const cacheKey = `slate-v5-${size}-${opts.tileWidth}-${opts.tileHeight}-${opts.baseColor}`;
+  const cacheKey = `slate-v5-${size}-${opts.tileWidth}-${opts.tileHeight}-${opts.baseColor}-${opts.variation}`;
 
   return getTexture(cacheKey, () => {
     const data = new Uint8Array(size * size * 4);
@@ -402,12 +402,19 @@ const DEFAULT_THATCH_OPTIONS: Required<ThatchOptions> = {
   density: 0.8,
 };
 
+const thatchStrandPixels = (bundleWidth: number, density: number): number => {
+  const safeBundleWidth = Number.isFinite(bundleWidth) && bundleWidth > 0 ? bundleWidth : 40;
+  const safeDensity = Number.isFinite(density) && density > 0 ? density : 0.8;
+  return Math.max(4, Math.round(THATCH_STRAND_PX * (safeBundleWidth / 40) * (0.8 / safeDensity)));
+};
+
 export const generateThatch = (
   size: number = 512,
   options: ThatchOptions = {}
 ): THREE.DataTexture => {
   const opts = { ...DEFAULT_THATCH_OPTIONS, ...options };
-  const cacheKey = `thatch-v11-${size}-${opts.baseColor}`;
+  const strandPixels = thatchStrandPixels(opts.bundleWidth, opts.density);
+  const cacheKey = `thatch-v12-${size}-${opts.baseColor}-${strandPixels}`;
 
   return getTexture(cacheKey, () => {
     const data = new Uint8Array(size * size * 4);
@@ -417,10 +424,10 @@ export const generateThatch = (
       for (let x = 0; x < size; x++) {
         const i = (y * size + x) * 4;
 
-        // Vertical straw strands - THATCH_STRAND_PX wide. At the original
-        // 2 px the pattern sat at the Nyquist limit and averaged to flat one
-        // mip down.
-        const strandId = Math.floor(x / THATCH_STRAND_PX);
+        // Vertical straw strands scale with authored bundle width and density.
+        // The four-pixel floor stays above the Nyquist trap that made the old
+        // two-pixel pattern average flat one mip down.
+        const strandId = Math.floor(x / strandPixels);
         const strandColor = (hash(strandId, 0) - 0.5) * 0.18;
 
         // Variation along strand using only hash (no continuous noise = no tiling seams)
@@ -453,24 +460,27 @@ export const generateThatch = (
 
 export const generateThatchNormal = (
   size: number = 512,
-  _bundleWidth: number = 40
+  options: Pick<ThatchOptions, 'bundleWidth' | 'density'> = {}
 ): THREE.DataTexture => {
-  return getTexture(`thatch-normal-v11-${size}`, () => {
+  const opts = { ...DEFAULT_THATCH_OPTIONS, ...options };
+  const strandPixels = thatchStrandPixels(opts.bundleWidth, opts.density);
+  return getTexture(`thatch-normal-v12-${size}-${strandPixels}`, () => {
     const data = new Uint8Array(size * size * 4);
 
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         const i = (y * size + x) * 4;
 
-        // Vertical strand normals - each strand rounded across 4 px. The old
+        // Vertical strand normals, rounded across the same authored width as
+        // the colour texture. The old
         // `(x % 2) / 2` took only two values, i.e. a 2 px square wave whose
         // mean is a constant tilt: the "roundness" was a mathematical no-op.
-        const posInStrand = ((x % THATCH_STRAND_PX) + 0.5) / THATCH_STRAND_PX;
+        const posInStrand = ((x % strandPixels) + 0.5) / strandPixels;
         const strandNormalX = Math.sin((posInStrand - 0.5) * Math.PI) * 0.28;
 
         // Strand ends taper, so nudge Y at the segment boundaries.
         const segmentId = Math.floor(y / 4);
-        const strandNormalY = (hash(Math.floor(x / THATCH_STRAND_PX), segmentId) - 0.5) * 0.12;
+        const strandNormalY = (hash(Math.floor(x / strandPixels), segmentId) - 0.5) * 0.12;
 
         // Fine grain only (no fbmNoise = no tiling seams)
         const grainX = (hash(x * 2, y) - 0.5) * 0.05;
